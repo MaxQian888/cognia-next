@@ -768,6 +768,8 @@ export interface WorkflowTriggeredFrom {
   sourceMessageId?: string
   deliveryTarget?: import("@/types/connectors/event").ConversationDeliveryTarget
   sessionId?: string
+  /** Run-scoped persona reference supplied by an IM conversation binding. */
+  characterId?: string
   initiator?: {
     platformIdentityId?: string
     remoteUserId?: string
@@ -831,6 +833,11 @@ export interface WorkflowRunLineage {
 export interface WorkflowRunSecurityContext {
   piiEgressRequired: boolean
   sourceTriggerKind: WorkflowNodeKind
+  /**
+   * Parent IM ceiling for dynamic agent turns. Fixed workflow nodes retain
+   * their deployment and node-level security policy.
+   */
+  permissionCeiling?: import("@/types/agent/permission-ceiling").AgentPermissionCeiling
 }
 
 export interface WorkflowRunRow {

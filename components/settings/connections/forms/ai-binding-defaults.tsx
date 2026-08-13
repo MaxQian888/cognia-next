@@ -1,26 +1,10 @@
 "use client"
 
-/**
- * AiBindingDefaults — shared, self-managing "which agent answers on this bot"
- * section for every IM adapter's detail panel (W1 multi-bot).
- *
- * Edits the instance-level binding defaults on `AdapterInstanceRow`:
- *   - `defaultCharacterId` (persona; resolved by `resolveBinding` layer 1 —
- *     this closes the "field existed but was never editable" gap)
- *   - `defaultTeamId` (Agent Team; `resolveEffectiveTeamBinding`)
- *   - `defaultProvider` + `defaultModel` (picked together, mirroring
- *     `/model provider/model` semantics; chains in `build-options.ts`)
- *   - `defaultReasoning` (effort chain)
- *
- * Same pattern as `ControlCommands`: takes only `adapterId`, reads the row
- * via `useLiveQuery`, persists immediately through `updateAdapterInstance`,
- * and is mounted ONCE in `config-detail.tsx` so all platforms get it without
- * per-form wiring. Per-conversation overrides (`/model`, `/team`, inbox
- * switchers) always beat these defaults.
- */
-
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import {
@@ -30,26 +14,47 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { getDb } from "@/lib/db/schema"
-import { updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { collectOptions } from "@/components/inbox/provider-model-switcher"
-import { TeamPicker } from "./_shared/team-picker"
+import { updateAdapterConfigSection } from "@/lib/db/adapter-instances"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import { getDb } from "@/lib/db/schema"
 import type { AppSettings, Character } from "@cognia/agent-config-types"
+import { EntityPicker } from "./_shared/entity-picker"
+import { TeamPicker } from "./_shared/team-picker"
 
-/** Radix Select forbids `""` item values — sentinel for "use the default". */
 const DEFAULT_VALUE = "__default__"
-
 const REASONING_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const
 type ReasoningLevel = (typeof REASONING_LEVELS)[number]
+type TargetKind = "direct" | "team" | "workflow"
 
-export interface AiBindingDefaultsProps {
-  adapterId: string
+interface Draft {
+  target: TargetKind
+  characterId?: string
+  teamId?: string
+  workflowId?: string
+  provider?: string
+  model?: string
+  reasoning?: ReasoningLevel
 }
 
-export function AiBindingDefaults({ adapterId }: AiBindingDefaultsProps) {
-  const t = useTranslations("settings.connections.aiBindingDefaults")
+function fromRow(row?: AdapterInstanceRow): Draft {
+  const target: TargetKind = row?.defaultTeamId
+    ? "team"
+    : row?.defaultWorkflowId
+      ? "workflow"
+      : "direct"
+  return {
+    target,
+    characterId: row?.defaultCharacterId,
+    teamId: row?.defaultTeamId,
+    workflowId: row?.defaultWorkflowId,
+    provider: row?.defaultProvider,
+    model: row?.defaultModel,
+    reasoning: row?.defaultReasoning,
+  }
+}
 
+export function AiBindingDefaults({ adapterId }: { adapterId: string }) {
   const row = useLiveQuery<AdapterInstanceRow | undefined>(
     () =>
       typeof window === "undefined"
@@ -57,6 +62,23 @@ export function AiBindingDefaults({ adapterId }: AiBindingDefaultsProps) {
         : getDb().adapterInstances.get(adapterId),
     [adapterId]
   )
+  return (
+    <AiBindingDefaultsDraft
+      key={`${adapterId}:${row?.updatedAt ?? "loading"}`}
+      adapterId={adapterId}
+      row={row}
+    />
+  )
+}
+
+function AiBindingDefaultsDraft({
+  adapterId,
+  row,
+}: {
+  adapterId: string
+  row?: AdapterInstanceRow
+}) {
+  const t = useTranslations("settings.connections.aiBindingDefaults")
   const settings = useLiveQuery<AppSettings | undefined>(
     () =>
       typeof window === "undefined"
@@ -68,20 +90,51 @@ export function AiBindingDefaults({ adapterId }: AiBindingDefaultsProps) {
     () => (typeof window === "undefined" ? Promise.resolve([]) : getDb().characters.toArray()),
     []
   )
+  const executableWorkflows = useLiveQuery(async () => {
+    if (typeof window === "undefined") return []
+    const [workflows, deployments] = await Promise.all([
+      getDb().workflows.toArray(),
+      getDb().workflowDeployments.toArray(),
+    ])
+    const active = new Set(
+      deployments
+        .filter((item) => item.environment === "production" && item.status === "active")
+        .map((item) => item.workflowId)
+    )
+    return workflows.filter((workflow) => active.has(workflow.id))
+  }, [])
+  const [draft, setDraft] = useState<Draft>(() => fromRow(row))
 
-  const options = collectOptions(settings)
+  const modelOptions = collectOptions(settings)
   const modelValue =
-    row?.defaultProvider || row?.defaultModel
-      ? `${row?.defaultProvider ?? ""}:${row?.defaultModel ?? ""}`
-      : DEFAULT_VALUE
-  // A saved default that is no longer among the configured options must stay
-  // visible (and clearable) instead of silently blanking the select.
-  const modelValueKnown = options.some((o) => `${o.providerId}:${o.modelId}` === modelValue)
-  const characterKnown =
-    !row?.defaultCharacterId || (characters ?? []).some((c) => c.id === row.defaultCharacterId)
+    draft.provider || draft.model ? `${draft.provider ?? ""}:${draft.model ?? ""}` : DEFAULT_VALUE
+  const modelKnown = modelOptions.some(
+    (option) => `${option.providerId}:${option.modelId}` === modelValue
+  )
+  const workflowItems = useMemo(
+    () =>
+      (executableWorkflows ?? []).map((workflow) => ({
+        id: workflow.id,
+        label: workflow.name,
+        description: t("workflowProduction"),
+      })),
+    [executableWorkflows, t]
+  )
 
-  const persist = (patch: Partial<AdapterInstanceRow>): void => {
-    void updateAdapterInstance(adapterId, patch)
+  const save = async () => {
+    await updateAdapterConfigSection(
+      adapterId,
+      "responder",
+      {
+        defaultCharacterId: draft.characterId,
+        defaultTeamId: draft.target === "team" ? draft.teamId : undefined,
+        defaultWorkflowId: draft.target === "workflow" ? draft.workflowId : undefined,
+        defaultProvider: draft.target === "direct" ? draft.provider : undefined,
+        defaultModel: draft.target === "direct" ? draft.model : undefined,
+        defaultReasoning: draft.target === "direct" ? draft.reasoning : undefined,
+      },
+      "settings.adapter.responder"
+    )
   }
 
   return (
@@ -93,118 +146,157 @@ export function AiBindingDefaults({ adapterId }: AiBindingDefaultsProps) {
         <p className="text-xs text-muted-foreground">{t("precedenceNote")}</p>
 
         <div className="space-y-1">
+          <Label htmlFor="ai-binding-target">{t("targetLabel")}</Label>
+          <Select
+            value={draft.target}
+            onValueChange={(target) =>
+              setDraft((current) => ({ ...current, target: target as TargetKind }))
+            }
+          >
+            <SelectTrigger id="ai-binding-target" data-testid="ai-binding-target">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="direct">{t("targetDirect")}</SelectItem>
+              <SelectItem value="team">{t("targetTeam")}</SelectItem>
+              <SelectItem value="workflow">{t("targetWorkflow")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {draft.target === "team" && (
+          <div className="space-y-1">
+            <Label htmlFor="ai-binding-team">{t("teamLabel")}</Label>
+            <TeamPicker
+              id="ai-binding-team"
+              value={draft.teamId}
+              onChange={(teamId) => setDraft((current) => ({ ...current, teamId }))}
+            />
+          </div>
+        )}
+
+        {draft.target === "workflow" && (
+          <div className="space-y-1">
+            <Label htmlFor="ai-binding-workflow">{t("workflowLabel")}</Label>
+            <EntityPicker
+              id="ai-binding-workflow"
+              value={draft.workflowId}
+              items={workflowItems}
+              emptyLabel={t("workflowNone")}
+              missingLabel={(id) => t("notConfigured", { id: id.slice(0, 12) })}
+              onChange={(workflowId) => setDraft((current) => ({ ...current, workflowId }))}
+            />
+            <p className="text-xs text-muted-foreground">{t("workflowHelp")}</p>
+          </div>
+        )}
+
+        <div className="space-y-1">
           <Label htmlFor="ai-binding-character">{t("characterLabel")}</Label>
-          <p className="text-xs text-muted-foreground">{t("characterHelp")}</p>
-          <Select
-            value={
-              characterKnown ? (row?.defaultCharacterId ?? DEFAULT_VALUE) : row?.defaultCharacterId
-            }
-            onValueChange={(v) =>
-              persist({ defaultCharacterId: v === DEFAULT_VALUE ? undefined : v })
-            }
-          >
-            <SelectTrigger id="ai-binding-character" data-testid="ai-binding-character">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={DEFAULT_VALUE}>{t("characterDefault")}</SelectItem>
-              {!characterKnown && row?.defaultCharacterId && (
-                <SelectItem
-                  value={row.defaultCharacterId}
-                  className="text-destructive"
-                  data-testid="ai-binding-character-missing"
-                >
-                  {t("notConfigured", { id: row.defaultCharacterId.slice(0, 12) })}
-                </SelectItem>
-              )}
-              {(characters ?? []).map((c) => (
-                <SelectItem key={c.id} value={c.id} data-testid={`ai-binding-character-${c.id}`}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-1">
-          <Label htmlFor="ai-binding-team">{t("teamLabel")}</Label>
-          <p className="text-xs text-muted-foreground">{t("teamHelp")}</p>
-          <TeamPicker
-            id="ai-binding-team"
-            value={row?.defaultTeamId || undefined}
-            onChange={(teamId) => persist({ defaultTeamId: teamId })}
+          <EntityPicker
+            id="ai-binding-character"
+            value={draft.characterId}
+            items={(characters ?? []).map((character) => ({
+              id: character.id,
+              label: character.name,
+            }))}
+            emptyLabel={t("characterDefault")}
+            missingLabel={(id) => t("notConfigured", { id: id.slice(0, 12) })}
+            onChange={(characterId) => setDraft((current) => ({ ...current, characterId }))}
           />
+          <p className="text-xs text-muted-foreground">
+            {draft.target === "team"
+              ? t("characterTeamHelp")
+              : draft.target === "workflow"
+                ? t("characterWorkflowHelp")
+                : t("characterHelp")}
+          </p>
         </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="ai-binding-model">{t("modelLabel")}</Label>
-          <p className="text-xs text-muted-foreground">{t("modelHelp")}</p>
-          <Select
-            value={modelValue}
-            onValueChange={(v) => {
-              if (v === DEFAULT_VALUE) {
-                persist({ defaultProvider: undefined, defaultModel: undefined })
-                return
-              }
-              const sep = v.indexOf(":")
-              persist({
-                defaultProvider: v.slice(0, sep) || undefined,
-                defaultModel: v.slice(sep + 1) || undefined,
-              })
-            }}
+        {draft.target === "direct" ? (
+          <>
+            <div className="space-y-1">
+              <Label htmlFor="ai-binding-model">{t("modelLabel")}</Label>
+              <Select
+                value={modelValue}
+                onValueChange={(next) => {
+                  if (next === DEFAULT_VALUE) {
+                    setDraft((current) => ({ ...current, provider: undefined, model: undefined }))
+                    return
+                  }
+                  const separator = next.indexOf(":")
+                  setDraft((current) => ({
+                    ...current,
+                    provider: next.slice(0, separator) || undefined,
+                    model: next.slice(separator + 1) || undefined,
+                  }))
+                }}
+              >
+                <SelectTrigger id="ai-binding-model" data-testid="ai-binding-model">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-[50vh]">
+                  <SelectItem value={DEFAULT_VALUE}>{t("modelDefault")}</SelectItem>
+                  {!modelKnown && modelValue !== DEFAULT_VALUE && (
+                    <SelectItem
+                      value={modelValue}
+                      className="text-destructive"
+                      data-testid="ai-binding-model-missing"
+                    >
+                      {t("notConfigured", {
+                        id: `${draft.provider ?? "?"} · ${draft.model ?? "?"}`,
+                      })}
+                    </SelectItem>
+                  )}
+                  {modelOptions.map((option) => (
+                    <SelectItem
+                      key={`${option.providerId}:${option.modelId}`}
+                      value={`${option.providerId}:${option.modelId}`}
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="ai-binding-reasoning">{t("reasoningLabel")}</Label>
+              <Select
+                value={draft.reasoning ?? DEFAULT_VALUE}
+                onValueChange={(next) =>
+                  setDraft((current) => ({
+                    ...current,
+                    reasoning: next === DEFAULT_VALUE ? undefined : (next as ReasoningLevel),
+                  }))
+                }
+              >
+                <SelectTrigger id="ai-binding-reasoning" data-testid="ai-binding-reasoning">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_VALUE}>{t("reasoningDefault")}</SelectItem>
+                  {REASONING_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {t(`reasoning_${level}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        ) : (
+          <p
+            className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground"
+            data-testid="ai-binding-target-managed"
           >
-            <SelectTrigger id="ai-binding-model" data-testid="ai-binding-model">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="max-h-[50vh]">
-              <SelectItem value={DEFAULT_VALUE}>{t("modelDefault")}</SelectItem>
-              {!modelValueKnown && modelValue !== DEFAULT_VALUE && (
-                <SelectItem
-                  value={modelValue}
-                  className="text-destructive"
-                  data-testid="ai-binding-model-missing"
-                >
-                  {t("notConfigured", {
-                    id: `${row?.defaultProvider ?? "?"} · ${row?.defaultModel ?? "?"}`,
-                  })}
-                </SelectItem>
-              )}
-              {options.map((opt) => (
-                <SelectItem
-                  key={`${opt.providerId}:${opt.modelId}`}
-                  value={`${opt.providerId}:${opt.modelId}`}
-                  data-testid={`ai-binding-model-${opt.providerId}-${opt.modelId}`}
-                >
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+            {t("modelManagedByTarget")}
+          </p>
+        )}
 
-        <div className="space-y-1">
-          <Label htmlFor="ai-binding-reasoning">{t("reasoningLabel")}</Label>
-          <p className="text-xs text-muted-foreground">{t("reasoningHelp")}</p>
-          <Select
-            value={row?.defaultReasoning ?? DEFAULT_VALUE}
-            onValueChange={(v) =>
-              persist({
-                defaultReasoning: v === DEFAULT_VALUE ? undefined : (v as ReasoningLevel),
-              })
-            }
-          >
-            <SelectTrigger id="ai-binding-reasoning" data-testid="ai-binding-reasoning">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={DEFAULT_VALUE}>{t("reasoningDefault")}</SelectItem>
-              {REASONING_LEVELS.map((level) => (
-                <SelectItem key={level} value={level} data-testid={`ai-binding-reasoning-${level}`}>
-                  {t(`reasoning_${level}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setDraft(fromRow(row))}>
+            {t("cancel")}
+          </Button>
+          <Button onClick={() => void save()}>{t("save")}</Button>
         </div>
       </CardContent>
     </Card>

@@ -17,6 +17,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -97,6 +98,10 @@ export function LabelPicker({ conversationKey, sessionId, selectedIds }: LabelPi
               ))
             )}
           </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <a href="/settings?section=connections&connectionsTab=assets">{t("manage")}</a>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

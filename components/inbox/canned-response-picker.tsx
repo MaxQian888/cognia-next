@@ -100,6 +100,11 @@ export function CannedResponsePicker({ context }: CannedResponsePickerProps) {
               ))}
             </CommandGroup>
           </CommandList>
+          <div className="border-t p-2">
+            <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
+              <a href="/settings?section=connections&connectionsTab=assets">{t("manage")}</a>
+            </Button>
+          </div>
         </Command>
       </PopoverContent>
     </Popover>

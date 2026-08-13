@@ -50,69 +50,109 @@ export async function listAdapterInstancesByType(
   return getDb().adapterInstances.where("type").equals(type).toArray()
 }
 
+export type AdapterInstancePatch = Partial<
+  Pick<
+    AdapterInstanceRow,
+    | "displayName"
+    | "enabled"
+    | "transportMode"
+    | "settings"
+    | "credentialsRef"
+    | "trigger"
+    | "defaultCharacterId"
+    | "defaultMode"
+    | "webhookPath"
+    | "publicUrl"
+    | "quietHours"
+    | "muted"
+    | "lastKnownCapabilities"
+    | "implMetadata"
+    // v45 (im-refactored-crayon) — Lark guardrails + whoami cache.
+    | "atResponseStrategy"
+    | "inboundActivationPolicy"
+    | "activeRunDispatchMode"
+    | "activationTtlMs"
+    | "deliveryReadiness"
+    | "chatAllowlist"
+    | "chatBlocklist"
+    | "lastWhoamiAt"
+    | "lastWhoamiResult"
+    | "userTokenStoredAt"
+    // Cross-provider help / welcome card settings.
+    | "welcomeCardEnabled"
+    | "helpTriggers"
+    | "welcomeText"
+    // In-chat control-command permission gate (control-plane).
+    | "controlCommands"
+    // Token-usage presence config + runner state (usage-status-runner and
+    // the UsagePresence settings form already write these — the whitelist
+    // had silently lagged, tripping tsc at both call sites).
+    | "presence"
+    | "presenceState"
+    // v106 (W1 multi-bot) — instance-level AI binding defaults.
+    | "defaultTeamId"
+    | "defaultWorkflowId"
+    | "defaultModel"
+    | "defaultProvider"
+    | "defaultReasoning"
+    | "builtInSkillCeiling"
+    | "hostCapabilityCeiling"
+    | "requireHitlForWrites"
+    // v106 (W2 chat management) — scopes observed missing at runtime.
+    | "lastMissingScopes"
+    // v107 (W3 multi-bot) — declarative inbound dispatch rules.
+    | "dispatchRules"
+    // W5 (multi-bot same-group) — sibling-bot inbound guard.
+    | "siblingBotPolicy"
+    | "botInterplayBudget"
+    // Multi-bot outbound: per-bot throttle/breaker tuning + circuit-open
+    // failover targets (settings OutboundTuning card).
+    | "outboundTuning"
+    | "failoverAdapterIds"
+    // Multi-bot outbound: rate-limit spillover targets (load balancing).
+    | "balanceAdapterIds"
+  >
+>
+
 export async function updateAdapterInstance(
   id: string,
-  patch: Partial<
-    Pick<
-      AdapterInstanceRow,
-      | "displayName"
-      | "enabled"
-      | "transportMode"
-      | "settings"
-      | "credentialsRef"
-      | "trigger"
-      | "defaultCharacterId"
-      | "defaultMode"
-      | "webhookPath"
-      | "publicUrl"
-      | "quietHours"
-      | "muted"
-      | "lastKnownCapabilities"
-      | "implMetadata"
-      // v45 (im-refactored-crayon) — Lark guardrails + whoami cache.
-      | "atResponseStrategy"
-      | "inboundActivationPolicy"
-      | "activeRunDispatchMode"
-      | "activationTtlMs"
-      | "deliveryReadiness"
-      | "chatAllowlist"
-      | "chatBlocklist"
-      | "lastWhoamiAt"
-      | "lastWhoamiResult"
-      | "userTokenStoredAt"
-      // Cross-provider help / welcome card settings.
-      | "welcomeCardEnabled"
-      | "helpTriggers"
-      | "welcomeText"
-      // In-chat control-command permission gate (control-plane).
-      | "controlCommands"
-      // Token-usage presence config + runner state (usage-status-runner and
-      // the UsagePresence settings form already write these — the whitelist
-      // had silently lagged, tripping tsc at both call sites).
-      | "presence"
-      | "presenceState"
-      // v106 (W1 multi-bot) — instance-level AI binding defaults.
-      | "defaultTeamId"
-      | "defaultModel"
-      | "defaultProvider"
-      | "defaultReasoning"
-      // v106 (W2 chat management) — scopes observed missing at runtime.
-      | "lastMissingScopes"
-      // v107 (W3 multi-bot) — declarative inbound dispatch rules.
-      | "dispatchRules"
-      // W5 (multi-bot same-group) — sibling-bot inbound guard.
-      | "siblingBotPolicy"
-      | "botInterplayBudget"
-      // Multi-bot outbound: per-bot throttle/breaker tuning + circuit-open
-      // failover targets (settings OutboundTuning card).
-      | "outboundTuning"
-      | "failoverAdapterIds"
-      // Multi-bot outbound: rate-limit spillover targets (load balancing).
-      | "balanceAdapterIds"
-    >
-  >
+  patch: AdapterInstancePatch
 ): Promise<void> {
   await getDb().adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
+}
+
+export type AdapterConfigSection =
+  "connection" | "behavior" | "responder" | "permissions" | "delivery" | "platform" | "promotion"
+
+export type AdapterConfigSource =
+  | "settings"
+  | "settings.adapter.behavior"
+  | "settings.adapter.permissions"
+  | "settings.adapter.responder"
+  | "conversation-promotion"
+  | "mobile"
+
+/** Atomically persist one settings section and its redaction-safe audit breadcrumb. */
+export async function updateAdapterConfigSection(
+  id: string,
+  section: AdapterConfigSection,
+  patch: AdapterInstancePatch,
+  source: AdapterConfigSource = "settings"
+): Promise<void> {
+  const db = getDb()
+  const changedKeys = Object.keys(patch).sort()
+  if (changedKeys.length === 0) return
+  await db.transaction("rw", db.adapterInstances, db.connectorAudit, async () => {
+    const updated = await db.adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
+    if (updated === 0) throw new Error(`Adapter instance not found: ${id}`)
+    await db.connectorAudit.add({
+      id: crypto.randomUUID(),
+      adapterId: id,
+      kind: "adapter.config_changed",
+      at: Date.now(),
+      fields: { scope: "adapter", section, changedKeys, source },
+    })
+  })
 }
 
 /**

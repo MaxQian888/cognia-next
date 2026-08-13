@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid"
 import { generateTraceId } from "@cognia/logging"
+import Dexie from "dexie"
 
 import { getDb } from "@/lib/db/schema"
 import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
@@ -328,20 +329,27 @@ export async function executeDeployedWorkflow(
   let admission: { invocation: WorkflowInvocation; reused: boolean }
   try {
     const db = getDb()
-    await db.transaction("rw", db.workflowInvocations, db.workflowRuns, async () => {
-      await db.workflowInvocations.add(invocation)
-      // The admission ledger and its externally visible pending run are one
-      // durability unit. A process crash can no longer leave an invocation
-      // that points at a run id absent from status/events APIs.
-      await db.workflowRuns.add(pendingRun)
-    })
+    await Dexie.ignoreTransaction(() =>
+      db.transaction("rw", db.workflowInvocations, db.workflowRuns, () => {
+        // The admission ledger and its externally visible pending run are one
+        // durability unit. A process crash can no longer leave an invocation
+        // that points at a run id absent from status/events APIs.
+        return Promise.all([
+          db.workflowInvocations.add(invocation),
+          db.workflowRuns.add(pendingRun),
+        ]).then(() => undefined)
+      })
+    )
     admission = { invocation, reused: false }
   } catch (error) {
     // Idempotent requests use a deterministic primary key. A concurrent
     // winner may insert between our read and add; the losing add resolves to
     // that durable row rather than starting a second run.
     const existing = input.idempotencyKey ? await getDb().workflowInvocations.get(id) : undefined
-    if (!existing) throw error
+    if (!existing) {
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+      throw new Error(`Workflow admission transaction failed: ${detail}`, { cause: error })
+    }
     admission = { invocation: existing, reused: true }
   }
 

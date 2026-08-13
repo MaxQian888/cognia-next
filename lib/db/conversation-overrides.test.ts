@@ -6,6 +6,7 @@ import {
   upsertByConversationKey,
   readForResolution,
   patchConversationOverride,
+  updateConversationConfigSection,
   setPinned,
   setArchived,
   effectiveStatus,
@@ -121,6 +122,36 @@ describe("conversation-overrides", () => {
         workflowId: undefined,
       })
       expect(cleared.workflowId).toBeUndefined()
+    })
+  })
+
+  it("atomically saves a configuration section and audit metadata", async () => {
+    await upsertByConversationKey({
+      conversationKey: "telegram:adp_1:chat_999",
+      sessionId: "sess_999",
+    })
+    const row = await updateConversationConfigSection({
+      adapterId: "adp_1",
+      conversationKey: "telegram:adp_1:chat_999",
+      sessionId: "sess_999",
+      section: "responder",
+      patch: { workflowId: "wf_prod", teamDisabled: true },
+    })
+    expect(row).toMatchObject({ workflowId: "wf_prod", teamDisabled: true })
+    const audit = await getDb()
+      .connectorAudit.where("adapterId")
+      .equals("adp_1")
+      .filter((entry) => entry.conversationKey === "telegram:adp_1:chat_999")
+      .first()
+    expect(audit).toMatchObject({
+      adapterId: "adp_1",
+      kind: "override.config_changed",
+      fields: {
+        scope: "conversation",
+        section: "responder",
+        changedKeys: ["teamDisabled", "workflowId"],
+        source: "inbox",
+      },
     })
   })
 

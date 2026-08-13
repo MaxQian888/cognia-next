@@ -8,11 +8,13 @@
 
 import { render, screen } from "@testing-library/react"
 
+const mockUseSearchParams = jest.fn(() => new URLSearchParams())
+
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mockUseSearchParams(),
   usePathname: () => "/settings",
 }))
 
@@ -27,12 +29,14 @@ jest.mock("./tabs/conversations-tab", () => ({
   ConversationsTab: () => <div>Conversations</div>,
 }))
 jest.mock("./tabs/inbox-tab", () => ({ InboxTab: () => <div>Inbox</div> }))
+jest.mock("./tabs/inbox-assets-tab", () => ({ InboxAssetsTab: () => <div>Assets</div> }))
 
 import { ConnectionsSection } from "./connections-section"
 import { usePlatform } from "@/hooks/use-platform"
 
 beforeEach(() => {
   ;(usePlatform as jest.Mock).mockReturnValue("web")
+  mockUseSearchParams.mockReturnValue(new URLSearchParams())
 })
 
 describe("ConnectionsSection", () => {
@@ -49,9 +53,17 @@ describe("ConnectionsSection", () => {
     expect(screen.queryByRole("status", { name: /web mode banner/i })).not.toBeInTheDocument()
   })
 
-  it("renders all nine tab triggers", () => {
+  it("renders the seven operational tabs without duplicate Inbox or Tunnel tabs", () => {
     render(<ConnectionsSection />)
-    expect(screen.getAllByRole("tab")).toHaveLength(9)
+    expect(screen.getAllByRole("tab")).toHaveLength(7)
+    expect(screen.queryByRole("tab", { name: /^Tunnel$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: /^Inbox$/i })).not.toBeInTheDocument()
+  })
+
+  it("maps the legacy tunnel deep link to Overview", () => {
+    mockUseSearchParams.mockReturnValue(new URLSearchParams("connectionsTab=tunnel"))
+    render(<ConnectionsSection />)
+    expect(screen.getByRole("tab", { name: /^Overview$/i })).toHaveAttribute("data-state", "active")
   })
 
   it("makes the tab list horizontally scrollable on narrow viewports", () => {

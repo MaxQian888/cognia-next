@@ -117,6 +117,20 @@ describe("WeComConfigDialog — create new", () => {
     expect(mockConnectorsKeyringSet).toHaveBeenCalledWith("wc-new-id", "secret", "sec_123")
     expect(mockToastSuccess).toHaveBeenCalled()
   })
+
+  it("keeps the old connection untouched when strict save preflight fails", async () => {
+    mockProbeWeComCredentials.mockResolvedValueOnce({ ok: false, error: "bad candidate" })
+    render(<WeComConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot id/i), { target: { value: "wb_bad" } })
+    fireEvent.change(screen.getByLabelText(/secret/i), { target: { value: "bad" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("bad candidate"))
+    )
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+    expect(mockConnectorsKeyringSet).not.toHaveBeenCalled()
+  })
 })
 
 describe("WeComConfigDialog — edit existing", () => {

@@ -310,6 +310,36 @@ describe("runBuiltInSkill — write tier HITL routing", () => {
     expect(r.status).toBe("ok")
   })
 
+  it("uses the adapter HITL default when the conversation inherits", async () => {
+    registerBuiltInSkill(
+      mkSkill({
+        id: "lark.calendar.create_event",
+        mutation: "write",
+        hitlSurface,
+        mcpToolName: "lark_calendar_create_event",
+      })
+    )
+    const r = await runBuiltInSkill(
+      "lark.calendar.create_event",
+      { calendarId: "cal_1" },
+      { ...imCtx, imAdapterRow: { requireHitlForWrites: false } }
+    )
+    expect(r.status).toBe("ok")
+  })
+
+  it("fails closed at the adapter skill ceiling and audits the denial", async () => {
+    registerBuiltInSkill(mkSkill())
+    const r = await runBuiltInSkill(
+      "lark.calendar.list_events",
+      { calendarId: "cal_1" },
+      { ...imCtx, imAdapterRow: { builtInSkillCeiling: [] } }
+    )
+    expect(r).toMatchObject({ status: "denied", reason: "adapter_skill_ceiling" })
+    await expect(
+      getDb().connectorAudit.where("kind").equals("builtin_skill_denied").first()
+    ).resolves.toMatchObject({ reason: "adapter_skill_ceiling" })
+  })
+
   it("executes immediately when hitlBypass = true (callback re-fire)", async () => {
     registerBuiltInSkill(
       mkSkill({

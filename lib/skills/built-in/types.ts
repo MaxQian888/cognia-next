@@ -31,7 +31,7 @@ import type {
   PlatformSkillCapability,
 } from "@/types/connectors/skill-capability"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
-import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 
 export type { BuiltInSkillMutation, PlatformSkillCapability }
 
@@ -79,6 +79,8 @@ export interface BuiltInSkillContext {
   }
   /** Per-conversation override row, if any — drives HITL / allowlist gates. */
   imOverrideRow?: ConversationOverrideRow
+  /** Adapter-level skill ceiling and write-HITL default for IM sessions. */
+  imAdapterRow?: Pick<AdapterInstanceRow, "builtInSkillCeiling" | "requireHitlForWrites">
   /**
    * Whether the dispatcher should bypass HITL. Set to `true` when re-firing
    * a skill in response to a user clicking "Confirm" on the A2UI confirm card.

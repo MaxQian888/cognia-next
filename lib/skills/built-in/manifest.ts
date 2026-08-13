@@ -33,7 +33,8 @@ import { z } from "zod"
 import type { Capability } from "@/types/connectors/capability"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
-import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
+import { adapterAllowsBuiltInSkill } from "@/lib/connectors/permission-resolve"
 import { getSharedBuiltInSkillRegistry, platformAllows } from "./registry"
 import type { BuiltInSkill } from "./types"
 import {
@@ -70,6 +71,7 @@ export interface BuildBuiltInSkillManifestInput {
   }
   /** Per-conversation override row (drives allowlist & access tier). */
   imOverrideRow?: ConversationOverrideRow
+  imAdapterRow?: Pick<AdapterInstanceRow, "builtInSkillCeiling">
   /**
    * Capabilities the bound channel declares (the adapter's static
    * `*_CAPS`). Drives the `requires` filter. Omit for non-IM sessions —
@@ -93,6 +95,7 @@ export function buildBuiltInSkillManifest(
     if (!passPlatformFilter(skill, input.imBinding?.platform, isImSession)) continue
     if (!passImAccessFilter(skill, isImSession, input.imOverrideRow)) continue
     if (!passAllowedListFilter(skill, input.imOverrideRow?.allowedBuiltInSkillIds)) continue
+    if (!adapterAllowsBuiltInSkill(input.imAdapterRow, skill)) continue
     if (!passRequiresFilter(skill, isImSession, input.channelCapabilities)) continue
 
     out.push({

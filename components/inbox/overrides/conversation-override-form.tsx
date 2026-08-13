@@ -28,12 +28,15 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
+import {
+  upsertByConversationKey,
+  updateConversationConfigSection,
+} from "@/lib/db/conversation-overrides"
+import { updateAdapterConfigSection, type AdapterInstancePatch } from "@/lib/db/adapter-instances"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import type {
@@ -41,6 +44,8 @@ import type {
   ConnectorMode,
   InboundActivationPolicy,
 } from "@/types/connectors/policy"
+import { ConversationBehaviorEditor } from "@/components/settings/connections/forms/conversation-behavior-editor"
+import type { ImConfigSource } from "@/lib/connectors/effective-config"
 
 type SkillAllowMode = "inherit" | "all" | "whitelist"
 
@@ -50,6 +55,22 @@ interface QuietHoursDraft {
   to: string
   tz: string
 }
+
+const PROMOTION_FIELD_LABELS = {
+  defaultMode: "mode",
+  inboundActivationPolicy: "activationPolicy",
+  activeRunDispatchMode: "dispatchMode",
+  activationTtlMs: "activationTtl",
+  defaultCharacterId: "character",
+  defaultTeamId: "team",
+  defaultWorkflowId: "workflow",
+  defaultProvider: "provider",
+  defaultModel: "model",
+  muted: "muted",
+  quietHours: "quietHours",
+  builtInSkillCeiling: "builtInSkillCeiling",
+  requireHitlForWrites: "requireHitlForWrites",
+} as const satisfies Partial<Record<keyof AdapterInstancePatch, string>>
 
 function deriveSkillMode(value: ConversationOverrideRow["allowedBuiltInSkillIds"]): SkillAllowMode {
   if (value === undefined) return "inherit"
@@ -70,13 +91,6 @@ function parseActivationTtlMs(buffer: string): number | undefined {
   return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 3_600_000) : undefined
 }
 
-const MODES: ReadonlyArray<{ value: ConnectorMode | "unset"; key: string }> = [
-  { value: "unset", key: "unset" },
-  { value: "auto", key: "auto" },
-  { value: "manual", key: "manual" },
-  { value: "draft", key: "draft" },
-]
-
 export interface ConversationOverrideFormProps {
   /** Bus-level adapter id (the middle segment of `conversationKey`). */
   adapterId: string
@@ -91,10 +105,18 @@ export interface ConversationOverrideFormProps {
   onDone?: () => void
   /** Called when Cancel is clicked. */
   onCancel?: () => void
+  /** Canonical effective-config provenance resolved by the caller. */
+  effectiveSources?: Partial<
+    Record<
+      "mode" | "inboundActivationPolicy" | "activeRunDispatchMode" | "activationTtlHours",
+      ImConfigSource
+    >
+  >
 }
 
 export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
-  const { adapterId, conversationKey, initialRow, sessionId, onDone, onCancel } = props
+  const { adapterId, conversationKey, initialRow, sessionId, onDone, onCancel, effectiveSources } =
+    props
   const t = useTranslations("inbox.conversationOverride")
 
   const [mode, setMode] = useState<ConnectorMode | "unset">(
@@ -110,10 +132,22 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
     initialRow?.activationTtlMs ? String(initialRow.activationTtlMs / 3_600_000) : ""
   )
   const [characterId, setCharacterId] = useState(initialRow?.characterId ?? "")
+  const [characterState, setCharacterState] = useState<"inherit" | "none" | "character">(
+    initialRow?.characterDisabled ? "none" : initialRow?.characterId ? "character" : "inherit"
+  )
   // Agent Team binding (control-plane multi-agent). When set, inbound AI-run
   // routes to the team runtime instead of the single character.
   const [teamId, setTeamId] = useState(initialRow?.teamId ?? "")
   const [workflowId, setWorkflowId] = useState(initialRow?.workflowId ?? "")
+  const [targetKind, setTargetKind] = useState<"inherit" | "direct" | "team" | "workflow">(
+    initialRow?.teamId
+      ? "team"
+      : initialRow?.workflowId
+        ? "workflow"
+        : initialRow?.teamDisabled && initialRow?.workflowDisabled
+          ? "direct"
+          : "inherit"
+  )
   const [allowComputerUse, setAllowComputerUse] = useState(initialRow?.allowComputerUse ?? false)
   const [allowGoalDriving, setAllowGoalDriving] = useState(initialRow?.allowGoalDriving ?? false)
   const [allowScheduleTools, setAllowScheduleTools] = useState(
@@ -205,33 +239,41 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         quietHours.enabled && quietHours.from && quietHours.to && quietHours.tz
           ? { from: quietHours.from, to: quietHours.to, tz: quietHours.tz }
           : undefined
+      await updateConversationConfigSection({
+        conversationKey,
+        sessionId,
+        section: "responder",
+        source: "inbox.override.editor",
+        patch: {
+          mode: mode === "unset" ? undefined : mode,
+          inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
+          activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
+          activationTtlMs: parseActivationTtlMs(activationTtlHours),
+          characterId: characterState === "character" ? characterId.trim() || undefined : undefined,
+          characterDisabled: characterState === "none" ? true : undefined,
+          teamId: targetKind === "team" ? teamId.trim() || undefined : undefined,
+          teamDisabled: targetKind === "workflow" || targetKind === "direct" ? true : undefined,
+          workflowId: targetKind === "workflow" ? workflowId.trim() || undefined : undefined,
+          workflowDisabled: targetKind === "team" || targetKind === "direct" ? true : undefined,
+          proactivePush: proactivePush ? true : undefined,
+          liveActivity: liveActivity ? undefined : false,
+          appendActivity: appendActivity ? undefined : false,
+          allowComputerUse: allowComputerUse ? true : undefined,
+          allowGoalDriving: allowGoalDriving ? true : undefined,
+          allowScheduleTools: allowScheduleTools ? true : undefined,
+          providerOverride: providerOverride.trim() || undefined,
+          modelOverride: modelOverride.trim() || undefined,
+          muted: muted ? true : undefined,
+          allowedBuiltInSkillIds: resolvedAllowed,
+          requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
+          quietHours: resolvedQuietHours,
+        },
+      })
       await upsertByConversationKey({
         conversationKey,
         sessionId,
-        mode: mode === "unset" ? undefined : mode,
-        inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
-        activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
-        activationTtlMs: parseActivationTtlMs(activationTtlHours),
-        characterId: characterId.trim() || undefined,
-        teamId: teamId.trim() || undefined,
-        workflowId: workflowId.trim() || undefined,
-        proactivePush: proactivePush ? true : undefined,
-        liveActivity: liveActivity ? undefined : false,
-        appendActivity: appendActivity ? undefined : false,
-        allowComputerUse: allowComputerUse ? true : undefined,
-        allowGoalDriving: allowGoalDriving ? true : undefined,
-        allowScheduleTools: allowScheduleTools ? true : undefined,
-        providerOverride: providerOverride.trim() || undefined,
-        modelOverride: modelOverride.trim() || undefined,
         pinned: pinned ? true : undefined,
         archived: archived ? true : undefined,
-        muted: muted ? true : undefined,
-        trigger: initialRow?.trigger,
-        allowedBuiltInSkillIds: resolvedAllowed,
-        // The HITL flag defaults true at the read site; only persist when
-        // explicitly set to false so older rows don't get migration churn.
-        requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
-        quietHours: resolvedQuietHours,
         slaResponseMinutes: parseSlaMinutes(slaMinutes),
       })
       onDone?.()
@@ -249,89 +291,72 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
     onDone?.()
   }
 
-  const [applyingToAdapter, setApplyingToAdapter] = useState(false)
+  const [promotingToAdapter, setPromotingToAdapter] = useState(false)
 
-  /**
-   * v49 — Apply the in-form values (pinned / archived / allowComputerUse /
-   * allowGoalDriving / mode / quietHours / character / provider+model /
-   * skill allowlist) to every conversation that shares this adapter.
-   * Lets the operator say "make every Slack channel default to draft mode
-   * with goal-driving off" in one click instead of editing each override.
-   *
-   * Bulk path is transactional so a half-applied batch can't leak through
-   * if Dexie throws midway. The audit row is per-conversation already (via
-   * upsertByConversationKey), so no extra audit work is needed here.
-   */
-  const onApplyToAdapter = async () => {
+  const onPromoteToAdapter = async () => {
     if (!adapterId) return
-    if (typeof window !== "undefined") {
-      const ok = window.confirm(t("fields.applyToAdapterConfirm"))
-      if (!ok) return
+    let resolvedAllowed: ConversationOverrideRow["allowedBuiltInSkillIds"]
+    if (skillMode === "inherit") resolvedAllowed = undefined
+    else if (skillMode === "all") resolvedAllowed = "all"
+    else resolvedAllowed = skillIds
+    const resolvedQuietHours =
+      quietHours.enabled && quietHours.from && quietHours.to && quietHours.tz
+        ? { from: quietHours.from, to: quietHours.to, tz: quietHours.tz }
+        : undefined
+    const patch: AdapterInstancePatch = {
+      ...(mode !== "unset" ? { defaultMode: mode } : {}),
+      ...(activationPolicy !== "inherit" ? { inboundActivationPolicy: activationPolicy } : {}),
+      ...(dispatchMode !== "inherit" ? { activeRunDispatchMode: dispatchMode } : {}),
+      ...(parseActivationTtlMs(activationTtlHours)
+        ? { activationTtlMs: parseActivationTtlMs(activationTtlHours) }
+        : {}),
+      ...(characterState === "character" && characterId.trim()
+        ? { defaultCharacterId: characterId.trim() }
+        : {}),
+      ...(targetKind === "team" && teamId.trim()
+        ? { defaultTeamId: teamId.trim(), defaultWorkflowId: undefined }
+        : targetKind === "workflow" && workflowId.trim()
+          ? { defaultWorkflowId: workflowId.trim(), defaultTeamId: undefined }
+          : targetKind === "direct"
+            ? { defaultTeamId: undefined, defaultWorkflowId: undefined }
+            : {}),
+      ...(providerOverride.trim() ? { defaultProvider: providerOverride.trim() } : {}),
+      ...(modelOverride.trim() ? { defaultModel: modelOverride.trim() } : {}),
+      ...(muted ? { muted: true } : {}),
+      ...(resolvedQuietHours ? { quietHours: resolvedQuietHours } : {}),
+      ...(resolvedAllowed !== undefined
+        ? {
+            builtInSkillCeiling: resolvedAllowed === "all" ? undefined : resolvedAllowed,
+          }
+        : {}),
+      ...(initialRow?.requireHitlForWrites !== undefined || !requireHitlForWrites
+        ? { requireHitlForWrites }
+        : {}),
     }
-    setApplyingToAdapter(true)
+    const changedKeys = Object.keys(patch) as Array<keyof typeof PROMOTION_FIELD_LABELS>
+    if (changedKeys.length === 0) return
+    const translatedChanges = changedKeys
+      .map((key) => t(`fields.promotionFields.${PROMOTION_FIELD_LABELS[key]}`))
+      .join(", ")
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(t("fields.promoteConfirm", { changes: translatedChanges }))
+    ) {
+      return
+    }
+    if (
+      typeof window !== "undefined" &&
+      ("builtInSkillCeiling" in patch || "requireHitlForWrites" in patch) &&
+      !window.confirm(t("fields.promotePermissionConfirm"))
+    ) {
+      return
+    }
+    setPromotingToAdapter(true)
     try {
-      let resolvedAllowed: ConversationOverrideRow["allowedBuiltInSkillIds"]
-      if (skillMode === "inherit") resolvedAllowed = undefined
-      else if (skillMode === "all") resolvedAllowed = "all"
-      else resolvedAllowed = skillIds
-      const resolvedQuietHours =
-        quietHours.enabled && quietHours.from && quietHours.to && quietHours.tz
-          ? { from: quietHours.from, to: quietHours.to, tz: quietHours.tz }
-          : undefined
-
-      const db = getDb()
-      // Identify the conversations belonging to this adapter via the
-      // adapter middle segment of the conversationKey. We also pull any
-      // sessions bound to the adapter that have NO override yet so the
-      // bulk apply creates fresh override rows for them.
-      const adapterPrefix = `:${adapterId}:`
-      const existing = await db.conversationOverrides
-        .filter((row) => row.conversationKey.includes(adapterPrefix))
-        .toArray()
-      const sessions = await db.sessions
-        .filter((s) => s.platformBinding?.adapterId === adapterId)
-        .toArray()
-      const knownKeys = new Set(existing.map((r) => r.conversationKey))
-      const targets: Array<{ conversationKey: string; sessionId: string }> = [
-        ...existing.map((r) => ({ conversationKey: r.conversationKey, sessionId: r.sessionId })),
-        ...sessions
-          .filter((s) => s.platformBinding && !knownKeys.has(s.platformBinding.conversationKey))
-          .map((s) => ({
-            conversationKey: s.platformBinding!.conversationKey,
-            sessionId: s.id,
-          })),
-      ]
-      for (const target of targets) {
-        // Re-apply the form values per-conversation. We deliberately call
-        // the existing upsert helper instead of `bulkPut` so the per-row
-        // audit + updatedAt bump path stays consistent with single-row
-        // saves.
-        await upsertByConversationKey({
-          conversationKey: target.conversationKey,
-          sessionId: target.sessionId,
-          mode: mode === "unset" ? undefined : mode,
-          inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
-          activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
-          activationTtlMs: parseActivationTtlMs(activationTtlHours),
-          characterId: characterId.trim() || undefined,
-          teamId: teamId.trim() || undefined,
-          workflowId: workflowId.trim() || undefined,
-          allowComputerUse: allowComputerUse ? true : undefined,
-          allowGoalDriving: allowGoalDriving ? true : undefined,
-          providerOverride: providerOverride.trim() || undefined,
-          modelOverride: modelOverride.trim() || undefined,
-          pinned: pinned ? true : undefined,
-          archived: archived ? true : undefined,
-          muted: muted ? true : undefined,
-          allowedBuiltInSkillIds: resolvedAllowed,
-          requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
-          quietHours: resolvedQuietHours,
-          slaResponseMinutes: parseSlaMinutes(slaMinutes),
-        })
-      }
+      await updateAdapterConfigSection(adapterId, "promotion", patch, "conversation-promotion")
       onDone?.()
     } finally {
-      setApplyingToAdapter(false)
+      setPromotingToAdapter(false)
     }
   }
 
@@ -339,126 +364,99 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
     <div className="flex flex-col gap-5">
       <div className="border-b pb-3 text-xs font-mono text-muted-foreground">{conversationKey}</div>
 
+      <div className="border-b pb-5">
+        <ConversationBehaviorEditor
+          scope="conversation"
+          value={{
+            mode: mode === "unset" ? undefined : mode,
+            inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
+            activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
+            activationTtlHours,
+          }}
+          sources={effectiveSources}
+          onChange={(next) => {
+            setMode(next.mode ?? "unset")
+            setActivationPolicy(next.inboundActivationPolicy ?? "inherit")
+            setDispatchMode(next.activeRunDispatchMode ?? "inherit")
+            setActivationTtlHours(next.activationTtlHours ?? "")
+          }}
+        />
+      </div>
+
       <div className="space-y-2">
-        <Label htmlFor="conv-override-mode">{t("fields.mode")}</Label>
-        <Select value={mode} onValueChange={(v) => setMode(v as ConnectorMode | "unset")}>
-          <SelectTrigger id="conv-override-mode" data-testid="conv-override-mode">
+        <Label htmlFor="conv-override-character-state">{t("fields.character")}</Label>
+        <Select
+          value={characterState}
+          onValueChange={(value) => setCharacterState(value as typeof characterState)}
+        >
+          <SelectTrigger
+            id="conv-override-character-state"
+            data-testid="conv-override-character-state"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectGroup>
-              {MODES.map((m) => (
-                <SelectItem key={m.value} value={m.value}>
-                  {t(`fields.modeOptions.${m.key}`)}
-                </SelectItem>
-              ))}
-            </SelectGroup>
+            <SelectItem value="inherit">{t("fields.target.inherit")}</SelectItem>
+            <SelectItem value="none">{t("fields.target.none")}</SelectItem>
+            <SelectItem value="character">{t("fields.target.specificCharacter")}</SelectItem>
+          </SelectContent>
+        </Select>
+        {characterState === "character" && (
+          <Input
+            id="conv-override-character"
+            value={characterId}
+            placeholder={t("fields.characterPlaceholder")}
+            onChange={(e) => setCharacterId(e.target.value)}
+            data-testid="conv-override-character"
+          />
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="conv-override-target">{t("fields.target.label")}</Label>
+        <Select
+          value={targetKind}
+          onValueChange={(value) => setTargetKind(value as typeof targetKind)}
+        >
+          <SelectTrigger id="conv-override-target" data-testid="conv-override-target">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="inherit">{t("fields.target.inherit")}</SelectItem>
+            <SelectItem value="direct">{t("fields.target.direct")}</SelectItem>
+            <SelectItem value="team">{t("fields.target.team")}</SelectItem>
+            <SelectItem value="workflow">{t("fields.target.workflow")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 border-b pb-5 sm:grid-cols-3">
+      {targetKind === "team" && (
         <div className="space-y-2">
-          <Label htmlFor="conv-override-activation-policy">
-            {t("fields.activationPolicy.label")}
-          </Label>
-          <Select
-            value={activationPolicy}
-            onValueChange={(value) =>
-              setActivationPolicy(value as InboundActivationPolicy | "inherit")
-            }
-          >
-            <SelectTrigger
-              id="conv-override-activation-policy"
-              data-testid="conv-override-activation-policy"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {(
-                  ["inherit", "mention_activates", "mention_each", "always", "direct_only"] as const
-                ).map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {t(`fields.activationPolicy.options.${value}`)}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="conv-override-dispatch-mode">{t("fields.dispatchMode.label")}</Label>
-          <Select
-            value={dispatchMode}
-            onValueChange={(value) => setDispatchMode(value as ActiveRunDispatchMode | "inherit")}
-          >
-            <SelectTrigger
-              id="conv-override-dispatch-mode"
-              data-testid="conv-override-dispatch-mode"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {(["inherit", "queue", "steer"] as const).map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {t(`fields.dispatchMode.options.${value}`)}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="conv-override-activation-ttl">{t("fields.activationTtl.label")}</Label>
+          <Label htmlFor="conv-override-team">{t("fields.teamBinding")}</Label>
           <Input
-            id="conv-override-activation-ttl"
-            type="number"
-            min="1"
-            step="1"
-            value={activationTtlHours}
-            placeholder={t("fields.activationTtl.placeholder")}
-            onChange={(event) => setActivationTtlHours(event.target.value)}
-            data-testid="conv-override-activation-ttl"
+            id="conv-override-team"
+            value={teamId}
+            placeholder={t("fields.teamBindingPlaceholder")}
+            onChange={(e) => setTeamId(e.target.value)}
+            data-testid="conv-override-team"
           />
+          <p className="text-[11px] text-muted-foreground">{t("fields.teamBindingHelp")}</p>
         </div>
-      </div>
+      )}
 
-      <div className="space-y-2">
-        <Label htmlFor="conv-override-character">{t("fields.character")}</Label>
-        <Input
-          id="conv-override-character"
-          value={characterId}
-          placeholder={t("fields.characterPlaceholder")}
-          onChange={(e) => setCharacterId(e.target.value)}
-          data-testid="conv-override-character"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="conv-override-team">{t("fields.teamBinding")}</Label>
-        <Input
-          id="conv-override-team"
-          value={teamId}
-          placeholder={t("fields.teamBindingPlaceholder")}
-          onChange={(e) => setTeamId(e.target.value)}
-          data-testid="conv-override-team"
-        />
-        <p className="text-[11px] text-muted-foreground">{t("fields.teamBindingHelp")}</p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="conv-override-workflow">{t("fields.workflowBinding")}</Label>
-        <Input
-          id="conv-override-workflow"
-          value={workflowId}
-          placeholder={t("fields.workflowBindingPlaceholder")}
-          onChange={(e) => setWorkflowId(e.target.value)}
-          data-testid="conv-override-workflow"
-        />
-        <p className="text-[11px] text-muted-foreground">{t("fields.workflowBindingHelp")}</p>
-      </div>
+      {targetKind === "workflow" && (
+        <div className="space-y-2">
+          <Label htmlFor="conv-override-workflow">{t("fields.workflowBinding")}</Label>
+          <Input
+            id="conv-override-workflow"
+            value={workflowId}
+            placeholder={t("fields.workflowBindingPlaceholder")}
+            onChange={(e) => setWorkflowId(e.target.value)}
+            data-testid="conv-override-workflow"
+          />
+          <p className="text-[11px] text-muted-foreground">{t("fields.workflowBindingHelp")}</p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-4 border-b pb-5">
         <div className="flex items-start gap-2">
@@ -851,12 +849,12 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            onClick={onApplyToAdapter}
-            disabled={applyingToAdapter || saving || !adapterId}
-            data-testid="conv-override-apply-to-adapter"
-            title={t("fields.applyToAdapterTitle")}
+            onClick={onPromoteToAdapter}
+            disabled={promotingToAdapter || saving || !adapterId}
+            data-testid="conv-override-promote-to-adapter"
+            title={t("fields.promoteToAdapterTitle")}
           >
-            {applyingToAdapter ? t("saving") : t("fields.applyToAdapter")}
+            {promotingToAdapter ? t("saving") : t("fields.promoteToAdapter")}
           </Button>
           <Button variant="ghost" onClick={onCancel} data-testid="conv-override-cancel">
             {t("reset")}

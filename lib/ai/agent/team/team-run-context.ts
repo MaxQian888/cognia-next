@@ -142,6 +142,8 @@ export interface TeamRunContext {
    * interactive/UI runs.
    */
   readonly triggeredFrom?: import("@/types/workflow/visual").WorkflowTriggeredFrom
+  /** IM parent ceiling; teammate and Team policies may only narrow it. */
+  readonly parentPermissionCeiling?: import("@/types/agent/permission-ceiling").AgentPermissionCeiling
   readonly storeWriter: TeamStoreWriter
   /**
    * Per-teammate cache of capability resolution. Populated lazily by the

@@ -1233,7 +1233,10 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     } as never)
     await upsertByConversationKey({ conversationKey: key, sessionId: "s_team2", teamId: "ghost" })
 
-    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run", {
+      ...RESOLVED,
+      characterId: undefined,
+    })
 
     expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
     const audit = await getDb().connectorAudit.toArray()
@@ -1256,7 +1259,10 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     } as never)
     await upsertByConversationKey({ conversationKey: key, sessionId: "s_wf", workflowId: "wf_n" })
 
-    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run", {
+      ...RESOLVED,
+      characterId: undefined,
+    })
 
     expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
     expect(mockStartWorkflowFromIM).toHaveBeenCalledTimes(1)
@@ -1364,7 +1370,10 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
       teamId: "team_r",
     })
 
-    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run", {
+      ...RESOLVED,
+      characterId: undefined,
+    })
 
     expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
   })
@@ -1384,7 +1393,10 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
       updatedAt: 0,
     } as never)
 
-    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run", {
+      ...RESOLVED,
+      characterId: undefined,
+    })
 
     expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
     expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
@@ -1433,7 +1445,7 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
   })
 
-  it("stale instance-default team (team_not_found) falls through to single-character ai-run", async () => {
+  it("stale instance-default team fails closed without a direct-agent fallback", async () => {
     const key = "telegram:adapter_1:chat_inst_stale"
     await seedAdapter("adapter_1", { defaultTeamId: "ghost_team" })
     mockStartTeamRunFromIM.mockResolvedValueOnce({
@@ -1450,15 +1462,16 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
       updatedAt: 0,
     } as never)
 
-    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run", {
+      ...RESOLVED,
+      characterId: undefined,
+    })
 
-    // The deleted bot-default team must not brick the instance: audit + run
-    // the normal single-character path.
-    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
     const audit = await getDb().connectorAudit.toArray()
-    expect(
-      audit.some((r) => r.kind === "adapter.error" && r.reason === "instance_default_team_missing")
-    ).toBe(true)
+    expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "team_not_found")).toBe(
+      true
+    )
   })
 
   it("stale OVERRIDE team keeps the audit+stop behaviour (no fallthrough)", async () => {
@@ -1479,7 +1492,10 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     } as never)
     await upsertByConversationKey({ conversationKey: key, sessionId: "s_ostale", teamId: "ghost" })
 
-    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run", {
+      ...RESOLVED,
+      characterId: undefined,
+    })
 
     expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
     const audit = await getDb().connectorAudit.toArray()
@@ -2394,7 +2410,7 @@ describe("installRuntime — ai-run (dispatch-failure IM notification)", () => {
     )
   })
 
-  it("does NOT notify when a stale instance-default team falls through to a live reply", async () => {
+  it("notifies when a stale instance-default team fails closed", async () => {
     const key = "telegram:adapter_1:chat_staleteam_notify"
     await seedAdapter("adapter_1", { defaultTeamId: "ghost" })
     mockStartTeamRunFromIM.mockResolvedValueOnce({
@@ -2402,13 +2418,14 @@ describe("installRuntime — ai-run (dispatch-failure IM notification)", () => {
       reason: "team_not_found",
     } as never)
 
-    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run", {
+      ...RESOLVED,
+      characterId: undefined,
+    })
     await flushNotify()
 
-    // The turn fell through to the single-character reply — no silence, so no
-    // failure notice either.
-    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
-    expect(notifyMock).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    expect(notifyMock).toHaveBeenCalledTimes(1)
   })
 
   it("still does not notify on successful team dispatch", async () => {

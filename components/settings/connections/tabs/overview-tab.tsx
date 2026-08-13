@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
+import { TunnelTab } from "./tunnel-tab"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ActivityIcon,
@@ -21,6 +23,7 @@ import type { AdapterInstanceRow, ConnectorHeartbeatRow } from "@/lib/db/connect
 import type { HealthCellState } from "@/lib/connectors/health/derive-history"
 import { HEARTBEAT_INTERVAL_MS } from "@/lib/connectors/health/heartbeat"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { auditKindLabel } from "./audit-kind-label"
 
 const POLL_INTERVAL_MS = 10_000
@@ -86,6 +89,7 @@ function auditKindBadgeVariant(kind: string): "default" | "secondary" | "destruc
 export function OverviewTab() {
   const t = useTranslations("settings.connections.overview")
   const tKind = useTranslations("settings.connections.audit.kind")
+  const router = useRouter()
   const [health, setHealth] = useState<ConnectorsHealth | null>(null)
   const desktop = isTauri()
 
@@ -163,6 +167,11 @@ export function OverviewTab() {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button onClick={() => router.push("/inbox")} data-testid="connections-open-inbox">
+          {t("openInbox")}
+        </Button>
+      </div>
       {/* Card 1: Server status */}
       <Card>
         <CardHeader className="pb-3">
@@ -194,6 +203,8 @@ export function OverviewTab() {
           )}
         </CardContent>
       </Card>
+
+      <TunnelTab />
 
       {/* Card 2: Adapter health */}
       <Card>

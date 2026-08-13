@@ -138,6 +138,57 @@ describe("<ConnectorPolicySheet />", () => {
     )
   })
 
+  it("persists the shared behavior fields and converts activation TTL hours", async () => {
+    const user = userEvent.setup()
+    render(
+      <ConnectorPolicySheet
+        open
+        policy={
+          makePolicy({
+            inboundActivationPolicy: "always",
+            activeRunDispatchMode: "steer",
+            activationTtlMs: 7_200_000,
+          })
+        }
+        onOpenChange={jest.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("conversation-behavior-editor")).toBeInTheDocument()
+    expect(screen.getByTestId("behavior-ttl")).toHaveValue(2)
+    fireEvent.change(screen.getByTestId("behavior-ttl"), { target: { value: "3" } })
+    await user.click(screen.getByTestId("policy-save"))
+
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith(
+        "ad-1",
+        expect.objectContaining({
+          inboundActivationPolicy: "always",
+          activeRunDispatchMode: "steer",
+          activationTtlMs: 10_800_000,
+        })
+      )
+    )
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ activationTtlMs: 10_800_000 }),
+      })
+    )
+  })
+
+  it("normalizes an invalid activation TTL to inherit", async () => {
+    const user = userEvent.setup()
+    render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />)
+    fireEvent.change(screen.getByTestId("behavior-ttl"), { target: { value: "0" } })
+    await user.click(screen.getByTestId("policy-save"))
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith(
+        "ad-1",
+        expect.objectContaining({ activationTtlMs: undefined })
+      )
+    )
+  })
+
   it("re-seeds the form when the sheet opens for a different adapter", async () => {
     const { rerender } = render(
       <ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />

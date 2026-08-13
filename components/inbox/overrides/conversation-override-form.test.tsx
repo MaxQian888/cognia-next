@@ -4,6 +4,7 @@
 
 import "fake-indexeddb/auto"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { ConversationOverrideForm } from "./conversation-override-form"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
@@ -166,7 +167,7 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.requireHitlForWrites).toBe(false)
   })
 
-  it("renders empty form when no initialRow is supplied", () => {
+  it("renders inherited Character and target state when no initialRow is supplied", () => {
     render(
       <ConversationOverrideForm
         adapterId="lark-1"
@@ -174,7 +175,9 @@ describe("ConversationOverrideForm", () => {
         sessionId="s_new"
       />
     )
-    expect(screen.getByTestId("conv-override-character")).toHaveValue("")
+    expect(screen.getByTestId("conv-override-character-state")).toHaveTextContent("Inherit")
+    expect(screen.queryByTestId("conv-override-character")).not.toBeInTheDocument()
+    expect(screen.getByTestId("conv-override-target")).toHaveTextContent("Inherit")
     expect(screen.getByTestId("conv-override-provider")).toHaveValue("")
     expect(screen.getByTestId("conv-override-model")).toHaveValue("")
   })
@@ -217,6 +220,7 @@ describe("ConversationOverrideForm", () => {
   })
 
   it("upserts a new row when Save is clicked", async () => {
+    const user = userEvent.setup()
     const onDone = jest.fn()
     render(
       <ConversationOverrideForm
@@ -226,17 +230,18 @@ describe("ConversationOverrideForm", () => {
         onDone={onDone}
       />
     )
+    await user.click(screen.getByTestId("conv-override-character-state"))
+    await user.click(screen.getByRole("option", { name: "Specific Character" }))
     fireEvent.change(screen.getByTestId("conv-override-character"), {
       target: { value: "char_bravo" },
     })
     fireEvent.change(screen.getByTestId("conv-override-provider"), {
       target: { value: "anthropic" },
     })
+    await user.click(screen.getByTestId("conv-override-target"))
+    await user.click(screen.getByRole("option", { name: "Agent Team" }))
     fireEvent.change(screen.getByTestId("conv-override-team"), {
       target: { value: "team_research" },
-    })
-    fireEvent.change(screen.getByTestId("conv-override-workflow"), {
-      target: { value: "wf_nightly" },
     })
     fireEvent.click(screen.getByTestId("conv-override-proactive"))
     fireEvent.click(screen.getByTestId("conv-override-save"))
@@ -248,7 +253,8 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.characterId).toBe("char_bravo")
     expect(persisted?.providerOverride).toBe("anthropic")
     expect(persisted?.teamId).toBe("team_research")
-    expect(persisted?.workflowId).toBe("wf_nightly")
+    expect(persisted?.workflowId).toBeUndefined()
+    expect(persisted?.workflowDisabled).toBe(true)
     expect(persisted?.proactivePush).toBe(true)
   })
 
@@ -313,7 +319,7 @@ describe("ConversationOverrideForm", () => {
         onDone={onDone}
       />
     )
-    fireEvent.change(screen.getByTestId("conv-override-activation-ttl"), {
+    fireEvent.change(screen.getByTestId("behavior-ttl"), {
       target: { value: "48" },
     })
     fireEvent.click(screen.getByTestId("conv-override-save"))
@@ -394,6 +400,7 @@ describe("ConversationOverrideForm", () => {
   })
 
   it("never writes a row on Cancel without prior Save", async () => {
+    const user = userEvent.setup()
     render(
       <ConversationOverrideForm
         adapterId="lark-1"
@@ -401,10 +408,63 @@ describe("ConversationOverrideForm", () => {
         sessionId="s_noempty"
       />
     )
+    await user.click(screen.getByTestId("conv-override-character-state"))
+    await user.click(screen.getByRole("option", { name: "Specific Character" }))
     fireEvent.change(screen.getByTestId("conv-override-character"), {
       target: { value: "abc" },
     })
     fireEvent.click(screen.getByTestId("conv-override-cancel"))
     expect(await getDb().conversationOverrides.count()).toBe(0)
+  })
+
+  it("promotes supported explicit values without rewriting conversation overrides", async () => {
+    await getDb().adapterInstances.put({
+      id: "lark-1",
+      type: "lark",
+      displayName: "Bot",
+      enabled: true,
+      transportMode: "long-connection",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const initial: ConversationOverrideRow = {
+      id: "co-promote",
+      conversationKey: "lark:lark-1:oc_promote",
+      sessionId: "s_promote",
+      mode: "manual",
+      allowedBuiltInSkillIds: ["lark.calendar.*"],
+      requireHitlForWrites: false,
+      pinned: true,
+      archived: true,
+      slaResponseMinutes: 15,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.put(initial)
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true)
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey={initial.conversationKey}
+        sessionId={initial.sessionId}
+        initialRow={initial}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("conv-override-promote-to-adapter"))
+    await waitFor(async () => {
+      expect(await getDb().adapterInstances.get("lark-1")).toMatchObject({
+        defaultMode: "manual",
+        builtInSkillCeiling: ["lark.calendar.*"],
+        requireHitlForWrites: false,
+      })
+    })
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(await getDb().conversationOverrides.get(initial.id)).toEqual(initial)
+    confirm.mockRestore()
   })
 })

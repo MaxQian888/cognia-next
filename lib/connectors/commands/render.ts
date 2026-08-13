@@ -9,6 +9,7 @@
  */
 
 import type { ControlCommandName } from "./parse"
+import type { DispatchRule } from "@/lib/db/connector-types"
 
 /** A control command and its one-line bilingual description, for `/help`. */
 const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string; desc: string }> = [
@@ -92,6 +93,10 @@ export interface StatusView {
   approvalMode: string
   team: string
   workflow: string
+  routeSource: string
+  matchedRule: string
+  responseAdapter: string
+  enabledRules: string[]
   sessionTitle: string
   sessionIdPrefix: string
 }
@@ -130,8 +135,11 @@ export function confirmAgentProbeStarted(): string {
 }
 
 export function renderStatus(v: StatusView): string {
-  return [
-    "当前设置 / Current settings:",
+  const lines = [
+    "当前 /status 事件的实际路由 / Actual route for this /status event:",
+    `• 来源 / source: ${v.routeSource}`,
+    `• 匹配规则 / matched rule: ${v.matchedRule}`,
+    `• 回复 Adapter / response adapter: ${v.responseAdapter}`,
     `• 模式 / mode: ${v.mode}`,
     `• 模型 / model: ${v.model}`,
     `• 提供商 / provider: ${v.provider}`,
@@ -141,7 +149,39 @@ export function renderStatus(v: StatusView): string {
     `• 团队 / team: ${v.team}`,
     `• 工作流 / workflow: ${v.workflow}`,
     `• 会话 / session: ${v.sessionTitle} (${v.sessionIdPrefix})`,
-  ].join("\n")
+    "已启用规则（优先级顺序） / Enabled rules (priority order):",
+    ...(v.enabledRules.length > 0 ? v.enabledRules : ["无 / none"]),
+    "后续消息会按其文本、发送者和频道重新匹配，结果可能不同 / Future messages are matched again by their text, sender, and channel, so their route may differ.",
+  ]
+  return lines.join("\n")
+}
+
+export function sourceLabel(source: string): string {
+  const labels: Record<string, string> = {
+    override: "会话覆盖 / conversation override",
+    rule: "路由规则 / dispatch rule",
+    "instance-default": "Adapter 默认 / adapter default",
+    none: "系统默认 / system default",
+    "conversation-override": "会话覆盖 / conversation override",
+    "dispatch-rule": "路由规则 / dispatch rule",
+    "adapter-default": "Adapter 默认 / adapter default",
+    "system-default": "系统默认 / system default",
+    "target-managed": "执行目标管理 / managed by execution target",
+  }
+  return labels[source] ?? source
+}
+
+export function renderDispatchRuleSummary(rule: DispatchRule, priority: number): string {
+  const label = rule.name?.trim() ? `${rule.name.trim()} (${rule.id})` : rule.id
+  const targets = [
+    rule.action.teamId?.trim() ? `team:${rule.action.teamId.trim()}` : undefined,
+    rule.action.workflowId?.trim() ? `workflow:${rule.action.workflowId.trim()}` : undefined,
+    rule.action.characterId?.trim() ? `character:${rule.action.characterId.trim()}` : undefined,
+    rule.action.respondViaAdapterId?.trim()
+      ? `respond-via:${rule.action.respondViaAdapterId.trim()}`
+      : undefined,
+  ].filter((value): value is string => Boolean(value))
+  return `${priority}. ${label} → ${targets.length > 0 ? targets.join(", ") : "无目标 / no target"}`
 }
 
 /**
@@ -150,6 +190,10 @@ export function renderStatus(v: StatusView): string {
  */
 export function withBotDefault(value: string): string {
   return `${value}（bot 默认 / bot default）`
+}
+
+export function withSource(value: string, source: string): string {
+  return `${value}（${sourceLabel(source)}）`
 }
 
 export interface SessionLine {
@@ -196,6 +240,12 @@ export function confirmReasoning(level: string): string {
 export function confirmCharacter(name: string): string {
   return `已切换角色 / Character set: ${name}`
 }
+export function confirmCharacterDisabled(): string {
+  return "此会话已关闭角色 / Character disabled for this chat"
+}
+export function confirmCharacterInherited(): string {
+  return "角色已恢复继承 / Character restored to inherited setting"
+}
 export function confirmTeam(name: string): string {
   return `已绑定团队 / Team bound: ${name}`
 }
@@ -209,7 +259,10 @@ export function confirmWorkflow(name: string): string {
   return `已绑定工作流 / Workflow bound: ${name}`
 }
 export function confirmWorkflowCleared(): string {
-  return "已解绑工作流 / Workflow unbound"
+  return "此会话已关闭工作流 / Workflow disabled for this chat"
+}
+export function denyWorkflowNotDeployed(name: string): string {
+  return `工作流没有 active production deployment，无法绑定 / Workflow has no active production deployment: ${name}`
 }
 /**
  * Multiple workflows matched a `/workflow <name>` query — list the candidates

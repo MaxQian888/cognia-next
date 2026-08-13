@@ -38,6 +38,9 @@ import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction
 
 export type { ConnectorCallbackBindingRow }
 
+/** Host-owned capabilities that an IM adapter may further restrict. */
+export type ImHostCapabilityId = "computer_use" | "ocr" | "goal_driving" | "schedule_tools"
+
 /**
  * Optional probe metadata captured at adapter start. Used by OneBot to
  * record which upstream implementation (NapCat / Lagrange / LLOneBot) the
@@ -347,9 +350,17 @@ export interface AdapterInstanceRow {
    *                         effective model cannot reason.
    */
   defaultTeamId?: string
+  /** Default deployed Visual Workflow when no override or dispatch rule selects a target. */
+  defaultWorkflowId?: string
   defaultModel?: string
   defaultProvider?: string
   defaultReasoning?: "low" | "medium" | "high" | "xhigh" | "max"
+  /** Optional channel ceiling over registered built-in skill ids/wildcards. */
+  builtInSkillCeiling?: string[]
+  /** Optional channel ceiling over host-owned capabilities. Undefined means no extra clamp. */
+  hostCapabilityCeiling?: ImHostCapabilityId[]
+  /** Default HITL policy for normal write-tier skills; destructive skills always require HITL. */
+  requireHitlForWrites?: boolean
   /**
    * Platform scopes observed missing at runtime (chat-management calls that
    * failed with a permission error record the scope they needed here, e.g.
@@ -642,6 +653,8 @@ export interface ConversationOverrideRow {
   /** Topic-specific sliding activation lifetime override. */
   activationTtlMs?: number
   characterId?: string
+  /** Explicitly suppress rule/adapter Character inheritance for this conversation. */
+  characterDisabled?: boolean
   trigger?: Partial<TriggerPolicy>
   pinned?: boolean
   archived?: boolean
@@ -746,6 +759,8 @@ export interface ConversationOverrideRow {
    * Dexie bump).
    */
   workflowId?: string
+  /** Explicitly suppress rule/adapter Workflow inheritance for this conversation. */
+  workflowDisabled?: boolean
   /**
    * Tool-approval mode for HITL ask-tier tools on this IM conversation
    * (control-plane HITL). `"prompt"` (DEFAULT) projects an A2UI Allow/Deny

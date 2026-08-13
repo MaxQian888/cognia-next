@@ -85,6 +85,8 @@ export type AuditKind =
   // ("settings_save" | "manual_requeue") so operators can tell the two
   // apart in the Audit tab.
   | "adapter.credentials_rotated"
+  | "adapter.config_changed"
+  | "override.config_changed"
   // The OS / browser resumed from sleep (or the network came back online)
   // after a long absence, so the resume-reconnect watcher re-queued the
   // running adapter to heal a socket that may have gone half-open while the

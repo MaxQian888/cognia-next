@@ -15,7 +15,9 @@
  * card pushed by the runner, not as a tool response.
  */
 
+import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import Dexie from "dexie"
 import { executeDeployedWorkflow, WorkflowAdmissionError } from "./execution-authority"
 
 export interface StartWorkflowFromIMInput {
@@ -26,6 +28,8 @@ export interface StartWorkflowFromIMInput {
   triggeredFrom: WorkflowTriggeredFrom
   /** Optional external AbortSignal — propagates to the orchestrator. */
   signal?: AbortSignal
+  /** Parent IM ceiling inherited by dynamic agent nodes and nested runs. */
+  permissionCeiling?: AgentPermissionCeiling
 }
 
 export type StartWorkflowFromIMResult =
@@ -46,24 +50,38 @@ export async function startWorkflowFromIM(
   const persisted = new Promise<void>((resolve) => {
     markPersisted = resolve
   })
-  const execution = executeDeployedWorkflow({
-    workflowId: input.workflowId,
-    entrypoint: "skill",
-    caller: input.triggeredFrom.initiator?.principalId ?? "im",
-    triggerKind: "trigger.manual",
-    payload: input.runParams ?? {},
-    triggerBinding: {
-      adapterId: input.triggeredFrom.adapterId,
-      conversationKey: input.triggeredFrom.conversationKey,
-      sessionId: input.triggeredFrom.sessionId,
-    },
-    signal: input.signal,
-    triggeredBy: input.triggeredFrom,
-    onAdmitted: (runId) => {
-      admittedRunId = runId
-    },
-    onPersisted: markPersisted,
-  })
+  const execution = Dexie.ignoreTransaction(() =>
+    executeDeployedWorkflow({
+      workflowId: input.workflowId,
+      entrypoint: "skill",
+      caller: input.triggeredFrom.initiator?.principalId ?? "im",
+      triggerKind: "trigger.manual",
+      payload: input.runParams ?? {},
+      triggerBinding: {
+        adapterId: input.triggeredFrom.adapterId,
+        conversationKey: input.triggeredFrom.conversationKey,
+        sessionId: input.triggeredFrom.sessionId,
+        ...(input.triggeredFrom.characterId
+          ? { characterId: input.triggeredFrom.characterId }
+          : {}),
+      },
+      ...(input.permissionCeiling
+        ? {
+            securityContext: {
+              piiEgressRequired: true,
+              sourceTriggerKind: "trigger.manual" as const,
+              permissionCeiling: input.permissionCeiling,
+            },
+          }
+        : {}),
+      signal: input.signal,
+      triggeredBy: input.triggeredFrom,
+      onAdmitted: (runId) => {
+        admittedRunId = runId
+      },
+      onPersisted: markPersisted,
+    })
+  )
   // A valid run resolves `persisted` immediately after its durable row lands.
   // A validation/preflight failure can finish before creating that row, so the
   // execution promise is the second race arm and prevents this handoff from

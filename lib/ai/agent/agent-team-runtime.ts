@@ -126,6 +126,8 @@ export interface RunTeamLifecycleDeps {
    * letting the caller assemble the run via `queryByTrace`.
    */
   traceId?: string
+  /** Parent IM ceiling inherited by every teammate dispatch in this run. */
+  parentPermissionCeiling?: import("@/types/agent/permission-ceiling").AgentPermissionCeiling
   /**
    * Depth of the team-completion → workflow → team chain that produced this
    * run (0 = root). Threaded by the `action.team.run` executor from the
@@ -887,6 +889,9 @@ export async function runTeamLifecycle(
       // IM/workflow trigger origin — lets run-scoped consumers (e.g. the
       // team_post_to_chat collaboration tool) resolve the bound conversation.
       ...(deps.triggeredFrom ? { triggeredFrom: deps.triggeredFrom } : {}),
+      ...(deps.parentPermissionCeiling
+        ? { parentPermissionCeiling: deps.parentPermissionCeiling }
+        : {}),
       storeWriter: deps.storeWriter,
       ...(rateLimitResume ? { rateLimitResume } : {}),
       ...(twinDeps ? { twinDeps } : {}),

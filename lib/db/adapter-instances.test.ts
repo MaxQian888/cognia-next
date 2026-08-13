@@ -9,6 +9,7 @@ import {
   listEnabledAdapterInstances,
   listAdapterInstancesByType,
   updateAdapterInstance,
+  updateAdapterConfigSection,
   patchAdapterInstanceSettings,
   deleteAdapterInstance,
 } from "./adapter-instances"
@@ -89,6 +90,30 @@ describe("adapter-instances", () => {
     expect(updated?.displayName).toBe("Updated Bot")
     expect(updated?.enabled).toBe(false)
     expect(updated?.updatedAt).toBeGreaterThan(row.updatedAt)
+  })
+
+  it("atomically records a redaction-safe section audit", async () => {
+    const row = await createAdapterInstance(baseInput())
+    await updateAdapterConfigSection(
+      row.id,
+      "responder",
+      { defaultCharacterId: "char_1", defaultWorkflowId: "wf_1" },
+      "conversation-promotion"
+    )
+    await expect(getAdapterInstance(row.id)).resolves.toMatchObject({
+      defaultCharacterId: "char_1",
+      defaultWorkflowId: "wf_1",
+    })
+    const audit = await getDb().connectorAudit.where("adapterId").equals(row.id).first()
+    expect(audit).toMatchObject({
+      kind: "adapter.config_changed",
+      fields: {
+        scope: "adapter",
+        section: "responder",
+        changedKeys: ["defaultCharacterId", "defaultWorkflowId"],
+        source: "conversation-promotion",
+      },
+    })
   })
 
   it("atomically merges concurrent settings patches against the latest row", async () => {

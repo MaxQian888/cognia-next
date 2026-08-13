@@ -299,7 +299,10 @@ describe("GoalRuntime.createGoal — IM guardrail", () => {
     GoalImBlocked: new (...a: unknown[]) => Error
   }
 
-  async function seedImSession(overrides?: { allowGoalDriving?: boolean }): Promise<void> {
+  async function seedImSession(
+    overrides?: { allowGoalDriving?: boolean },
+    adapterCeiling?: string[]
+  ): Promise<void> {
     const db = getDb()
     const now = Date.now()
     await db.sessions.put({
@@ -317,6 +320,21 @@ describe("GoalRuntime.createGoal — IM guardrail", () => {
       createdAt: now,
       updatedAt: now,
     } as unknown as Parameters<typeof db.sessions.put>[0])
+
+    await db.adapterInstances.put({
+      id: "tg-1",
+      type: "telegram",
+      displayName: "TG",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+      ...(adapterCeiling ? { hostCapabilityCeiling: adapterCeiling } : {}),
+      createdAt: now,
+      updatedAt: now,
+    } as never)
 
     if (overrides && typeof overrides.allowGoalDriving === "boolean") {
       await db.conversationOverrides.put({
@@ -361,6 +379,16 @@ describe("GoalRuntime.createGoal — IM guardrail", () => {
     const audit = await getDb().connectorAudit.where("kind").equals("goal.started.im").toArray()
     expect(audit).toHaveLength(1)
     expect(audit[0].adapterId).toBe("tg-1")
+  })
+
+  it("blocks an opted-in conversation when the adapter ceiling excludes goal driving", async () => {
+    await seedImSession({ allowGoalDriving: true }, ["ocr"])
+    const rt = getGoalRuntime()
+    await expect(rt.createGoal({ sessionId: "ses_im", rawObjective: "x" })).rejects.toBeInstanceOf(
+      GoalImBlocked
+    )
+    const audit = await getDb().connectorAudit.where("kind").equals("goal.blocked.im").first()
+    expect(audit?.reason).toBe("adapter_goal_driving_ceiling")
   })
 
   it("non-IM sessions are not gated", async () => {

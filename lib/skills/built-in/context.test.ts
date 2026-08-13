@@ -12,10 +12,16 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: (...a: unknown[]) => mockReadForResolution(...a),
 }))
 
+const mockGetAdapterInstance = jest.fn()
+jest.mock("@/lib/db/adapter-instances", () => ({
+  getAdapterInstance: (...a: unknown[]) => mockGetAdapterInstance(...a),
+}))
+
 import { resolveBuiltInSkillContext } from "./context"
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockGetAdapterInstance.mockResolvedValue(undefined)
 })
 
 describe("resolveBuiltInSkillContext", () => {
@@ -29,6 +35,10 @@ describe("resolveBuiltInSkillContext", () => {
       },
     })
     mockReadForResolution.mockResolvedValue({ requireHitlForWrites: true })
+    mockGetAdapterInstance.mockResolvedValue({
+      builtInSkillCeiling: ["lark.calendar.list_events"],
+      requireHitlForWrites: false,
+    })
     const ctx = await resolveBuiltInSkillContext("s1")
     expect(ctx.sessionId).toBe("s1")
     expect(ctx.imBinding).toEqual({
@@ -37,7 +47,12 @@ describe("resolveBuiltInSkillContext", () => {
       conversationKey: "lark:a1:oc_1",
     })
     expect(ctx.imOverrideRow).toEqual({ requireHitlForWrites: true })
+    expect(ctx.imAdapterRow).toEqual({
+      builtInSkillCeiling: ["lark.calendar.list_events"],
+      requireHitlForWrites: false,
+    })
     expect(mockReadForResolution).toHaveBeenCalledWith("lark:a1:oc_1")
+    expect(mockGetAdapterInstance).toHaveBeenCalledWith("a1")
   })
 
   it("returns a bare context for desktop (non-bound) sessions", async () => {
@@ -106,6 +121,18 @@ describe("resolveBuiltInSkillContext", () => {
     const ctx = await resolveBuiltInSkillContext("s1")
     expect(ctx.imBinding?.adapterId).toBe("a1")
     expect(ctx.imOverrideRow).toBeUndefined()
+  })
+
+  it("keeps the binding when the adapter read fails (best-effort)", async () => {
+    mockSessionGet.mockResolvedValue({
+      id: "s1",
+      platformBinding: { platform: "lark", adapterId: "a1", conversationKey: "lark:a1:oc_1" },
+    })
+    mockReadForResolution.mockResolvedValue(null)
+    mockGetAdapterInstance.mockRejectedValue(new Error("adapter table unavailable"))
+    const ctx = await resolveBuiltInSkillContext("s1")
+    expect(ctx.imBinding?.adapterId).toBe("a1")
+    expect(ctx.imAdapterRow).toBeUndefined()
   })
 
   it("falls back to the bare context when the session lookup throws", async () => {

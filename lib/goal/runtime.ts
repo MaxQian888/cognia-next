@@ -54,6 +54,8 @@ import { isTauri } from "@/lib/platform/detect"
 import { getDb } from "@/lib/db/schema"
 import { getActiveLoopForSession } from "@/lib/db/loops"
 import { readForResolution } from "@/lib/db/conversation-overrides"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import { adapterAllowsHostCapability } from "@/lib/connectors/permission-resolve"
 import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
 import { getCharacter } from "@/lib/db/characters"
 import { classifyRisk } from "@/lib/policy/risk/classify-risk"
@@ -341,10 +343,12 @@ class GoalRuntime {
     const session = await getDb().sessions.get(input.sessionId)
     const platformBinding = session?.platformBinding
     if (platformBinding) {
-      const override = await readForResolution(platformBinding.conversationKey).catch(
-        () => undefined
-      )
-      const allowed = override?.allowGoalDriving === true
+      const [override, adapter] = await Promise.all([
+        readForResolution(platformBinding.conversationKey).catch(() => undefined),
+        getAdapterInstance(platformBinding.adapterId).catch(() => undefined),
+      ])
+      const allowed =
+        override?.allowGoalDriving === true && adapterAllowsHostCapability(adapter, "goal_driving")
       const auditAt = Date.now()
       if (!allowed) {
         try {
@@ -353,7 +357,10 @@ class GoalRuntime {
             kind: "goal.blocked.im",
             at: auditAt,
             conversationKey: platformBinding.conversationKey,
-            reason: "allow_goal_driving_off",
+            reason:
+              override?.allowGoalDriving === true
+                ? "adapter_goal_driving_ceiling"
+                : "allow_goal_driving_off",
             message: "GoalRuntime.createGoal blocked — IM conversation not opted in",
             fields: { sessionId: input.sessionId, platform: platformBinding.platform },
           })

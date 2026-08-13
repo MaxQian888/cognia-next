@@ -10180,6 +10180,7 @@
     },
     "cannedResponses": {
       "empty": "没有匹配的快捷回复。",
+      "manage": "管理快捷回复",
       "searchPlaceholder": "搜索快捷回复……",
       "triggerAria": "插入快捷回复"
     },
@@ -10331,11 +10332,6 @@
         "advancedJsonHelp": "这些字段会写入该会话的 `trigger` 部分覆盖，覆盖适配器级触发策略。",
         "allowComputerUse": "允许 Computer Use 工具",
         "allowComputerUseWarning": "开启后，该会话中的回复可能在本机触发截图、鼠标、键盘操作。IM 默认关闭。",
-        "allowGoalDriving": "允许在此会话上启动自驱 /goal",
-        "allowGoalDrivingPlatform": "仅在连接器运行时所在处运行——桌面应用（全部渠道）或 `cli serve`（webhook 渠道）。移动端无法驱动 IM 目标。",
-        "allowGoalDrivingWarning": "关闭时 /goal 拒绝在该 IM 会话上启动，避免自驱循环在没人审核的情况下自动回复。默认关闭。",
-        "allowScheduleTools": "允许此会话的 Agent 管理定时任务",
-        "allowScheduleToolsWarning": "仅向此会话暴露创建、查看和取消定时任务工具；Agent 只能修改自己创建的任务。默认关闭。",
         "allowedSkills": {
           "add": "添加",
           "all": "全部允许",
@@ -10346,6 +10342,11 @@
           "remove": "移除 {id}",
           "whitelist": "白名单"
         },
+        "allowGoalDriving": "允许在此会话上启动自驱 /goal",
+        "allowGoalDrivingPlatform": "仅在连接器运行时所在处运行——桌面应用（全部渠道）或 `cli serve`（webhook 渠道）。移动端无法驱动 IM 目标。",
+        "allowGoalDrivingWarning": "关闭时 /goal 拒绝在该 IM 会话上启动，避免自驱循环在没人审核的情况下自动回复。默认关闭。",
+        "allowScheduleTools": "允许此会话的 Agent 管理定时任务",
+        "allowScheduleToolsWarning": "仅向此会话暴露创建、查看和取消定时任务工具；Agent 只能修改自己创建的任务。默认关闭。",
         "appendActivity": "进度行（不支持编辑的适配器）",
         "appendActivityHint": "在无法原地编辑消息的适配器上，回合进行中每步发送一条紧凑的进度行，而非保持沉默。默认开启；频道消息过多时可关闭。",
         "applyToAdapter": "应用到此适配器全部会话",
@@ -10361,19 +10362,38 @@
         "liveActivity": "实时活动卡片",
         "liveActivityHint": "助手工作时在对话中显示实时进度卡片（工具数、用时、当前操作、文件编辑）。默认开启；频道消息过多时可关闭。",
         "mode": "模式",
+        "modelOverride": "Model 覆盖",
+        "modelOverridePlaceholder": "claude-opus-4-7",
         "modeOptions": {
           "auto": "自动回复",
           "draft": "仅生成草稿",
           "manual": "人工审核",
           "unset": "继承适配器默认"
         },
-        "modelOverride": "Model 覆盖",
-        "modelOverridePlaceholder": "claude-opus-4-7",
         "muted": "静音 (不发出站消息)",
         "mutedHint": "推迟此会话的全部出站投递（每分钟重新检查），机器人在其他会话中照常回复。语义与适配器级静音相同，但仅作用于本会话。",
         "pinned": "置顶",
         "proactivePush": "主动 IM 通知",
         "proactivePushHint": "允许助手将任务完成 / 出错 / 需输入等事件主动推送回此会话。默认关闭。",
+        "promoteConfirm": "将这些会话显式值提升为 Adapter 默认值？\n\n{changes}",
+        "promotePermissionConfirm": "本次提升会改变 Adapter 的内置 Skill 上限或 HITL 默认值，并可能影响其他会话。是否继续？",
+        "promoteToAdapter": "提升为 Adapter 默认",
+        "promoteToAdapterTitle": "仅提升支持的显式值，不改写已有会话覆盖",
+        "promotionFields": {
+          "activationPolicy": "激活策略",
+          "activationTtl": "激活有效期",
+          "builtInSkillCeiling": "内置 Skill 上限",
+          "character": "Character",
+          "dispatchMode": "运行中调度模式",
+          "mode": "响应模式",
+          "model": "Model",
+          "muted": "静音",
+          "provider": "Provider",
+          "quietHours": "免打扰时段",
+          "requireHitlForWrites": "写入类 Skill 二次确认",
+          "team": "Agent Team",
+          "workflow": "Workflow"
+        },
         "providerOverride": "Provider 覆盖",
         "providerOverridePlaceholder": "anthropic",
         "quietHours": {
@@ -10395,6 +10415,15 @@
         "slaResponseMinutesHint": "设置后，该会话会显示倒计时徽章；若在该分钟数内未回复则标记为「已超时」（不计入静默时段）。留空表示不设时限。",
         "slaResponseMinutesPlaceholder": "例如 30",
         "suppressGroups": "在群聊中抑制",
+        "target": {
+          "direct": "Direct Agent",
+          "inherit": "继承",
+          "label": "执行目标",
+          "none": "无",
+          "specificCharacter": "指定 Character",
+          "team": "Agent Team",
+          "workflow": "Workflow"
+        },
         "teamBinding": "Agent 团队 (id)",
         "teamBindingHelp": "设置后，入站消息将派发给该 Agent 团队而非单个角色；进度会回流到会话中。",
         "teamBindingPlaceholder": "（无 —— 由角色回复）",
@@ -10463,6 +10492,7 @@
     "labels": {
       "addAria": "添加或移除标签",
       "empty": "暂无标签——请在设置中创建。",
+      "manage": "管理标签",
       "pickerTitle": "标签",
       "removeAria": "移除标签 {name}"
     },
@@ -23522,7 +23552,15 @@
           "fieldPublicUrl": "公开 URL",
           "fieldTransport": "传输",
           "fieldType": "类型",
-          "noSelection": "在左侧选择一个适配器，查看其配置、健康状态、会话和审计日志。"
+          "noSelection": "在左侧选择一个适配器，查看其配置、健康状态、会话和审计日志。",
+          "sections": {
+            "behavior": "行为",
+            "connection": "连接",
+            "delivery": "投递",
+            "permissions": "权限",
+            "platform": "平台",
+            "responder": "响应者"
+          }
         },
         "detailTabs": {
           "audit": "审计",
@@ -23672,25 +23710,38 @@
         }
       },
       "aiBindingDefaults": {
+        "cancel": "取消",
         "characterDefault": "默认",
         "characterHelp": "此机器人默认使用的人设；会话可用 /character 单独绑定。",
         "characterLabel": "默认人设",
+        "characterTeamHelp": "仅将人设和系统提示词注入团队队长的本次入口上下文，不改变成员、模型或工具。",
+        "characterWorkflowHelp": "Character ID 会通过现有工作流触发载荷传递，节点可按需读取。",
         "modelDefault": "默认",
         "modelHelp": "此机器人使用的提供商 + 模型。优先于人设自带的模型；会话内 /model 仍然最高。",
         "modelLabel": "默认提供商 · 模型",
+        "modelManagedByTarget": "Provider 和 Model 由所选 Agent Team 或 Workflow 管理。",
         "notConfigured": "{id}（未配置）",
         "precedenceNote": "会话级覆盖（/model、/team、收件箱切换器）始终优先于这些机器人级默认值。",
-        "reasoningDefault": "默认",
-        "reasoningHelp": "此机器人回复的思考强度。模型不支持推理时自动忽略。",
-        "reasoningLabel": "默认思考强度",
         "reasoning_high": "高",
         "reasoning_low": "低",
         "reasoning_max": "最高",
         "reasoning_medium": "中",
         "reasoning_xhigh": "特高",
+        "reasoningDefault": "默认",
+        "reasoningHelp": "此机器人回复的思考强度。模型不支持推理时自动忽略。",
+        "reasoningLabel": "默认思考强度",
+        "save": "保存",
+        "targetDirect": "Direct Agent",
+        "targetLabel": "执行目标",
+        "targetTeam": "Agent Team",
+        "targetWorkflow": "Workflow",
         "teamHelp": "入站消息将派发给该 Agent 团队；会话可用 /team 单独绑定，或用 /team off 关闭。",
         "teamLabel": "默认 Agent 团队",
-        "title": "AI 绑定默认值"
+        "title": "AI 绑定默认值",
+        "workflowHelp": "只有存在 active production deployment 的工作流才能接收 IM 流量。",
+        "workflowLabel": "默认 Workflow",
+        "workflowNone": "无",
+        "workflowProduction": "生产部署"
       },
       "audit": {
         "collapseAria": "收起审计条目",
@@ -23713,6 +23764,7 @@
             "edit_fallback": "活动编辑回退"
           },
           "adapter": {
+            "config_changed": "适配器配置已变更",
             "credentials_rotated": "凭证已轮换",
             "error": "适配器错误",
             "heartbeat": "心跳",
@@ -23805,7 +23857,8 @@
             "replayed": "已重放"
           },
           "override": {
-            "computer_use_changed": "电脑操作开关变更"
+            "computer_use_changed": "电脑操作开关变更",
+            "config_changed": "会话覆盖配置已变更"
           },
           "plugin": {
             "inbound_blocked": "插件拦截入站",
@@ -23865,6 +23918,32 @@
           "all": "全部"
         },
         "timeRangeLabel": "时间范围"
+      },
+      "behaviorEditor": {
+        "activationTtl": "激活有效期（小时）",
+        "activationTtlPlaceholder": "例如 24",
+        "activation_always": "始终激活",
+        "activation_direct_only": "仅私聊",
+        "activation_mention_activates": "提及后激活会话",
+        "activation_mention_each": "每条消息都需提及",
+        "activeRun": "已有运行时",
+        "cancel": "取消",
+        "dispatchQueue": "消息排队",
+        "dispatchSteer": "引导当前运行",
+        "effectiveSource": "有效来源：{source}",
+        "groupActivation": "群聊激活",
+        "inherit": "继承",
+        "modeAuto": "自动回复",
+        "modeDraft": "仅生成草稿",
+        "modeManual": "人工审核",
+        "responseMode": "响应模式",
+        "save": "保存",
+        "source_adapter-default": "Adapter 默认值",
+        "source_conversation-override": "会话覆盖",
+        "source_dispatch-rule": "调度规则",
+        "source_system-default": "系统默认值",
+        "source_target-managed": "由执行目标管理",
+        "title": "会话行为"
       },
       "cannedResponses": {
         "addButton": "添加快捷回复",
@@ -24119,6 +24198,11 @@
         "summary": "按适配器分组的会话汇总。完整视图请到收件箱。",
         "totalLabel": "总数",
         "unreadLabel": "未读"
+      },
+      "inboxAssets": {
+        "cannedResponses": "快捷回复",
+        "description": "管理收件箱中使用的可复用标签与回复。",
+        "labels": "标签"
       },
       "labels": {
         "addButton": "添加标签",
@@ -24570,6 +24654,7 @@
         "disabledBadge": "已禁用",
         "noAdapters": "尚未配置任何适配器。",
         "noRecentActivity": "暂无最近活动。",
+        "openInbox": "打开收件箱",
         "recentActivityHeading": "最近活动",
         "runningSummary": "已启用 {total} 个适配器，其中 {running} 个运行中",
         "serverHeading": "入站服务器（Webhook / 反向 WS）",
@@ -24587,6 +24672,25 @@
         "statusRunning": "运行中 — {addr}",
         "statusStopped": "已停止",
         "statusUnknown": "未知"
+      },
+      "permissionsEditor": {
+        "builtInSkills": "内置 Skills 上限",
+        "cancel": "取消",
+        "confirmImpact": "保存此权限上限？它可能阻止该适配器全部会话中的 Skill 和主机能力。",
+        "conversationGrantRequired": "Adapter 只能限制此能力上限；每个会话仍需显式授权。",
+        "hitl": "写入类 Skill 需要 HITL",
+        "hitlHelp": "会话设置可覆盖此默认值；破坏性 Skill 始终需要审批。",
+        "host": {
+          "computer_use": "Computer Use",
+          "goal_driving": "Goal Driving",
+          "ocr": "OCR",
+          "schedule_tools": "Schedule Tools"
+        },
+        "hostCapabilities": "主机能力",
+        "save": "保存",
+        "skillHelp": "使用逗号分隔 Skill ID 或通配符。留空表示 Adapter 不追加限制；会话显式空白名单仍会阻止全部 Skill。",
+        "skillPlaceholder": "lark.calendar.*, lark.task.list",
+        "title": "权限"
       },
       "qqOfficial": {
         "adapterCreated": "已添加 QQ 官方机器人",
@@ -24767,6 +24871,7 @@
       },
       "tabs": {
         "adapters": "适配器",
+        "assets": "收件箱资产",
         "audit": "审计",
         "canned": "快捷回复",
         "capability": "能力矩阵",
@@ -24774,6 +24879,7 @@
         "inbox": "收件箱",
         "labels": "标签",
         "outbound": "出站",
+        "overrides": "覆盖配置",
         "overview": "概览",
         "tunnel": "隧道"
       },
@@ -24976,11 +25082,12 @@
         "botIdLabel": "Bot ID",
         "botIdPlaceholder": "例如 wb1234567890abcdef",
         "create": "创建",
-        "credentialUnchangedPlaceholder": "留空则保留当前值",
         "credentialsRequired": "Bot ID 和 Secret 为必填项。",
+        "credentialUnchangedPlaceholder": "留空则保留当前值",
         "displayNameLabel": "显示名称",
         "displayNamePlaceholder": "我的企业微信机器人",
         "displayNameRequired": "显示名称为必填项。",
+        "preflightFailed": "无法验证新凭据：{error}",
         "proactiveNote": "提示：企业微信仅在用户至少给机器人发过一次消息后，才会向该会话投递主动推送（定时 / 工作流）。",
         "quickCommands": {
           "help": "企业微信智能机器人没有持久菜单。在 enter_chat 时推送一张 template_card 模拟——下面每行变成一个按钮。触发键稳定即可（用户看不到，仅用于回链按钮）。"
@@ -24997,8 +25104,8 @@
         "sectionQuickCommands": "快捷指令",
         "sectionQuickCommandsDesc": "进入会话（enter_chat）时推送一张 template_card 菜单卡，每行映射到一个提示词或斜杠命令。",
         "testButtonLabel": "测试凭据",
-        "testCredentialScopeHelp": "测试会向企业微信申请一个短期访问令牌，以验证企业凭据。",
         "testCredentialsAria": "测试企业微信凭据",
+        "testCredentialScopeHelp": "测试会向企业微信申请一个短期访问令牌，以验证企业凭据。",
         "testFailedLabel": "凭据测试失败",
         "testFailedToast": "企业微信凭据测试失败：{error}",
         "testSucceededLabel": "凭据有效",

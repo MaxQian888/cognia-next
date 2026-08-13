@@ -187,6 +187,17 @@ describe("buildBuiltInSkillManifest — imAccess filter", () => {
 })
 
 describe("buildBuiltInSkillManifest — allowedList filter", () => {
+  it("intersects the conversation list with the adapter skill ceiling", () => {
+    registerBuiltInSkill(mkSkill())
+    expect(
+      buildBuiltInSkillManifest({
+        imBinding: { platform: "lark", adapterId: "lark-1", conversationKey: "k" },
+        imOverrideRow: mkOverride({ allowedBuiltInSkillIds: "all" }),
+        imAdapterRow: { builtInSkillCeiling: [] },
+      })
+    ).toEqual([])
+  })
+
   it("blocks everything when allowedBuiltInSkillIds === []", () => {
     registerBuiltInSkill(mkSkill())
     const m = buildBuiltInSkillManifest({

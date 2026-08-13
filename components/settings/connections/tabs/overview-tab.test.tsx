@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { ConnectorsHealth } from "@/lib/connectors/tauri/commands"
 import type { AdapterInstanceRow, ConnectorHeartbeatRow } from "@/lib/db/connector-types"
 import type { AuditEntry } from "@/types/connectors/audit"
@@ -12,6 +12,12 @@ import type { AuditEntry } from "@/types/connectors/audit"
 // ---------------------------------------------------------------------------
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(false) }))
+jest.mock("./tunnel-tab", () => ({ TunnelTab: () => <div>Tunnel controls</div> }))
+
+const mockRouterPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockRouterPush }),
+}))
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsHealth: jest.fn().mockResolvedValue({
@@ -105,6 +111,13 @@ describe("OverviewTab", () => {
   it("renders the inbound server card", () => {
     render(<OverviewTab />)
     expect(screen.getByText(/Inbound Server/i)).toBeInTheDocument()
+    expect(screen.getByText("Tunnel controls")).toBeInTheDocument()
+  })
+
+  it("opens the operational Inbox from the overview", () => {
+    render(<OverviewTab />)
+    fireEvent.click(screen.getByTestId("connections-open-inbox"))
+    expect(mockRouterPush).toHaveBeenCalledWith("/inbox")
   })
 
   it("shows desktop-only notice in web mode", () => {

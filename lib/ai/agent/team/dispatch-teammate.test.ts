@@ -1082,6 +1082,34 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
 })
 
 describe("dispatchTeammate — team permission ceiling", () => {
+  it("intersects the IM parent ceiling with Team policy", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "ok", messageId: "m1" })
+    const { ctx } = makeCtx(makeTeammate(), {
+      allowedTools: ["Read", "Bash"],
+      disallowedTools: ["Write"],
+    })
+    Object.assign(ctx, {
+      parentPermissionCeiling: {
+        allowedTools: ["Read", "Grep"],
+        disallowedTools: ["Computer"],
+      },
+    })
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        permissionCeiling: {
+          allowedTools: ["Read"],
+          disallowedTools: ["Computer", "Write"],
+        },
+      })
+    )
+  })
+
   it("clamps the sidecar path: team ceiling flows into resolveSendOptions", async () => {
     isTauriMock.mockReturnValue(true)
     createSessionMock.mockResolvedValue({ id: "sess1" })

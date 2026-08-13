@@ -210,6 +210,24 @@ describe("resolveEffectiveRouting — precedence", () => {
     })
   })
 
+  it("falls through from rule to the instance workflow default", () => {
+    expect(resolveEffectiveRouting({ defaultWorkflowId: "wf_default" }, null, null)).toMatchObject({
+      workflowId: "wf_default",
+      workflowSource: "instance-default",
+    })
+  })
+
+  it("workflowDisabled suppresses override, rule, and instance workflow targets", () => {
+    const ruleHit = { ...HIT, action: { workflowId: "wf_rule" } }
+    expect(
+      resolveEffectiveRouting(
+        { defaultWorkflowId: "wf_default" },
+        { workflowId: "wf_override", workflowDisabled: true } as never,
+        ruleHit
+      )
+    ).toMatchObject({ workflowId: undefined, workflowSource: "none" })
+  })
+
   it("override characterId beats rule characterId", () => {
     const ruleHit = { ...HIT, action: { characterId: "char_rule" } }
     expect(
@@ -223,6 +241,19 @@ describe("resolveEffectiveRouting — precedence", () => {
       characterId: undefined,
       characterSource: "none",
     })
+  })
+
+  it("falls through to the instance Character and supports explicit suppression", () => {
+    expect(
+      resolveEffectiveRouting({ defaultCharacterId: "char_default" }, null, null)
+    ).toMatchObject({ characterId: "char_default", characterSource: "instance-default" })
+    expect(
+      resolveEffectiveRouting(
+        { defaultCharacterId: "char_default" },
+        { characterDisabled: true } as never,
+        { ...HIT, action: { characterId: "char_rule" } }
+      )
+    ).toMatchObject({ characterId: undefined, characterSource: "none" })
   })
 
   it("a single rule can carry all targets — each surfaces on its own axis", () => {

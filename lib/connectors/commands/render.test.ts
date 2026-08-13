@@ -11,6 +11,10 @@ describe("renderStatus", () => {
       approvalMode: "prompt",
       team: "team_bot（bot 默认 / bot default）",
       workflow: "无 / none",
+      routeSource: "路由规则 / dispatch rule",
+      matchedRule: "Status route (rule-status)",
+      responseAdapter: "tg-reply（路由规则 / dispatch rule）",
+      enabledRules: ["1. Status route (rule-status) → team:team_bot, respond-via:tg-reply"],
       sessionTitle: "Main",
       sessionIdPrefix: "abc12345",
     })
@@ -20,6 +24,11 @@ describe("renderStatus", () => {
     expect(text).toContain("reasoning: high")
     expect(text).toContain("character: Researcher")
     expect(text).toContain("team: team_bot（bot 默认 / bot default）")
+    expect(text).toContain("source: 路由规则 / dispatch rule")
+    expect(text).toContain("matched rule: Status route (rule-status)")
+    expect(text).toContain("response adapter: tg-reply（路由规则 / dispatch rule）")
+    expect(text).toContain("1. Status route (rule-status) → team:team_bot, respond-via:tg-reply")
+    expect(text).toContain("Future messages are matched again")
     expect(text).toContain("session: Main (abc12345)")
   })
 })

@@ -46,6 +46,8 @@ import { RunOperators } from "../../forms/run-operators"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
 import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
+import { AdapterBehaviorDefaults } from "../../forms/adapter-behavior-defaults"
+import { AdapterPermissions } from "../../forms/adapter-permissions"
 import { DispatchRules } from "../../forms/dispatch-rules"
 import { OutboundTuning } from "../../forms/outbound-tuning"
 import { UsagePresence } from "../../forms/usage-presence"
@@ -66,6 +68,7 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
 
   return (
     <div className="space-y-4" data-testid="config-detail">
+      <h3 className="text-sm font-semibold">{t("sections.connection")}</h3>
       <Card>
         <CardHeader className="pb-2 pt-3">
           <CardTitle className="flex items-center justify-between text-sm font-medium">
@@ -119,6 +122,9 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * handlers). Renders only for adapters that recorded scopes. */}
       <ConnectedScopesCard row={row} />
 
+      <h3 className="pt-2 text-sm font-semibold">{t("sections.behavior")}</h3>
+      <AdapterBehaviorDefaults adapterId={row.id} />
+
       {/* Mention strategy + chat allow/blocklist — applies to every
        * platform that distinguishes private / group / channel contexts.
        * The components were originally written for Lark but the body is
@@ -154,6 +160,8 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * managing; one mount covers every platform. */}
       <ControlCommands adapterId={row.id} />
 
+      <h3 className="pt-2 text-sm font-semibold">{t("sections.responder")}</h3>
+
       {/* Instance-level AI binding defaults (persona / team / model /
        * reasoning — W1 multi-bot). Self-managing; one mount covers every
        * platform, so the 11 per-platform create dialogs stay untouched. */}
@@ -164,9 +172,16 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * self-managing, one mount covers every platform. */}
       <DispatchRules adapterId={row.id} />
 
+      <h3 className="pt-2 text-sm font-semibold">{t("sections.permissions")}</h3>
+      <AdapterPermissions adapterId={row.id} />
+
+      <h3 className="pt-2 text-sm font-semibold">{t("sections.delivery")}</h3>
+
       {/* Per-bot outbound throttle/breaker tuning + circuit-open failover
        * targets (multi-bot). Self-managing, one mount covers every platform. */}
       <OutboundTuning adapterId={row.id} />
+
+      <h3 className="pt-2 text-sm font-semibold">{t("sections.platform")}</h3>
 
       {/* End-to-end verify: send a synthetic message through the same
        * bus path the runner uses. Lives here (not in the create dialog)

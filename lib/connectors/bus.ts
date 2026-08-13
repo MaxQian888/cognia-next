@@ -662,7 +662,9 @@ export class ConnectorBus {
     //   • 4 character lookup: only this result feeds downstream binding.
     // All three are best-effort — a write/read failure must never break the
     // inbound pipeline.
-    const charId = override?.characterId ?? adapterRow.defaultCharacterId
+    const charId = override?.characterDisabled
+      ? undefined
+      : (override?.characterId ?? adapterRow.defaultCharacterId)
     const [, , character] = await Promise.all([
       override?.slaResponseMinutes && override.slaResponseMinutes > 0
         ? setSlaDue(

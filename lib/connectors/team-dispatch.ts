@@ -17,6 +17,7 @@
  */
 
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 
 export interface StartTeamRunFromIMInput {
   teamId: string
@@ -25,6 +26,8 @@ export interface StartTeamRunFromIMInput {
   adapterId: string
   conversationKey: string
   sessionId?: string
+  characterId?: string
+  permissionCeiling?: AgentPermissionCeiling
 }
 
 export interface StartTeamRunFromIMResult {
@@ -57,7 +60,14 @@ export interface StartTeamRunFromIMDeps {
     ) => Promise<{ runId: string; status: string; reason?: string }>
   >
   /** Returns `buildAgentTeamRuntimeDeps` (notifierDeps + lead planning). */
-  loadBuildDeps?: () => Promise<() => Record<string, unknown>>
+  loadBuildDeps?: () => Promise<
+    (options?: {
+      entryPersona?: { id: string; name: string; systemPrompt: string }
+    }) => Record<string, unknown>
+  >
+  loadCharacter?: (
+    characterId: string
+  ) => Promise<{ id: string; name: string; systemPrompt: string } | undefined>
 }
 
 async function defaultLoadStore(): Promise<TeamStoreLike> {
@@ -72,9 +82,23 @@ async function defaultLoadRunTeamLifecycle(): Promise<
   return runTeamLifecycle as unknown as never
 }
 
-async function defaultLoadBuildDeps(): Promise<() => Record<string, unknown>> {
+async function defaultLoadBuildDeps(): Promise<
+  (options?: {
+    entryPersona?: { id: string; name: string; systemPrompt: string }
+  }) => Record<string, unknown>
+> {
   const { buildAgentTeamRuntimeDeps } = await import("@/lib/ai/agent/agent-team-runtime-deps")
-  return buildAgentTeamRuntimeDeps as unknown as () => Record<string, unknown>
+  return buildAgentTeamRuntimeDeps as unknown as (options?: {
+    entryPersona?: { id: string; name: string; systemPrompt: string }
+  }) => Record<string, unknown>
+}
+
+async function defaultLoadCharacter(characterId: string) {
+  const { resolveCharacterById } = await import("@/lib/db/characters")
+  const character = await resolveCharacterById(characterId)
+  return character
+    ? { id: character.id, name: character.name, systemPrompt: character.systemPrompt ?? "" }
+    : undefined
 }
 
 /**
@@ -100,7 +124,9 @@ export async function startTeamRunFromIM(
   let runTeamLifecycle: Awaited<
     ReturnType<NonNullable<StartTeamRunFromIMDeps["loadRunTeamLifecycle"]>>
   >
-  let buildAgentTeamRuntimeDeps: () => Record<string, unknown>
+  let buildAgentTeamRuntimeDeps: (options?: {
+    entryPersona?: { id: string; name: string; systemPrompt: string }
+  }) => Record<string, unknown>
   try {
     ;[store, runTeamLifecycle, buildAgentTeamRuntimeDeps] = await Promise.all([
       loadStore(),
@@ -112,6 +138,13 @@ export async function startTeamRunFromIM(
   }
 
   if (!store.getTeam(teamId)) return { started: false, reason: "team_not_found" }
+
+  const entryPersona = input.characterId
+    ? await (deps.loadCharacter ?? defaultLoadCharacter)(input.characterId)
+    : undefined
+  if (input.characterId && !entryPersona) {
+    return { started: false, reason: "dispatch_error" }
+  }
 
   // Seed the team's objective from the inbound text so the run works on the
   // user's request. Empty goals leave the existing objective untouched.
@@ -128,9 +161,10 @@ export async function startTeamRunFromIM(
     adapterId: input.adapterId,
     conversationKey: input.conversationKey,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(input.characterId ? { characterId: input.characterId } : {}),
   }
 
-  const partial = buildAgentTeamRuntimeDeps()
+  const partial = buildAgentTeamRuntimeDeps(entryPersona ? { entryPersona } : undefined)
   const runId = `run_team_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`
   const lifecycleDeps: Record<string, unknown> = {
     ...partial,
@@ -139,6 +173,7 @@ export async function startTeamRunFromIM(
     // Belt-and-braces: the lifecycle also derives "im" from triggeredFrom,
     // but stating it keeps the headless gate policy explicit.
     origin: "im",
+    ...(input.permissionCeiling ? { parentPermissionCeiling: input.permissionCeiling } : {}),
     storeReader: {
       getTeam: (id: string) => store.getTeam(id),
       getTeammates: (id: string) => store.getTeammates(id),

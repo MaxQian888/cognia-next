@@ -10,10 +10,8 @@
  * runtime's ai-run branch. Precedence (user-confirmed):
  *   explicit conversation override (`/team`, `/character`, `/workflow`,
  *   `teamDisabled`) > first matching rule > instance defaults.
- * It deliberately leaves `resolveEffectiveTeamBinding`
- * (`lib/connectors/policy-resolve.ts`) untouched — `/status` keeps using
- * that override→instance-default view; the runtime uses THIS resolver so
- * rules slot in between the two layers.
+ * Runtime dispatch and `/status` both consume this resolver so the route
+ * reported in chat cannot drift from the rule selected for that event.
  */
 
 import type {
@@ -119,7 +117,7 @@ export interface EffectiveRouting {
    * `/team`-bound chat from a rule hit from a bot-default dispatch. */
   teamSource: "override" | "rule" | "instance-default" | "none"
   workflowId: string | undefined
-  workflowSource: "override" | "rule" | "none"
+  workflowSource: "override" | "rule" | "instance-default" | "none"
   /**
    * Character routed by an override or a rule. `undefined` means "no
    * explicit routing here" — the caller falls back to the resolved binding
@@ -127,7 +125,7 @@ export interface EffectiveRouting {
    * the adapter default).
    */
   characterId: string | undefined
-  characterSource: "override" | "rule" | "none"
+  characterSource: "override" | "rule" | "instance-default" | "none"
   /**
    * Bot instance the reply should be delivered through (multi-bot
    * cross-account send). Only a rule can set this in v1 — there is no
@@ -155,10 +153,15 @@ export interface EffectiveRouting {
  * none (caller falls back to the resolved binding).
  */
 export function resolveEffectiveRouting(
-  adapter: Pick<AdapterInstanceRow, "defaultTeamId">,
+  adapter: Pick<AdapterInstanceRow, "defaultTeamId" | "defaultWorkflowId" | "defaultCharacterId">,
   override: Pick<
     ConversationOverrideRow,
-    "teamId" | "teamDisabled" | "workflowId" | "characterId"
+    | "teamId"
+    | "teamDisabled"
+    | "workflowId"
+    | "workflowDisabled"
+    | "characterId"
+    | "characterDisabled"
   > | null,
   ruleHit: DispatchRuleHit | null
 ): EffectiveRouting {
@@ -184,27 +187,39 @@ export function resolveEffectiveRouting(
   // ── workflow ──────────────────────────────────────────────────────────────
   let workflowId: string | undefined
   let workflowSource: EffectiveRouting["workflowSource"] = "none"
-  const overrideWorkflowId = override?.workflowId?.trim()
-  const ruleWorkflowId = ruleHit?.action.workflowId?.trim()
-  if (overrideWorkflowId) {
-    workflowId = overrideWorkflowId
-    workflowSource = "override"
-  } else if (ruleWorkflowId) {
-    workflowId = ruleWorkflowId
-    workflowSource = "rule"
+  if (override?.workflowDisabled !== true) {
+    const overrideWorkflowId = override?.workflowId?.trim()
+    const ruleWorkflowId = ruleHit?.action.workflowId?.trim()
+    const instanceWorkflowId = adapter.defaultWorkflowId?.trim()
+    if (overrideWorkflowId) {
+      workflowId = overrideWorkflowId
+      workflowSource = "override"
+    } else if (ruleWorkflowId) {
+      workflowId = ruleWorkflowId
+      workflowSource = "rule"
+    } else if (instanceWorkflowId) {
+      workflowId = instanceWorkflowId
+      workflowSource = "instance-default"
+    }
   }
 
   // ── character ─────────────────────────────────────────────────────────────
   let characterId: string | undefined
   let characterSource: EffectiveRouting["characterSource"] = "none"
-  const overrideCharacterId = override?.characterId?.trim()
-  const ruleCharacterId = ruleHit?.action.characterId?.trim()
-  if (overrideCharacterId) {
-    characterId = overrideCharacterId
-    characterSource = "override"
-  } else if (ruleCharacterId) {
-    characterId = ruleCharacterId
-    characterSource = "rule"
+  if (override?.characterDisabled !== true) {
+    const overrideCharacterId = override?.characterId?.trim()
+    const ruleCharacterId = ruleHit?.action.characterId?.trim()
+    const instanceCharacterId = adapter.defaultCharacterId?.trim()
+    if (overrideCharacterId) {
+      characterId = overrideCharacterId
+      characterSource = "override"
+    } else if (ruleCharacterId) {
+      characterId = ruleCharacterId
+      characterSource = "rule"
+    } else if (instanceCharacterId) {
+      characterId = instanceCharacterId
+      characterSource = "instance-default"
+    }
   }
 
   // ── respond-via bot (rule-only layer) ─────────────────────────────────────

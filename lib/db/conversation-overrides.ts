@@ -117,6 +117,72 @@ export async function patchConversationOverride(
   return updated
 }
 
+export type ConversationConfigSection = "behavior" | "responder" | "permissions" | "delivery"
+
+export type ConversationConfigSource = "inbox" | "inbox.override.editor" | "mobile" | "command"
+
+/**
+ * Persist one conversation configuration section and its audit entry in the
+ * same transaction. Operational fields (pin/archive/assignment/read state)
+ * intentionally continue through their dedicated CRUD paths.
+ */
+export async function updateConversationConfigSection(input: {
+  adapterId: string
+  conversationKey: string
+  sessionId?: string
+  section: ConversationConfigSection
+  patch: Partial<Omit<ConversationOverrideRow, "id" | "conversationKey" | "createdAt">>
+  source?: ConversationConfigSource
+}): Promise<ConversationOverrideRow> {
+  const db = getDb()
+  const existing = await readForResolution(input.conversationKey)
+  if (!existing && !input.sessionId) {
+    throw new Error(
+      `conversationOverrides: no row for ${input.conversationKey} and no sessionId to create one`
+    )
+  }
+  const projectId =
+    existing?.projectId ?? (await resolveSessionProjectId(input.sessionId as string))
+  const now = Date.now()
+  const changedKeys = Object.keys(input.patch).sort()
+  if (changedKeys.length === 0 && existing) return existing
+
+  return db.transaction("rw", db.conversationOverrides, db.connectorAudit, async () => {
+    const latest =
+      (await db.conversationOverrides
+        .where("conversationKey")
+        .equals(input.conversationKey)
+        .first()) ?? existing
+    const row: ConversationOverrideRow = latest
+      ? { ...latest, ...input.patch, updatedAt: now }
+      : {
+          id: newId(),
+          conversationKey: input.conversationKey,
+          sessionId: input.sessionId as string,
+          projectId,
+          ...input.patch,
+          createdAt: now,
+          updatedAt: now,
+        }
+    await db.conversationOverrides.put(row)
+    await db.connectorAudit.add({
+      id: crypto.randomUUID(),
+      adapterId: input.adapterId,
+      projectId: row.projectId,
+      conversationKey: input.conversationKey,
+      kind: "override.config_changed",
+      at: now,
+      fields: {
+        scope: "conversation",
+        section: input.section,
+        changedKeys,
+        source: input.source ?? "inbox",
+      },
+    })
+    return row
+  })
+}
+
 /** Set or clear the `pinned` flag. */
 export async function setPinned(id: string, pinned: boolean): Promise<void> {
   await getDb().conversationOverrides.update(id, { pinned, updatedAt: Date.now() })

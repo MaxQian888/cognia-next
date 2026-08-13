@@ -156,6 +156,7 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
       cwd: params.cwd,
       allowedTools: params.allowedTools,
       timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      permissionCeiling: ctx.securityContext?.permissionCeiling,
       onDelta: ctx.emitStream,
       onEvent: (event: CaptureStreamEvent) => {
         if (event.type === "commentary-delta" && event.delta) {

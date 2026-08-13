@@ -38,6 +38,10 @@ import { append as appendAudit } from "@/lib/db/connector-audit"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { getSharedBuiltInSkillRegistry } from "./registry"
 import type { BuiltInSkill, BuiltInSkillContext, BuiltInSkillResult } from "./types"
+import {
+  adapterAllowsBuiltInSkill,
+  resolveRequireHitlForWrites,
+} from "@/lib/connectors/permission-resolve"
 
 /** Default TTL for skill_invoke bindings — 7 days. Matches the existing pattern. */
 const SKILL_INVOKE_TTL_MS = 7 * 24 * 3600 * 1000
@@ -160,6 +164,22 @@ export async function runBuiltInSkill(
   // 4 + 5 — Channel allowlist & IM access gates. Both are no-ops for in-app
   // (non-IM) sessions: built-in skills are always exposed in desktop chat.
   if (ctx.imBinding) {
+    if (!adapterAllowsBuiltInSkill(ctx.imAdapterRow, skill)) {
+      await safeAppendAudit({
+        adapterId: ctx.imBinding.adapterId,
+        kind: "builtin_skill_denied",
+        at: now,
+        conversationKey: ctx.imBinding.conversationKey,
+        reason: "adapter_skill_ceiling",
+        message: `Skill "${skillId}" is outside this adapter's built-in skill ceiling.`,
+        fields: { skillId },
+      })
+      return {
+        status: "denied",
+        reason: "adapter_skill_ceiling",
+        message: "Built-in skill refused by the adapter channel ceiling.",
+      }
+    }
     const allowedListGate = checkAllowedList(skill, ctx.imOverrideRow?.allowedBuiltInSkillIds)
     if (!allowedListGate.allowed) {
       await safeAppendAudit({
@@ -201,7 +221,9 @@ export async function runBuiltInSkill(
   const hitlRequired = computeHitlRequired(
     skill,
     ctx.imBinding != null,
-    ctx.imOverrideRow?.requireHitlForWrites,
+    ctx.imBinding
+      ? resolveRequireHitlForWrites(ctx.imAdapterRow, ctx.imOverrideRow)
+      : ctx.imOverrideRow?.requireHitlForWrites,
     ctx.hitlBypass === true
   )
 

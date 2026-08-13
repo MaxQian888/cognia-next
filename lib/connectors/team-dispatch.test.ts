@@ -112,6 +112,14 @@ describe("startTeamRunFromIM", () => {
 
   it("seeds the objective and launches runTeamLifecycle with triggeredFrom", async () => {
     const h = harness()
+    const permissionCeiling = { disallowedTools: ["Bash"] }
+    const buildDeps = jest.fn(() => ({ notifierDeps: { marker: true } }))
+    h.deps.loadBuildDeps = async () => buildDeps
+    h.deps.loadCharacter = async () => ({
+      id: "char_1",
+      name: "Sage",
+      systemPrompt: "Be precise",
+    })
     const res = await startTeamRunFromIM(
       {
         teamId: "team_x",
@@ -119,6 +127,8 @@ describe("startTeamRunFromIM", () => {
         adapterId: "tg-1",
         conversationKey: "telegram:tg-1:9",
         sessionId: "s1",
+        characterId: "char_1",
+        permissionCeiling,
       },
       h.deps
     )
@@ -136,12 +146,34 @@ describe("startTeamRunFromIM", () => {
       adapterId: "tg-1",
       conversationKey: "telegram:tg-1:9",
       sessionId: "s1",
+      characterId: "char_1",
+    })
+    expect(h.runCalls[0].deps.parentPermissionCeiling).toBe(permissionCeiling)
+    expect(buildDeps).toHaveBeenCalledWith({
+      entryPersona: { id: "char_1", name: "Sage", systemPrompt: "Be precise" },
     })
     // notifierDeps from buildAgentTeamRuntimeDeps merged in
     expect(h.runCalls[0].deps.notifierDeps).toEqual({ marker: true })
     // storeReader/storeWriter wired
     expect(h.runCalls[0].deps.storeReader).toBeDefined()
     expect(h.runCalls[0].deps.storeWriter).toBeDefined()
+  })
+
+  it("fails closed when the bound Character was deleted", async () => {
+    const h = harness()
+    h.deps.loadCharacter = async () => undefined
+    const res = await startTeamRunFromIM(
+      {
+        teamId: "team_x",
+        goal: "hi",
+        adapterId: "tg-1",
+        conversationKey: "k",
+        characterId: "missing",
+      },
+      h.deps
+    )
+    expect(res).toEqual({ started: false, reason: "dispatch_error" })
+    expect(h.runCalls).toHaveLength(0)
   })
 
   it("does not seed when goal is blank", async () => {

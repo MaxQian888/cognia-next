@@ -1,5 +1,5 @@
 import type { AcpCapabilities, AcpPermissionMode } from "@/types/agent/external-agent"
-import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
+import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
 
 /**
@@ -14,22 +14,8 @@ import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
  * Goose's force-Auto behaviour: **a parent's restriction always cascades; a
  * child may only further-restrict, never escalate.**
  */
-export interface ExternalSessionPermissionSpec {
-  /** ACP permission mode ceiling for the session. */
-  permissionMode?: AcpPermissionMode
-  /** Allow-list of tool names. `undefined` means "no allow-list" (all tools). */
-  allowedTools?: string[]
-  /** Deny-list of tool names. Always cascades (union). */
-  disallowedTools?: string[]
-  /** MCP servers the session may reach. The parent's set is the ceiling. */
-  mcpServers?: Array<{ name: string; [key: string]: unknown }>
-  /**
-   * OS-sandbox resource/network ceiling (ADR-0028). Cascades monotonically via
-   * {@link clampSandboxPolicy}: a child may only narrow writable roots, tighten
-   * the network reach, and lower the CPU/memory caps — never widen them.
-   */
-  sandboxPolicy?: SandboxResourcePolicy
-}
+/** @deprecated Import `AgentPermissionCeiling` from `@/types/agent/permission-ceiling`. */
+export type ExternalSessionPermissionSpec = AgentPermissionCeiling
 
 /**
  * Permissiveness ranking, ascending. `plan` (read-only) is the most

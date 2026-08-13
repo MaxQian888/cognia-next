@@ -187,6 +187,7 @@ export function OneBotConfigDialog({
           },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
+          ...(transportMode === "reverse-ws" ? { deliveryReadiness: "unknown" as const } : {}),
           quietHours: quietHours ?? undefined,
           muted,
         })
@@ -199,6 +200,7 @@ export function OneBotConfigDialog({
           settings: onebotSettings,
           muted,
           quietHours: quietHours ?? undefined,
+          ...(transportMode === "reverse-ws" ? { deliveryReadiness: "unknown" as const } : {}),
         })
       }
 
@@ -339,8 +341,9 @@ export function OneBotConfigDialog({
           <div className="space-y-1.5">
             <Label htmlFor="ob-bearer">{t("bearerTokenLabel")}</Label>
             <p className="text-xs text-muted-foreground">
-              {t("bearerTokenHelpPrefix")} <code className="text-xs">accessToken</code>{" "}
-              {t("bearerTokenHelpSuffix")}
+              {t("bearerTokenHelpPrefix")}{" "}
+              {/* i18n-exempt: literal OneBot client configuration key */}
+              <code className="text-xs">accessToken</code> {t("bearerTokenHelpSuffix")}
             </p>
             <Input
               id="ob-bearer"
@@ -437,8 +440,8 @@ export function OneBotConfigDialog({
       <div className="space-y-3">
         <Label className="text-xs font-medium">{t("endpointLabel")}</Label>
         <p className="text-xs text-muted-foreground">
-          {t("endpointHelpPrefix")} <code className="text-xs">wsReverse</code>{" "}
-          {t("endpointHelpSuffix")}
+          {t("endpointHelpPrefix")} {/* i18n-exempt: literal OneBot client configuration key */}
+          <code className="text-xs">wsReverse</code> {t("endpointHelpSuffix")}
         </p>
         <div
           className="rounded-md bg-muted px-3 py-2 font-mono text-xs break-all"

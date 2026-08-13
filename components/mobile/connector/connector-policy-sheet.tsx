@@ -18,13 +18,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -36,6 +29,8 @@ import { Switch } from "@/components/ui/switch"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
 import type { ConnectorMode } from "@/types/connectors/policy"
+import type { ActiveRunDispatchMode, InboundActivationPolicy } from "@/types/connectors/policy"
+import { ConversationBehaviorEditor } from "@/components/settings/connections/forms/conversation-behavior-editor"
 
 export interface ConnectorPolicy {
   id: string
@@ -43,6 +38,9 @@ export interface ConnectorPolicy {
   defaultMode?: ConnectorMode
   muted?: boolean
   quietHours?: { from: string; to: string; tz: string }
+  inboundActivationPolicy?: InboundActivationPolicy
+  activeRunDispatchMode?: ActiveRunDispatchMode
+  activationTtlMs?: number
 }
 
 export interface ConnectorPolicySheetProps {
@@ -54,6 +52,11 @@ export interface ConnectorPolicySheetProps {
 export function ConnectorPolicySheet({ open, policy, onOpenChange }: ConnectorPolicySheetProps) {
   const t = useTranslations("mobile.connectorPolicy")
   const [defaultMode, setDefaultMode] = useState<ConnectorMode>(policy?.defaultMode ?? "auto")
+  const [activationPolicy, setActivationPolicy] = useState(policy?.inboundActivationPolicy)
+  const [dispatchMode, setDispatchMode] = useState(policy?.activeRunDispatchMode)
+  const [activationTtlHours, setActivationTtlHours] = useState(
+    policy?.activationTtlMs ? String(policy.activationTtlMs / 3_600_000) : ""
+  )
   const [muted, setMuted] = useState(policy?.muted ?? false)
   const [from, setFrom] = useState(policy?.quietHours?.from ?? "")
   const [to, setTo] = useState(policy?.quietHours?.to ?? "")
@@ -68,6 +71,11 @@ export function ConnectorPolicySheet({ open, policy, onOpenChange }: ConnectorPo
     setLastKey(currentKey)
     if (open && policy) {
       setDefaultMode(policy.defaultMode ?? "auto")
+      setActivationPolicy(policy.inboundActivationPolicy)
+      setDispatchMode(policy.activeRunDispatchMode)
+      setActivationTtlHours(
+        policy.activationTtlMs ? String(policy.activationTtlMs / 3_600_000) : ""
+      )
       setMuted(policy.muted ?? false)
       setFrom(policy.quietHours?.from ?? "")
       setTo(policy.quietHours?.to ?? "")
@@ -82,6 +90,9 @@ export function ConnectorPolicySheet({ open, policy, onOpenChange }: ConnectorPo
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
       const hasQuiet = from.length > 0 && to.length > 0
+      const ttlHours = Number(activationTtlHours)
+      const activationTtlMs =
+        Number.isFinite(ttlHours) && ttlHours > 0 ? Math.round(ttlHours * 3_600_000) : undefined
       // Dexie's `UpdateSpec<AdapterInstanceRow>` rejects `null` on a
       // non-nullable field, so we either include `quietHours` with the
       // full triple or omit the key entirely. The desktop bridge clears
@@ -90,8 +101,23 @@ export function ConnectorPolicySheet({ open, policy, onOpenChange }: ConnectorPo
       await getDb().adapterInstances.update(
         policy.id,
         hasQuiet
-          ? { defaultMode, muted, quietHours: { from, to, tz }, updatedAt: Date.now() }
-          : { defaultMode, muted, updatedAt: Date.now() }
+          ? {
+              defaultMode,
+              inboundActivationPolicy: activationPolicy,
+              activeRunDispatchMode: dispatchMode,
+              activationTtlMs,
+              muted,
+              quietHours: { from, to, tz },
+              updatedAt: Date.now(),
+            }
+          : {
+              defaultMode,
+              inboundActivationPolicy: activationPolicy,
+              activeRunDispatchMode: dispatchMode,
+              activationTtlMs,
+              muted,
+              updatedAt: Date.now(),
+            }
       )
       if (!hasQuiet) {
         // Drop any existing quiet-hours window locally — see comment above.
@@ -107,6 +133,9 @@ export function ConnectorPolicySheet({ open, policy, onOpenChange }: ConnectorPo
         payload: {
           id: policy.id,
           defaultMode,
+          inboundActivationPolicy: activationPolicy,
+          activeRunDispatchMode: dispatchMode,
+          activationTtlMs,
           muted,
           quietHours: hasQuiet ? { from, to, tz } : null,
         },
@@ -130,20 +159,21 @@ export function ConnectorPolicySheet({ open, policy, onOpenChange }: ConnectorPo
         </SheetHeader>
 
         <div className="flex flex-col gap-4 px-4 pb-4 pt-2">
-          <Label className="flex flex-col gap-1 text-xs font-medium">
-            <span>{t("defaultMode")}</span>
-            <Select value={defaultMode} onValueChange={(v) => setDefaultMode(v as ConnectorMode)}>
-              <SelectTrigger data-testid="policy-default-mode">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">{t("modeAuto")}</SelectItem>
-                <SelectItem value="manual">{t("modeManual")}</SelectItem>
-                <SelectItem value="draft">{t("modeDraft")}</SelectItem>
-              </SelectContent>
-            </Select>
-            <span className="text-xs text-muted-foreground">{t("defaultModeHelp")}</span>
-          </Label>
+          <ConversationBehaviorEditor
+            scope="adapter"
+            value={{
+              mode: defaultMode,
+              inboundActivationPolicy: activationPolicy,
+              activeRunDispatchMode: dispatchMode,
+              activationTtlHours,
+            }}
+            onChange={(next) => {
+              setDefaultMode(next.mode ?? "auto")
+              setActivationPolicy(next.inboundActivationPolicy)
+              setDispatchMode(next.activeRunDispatchMode)
+              setActivationTtlHours(next.activationTtlHours ?? "")
+            }}
+          />
           <Toggle
             label={t("muted")}
             help={t("mutedHelp")}

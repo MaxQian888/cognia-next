@@ -28,7 +28,10 @@ import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import { priceTokensForModel } from "@/lib/usage/pricing"
 import type { SpanUsage } from "@/types/agent-trace/span"
 import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/types/agent/agent-team"
-import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
+import {
+  deriveExternalSessionPermission,
+  type ExternalSessionPermissionSpec,
+} from "@/lib/ai/agent/external/permission-cascade"
 import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
 import { applyTeammateTwinContext } from "./twin-context"
@@ -234,7 +237,10 @@ async function runToolEnabled(
   // Team ceiling: the teammate character already carries its own `allowedTools`
   // (= teammate.config.tools); clamp that resolved surface against the team's
   // ceiling so a teammate can never widen beyond what the team permits.
-  const ceiling = teamPermissionCeiling(teamCtx.team.config)
+  const teamCeiling = teamPermissionCeiling(teamCtx.team.config)
+  const ceiling = teamCtx.parentPermissionCeiling
+    ? deriveExternalSessionPermission(teamCtx.parentPermissionCeiling, teamCeiling)
+    : teamCeiling
   // Bind this ephemeral session to the teammate's identity so host-routed
   // team-collaboration tools (team-builtin-tools.ts) know who is calling.
   const { registerTeamDispatchContext, clearTeamDispatchContext, clearResolvedPermissionCeiling } =

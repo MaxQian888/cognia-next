@@ -21,7 +21,10 @@ import type { ConnectorMode, TriggerPolicy } from "@/types/connectors/policy"
 export interface BindingResolutionInput {
   adapter: Pick<AdapterInstanceRow, "trigger" | "defaultMode" | "defaultCharacterId">
   character: Pick<Character, "platformDefaults"> | null
-  override: Pick<ConversationOverrideRow, "mode" | "characterId" | "trigger"> | null
+  override: Pick<
+    ConversationOverrideRow,
+    "mode" | "characterId" | "characterDisabled" | "trigger"
+  > | null
 }
 
 export interface ResolvedBinding {
@@ -61,7 +64,8 @@ export function resolveBinding(input: BindingResolutionInput): ResolvedBinding {
   let characterId: string | undefined = adapter.defaultCharacterId
   // Layer 2: character — a Character IS the character; no id redirect; skip
   // Layer 3: override
-  if (override?.characterId !== undefined) characterId = override.characterId
+  if (override?.characterDisabled === true) characterId = undefined
+  else if (override?.characterId !== undefined) characterId = override.characterId
 
   // ── trigger ───────────────────────────────────────────────────────────────
   // Layer 1: adapter trigger as base

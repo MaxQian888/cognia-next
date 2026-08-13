@@ -23,6 +23,7 @@ import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-i
 import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { probeWeComCredentials } from "@/lib/connectors/adapters/wecom/probe"
+import { preflightConnectorConfig } from "@/lib/connectors/config-preflight"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
@@ -122,6 +123,17 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
 
     setSaving(true)
     try {
+      if (botId.trim() || secret.trim()) {
+        if (!botId.trim() || !secret.trim()) throw new Error(t("credentialsRequired"))
+        try {
+          await preflightConnectorConfig({
+            probe: () => probeWeComCredentials(botId.trim(), secret.trim()),
+          })
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          throw new Error(t("preflightFailed", { error: detail }))
+        }
+      }
       const wecomSettings = {
         welcomeMessage: welcomeMessage.trim() || undefined,
         ...(quickCommands.length > 0 ? { quickCommands } : {}),

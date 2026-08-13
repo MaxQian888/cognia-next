@@ -96,6 +96,7 @@ describe("OneBotConfigDialog — create new", () => {
       expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "onebot",
+          deliveryReadiness: "unknown",
           settings: expect.objectContaining({ selfBotUin: "123456789" }),
         })
       )
@@ -243,7 +244,7 @@ describe("OneBotConfigDialog — edit existing", () => {
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
         "ob-existing",
-        expect.objectContaining({ displayName: "Updated Bot" })
+        expect.objectContaining({ displayName: "Updated Bot", deliveryReadiness: "unknown" })
       )
       expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
     })
@@ -347,6 +348,7 @@ describe("OneBotConfigDialog — transport mode", () => {
         })
       )
     })
+    expect(mockUpdateAdapterInstance.mock.calls.at(-1)?.[1]).not.toHaveProperty("deliveryReadiness")
   })
 
   it("blocks Save with an error when the forward-ws URL is empty", async () => {

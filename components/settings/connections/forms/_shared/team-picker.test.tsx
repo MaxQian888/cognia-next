@@ -66,7 +66,7 @@ describe("TeamPicker", () => {
     const select = screen.getByTestId("native-select")
     fireEvent.change(select, { target: { value: "t1" } })
     expect(onChange).toHaveBeenLastCalledWith("t1")
-    fireEvent.change(select, { target: { value: "__none__" } })
+    fireEvent.change(select, { target: { value: "__inherit__" } })
     expect(onChange).toHaveBeenLastCalledWith(undefined)
   })
 

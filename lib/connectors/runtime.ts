@@ -30,7 +30,8 @@ import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-
 import type { RouteDecision } from "./mode-router"
 import type { LiveSteerHandler } from "./bus"
 import type { ResolvedBinding } from "./policy-resolve"
-import { matchDispatchRule, resolveEffectiveRouting } from "./dispatch-rules"
+import { matchDispatchRule } from "./dispatch-rules"
+import { resolveImEffectiveConfig } from "./effective-config"
 import type {
   SendContent,
   StoredMessage,
@@ -44,7 +45,7 @@ import { getDb } from "@/lib/db/schema"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { createDraft } from "@/lib/db/connector-drafts"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
-import { getCharacter } from "@/lib/db/characters"
+import { resolveCharacterById } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { endSpan } from "@cognia/agent-trace/emitter"
@@ -66,6 +67,8 @@ import {
 } from "./session-bindings"
 import { startTeamRunFromIM } from "./team-dispatch"
 import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
+import { buildImPermissionCeiling } from "@/lib/connectors/im-permission-ceiling"
+import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
 import { getRunningAdapter } from "./lifecycle"
 import { makeImPermissionResponder } from "./hitl/tool-approval"
@@ -674,13 +677,25 @@ async function resolveInboundSendOptions(params: {
   adapterRow: AdapterInstanceRow
   emitTrace: boolean
   executionIdentity?: { runId: string; attemptId?: string }
+  permissionCeiling?: AgentPermissionCeiling
+  resolvedCharacter?: Awaited<ReturnType<typeof resolveCharacterById>>
 }): Promise<{
   sendOptions: Awaited<ReturnType<typeof resolveSendOptions>>
   appSettings: AppSettings | undefined
   runTitle: string
   workspaceRoot?: string
 }> {
-  const { event, session, resolved, override, adapterRow, emitTrace, executionIdentity } = params
+  const {
+    event,
+    session,
+    resolved,
+    override,
+    adapterRow,
+    emitTrace,
+    executionIdentity,
+    permissionCeiling,
+    resolvedCharacter,
+  } = params
 
   let appSettings: AppSettings | undefined
   try {
@@ -688,10 +703,10 @@ async function resolveInboundSendOptions(params: {
   } catch {
     appSettings = undefined
   }
-  let character
-  if (resolved.characterId) {
+  let character = resolvedCharacter
+  if (!character && resolved.characterId) {
     try {
-      character = await getCharacter(resolved.characterId)
+      character = await resolveCharacterById(resolved.characterId)
     } catch {
       character = undefined
     }
@@ -771,6 +786,7 @@ async function resolveInboundSendOptions(params: {
     emitTrace,
     traceSurface: "connector",
     executionIdentity,
+    permissionCeiling,
   })
 
   const projects = await getAllProjects().catch(() => [])
@@ -862,9 +878,57 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // routing. `teamDisabled` (the `/team off` sentinel) suppresses the
         // rule-sourced team AND the bot-level default.
         const ruleHit = matchDispatchRule(adapterRow.dispatchRules, event)
-        const routing = resolveEffectiveRouting(adapterRow, override, ruleHit)
+        const effectiveConfig = resolveImEffectiveConfig({
+          adapter: adapterRow,
+          override,
+          rule: ruleHit,
+          system: { mode: resolved.mode, characterId: resolved.characterId },
+        })
+        const routing = effectiveConfig.routing
         const effectiveTeamId = routing.teamId
         const effectiveWorkflowId = routing.workflowId
+        const effectiveCharacterId = override?.characterDisabled
+          ? undefined
+          : (routing.characterId ?? resolved.characterId)
+        const effectiveCharacter = effectiveCharacterId
+          ? await resolveCharacterById(effectiveCharacterId).catch(() => undefined)
+          : undefined
+
+        // Explicit references are fail-closed. A deleted Character must never
+        // silently turn into the system persona for Team, Workflow, or Direct.
+        if (
+          effectiveCharacterId &&
+          effectiveConfig.character.source !== "system-default" &&
+          !effectiveCharacter
+        ) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "adapter.error",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            reason: "character_reference_missing",
+            fields: {
+              characterId: effectiveCharacterId,
+              characterSource: routing.characterSource,
+              sourceMessageId: storedMsg.id,
+            },
+          })
+          notifyImFailure(
+            event.conversationKey,
+            IM_FAILURE_NOTICE.dispatchFailed,
+            `dispatch-error:${event.conversationKey}`
+          )
+          break
+        }
+
+        const target = effectiveTeamId ? "team" : effectiveWorkflowId ? "workflow" : "direct"
+        const permissionCeiling = await buildImPermissionCeiling({
+          adapter: adapterRow,
+          override,
+          character: effectiveCharacter,
+          platform: event.platform,
+          target,
+        })
 
         // One-shot `dispatch.rule_matched` audit writer — appended only when
         // the matched rule's action actually decided the routing (i.e. was
@@ -928,14 +992,12 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             sessionId: session.id,
+            ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
+            permissionCeiling,
           })
           if (res.started && res.runId) {
             await routeContext.bindExecutionRun(res.runId)
           }
-          const staleInstanceDefault =
-            !res.started &&
-            res.reason === "team_not_found" &&
-            routing.teamSource === "instance-default"
           await appendAudit({
             adapterId: event.adapterId,
             kind: res.started ? "team.dispatched" : "adapter.error",
@@ -944,9 +1006,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             ...(res.started
               ? {}
               : {
-                  reason: staleInstanceDefault
-                    ? "instance_default_team_missing"
-                    : (res.reason ?? "team_dispatch_failed"),
+                  reason: res.reason ?? "team_dispatch_failed",
                 }),
             fields: {
               teamId: effectiveTeamId,
@@ -954,23 +1014,14 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               sourceMessageId: storedMsg.id,
             },
           })
-          // Surface the failure to the conversation (parity with the
-          // capture-failure branch below) — an audit row alone leaves the IM
-          // user with silence. Skipped for the stale-instance-default case,
-          // which falls through to a live single-character reply instead.
-          if (!res.started && !staleInstanceDefault) {
+          if (!res.started) {
             notifyImFailure(
               event.conversationKey,
               IM_FAILURE_NOTICE.dispatchFailed,
               `dispatch-error:${event.conversationKey}`
             )
           }
-          // A deleted team behind the BOT default must not brick every
-          // message on the instance — fall through to the single-character
-          // ai-run below. An explicitly `/team`-bound (or rule-bound)
-          // conversation keeps the audit+stop behaviour (the operator asked
-          // for that team).
-          if (!staleInstanceDefault) break
+          break
         }
 
         // ── Visual Workflow dispatch (workflow⇄IM parity) ──
@@ -987,7 +1038,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           }
           const res = await startWorkflowFromIM({
             workflowId: effectiveWorkflowId,
-            runParams: { message: event.plainText },
+            runParams: {
+              message: event.plainText,
+              ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
+            },
             triggeredFrom: {
               source: "im",
               adapterId: event.adapterId,
@@ -995,6 +1049,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               sourceMessageId: event.messageId,
               deliveryTarget: deliveryTargetFromEvent(event),
               ...(session.id ? { sessionId: session.id } : {}),
+              ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
               initiator: {
                 platformIdentityId: event.sender.id,
                 remoteUserId: event.sender.remoteUserId,
@@ -1002,6 +1057,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
                 ...(readResolvedPrincipal(event.channelData) ?? {}),
               },
             },
+            permissionCeiling,
           })
           if (res.ok) {
             await routeContext.bindExecutionRun(res.runId)
@@ -1056,10 +1112,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // `resolved.characterId` by `resolveBinding` and wins). Session
         // creation above deliberately kept `resolved.characterId` — the
         // rule retargets this turn's persona, not the session binding.
-        const effectiveResolved: ResolvedBinding =
-          routing.characterSource === "rule" && routing.characterId
-            ? { ...resolved, characterId: routing.characterId }
-            : resolved
+        const effectiveResolved: ResolvedBinding = {
+          ...resolved,
+          characterId: effectiveCharacterId,
+        }
         if (routing.characterSource === "rule" && routing.characterId) {
           await auditRuleDecision({ characterId: routing.characterId })
         }
@@ -1095,6 +1151,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             adapterRow,
             emitTrace: true,
             executionIdentity,
+            permissionCeiling,
           })
 
         let recoveryExecution: AgentExecutionSendSpec

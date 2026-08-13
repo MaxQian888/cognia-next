@@ -67,6 +67,7 @@ import {
   type RunTeamLifecycleDeps,
 } from "./agent-team-runtime"
 import { approve, reject, __resetForTesting as resetApprovalBus } from "@/lib/runtime/approval-bus"
+import { getTeamRunContext } from "./team/team-run-context"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
 const lead: AgentTeammate = {
@@ -269,6 +270,33 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     expect(row?.triggerBinding).toMatchObject({
       adapterId: "lark:a1",
       conversationKey: "lark:a1:oc_team",
+    })
+  })
+
+  it("registers the parent IM permission ceiling for teammate dispatch", async () => {
+    const observed: unknown[] = []
+    ;(executeAgent as jest.Mock).mockImplementation(async () => {
+      observed.push(getTeamRunContext("run_team_permission_ceiling")?.parentPermissionCeiling)
+      return {
+        text: "result",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      }
+    })
+    const deps = {
+      ...buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]),
+      runId: "run_team_permission_ceiling",
+      parentPermissionCeiling: {
+        allowedTools: ["Read"],
+        disallowedTools: ["Bash"],
+      },
+    }
+
+    await expect(runTeamLifecycle("team-1", deps)).resolves.toMatchObject({
+      status: "completed",
+    })
+    expect(observed).toContainEqual({
+      allowedTools: ["Read"],
+      disallowedTools: ["Bash"],
     })
   })
 

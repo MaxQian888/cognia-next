@@ -10180,6 +10180,7 @@
     },
     "cannedResponses": {
       "empty": "No canned responses match.",
+      "manage": "Manage canned responses",
       "searchPlaceholder": "Search canned responses…",
       "triggerAria": "Insert a canned response"
     },
@@ -10331,11 +10332,6 @@
         "advancedJsonHelp": "These fields populate the per-conversation `trigger` partial that overrides the adapter trigger policy.",
         "allowComputerUse": "Allow Computer Use tools",
         "allowComputerUseWarning": "When on, replies in this channel may fire screenshot, mouse, and keyboard actions on the host. Off by default for IM channels.",
-        "allowGoalDriving": "Allow self-driving /goal on this conversation",
-        "allowGoalDrivingPlatform": "Runs only where the connector runtime runs — the desktop app (all channels) or `cli serve` (webhook channels). The mobile app can't drive IM goals.",
-        "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
-        "allowScheduleTools": "Allow this conversation's agent to manage schedules",
-        "allowScheduleToolsWarning": "Exposes create, list, and cancel schedule tools only to this conversation. The agent can mutate only tasks it created. Off by default.",
         "allowedSkills": {
           "add": "Add",
           "all": "Allow all",
@@ -10346,6 +10342,11 @@
           "remove": "Remove {id}",
           "whitelist": "Whitelist"
         },
+        "allowGoalDriving": "Allow self-driving /goal on this conversation",
+        "allowGoalDrivingPlatform": "Runs only where the connector runtime runs — the desktop app (all channels) or `cli serve` (webhook channels). The mobile app can't drive IM goals.",
+        "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
+        "allowScheduleTools": "Allow this conversation's agent to manage schedules",
+        "allowScheduleToolsWarning": "Exposes create, list, and cancel schedule tools only to this conversation. The agent can mutate only tasks it created. Off by default.",
         "appendActivity": "Progress lines (no-edit adapters)",
         "appendActivityHint": "On adapters that can't edit a message in place, post one compact progress line per step during a turn instead of staying silent. On by default; turn off for noisy channels.",
         "applyToAdapter": "Apply to all on this adapter",
@@ -10361,19 +10362,38 @@
         "liveActivity": "Live activity card",
         "liveActivityHint": "Show a live progress card in chat while the assistant is working (tool count, elapsed time, current action, file edits). On by default; turn off for noisy channels.",
         "mode": "Mode",
+        "modelOverride": "Model override",
+        "modelOverridePlaceholder": "claude-opus-4-7",
         "modeOptions": {
           "auto": "Auto-reply",
           "draft": "Draft only",
           "manual": "Manual review",
           "unset": "Use adapter default"
         },
-        "modelOverride": "Model override",
-        "modelOverridePlaceholder": "claude-opus-4-7",
         "muted": "Muted (drops outbound)",
         "mutedHint": "Defer every outbound delivery on this conversation (re-checked every minute) while the bot keeps replying in its other conversations. Same semantics as the adapter-level mute, scoped to one chat.",
         "pinned": "Pinned",
         "proactivePush": "Proactive IM notifications",
         "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
+        "promoteConfirm": "Promote these explicit conversation values to adapter defaults?\n\n{changes}",
+        "promotePermissionConfirm": "This promotion changes the adapter Built-in Skill ceiling or HITL default and can affect other conversations. Continue?",
+        "promoteToAdapter": "Promote to Adapter default",
+        "promoteToAdapterTitle": "Promote supported explicit values without rewriting conversation overrides",
+        "promotionFields": {
+          "activationPolicy": "Activation policy",
+          "activationTtl": "Activation TTL",
+          "builtInSkillCeiling": "Built-in Skill ceiling",
+          "character": "Character",
+          "dispatchMode": "Active-run dispatch mode",
+          "mode": "Response mode",
+          "model": "Model",
+          "muted": "Muted",
+          "provider": "Provider",
+          "quietHours": "Quiet hours",
+          "requireHitlForWrites": "Write-skill HITL",
+          "team": "Agent Team",
+          "workflow": "Workflow"
+        },
         "providerOverride": "Provider override",
         "providerOverridePlaceholder": "anthropic",
         "quietHours": {
@@ -10395,6 +10415,15 @@
         "slaResponseMinutesHint": "When set, this conversation shows a countdown badge and turns Overdue if no reply is sent within this many minutes (quiet hours excluded). Leave empty for no SLA.",
         "slaResponseMinutesPlaceholder": "e.g. 30",
         "suppressGroups": "Suppress in group chats",
+        "target": {
+          "direct": "Direct Agent",
+          "inherit": "Inherit",
+          "label": "Execution target",
+          "none": "None",
+          "specificCharacter": "Specific Character",
+          "team": "Agent Team",
+          "workflow": "Workflow"
+        },
         "teamBinding": "Agent Team (id)",
         "teamBindingHelp": "When set, inbound messages dispatch to this Agent Team instead of a single character; progress streams back to the conversation.",
         "teamBindingPlaceholder": "(none — replies use the character)",
@@ -10463,6 +10492,7 @@
     "labels": {
       "addAria": "Add or remove labels",
       "empty": "No labels yet — create them in Settings.",
+      "manage": "Manage labels",
       "pickerTitle": "Labels",
       "removeAria": "Remove label {name}"
     },
@@ -23522,7 +23552,15 @@
           "fieldPublicUrl": "Public URL",
           "fieldTransport": "Transport",
           "fieldType": "Type",
-          "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log."
+          "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log.",
+          "sections": {
+            "behavior": "Behavior",
+            "connection": "Connection",
+            "delivery": "Delivery",
+            "permissions": "Permissions",
+            "platform": "Platform",
+            "responder": "Responder"
+          }
         },
         "detailTabs": {
           "audit": "Audit",
@@ -23672,25 +23710,38 @@
         }
       },
       "aiBindingDefaults": {
+        "cancel": "Cancel",
         "characterDefault": "Default",
         "characterHelp": "Persona this bot answers as unless a conversation binds its own (/character).",
         "characterLabel": "Default persona",
+        "characterTeamHelp": "Only the persona and system prompt are injected into the team lead entry context. Team members, models, and tools stay unchanged.",
+        "characterWorkflowHelp": "The character id is passed in the existing workflow trigger payload for nodes to consume when needed.",
         "modelDefault": "Default",
         "modelHelp": "Provider + model this bot uses. Beats the persona's own model; /model in a chat still wins.",
         "modelLabel": "Default provider · model",
+        "modelManagedByTarget": "Provider and model are managed by the selected Agent Team or Workflow.",
         "notConfigured": "{id} (not configured)",
         "precedenceNote": "Per-conversation overrides (/model, /team, inbox switchers) always beat these bot-level defaults.",
-        "reasoningDefault": "Default",
-        "reasoningHelp": "Thinking depth for this bot's replies. Dropped automatically on models without reasoning.",
-        "reasoningLabel": "Default reasoning",
         "reasoning_high": "High",
         "reasoning_low": "Low",
         "reasoning_max": "Max",
         "reasoning_medium": "Medium",
         "reasoning_xhigh": "Extra high",
+        "reasoningDefault": "Default",
+        "reasoningHelp": "Thinking depth for this bot's replies. Dropped automatically on models without reasoning.",
+        "reasoningLabel": "Default reasoning",
+        "save": "Save",
+        "targetDirect": "Direct Agent",
+        "targetLabel": "Execution target",
+        "targetTeam": "Agent Team",
+        "targetWorkflow": "Workflow",
         "teamHelp": "Inbound messages dispatch to this Agent Team unless a conversation binds its own (/team) or turns teams off (/team off).",
         "teamLabel": "Default Agent Team",
-        "title": "AI binding defaults"
+        "title": "AI binding defaults",
+        "workflowHelp": "Only workflows with an active production deployment can receive IM traffic.",
+        "workflowLabel": "Default Workflow",
+        "workflowNone": "None",
+        "workflowProduction": "Production"
       },
       "audit": {
         "collapseAria": "Collapse audit entry",
@@ -23713,6 +23764,7 @@
             "edit_fallback": "Activity edit fallback"
           },
           "adapter": {
+            "config_changed": "Adapter configuration changed",
             "credentials_rotated": "Credentials rotated",
             "error": "Adapter error",
             "heartbeat": "Heartbeat",
@@ -23805,7 +23857,8 @@
             "replayed": "Replayed"
           },
           "override": {
-            "computer_use_changed": "Computer Use toggled"
+            "computer_use_changed": "Computer Use toggled",
+            "config_changed": "Conversation override changed"
           },
           "plugin": {
             "inbound_blocked": "Plugin blocked inbound",
@@ -23865,6 +23918,32 @@
           "all": "All"
         },
         "timeRangeLabel": "Time range"
+      },
+      "behaviorEditor": {
+        "activationTtl": "Activation TTL (hours)",
+        "activationTtlPlaceholder": "e.g. 24",
+        "activation_always": "Always active",
+        "activation_direct_only": "Direct messages only",
+        "activation_mention_activates": "Mention activates the conversation",
+        "activation_mention_each": "Require a mention for every message",
+        "activeRun": "When a run is active",
+        "cancel": "Cancel",
+        "dispatchQueue": "Queue the message",
+        "dispatchSteer": "Steer the active run",
+        "effectiveSource": "Effective source: {source}",
+        "groupActivation": "Group activation",
+        "inherit": "Inherit",
+        "modeAuto": "Auto-reply",
+        "modeDraft": "Draft only",
+        "modeManual": "Manual review",
+        "responseMode": "Response mode",
+        "save": "Save",
+        "source_adapter-default": "Adapter default",
+        "source_conversation-override": "Conversation override",
+        "source_dispatch-rule": "Dispatch rule",
+        "source_system-default": "System default",
+        "source_target-managed": "Managed by target",
+        "title": "Conversation behavior"
       },
       "cannedResponses": {
         "addButton": "Add canned response",
@@ -24119,6 +24198,11 @@
         "summary": "Per-adapter conversation summary. Use the Inbox for the full view.",
         "totalLabel": "Total",
         "unreadLabel": "Unread"
+      },
+      "inboxAssets": {
+        "cannedResponses": "Canned responses",
+        "description": "Manage the reusable labels and replies used from the Inbox.",
+        "labels": "Labels"
       },
       "labels": {
         "addButton": "Add label",
@@ -24570,6 +24654,7 @@
         "disabledBadge": "disabled",
         "noAdapters": "No adapters configured yet.",
         "noRecentActivity": "No recent activity.",
+        "openInbox": "Open Inbox",
         "recentActivityHeading": "Recent Activity",
         "runningSummary": "{running} of {total} enabled adapters running",
         "serverHeading": "Inbound Server (webhooks)",
@@ -24587,6 +24672,25 @@
         "statusRunning": "Running — {addr}",
         "statusStopped": "Stopped",
         "statusUnknown": "Unknown"
+      },
+      "permissionsEditor": {
+        "builtInSkills": "Built-in Skills ceiling",
+        "cancel": "Cancel",
+        "confirmImpact": "Save this permission ceiling? It can block skills and host capabilities across every conversation on this adapter.",
+        "conversationGrantRequired": "The adapter can only cap this capability; each conversation must grant it explicitly.",
+        "hitl": "Require HITL for write skills",
+        "hitlHelp": "Conversation settings may override this default. Destructive skills always require approval.",
+        "host": {
+          "computer_use": "Computer Use",
+          "goal_driving": "Goal Driving",
+          "ocr": "OCR",
+          "schedule_tools": "Schedule Tools"
+        },
+        "hostCapabilities": "Host Capabilities",
+        "save": "Save",
+        "skillHelp": "Comma-separated skill ids or wildcards. Leave blank to impose no additional adapter restriction; an explicit empty conversation allowlist still blocks all skills.",
+        "skillPlaceholder": "lark.calendar.*, lark.task.list",
+        "title": "Permissions"
       },
       "qqOfficial": {
         "adapterCreated": "QQ Official Bot added",
@@ -24767,6 +24871,7 @@
       },
       "tabs": {
         "adapters": "Adapters",
+        "assets": "Inbox assets",
         "audit": "Audit",
         "canned": "Canned",
         "capability": "Capabilities",
@@ -24774,6 +24879,7 @@
         "inbox": "Inbox",
         "labels": "Labels",
         "outbound": "Outbound",
+        "overrides": "Overrides",
         "overview": "Overview",
         "tunnel": "Tunnel"
       },
@@ -24976,11 +25082,12 @@
         "botIdLabel": "Bot ID",
         "botIdPlaceholder": "e.g. wb1234567890abcdef",
         "create": "Create",
-        "credentialUnchangedPlaceholder": "Leave blank to keep current",
         "credentialsRequired": "Bot ID and Secret are required.",
+        "credentialUnchangedPlaceholder": "Leave blank to keep current",
         "displayNameLabel": "Display name",
         "displayNamePlaceholder": "My WeCom Bot",
         "displayNameRequired": "Display name is required.",
+        "preflightFailed": "Could not verify the new credentials: {error}",
         "proactiveNote": "Note: WeCom only delivers proactive pushes (scheduled / workflow) to a chat after the user has messaged the bot at least once.",
         "quickCommands": {
           "help": "WeCom 智能机器人 has no persistent menu surface. We approximate one by pushing a template_card on enter_chat — each row below becomes a button. Pick a stable trigger key (you'll never see it as a user; it's only how the click is wired)."
@@ -24997,8 +25104,8 @@
         "sectionQuickCommands": "Quick commands",
         "sectionQuickCommandsDesc": "Buttons pushed on enter_chat as a template_card menu — each maps a trigger key to a prompt or slash command.",
         "testButtonLabel": "Test credentials",
-        "testCredentialScopeHelp": "Testing mints a short-lived access token from WeCom to verify the corp credentials.",
         "testCredentialsAria": "Test WeCom credentials",
+        "testCredentialScopeHelp": "Testing mints a short-lived access token from WeCom to verify the corp credentials.",
         "testFailedLabel": "Credential test failed",
         "testFailedToast": "WeCom credential test failed: {error}",
         "testSucceededLabel": "Credentials valid",

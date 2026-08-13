@@ -19,12 +19,14 @@ import type { MessageSegment } from "@/types/connectors/segment"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import type { ResolvedBinding } from "./../policy-resolve"
-import { resolveEffectiveTeamBinding } from "./../policy-resolve"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { appendAudit } from "@/lib/connectors/audit"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
-import { patchConversationOverride } from "@/lib/db/conversation-overrides"
+import {
+  patchConversationOverride,
+  updateConversationConfigSection,
+} from "@/lib/db/conversation-overrides"
 import {
   listSessionsByConversationKey,
   findActiveSessionForConversation,
@@ -33,6 +35,9 @@ import {
 import { getCharacter, listCharacters } from "@/lib/db/characters"
 import { resolveTeamByNameOrId } from "@/lib/connectors/team-dispatch"
 import { resolveWorkflowByNameOrId } from "@/lib/workflow/library/lookup"
+import { resolveWorkflowDeployment } from "@/lib/db/workflow-deployments"
+import { matchDispatchRule } from "@/lib/connectors/dispatch-rules"
+import { resolveImEffectiveConfig } from "@/lib/connectors/effective-config"
 import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
 import { clearSessionBypass } from "@/lib/connectors/hitl/approval-registry"
 import {
@@ -66,6 +71,7 @@ export interface ControlCommandDeps {
   listAllCharacters?: typeof listCharacters
   resolveTeam?: typeof resolveTeamByNameOrId
   resolveWorkflow?: typeof resolveWorkflowByNameOrId
+  isWorkflowExecutable?: (workflowId: string) => Promise<boolean>
   /**
    * Validates a provider id for `/model <provider/model>`. Defaults to the
    * built-in catalog (60+ ids incl. all local/self-hosted); callers may inject
@@ -184,6 +190,9 @@ export async function maybeHandleControlCommand(
   const listAllCharacters = deps.listAllCharacters ?? listCharacters
   const resolveTeam = deps.resolveTeam ?? resolveTeamByNameOrId
   const resolveWorkflow = deps.resolveWorkflow ?? resolveWorkflowByNameOrId
+  const isWorkflowExecutable =
+    deps.isWorkflowExecutable ??
+    (async (workflowId: string) => Boolean(await resolveWorkflowDeployment(workflowId)))
 
   const reply = async (
     content: string | MessageSegment[],
@@ -239,7 +248,17 @@ export async function maybeHandleControlCommand(
     patch: Partial<Omit<ConversationOverrideRow, "id" | "conversationKey" | "createdAt">>
   ): Promise<void> => {
     const s = await ensureSession()
-    await patchOverride(event.conversationKey, patch, s.id)
+    if (deps.patchOverride) {
+      await patchOverride(event.conversationKey, patch, s.id)
+      return
+    }
+    await updateConversationConfigSection({
+      conversationKey: event.conversationKey,
+      sessionId: s.id,
+      section: "responder",
+      patch,
+      source: `command.${name}`,
+    })
   }
 
   switch (name) {
@@ -254,38 +273,89 @@ export async function maybeHandleControlCommand(
       return true
 
     case "status": {
-      const charId = override?.characterId ?? resolved.characterId
+      const ruleHit = matchDispatchRule(adapterRow.dispatchRules, event)
+      const effectiveConfig = resolveImEffectiveConfig({
+        adapter: adapterRow,
+        override: override ?? null,
+        rule: ruleHit,
+        system: { mode: resolved.mode, characterId: resolved.characterId },
+      })
+      const routing = effectiveConfig.routing
+      const charId = override?.characterDisabled
+        ? undefined
+        : (routing.characterId ?? resolved.characterId)
       const character = charId ? await getCharacterById(charId).catch(() => undefined) : undefined
       // Effective values: per-conversation override first, then the BOT-level
       // instance default (annotated so the reader can tell them apart), then
       // the literal "default"/"none" fallback. Same resolver the runtime
       // dispatch uses, so `/status` can't drift from actual routing.
-      const teamBinding = resolveEffectiveTeamBinding(adapterRow, override ?? null)
+      const targetManaged = routing.teamId
+        ? "由 Agent Team 管理 / managed by Agent Team"
+        : routing.workflowId
+          ? "由 Workflow 管理 / managed by Workflow"
+          : undefined
       const botDefault = (v: string | undefined): string | undefined =>
         v?.trim() ? R.withBotDefault(v.trim()) : undefined
+      const modelBinding = (value: string | undefined, source: string): string => {
+        if (!value?.trim()) return "默认 / default"
+        if (source === "adapter-default") return R.withBotDefault(value.trim())
+        return R.withSource(value.trim(), source)
+      }
+      const routeSource = routing.teamId
+        ? routing.teamSource
+        : routing.workflowId
+          ? routing.workflowSource
+          : routing.characterId
+            ? routing.characterSource
+            : routing.respondViaAdapterId
+              ? routing.respondViaSource
+              : effectiveConfig.target.source
+      const enabledRules = (adapterRow.dispatchRules ?? [])
+        .filter((rule) => rule.enabled !== false)
+        .map((rule, index) => R.renderDispatchRuleSummary(rule, index + 1))
       await reply(
         R.renderStatus({
           mode: override?.mode ?? resolved.mode,
-          model: override?.modelOverride ?? botDefault(adapterRow.defaultModel) ?? "默认 / default",
+          model:
+            targetManaged ??
+            modelBinding(effectiveConfig.model.effective, effectiveConfig.model.source),
           provider:
-            override?.providerOverride ??
-            botDefault(adapterRow.defaultProvider) ??
-            "默认 / default",
-          character: character?.name ?? "默认 / default",
+            targetManaged ??
+            modelBinding(effectiveConfig.provider.effective, effectiveConfig.provider.source),
+          character: override?.characterDisabled
+            ? "已关闭 / none"
+            : character?.name
+              ? R.withSource(character.name, routing.characterSource)
+              : "默认 / default",
           reasoning:
             override?.reasoningOverride ??
             botDefault(adapterRow.defaultReasoning) ??
             "默认 / default",
           approvalMode: override?.approvalMode ?? "prompt",
-          team:
-            teamBinding.source === "override"
-              ? (teamBinding.teamId as string)
-              : teamBinding.source === "instance-default"
-                ? R.withBotDefault(teamBinding.teamId as string)
-                : override?.teamDisabled
-                  ? "已关闭 / off"
-                  : "无 / none",
-          workflow: override?.workflowId ?? "无 / none",
+          team: routing.teamId
+            ? routing.teamSource === "instance-default"
+              ? R.withBotDefault(routing.teamId)
+              : routing.teamSource === "rule"
+                ? R.withSource(routing.teamId, routing.teamSource)
+                : routing.teamId
+            : override?.teamDisabled
+              ? "已关闭 / off"
+              : "无 / none",
+          workflow: routing.workflowId
+            ? R.withSource(routing.workflowId, routing.workflowSource)
+            : override?.workflowDisabled
+              ? "已关闭 / off"
+              : "无 / none",
+          routeSource: R.sourceLabel(routeSource),
+          matchedRule: ruleHit
+            ? ruleHit.rule.name?.trim()
+              ? `${ruleHit.rule.name.trim()} (${ruleHit.rule.id})`
+              : ruleHit.rule.id
+            : "无 / none",
+          responseAdapter: routing.respondViaAdapterId
+            ? R.withSource(routing.respondViaAdapterId, routing.respondViaSource)
+            : `${event.adapterId}（接收 Adapter / receiving adapter）`,
+          enabledRules,
           sessionTitle: active?.title ?? "无 / none",
           sessionIdPrefix: active ? idPrefix(active.id) : "—",
         }),
@@ -420,6 +490,17 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("character"), "applied")
         return true
       }
+      const normalized = arg.toLowerCase()
+      if (normalized === "off" || normalized === "none") {
+        await persist({ characterId: undefined, characterDisabled: true })
+        await reply(R.confirmCharacterDisabled(), "applied")
+        return true
+      }
+      if (normalized === "inherit") {
+        await persist({ characterId: undefined, characterDisabled: undefined })
+        await reply(R.confirmCharacterInherited(), "applied")
+        return true
+      }
       const byId = await getCharacterById(arg).catch(() => undefined)
       let match = byId
       if (!match) {
@@ -430,7 +511,7 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("character"), "applied")
         return true
       }
-      await persist({ characterId: match.id })
+      await persist({ characterId: match.id, characterDisabled: undefined })
       await reply(R.confirmCharacter(match.name), "applied")
       return true
     }
@@ -452,14 +533,19 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("team"), "applied")
         return true
       }
-      await persist({ teamId: team.id, teamDisabled: undefined })
+      await persist({
+        teamId: team.id,
+        teamDisabled: undefined,
+        workflowId: undefined,
+        workflowDisabled: true,
+      })
       await reply(R.confirmTeam(team.name), "applied")
       return true
     }
 
     case "workflow": {
       if (!arg || arg.toLowerCase() === "off") {
-        await persist({ workflowId: undefined })
+        await persist({ workflowId: undefined, workflowDisabled: true })
         await reply(R.confirmWorkflowCleared(), "applied")
         return true
       }
@@ -472,7 +558,19 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("workflow"), "applied")
         return true
       }
-      await persist({ workflowId: res.workflowId })
+      if (!(await isWorkflowExecutable(res.workflowId))) {
+        await reply(R.denyWorkflowNotDeployed(res.name), "denied", {
+          reason: "workflow_not_deployed",
+          workflowId: res.workflowId,
+        })
+        return true
+      }
+      await persist({
+        workflowId: res.workflowId,
+        workflowDisabled: undefined,
+        teamId: undefined,
+        teamDisabled: true,
+      })
       await reply(R.confirmWorkflow(res.name), "applied")
       return true
     }

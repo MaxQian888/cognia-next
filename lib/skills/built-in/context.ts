@@ -51,6 +51,12 @@ export async function resolveBuiltInSkillContext(sessionId: string): Promise<Bui
       // block the invocation — the dispatcher treats undefined as
       // "no per-chat config" (default gates still apply).
     }
+    try {
+      const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+      ctx.imAdapterRow = await getAdapterInstance(binding.adapterId)
+    } catch {
+      // The dispatcher keeps the legacy no-ceiling + secure HITL defaults.
+    }
     return ctx
   } catch {
     // Session lookup failed (torn-down DB in tests, etc.) — fall back to the

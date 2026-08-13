@@ -3437,6 +3437,21 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor", "working_set"])
   })
 
+  it("adapter host ceiling can still deny an opted-in Computer Use session", async () => {
+    mReadOverride.mockResolvedValueOnce({ allowComputerUse: true })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
+      } as ChatSession),
+      character: makeChar({ enableComputerUse: true }),
+      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as AdapterInstanceRow,
+    })
+    const names = (opts.pluginTools ?? []).map((tool) => tool.name)
+    expect(names).not.toContain("computer_use")
+    expect(names).not.toContain("bash")
+  })
+
   it("withholds scheduler agent tools from IM sessions by default", async () => {
     mReadOverride.mockResolvedValueOnce(undefined)
     const opts = await resolveSendOptions({
@@ -3465,6 +3480,40 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
         "mcp__cognia__cancel_scheduled_task",
       ])
     )
+  })
+
+  it("adapter host ceiling denies scheduler tools even after conversation opt-in", async () => {
+    mReadOverride.mockResolvedValueOnce({ allowScheduleTools: true })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
+      } as ChatSession),
+      character: makeChar(),
+      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as AdapterInstanceRow,
+    })
+    expect(opts.allowedTools ?? []).not.toContain("mcp__cognia__schedule_task")
+  })
+
+  it("adapter host ceiling can deny the otherwise low-risk OCR default", async () => {
+    mBuildManifest.mockReturnValueOnce([
+      {
+        name: "ocr_extract",
+        description: "extract text",
+        jsonSchema: {},
+        pluginId: "cognia-ocr",
+      },
+      otherTool,
+    ])
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
+      } as ChatSession),
+      character: makeChar(),
+      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as AdapterInstanceRow,
+    })
+    expect((opts.pluginTools ?? []).map((tool) => tool.name)).not.toContain("ocr_extract")
   })
 
   it("disablePluginTools wipes plugin tools but the first-class web tools survive", async () => {

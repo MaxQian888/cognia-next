@@ -125,6 +125,7 @@ function harness(
         }
       return { ok: false, reason: "not-found" }
     }) as unknown as ControlCommandDeps["resolveWorkflow"],
+    isWorkflowExecutable: async () => true,
     getAgentTopicStatus: async () =>
       opts.agentStatus ?? {
         policy: "mention_activates",
@@ -518,6 +519,31 @@ describe("maybeHandleControlCommand", () => {
     expect(h.enqueued[0].text).toMatch(/Usage/)
   })
 
+  it("supports Character None and Inherit without changing Adapter defaults", async () => {
+    const none = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/character none" }),
+      makeAdapter({ defaultCharacterId: "char_known" }),
+      undefined,
+      RESOLVED,
+      none.deps
+    )
+    expect(none.patches[0].patch).toEqual({ characterId: undefined, characterDisabled: true })
+
+    const inherit = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/character inherit" }),
+      makeAdapter({ defaultCharacterId: "char_known" }),
+      { characterDisabled: true } as ConversationOverrideRow,
+      RESOLVED,
+      inherit.deps
+    )
+    expect(inherit.patches[0].patch).toEqual({
+      characterId: undefined,
+      characterDisabled: undefined,
+    })
+  })
+
   it("/new creates a session and points activeSessionId at it", async () => {
     const h = harness()
     await maybeHandleControlCommand(
@@ -610,10 +636,23 @@ describe("maybeHandleControlCommand", () => {
       h.deps
     )
     const text = h.enqueued[0].text
-    expect(text).toMatch(/claude-fable-5（bot 默认 \/ bot default）/)
-    expect(text).toMatch(/provider: anthropic（bot 默认 \/ bot default）/)
+    expect(text).toMatch(/model: 由 Agent Team 管理 \/ managed by Agent Team/)
+    expect(text).toMatch(/provider: 由 Agent Team 管理 \/ managed by Agent Team/)
     expect(text).toMatch(/reasoning: high（bot 默认 \/ bot default）/)
     expect(text).toMatch(/team: team_bot（bot 默认 \/ bot default）/)
+  })
+
+  it("/status annotates direct model bindings with their effective source", async () => {
+    const h = harness({ active: session("s1", "Main") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/status" }),
+      makeAdapter({ defaultModel: "bot-model", defaultProvider: "openai" }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.enqueued[0].text).toMatch(/model: bot-model（bot 默认 \/ bot default）/)
+    expect(h.enqueued[0].text).toMatch(/provider: openai（bot 默认 \/ bot default）/)
   })
 
   it("/status shows team off (not the bot default) when teamDisabled is set", async () => {
@@ -638,9 +677,78 @@ describe("maybeHandleControlCommand", () => {
       h.deps
     )
     const text = h.enqueued[0].text
-    expect(text).toMatch(/model: gpt-5\n/)
+    expect(text).toMatch(/model: 由 Agent Team 管理 \/ managed by Agent Team/)
     expect(text).toMatch(/team: team_chat\n/)
+    expect(text).not.toMatch(/bot-model|gpt-5/)
+  })
+
+  it("/status reports the rule matched by the current event and enabled rule priority", async () => {
+    const h = harness({ active: session("s1", "Main") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/status" }),
+      makeAdapter({
+        defaultModel: "bot-model",
+        dispatchRules: [
+          {
+            id: "rule-status",
+            name: "Status route",
+            match: { keywords: ["/status"] },
+            action: { teamId: "team_status", respondViaAdapterId: "tg-reply" },
+          },
+          {
+            id: "rule-future",
+            name: "Future route",
+            match: { keywords: ["urgent"] },
+            action: { workflowId: "wf_future" },
+          },
+          {
+            id: "rule-disabled",
+            enabled: false,
+            name: "Disabled route",
+            match: {},
+            action: { characterId: "char_known" },
+          },
+        ],
+      }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+
+    const text = h.enqueued[0].text
+    expect(text).toMatch(/matched rule: Status route \(rule-status\)/)
+    expect(text).toMatch(/source: 路由规则 \/ dispatch rule/)
+    expect(text).toMatch(/team: team_status（路由规则 \/ dispatch rule）/)
+    expect(text).toMatch(/response adapter: tg-reply（路由规则 \/ dispatch rule）/)
+    expect(text).toMatch(/model: 由 Agent Team 管理 \/ managed by Agent Team/)
     expect(text).not.toMatch(/bot-model/)
+    expect(text.indexOf("Status route")).toBeLessThan(text.indexOf("Future route"))
+    expect(text).not.toMatch(/Disabled route/)
+    expect(text).toMatch(/Future messages are matched again/)
+  })
+
+  it("/status says no rule matched when enabled rules do not match /status", async () => {
+    const h = harness({ active: session("s1", "Main") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/status" }),
+      makeAdapter({
+        dispatchRules: [
+          {
+            id: "rule-urgent",
+            name: "Urgent route",
+            match: { keywords: ["urgent"] },
+            action: { characterId: "char_known" },
+          },
+        ],
+      }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+
+    expect(h.enqueued[0].text).toMatch(/matched rule: 无 \/ none/)
+    expect(h.enqueued[0].text).toMatch(/response adapter: tg-1/)
+    expect(h.enqueued[0].text).toMatch(/Urgent route/)
   })
 
   it("/team <name> binds the team", async () => {
@@ -652,7 +760,12 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.patches[0].patch).toEqual({ teamId: "team_r", teamDisabled: undefined })
+    expect(h.patches[0].patch).toEqual({
+      teamId: "team_r",
+      teamDisabled: undefined,
+      workflowId: undefined,
+      workflowDisabled: true,
+    })
     expect(h.enqueued[0].text).toMatch(/Team bound: Researchers/)
   })
 
@@ -729,7 +842,12 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.patches[0].patch).toEqual({ workflowId: "wf_n" })
+    expect(h.patches[0].patch).toEqual({
+      workflowId: "wf_n",
+      workflowDisabled: undefined,
+      teamId: undefined,
+      teamDisabled: true,
+    })
     expect(h.enqueued[0].text).toMatch(/Workflow bound: Nightly/)
     expect(h.audits[0].kind).toBe("command.applied")
   })
@@ -743,7 +861,12 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.patches[0].patch).toEqual({ workflowId: "wf_n" })
+    expect(h.patches[0].patch).toEqual({
+      workflowId: "wf_n",
+      workflowDisabled: undefined,
+      teamId: undefined,
+      teamDisabled: true,
+    })
   })
 
   it("/workflow off clears the binding", async () => {
@@ -755,8 +878,8 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.patches[0].patch).toEqual({ workflowId: undefined })
-    expect(h.enqueued[0].text).toMatch(/Workflow unbound/)
+    expect(h.patches[0].patch).toEqual({ workflowId: undefined, workflowDisabled: true })
+    expect(h.enqueued[0].text).toMatch(/Workflow disabled/)
   })
 
   it("/workflow with an ambiguous name lists candidates", async () => {
@@ -784,6 +907,21 @@ describe("maybeHandleControlCommand", () => {
     )
     expect(h.patches).toHaveLength(0)
     expect(h.enqueued[0].text).toMatch(/Usage/)
+  })
+
+  it("rejects a Workflow without an active production deployment", async () => {
+    const h = harness({ active: session("s1") })
+    h.deps.isWorkflowExecutable = async () => false
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/workflow Nightly" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches).toHaveLength(0)
+    expect(h.enqueued[0].text).toMatch(/no active production deployment/)
+    expect(h.audits[0]).toMatchObject({ kind: "command.denied" })
   })
 
   it("/status shows the bound workflow", async () => {

@@ -25,6 +25,7 @@ describe("ConversationOverrideDialog", () => {
     )
     expect(screen.getByTestId("conv-override-save")).toBeInTheDocument()
     expect(screen.getByText("lark:lark-1:oc_x")).toBeInTheDocument()
+    expect(screen.getAllByText(/Effective source:/i)).toHaveLength(4)
   })
 
   it("does not render the form when closed", () => {

@@ -1,16 +1,8 @@
 "use client"
 
 // Tabbed shell for the Connections (Platform Connectors) settings section.
-// Mirrors `remote-control/remote-control-section.tsx` 1:1 — only the param
-// name (`?connectionsTab=`) and tab ids differ. The four tab implementations
-// live in `./tabs/`.
-//
-// SCOPE NOTE (CP-Phase-1):
-// The original plan listed 6 tabs (Overview / Adapters / Conversations / Inbox
-// / Outbound / Audit). Conversations + Inbox tabs have been dropped for Phase 1
-// because the Inbox UI already lives at `/inbox/*` routes and per-conversation
-// override UI is CP-C scope. Phase 1 ships 4 tabs: Overview / Adapters /
-// Outbound / Audit.
+// The `?connectionsTab=` parameter is the stable deep-link contract shared by
+// connector forms and paired clients; each tab implementation lives in `./tabs/`.
 
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -24,34 +16,22 @@ import { AdaptersTab } from "./tabs/adapters-tab"
 import { OutboundTab } from "./tabs/outbound-tab"
 import { AuditTab } from "./tabs/audit-tab"
 import { ConversationsTab } from "./tabs/conversations-tab"
-import { InboxTab } from "./tabs/inbox-tab"
 import { CapabilityMatrixTab } from "./tabs/capability-matrix-tab"
-import { LabelsTab } from "./tabs/labels-tab"
-import { CannedResponsesTab } from "./tabs/canned-responses-tab"
+import { InboxAssetsTab } from "./tabs/inbox-assets-tab"
 
 const CONNECTIONS_TAB_PARAM = "connectionsTab"
 
 export type ConnectionsTabId =
-  | "overview"
-  | "adapters"
-  | "conversations"
-  | "inbox"
-  | "outbound"
-  | "audit"
-  | "capability"
-  | "labels"
-  | "canned"
+  "overview" | "adapters" | "overrides" | "outbound" | "audit" | "capability" | "assets"
 
 const TAB_IDS: ConnectionsTabId[] = [
   "overview",
   "adapters",
-  "conversations",
-  "inbox",
+  "overrides",
   "outbound",
   "audit",
   "capability",
-  "labels",
-  "canned",
+  "assets",
 ]
 
 function isConnectionsTab(value: string | null): value is ConnectionsTabId {
@@ -63,6 +43,7 @@ export function ConnectionsSection() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const requested = searchParams.get(CONNECTIONS_TAB_PARAM)
+  // Preserve old Tunnel deep links after moving tunnel controls into Overview.
   const activeTab: ConnectionsTabId = isConnectionsTab(requested) ? requested : "overview"
 
   const onTabChange = (value: string) => {
@@ -106,11 +87,8 @@ export function ConnectionsSection() {
           <TabsTrigger value="adapters" className="shrink-0">
             {t("tabs.adapters")}
           </TabsTrigger>
-          <TabsTrigger value="conversations" className="shrink-0">
-            {t("tabs.conversations")}
-          </TabsTrigger>
-          <TabsTrigger value="inbox" className="shrink-0">
-            {t("tabs.inbox")}
+          <TabsTrigger value="overrides" className="shrink-0">
+            {t("tabs.overrides")}
           </TabsTrigger>
           <TabsTrigger value="outbound" className="shrink-0">
             {t("tabs.outbound")}
@@ -121,11 +99,8 @@ export function ConnectionsSection() {
           <TabsTrigger value="capability" className="shrink-0">
             {t("tabs.capability")}
           </TabsTrigger>
-          <TabsTrigger value="labels" className="shrink-0">
-            {t("tabs.labels")}
-          </TabsTrigger>
-          <TabsTrigger value="canned" className="shrink-0">
-            {t("tabs.canned")}
+          <TabsTrigger value="assets" className="shrink-0">
+            {t("tabs.assets")}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className={scrollBlock}>
@@ -134,11 +109,8 @@ export function ConnectionsSection() {
         <TabsContent value="adapters" className={fillBlock}>
           <AdaptersTab />
         </TabsContent>
-        <TabsContent value="conversations" className={scrollBlock}>
+        <TabsContent value="overrides" className={scrollBlock}>
           <ConversationsTab />
-        </TabsContent>
-        <TabsContent value="inbox" className={scrollBlock}>
-          <InboxTab />
         </TabsContent>
         <TabsContent value="outbound" className={scrollBlock}>
           <OutboundTab />
@@ -149,11 +121,8 @@ export function ConnectionsSection() {
         <TabsContent value="capability" className={scrollBlock}>
           <CapabilityMatrixTab />
         </TabsContent>
-        <TabsContent value="labels" className={scrollBlock}>
-          <LabelsTab />
-        </TabsContent>
-        <TabsContent value="canned" className={scrollBlock}>
-          <CannedResponsesTab />
+        <TabsContent value="assets" className={scrollBlock}>
+          <InboxAssetsTab />
         </TabsContent>
       </Tabs>
     </div>

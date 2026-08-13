@@ -160,6 +160,20 @@ describe("resolveBinding — adapter + override", () => {
     expect(resolveBinding(input).characterId).toBe("char_new")
   })
 
+  it("characterDisabled suppresses an explicit and adapter character", () => {
+    const input: BindingResolutionInput = {
+      adapter: { trigger: baseTrigger(), defaultMode: "auto", defaultCharacterId: "char_default" },
+      character: null,
+      override: {
+        mode: undefined,
+        characterId: "char_override",
+        characterDisabled: true,
+        trigger: undefined,
+      },
+    }
+    expect(resolveBinding(input).characterId).toBeUndefined()
+  })
+
   it("override.trigger.rules replaces combined adapter+character rules", () => {
     const input: BindingResolutionInput = {
       adapter: { trigger: baseTrigger(), defaultMode: "auto", defaultCharacterId: undefined },

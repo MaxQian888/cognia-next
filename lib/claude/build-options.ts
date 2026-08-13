@@ -51,6 +51,10 @@ import { getTeam } from "@/lib/db/teams"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import { isOcrToolAllowed } from "@/lib/claude/ocr-tool-gate"
+import {
+  adapterAllowsHostCapability,
+  resolveImHostCapabilities,
+} from "@/lib/connectors/permission-resolve"
 import { resolveOutputStyleSnippet } from "@/lib/claude/output-styles"
 import {
   buildPostCompactionRecovery,
@@ -818,11 +822,8 @@ const NEVER_PRUNE_TOOLS: ReadonlySet<string> = new Set([
 ])
 
 /** Agent scheduler tools are opt-in per IM conversation; never globally offered. */
-export const SCHEDULER_AGENT_TOOL_NAMES = [
-  "mcp__cognia__schedule_task",
-  "mcp__cognia__list_scheduled_tasks",
-  "mcp__cognia__cancel_scheduled_task",
-] as const
+export { IM_SCHEDULER_TOOL_NAMES as SCHEDULER_AGENT_TOOL_NAMES } from "@/lib/connectors/im-permission-ceiling"
+import { IM_SCHEDULER_TOOL_NAMES as SCHEDULER_AGENT_TOOL_NAMES } from "@/lib/connectors/im-permission-ceiling"
 
 /**
  * The dispatchable-subagent list seeding the `dispatch_agent` enum + discovery.
@@ -1896,7 +1897,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Agent mode tools union in too — picking "Code Generator" should grant
   // execute_code without forcing the user to also tweak the character.
   for (const t of activeMode?.tools ?? []) allowed.add(t)
-  if (imOverrideRow?.allowScheduleTools === true) {
+  if (
+    imOverrideRow?.allowScheduleTools === true &&
+    adapterAllowsHostCapability(imAdapterRow, "schedule_tools")
+  ) {
     for (const tool of SCHEDULER_AGENT_TOOL_NAMES) allowed.add(tool)
   }
   // A2UI: when the active scope opts in, fold the 4 bridge tools into the
@@ -2013,6 +2017,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
               }
             : undefined,
           imOverrideRow: imOverrideRow ?? undefined,
+          imAdapterRow: imAdapterRow ?? undefined,
           channelCapabilities,
         })
         lruSet(
@@ -2227,7 +2232,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // read. The first read is best-effort, so `imOverrideRow` may still be
   // undefined here; the fallback is the safe `false` default.
   const imSession = Boolean(session?.platformBinding?.adapterId)
-  const allowImComputerUse = imOverrideRow?.allowComputerUse === true
+  const imHostCapabilities = resolveImHostCapabilities({
+    adapter: imAdapterRow,
+    override: imOverrideRow,
+    characterComputerUseEnabled: character?.enableComputerUse,
+  })
+  const allowImComputerUse = imHostCapabilities.computer_use
   const computerUseAllowedForChat =
     character?.enableComputerUse === true && (!imSession || allowImComputerUse)
 
@@ -2243,11 +2253,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
 
   // OCR tool (`cognia-ocr` / `ocr.extract`, ADR-0024) is low-risk and
   // default-allowed everywhere (incl. IM); see `isOcrToolAllowed`.
-  const ocrAllowedForChat = isOcrToolAllowed({
-    character,
-    imSession,
-    allowOcrOverride: imOverrideRow?.allowOcr,
-  })
+  const ocrAllowedForChat =
+    isOcrToolAllowed({
+      character,
+      imSession,
+      allowOcrOverride: imOverrideRow?.allowOcr,
+    }) &&
+    (!imSession || imHostCapabilities.ocr)
 
   // --- Plugin tools → SDK sidecar ------------------------------------------
   // Surface enabled plugin tools + ADR-0026 built-in skills + terminal_dock_*

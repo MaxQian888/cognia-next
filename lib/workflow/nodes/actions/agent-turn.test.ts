@@ -151,6 +151,27 @@ describe("runAgentTurn", () => {
     )
   })
 
+  it("applies the parent IM ceiling only to the dynamic agent turn", async () => {
+    const permissionCeiling = { allowedTools: ["Read"], disallowedTools: ["Bash"] }
+    await runAgentTurn(
+      makeCtx(
+        { prompt: "go" },
+        {
+          securityContext: {
+            piiEgressRequired: true,
+            sourceTriggerKind: "trigger.manual",
+            permissionCeiling,
+          },
+        }
+      )
+    )
+
+    expect(mockExecuteAgent).toHaveBeenCalledWith(
+      "go",
+      expect.objectContaining({ permissionCeiling })
+    )
+  })
+
   it("warns when tools were requested but unavailable (honest degradation)", async () => {
     const ctx = makeCtx({ prompt: "go" })
     await runAgentTurn(ctx)
