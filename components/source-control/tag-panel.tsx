@@ -27,7 +27,8 @@ interface TagPanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   rootDir: string
-  actions: Pick<UseGitActionsResult, "createTag" | "deleteTag" | "pushTag">
+  actions: Pick<UseGitActionsResult, "createTag" | "deleteTag" | "pushTag"> &
+    Partial<Pick<UseGitActionsResult, "can">>
 }
 
 export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps) {
@@ -35,6 +36,7 @@ export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps
   const [tags, setTags] = useState<GitTag[]>([])
   const [name, setName] = useState("")
   const [message, setMessage] = useState("")
+  const can = actions.can ?? (() => true)
 
   const reload = useCallback(async () => {
     setTags(await gitTags(rootDir))
@@ -92,7 +94,7 @@ export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps
           />
           <Button
             onClick={() => void doCreate()}
-            disabled={!name.trim()}
+            disabled={!name.trim() || !can("git_create_tag")}
             className="gap-1.5"
             data-testid="tag-create"
           >
@@ -129,6 +131,7 @@ export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps
                   title={t("tags.push")}
                   onClick={() => void actions.pushTag(tag.name)}
                   data-testid={`tag-push-${tag.name}`}
+                  disabled={!can("git_push_tag")}
                 >
                   <ArrowUpFromLineIcon className="size-3" />
                 </Button>
@@ -139,6 +142,7 @@ export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps
                   aria-label={t("tags.delete")}
                   onClick={() => void doDelete(tag.name)}
                   data-testid={`tag-delete-${tag.name}`}
+                  disabled={!can("git_delete_tag")}
                 >
                   <Trash2Icon className="size-3" />
                 </Button>

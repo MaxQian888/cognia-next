@@ -62,7 +62,9 @@ interface CommitDetailProps {
   rootDir: string
   commit: GitCommit
   actions?: Pick<UseGitActionsResult, "reset"> &
-    Partial<Pick<UseGitActionsResult, "cherryPick" | "revert" | "createBranch" | "checkout">>
+    Partial<
+      Pick<UseGitActionsResult, "cherryPick" | "revert" | "createBranch" | "checkout" | "can">
+    >
   /** Open blame for a file pinned to this commit. */
   onViewBlame?: (path: string, rev: string) => void
   /** Start an interactive rebase from this commit (base = this commit). */
@@ -89,6 +91,7 @@ export function CommitDetail({
   const explainEnabled = useSettingsStore(
     (s) => s.settings?.gitSettings?.explainAI?.enabled ?? false
   )
+  const can = actions?.can ?? (() => true)
 
   // Reset the selection when the displayed commit changes — done in render via
   // a previous-value guard rather than an effect (react-hooks/set-state-in-effect).
@@ -166,6 +169,7 @@ export function CommitDetail({
                 {actions.cherryPick && (
                   <DropdownMenuItem
                     onSelect={() => void actions.cherryPick?.(commit.hash)}
+                    disabled={!can("git_cherry_pick")}
                     data-testid="commit-cherry-pick"
                   >
                     {t("sequencer.cherryPick")}
@@ -174,6 +178,7 @@ export function CommitDetail({
                 {actions.revert && (
                   <DropdownMenuItem
                     onSelect={() => void actions.revert?.(commit.hash)}
+                    disabled={!can("git_revert")}
                     data-testid="commit-revert"
                   >
                     {t("sequencer.revert")}
@@ -187,6 +192,7 @@ export function CommitDetail({
                       e.preventDefault()
                       onInteractiveRebase(commit.hash)
                     }}
+                    disabled={!can("git_interactive_rebase")}
                     data-testid="commit-interactive-rebase"
                   >
                     {t("irebase.fromHere")}
@@ -198,6 +204,7 @@ export function CommitDetail({
                       e.preventDefault()
                       setBranchDialogOpen(true)
                     }}
+                    disabled={!can("git_create_branch")}
                     data-testid="commit-create-branch"
                   >
                     {t("commitDetail.createBranchHere")}
@@ -209,6 +216,7 @@ export function CommitDetail({
                       e.preventDefault()
                       setConfirmCheckout(true)
                     }}
+                    disabled={!can("git_checkout_branch")}
                     data-testid="commit-checkout"
                   >
                     {t("commitDetail.checkoutCommit")}
@@ -221,12 +229,14 @@ export function CommitDetail({
                   onInteractiveRebase) && <DropdownMenuSeparator />}
                 <DropdownMenuItem
                   onSelect={() => void actions.reset("soft", commit.hash)}
+                  disabled={!can("git_reset")}
                   data-testid="reset-soft"
                 >
                   {t("reset.soft")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => void actions.reset("mixed", commit.hash)}
+                  disabled={!can("git_reset")}
                   data-testid="reset-mixed"
                 >
                   {t("reset.mixed")}
@@ -237,6 +247,7 @@ export function CommitDetail({
                     e.preventDefault()
                     setConfirmHardReset(true)
                   }}
+                  disabled={!can("git_reset")}
                   data-testid="reset-hard"
                 >
                   {t("reset.hard")}
@@ -282,7 +293,7 @@ export function CommitDetail({
           />
           <DialogFooter>
             <Button
-              disabled={!branchName.trim()}
+              disabled={!branchName.trim() || !can("git_create_branch")}
               onClick={() => void createBranchFromCommit()}
               data-testid="create-branch-confirm"
             >
@@ -312,6 +323,7 @@ export function CommitDetail({
                   if (!failure) setConfirmCheckout(false)
                 })
               }}
+              disabled={!can("git_checkout_branch")}
               data-testid="checkout-commit-confirm-action"
             >
               {t("commitDetail.checkoutAction")}
@@ -336,6 +348,7 @@ export function CommitDetail({
                   if (!failure) setConfirmHardReset(false)
                 })
               }}
+              disabled={!can("git_reset")}
               data-testid="reset-hard-confirm-action"
             >
               {t("reset.confirmAction")}

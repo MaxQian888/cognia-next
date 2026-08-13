@@ -29,13 +29,14 @@ interface RestoreDialogProps {
   /** File to restore; `null` keeps the dialog closed. */
   path: string | null
   onOpenChange: (open: boolean) => void
-  actions: Pick<UseGitActionsResult, "restore">
+  actions: Pick<UseGitActionsResult, "restore"> & Partial<Pick<UseGitActionsResult, "can">>
 }
 
 export function RestoreDialog({ rootDir, path, onOpenChange, actions }: RestoreDialogProps) {
   const t = useTranslations("sourceControl")
   const [source, setSource] = useState("HEAD")
   const [refs, setRefs] = useState<GitRef[]>([])
+  const can = actions.can ?? (() => true)
 
   // Reset the source to HEAD when a new file opens — done in render via a
   // previous-value guard (not an effect) to avoid set-state-in-effect.
@@ -91,7 +92,11 @@ export function RestoreDialog({ rootDir, path, onOpenChange, actions }: RestoreD
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("restore.cancel")}
           </Button>
-          <Button onClick={() => void doRestore()} data-testid="restore-confirm">
+          <Button
+            onClick={() => void doRestore()}
+            disabled={!can("git_restore")}
+            data-testid="restore-confirm"
+          >
             {t("restore.confirm")}
           </Button>
         </DialogFooter>

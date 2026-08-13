@@ -32,7 +32,7 @@ const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.Di
 
 interface ConflictResolverProps {
   conflict: GitConflict
-  onResolve: (resolution: { mergedContent?: string; side?: ConflictSide }) => void
+  onResolve?: (resolution: { mergedContent?: string; side?: ConflictSide }) => void
 }
 
 export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps) {
@@ -118,7 +118,8 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
           size="sm"
           variant="outline"
           className="h-6 text-xs"
-          onClick={() => onResolve({ side: "ours" })}
+          onClick={() => onResolve?.({ side: "ours" })}
+          disabled={!onResolve}
           data-testid="accept-ours"
         >
           {t("conflicts.acceptOurs")}
@@ -127,7 +128,8 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
           size="sm"
           variant="outline"
           className="h-6 text-xs"
-          onClick={() => onResolve({ side: "theirs" })}
+          onClick={() => onResolve?.({ side: "theirs" })}
+          disabled={!onResolve}
           data-testid="accept-theirs"
         >
           {t("conflicts.acceptTheirs")}
@@ -136,7 +138,8 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
           size="sm"
           variant="outline"
           className="h-6 text-xs"
-          onClick={() => onResolve({ mergedContent: mergeBoth(conflict) })}
+          onClick={() => onResolve?.({ mergedContent: mergeBoth(conflict) })}
+          disabled={!onResolve}
           data-testid="accept-both"
         >
           {t("conflicts.acceptBoth")}

@@ -49,6 +49,29 @@ describe("ChangeGroup", () => {
     expect(onClick).toHaveBeenCalled()
   })
 
+  it("disables an unavailable group action", () => {
+    render(
+      <ChangeGroup
+        group="changes"
+        count={1}
+        expanded
+        onToggle={() => {}}
+        actions={[
+          {
+            key: "stage-all",
+            label: "Stage All",
+            icon: <span>+</span>,
+            onClick: jest.fn(),
+            disabled: true,
+          },
+        ]}
+      >
+        <div />
+      </ChangeGroup>
+    )
+    expect(screen.getByTestId("group-action-changes-stage-all")).toBeDisabled()
+  })
+
   it("keeps group actions visible and touch-sized in touch density", () => {
     render(
       <ChangeGroup

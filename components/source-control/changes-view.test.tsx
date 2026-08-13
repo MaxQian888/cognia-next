@@ -323,4 +323,17 @@ describe("ChangesView", () => {
     expect(onViewBlame).toHaveBeenCalledTimes(3)
     expect(onRestore).toHaveBeenCalledTimes(2)
   })
+
+  it("removes or disables unavailable file mutations", () => {
+    const actions = makeActions()
+    actions.can = () => false
+    renderView(actions)
+
+    expect(screen.getByTestId("group-action-staged-unstage-all")).toBeDisabled()
+    expect(screen.getByTestId("group-action-changes-stage-all")).toBeDisabled()
+    expect(screen.getByTestId("group-action-changes-discard-all")).toBeDisabled()
+    expect(screen.queryByTestId("unstage-staged.ts")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("stage-work.ts")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("discard-work.ts")).not.toBeInTheDocument()
+  })
 })

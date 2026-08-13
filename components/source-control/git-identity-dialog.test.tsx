@@ -5,11 +5,13 @@ jest.mock("@/lib/git/commands", () => ({
   gitIdentity: (repoPath: string) => gitIdentity(repoPath),
   gitSetIdentity: (repoPath: string, name: string, email: string, global: boolean) =>
     gitSetIdentity(repoPath, name, email, global),
+  runGitUserAction: (_command: string, operation: () => Promise<unknown>) => operation(),
 }))
 
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { GitIdentityDialog } from "./git-identity-dialog"
+import { gitTargetFromRemote } from "@/lib/git/target"
 
 beforeEach(() => {
   gitIdentity.mockReset()
@@ -44,6 +46,30 @@ describe("GitIdentityDialog", () => {
       )
     )
     expect(onSaved).toHaveBeenCalled()
+  })
+
+  it("keeps remote identity repository-local and hides the global scope", async () => {
+    const user = userEvent.setup()
+    const repoPath = gitTargetFromRemote("workspace-a", "repo")
+    gitIdentity.mockResolvedValue({ name: "", email: "" })
+    gitSetIdentity.mockResolvedValue(undefined)
+    render(
+      <GitIdentityDialog open repoPath={repoPath} onOpenChange={jest.fn()} onSaved={jest.fn()} />
+    )
+
+    await user.type(screen.getByTestId("identity-name"), "Remote Developer")
+    await user.type(screen.getByTestId("identity-email"), "remote@example.com")
+    expect(screen.queryByTestId("identity-global")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("identity-save"))
+
+    await waitFor(() =>
+      expect(gitSetIdentity).toHaveBeenCalledWith(
+        repoPath,
+        "Remote Developer",
+        "remote@example.com",
+        false
+      )
+    )
   })
 
   it("keeps the dialog open and shows a typed backend error", async () => {

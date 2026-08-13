@@ -82,4 +82,16 @@ describe("RestoreDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
     expect(screen.getByTestId("restore-dialog")).toBeInTheDocument()
   })
+
+  it("disables restore when the exact command is unavailable", async () => {
+    render(
+      <RestoreDialog
+        rootDir="/r"
+        path="a.ts"
+        onOpenChange={() => {}}
+        actions={{ ...makeActions(), can: () => false }}
+      />
+    )
+    expect(await screen.findByTestId("restore-confirm")).toBeDisabled()
+  })
 })

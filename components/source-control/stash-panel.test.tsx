@@ -60,4 +60,19 @@ describe("StashPanel", () => {
     render(<StashPanel open onOpenChange={() => {}} stashes={[]} actions={makeActions()} />)
     expect(screen.getByTestId("stash-panel")).toBeInTheDocument()
   })
+
+  it("disables every unavailable stash mutation", () => {
+    render(
+      <StashPanel
+        open
+        onOpenChange={() => {}}
+        stashes={stashes}
+        actions={{ ...makeActions(), can: () => false }}
+      />
+    )
+    expect(screen.getByTestId("stash-push")).toBeDisabled()
+    expect(screen.getByTestId("stash-pop-0")).toBeDisabled()
+    expect(screen.getByTestId("stash-apply-0")).toBeDisabled()
+    expect(screen.getByTestId("stash-drop-0")).toBeDisabled()
+  })
 })

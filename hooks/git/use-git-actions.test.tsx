@@ -33,6 +33,8 @@ jest.mock("@/lib/git/commands", () => ({
   gitSequencerContinue: jest.fn(),
   gitSequencerAbort: jest.fn(),
   gitInteractiveRebase: jest.fn(),
+  runGitUserAction: jest.fn((_command: string, operation: () => Promise<unknown>) => operation()),
+  resolveGitOperationAvailability: jest.fn(() => ({ state: "available" })),
 }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
@@ -49,6 +51,11 @@ const refresh = jest.fn().mockResolvedValue(undefined)
 beforeEach(() => {
   Object.values(commands).forEach((m) => {
     if (typeof m === "function") (m as jest.Mock).mockReset().mockResolvedValue(undefined)
+  })
+  commands.runGitUserAction.mockImplementation((_command, operation) => operation())
+  commands.resolveGitOperationAvailability.mockReturnValue({
+    state: "available",
+    reason: "local-host",
   })
   toastErrorMock.mockReset()
   refresh.mockReset().mockResolvedValue(undefined)

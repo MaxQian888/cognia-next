@@ -160,4 +160,17 @@ describe("InteractiveRebaseDialog", () => {
     }
     expect(screen.getByTestId("irebase-apply")).toBeDisabled()
   })
+
+  it("disables apply when interactive rebase is unavailable", async () => {
+    render(
+      <InteractiveRebaseDialog
+        rootDir="/r"
+        base="HEAD~2"
+        onOpenChange={() => {}}
+        actions={{ ...makeActions(), can: () => false }}
+      />
+    )
+    await screen.findByTestId("irebase-row-aaaaaaa1")
+    expect(screen.getByTestId("irebase-apply")).toBeDisabled()
+  })
 })

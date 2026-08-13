@@ -18,6 +18,7 @@ export interface GroupAction {
   icon: React.ReactNode
   onClick: () => void
   destructive?: boolean
+  disabled?: boolean
 }
 
 interface ChangeGroupProps {
@@ -86,6 +87,7 @@ export function ChangeGroup({
               aria-label={action.label}
               title={action.label}
               onClick={action.onClick}
+              disabled={action.disabled}
               data-testid={`group-action-${group}-${action.key}`}
             >
               {action.icon}

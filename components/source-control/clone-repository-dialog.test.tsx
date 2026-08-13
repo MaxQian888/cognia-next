@@ -3,6 +3,7 @@ const pickDirectory = jest.fn<Promise<string | null>, []>()
 
 jest.mock("@/lib/git/commands", () => ({
   gitClone: (remoteUrl: string, destination: string) => gitClone(remoteUrl, destination),
+  runGitUserAction: (_command: string, operation: () => Promise<unknown>) => operation(),
 }))
 
 jest.mock("@/lib/files/file-bridge", () => ({
@@ -12,6 +13,7 @@ jest.mock("@/lib/files/file-bridge", () => ({
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { CloneRepositoryDialog } from "./clone-repository-dialog"
+import { parseGitTarget } from "@/lib/git/target"
 
 beforeEach(() => {
   gitClone.mockReset()
@@ -35,6 +37,32 @@ describe("CloneRepositoryDialog", () => {
     )
     expect(onCloned).toHaveBeenCalledWith("/work/cloned")
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("uses a relative destination and hides the native picker for remote workspaces", async () => {
+    const user = userEvent.setup()
+    gitClone.mockResolvedValue("git-workspace:cloned")
+    render(
+      <CloneRepositoryDialog
+        open
+        remoteWorkspaceId="workspace-a"
+        onOpenChange={jest.fn()}
+        onCloned={jest.fn()}
+      />
+    )
+
+    await user.type(screen.getByTestId("clone-url"), "https://example.com/team/repo.git")
+    await user.type(screen.getByTestId("clone-destination"), "repositories/project")
+    await user.click(screen.getByTestId("clone-submit"))
+
+    await waitFor(() => expect(gitClone).toHaveBeenCalled())
+    const destination = gitClone.mock.calls[0]?.[1] ?? ""
+    expect(parseGitTarget(destination)).toEqual({
+      kind: "remote",
+      workspaceId: "workspace-a",
+      relativePath: "repositories/project",
+    })
+    expect(screen.queryByTestId("clone-browse")).not.toBeInTheDocument()
   })
 
   it("uses the directory picker and keeps the dialog open when cloning fails", async () => {

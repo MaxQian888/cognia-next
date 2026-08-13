@@ -30,7 +30,9 @@ describe("getSidebarCatalog", () => {
     expect(ids).not.toContain("source-control")
     expect(ids).toContain("workflows")
     // Derived, not hard-coded — the browser pane addition broke a literal "-2".
-    expect(cat).toHaveLength(SIDEBAR_NAV_META.filter((m) => !m.desktopOnly).length)
+    expect(cat).toHaveLength(
+      SIDEBAR_NAV_META.filter((meta) => !meta.desktopOnly && meta.id !== "source-control").length
+    )
   })
 
   it("keeps desktop-only items hidden on mobile even before runtime targeting settles", () => {
@@ -73,6 +75,26 @@ describe("getSidebarCatalog", () => {
       },
     }
     expect(getSidebarCatalog("web", runtime).map((item) => item.id)).toContain("browser")
+  })
+
+  it("restores Source Control only when the paired host advertises Git status", () => {
+    const runtime: RuntimeSnapshot = {
+      target: {
+        id: "desktop",
+        kind: "companion",
+        hostKind: "desktop",
+        platform: "web",
+      },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: {
+        compatible: true,
+        operations: ["git_status"],
+        grants: ["workspace.read"],
+      },
+    }
+
+    expect(getSidebarCatalog("web", runtime).map((item) => item.id)).toContain("source-control")
   })
 })
 

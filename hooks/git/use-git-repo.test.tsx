@@ -1,10 +1,14 @@
 const uiAvailableMock = jest.fn()
 const loadGitRepoMock = jest.fn()
 const openFolderAsWorkspaceMock = jest.fn()
+const gitWorkspaceListMock = jest.fn()
+const isTauriMock = jest.fn()
 
 jest.mock("@/lib/git/commands", () => ({
   isSourceControlUiAvailable: () => uiAvailableMock(),
+  gitWorkspaceList: () => gitWorkspaceListMock(),
 }))
+jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 jest.mock("@/lib/git/load", () => ({ loadGitRepo: (...a: unknown[]) => loadGitRepoMock(...a) }))
 jest.mock("@/lib/workspace/open-folder", () => ({
   openFolderAsWorkspace: (...a: unknown[]) => openFolderAsWorkspaceMock(...a),
@@ -13,11 +17,14 @@ jest.mock("@/lib/workspace/open-folder", () => ({
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { useGitRepo } from "./use-git-repo"
 import { useGitStore } from "@/stores/git/git-store"
+import { gitTargetFromRemote } from "@/lib/git/target"
 
 beforeEach(() => {
   uiAvailableMock.mockReset()
   loadGitRepoMock.mockReset().mockResolvedValue(undefined)
   openFolderAsWorkspaceMock.mockReset().mockResolvedValue(null)
+  gitWorkspaceListMock.mockReset().mockResolvedValue([])
+  isTauriMock.mockReset().mockReturnValue(true)
   act(() => useGitStore.setState({ rootDir: null }))
 })
 
@@ -72,5 +79,51 @@ describe("useGitRepo", () => {
       await result.current.refresh()
     })
     expect(loadGitRepoMock).toHaveBeenCalledWith("/repo")
+  })
+
+  it("discovers opaque remote workspaces and polls only while the surface is mounted", async () => {
+    jest.useFakeTimers()
+    uiAvailableMock.mockReturnValue(true)
+    isTauriMock.mockReturnValue(false)
+    gitWorkspaceListMock.mockResolvedValue([
+      {
+        workspaceId: "workspace-a",
+        displayName: "Alpha",
+        repositoryState: {
+          isRepo: true,
+          rootDir: "packages/app",
+          detachedHead: false,
+          operationInProgress: null,
+        },
+      },
+    ])
+
+    const { result, unmount } = renderHook(() => useGitRepo())
+    await act(async () => {
+      jest.advanceTimersByTime(0)
+      await Promise.resolve()
+    })
+    expect(result.current.remoteWorkspaces).toHaveLength(1)
+    expect(useGitStore.getState().rootDir).toBe(gitTargetFromRemote("workspace-a", "packages/app"))
+
+    await act(async () => {
+      jest.advanceTimersByTime(5_000)
+      await Promise.resolve()
+    })
+    expect(gitWorkspaceListMock).toHaveBeenCalledTimes(2)
+    unmount()
+    jest.advanceTimersByTime(5_000)
+    expect(gitWorkspaceListMock).toHaveBeenCalledTimes(2)
+    jest.useRealTimers()
+  })
+
+  it("drops a remote target that is no longer authorized", async () => {
+    uiAvailableMock.mockReturnValue(true)
+    isTauriMock.mockReturnValue(false)
+    act(() => useGitStore.setState({ rootDir: gitTargetFromRemote("revoked", "repo") }))
+
+    renderHook(() => useGitRepo())
+
+    await waitFor(() => expect(useGitStore.getState().rootDir).toBeNull())
   })
 })

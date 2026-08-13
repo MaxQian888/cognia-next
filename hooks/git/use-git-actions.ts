@@ -47,7 +47,10 @@ import {
   gitStashPush,
   gitSync,
   gitUnstage,
+  runGitUserAction,
+  resolveGitOperationAvailability,
 } from "@/lib/git/commands"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import {
   asGitError,
   type ConflictSide,
@@ -65,6 +68,7 @@ const OP_ERROR_KEY: Partial<Record<GitOp, string>> = {
 }
 
 export interface UseGitActionsResult {
+  can: (command: string) => boolean
   stage: (paths: string[], hunkPatch?: string) => Promise<GitActionResult>
   unstage: (paths: string[], hunkPatch?: string) => Promise<GitActionResult>
   discard: (paths: string[], hunkPatch?: string) => Promise<GitActionResult>
@@ -122,9 +126,19 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
   const setError = useGitStore((s) => s.setError)
   const clearError = useGitStore((s) => s.clearError)
   const currentBranch = useGitStore((s) => s.status?.branch ?? null)
+  const runtimeSnapshot = useRuntimeSnapshot()
+  const can = useCallback(
+    (command: string) =>
+      resolveGitOperationAvailability(runtimeSnapshot, command).state === "available",
+    [runtimeSnapshot]
+  )
 
   const run = useCallback(
-    async (op: GitOp, fn: (rp: string) => Promise<unknown>): Promise<GitActionResult> => {
+    async (
+      op: GitOp,
+      command: string,
+      fn: (rp: string) => Promise<unknown>
+    ): Promise<GitActionResult> => {
       if (!rootDir) {
         // A click must never be silent: surface why nothing will happen.
         toast.error(t("errors.noRepo"))
@@ -134,7 +148,7 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
       clearError()
       try {
         try {
-          await fn(rootDir)
+          await runGitUserAction(command, () => fn(rootDir))
         } catch (err) {
           const payload = asGitError(err) ?? {
             kind: "commandFailed" as const,
@@ -166,23 +180,33 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
   )
   return useMemo<UseGitActionsResult>(
     () => ({
-      stage: (paths, hunkPatch) => run("stage", (rp) => gitStage(rp, paths, hunkPatch)),
-      unstage: (paths, hunkPatch) => run("unstage", (rp) => gitUnstage(rp, paths, hunkPatch)),
-      discard: (paths, hunkPatch) => run("discard", (rp) => gitDiscard(rp, paths, hunkPatch)),
-      discardAll: (includeUntracked) => run("discard", (rp) => gitDiscardAll(rp, includeUntracked)),
+      can,
+      stage: (paths, hunkPatch) =>
+        run("stage", "git_stage", (rp) => gitStage(rp, paths, hunkPatch)),
+      unstage: (paths, hunkPatch) =>
+        run("unstage", "git_unstage", (rp) => gitUnstage(rp, paths, hunkPatch)),
+      discard: (paths, hunkPatch) =>
+        run("discard", "git_discard", (rp) => gitDiscard(rp, paths, hunkPatch)),
+      discardAll: (includeUntracked) =>
+        run("discard", "git_discard_all", (rp) => gitDiscardAll(rp, includeUntracked)),
       commit: (message, options) =>
-        run("commit", (rp) =>
+        run("commit", "git_commit", (rp) =>
           gitCommit(rp, message, options?.amend ?? false, options?.signoff ?? false)
         ),
-      checkout: (name) => run("checkout", (rp) => gitCheckoutBranch(rp, name)),
+      checkout: (name) =>
+        run("checkout", "git_checkout_branch", (rp) => gitCheckoutBranch(rp, name)),
       createBranch: (name, checkout, from) =>
-        run("branch", (rp) => gitCreateBranch(rp, name, checkout, from)),
-      deleteBranch: (name, force) => run("branch", (rp) => gitDeleteBranch(rp, name, force)),
-      renameBranch: (newName, old) => run("branch", (rp) => gitRenameBranch(rp, newName, old)),
-      fetch: (options) => run("fetch", (rp) => gitFetch(rp, undefined, options?.prune ?? false)),
-      pull: (options) => run("pull", (rp) => gitPull(rp, { rebase: options?.rebase ?? false })),
+        run("branch", "git_create_branch", (rp) => gitCreateBranch(rp, name, checkout, from)),
+      deleteBranch: (name, force) =>
+        run("branch", "git_delete_branch", (rp) => gitDeleteBranch(rp, name, force)),
+      renameBranch: (newName, old) =>
+        run("branch", "git_rename_branch", (rp) => gitRenameBranch(rp, newName, old)),
+      fetch: (options) =>
+        run("fetch", "git_fetch", (rp) => gitFetch(rp, undefined, options?.prune ?? false)),
+      pull: (options) =>
+        run("pull", "git_pull", (rp) => gitPull(rp, { rebase: options?.rebase ?? false })),
       push: (options) =>
-        run("push", (rp) =>
+        run("push", "git_push", (rp) =>
           gitPush(rp, {
             setUpstream: options?.setUpstream,
             forceWithLease: options?.forceWithLease,
@@ -191,33 +215,35 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
             // repo's configured remotes instead of assuming "origin".
           })
         ),
-      sync: () => run("sync", (rp) => gitSync(rp)),
-      stashPush: (options) => run("stash", (rp) => gitStashPush(rp, options)),
-      stashPop: (index) => run("stash", (rp) => gitStashPop(rp, index)),
-      stashApply: (index) => run("stash", (rp) => gitStashApply(rp, index)),
-      stashDrop: (index) => run("stash", (rp) => gitStashDrop(rp, index)),
+      sync: () => run("sync", "git_sync", (rp) => gitSync(rp)),
+      stashPush: (options) => run("stash", "git_stash_push", (rp) => gitStashPush(rp, options)),
+      stashPop: (index) => run("stash", "git_stash_pop", (rp) => gitStashPop(rp, index)),
+      stashApply: (index) => run("stash", "git_stash_apply", (rp) => gitStashApply(rp, index)),
+      stashDrop: (index) => run("stash", "git_stash_drop", (rp) => gitStashDrop(rp, index)),
       resolveConflict: (path, resolution) =>
-        run("resolve", (rp) => gitResolveConflict(rp, path, resolution)),
-      merge: (branch) => run("sequence", (rp) => gitMerge(rp, branch)),
-      ignoreAdd: (pattern) => run("ignore", (rp) => gitIgnoreAdd(rp, pattern)),
-      mergeAbort: () => run("resolve", (rp) => gitMergeAbort(rp)),
-      remoteAdd: (name, url) => run("remote", (rp) => gitRemoteAdd(rp, name, url)),
-      remoteRemove: (name) => run("remote", (rp) => gitRemoteRemove(rp, name)),
+        run("resolve", "git_resolve_conflict", (rp) => gitResolveConflict(rp, path, resolution)),
+      merge: (branch) => run("sequence", "git_merge", (rp) => gitMerge(rp, branch)),
+      ignoreAdd: (pattern) => run("ignore", "git_ignore_add", (rp) => gitIgnoreAdd(rp, pattern)),
+      mergeAbort: () => run("resolve", "git_merge_abort", (rp) => gitMergeAbort(rp)),
+      remoteAdd: (name, url) =>
+        run("remote", "git_remote_add", (rp) => gitRemoteAdd(rp, name, url)),
+      remoteRemove: (name) => run("remote", "git_remote_remove", (rp) => gitRemoteRemove(rp, name)),
       createTag: (name, message, target) =>
-        run("tag", (rp) => gitCreateTag(rp, name, message, target)),
-      deleteTag: (name) => run("tag", (rp) => gitDeleteTag(rp, name)),
-      pushTag: (name, remote) => run("tag", (rp) => gitPushTag(rp, name, remote)),
-      reset: (mode, target) => run("reset", (rp) => gitReset(rp, mode, target)),
+        run("tag", "git_create_tag", (rp) => gitCreateTag(rp, name, message, target)),
+      deleteTag: (name) => run("tag", "git_delete_tag", (rp) => gitDeleteTag(rp, name)),
+      pushTag: (name, remote) => run("tag", "git_push_tag", (rp) => gitPushTag(rp, name, remote)),
+      reset: (mode, target) => run("reset", "git_reset", (rp) => gitReset(rp, mode, target)),
       restore: (paths, staged, source) =>
-        run("restore", (rp) => gitRestore(rp, paths, staged, source)),
-      rebase: (onto) => run("sequence", (rp) => gitRebase(rp, onto)),
-      cherryPick: (sha) => run("sequence", (rp) => gitCherryPick(rp, sha)),
-      revert: (sha) => run("sequence", (rp) => gitRevert(rp, sha)),
-      sequencerContinue: () => run("sequence", (rp) => gitSequencerContinue(rp)),
-      sequencerAbort: () => run("sequence", (rp) => gitSequencerAbort(rp)),
+        run("restore", "git_restore", (rp) => gitRestore(rp, paths, staged, source)),
+      rebase: (onto) => run("sequence", "git_rebase", (rp) => gitRebase(rp, onto)),
+      cherryPick: (sha) => run("sequence", "git_cherry_pick", (rp) => gitCherryPick(rp, sha)),
+      revert: (sha) => run("sequence", "git_revert", (rp) => gitRevert(rp, sha)),
+      sequencerContinue: () =>
+        run("sequence", "git_sequencer_continue", (rp) => gitSequencerContinue(rp)),
+      sequencerAbort: () => run("sequence", "git_sequencer_abort", (rp) => gitSequencerAbort(rp)),
       interactiveRebase: (base, entries) =>
-        run("sequence", (rp) => gitInteractiveRebase(rp, base, entries)),
+        run("sequence", "git_interactive_rebase", (rp) => gitInteractiveRebase(rp, base, entries)),
     }),
-    [run, currentBranch]
+    [run, currentBranch, can]
   )
 }

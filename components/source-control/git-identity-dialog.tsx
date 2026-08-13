@@ -15,7 +15,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
-import { gitIdentity, gitSetIdentity } from "@/lib/git/commands"
+import { gitIdentity, gitSetIdentity, runGitUserAction } from "@/lib/git/commands"
+import { isRemoteGitTarget } from "@/lib/git/target"
 import { asGitError } from "@/types/git"
 
 interface GitIdentityDialogProps {
@@ -38,6 +39,7 @@ export function GitIdentityDialog({
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const remote = isRemoteGitTarget(repoPath)
   const loadFailedMessage = t("identity.loadFailed")
 
   useEffect(() => {
@@ -75,7 +77,9 @@ export function GitIdentityDialog({
     setSaving(true)
     setError(null)
     try {
-      await gitSetIdentity(repoPath, trimmedName, trimmedEmail, global)
+      await runGitUserAction("git_set_identity", () =>
+        gitSetIdentity(repoPath, trimmedName, trimmedEmail, remote ? false : global)
+      )
       await onSaved()
       onOpenChange(false)
     } catch (err) {
@@ -120,19 +124,21 @@ export function GitIdentityDialog({
               data-testid="identity-email"
             />
           </div>
-          <div className="flex items-start gap-2">
-            <Checkbox
-              id="git-identity-global"
-              checked={global}
-              onCheckedChange={(checked) => setGlobal(checked === true)}
-              disabled={loading || saving}
-              data-testid="identity-global"
-            />
-            <div className="grid gap-0.5">
-              <Label htmlFor="git-identity-global">{t("identity.globalLabel")}</Label>
-              <p className="text-xs text-muted-foreground">{t("identity.globalDescription")}</p>
+          {!remote && (
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="git-identity-global"
+                checked={global}
+                onCheckedChange={(checked) => setGlobal(checked === true)}
+                disabled={loading || saving}
+                data-testid="identity-global"
+              />
+              <div className="grid gap-0.5">
+                <Label htmlFor="git-identity-global">{t("identity.globalLabel")}</Label>
+                <p className="text-xs text-muted-foreground">{t("identity.globalDescription")}</p>
+              </div>
             </div>
-          </div>
+          )}
           {error && (
             <p className="text-sm text-destructive" role="alert">
               {error}

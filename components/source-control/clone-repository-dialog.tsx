@@ -16,19 +16,24 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { pickDirectory } from "@/lib/files/file-bridge"
-import { gitClone } from "@/lib/git/commands"
+import { gitClone, runGitUserAction } from "@/lib/git/commands"
+import { gitTargetFromRemote } from "@/lib/git/target"
 import { asGitError } from "@/types/git"
 
 interface CloneRepositoryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCloned: (path: string) => void
+  remoteWorkspaceId?: string
+  available?: boolean
 }
 
 export function CloneRepositoryDialog({
   open,
   onOpenChange,
   onCloned,
+  remoteWorkspaceId,
+  available = true,
 }: CloneRepositoryDialogProps) {
   const t = useTranslations("sourceControl")
   const [remoteUrl, setRemoteUrl] = useState("")
@@ -62,7 +67,10 @@ export function CloneRepositoryDialog({
     setError(null)
     setAuthRequired(false)
     try {
-      const clonedPath = await gitClone(url, destination)
+      const target = remoteWorkspaceId
+        ? gitTargetFromRemote(remoteWorkspaceId, destination.trim())
+        : destination
+      const clonedPath = await runGitUserAction("git_clone", () => gitClone(url, target))
       setRemoteUrl("")
       setDestination("")
       onCloned(clonedPath)
@@ -81,7 +89,9 @@ export function CloneRepositoryDialog({
       <DialogContent data-testid="clone-repository-dialog">
         <DialogHeader>
           <DialogTitle>{t("clone.title")}</DialogTitle>
-          <DialogDescription>{t("clone.description")}</DialogDescription>
+          <DialogDescription>
+            {t(remoteWorkspaceId ? "clone.remoteDescription" : "clone.description")}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -104,22 +114,28 @@ export function CloneRepositoryDialog({
                 id="clone-destination"
                 value={destination}
                 onChange={(event) => setDestination(event.target.value)}
-                placeholder={t("clone.destinationPlaceholder")}
+                placeholder={t(
+                  remoteWorkspaceId
+                    ? "clone.remoteDestinationPlaceholder"
+                    : "clone.destinationPlaceholder"
+                )}
                 disabled={cloning}
                 autoComplete="off"
                 data-testid="clone-destination"
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => void browse()}
-                disabled={cloning}
-                aria-label={t("clone.browse")}
-                data-testid="clone-browse"
-              >
-                <FolderOpenIcon className="size-4" />
-              </Button>
+              {!remoteWorkspaceId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => void browse()}
+                  disabled={cloning}
+                  aria-label={t("clone.browse")}
+                  data-testid="clone-browse"
+                >
+                  <FolderOpenIcon className="size-4" />
+                </Button>
+              )}
             </div>
           </div>
           {error && (
@@ -152,7 +168,7 @@ export function CloneRepositoryDialog({
           <Button
             type="button"
             onClick={() => void submit()}
-            disabled={!remoteUrl.trim() || !destination.trim() || cloning}
+            disabled={!available || !remoteUrl.trim() || !destination.trim() || cloning}
             data-testid="clone-submit"
           >
             {cloning && <Spinner className="size-4" />}

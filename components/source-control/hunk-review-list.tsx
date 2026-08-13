@@ -35,6 +35,7 @@ interface Props {
   diff: GitDiff
   /** Stage one hunk patch (existing git stage path). */
   onStagePatch: (patch: string) => Promise<GitActionResult | void>
+  canStage?: boolean
   /** Invalidate the cached diff so it re-fetches after applying. */
   onInvalidate: () => void
   /** Collapsed shows only the header bar so the diff above keeps the space. */
@@ -49,6 +50,7 @@ export function HunkReviewList({
   change,
   diff,
   onStagePatch,
+  canStage = true,
   onInvalidate,
   collapsed = false,
   onToggleCollapse,
@@ -235,7 +237,7 @@ export function HunkReviewList({
           type="button"
           size="sm"
           className={cn("w-full", density === "touch" && "h-11")}
-          disabled={applying || acceptedCount === 0}
+          disabled={!canStage || applying || acceptedCount === 0}
           onClick={() => void applyAccepted()}
           data-testid="apply-accepted"
         >

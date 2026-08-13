@@ -55,7 +55,8 @@ interface SyncToolbarProps {
   actions: Pick<
     UseGitActionsResult,
     "fetch" | "pull" | "push" | "sync" | "discardAll" | "mergeAbort" | "reset"
-  >
+  > &
+    Partial<Pick<UseGitActionsResult, "can">>
   onOpenStash: () => void
   onOpenTimeline: () => void
   onOpenRemotes: () => void
@@ -68,12 +69,13 @@ interface SyncToolbarProps {
 interface IconBtnProps {
   label: string
   busy: boolean
+  disabled?: boolean
   onClick: () => void
   children: React.ReactNode
   testId: string
 }
 
-function IconBtn({ label, busy, onClick, children, testId }: IconBtnProps) {
+function IconBtn({ label, busy, disabled, onClick, children, testId }: IconBtnProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -83,7 +85,7 @@ function IconBtn({ label, busy, onClick, children, testId }: IconBtnProps) {
           className="size-7"
           aria-label={label}
           onClick={onClick}
-          disabled={busy}
+          disabled={busy || disabled}
           data-testid={testId}
         >
           {busy ? <Spinner className="size-3.5" /> : children}
@@ -115,6 +117,7 @@ export function SyncToolbar({
   const canForcePush = branch !== null && upstream !== null
   // Undoing a commit mid-merge/rebase would corrupt the sequencer state.
   const sequencerBusy = useGitStore((s) => s.repoState?.operationInProgress != null)
+  const can = actions.can ?? (() => true)
 
   const [confirmForcePush, setConfirmForcePush] = useState(false)
   const [confirmDiscardAll, setConfirmDiscardAll] = useState(false)
@@ -135,6 +138,7 @@ export function SyncToolbar({
       <IconBtn
         label={t("actions.sync")}
         busy={ops.sync}
+        disabled={!can("git_sync")}
         onClick={() => void actions.sync()}
         testId="sync-sync"
       >
@@ -143,6 +147,7 @@ export function SyncToolbar({
       <IconBtn
         label={t("actions.pull")}
         busy={ops.pull}
+        disabled={!can("git_pull")}
         onClick={() => void actions.pull({ rebase: prefs.pullRebase })}
         testId="sync-pull"
       >
@@ -152,6 +157,7 @@ export function SyncToolbar({
         <IconBtn
           label={t("actions.publish")}
           busy={ops.push}
+          disabled={!can("git_push")}
           onClick={() => void actions.push({ setUpstream: true })}
           testId="sync-publish"
         >
@@ -161,6 +167,7 @@ export function SyncToolbar({
         <IconBtn
           label={t("actions.push")}
           busy={ops.push}
+          disabled={!can("git_push")}
           onClick={() => void actions.push()}
           testId="sync-push"
         >
@@ -170,6 +177,7 @@ export function SyncToolbar({
       <IconBtn
         label={t("actions.fetch")}
         busy={ops.fetch}
+        disabled={!can("git_fetch")}
         onClick={() => void actions.fetch({ prune: prefs.fetchPrune })}
         testId="sync-fetch"
       >
@@ -195,6 +203,7 @@ export function SyncToolbar({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            disabled={!can("git_pull")}
             onSelect={() => void actions.pull({ rebase: true })}
             data-testid="more-pull-rebase"
           >
@@ -202,6 +211,7 @@ export function SyncToolbar({
             {t("actions.pullRebase")}
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={!can("git_fetch")}
             onSelect={() => void actions.fetch({ prune: true })}
             data-testid="more-fetch-prune"
           >
@@ -210,7 +220,7 @@ export function SyncToolbar({
           </DropdownMenuItem>
           <DropdownMenuItem
             className="text-destructive"
-            disabled={!canForcePush}
+            disabled={!canForcePush || !can("git_push")}
             onSelect={(e) => {
               // preventDefault: opening the confirm dialog from a closing menu
               // races Radix focus restore (sticky body[pointer-events:none]).
@@ -226,6 +236,7 @@ export function SyncToolbar({
           {/* preventDefault on overlay-opening items: opening a Sheet from a
               closing menu races Radix focus restore (sticky pointer-events). */}
           <DropdownMenuItem
+            disabled={!can("git_stash_list")}
             onSelect={(e) => {
               e.preventDefault()
               onOpenStash()
@@ -236,6 +247,7 @@ export function SyncToolbar({
             {t("stash.title")}
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={!can("git_log")}
             onSelect={(e) => {
               e.preventDefault()
               onOpenTimeline()
@@ -246,6 +258,7 @@ export function SyncToolbar({
             {t("timeline.title")}
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={!can("git_remotes")}
             onSelect={(e) => {
               e.preventDefault()
               onOpenRemotes()
@@ -256,6 +269,7 @@ export function SyncToolbar({
             {t("remotes.title")}
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={!can("git_tags")}
             onSelect={(e) => {
               e.preventDefault()
               onOpenTags()
@@ -266,6 +280,7 @@ export function SyncToolbar({
             {t("tags.title")}
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={!can("git_diff_refs_files")}
             onSelect={(e) => {
               e.preventDefault()
               onOpenCompare()
@@ -276,6 +291,7 @@ export function SyncToolbar({
             {t("compare.menuItem")}
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={!can("git_worktree_list")}
             onSelect={(e) => {
               e.preventDefault()
               onOpenWorktrees()
@@ -287,7 +303,7 @@ export function SyncToolbar({
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => void actions.reset("soft", "HEAD~1")}
-            disabled={sequencerBusy}
+            disabled={sequencerBusy || !can("git_reset")}
             data-testid="more-undo-commit"
           >
             <Undo2Icon className="size-3.5" />
@@ -295,6 +311,7 @@ export function SyncToolbar({
           </DropdownMenuItem>
           {isMerging && (
             <DropdownMenuItem
+              disabled={!can("git_merge_abort")}
               onSelect={() => void actions.mergeAbort()}
               data-testid="more-abort-merge"
             >
@@ -305,6 +322,7 @@ export function SyncToolbar({
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive"
+            disabled={!can("git_discard_all")}
             onSelect={(e) => {
               e.preventDefault()
               requestDiscardAll()

@@ -280,4 +280,22 @@ describe("SyncToolbar", () => {
     await user.click(await screen.findByTestId("discard-confirm-action"))
     expect(actions.discardAll).toHaveBeenCalledWith(false)
   })
+
+  it("gates toolbar and overflow controls by their exact commands", async () => {
+    const user = userEvent.setup()
+    const actions = { ...makeActions(), can: jest.fn().mockReturnValue(false) }
+    renderToolbar(actions)
+    for (const id of ["sync-sync", "sync-pull", "sync-push", "sync-fetch"]) {
+      expect(screen.getByTestId(id)).toBeDisabled()
+    }
+    await user.click(screen.getByTestId("sync-more"))
+    for (const id of [
+      "more-pull-rebase",
+      "more-fetch-prune",
+      "more-force-push",
+      "more-discard-all",
+    ]) {
+      expect(await screen.findByTestId(id)).toHaveAttribute("data-disabled")
+    }
+  })
 })

@@ -28,7 +28,8 @@ interface RemotePanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   rootDir: string
-  actions: Pick<UseGitActionsResult, "remoteAdd" | "remoteRemove">
+  actions: Pick<UseGitActionsResult, "remoteAdd" | "remoteRemove"> &
+    Partial<Pick<UseGitActionsResult, "can">>
 }
 
 export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePanelProps) {
@@ -36,6 +37,7 @@ export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePane
   const [remotes, setRemotes] = useState<GitRemote[]>([])
   const [name, setName] = useState("")
   const [url, setUrl] = useState("")
+  const can = actions.can ?? (() => true)
 
   const reload = useCallback(async () => {
     setRemotes(await gitRemotes(rootDir))
@@ -103,7 +105,7 @@ export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePane
           />
           <Button
             onClick={() => void doAdd()}
-            disabled={!name.trim() || !url.trim()}
+            disabled={!name.trim() || !url.trim() || !can("git_remote_add")}
             className="gap-1.5"
             data-testid="remote-add"
           >
@@ -143,6 +145,7 @@ export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePane
                   aria-label={t("remotes.remove")}
                   onClick={() => void doRemove(r.name)}
                   data-testid={`remote-remove-${r.name}`}
+                  disabled={!can("git_remote_remove")}
                 >
                   <Trash2Icon className="size-3" />
                 </Button>

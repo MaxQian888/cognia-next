@@ -90,8 +90,17 @@ export function getSidebarCatalog(
     if (platform === "mobile" && meta.desktopOnly) return false
     if (runtimeSnapshot) {
       const contract = getSurfaceContract(meta.id)
+      if (
+        platform !== "tauri" &&
+        runtimeSnapshot.target === null &&
+        contract?.standalone === "hidden"
+      ) {
+        return false
+      }
       return contract ? shouldShowSurface(contract, runtimeSnapshot) : false
     }
+    const contract = getSurfaceContract(meta.id)
+    if (contract?.standalone === "hidden") return false
     return !meta.desktopOnly
   }).map((m) => ({
     ...m,

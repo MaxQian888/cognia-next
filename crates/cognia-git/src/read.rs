@@ -20,6 +20,22 @@ pub fn open_repo(path: &str) -> Result<Repository> {
     Repository::discover(path).map_err(|_| GitError::NotARepo(path.to_string().into()))
 }
 
+/// Canonical work-tree and Git-directory boundaries for remote authorization.
+pub fn repository_boundaries(path: &str) -> Result<(PathBuf, PathBuf)> {
+    let repo = open_repo(path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::NotARepo("bare repositories are not remotely addressable".into()))?
+        .canonicalize()
+        .map_err(|error| {
+            GitError::CommandFailed(format!("canonicalize repository root: {error}").into())
+        })?;
+    let git_dir = repo.path().canonicalize().map_err(|error| {
+        GitError::CommandFailed(format!("canonicalize Git directory: {error}").into())
+    })?;
+    Ok((workdir, git_dir))
+}
+
 /// Validate a renderer/plugin file operand before it reaches either git2 or
 /// direct filesystem I/O. Source-control file paths are always repo-relative;
 /// accepting an absolute path or `..` would let a `git:read`/`git:write`
@@ -272,6 +288,20 @@ mod tests {
             open_repo(&tmp.path().to_string_lossy()),
             Err(GitError::NotARepo(_))
         ));
+    }
+
+    #[test]
+    fn repository_boundaries_are_canonical_and_reject_bare_repositories() {
+        let (tmp, repo) = init_repo();
+        let nested = tmp.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let (workdir, git_dir) = repository_boundaries(&nested.to_string_lossy()).unwrap();
+        assert_eq!(workdir, tmp.path().canonicalize().unwrap());
+        assert_eq!(git_dir, repo.path().canonicalize().unwrap());
+
+        let bare = TempDir::new().unwrap();
+        Repository::init_bare(bare.path()).unwrap();
+        assert!(repository_boundaries(&bare.path().to_string_lossy()).is_err());
     }
 
     #[test]

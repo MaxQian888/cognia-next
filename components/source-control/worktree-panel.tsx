@@ -40,7 +40,9 @@ import {
   gitWorktreeList,
   gitWorktreePrune,
   gitWorktreeRemove,
+  runGitUserAction,
 } from "@/lib/git/commands"
+import { isRemoteGitTarget } from "@/lib/git/target"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { asGitError, type GitWorktree } from "@/types/git"
 
@@ -48,6 +50,7 @@ interface WorktreePanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   rootDir: string
+  canMutate?: (command: string) => boolean
 }
 
 type WorktreeSuccessKey = "worktrees.created" | "worktrees.pruned" | "worktrees.removed"
@@ -59,7 +62,7 @@ function errorDetail(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProps) {
+export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: WorktreePanelProps) {
   const t = useTranslations("sourceControl")
   const tRef = useRef(t)
   const [worktrees, setWorktrees] = useState<GitWorktree[]>([])
@@ -71,6 +74,8 @@ export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProp
   const [removeTarget, setRemoveTarget] = useState<GitWorktree | null>(null)
   const [forceRemove, setForceRemove] = useState(false)
   const [deleteBranch, setDeleteBranch] = useState(false)
+  const remote = isRemoteGitTarget(rootDir)
+  const can = canMutate ?? (() => true)
 
   useEffect(() => {
     tRef.current = t
@@ -100,12 +105,13 @@ export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProp
   }, [open, rootDir])
 
   const runMutation = async (
+    command: string,
     fn: () => Promise<void>,
     successKey: WorktreeSuccessKey
   ): Promise<boolean> => {
     setBusy(true)
     try {
-      await fn()
+      await runGitUserAction(command, fn)
       await reload()
       toast.success(t(successKey))
       return true
@@ -131,6 +137,7 @@ export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProp
     const nextPath = path.trim()
     if (!nextBranch || !nextPath) return
     const created = await runMutation(
+      "git_worktree_add",
       () => gitWorktreeAdd(rootDir, nextPath, nextBranch, baseRef.trim() || undefined),
       "worktrees.created"
     )
@@ -150,6 +157,7 @@ export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProp
   const removeWorktree = async () => {
     if (!removeTarget || removeTarget.isMain) return
     const removed = await runMutation(
+      "git_worktree_remove",
       () =>
         gitWorktreeRemove(
           rootDir,
@@ -162,7 +170,8 @@ export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProp
     if (removed) setRemoveTarget(null)
   }
 
-  const pruneWorktrees = () => runMutation(() => gitWorktreePrune(rootDir), "worktrees.pruned")
+  const pruneWorktrees = () =>
+    runMutation("git_worktree_prune", () => gitWorktreePrune(rootDir), "worktrees.pruned")
 
   return (
     <>
@@ -200,26 +209,31 @@ export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProp
                 <Input
                   id="worktree-path"
                   value={path}
-                  readOnly
-                  placeholder={t("worktrees.pathPlaceholder")}
+                  readOnly={!remote}
+                  onChange={(event) => remote && setPath(event.target.value)}
+                  placeholder={
+                    remote ? t("worktrees.relativePathPlaceholder") : t("worktrees.pathPlaceholder")
+                  }
                   className="min-w-0"
                   data-testid="worktree-path"
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void chooseDirectory()}
-                  disabled={busy}
-                  data-testid="worktree-pick-directory"
-                >
-                  <FolderOpenIcon className="size-3.5" />
-                  {t("worktrees.chooseDirectory")}
-                </Button>
+                {!remote && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void chooseDirectory()}
+                    disabled={busy}
+                    data-testid="worktree-pick-directory"
+                  >
+                    <FolderOpenIcon className="size-3.5" />
+                    {t("worktrees.chooseDirectory")}
+                  </Button>
+                )}
               </div>
             </div>
             <Button
               onClick={() => void createWorktree()}
-              disabled={busy || !branch.trim() || !path.trim()}
+              disabled={busy || !branch.trim() || !path.trim() || !can("git_worktree_add")}
               className="gap-1.5"
               data-testid="worktree-create"
             >
@@ -237,7 +251,7 @@ export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProp
               variant="ghost"
               className="h-7 gap-1.5 text-xs"
               onClick={() => void pruneWorktrees()}
-              disabled={busy || loading}
+              disabled={busy || loading || !can("git_worktree_prune")}
               data-testid="worktree-prune"
             >
               <RefreshCwIcon className="size-3.5" />
@@ -278,21 +292,24 @@ export function WorktreePanel({ open, onOpenChange, rootDir }: WorktreePanelProp
                         </div>
                       )}
                     </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs"
-                      onClick={() => openPathAsWorkspace(worktree.path)}
-                      data-testid={`worktree-open-${worktree.path}`}
-                    >
-                      {t("worktrees.open")}
-                    </Button>
+                    {!remote && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs"
+                        onClick={() => openPathAsWorkspace(worktree.path)}
+                        data-testid={`worktree-open-${worktree.path}`}
+                      >
+                        {t("worktrees.open")}
+                      </Button>
+                    )}
                     {!worktree.isMain && (
                       <Button
                         size="icon"
                         variant="ghost"
                         className="size-7 text-destructive"
                         aria-label={t("worktrees.remove")}
+                        disabled={!can("git_worktree_remove")}
                         onClick={() => requestRemove(worktree)}
                         data-testid={`worktree-remove-${worktree.path}`}
                       >

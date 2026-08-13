@@ -85,6 +85,13 @@ describe("ConflictResolver", () => {
     fireEvent.click(screen.getByTestId("accept-both"))
     expect(onResolve).toHaveBeenCalledWith({ mergedContent: "ours line\ntheirs line\n" })
   })
+
+  it("fails closed when conflict resolution is unavailable", () => {
+    render(<ConflictResolver conflict={conflict} />)
+    expect(screen.getByTestId("accept-ours")).toBeDisabled()
+    expect(screen.getByTestId("accept-theirs")).toBeDisabled()
+    expect(screen.getByTestId("accept-both")).toBeDisabled()
+  })
 })
 
 describe("mergeBoth", () => {

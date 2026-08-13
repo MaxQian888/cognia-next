@@ -38,4 +38,17 @@ describe("BranchHeader", () => {
     fireEvent.click(screen.getByTestId("branch-header"))
     expect(screen.getByTestId("branch-picker")).toBeInTheDocument()
   })
+
+  it("disables branch selection when branch reads are unavailable", () => {
+    render(
+      <BranchHeader
+        branch="main"
+        ahead={0}
+        behind={0}
+        branches={branches}
+        actions={{ ...actions, can: () => false }}
+      />
+    )
+    expect(screen.getByTestId("branch-header")).toBeDisabled()
+  })
 })

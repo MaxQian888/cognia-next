@@ -33,7 +33,8 @@ interface CommitBoxProps {
   rootDir: string
   stagedCount: number
   committing: boolean
-  actions: Pick<UseGitActionsResult, "commit" | "push" | "sync" | "stage">
+  actions: Pick<UseGitActionsResult, "commit" | "push" | "sync" | "stage"> &
+    Partial<Pick<UseGitActionsResult, "can">>
 }
 
 export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitBoxProps) {
@@ -58,11 +59,14 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
   // arrows only step history on the first/last line, leaving normal caret
   // movement inside a multi-line message intact). Persisted per repo root.
   const history = useCommandHistory({ persistKey: `cmdhist:commit:${rootDir}` })
+  const can = actions.can ?? (() => true)
 
   const canCommit =
     (draft.trim().length > 0 || amend) &&
     (stagedCount > 0 || amend || smartWillStage) &&
-    !committing
+    !committing &&
+    can("git_commit") &&
+    (!smartWillStage || can("git_stage"))
 
   const doCommit = useCallback(
     async (afterOverride?: PostCommitAction, retryAfterIdentity = false) => {
@@ -185,14 +189,14 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem
-              disabled={!canCommit}
+              disabled={!canCommit || !can("git_push")}
               onSelect={() => void doCommit("push")}
               data-testid="commit-and-push"
             >
               {t("commit.commitAndPush")}
             </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={!canCommit}
+              disabled={!canCommit || !can("git_sync")}
               onSelect={() => void doCommit("sync")}
               data-testid="commit-and-sync"
             >

@@ -15,8 +15,13 @@
 
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
-import { transport } from "@/lib/tauri"
+import { transport as baseTransport } from "@/lib/tauri"
+import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
+import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
+import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { resolveOperationAvailability } from "@/lib/runtime/operation-availability"
 import { languageFromPath } from "./language-map"
+import { gitTargetArgs, gitTargetFromRemote, isRemoteGitTarget, parseGitTarget } from "./target"
 import {
   EMPTY_REPO_STATE,
   EMPTY_STATUS,
@@ -41,6 +46,140 @@ import {
   type RebaseTodoEntry,
 } from "@/types/git"
 
+export interface RemoteGitWorkspace {
+  workspaceId: string
+  displayName: string
+  repositoryState: GitRepoState
+}
+
+interface PendingGitApproval {
+  command: string
+  token: string
+}
+
+const pendingGitApprovals: PendingGitApproval[] = []
+
+function prepareGitTransportArgs(command: string, rawArgs: unknown): Record<string, unknown> {
+  const args = { ...((rawArgs ?? {}) as Record<string, unknown>) }
+  const repoPath = typeof args.repoPath === "string" ? args.repoPath : null
+  if (!isTauri() && repoPath && !isRemoteGitTarget(repoPath)) {
+    throw new Error("Remote Git requests require an opaque workspace target")
+  }
+  if (repoPath && isRemoteGitTarget(repoPath)) {
+    Object.assign(args, gitTargetArgs(repoPath))
+    delete args.repoPath
+    if (command === "git_worktree_add" && typeof args.path === "string") {
+      args.destinationRelativePath = args.path
+      delete args.path
+    }
+    if (command === "git_worktree_remove" && typeof args.path === "string") {
+      args.worktreeRelativePath = args.path
+      delete args.path
+    }
+  }
+  if (command === "git_worktree_commit" && typeof args.worktreePath === "string") {
+    const worktreePath = args.worktreePath
+    if (isRemoteGitTarget(worktreePath)) {
+      const target = parseGitTarget(worktreePath)
+      if (target.kind === "remote") {
+        args.workspaceId = target.workspaceId
+        args.worktreeRelativePath = target.relativePath
+        delete args.worktreePath
+      }
+    } else if (!isTauri()) {
+      throw new Error("Remote Git requests require an opaque workspace target")
+    }
+  }
+  if (command === "git_init" && typeof args.path === "string" && isRemoteGitTarget(args.path)) {
+    Object.assign(args, gitTargetArgs(args.path))
+    delete args.path
+  } else if (command === "git_init" && typeof args.path === "string" && !isTauri()) {
+    throw new Error("Remote Git requests require an opaque workspace target")
+  }
+  if (
+    command === "git_clone" &&
+    typeof args.destination === "string" &&
+    isRemoteGitTarget(args.destination)
+  ) {
+    const target = parseGitTarget(args.destination)
+    if (target.kind === "remote") {
+      args.workspaceId = target.workspaceId
+      args.destinationRelativePath = target.relativePath
+      delete args.destination
+    }
+  } else if (command === "git_clone" && typeof args.destination === "string" && !isTauri()) {
+    throw new Error("Remote Git requests require an opaque workspace target")
+  }
+  const descriptor = getCommandDescriptor(command)
+  if (
+    descriptor?.approval === "interactive" &&
+    Object.values(args).some((value) => typeof value === "string" && isRemoteGitTarget(value))
+  ) {
+    throw new Error(`Remote Git target for ${command} was not normalized`)
+  }
+  const pendingIndex = pendingGitApprovals.findIndex((approval) => approval.command === command)
+  if (pendingIndex >= 0) {
+    const [approval] = pendingGitApprovals.splice(pendingIndex, 1)
+    args.adminLease = approval.token
+  }
+  return args
+}
+
+const transport = {
+  call<T>(command: string, args?: unknown): Promise<T> {
+    return baseTransport.call<T>(command, prepareGitTransportArgs(command, args))
+  },
+}
+
+export function getGitOperationAvailability(
+  command: string
+): ReturnType<typeof resolveOperationAvailability> {
+  return resolveGitOperationAvailability(getRuntimeSnapshot(), command)
+}
+
+export function resolveGitOperationAvailability(
+  snapshot: ReturnType<typeof getRuntimeSnapshot>,
+  command: string
+): ReturnType<typeof resolveOperationAvailability> {
+  const availability = resolveOperationAvailability({ snapshot, command })
+  if (availability.state !== "available") return availability
+  const descriptor = getCommandDescriptor(command)
+  if (
+    snapshot.target?.kind === "companion" &&
+    descriptor?.approval === "interactive" &&
+    (!snapshot.host?.operations.includes("host_admin_lease_issue") ||
+      !snapshot.host.grants.includes("host.admin"))
+  ) {
+    return {
+      state: "requires-grant",
+      reason: "missing-grant",
+      requiredGrant: "host.admin",
+    }
+  }
+  return availability
+}
+
+/** Bind one exact 120-second approval lease to a user-triggered Git mutation. */
+export async function runGitUserAction<T>(
+  command: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  if (isTauri()) return operation()
+  const availability = getGitOperationAvailability(command)
+  if (availability.state !== "available") {
+    throw new Error(`Git operation unavailable: ${availability.reason}`)
+  }
+  const lease = await issueHostAdminLease([command], 120)
+  const approval = { command, token: lease.token }
+  pendingGitApprovals.push(approval)
+  try {
+    return await operation()
+  } finally {
+    const index = pendingGitApprovals.indexOf(approval)
+    if (index >= 0) pendingGitApprovals.splice(index, 1)
+  }
+}
+
 /**
  * Whether a transport that can actually reach the native git backend is
  * active: Tauri desktop, the Capacitor mobile shell, or a web client paired
@@ -64,10 +203,20 @@ export function hasGitBridge(): boolean {
  * can never navigate to a dead panel.
  */
 export function isSourceControlUiAvailable(): boolean {
-  return isTauri()
+  if (isTauri()) return true
+  const snapshot = getRuntimeSnapshot()
+  return (
+    snapshot.target?.kind === "companion" &&
+    resolveGitOperationAvailability(snapshot, "git_workspace_list").state === "available"
+  )
 }
 
 // ----------------------------------------------------------------- reads
+
+export async function gitWorkspaceList(): Promise<RemoteGitWorkspace[]> {
+  if (!hasGitBridge() || isTauri()) return []
+  return transport.call<RemoteGitWorkspace[]>("git_workspace_list", {})
+}
 
 export async function gitIsRepo(repoPath: string): Promise<boolean> {
   if (!hasGitBridge()) return false
@@ -76,7 +225,13 @@ export async function gitIsRepo(repoPath: string): Promise<boolean> {
 
 export async function gitRepoState(repoPath: string): Promise<GitRepoState> {
   if (!hasGitBridge()) return EMPTY_REPO_STATE
-  return transport.call<GitRepoState>("git_repo_state", { repoPath })
+  const state = await transport.call<GitRepoState>("git_repo_state", { repoPath })
+  const target = parseGitTarget(repoPath)
+  if (target.kind !== "remote" || !state.rootDir) return state
+  return {
+    ...state,
+    rootDir: gitTargetFromRemote(target.workspaceId, state.rootDir),
+  }
 }
 
 export async function gitStatus(repoPath: string): Promise<GitStatus> {
@@ -493,7 +648,13 @@ export async function gitInit(path: string): Promise<void> {
 /** Clone a remote repository and return the canonical cloned worktree path. */
 export async function gitClone(remoteUrl: string, destination: string): Promise<string> {
   if (!hasGitBridge()) return ""
-  return transport.call<string>("git_clone", { remoteUrl, destination })
+  const cloned = await transport.call<string | { workspaceId: string; relativePath: string }>(
+    "git_clone",
+    { remoteUrl, destination }
+  )
+  return typeof cloned === "string"
+    ? cloned
+    : gitTargetFromRemote(cloned.workspaceId, cloned.relativePath)
 }
 
 /** Resolve the repository's effective local/global commit identity. */

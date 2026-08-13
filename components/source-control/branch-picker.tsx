@@ -34,7 +34,8 @@ interface BranchPickerProps {
   actions: Pick<
     UseGitActionsResult,
     "checkout" | "createBranch" | "deleteBranch" | "renameBranch" | "rebase" | "merge"
-  >
+  > &
+    Partial<Pick<UseGitActionsResult, "can">>
   onPicked?: () => void
 }
 
@@ -43,6 +44,7 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
   const { prefs } = useSourceControlPrefs()
   const [mode, setMode] = useState<"create" | "rename">("create")
   const [name, setName] = useState("")
+  const can = actions.can ?? (() => true)
 
   // Order per the branch-sort preference; "default" keeps the backend order.
   const orderedBranches = useMemo(
@@ -83,6 +85,7 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                 }}
                 className="flex items-center gap-2"
                 data-testid={`branch-item-${branch.name}`}
+                disabled={!can("git_checkout_branch")}
               >
                 <GitBranchIcon className="size-3.5 shrink-0 text-muted-foreground" />
                 <span
@@ -107,6 +110,7 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                       })
                     }}
                     data-testid={`branch-merge-${branch.name}`}
+                    disabled={!can("git_merge")}
                   >
                     <GitMergeIcon className="size-3" />
                   </Button>
@@ -125,6 +129,7 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                       })
                     }}
                     data-testid={`branch-rebase-${branch.name}`}
+                    disabled={!can("git_rebase")}
                   >
                     <GitCompareArrowsIcon className="size-3" />
                   </Button>
@@ -141,6 +146,7 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
                       void actions.deleteBranch(branch.name, false)
                     }}
                     data-testid={`branch-delete-${branch.name}`}
+                    disabled={!can("git_delete_branch")}
                   >
                     <Trash2Icon className="size-3" />
                   </Button>
@@ -192,7 +198,9 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
           <Button
             size="icon"
             className="size-7 shrink-0"
-            disabled={!name.trim()}
+            disabled={
+              !name.trim() || !can(mode === "create" ? "git_create_branch" : "git_rename_branch")
+            }
             onClick={() => void submit()}
             aria-label={mode === "create" ? t("branches.create") : t("branches.rename")}
             data-testid="branch-submit"

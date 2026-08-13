@@ -107,4 +107,16 @@ describe("BranchPicker", () => {
     await waitFor(() => expect(actions.checkout).toHaveBeenCalled())
     expect(onPicked).not.toHaveBeenCalled()
   })
+
+  it("disables every branch mutation independently when unavailable", () => {
+    const actions = { ...makeActions(), can: jest.fn().mockReturnValue(false) }
+    render(<BranchPicker branches={branches} actions={actions} />)
+
+    expect(screen.getByTestId("branch-item-feature")).toHaveAttribute("data-disabled", "true")
+    expect(screen.getByTestId("branch-merge-feature")).toBeDisabled()
+    expect(screen.getByTestId("branch-rebase-feature")).toBeDisabled()
+    expect(screen.getByTestId("branch-delete-feature")).toBeDisabled()
+    fireEvent.change(screen.getByTestId("branch-name-input"), { target: { value: "blocked" } })
+    expect(screen.getByTestId("branch-submit")).toBeDisabled()
+  })
 })

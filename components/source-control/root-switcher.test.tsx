@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { WorkspaceRoot } from "@/types/workspace"
 import { RootSwitcher } from "./root-switcher"
+import { gitTargetFromRemote } from "@/lib/git/target"
 
 const setRootDir = jest.fn()
 let gitRootDir = "/repo/a"
@@ -81,5 +82,29 @@ describe("RootSwitcher", () => {
     )
 
     expect(screen.getByTestId("root-switcher")).toHaveTextContent("Resource API")
+  })
+
+  it("switches among opaque remote workspaces without exposing paths", async () => {
+    const user = userEvent.setup()
+    const onSelect = jest.fn()
+    const remoteWorkspaces = [
+      {
+        workspaceId: "a",
+        displayName: "Alpha",
+        repositoryState: { isRepo: true, rootDir: "repo-a" },
+      },
+      {
+        workspaceId: "b",
+        displayName: "Beta",
+        repositoryState: { isRepo: true, rootDir: "repo-b" },
+      },
+    ] as never
+    gitRootDir = gitTargetFromRemote("a", "repo-a")
+    render(<RootSwitcher remoteWorkspaces={remoteWorkspaces} onSelectRemoteWorkspace={onSelect} />)
+    expect(screen.getByTestId("root-switcher")).toHaveTextContent("Alpha")
+    expect(screen.queryByText("repo-a")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("root-switcher"))
+    await user.click(await screen.findByTestId("root-option-b"))
+    expect(onSelect).toHaveBeenCalledWith(remoteWorkspaces[1])
   })
 })

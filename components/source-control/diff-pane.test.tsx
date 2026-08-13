@@ -149,7 +149,9 @@ describe("DiffPane", () => {
 
   it("does not show the review list for a staged diff", async () => {
     render(<DiffPane rootDir="/r" path="a.ts" staged actions={makeActions()} />)
-    await screen.findByTestId("diff-viewer-stub")
+    await waitFor(() =>
+      expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-has-diff", "yes")
+    )
     expect(screen.queryByTestId("hunk-review-list")).not.toBeInTheDocument()
   })
 
@@ -243,5 +245,16 @@ describe("DiffPane", () => {
     render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
     await screen.findByTestId("diff-viewer-stub")
     expect(gitDiffFileMock).not.toHaveBeenCalled()
+  })
+
+  it("omits every unavailable hunk mutation", async () => {
+    const actions = { ...makeActions(), can: jest.fn().mockReturnValue(false) }
+    render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={actions} />)
+    await waitFor(() =>
+      expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-has-diff", "yes")
+    )
+    expect(screen.queryByTestId("stub-hunk-stage")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("stub-hunk-discard")).not.toBeInTheDocument()
+    expect(screen.getByTestId("apply-accepted")).toBeDisabled()
   })
 })

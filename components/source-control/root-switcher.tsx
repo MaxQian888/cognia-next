@@ -24,6 +24,8 @@ import {
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { WorkspaceRoot } from "@/types/workspace"
+import type { RemoteGitWorkspace } from "@/lib/git/commands"
+import { gitTargetFromRemote } from "@/lib/git/target"
 
 const EMPTY_ROOTS: WorkspaceRoot[] = []
 
@@ -40,9 +42,15 @@ interface RootSwitcherProps {
    * globally active workspace.
    */
   roots?: WorkspaceRoot[]
+  remoteWorkspaces?: RemoteGitWorkspace[]
+  onSelectRemoteWorkspace?: (workspace: RemoteGitWorkspace) => void
 }
 
-export function RootSwitcher({ roots: explicitRoots }: RootSwitcherProps = {}) {
+export function RootSwitcher({
+  roots: explicitRoots,
+  remoteWorkspaces,
+  onSelectRemoteWorkspace,
+}: RootSwitcherProps = {}) {
   const t = useTranslations("sourceControl")
   const rootDir = useGitStore((s) => s.rootDir)
   const setRootDir = useGitStore((s) => s.setRootDir)
@@ -52,6 +60,53 @@ export function RootSwitcher({ roots: explicitRoots }: RootSwitcherProps = {}) {
     return project?.roots ?? EMPTY_ROOTS
   })
   const roots = explicitRoots ?? activeProjectRoots
+  const remote = remoteWorkspaces ?? []
+
+  if (remoteWorkspaces) {
+    if (remote.length <= 1) return null
+    const current = remote.find(
+      (workspace) =>
+        gitTargetFromRemote(workspace.workspaceId, workspace.repositoryState.rootDir ?? "") ===
+        rootDir
+    )
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-1.5 text-xs"
+            aria-label={t("roots.switchRoot")}
+            data-testid="root-switcher"
+          >
+            <FolderGitIcon className="size-3.5" />
+            <span className="max-w-32 truncate">{current?.displayName ?? t("roots.select")}</span>
+            <ChevronsUpDownIcon className="size-3 opacity-60" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          {remote.map((workspace) => {
+            const target = gitTargetFromRemote(
+              workspace.workspaceId,
+              workspace.repositoryState.rootDir ?? ""
+            )
+            return (
+              <DropdownMenuItem
+                key={workspace.workspaceId}
+                onSelect={() => onSelectRemoteWorkspace?.(workspace)}
+                data-testid={`root-option-${workspace.workspaceId}`}
+              >
+                <CheckIcon
+                  className={cn("size-3.5", target === rootDir ? "opacity-100" : "opacity-0")}
+                />
+                <span className="min-w-0 flex-1 truncate">{workspace.displayName}</span>
+              </DropdownMenuItem>
+            )
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
 
   // Only meaningful when the active workspace mounts more than one directory.
   if (roots.length <= 1) return null

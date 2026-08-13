@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useAccountStore } from "@/stores/account/account-store"
 import { createLogger } from "@cognia/logging"
 
 const log = createLogger("files.allowed-roots-sync")
@@ -22,8 +23,25 @@ export async function syncAllowedRootsToRust(): Promise<void> {
   try {
     const projects = useProjectStore.getState().projects
     const paths = Array.from(new Set(projects.flatMap((p) => allRootPaths(p))))
-    if (paths.length === 0) return
-    await invoke("fs_set_allowed_roots", { paths })
+    const accountId = useAccountStore.getState().unlockedAccountId
+    const seenPaths = new Set<string>()
+    const gitWorkspaces = accountId
+      ? projects.flatMap((project) =>
+          (project.roots ?? []).flatMap((root) => {
+            const path = root.path.trim()
+            if (!path || seenPaths.has(path)) return []
+            seenPaths.add(path)
+            return [
+              {
+                workspaceId: root.id,
+                displayName: root.label?.trim() || project.name,
+                path,
+              },
+            ]
+          })
+        )
+      : []
+    await invoke("fs_set_allowed_roots", { paths, accountId, gitWorkspaces })
   } catch (e) {
     // A failed sync only means the shadow check logs a few extra out-of-root
     // accesses until the next successful sync — never break the app.

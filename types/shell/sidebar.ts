@@ -50,7 +50,6 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     route: "/source-control",
     i18nKey: "sourceControl",
     group: "auxiliary",
-    desktopOnly: true,
   },
   { id: "agent-runs", route: "/agent-runs", i18nKey: "agentRuns", group: "auxiliary" },
   { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary" },

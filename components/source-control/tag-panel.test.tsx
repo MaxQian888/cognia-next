@@ -105,4 +105,20 @@ describe("TagPanel", () => {
     await waitFor(() => expect(gitTags).toHaveBeenCalled())
     expect(screen.getByTestId("tag-panel")).toBeInTheDocument()
   })
+
+  it("disables every unavailable tag mutation", async () => {
+    render(
+      <TagPanel
+        open
+        rootDir="/repo"
+        onOpenChange={() => {}}
+        actions={{ ...makeActions(), can: () => false }}
+      />
+    )
+    expect(await screen.findByTestId("tag-entry-v1.0")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("tag-name"), { target: { value: "blocked" } })
+    expect(screen.getByTestId("tag-create")).toBeDisabled()
+    expect(screen.getByTestId("tag-push-v1.0")).toBeDisabled()
+    expect(screen.getByTestId("tag-delete-v1.0")).toBeDisabled()
+  })
 })

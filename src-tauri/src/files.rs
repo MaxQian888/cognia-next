@@ -6,7 +6,7 @@
 use gray_matter::{engine::YAML, Matter, Pod};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
@@ -42,6 +42,30 @@ fn allowed_roots_registry() -> &'static RwLock<HashSet<String>> {
 fn active_workspace_roots_registry() -> &'static RwLock<HashSet<String>> {
     static REG: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
     REG.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorkspaceRegistration {
+    pub workspace_id: String,
+    pub display_name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteGitWorkspace {
+    pub workspace_id: String,
+    pub display_name: String,
+    #[serde(skip_serializing)]
+    pub path: String,
+}
+
+fn remote_git_workspaces_registry(
+) -> &'static RwLock<HashMap<String, HashMap<String, RemoteGitWorkspace>>> {
+    static REG: OnceLock<RwLock<HashMap<String, HashMap<String, RemoteGitWorkspace>>>> =
+        OnceLock::new();
+    REG.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 /// Normalize a root to a stable key: trim, unify separators to `/`, drop a
@@ -81,6 +105,90 @@ pub fn set_allowed_roots(paths: Vec<String>) {
     for path in paths {
         add_allowed_root(path);
     }
+}
+
+fn set_remote_git_workspaces(
+    account_id: Option<String>,
+    registrations: Vec<GitWorkspaceRegistration>,
+) {
+    let Ok(mut registry) = remote_git_workspaces_registry().write() else {
+        return;
+    };
+    let Some(account_id) = account_id.filter(|value| !value.trim().is_empty()) else {
+        registry.clear();
+        return;
+    };
+    registry.clear();
+    let workspaces = registrations
+        .into_iter()
+        .filter_map(|registration| {
+            let workspace_id = registration.workspace_id.trim().to_string();
+            let display_name = registration.display_name.trim().to_string();
+            let path = normalize_root(&registration.path);
+            if workspace_id.is_empty() || display_name.is_empty() || path.is_empty() {
+                return None;
+            }
+            Some((
+                workspace_id.clone(),
+                RemoteGitWorkspace {
+                    workspace_id,
+                    display_name,
+                    path,
+                },
+            ))
+        })
+        .collect();
+    registry.insert(account_id, workspaces);
+}
+
+pub(crate) fn list_remote_git_workspaces(account_id: &str) -> Vec<RemoteGitWorkspace> {
+    let mut workspaces = remote_git_workspaces_registry()
+        .read()
+        .ok()
+        .and_then(|registry| registry.get(account_id).cloned())
+        .map(|workspaces| workspaces.into_values().collect::<Vec<_>>())
+        .unwrap_or_default();
+    workspaces.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    workspaces
+}
+
+pub(crate) fn resolve_remote_git_workspace_path(
+    account_id: &str,
+    workspace_id: &str,
+    relative_path: Option<&str>,
+) -> Result<(RemoteGitWorkspace, PathBuf), String> {
+    let workspace = remote_git_workspaces_registry()
+        .read()
+        .map_err(|_| "Git workspace registry is unavailable".to_string())?
+        .get(account_id)
+        .and_then(|workspaces| workspaces.get(workspace_id))
+        .cloned()
+        .ok_or_else(|| "Git workspace is not authorized for this account".to_string())?;
+    let relative = relative_path.unwrap_or("").trim();
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            !matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+    {
+        return Err("Git workspace paths must be relative without traversal".to_string());
+    }
+    let root = PathBuf::from(&workspace.path);
+    let target = if relative.is_empty() || relative == "." {
+        root.clone()
+    } else {
+        root.join(relative_path)
+    };
+    if !is_path_within_roots(
+        &target.to_string_lossy(),
+        std::slice::from_ref(&workspace.path),
+    ) {
+        return Err("Git workspace path escapes the authorized root".to_string());
+    }
+    Ok((workspace, target))
 }
 
 /// Seed the structurally-trusted directories at startup: appdata, the home
@@ -203,8 +311,13 @@ pub fn fs_allow_dialog_path(path: String) {
 /// Replace/extend the registered workspace roots from the renderer's active
 /// project. Called whenever `Project.roots` change.
 #[tauri::command]
-pub fn fs_set_allowed_roots(paths: Vec<String>) {
+pub fn fs_set_allowed_roots(
+    paths: Vec<String>,
+    account_id: Option<String>,
+    git_workspaces: Option<Vec<GitWorkspaceRegistration>>,
+) {
     set_allowed_roots(paths);
+    set_remote_git_workspaces(account_id, git_workspaces.unwrap_or_default());
 }
 
 /// Read a text file at the given absolute path. The frontend uses this
@@ -1864,6 +1977,39 @@ mod tests {
         assert!(is_remote_workspace_path_allowed(
             &root.join("f.txt").to_string_lossy()
         ));
+
+        set_remote_git_workspaces(
+            Some("acct-a".into()),
+            vec![GitWorkspaceRegistration {
+                workspace_id: "workspace-a".into(),
+                display_name: "Workspace A".into(),
+                path: root.to_string_lossy().to_string(),
+            }],
+        );
+        let listed = list_remote_git_workspaces("acct-a");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].workspace_id, "workspace-a");
+        assert_eq!(listed[0].display_name, "Workspace A");
+        assert!(list_remote_git_workspaces("acct-b").is_empty());
+        let (_, nested) =
+            resolve_remote_git_workspace_path("acct-a", "workspace-a", Some("nested/repository"))
+                .unwrap();
+        assert_eq!(nested, root.join("nested/repository"));
+        assert!(
+            resolve_remote_git_workspace_path("acct-a", "workspace-a", Some("../escape")).is_err()
+        );
+        assert!(resolve_remote_git_workspace_path("acct-b", "workspace-a", None).is_err());
+
+        set_remote_git_workspaces(
+            Some("acct-b".into()),
+            vec![GitWorkspaceRegistration {
+                workspace_id: "workspace-b".into(),
+                display_name: "Workspace B".into(),
+                path: root.to_string_lossy().to_string(),
+            }],
+        );
+        assert!(list_remote_git_workspaces("acct-a").is_empty());
+        assert_eq!(list_remote_git_workspaces("acct-b").len(), 1);
 
         // Separator + trailing-slash normalization key.
         assert_eq!(normalize_root("C:\\a\\b\\"), "C:/a/b");

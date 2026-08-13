@@ -19,7 +19,8 @@ interface BranchHeaderProps {
   actions: Pick<
     UseGitActionsResult,
     "checkout" | "createBranch" | "deleteBranch" | "renameBranch" | "rebase" | "merge"
-  >
+  > &
+    Partial<Pick<UseGitActionsResult, "can">>
 }
 
 export function BranchHeader({ branch, ahead, behind, branches, actions }: BranchHeaderProps) {
@@ -35,6 +36,7 @@ export function BranchHeader({ branch, ahead, behind, branches, actions }: Branc
           className="h-7 max-w-[60%] gap-1.5 px-2"
           data-testid="branch-header"
           aria-label={t("branches.switch")}
+          disabled={actions.can ? !actions.can("git_branches") : false}
         >
           <GitBranchIcon className="size-3.5 shrink-0" />
           <span className="truncate">{branch ?? t("branches.detached")}</span>

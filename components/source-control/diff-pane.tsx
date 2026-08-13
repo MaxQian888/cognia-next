@@ -15,7 +15,7 @@ import { fileDiffKey, type GitDiff, type GitFileChange, type GitHunk } from "@/t
 import { useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
-import type { GitActionResult } from "@/hooks/git/use-git-actions"
+import type { GitActionResult, UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { DiffViewer, type HunkAction } from "./diff-viewer"
 import { HunkReviewList } from "./hunk-review-list"
 import { AiExplainPopover } from "./ai-explain-popover"
@@ -28,7 +28,7 @@ interface DiffPaneProps {
     stage: (paths: string[], patch?: string) => Promise<GitActionResult | void>
     unstage: (paths: string[], patch?: string) => Promise<GitActionResult | void>
     discard: (paths: string[], patch?: string) => Promise<GitActionResult | void>
-  }
+  } & Partial<Pick<UseGitActionsResult, "can">>
   density?: "compact" | "touch"
   /**
    * Stage this diff as context for the next chat message.
@@ -58,6 +58,7 @@ export function DiffPane({
   const statusStamp = useGitStore((s) => s.status)
   const [reviewCollapsed, setReviewCollapsed] = useState(false)
   const reviewLayout = useResizableLayout("cognia-git-diff-review")
+  const can = actions.can ?? (() => true)
 
   // The working-tree change row backs the rename-aware review key. Fall back to
   // a plain modified change when the status row isn't found (e.g. mid-refresh).
@@ -95,24 +96,34 @@ export function DiffPane({
   )
 
   const hunkActions: HunkAction[] = staged
-    ? [
-        {
-          icon: "unstage",
-          label: t("actions.unstageHunk"),
-          onClick: (h) => void runHunk((p) => actions.unstage([], p), h),
-        },
-      ]
+    ? can("git_unstage")
+      ? [
+          {
+            icon: "unstage",
+            label: t("actions.unstageHunk"),
+            onClick: (h) => void runHunk((p) => actions.unstage([], p), h),
+          },
+        ]
+      : []
     : [
-        {
-          icon: "stage",
-          label: t("actions.stageHunk"),
-          onClick: (h) => void runHunk((p) => actions.stage([], p), h),
-        },
-        {
-          icon: "discard",
-          label: t("actions.discardHunk"),
-          onClick: (h) => void runHunk((p) => actions.discard([], p), h),
-        },
+        ...(can("git_stage")
+          ? [
+              {
+                icon: "stage",
+                label: t("actions.stageHunk"),
+                onClick: (h) => void runHunk((p) => actions.stage([], p), h),
+              } satisfies HunkAction,
+            ]
+          : []),
+        ...(can("git_discard")
+          ? [
+              {
+                icon: "discard",
+                label: t("actions.discardHunk"),
+                onClick: (h) => void runHunk((p) => actions.discard([], p), h),
+              } satisfies HunkAction,
+            ]
+          : []),
       ]
 
   const diff = cachedDiff ?? fetched
@@ -171,6 +182,7 @@ export function DiffPane({
       change={change}
       diff={diff}
       onStagePatch={(patch) => actions.stage([], patch)}
+      canStage={can("git_stage")}
       onInvalidate={() => invalidateDiff(fileDiffKey(path, staged))}
       collapsed={reviewCollapsed}
       onToggleCollapse={() => setReviewCollapsed((c) => !c)}

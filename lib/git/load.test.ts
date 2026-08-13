@@ -3,6 +3,7 @@ const gitStatusMock = jest.fn()
 const gitBranchesMock = jest.fn()
 const gitStashListMock = jest.fn()
 const gitConflictsMock = jest.fn()
+const getGitOperationAvailabilityMock = jest.fn()
 
 jest.mock("@/lib/git/commands", () => ({
   gitRepoState: (...a: unknown[]) => gitRepoStateMock(...a),
@@ -10,6 +11,7 @@ jest.mock("@/lib/git/commands", () => ({
   gitBranches: (...a: unknown[]) => gitBranchesMock(...a),
   gitStashList: (...a: unknown[]) => gitStashListMock(...a),
   gitConflicts: (...a: unknown[]) => gitConflictsMock(...a),
+  getGitOperationAvailability: (...a: unknown[]) => getGitOperationAvailabilityMock(...a),
 }))
 
 import { loadGitRepo, refreshGitStatus } from "./load"
@@ -38,6 +40,7 @@ beforeEach(() => {
   gitBranchesMock.mockReset().mockResolvedValue([])
   gitStashListMock.mockReset().mockResolvedValue([])
   gitConflictsMock.mockReset().mockResolvedValue([])
+  getGitOperationAvailabilityMock.mockReset().mockReturnValue({ state: "available" })
   useGitStore.getState().reset()
   useGitStore.setState({ rootDir: "/r" })
 })
@@ -70,6 +73,19 @@ describe("loadGitRepo", () => {
     expect(useGitStore.getState().branches).toHaveLength(1)
     expect(useGitStore.getState().stashes).toHaveLength(1)
     expect(useGitStore.getState().loadingStatus).toBe(false)
+  })
+
+  it("does not call an unavailable optional repository operation", async () => {
+    gitRepoStateMock.mockResolvedValue(repoState)
+    gitStatusMock.mockResolvedValue(status("main"))
+    getGitOperationAvailabilityMock.mockImplementation((command: string) => ({
+      state: command === "git_branches" ? "unavailable" : "available",
+    }))
+
+    await loadGitRepo("/r")
+
+    expect(gitBranchesMock).not.toHaveBeenCalled()
+    expect(useGitStore.getState().branches).toEqual([])
   })
 
   it("skips status load when path is not a repo", async () => {

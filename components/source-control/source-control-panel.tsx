@@ -37,7 +37,8 @@ import {
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
 import { useMediaQuery } from "@/hooks/ui/use-media-query"
 import { Spinner } from "@/components/ui/spinner"
-import { gitInit } from "@/lib/git/commands"
+import { gitInit, runGitUserAction } from "@/lib/git/commands"
+import { parseGitTarget } from "@/lib/git/target"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
 import { useGitActions } from "@/hooks/git/use-git-actions"
@@ -70,8 +71,17 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 export function SourceControlPanel() {
   const t = useTranslations("sourceControl")
   const tReview = useTranslations("unifiedReview")
-  const { available, rootDir, refresh, openFolder } = useGitRepo()
+  const {
+    available,
+    rootDir,
+    refresh,
+    openFolder,
+    remoteWorkspaces,
+    selectRemoteWorkspace,
+    remote,
+  } = useGitRepo()
   const actions = useGitActions(refresh)
+  const can = actions.can ?? (() => true)
   const { isDefault: prefsIsDefault } = useSourceControlPrefs()
 
   const repoState = useGitStore((s) => s.repoState)
@@ -114,11 +124,16 @@ export function SourceControlPanel() {
     isNarrow ? "cognia-git-panel-vertical" : "cognia-git-panel-horizontal"
   )
   const refreshSafely = () => void refresh().catch(() => undefined)
+  const selectedRemoteTarget = rootDir ? parseGitTarget(rootDir) : null
   const cloneDialog = (
     <CloneRepositoryDialog
       open={cloneOpen}
       onOpenChange={setCloneOpen}
-      onCloned={openPathAsWorkspace}
+      onCloned={remote ? (path) => useGitStore.getState().setRootDir(path) : openPathAsWorkspace}
+      remoteWorkspaceId={
+        selectedRemoteTarget?.kind === "remote" ? selectedRemoteTarget.workspaceId : undefined
+      }
+      available={can("git_clone")}
     />
   )
 
@@ -137,6 +152,19 @@ export function SourceControlPanel() {
   }
 
   if (!rootDir) {
+    if (remote) {
+      return (
+        <Empty className="h-full border-0" data-testid="sc-no-remote-workspace">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <FolderOpenIcon />
+            </EmptyMedia>
+            <EmptyTitle>{t("remote.noWorkspace")}</EmptyTitle>
+            <EmptyDescription>{t("remote.noWorkspaceDescription")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )
+    }
     return (
       <>
         <Empty className="h-full border-0" data-testid="sc-open-folder">
@@ -153,6 +181,7 @@ export function SourceControlPanel() {
             <Button
               variant="outline"
               onClick={() => setCloneOpen(true)}
+              disabled={!can("git_clone")}
               data-testid="clone-repo-button"
             >
               <DownloadIcon className="size-3.5" />
@@ -180,8 +209,9 @@ export function SourceControlPanel() {
               onClick={() => {
                 // Direct call (not via actions.run): rootDir is bound but not a
                 // repo yet; refresh flips the panel once init lands.
-                void gitInit(rootDir).then(() => refresh())
+                void runGitUserAction("git_init", () => gitInit(rootDir)).then(() => refresh())
               }}
+              disabled={!can("git_init")}
               data-testid="init-repo-button"
             >
               <SparklesIcon className="size-3.5" />
@@ -190,18 +220,21 @@ export function SourceControlPanel() {
             <Button
               variant="outline"
               onClick={() => setCloneOpen(true)}
+              disabled={!can("git_clone")}
               data-testid="clone-repo-button"
             >
               <DownloadIcon className="size-3.5" />
               {t("clone.open")}
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => void openFolder()}
-              data-testid="open-folder-button"
-            >
-              {t("emptyState.openFolder")}
-            </Button>
+            {!remote && (
+              <Button
+                variant="outline"
+                onClick={() => void openFolder()}
+                data-testid="open-folder-button"
+              >
+                {t("emptyState.openFolder")}
+              </Button>
+            )}
           </EmptyContent>
         </Empty>
         {cloneDialog}
@@ -226,7 +259,12 @@ export function SourceControlPanel() {
         variant="compact"
         icon={<GitBranchIcon />}
         title={t("title")}
-        breadcrumb={<RootSwitcher />}
+        breadcrumb={
+          <RootSwitcher
+            remoteWorkspaces={remote ? remoteWorkspaces : undefined}
+            onSelectRemoteWorkspace={selectRemoteWorkspace}
+          />
+        }
         actions={
           <div className="flex min-w-0 items-center gap-0.5">
             <BranchHeader
@@ -295,6 +333,7 @@ export function SourceControlPanel() {
               variant="outline"
               className="h-6 text-xs"
               onClick={() => void actions.sequencerContinue()}
+              disabled={!can("git_sequencer_continue")}
               data-testid="sequencer-continue"
             >
               {t("sequencer.continue")}
@@ -304,6 +343,7 @@ export function SourceControlPanel() {
               variant="ghost"
               className="h-6 text-xs text-destructive"
               onClick={() => void actions.sequencerAbort()}
+              disabled={!can("git_sequencer_abort")}
               data-testid="sequencer-abort"
             >
               {t("sequencer.abort")}
@@ -399,11 +439,15 @@ export function SourceControlPanel() {
             ) : conflict ? (
               <ConflictResolver
                 conflict={conflict}
-                onResolve={(resolution) => {
-                  void actions.resolveConflict(conflict.path, resolution).then((failure) => {
-                    if (!failure) selectFile(null, false)
-                  })
-                }}
+                onResolve={
+                  can("git_resolve_conflict")
+                    ? (resolution) => {
+                        void actions.resolveConflict(conflict.path, resolution).then((failure) => {
+                          if (!failure) selectFile(null, false)
+                        })
+                      }
+                    : undefined
+                }
               />
             ) : selectedPath ? (
               <DiffPane
@@ -433,7 +477,12 @@ export function SourceControlPanel() {
       />
       <TagPanel open={tagOpen} onOpenChange={setTagOpen} rootDir={rootDir} actions={actions} />
       <CompareRefsSheet open={compareOpen} onOpenChange={setCompareOpen} rootDir={rootDir} />
-      <WorktreePanel open={worktreesOpen} onOpenChange={setWorktreesOpen} rootDir={rootDir} />
+      <WorktreePanel
+        open={worktreesOpen}
+        onOpenChange={setWorktreesOpen}
+        rootDir={rootDir}
+        canMutate={can}
+      />
       <RestoreDialog
         rootDir={rootDir}
         path={restorePath}

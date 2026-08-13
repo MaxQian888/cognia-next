@@ -97,6 +97,23 @@ pub fn identity(repo_path: &str) -> Result<GitIdentity> {
     })
 }
 
+/// Resolve only repository-local identity values without inherited/global fallbacks.
+pub fn identity_local(repo_path: &str) -> Result<GitIdentity> {
+    let repo = open_repo(repo_path)?;
+    let config = repo.config()?.open_level(git2::ConfigLevel::Local)?;
+    let value = |key: &str| {
+        config
+            .get_string(key)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    Ok(GitIdentity {
+        name: value("user.name"),
+        email: value("user.email"),
+    })
+}
+
 /// Set the commit identity in repository-local or user-global Git config.
 pub async fn set_identity(repo_path: &str, name: &str, email: &str, global: bool) -> Result<()> {
     set_identity_with_env(repo_path, name, email, global, &[]).await
@@ -260,6 +277,18 @@ mod tests {
             initial.name != configured.name || initial.email != configured.email,
             "the repository-local identity must override any inherited global identity"
         );
+    }
+
+    #[test]
+    fn local_identity_does_not_inherit_global_values() {
+        let tmp = TempDir::new().unwrap();
+        Repository::init(tmp.path()).unwrap();
+        let repo_path = tmp.path().to_string_lossy();
+
+        let configured = identity_local(&repo_path).unwrap();
+
+        assert_eq!(configured.name, None);
+        assert_eq!(configured.email, None);
     }
 
     #[tokio::test]

@@ -275,4 +275,21 @@ describe("HunkReviewList", () => {
     expect(useDiffReviewStore.getState().getFileDecisions("/r", "a.ts")).toEqual([])
     expect(screen.queryByTestId("ai-review-clear")).not.toBeInTheDocument()
   })
+
+  it("does not apply accepted hunks when staging is unavailable", async () => {
+    const onStagePatch = jest.fn()
+    render(
+      <HunkReviewList
+        rootDir="/r"
+        change={change}
+        diff={diff([hunk(1, "a")])}
+        onStagePatch={onStagePatch}
+        onInvalidate={jest.fn()}
+        canStage={false}
+      />
+    )
+    await userEvent.click(screen.getByTestId("item-0"))
+    expect(screen.getByTestId("apply-accepted")).toBeDisabled()
+    expect(onStagePatch).not.toHaveBeenCalled()
+  })
 })

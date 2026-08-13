@@ -97,4 +97,20 @@ describe("RemotePanel", () => {
     await waitFor(() => expect(gitRemotes).toHaveBeenCalled())
     expect(screen.getByTestId("remote-panel")).toBeInTheDocument()
   })
+
+  it("disables unavailable remote mutations", async () => {
+    render(
+      <RemotePanel
+        open
+        rootDir="/repo"
+        onOpenChange={() => {}}
+        actions={{ ...makeActions(), can: () => false }}
+      />
+    )
+    expect(await screen.findByTestId("remote-entry-origin")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("remote-name"), { target: { value: "upstream" } })
+    fireEvent.change(screen.getByTestId("remote-url"), { target: { value: "https://e/r.git" } })
+    expect(screen.getByTestId("remote-add")).toBeDisabled()
+    expect(screen.getByTestId("remote-remove-origin")).toBeDisabled()
+  })
 })

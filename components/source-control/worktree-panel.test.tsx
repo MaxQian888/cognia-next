@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { GitWorktree } from "@/types/git"
 import { WorktreePanel } from "./worktree-panel"
+import { gitTargetFromRemote } from "@/lib/git/target"
 
 const gitWorktreeAdd = jest.fn<Promise<void>, [string, string, string, string?]>()
 const gitWorktreeList = jest.fn<Promise<GitWorktree[]>, [string]>()
@@ -17,6 +18,7 @@ jest.mock("@/lib/git/commands", () => ({
   gitWorktreeList: (...args: [string]) => gitWorktreeList(...args),
   gitWorktreePrune: (...args: [string]) => gitWorktreePrune(...args),
   gitWorktreeRemove: (...args: [string, string, boolean, string?]) => gitWorktreeRemove(...args),
+  runGitUserAction: (_command: string, operation: () => Promise<unknown>) => operation(),
 }))
 jest.mock("@/lib/files/file-bridge", () => ({
   pickDirectory: () => pickDirectory(),
@@ -91,6 +93,28 @@ describe("WorktreePanel", () => {
     await waitFor(() => expect(gitWorktreeList).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(screen.getByTestId("worktree-branch")).toHaveValue(""))
     expect(screen.getByTestId("worktree-path")).toHaveValue("")
+  })
+
+  it("uses relative destinations and hides host path controls remotely", async () => {
+    const user = userEvent.setup()
+    const root = gitTargetFromRemote("workspace-a", "repo")
+    render(<WorktreePanel open onOpenChange={() => {}} rootDir={root} />)
+    await waitFor(() => expect(gitWorktreeList).toHaveBeenCalledWith(root))
+
+    await user.type(screen.getByTestId("worktree-branch"), "feature/remote")
+    await user.type(screen.getByTestId("worktree-path"), "worktrees/remote")
+    await user.click(screen.getByTestId("worktree-create"))
+
+    await waitFor(() =>
+      expect(gitWorktreeAdd).toHaveBeenCalledWith(
+        root,
+        "worktrees/remote",
+        "feature/remote",
+        undefined
+      )
+    )
+    expect(screen.queryByTestId("worktree-pick-directory")).not.toBeInTheDocument()
+    expect(document.querySelector('[data-testid^="worktree-open-"]')).toBeNull()
   })
 
   it("keeps create inputs and reports a typed mutation failure", async () => {

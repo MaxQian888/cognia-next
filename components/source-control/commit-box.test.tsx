@@ -342,4 +342,18 @@ describe("CommitBox", () => {
     expect(actions.commit).not.toHaveBeenCalled()
     expect(useGitStore.getState().commitDraft["/r"]).toBe("feat: keep me")
   })
+
+  it("gates commit and post-commit actions by exact command availability", async () => {
+    const user = userEvent.setup()
+    const actions = {
+      ...makeActions(),
+      can: jest.fn((command: string) => command === "git_commit"),
+    }
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: gate" } })
+    expect(screen.getByTestId("commit-button")).not.toBeDisabled()
+    await user.click(screen.getByTestId("commit-more"))
+    expect(await screen.findByTestId("commit-and-push")).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("commit-and-sync")).toHaveAttribute("data-disabled")
+  })
 })

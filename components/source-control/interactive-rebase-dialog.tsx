@@ -52,7 +52,8 @@ interface InteractiveRebaseDialogProps {
   /** Rebase commits in `base..HEAD`; `null` keeps the dialog closed. */
   base: string | null
   onOpenChange: (open: boolean) => void
-  actions: Pick<UseGitActionsResult, "interactiveRebase">
+  actions: Pick<UseGitActionsResult, "interactiveRebase"> &
+    Partial<Pick<UseGitActionsResult, "can">>
 }
 
 export function InteractiveRebaseDialog({
@@ -63,6 +64,7 @@ export function InteractiveRebaseDialog({
 }: InteractiveRebaseDialogProps) {
   const t = useTranslations("sourceControl")
   const [rows, setRows] = useState<Row[] | null>(null)
+  const can = actions.can ?? (() => true)
 
   useEffect(() => {
     if (base === null) return
@@ -198,7 +200,7 @@ export function InteractiveRebaseDialog({
           </Button>
           <Button
             onClick={() => void apply()}
-            disabled={!rows || rows.length === 0 || allDropped}
+            disabled={!rows || rows.length === 0 || allDropped || !can("git_interactive_rebase")}
             data-testid="irebase-apply"
           >
             {t("irebase.apply")}

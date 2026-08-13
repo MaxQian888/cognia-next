@@ -11,6 +11,7 @@ import {
   gitRepoState,
   gitStashList,
   gitStatus,
+  getGitOperationAvailability,
 } from "@/lib/git/commands"
 import { useGitStore } from "@/stores/git/git-store"
 import { asGitError } from "@/types/git"
@@ -67,9 +68,15 @@ export async function loadGitRepo(rootDir: string | null): Promise<void> {
     }
     const [status, branches, stashes, conflicts] = await Promise.all([
       gitStatus(rootDir),
-      gitBranches(rootDir),
-      gitStashList(rootDir),
-      gitConflicts(rootDir),
+      getGitOperationAvailability("git_branches").state === "available"
+        ? gitBranches(rootDir)
+        : Promise.resolve([]),
+      getGitOperationAvailability("git_stash_list").state === "available"
+        ? gitStashList(rootDir)
+        : Promise.resolve([]),
+      getGitOperationAvailability("git_conflicts").state === "available"
+        ? gitConflicts(rootDir)
+        : Promise.resolve([]),
     ])
     if (requestId !== loadRequestId || !isCurrentRoot(rootDir)) return
     store.setStatus(status)
@@ -113,9 +120,15 @@ export async function refreshGitStatus(rootDir: string | null): Promise<void> {
     }
     const [status, branches, stashes, conflicts] = await Promise.all([
       gitStatus(rootDir),
-      gitBranches(rootDir),
-      gitStashList(rootDir),
-      gitConflicts(rootDir),
+      getGitOperationAvailability("git_branches").state === "available"
+        ? gitBranches(rootDir)
+        : Promise.resolve([]),
+      getGitOperationAvailability("git_stash_list").state === "available"
+        ? gitStashList(rootDir)
+        : Promise.resolve([]),
+      getGitOperationAvailability("git_conflicts").state === "available"
+        ? gitConflicts(rootDir)
+        : Promise.resolve([]),
     ])
     if (requestId !== loadRequestId || !isCurrentRoot(rootDir)) return
     store.setStatus(status)

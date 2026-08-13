@@ -238,4 +238,36 @@ describe("CommitDetail", () => {
     expect(await screen.findByTestId("reset-hard-confirm")).toBeInTheDocument()
     expect(screen.getByTestId("reset-hard")).toBeInTheDocument()
   })
+
+  it("disables commit mutations whose exact commands are unavailable", async () => {
+    const user = userEvent.setup()
+    render(
+      <CommitDetail
+        rootDir="/r"
+        commit={commit}
+        actions={{
+          reset: jest.fn(),
+          cherryPick: jest.fn(),
+          revert: jest.fn(),
+          createBranch: jest.fn(),
+          checkout: jest.fn(),
+          can: () => false,
+        }}
+        onInteractiveRebase={jest.fn()}
+      />
+    )
+    await user.click(screen.getByTestId("commit-reset"))
+    for (const id of [
+      "commit-cherry-pick",
+      "commit-revert",
+      "commit-interactive-rebase",
+      "commit-create-branch",
+      "commit-checkout",
+      "reset-soft",
+      "reset-mixed",
+      "reset-hard",
+    ]) {
+      expect(await screen.findByTestId(id)).toHaveAttribute("data-disabled")
+    }
+  })
 })

@@ -27,7 +27,8 @@ interface StashPanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   stashes: GitStashEntry[]
-  actions: Pick<UseGitActionsResult, "stashPush" | "stashPop" | "stashApply" | "stashDrop">
+  actions: Pick<UseGitActionsResult, "stashPush" | "stashPop" | "stashApply" | "stashDrop"> &
+    Partial<Pick<UseGitActionsResult, "can">>
 }
 
 export function StashPanel({ open, onOpenChange, stashes, actions }: StashPanelProps) {
@@ -35,6 +36,7 @@ export function StashPanel({ open, onOpenChange, stashes, actions }: StashPanelP
   const [message, setMessage] = useState("")
   const [includeUntracked, setIncludeUntracked] = useState(false)
   const [keepIndex, setKeepIndex] = useState(false)
+  const can = actions.can ?? (() => true)
 
   const doPush = async () => {
     const failure = await actions.stashPush({
@@ -77,7 +79,12 @@ export function StashPanel({ open, onOpenChange, stashes, actions }: StashPanelP
             />
             <Label className="cursor-pointer">{t("stash.keepIndex")}</Label>
           </label>
-          <Button onClick={() => void doPush()} className="gap-1.5" data-testid="stash-push">
+          <Button
+            onClick={() => void doPush()}
+            disabled={!can("git_stash_push")}
+            className="gap-1.5"
+            data-testid="stash-push"
+          >
             <ArchiveIcon className="size-3.5" />
             {t("stash.push")}
           </Button>
@@ -100,6 +107,7 @@ export function StashPanel({ open, onOpenChange, stashes, actions }: StashPanelP
                   className="h-6 text-xs"
                   onClick={() => void actions.stashPop(s.index)}
                   data-testid={`stash-pop-${s.index}`}
+                  disabled={!can("git_stash_pop")}
                 >
                   {t("stash.pop")}
                 </Button>
@@ -109,6 +117,7 @@ export function StashPanel({ open, onOpenChange, stashes, actions }: StashPanelP
                   className="h-6 text-xs"
                   onClick={() => void actions.stashApply(s.index)}
                   data-testid={`stash-apply-${s.index}`}
+                  disabled={!can("git_stash_apply")}
                 >
                   {t("stash.apply")}
                 </Button>
@@ -119,6 +128,7 @@ export function StashPanel({ open, onOpenChange, stashes, actions }: StashPanelP
                   aria-label={t("stash.drop")}
                   onClick={() => void actions.stashDrop(s.index)}
                   data-testid={`stash-drop-${s.index}`}
+                  disabled={!can("git_stash_drop")}
                 >
                   <Trash2Icon className="size-3" />
                 </Button>

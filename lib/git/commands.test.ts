@@ -89,8 +89,10 @@ import {
   gitWorktreeRemove,
   hasGitBridge,
   isSourceControlUiAvailable,
+  runGitUserAction,
 } from "./commands"
 import { EMPTY_REPO_STATE, EMPTY_STATUS } from "@/types/git"
+import { gitTargetFromRemote } from "./target"
 
 beforeEach(() => {
   isTauriMock.mockReset()
@@ -182,16 +184,38 @@ describe("when on a companion transport (Capacitor / paired web)", () => {
   })
 
   it("reads and writes go through the transport", async () => {
+    const target = gitTargetFromRemote("workspace-a", "packages/app")
     callMock.mockResolvedValueOnce(true)
-    expect(await gitIsRepo("/r")).toBe(true)
-    expect(callMock).toHaveBeenCalledWith("git_is_repo", { repoPath: "/r" })
+    expect(await gitIsRepo(target)).toBe(true)
+    expect(callMock).toHaveBeenCalledWith("git_is_repo", {
+      workspaceId: "workspace-a",
+      relativePath: "packages/app",
+    })
 
-    await gitStage("/r", ["a.ts"])
+    callMock.mockResolvedValueOnce({
+      token: "lease-a",
+      operations: ["git_stage"],
+      expiresAt: Date.now() + 120_000,
+    })
+    callMock.mockResolvedValueOnce(undefined)
+    await runGitUserAction("git_stage", () => gitStage(target, ["a.ts"]))
+    expect(callMock).toHaveBeenCalledWith("host_admin_lease_issue", {
+      operations: ["git_stage"],
+      ttlSeconds: 120,
+      confirmed: true,
+    })
     expect(callMock).toHaveBeenCalledWith("git_stage", {
-      repoPath: "/r",
+      workspaceId: "workspace-a",
+      relativePath: "packages/app",
       paths: ["a.ts"],
       hunkPatch: null,
+      adminLease: "lease-a",
     })
+  })
+
+  it("refuses absolute host paths on companion transports", async () => {
+    await expect(gitStatus("/Users/host/private/repo")).rejects.toThrow("opaque workspace target")
+    expect(callMock).not.toHaveBeenCalled()
   })
 
   it("the fs watcher stays Tauri-only", async () => {

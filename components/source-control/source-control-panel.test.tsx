@@ -3,16 +3,23 @@ const repoCfg: {
   rootDir: string | null
   openFolder: jest.Mock
   refresh: jest.Mock
+  remote: boolean
+  remoteWorkspaces: unknown[]
+  selectRemoteWorkspace: jest.Mock
 } = {
   available: true,
   rootDir: "/repo",
   openFolder: jest.fn(),
   refresh: jest.fn().mockResolvedValue(undefined),
+  remote: false,
+  remoteWorkspaces: [],
+  selectRemoteWorkspace: jest.fn(),
 }
 const actionCfg = {
   resolveConflict: jest.fn(),
   sequencerContinue: jest.fn(),
   sequencerAbort: jest.fn(),
+  can: jest.fn().mockReturnValue(true),
 }
 
 jest.mock("@/hooks/git/use-git-repo", () => ({
@@ -21,6 +28,9 @@ jest.mock("@/hooks/git/use-git-repo", () => ({
     rootDir: repoCfg.rootDir,
     refresh: repoCfg.refresh,
     openFolder: repoCfg.openFolder,
+    remote: repoCfg.remote,
+    remoteWorkspaces: repoCfg.remoteWorkspaces,
+    selectRemoteWorkspace: repoCfg.selectRemoteWorkspace,
   }),
 }))
 jest.mock("@/hooks/git/use-git-actions", () => ({
@@ -28,6 +38,7 @@ jest.mock("@/hooks/git/use-git-actions", () => ({
 }))
 jest.mock("@/lib/git/commands", () => ({
   gitInit: jest.fn().mockResolvedValue(undefined),
+  runGitUserAction: (_command: string, operation: () => Promise<unknown>) => operation(),
 }))
 const openPathAsWorkspace = jest.fn()
 jest.mock("@/lib/workspace/open-folder", () => ({
@@ -114,8 +125,13 @@ jest.mock("./changes-view", () => ({
 }))
 jest.mock("./diff-pane", () => ({ DiffPane: () => <div data-testid="diff-pane-stub" /> }))
 jest.mock("./conflict-resolver", () => ({
-  ConflictResolver: ({ onResolve }: { onResolve: (resolution: string) => void }) => (
-    <button type="button" data-testid="conflict-stub" onClick={() => onResolve("ours")}>
+  ConflictResolver: ({ onResolve }: { onResolve?: (resolution: string) => void }) => (
+    <button
+      type="button"
+      data-testid="conflict-stub"
+      disabled={!onResolve}
+      onClick={() => onResolve?.("ours")}
+    >
       resolve
     </button>
   ),
@@ -328,11 +344,16 @@ const status: GitStatus = {
 beforeEach(() => {
   repoCfg.available = true
   repoCfg.rootDir = "/repo"
+  repoCfg.remote = false
+  repoCfg.remoteWorkspaces = []
   repoCfg.openFolder.mockReset()
   repoCfg.refresh.mockClear()
   useMediaQueryMock.mockReset().mockReturnValue(false)
   openPathAsWorkspace.mockReset()
-  Object.values(actionCfg).forEach((mock) => mock.mockReset().mockResolvedValue(null))
+  actionCfg.resolveConflict.mockReset().mockResolvedValue(null)
+  actionCfg.sequencerContinue.mockReset().mockResolvedValue(null)
+  actionCfg.sequencerAbort.mockReset().mockResolvedValue(null)
+  actionCfg.can.mockReset().mockReturnValue(true)
   act(() => {
     useGitStore.getState().reset()
     useGitStore.setState({ rootDir: "/repo" })
@@ -359,6 +380,14 @@ describe("SourceControlPanel", () => {
     render(<SourceControlPanel />)
     fireEvent.click(screen.getByTestId("open-folder-button"))
     expect(repoCfg.openFolder).toHaveBeenCalled()
+  })
+
+  it("shows no folder picker when a paired client has no authorized workspace", () => {
+    repoCfg.rootDir = null
+    repoCfg.remote = true
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("sc-no-remote-workspace")).toBeInTheDocument()
+    expect(screen.queryByTestId("open-folder-button")).not.toBeInTheDocument()
   })
 
   it("opens clone from the no-folder state and activates the cloned workspace", () => {
@@ -628,5 +657,22 @@ describe("SourceControlPanel", () => {
     fireEvent.click(screen.getByTestId("sequencer-abort"))
     expect(actionCfg.sequencerContinue).toHaveBeenCalled()
     expect(actionCfg.sequencerAbort).toHaveBeenCalled()
+  })
+
+  it("disables sequencer and conflict mutations when their commands are unavailable", () => {
+    actionCfg.can.mockReturnValue(false)
+    act(() => {
+      useGitStore.getState().setRepoState({
+        isRepo: true,
+        rootDir: "/repo",
+        detachedHead: false,
+        operationInProgress: "rebase",
+      })
+      useGitStore.getState().selectFile("conf.ts", false)
+    })
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("sequencer-continue")).toBeDisabled()
+    expect(screen.getByTestId("sequencer-abort")).toBeDisabled()
+    expect(screen.getByTestId("conflict-stub")).toBeDisabled()
   })
 })

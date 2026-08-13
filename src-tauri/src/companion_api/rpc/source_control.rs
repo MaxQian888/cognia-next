@@ -1,5 +1,216 @@
 use super::*;
 
+#[derive(Clone)]
+struct RemoteGitTarget {
+    workspace: crate::files::RemoteGitWorkspace,
+    relative_path: String,
+    resolved_path: std::path::PathBuf,
+}
+
+fn relative_path_from_args(
+    args: &Value,
+    key: &str,
+) -> Result<String, (StatusCode, Json<RpcError>)> {
+    optional::<String>(args, key).map(|value| value.unwrap_or_default())
+}
+
+fn resolve_remote_target(
+    args: &Value,
+    account_id: Option<&str>,
+    relative_key: &str,
+) -> Result<RemoteGitTarget, (StatusCode, Json<RpcError>)> {
+    let account_id = account_id
+        .ok_or_else(|| RpcError::forbidden("remote Git requires an account-bound device token"))?;
+    let workspace_id: String = required(args, "workspaceId")?;
+    let relative_path = relative_path_from_args(args, relative_key)?;
+    let (workspace, resolved_path) = crate::files::resolve_remote_git_workspace_path(
+        account_id,
+        &workspace_id,
+        Some(&relative_path),
+    )
+    .map_err(RpcError::forbidden)?;
+    Ok(RemoteGitTarget {
+        workspace,
+        relative_path,
+        resolved_path,
+    })
+}
+
+fn authorize_discovered_repository(
+    target: &RemoteGitTarget,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    let (workdir, git_dir) =
+        crate::git::read::repository_boundaries(&target.resolved_path.to_string_lossy())
+            .map_err(|error| RpcError::internal(sanitize_text(&error.to_string(), target)))?;
+    let root = std::path::Path::new(&target.workspace.path)
+        .canonicalize()
+        .map_err(|_| RpcError::forbidden("authorized Git workspace is no longer available"))?;
+    if !workdir.starts_with(&root) || !git_dir.starts_with(&root) {
+        return Err(RpcError::forbidden(
+            "discovered repository escapes the authorized Git workspace",
+        ));
+    }
+    Ok(())
+}
+
+fn prepare_remote_args(
+    name: &str,
+    mut args: Value,
+    account_id: Option<&str>,
+    scope: Option<&str>,
+) -> Result<(Value, Option<RemoteGitTarget>), (StatusCode, Json<RpcError>)> {
+    if scope == Some("service") || name == "git_workspace_list" {
+        return Ok((args, None));
+    }
+    let object = args
+        .as_object_mut()
+        .ok_or_else(|| RpcError::malformed("Git RPC arguments must be an object".into()))?;
+    let relative_key = match name {
+        "git_clone" => "destinationRelativePath",
+        "git_worktree_commit" | "git_worktree_remove" => "worktreeRelativePath",
+        "git_worktree_add" => "destinationRelativePath",
+        _ => "relativePath",
+    };
+    let target = resolve_remote_target(&Value::Object(object.clone()), account_id, relative_key)?;
+    let resolved = target.resolved_path.to_string_lossy().to_string();
+    match name {
+        "git_clone" => {
+            object.insert("destination".into(), Value::String(resolved));
+        }
+        "git_init" => {
+            object.insert("path".into(), Value::String(resolved));
+        }
+        "git_worktree_add" | "git_worktree_remove" => {
+            let repository_target =
+                resolve_remote_target(&Value::Object(object.clone()), account_id, "relativePath")?;
+            authorize_discovered_repository(&repository_target)?;
+            object.insert(
+                "repoPath".into(),
+                Value::String(
+                    repository_target
+                        .resolved_path
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+            );
+            object.insert("path".into(), Value::String(resolved));
+            if name == "git_worktree_remove" {
+                authorize_discovered_repository(&target)?;
+            }
+        }
+        "git_worktree_commit" => {
+            object.insert("worktreePath".into(), Value::String(resolved));
+            authorize_discovered_repository(&target)?;
+        }
+        "git_repo_state" | "git_is_repo" => {
+            if crate::git::read::repository_boundaries(&resolved).is_ok() {
+                authorize_discovered_repository(&target)?;
+            }
+            object.insert("repoPath".into(), Value::String(resolved));
+        }
+        _ => {
+            authorize_discovered_repository(&target)?;
+            object.insert("repoPath".into(), Value::String(resolved));
+        }
+    }
+    Ok((args, Some(target)))
+}
+
+fn sanitize_text(value: &str, target: &RemoteGitTarget) -> String {
+    value
+        .replace(&target.workspace.path, "<workspace>")
+        .replace(
+            &target.resolved_path.to_string_lossy().to_string(),
+            "<workspace>",
+        )
+}
+
+fn relative_to_workspace(path: &str, target: &RemoteGitTarget) -> Option<String> {
+    let root = std::path::Path::new(&target.workspace.path)
+        .canonicalize()
+        .ok()?;
+    let canonical = std::path::Path::new(path).canonicalize().ok()?;
+    canonical
+        .strip_prefix(root)
+        .ok()
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn sanitize_remote_result(name: &str, value: Value, target: &RemoteGitTarget) -> Value {
+    if name == "git_clone" {
+        return json!({
+            "workspaceId": target.workspace.workspace_id,
+            "relativePath": target.relative_path,
+        });
+    }
+    let mut value = value;
+    if name == "git_repo_state" {
+        if let Some(root_dir) = value.get("rootDir").and_then(Value::as_str) {
+            value["rootDir"] = relative_to_workspace(root_dir, target)
+                .map(Value::String)
+                .unwrap_or(Value::Null);
+        }
+    } else if name == "git_worktree_list" {
+        let entries = value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.get("path")?.as_str()?;
+                let relative = relative_to_workspace(path, target)?;
+                let mut entry = entry.clone();
+                entry["path"] = Value::String(relative);
+                Some(entry)
+            })
+            .collect();
+        value = Value::Array(entries);
+    } else if name == "git_remotes" {
+        if let Some(remotes) = value.as_array_mut() {
+            for remote in remotes {
+                for key in ["fetchUrl", "pushUrl"] {
+                    if let Some(url) = remote.get(key).and_then(Value::as_str) {
+                        if is_local_remote_url(url) {
+                            remote[key] = Value::String("local://redacted".into());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    sanitize_value(value, target)
+}
+
+fn is_local_remote_url(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    std::path::Path::new(value).is_absolute()
+        || value.starts_with("file:")
+        || value.starts_with("\\\\")
+        || value.starts_with("//")
+        || (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\'))
+}
+
+fn sanitize_value(value: Value, target: &RemoteGitTarget) -> Value {
+    match value {
+        Value::String(value) => Value::String(sanitize_text(&value, target)),
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(|value| sanitize_value(value, target))
+                .collect(),
+        ),
+        Value::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, sanitize_value(value, target)))
+                .collect(),
+        ),
+        value => value,
+    }
+}
+
 pub(super) const COMMANDS: &[&str] = &[
     "git_is_repo",
     "git_repo_state",
@@ -64,6 +275,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "git_set_identity",
     "git_ignore_add",
     "git_merge",
+    "git_workspace_list",
 ];
 
 pub(super) async fn dispatch(
@@ -75,7 +287,20 @@ pub(super) async fn dispatch(
     account_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let _ = (state, host, device_id, account_id, scope);
+    let _ = (state, host, device_id);
+    let prepare_name = name.to_string();
+    let prepare_account_id = account_id.map(str::to_string);
+    let prepare_scope = scope.map(str::to_string);
+    let (args, remote_target) = tokio::task::spawn_blocking(move || {
+        prepare_remote_args(
+            &prepare_name,
+            args,
+            prepare_account_id.as_deref(),
+            prepare_scope.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| RpcError::internal(format!("prepare Git request: {error}")))??;
     let result = match name {
         // ── Source control (ADR-0038) — native git porcelain ────────────────
         // camelCase arg keys mirror `lib/git/commands.ts` (the shared desktop
@@ -581,9 +806,12 @@ pub(super) async fn dispatch(
         }
         "git_identity" => {
             let repo_path: String = required(&args, "repoPath")?;
-            let identity = crate::git::commands::git_identity(repo_path)
-                .await
-                .map_err(|e| RpcError::internal(e.to_string()))?;
+            let identity = if remote_target.is_some() {
+                crate::git::repo::identity_local(&repo_path)
+            } else {
+                crate::git::repo::identity(&repo_path)
+            }
+            .map_err(|e| RpcError::internal(e.to_string()))?;
             serde_json::to_value(identity)
                 .map_err(|e| RpcError::internal(format!("serialize git identity: {e}")))
         }
@@ -592,6 +820,11 @@ pub(super) async fn dispatch(
             let name: String = required(&args, "name")?;
             let email: String = required(&args, "email")?;
             let global: bool = optional(&args, "global")?.unwrap_or(false);
+            if remote_target.is_some() && global {
+                return Err(RpcError::forbidden(
+                    "remote Git identity may only be changed for the selected repository",
+                ));
+            }
             crate::git::commands::git_set_identity(repo_path, name, email, global)
                 .await
                 .map(|_| Value::Null)
@@ -613,19 +846,228 @@ pub(super) async fn dispatch(
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
+        "git_workspace_list" => {
+            let account_id = account_id
+                .ok_or_else(|| {
+                    RpcError::forbidden("remote Git requires an account-bound device token")
+                })?
+                .to_string();
+            let workspaces = tokio::task::spawn_blocking(move || {
+                crate::files::list_remote_git_workspaces(&account_id)
+                    .into_iter()
+                    .map(|workspace| {
+                        let target = RemoteGitTarget {
+                            relative_path: String::new(),
+                            resolved_path: std::path::PathBuf::from(&workspace.path),
+                            workspace: workspace.clone(),
+                        };
+                        let mut state = crate::git::read::repo_state(&workspace.path);
+                        if state.is_repo && authorize_discovered_repository(&target).is_err() {
+                            state = crate::git::types::GitRepoState {
+                                is_repo: false,
+                                root_dir: None,
+                                detached_head: false,
+                                operation_in_progress: None,
+                            };
+                        }
+                        if let Some(root_dir) = state.root_dir.as_deref() {
+                            state.root_dir = relative_to_workspace(root_dir, &target);
+                        }
+                        json!({
+                            "workspaceId": workspace.workspace_id,
+                            "displayName": workspace.display_name,
+                            "repositoryState": state,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .map_err(|error| RpcError::internal(format!("list Git workspaces: {error}")))?;
+            Ok(Value::Array(workspaces))
+        }
         unknown => Err(RpcError::unknown_command(unknown)),
     };
-    result
+    match (result, remote_target.as_ref()) {
+        (Ok(value), Some(target)) => Ok(sanitize_remote_result(name, value, target)),
+        (Err((status, Json(mut error))), Some(target)) => {
+            error.message = sanitize_text(&error.message, target);
+            Err((status, Json(error)))
+        }
+        (result, None) => result,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn register_workspace(account_id: &str, workspace_id: &str, root: &std::path::Path) {
+        crate::files::fs_set_allowed_roots(
+            vec![root.to_string_lossy().to_string()],
+            Some(account_id.to_string()),
+            Some(vec![crate::files::GitWorkspaceRegistration {
+                workspace_id: workspace_id.to_string(),
+                display_name: "Authorized workspace".to_string(),
+                path: root.to_string_lossy().to_string(),
+            }]),
+        );
+    }
+
     #[test]
     fn command_family_is_non_empty_and_unique() {
         assert!(!COMMANDS.is_empty());
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn remote_target_uses_account_scoped_workspace_and_rejects_traversal() {
+        let root = tempfile::TempDir::new().unwrap();
+        register_workspace("acct-source-a", "workspace-a", root.path());
+        let args = json!({ "workspaceId": "workspace-a", "relativePath": "nested" });
+
+        let (prepared, target) =
+            prepare_remote_args("git_repo_state", args, Some("acct-source-a"), None).unwrap();
+
+        assert_eq!(
+            prepared["repoPath"],
+            Value::String(root.path().join("nested").to_string_lossy().to_string())
+        );
+        assert_eq!(target.unwrap().workspace.workspace_id, "workspace-a");
+        assert!(prepare_remote_args(
+            "git_repo_state",
+            json!({ "workspaceId": "workspace-a", "relativePath": "../escape" }),
+            Some("acct-source-a"),
+            None,
+        )
+        .is_err());
+        assert!(prepare_remote_args(
+            "git_repo_state",
+            json!({ "workspaceId": "workspace-a" }),
+            Some("acct-source-b"),
+            None,
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn upward_repository_discovery_is_rejected_but_nested_repository_is_allowed() {
+        let parent = tempfile::TempDir::new().unwrap();
+        crate::git::repo::init(&parent.path().to_string_lossy())
+            .await
+            .unwrap();
+        let granted_child = parent.path().join("granted");
+        std::fs::create_dir_all(&granted_child).unwrap();
+        register_workspace("acct-upward", "workspace-upward", &granted_child);
+
+        assert!(prepare_remote_args(
+            "git_status",
+            json!({ "workspaceId": "workspace-upward" }),
+            Some("acct-upward"),
+            None,
+        )
+        .is_err());
+
+        let nested = granted_child.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        crate::git::repo::init(&nested.to_string_lossy())
+            .await
+            .unwrap();
+        assert!(prepare_remote_args(
+            "git_status",
+            json!({ "workspaceId": "workspace-upward", "relativePath": "nested" }),
+            Some("acct-upward"),
+            None,
+        )
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn remote_worktree_requests_keep_the_authorized_repository_path() {
+        let root = tempfile::TempDir::new().unwrap();
+        crate::git::repo::init(&root.path().to_string_lossy())
+            .await
+            .unwrap();
+        let nested = root.path().join("nested-worktree");
+        std::fs::create_dir_all(&nested).unwrap();
+        crate::git::repo::init(&nested.to_string_lossy())
+            .await
+            .unwrap();
+        register_workspace("acct-worktree", "workspace-worktree", root.path());
+
+        let (add, _) = prepare_remote_args(
+            "git_worktree_add",
+            json!({
+                "workspaceId": "workspace-worktree",
+                "relativePath": "",
+                "destinationRelativePath": "new-worktree",
+                "branch": "feature"
+            }),
+            Some("acct-worktree"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(add["repoPath"], root.path().to_string_lossy().as_ref());
+        assert_eq!(
+            add["path"],
+            root.path().join("new-worktree").to_string_lossy().as_ref()
+        );
+
+        let (remove, _) = prepare_remote_args(
+            "git_worktree_remove",
+            json!({
+                "workspaceId": "workspace-worktree",
+                "relativePath": "",
+                "worktreeRelativePath": "nested-worktree",
+                "force": false
+            }),
+            Some("acct-worktree"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(remove["repoPath"], root.path().to_string_lossy().as_ref());
+        assert_eq!(remove["path"], nested.to_string_lossy().as_ref());
+    }
+
+    #[test]
+    fn local_remote_url_detection_is_cross_platform() {
+        for local in [
+            "/srv/repository.git",
+            "file:///srv/repository.git",
+            r"C:\repository.git",
+            "C:/repository.git",
+            r"\\server\share\repository.git",
+            "//server/share/repository.git",
+        ] {
+            assert!(is_local_remote_url(local), "expected local URL: {local}");
+        }
+        assert!(!is_local_remote_url("https://example.com/repository.git"));
+        assert!(!is_local_remote_url("git@example.com:team/repository.git"));
+    }
+
+    #[test]
+    fn remote_results_replace_host_paths_and_local_remote_urls() {
+        let root = tempfile::TempDir::new().unwrap();
+        let target = RemoteGitTarget {
+            workspace: crate::files::RemoteGitWorkspace {
+                workspace_id: "workspace-redact".into(),
+                display_name: "Redacted".into(),
+                path: root.path().to_string_lossy().to_string(),
+            },
+            relative_path: String::new(),
+            resolved_path: root.path().to_path_buf(),
+        };
+        let result = sanitize_remote_result(
+            "git_remotes",
+            json!([{
+                "name": "local",
+                "fetchUrl": format!("file://{}", root.path().display()),
+                "pushUrl": root.path().join("bare.git").to_string_lossy(),
+            }]),
+            &target,
+        );
+        let encoded = serde_json::to_string(&result).unwrap();
+        assert!(!encoded.contains(&root.path().to_string_lossy().to_string()));
+        assert!(encoded.contains("local://redacted"));
     }
 }

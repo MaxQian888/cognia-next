@@ -54,6 +54,7 @@ export function ChangesView({
   const toggleGroup = useGitStore((s) => s.toggleGroup)
   const { prefs } = useSourceControlPrefs()
   const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null)
+  const can = actions.can ?? (() => true)
 
   const runDiscard = (d: PendingDiscard) => {
     if (d.kind === "file") void actions.discard([d.path])
@@ -121,6 +122,7 @@ export function ChangesView({
                   label: t("actions.unstageAll"),
                   icon: <MinusIcon className="size-3" />,
                   onClick: () => void actions.unstage(status.staged.map((c) => c.path)),
+                  disabled: !can("git_unstage"),
                 },
               ]}
             >
@@ -130,7 +132,7 @@ export function ChangesView({
                   change={c}
                   selected={selectedPath === c.path}
                   onSelect={() => onSelectFile(c.path, true)}
-                  onUnstage={() => void actions.unstage([c.path])}
+                  onUnstage={can("git_unstage") ? () => void actions.unstage([c.path]) : undefined}
                   onCopyPath={() => copyPath(c.path)}
                   onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
                   onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
@@ -154,6 +156,7 @@ export function ChangesView({
                   label: t("actions.stageAll"),
                   icon: <CheckIcon className="size-3" />,
                   onClick: () => void actions.stage(status.changes.map((c) => c.path)),
+                  disabled: !can("git_stage"),
                 },
                 {
                   key: "discard-all",
@@ -161,6 +164,7 @@ export function ChangesView({
                   icon: <Trash2Icon className="size-3" />,
                   destructive: true,
                   onClick: () => requestDiscard({ kind: "all", includeUntracked: true }),
+                  disabled: !can("git_discard_all"),
                 },
               ]}
             >
@@ -170,13 +174,19 @@ export function ChangesView({
                   change={c}
                   selected={selectedPath === c.path}
                   onSelect={() => onSelectFile(c.path, false)}
-                  onStage={() => void actions.stage([c.path])}
-                  onDiscard={() => requestDiscard({ kind: "file", path: c.path })}
+                  onStage={can("git_stage") ? () => void actions.stage([c.path]) : undefined}
+                  onDiscard={
+                    can("git_discard")
+                      ? () => requestDiscard({ kind: "file", path: c.path })
+                      : undefined
+                  }
                   onCopyPath={() => copyPath(c.path)}
                   onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
                   onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
                   onRestore={onRestore ? () => onRestore(c.path) : undefined}
-                  onAddToGitignore={() => void actions.ignoreAdd(c.path)}
+                  onAddToGitignore={
+                    can("git_ignore_add") ? () => void actions.ignoreAdd(c.path) : undefined
+                  }
                   density={density}
                 />
               ))}
