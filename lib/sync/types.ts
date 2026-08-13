@@ -48,7 +48,7 @@ export interface SyncResult {
 
 export interface SyncFailure {
   table: SyncableTable
-  reason: "transport" | "not_implemented" | "schema" | "unknown"
+  reason: "transport" | "not_implemented" | "schema" | "upgrade_required" | "unknown"
   message: string
 }
 

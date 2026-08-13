@@ -156,6 +156,13 @@ impl RpcError {
         )
     }
 
+    fn upgrade_required(detail: String) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::UPGRADE_REQUIRED,
+            Json(Self::new("upgrade_required", detail)),
+        )
+    }
+
     /// ADR-0059 R5 — the command's body still requires the desktop Tauri
     /// runtime and this process is a headless `cognia-server`. Distinct code
     /// from `service_unavailable` so clients can tell "retry later" (server

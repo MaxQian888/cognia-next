@@ -4,6 +4,7 @@ import { createKeyringStore, type KeyringStore } from "@/lib/credentials/keyring
 import { isCapacitor, isTauri } from "@/lib/tauri"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
+import { createBackupChunkCipher, type BackupChunkEncryptionConfig } from "@/lib/data/crypto"
 
 const PROFILE_DEK_NAMESPACE = "retrieval-profile-dek/v1"
 const ACTIVE_KEY_PREFIX = "active:"
@@ -13,6 +14,20 @@ export interface ProfileDekHandle {
   profileId: string
   keyId: string
   key: CryptoKey
+}
+
+export interface ProfileDekPairingExportV1 {
+  profileId: string
+  keyId: string
+  rawKey: Uint8Array
+}
+
+export interface PortableProfileDekEnvelopeV1 {
+  version: 1
+  profileId: string
+  keyId: string
+  encryption: BackupChunkEncryptionConfig
+  ciphertext: string
 }
 
 export class RetrievalVaultLockedError extends Error {
@@ -97,6 +112,32 @@ export function createProfileDekStore(dependencies: ProfileDekStoreDependencies 
     return { profileId, keyId, key: await importDek(base64ToBytes(encoded)) }
   }
 
+  async function loadActiveMaterial(
+    profileId: string
+  ): Promise<{ keyId: string; encoded: string }> {
+    assertAvailable()
+    if (!profileId.trim()) throw new Error("Profile id is required")
+    const keyId = await secretStore.load(activeKey(profileId))
+    if (!keyId) throw new Error("Profile DEK is not provisioned")
+    const encoded = await secretStore.load(materialKey(profileId, keyId))
+    if (!encoded) throw new Error("Active profile DEK material is missing")
+    return { keyId, encoded }
+  }
+
+  function assertPairingTransport(transport: {
+    authenticated: boolean
+    protocolVersion: number
+  }): void {
+    if (transport.protocolVersion !== 1) throw new ProfileDekProtocolError()
+    if (!transport.authenticated) {
+      throw new Error("Profile DEK export requires an authenticated pairing transport")
+    }
+  }
+
+  function portableAad(profileId: string, keyId: string): string {
+    return `profile-dek:${profileId}:${keyId}:v1`
+  }
+
   return {
     async getOrCreate(profileId: string): Promise<ProfileDekHandle> {
       assertAvailable()
@@ -143,6 +184,62 @@ export function createProfileDekStore(dependencies: ProfileDekStoreDependencies 
       await importDek(rawKey)
       await secretStore.save(materialKey(profileId, keyId), bytesToBase64(rawKey))
       await secretStore.save(activeKey(profileId), keyId)
+    },
+
+    async exportForPairing(
+      profileId: string,
+      transport: { authenticated: boolean; protocolVersion: number }
+    ): Promise<ProfileDekPairingExportV1> {
+      assertPairingTransport(transport)
+      const { keyId, encoded } = await loadActiveMaterial(profileId)
+      const rawKey = base64ToBytes(encoded)
+      await importDek(rawKey)
+      return { profileId, keyId, rawKey }
+    },
+
+    async exportPortable(
+      profileId: string,
+      passphrase: string
+    ): Promise<PortableProfileDekEnvelopeV1> {
+      if (!passphrase) throw new Error("A backup passphrase is required")
+      const { keyId, encoded } = await loadActiveMaterial(profileId)
+      const cipher = await createBackupChunkCipher(passphrase)
+      return {
+        version: 1,
+        profileId,
+        keyId,
+        encryption: cipher.config,
+        ciphertext: await cipher.seal(0, encoded, portableAad(profileId, keyId)),
+      }
+    },
+
+    async importPortable(
+      envelope: PortableProfileDekEnvelopeV1,
+      passphrase: string
+    ): Promise<void> {
+      assertAvailable()
+      if (envelope.version !== 1) throw new ProfileDekProtocolError()
+      if (!envelope.profileId || !envelope.keyId || !envelope.ciphertext) {
+        throw new Error("Portable profile DEK envelope is incomplete")
+      }
+      if (!passphrase) throw new Error("A backup passphrase is required")
+      const cipher = await createBackupChunkCipher(passphrase, envelope.encryption)
+      const encoded = await cipher.open(
+        0,
+        envelope.ciphertext,
+        portableAad(envelope.profileId, envelope.keyId)
+      )
+      const rawKey = base64ToBytes(encoded)
+      try {
+        await importDek(rawKey)
+        await secretStore.save(
+          materialKey(envelope.profileId, envelope.keyId),
+          bytesToBase64(rawKey)
+        )
+        await secretStore.save(activeKey(envelope.profileId), envelope.keyId)
+      } finally {
+        rawKey.fill(0)
+      }
     },
 
     async deleteProfile(profileId: string): Promise<void> {

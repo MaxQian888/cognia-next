@@ -29,6 +29,66 @@ describe("ProfileDekStore", () => {
     expect(fixture.values.size).toBe(0)
   })
 
+  it("exports raw DEK material only across an authenticated v1 pairing transport", async () => {
+    const fixture = secretStore()
+    const store = createProfileDekStore({
+      secretStore: fixture.store,
+      requireUnlocked: () => true,
+      now: () => 10,
+    })
+    const created = await store.getOrCreate("profile-1")
+
+    await expect(
+      store.exportForPairing("profile-1", {
+        authenticated: false,
+        protocolVersion: 1,
+      })
+    ).rejects.toThrow("authenticated pairing transport")
+    await expect(
+      store.exportForPairing("profile-1", {
+        authenticated: true,
+        protocolVersion: 0,
+      })
+    ).rejects.toBeInstanceOf(ProfileDekProtocolError)
+
+    const exported = await store.exportForPairing("profile-1", {
+      authenticated: true,
+      protocolVersion: 1,
+    })
+    expect(exported.profileId).toBe("profile-1")
+    expect(exported.keyId).toBe(created.keyId)
+    expect(exported.rawKey).toHaveLength(32)
+  })
+
+  it("wraps a profile DEK with a backup passphrase and imports it without plaintext material", async () => {
+    const sourceSecrets = secretStore()
+    const source = createProfileDekStore({
+      secretStore: sourceSecrets.store,
+      requireUnlocked: () => true,
+      now: () => 10,
+    })
+    const original = await source.getOrCreate("profile-1")
+    const wrapped = await source.exportPortable("profile-1", "correct horse battery staple")
+    const serialized = JSON.stringify(wrapped)
+
+    expect(serialized).not.toContain(
+      sourceSecrets.values.get(`material:profile-1:${original.keyId}`)
+    )
+    expect(wrapped).toMatchObject({ version: 1, profileId: "profile-1", keyId: original.keyId })
+
+    const targetSecrets = secretStore()
+    const target = createProfileDekStore({
+      secretStore: targetSecrets.store,
+      requireUnlocked: () => true,
+    })
+    await expect(target.importPortable(wrapped, "wrong passphrase")).rejects.toBeDefined()
+    await target.importPortable(wrapped, "correct horse battery staple")
+    await expect(target.load("profile-1", original.keyId)).resolves.toMatchObject({
+      profileId: "profile-1",
+      keyId: original.keyId,
+    })
+  })
+
   it("creates one non-extractable AES-256-GCM DEK and reloads it by key id", async () => {
     const fixture = secretStore()
     const store = createProfileDekStore({

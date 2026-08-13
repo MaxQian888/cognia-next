@@ -111,6 +111,18 @@ pub(super) const COMMANDS: &[&str] = &[
     "external_agent_update",
 ];
 
+fn validate_content_protocol(
+    table: &str,
+    content_protocol_version: Option<u64>,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    if table == "memories" && content_protocol_version != Some(1) {
+        return Err(RpcError::upgrade_required(
+            "retrieval content protocol v1 is required for memory sync".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(super) async fn dispatch(
     name: &str,
     args: Value,
@@ -235,6 +247,8 @@ pub(super) async fn dispatch(
         "sync_pull" => {
             let table: String = required(&args, "table")?;
             let since: i64 = optional::<i64>(&args, "since")?.unwrap_or(0);
+            let content_protocol_version = optional::<u64>(&args, "content_protocol_version")?;
+            validate_content_protocol(&table, content_protocol_version)?;
             let account_id = account_id.ok_or_else(|| {
         RpcError::forbidden("sync_pull requires an account-bound device principal")
             })?;
@@ -259,6 +273,7 @@ pub(super) async fn dispatch(
                     table,
                     since,
                     account_id.to_string(),
+                    content_protocol_version,
                     crate::companion_api::sync_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
@@ -651,5 +666,15 @@ mod tests {
         assert!(!COMMANDS.is_empty());
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn memory_sync_requires_retrieval_content_protocol_v1() {
+        let (status, Json(error)) = validate_content_protocol("memories", None).unwrap_err();
+        assert_eq!(status, StatusCode::UPGRADE_REQUIRED);
+        assert_eq!(error.code, "upgrade_required");
+        assert!(error.message.contains("protocol v1"));
+        assert!(validate_content_protocol("memories", Some(1)).is_ok());
+        assert!(validate_content_protocol("sessions", None).is_ok());
     }
 }

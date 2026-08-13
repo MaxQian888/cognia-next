@@ -62,9 +62,50 @@ describe("readDexieDelta", () => {
     await db.settings.clear()
     await db.workflowRuns.clear()
     await db.executionRuns.clear()
+    await db.memories.clear()
     await db.syncTombstones.clear()
     ;(tauriListen as jest.Mock).mockReset()
     ;(tauriInvoke as jest.Mock).mockReset()
+  })
+
+  it("rejects memory sync clients that do not support encrypted content protocol v1", async () => {
+    await expect(readDexieDelta("memories", 0)).rejects.toThrow("upgrade_required")
+    await expect(readDexieDelta("memories", 0, 0)).rejects.toThrow("upgrade_required")
+  })
+
+  it("returns memory rows as ciphertext-only protocol v1 envelopes", async () => {
+    await getDb().memories.add({
+      id: "memory-1",
+      scope: "global",
+      type: "semantic",
+      text: "private memory statement",
+      tags: [],
+      importance: 7,
+      createdAt: 1,
+      updatedAt: 2,
+      lastAccessedAt: 2,
+      accessCount: 0,
+      version: 1,
+      status: "active",
+      pinned: false,
+      provenance: "user",
+    })
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ])
+    const delta = await readDexieDelta("memories", 0, 1, {
+      getMemoryDek: async () => ({ profileId: "memory-shared", keyId: "dek-1", key }),
+    })
+    const serialized = JSON.stringify(delta)
+
+    expect(delta.rows).toHaveLength(1)
+    expect(delta.rows[0]).toMatchObject({
+      id: "memory-1",
+      protocolVersion: 1,
+      envelope: { keyId: "dek-1", algorithm: "AES-256-GCM" },
+    })
+    expect(serialized).not.toContain("private memory statement")
   })
 
   it("returns characters whose updatedAt > since", async () => {
