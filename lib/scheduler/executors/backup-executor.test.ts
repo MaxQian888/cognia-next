@@ -13,6 +13,7 @@ jest.mock("@/lib/tauri", () => ({
 
 const writeTextFileMock = jest.fn(async (_path: string, _body: string) => {})
 const mkdirMock = jest.fn(async (_path: string, _opts?: unknown) => {})
+const attachPortableRetrievalKeysMock = jest.fn(async (pkg: unknown) => pkg)
 
 jest.mock(
   "@tauri-apps/plugin-fs",
@@ -45,6 +46,10 @@ const dispatchMock = jest.fn(
 )
 jest.mock("@/lib/data/destinations", () => ({
   dispatchBackupDestination: (...args: unknown[]) => dispatchMock(...args),
+}))
+jest.mock("@/lib/data/retrieval-key-backup", () => ({
+  attachPortableRetrievalKeys: (pkg: unknown, passphrase: string) =>
+    attachPortableRetrievalKeysMock(pkg, passphrase),
 }))
 
 function makeTask(payload: ScheduledTask["payload"]): ScheduledTask {
@@ -99,6 +104,7 @@ beforeEach(async () => {
     ok: true,
     target: "/cognia-backups/cognia-backup-x.enc.cbk",
   })
+  attachPortableRetrievalKeysMock.mockClear()
 })
 
 describe("executeBackupTask", () => {
@@ -191,6 +197,10 @@ describe("executeBackupTask", () => {
     expect(result.success).toBe(true)
     expect(writeTextFileMock).toHaveBeenCalledTimes(1)
     expect(dispatchMock).toHaveBeenCalledTimes(1)
+    expect(attachPortableRetrievalKeysMock.mock.calls.map((call) => call[1])).toEqual([
+      expect.any(String),
+      "sync-pass",
+    ])
   })
 
   it("`all` keeps partial success but surfaces a locked webdav leg in output", async () => {

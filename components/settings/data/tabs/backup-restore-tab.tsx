@@ -43,6 +43,7 @@ import { ShareSettingsCard } from "@/components/share/share-settings-card"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { backupPayload } from "@/lib/share/payload"
 import { WebDavSyncCard } from "@/components/settings/data/webdav-sync-card"
+import { requireBiometric } from "@/lib/biometric/prompt"
 
 export function BackupRestoreTab() {
   return (
@@ -65,7 +66,7 @@ function ExportBlock() {
   const [includeSessions, setIncludeSessions] = useState(false)
   const [includeApiKey, setIncludeApiKey] = useState(false)
   const [includeBuiltIns, setIncludeBuiltIns] = useState(false)
-  const [encryption, setEncryption] = useState<EncryptionMode>("plaintext")
+  const [encryption, setEncryption] = useState<EncryptionMode>("auto-key")
   const [passphrase, setPassphrase] = useState("")
   const { run, busy } = useFullBackup()
 
@@ -73,6 +74,26 @@ function ExportBlock() {
     if (encryption === "passphrase" && !passphrase) {
       toast.error(t("backup.passphraseRequired"))
       return
+    }
+    let plaintextConfirmed = false
+    if (encryption === "plaintext") {
+      const confirmation = await requireBiometric({
+        title: t("backup.plaintextConfirmTitle"),
+        message: t("backup.plaintextConfirmBody"),
+        confirmLabel: t("backup.plaintextConfirmAction"),
+        cancelLabel: t("cancel"),
+      })
+      if (!confirmation.ok) {
+        loggers.export.warn("plaintext_backup_cancelled")
+        return
+      }
+      plaintextConfirmed = true
+      loggers.export.warn("plaintext_backup_confirmed", {
+        includeSessions,
+        includeApiKey,
+        includeBuiltIns,
+        verification: confirmation.via,
+      })
     }
     loggers.export.info("full_backup_initiated", {
       includeSessions,
@@ -87,6 +108,7 @@ function ExportBlock() {
       includeBuiltIns,
       encryption,
       passphrase,
+      plaintextConfirmed,
     })
     if (result.ok) {
       if (!result.canceled) {

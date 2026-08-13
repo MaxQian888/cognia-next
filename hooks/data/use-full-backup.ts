@@ -19,6 +19,7 @@ import { appendBackupHistory } from "@/lib/db/backup-history"
 import type { BackupHistoryEncryption, BackupHistoryType } from "@/lib/db/backup-history"
 import type { ExportOptions } from "@/lib/data/types"
 import type { EncryptionMode } from "@/components/data/shared/encryption-options"
+import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
 
 export interface RunBackupArgs extends ExportOptions {
   encryption: EncryptionMode
@@ -26,6 +27,8 @@ export interface RunBackupArgs extends ExportOptions {
   type?: BackupHistoryType
   /** Pre-resolved destination path (for scheduled backups). */
   destination?: string
+  /** Set only after the dedicated plaintext-risk confirmation succeeds. */
+  plaintextConfirmed?: boolean
 }
 
 export type RunBackupResult =
@@ -39,11 +42,26 @@ export function useFullBackup() {
   const run = useCallback(async (args: RunBackupArgs): Promise<RunBackupResult> => {
     setBusy(true)
     try {
-      const pkg = await buildBackupPackage({
+      if (args.encryption === "plaintext" && args.plaintextConfirmed !== true) {
+        throw new Error("Plaintext backup requires explicit confirmation.")
+      }
+      const passphrase =
+        args.encryption === "plaintext"
+          ? undefined
+          : args.encryption === "passphrase"
+            ? args.passphrase
+            : await getDefaultBackupPassphrase()
+      if (args.encryption !== "plaintext" && !passphrase) {
+        throw new Error("Encryption key unavailable on this runtime.")
+      }
+      const basePackage = await buildBackupPackage({
         includeSessions: args.includeSessions,
         includeApiKey: args.includeApiKey,
         includeBuiltIns: args.includeBuiltIns,
       })
+      const pkg = passphrase
+        ? await attachPortableRetrievalKeys(basePackage, passphrase)
+        : basePackage
       const plaintext = serializePackage(pkg)
 
       let body: string
@@ -53,11 +71,6 @@ export function useFullBackup() {
         body = plaintext
         historyEncryption = "none"
       } else {
-        const passphrase =
-          args.encryption === "passphrase" ? args.passphrase : await getDefaultBackupPassphrase()
-        if (!passphrase) {
-          return { ok: false, error: "Encryption key unavailable on this runtime." }
-        }
         const env = await encryptBackupPackage(plaintext, passphrase, {
           version: pkg.manifest.version,
           schemaVersion: pkg.manifest.schemaVersion,

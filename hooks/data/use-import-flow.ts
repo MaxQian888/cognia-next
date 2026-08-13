@@ -40,9 +40,11 @@ export function useImportFlow() {
     stateRef.current = state
   }, [state])
   const rawRef = useRef<string | null>(null)
+  const retrievalDekPassphraseRef = useRef<string | null>(null)
 
   const reset = useCallback(() => {
     rawRef.current = null
+    retrievalDekPassphraseRef.current = null
     setState({ status: "idle" })
   }, [])
 
@@ -59,7 +61,10 @@ export function useImportFlow() {
         return
       }
       rawRef.current = raw
-      await dispatch(raw, setState)
+      retrievalDekPassphraseRef.current = null
+      await dispatch(raw, setState, (passphrase) => {
+        retrievalDekPassphraseRef.current = passphrase
+      })
     } catch (err) {
       log.error("import-pickFile-failed", { error: err })
       setState({ status: "error", message: err instanceof Error ? err.message : String(err) })
@@ -82,6 +87,7 @@ export function useImportFlow() {
       }
       const plaintext = await decryptBackupPackage(parsed, passphrase)
       const pkg = await migrateEnvelope(JSON.parse(plaintext))
+      retrievalDekPassphraseRef.current = passphrase
       setState({ status: "preview", pkg })
     } catch (err) {
       log.warn("import-passphrase-rejected", { error: err })
@@ -99,7 +105,10 @@ export function useImportFlow() {
     const pkg = prev.pkg
     setState({ status: "applying", pkg })
     try {
-      const summary = await applyBackupPackage(pkg, opts)
+      const summary = await applyBackupPackage(pkg, {
+        ...opts,
+        retrievalDekPassphrase: retrievalDekPassphraseRef.current ?? undefined,
+      })
       setState({ status: "done", pkg, summary })
     } catch (err) {
       log.error("import-apply-failed", {
@@ -117,7 +126,8 @@ export function useImportFlow() {
 
 async function dispatch(
   raw: string,
-  setState: React.Dispatch<React.SetStateAction<ImportFlowState>>
+  setState: React.Dispatch<React.SetStateAction<ImportFlowState>>,
+  setRetrievalDekPassphrase: (passphrase: string | null) => void
 ): Promise<void> {
   let parsed: unknown
   try {
@@ -135,6 +145,7 @@ async function dispatch(
   // silently before falling back to a passphrase prompt.
   try {
     const pkg = await migrateEnvelope(parsed)
+    setRetrievalDekPassphrase(null)
     setState({ status: "preview", pkg })
     return
   } catch (err) {
@@ -145,6 +156,7 @@ async function dispatch(
         try {
           const plaintext = await decryptBackupPackage(err.envelope, autoKey)
           const pkg = await migrateEnvelope(JSON.parse(plaintext))
+          setRetrievalDekPassphrase(autoKey)
           log.info("import-auto-key-success")
           setState({ status: "preview", pkg })
           return

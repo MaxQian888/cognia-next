@@ -25198,6 +25198,9 @@
         "passphraseConfirm": "确认密码短语",
         "passphraseMismatch": "两次输入的密码短语不一致。",
         "passphraseRequired": "此模式必须提供密码短语。",
+        "plaintextConfirmAction": "导出明文",
+        "plaintextConfirmBody": "此文件可能以可读形式包含记忆、数字分身、项目和知识内容。检索解密密钥不会写入文件，因此加密检索内容可能仍需原设备保险库。仅在你信任目标位置时继续。",
+        "plaintextConfirmTitle": "要导出未加密备份吗？",
         "previewBackend": "来自 {backend}（应用 {appVersion}）— 导出于 {exportedAt}",
         "quickSessionBody": "把一个或多个会话打包为 ZIP（Markdown / JSON / HTML / 纯文本）。",
         "quickSessionButton": "批量导出…",
@@ -25611,6 +25614,7 @@
       "summaryLsSkipped": "已跳过 ({count})",
       "summaryLsWritten": "已写入 ({count})",
       "summaryOverwritten": "覆盖",
+      "summaryRetrievalKeys": "已恢复检索密钥（{count}）",
       "summarySkipped": "跳过",
       "summarySyncResults": "Agent 重投影",
       "syncResults": {

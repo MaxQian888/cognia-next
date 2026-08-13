@@ -9,6 +9,7 @@ import { createBackupChunkCipher, type BackupChunkEncryptionConfig } from "@/lib
 const PROFILE_DEK_NAMESPACE = "retrieval-profile-dek/v1"
 const ACTIVE_KEY_PREFIX = "active:"
 const MATERIAL_KEY_PREFIX = "material:"
+const PROFILE_REGISTRY_KEY = "profiles"
 
 export interface ProfileDekHandle {
   profileId: string
@@ -52,6 +53,10 @@ export interface ProfileDekStoreDependencies {
   secretStore?: KeyringStore
   requireUnlocked?: () => boolean
   now?: () => number
+}
+
+export interface PortableProfileDekImportOptions {
+  activate: "always" | "if-missing"
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -124,6 +129,35 @@ export function createProfileDekStore(dependencies: ProfileDekStoreDependencies 
     return { keyId, encoded }
   }
 
+  async function readProfileRegistry(): Promise<string[]> {
+    const encoded = await secretStore.load(PROFILE_REGISTRY_KEY)
+    if (encoded === null) return []
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(encoded)
+    } catch {
+      throw new Error("Profile DEK registry is corrupt")
+    }
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string" || !value)) {
+      throw new Error("Profile DEK registry is corrupt")
+    }
+    return [...new Set(parsed)].sort()
+  }
+
+  async function writeProfileRegistry(profileIds: readonly string[]): Promise<void> {
+    await secretStore.save(PROFILE_REGISTRY_KEY, JSON.stringify([...new Set(profileIds)].sort()))
+  }
+
+  async function registerProfile(profileId: string): Promise<void> {
+    const current = await readProfileRegistry()
+    if (!current.includes(profileId)) await writeProfileRegistry([...current, profileId])
+  }
+
+  async function restoreSecret(key: string, value: string | null): Promise<void> {
+    if (value === null) await secretStore.delete(key)
+    else await secretStore.save(key, value)
+  }
+
   function assertPairingTransport(transport: {
     authenticated: boolean
     protocolVersion: number
@@ -146,6 +180,7 @@ export function createProfileDekStore(dependencies: ProfileDekStoreDependencies 
       if (active) {
         const existing = await load(profileId, active)
         if (!existing) throw new Error("Active profile DEK material is missing")
+        await registerProfile(profileId)
         return existing
       }
 
@@ -154,6 +189,7 @@ export function createProfileDekStore(dependencies: ProfileDekStoreDependencies 
       try {
         await secretStore.save(materialKey(profileId, keyId), bytesToBase64(bytes))
         await secretStore.save(activeKey(profileId), keyId)
+        await registerProfile(profileId)
         return { profileId, keyId, key: await importDek(bytes) }
       } finally {
         bytes.fill(0)
@@ -184,6 +220,7 @@ export function createProfileDekStore(dependencies: ProfileDekStoreDependencies 
       await importDek(rawKey)
       await secretStore.save(materialKey(profileId, keyId), bytesToBase64(rawKey))
       await secretStore.save(activeKey(profileId), keyId)
+      await registerProfile(profileId)
     },
 
     async exportForPairing(
@@ -213,33 +250,102 @@ export function createProfileDekStore(dependencies: ProfileDekStoreDependencies 
       }
     },
 
-    async importPortable(
-      envelope: PortableProfileDekEnvelopeV1,
-      passphrase: string
+    async listProfileIds(candidateProfileIds: readonly string[] = []): Promise<string[]> {
+      assertAvailable()
+      const candidates = new Set([...(await readProfileRegistry()), ...candidateProfileIds])
+      const provisioned: string[] = []
+      for (const profileId of [...candidates].sort()) {
+        if (!profileId) continue
+        if (await secretStore.load(activeKey(profileId))) provisioned.push(profileId)
+      }
+      if (provisioned.length > 0) await writeProfileRegistry(provisioned)
+      return provisioned
+    },
+
+    async importPortableBatch(
+      envelopes: readonly PortableProfileDekEnvelopeV1[],
+      passphrase: string,
+      options: PortableProfileDekImportOptions = { activate: "always" }
     ): Promise<void> {
       assertAvailable()
-      if (envelope.version !== 1) throw new ProfileDekProtocolError()
-      if (!envelope.profileId || !envelope.keyId || !envelope.ciphertext) {
-        throw new Error("Portable profile DEK envelope is incomplete")
-      }
       if (!passphrase) throw new Error("A backup passphrase is required")
-      const cipher = await createBackupChunkCipher(passphrase, envelope.encryption)
-      const encoded = await cipher.open(
-        0,
-        envelope.ciphertext,
-        portableAad(envelope.profileId, envelope.keyId)
-      )
-      const rawKey = base64ToBytes(encoded)
+      const identities = new Set<string>()
+      const prepared: Array<{
+        envelope: PortableProfileDekEnvelopeV1
+        rawKey: Uint8Array
+        encoded: string
+      }> = []
       try {
-        await importDek(rawKey)
-        await secretStore.save(
-          materialKey(envelope.profileId, envelope.keyId),
-          bytesToBase64(rawKey)
-        )
-        await secretStore.save(activeKey(envelope.profileId), envelope.keyId)
+        for (const envelope of envelopes) {
+          if (envelope.version !== 1) throw new ProfileDekProtocolError()
+          if (!envelope.profileId || !envelope.keyId || !envelope.ciphertext) {
+            throw new Error("Portable profile DEK envelope is incomplete")
+          }
+          if (identities.has(envelope.profileId)) {
+            throw new Error(
+              `Portable backup contains duplicate profile DEKs: ${envelope.profileId}`
+            )
+          }
+          identities.add(envelope.profileId)
+          const cipher = await createBackupChunkCipher(passphrase, envelope.encryption)
+          const encoded = await cipher.open(
+            0,
+            envelope.ciphertext,
+            portableAad(envelope.profileId, envelope.keyId)
+          )
+          const rawKey = base64ToBytes(encoded)
+          await importDek(rawKey)
+          prepared.push({ envelope, rawKey, encoded: bytesToBase64(rawKey) })
+        }
+
+        const touched = new Map<string, string | null>()
+        const remember = async (key: string) => {
+          if (!touched.has(key)) touched.set(key, await secretStore.load(key))
+        }
+        await remember(PROFILE_REGISTRY_KEY)
+        try {
+          for (const { envelope, encoded } of prepared) {
+            const material = materialKey(envelope.profileId, envelope.keyId)
+            const active = activeKey(envelope.profileId)
+            await remember(material)
+            await remember(active)
+            await secretStore.save(material, encoded)
+            if (options.activate === "always" || (await secretStore.load(active)) === null) {
+              await secretStore.save(active, envelope.keyId)
+            }
+          }
+          await writeProfileRegistry([
+            ...(await readProfileRegistry()),
+            ...prepared.map(({ envelope }) => envelope.profileId),
+          ])
+        } catch (error) {
+          const rollbackErrors: unknown[] = []
+          for (const [key, value] of [...touched.entries()].reverse()) {
+            try {
+              await restoreSecret(key, value)
+            } catch (rollbackError) {
+              rollbackErrors.push(rollbackError)
+            }
+          }
+          if (rollbackErrors.length > 0) {
+            throw new AggregateError(
+              [error, ...rollbackErrors],
+              "Profile DEK import rollback failed"
+            )
+          }
+          throw error
+        }
       } finally {
-        rawKey.fill(0)
+        for (const item of prepared) item.rawKey.fill(0)
       }
+    },
+
+    async importPortable(
+      envelope: PortableProfileDekEnvelopeV1,
+      passphrase: string,
+      options: PortableProfileDekImportOptions = { activate: "always" }
+    ): Promise<void> {
+      await this.importPortableBatch([envelope], passphrase, options)
     },
 
     async deleteProfile(profileId: string): Promise<void> {
@@ -247,6 +353,8 @@ export function createProfileDekStore(dependencies: ProfileDekStoreDependencies 
       const active = await secretStore.load(activeKey(profileId))
       if (active) await secretStore.delete(materialKey(profileId, active))
       await secretStore.delete(activeKey(profileId))
+      const profiles = await readProfileRegistry()
+      await writeProfileRegistry(profiles.filter((candidate) => candidate !== profileId))
     },
   }
 }

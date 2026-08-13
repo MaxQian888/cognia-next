@@ -25198,6 +25198,9 @@
         "passphraseConfirm": "Confirm passphrase",
         "passphraseMismatch": "Passphrases don't match.",
         "passphraseRequired": "A passphrase is required for this mode.",
+        "plaintextConfirmAction": "Export plaintext",
+        "plaintextConfirmBody": "This file can contain Memory, Twin, project, and knowledge content in readable form. Retrieval decryption keys are excluded, so encrypted retrieval content may require the original device vault. Continue only if you trust the destination.",
+        "plaintextConfirmTitle": "Export an unencrypted backup?",
         "previewBackend": "From {backend} (app {appVersion}) — exported {exportedAt}",
         "quickSessionBody": "Bundle one or more conversations into a ZIP archive (Markdown / JSON / HTML / plain text).",
         "quickSessionButton": "Bulk export…",
@@ -25611,6 +25614,7 @@
       "summaryLsSkipped": "Skipped ({count})",
       "summaryLsWritten": "Written ({count})",
       "summaryOverwritten": "Overwritten",
+      "summaryRetrievalKeys": "Restored retrieval keys ({count})",
       "summarySkipped": "Skipped",
       "summarySyncResults": "Agent re-projection",
       "syncResults": {

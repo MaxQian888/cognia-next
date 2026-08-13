@@ -16,6 +16,7 @@ const mockHasSyncPassphrase = jest.fn(() => false)
 const mockGetSyncPassphrase = jest.fn((): string | null => null)
 const mockLoadPersistedSyncPassphrase = jest.fn(async () => false)
 const mockNotifyRemoteNewer = jest.fn(async (_input?: unknown) => false)
+const mockAttachPortableRetrievalKeys = jest.fn(async (value: unknown) => value)
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: () => mockGetSettings(),
@@ -32,6 +33,10 @@ jest.mock("@/lib/data/build-package", () => ({
 }))
 jest.mock("@/lib/data/backup-key", () => ({
   getDefaultBackupPassphrase: () => mockGetAutoKey(),
+}))
+jest.mock("@/lib/data/retrieval-key-backup", () => ({
+  attachPortableRetrievalKeys: (value: unknown, passphrase: string) =>
+    mockAttachPortableRetrievalKeys(value, passphrase),
 }))
 jest.mock("@/lib/data/scheduler", () => ({
   shouldRunScheduledBackup: (input: unknown) => mockShouldRun(input),
@@ -94,6 +99,7 @@ beforeEach(() => {
   mockHasSyncPassphrase.mockReturnValue(false)
   mockGetSyncPassphrase.mockReturnValue(null)
   mockLoadPersistedSyncPassphrase.mockResolvedValue(false)
+  mockAttachPortableRetrievalKeys.mockClear()
 })
 
 afterEach(() => {
@@ -124,6 +130,7 @@ it("writes, prunes, records, and stamps one encrypted scheduled backup through t
     "encrypted"
   )
   expect(filesystem.remove).toHaveBeenCalledWith("/srv/backups/old.enc.cbk")
+  expect(mockAttachPortableRetrievalKeys).toHaveBeenCalledWith(pkg, "auto-key")
   expect(mockAppendHistory).toHaveBeenCalledWith(
     expect.objectContaining({
       type: "scheduled",
@@ -242,6 +249,7 @@ it("preserves every WebDAV outcome in backup history", async () => {
   expect(mockSaveSettings).toHaveBeenLastCalledWith({
     webdavSync: expect.objectContaining({ enabled: true, lastSyncAt: expect.any(String) }),
   })
+  expect(mockAttachPortableRetrievalKeys).toHaveBeenLastCalledWith(pkg, "sync-passphrase")
 
   mockUpload.mockResolvedValueOnce({ ok: false, error: "remote unavailable" })
   await maybeUploadToWebDav(true, pkg as never, "plain", messages)

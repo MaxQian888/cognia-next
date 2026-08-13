@@ -235,6 +235,7 @@ describe("dispatchCommand: settings + backup", () => {
 
   it("backup_export builds a package with secrets excluded", async () => {
     const res = (await dispatchCommand("backup_export", {
+      plaintextConfirmed: true,
       options: { includeSessions: true },
     })) as {
       package: { schemaVersion: number }
@@ -243,16 +244,23 @@ describe("dispatchCommand: settings + backup", () => {
       expect.objectContaining({ includeApiKey: false, includeSessions: true })
     )
     expect(res.package.schemaVersion).toBe(3)
+    await expect(dispatchCommand("backup_export", {})).rejects.toThrow(
+      /explicit plaintext confirmation/
+    )
   })
 
   it("backup_import applies a package and requires one", async () => {
     const res = (await dispatchCommand("backup_import", {
       package: { schemaVersion: 3 },
-      options: { mergeStrategy: "overwrite" },
+      options: { mergeStrategy: "overwrite", retrievalDekPassphrase: "backup-passphrase" },
     })) as { summary: unknown }
     expect(applyPkg.applyBackupPackage).toHaveBeenCalledWith(
       { schemaVersion: 3 },
-      expect.objectContaining({ mergeStrategy: "overwrite", includeApiKey: false })
+      expect.objectContaining({
+        mergeStrategy: "overwrite",
+        includeApiKey: false,
+        retrievalDekPassphrase: "backup-passphrase",
+      })
     )
     expect(res.summary).toEqual({ applied: true })
     await expect(dispatchCommand("backup_import", {})).rejects.toThrow(/package is required/)

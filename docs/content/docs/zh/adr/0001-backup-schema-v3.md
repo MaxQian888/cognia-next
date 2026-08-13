@@ -72,11 +72,16 @@ DomainExportFile                       # single-table slice
 
 导出对话框提供三种模式：
 
-1. **明文**（默认）——最便于查看。
-2. **自动密钥**——用设备存储的密钥加密（Tauri：
+1. **自动密钥**（默认）——用设备存储的密钥加密（Tauri：
    `@tauri-apps/plugin-store`，web：`localStorage`）。一键完成，在其他
    设备上不可读，除非用户也导出了该密钥。
-3. **自定义口令**——PBKDF2-SHA256，600 000 次迭代 + AES-GCM。
+2. **自定义口令**——PBKDF2-SHA256，600 000 次迭代 + AES-GCM。
+3. **明文**——文件可直接读取，因此必须经过单独的风险警告确认，并且绝不携带
+   retrieval DEK。
+
+加密备份会携带 canonical retrieval ciphertext，并使用同一个 backup key 或
+passphrase 分别封装每个已配置的 retrieval-profile DEK。词法索引 segment 属于
+可重建派生数据，恢复后重新生成。
 
 导入器会检测加密形态，先静默尝试自动密钥，只有在失败时才回退到口令提示。
 

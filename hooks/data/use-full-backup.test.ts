@@ -11,6 +11,13 @@ import { decryptBackupPackage } from "@/lib/data/crypto"
 import { isEncryptedEnvelope } from "@/lib/data/migrate"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 
+const mockAttachPortableRetrievalKeys = jest.fn(async <T>(pkg: T) => pkg)
+
+jest.mock("@/lib/data/retrieval-key-backup", () => ({
+  attachPortableRetrievalKeys: (pkg: unknown, passphrase: string) =>
+    mockAttachPortableRetrievalKeys(pkg, passphrase),
+}))
+
 // jsdom doesn't expose URL.createObjectURL; mock it for the web download path.
 beforeAll(() => {
   if (typeof URL.createObjectURL === "undefined") {
@@ -26,6 +33,7 @@ beforeAll(() => {
 })
 
 beforeEach(async () => {
+  mockAttachPortableRetrievalKeys.mockClear()
   await getDb().delete()
   __resetDbForTesting()
   await whenSeeded()
@@ -47,6 +55,7 @@ describe("useFullBackup", () => {
         includeSessions: false,
         includeApiKey: false,
         encryption: "plaintext",
+        plaintextConfirmed: true,
       })
     })
     expect(outcome).toMatchObject({ ok: true, canceled: false })
@@ -57,6 +66,23 @@ describe("useFullBackup", () => {
       type: "manual",
       encryption: "none",
     })
+  })
+
+  it("refuses plaintext export without a separate confirmation receipt", async () => {
+    const { result } = renderHook(() => useFullBackup())
+    let outcome: Awaited<ReturnType<typeof result.current.run>> | undefined
+    await act(async () => {
+      outcome = await result.current.run({
+        includeSessions: false,
+        includeApiKey: false,
+        encryption: "plaintext",
+      })
+    })
+    expect(outcome).toEqual({
+      ok: false,
+      error: "Plaintext backup requires explicit confirmation.",
+    })
+    expect(mockAttachPortableRetrievalKeys).not.toHaveBeenCalled()
   })
 
   it("auto-key export produces a decryptable encrypted envelope", async () => {
@@ -74,6 +100,10 @@ describe("useFullBackup", () => {
       })
     })
     expect(outcome?.ok).toBe(true)
+    expect(mockAttachPortableRetrievalKeys).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(String)
+    )
     const history = await listBackupHistory()
     expect(history[0].encryption).toBe("auto-key")
   })
@@ -106,6 +136,7 @@ describe("useFullBackup", () => {
     const history = await listBackupHistory()
     expect(history[0].encryption).toBe("passphrase")
     expect(history[0].success).toBe(true)
+    expect(mockAttachPortableRetrievalKeys).toHaveBeenCalledWith(expect.any(Object), "hunter2")
   })
 
   // Sanity: ensure the encrypted envelope produced by auto-key is structurally

@@ -1707,6 +1707,9 @@ async function conversationOverridesUpdate(
 async function backupExport(
   payload: Record<string, unknown>
 ): Promise<{ package: BackupPackageV3 }> {
+  if (payload.plaintextConfirmed !== true) {
+    throw new Error("backup_export requires explicit plaintext confirmation")
+  }
   const opts = (payload.options as Partial<ExportOptions> | undefined) ?? {}
   const exportOptions: ExportOptions = {
     includeSessions: opts.includeSessions ?? true,
@@ -1729,6 +1732,8 @@ async function backupImport(payload: Record<string, unknown>): Promise<{ summary
     mergeStrategy,
     includeSessions: opts.includeSessions ?? true,
     includeApiKey: false,
+    retrievalDekPassphrase:
+      typeof opts.retrievalDekPassphrase === "string" ? opts.retrievalDekPassphrase : undefined,
   }
   const summary = await applyBackupPackage(pkg, importOptions)
   return { summary }

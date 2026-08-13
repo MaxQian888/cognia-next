@@ -89,6 +89,54 @@ describe("ProfileDekStore", () => {
     })
   })
 
+  it("discovers legacy keys and validates a portable batch before changing the target", async () => {
+    const sourceSecrets = secretStore()
+    const source = createProfileDekStore({
+      secretStore: sourceSecrets.store,
+      requireUnlocked: () => true,
+      now: () => 10,
+    })
+    const first = await source.getOrCreate("profile-1")
+    const second = await source.getOrCreate("profile-2")
+    const envelopes = await Promise.all([
+      source.exportPortable("profile-1", "backup-passphrase"),
+      source.exportPortable("profile-2", "backup-passphrase"),
+    ])
+
+    // Simulate keys created before the profile registry existed.
+    sourceSecrets.values.delete("profiles")
+    await expect(source.listProfileIds(["profile-2", "profile-1", "missing"])).resolves.toEqual([
+      "profile-1",
+      "profile-2",
+    ])
+
+    const targetSecrets = secretStore()
+    const target = createProfileDekStore({
+      secretStore: targetSecrets.store,
+      requireUnlocked: () => true,
+    })
+    const existingTargetKey = await target.getOrCreate("profile-1")
+    const tampered = { ...envelopes[1], ciphertext: `${envelopes[1].ciphertext}broken` }
+    await expect(
+      target.importPortableBatch([envelopes[0], tampered], "backup-passphrase", {
+        activate: "if-missing",
+      })
+    ).rejects.toBeDefined()
+    await expect(target.load("profile-1", first.keyId)).resolves.toBeNull()
+    await expect(target.load("profile-2", second.keyId)).resolves.toBeNull()
+
+    await target.importPortableBatch(envelopes, "backup-passphrase", {
+      activate: "if-missing",
+    })
+    await expect(target.listProfileIds()).resolves.toEqual(["profile-1", "profile-2"])
+    await expect(target.getOrCreate("profile-1")).resolves.toMatchObject({
+      keyId: existingTargetKey.keyId,
+    })
+    await expect(target.load("profile-1", first.keyId)).resolves.toMatchObject({
+      keyId: first.keyId,
+    })
+  })
+
   it("creates one non-extractable AES-256-GCM DEK and reloads it by key id", async () => {
     const fixture = secretStore()
     const store = createProfileDekStore({
@@ -102,7 +150,7 @@ describe("ProfileDekStore", () => {
     expect(first.keyId).toBe(second.keyId)
     expect(first.key.extractable).toBe(false)
     expect(first.key.algorithm).toEqual({ name: "AES-GCM", length: 256 })
-    expect(fixture.values.size).toBe(2) // active pointer + versioned key material
+    expect(fixture.values.size).toBe(3) // registry + active pointer + versioned key material
   })
 
   it("accepts paired ciphertext keys only for authenticated protocol v1 clients", async () => {

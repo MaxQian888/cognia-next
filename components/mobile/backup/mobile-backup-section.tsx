@@ -50,6 +50,7 @@ import {
 } from "@/lib/capacitor/local-notifications"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { applyBackupPackage } from "@/lib/data/apply-package"
+import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
 import { buildBackupPackage } from "@/lib/data/build-package"
 import { decryptBackupPackage, encryptBackupPackage } from "@/lib/data/crypto"
 import { isEncryptedEnvelope, migrateEnvelope } from "@/lib/data/migrate"
@@ -94,12 +95,13 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   const reduce = useReducedMotion()
 
   const runExport = async () => {
-    const pkg = await buildBackupPackage({
+    const basePackage = await buildBackupPackage({
       mergeStrategy: "skip",
       includeSessions: true,
       includeApiKey: false,
       includeBuiltIns: false,
     } as never)
+    const pkg = await attachPortableRetrievalKeys(basePackage, passphrase)
     const plaintext = JSON.stringify(pkg)
     const envelope = await encryptBackupPackage(plaintext, passphrase, pkg.manifest)
     const json = JSON.stringify(envelope)
@@ -235,6 +237,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
         mergeStrategy: strategy,
         includeSessions: true,
         includeApiKey: false,
+        retrievalDekPassphrase: passphrase,
       })
       toast.success(t("importSuccess"))
     } catch (err) {

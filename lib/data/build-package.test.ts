@@ -88,6 +88,79 @@ it("backs up canonical comments for non-canvas resources", async () => {
   expect(backup.payload.canvasComments).toEqual([])
 })
 
+it("backs up retrieval profiles and ciphertext while excluding rebuildable lexical segments", async () => {
+  const db = getDb()
+  await db.retrievalProfiles.put({
+    id: "memory",
+    schemaVersion: 1,
+    fingerprint: "fingerprint",
+    profile: {
+      version: 1,
+      id: "memory",
+      embedding: { provider: "browser", model: "local", locality: "local" },
+      vector: { backend: "native" },
+      budgets: { topK: 8, tokenBudget: 2_000, timeoutMs: 500 },
+      retrieval: { expansion: false, rerank: false, correctiveFilter: true },
+      safety: {
+        allowOriginalTextForLocalProvider: false,
+        failClosedOnPii: true,
+        dataOnlyPromptBoundary: true,
+      },
+    },
+    active: true,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  const envelope = {
+    version: 1 as const,
+    algorithm: "AES-256-GCM" as const,
+    keyId: "dek-memory",
+    iv: "iv",
+    ciphertext: "ciphertext",
+    aadHash: "aad",
+  }
+  await db.retrievalEncryptedContent.bulkPut([
+    {
+      id: "memory:m1:canonical",
+      entityType: "memory",
+      entityId: "m1",
+      corpusId: "memory",
+      kind: "canonical",
+      envelope,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    {
+      id: "segment:g1:0",
+      entityType: "bm25_segment",
+      entityId: "segment-0",
+      corpusId: "memory",
+      generationId: "g1",
+      kind: "lexical_segment",
+      envelope,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ])
+
+  const backup = await buildBackupPackage({ includeSessions: false, includeApiKey: false })
+
+  expect(backup.payload.retrievalProfiles).toEqual([
+    expect.objectContaining({ id: "memory", fingerprint: "fingerprint" }),
+  ])
+  expect(backup.payload.retrievalEncryptedContent).toEqual([
+    expect.objectContaining({ id: "memory:m1:canonical", kind: "canonical" }),
+  ])
+  expect(backup.payload.retrievalProfileDeks).toBeUndefined()
+
+  const withoutMemories = await buildBackupPackage({
+    includeSessions: false,
+    includeApiKey: false,
+    includeMemories: false,
+  })
+  expect(withoutMemories.payload.retrievalEncryptedContent).toEqual([])
+})
+
 it("emits an adapter field for every catalog-declared portable table", async () => {
   const backup = await buildBackupPackage({
     includeSessions: true,
