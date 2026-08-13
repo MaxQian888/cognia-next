@@ -41,6 +41,7 @@ import { Empty, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { RetrievalControlPanel } from "@/components/rag/retrieval-control-panel"
 import {
   Sheet,
   SheetContent,
@@ -463,6 +464,8 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
         description={t("subtitle")}
         className="rounded-xl border shadow-sm"
       />
+
+      <RetrievalControlPanel corpusPrefixes={["memory:"]} compact />
 
       <Tabs defaultValue="app" className="flex min-h-0 flex-1 flex-col gap-4">
         <TabsList>

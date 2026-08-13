@@ -30,6 +30,7 @@ import {
 } from "@/lib/webdav/passphrase-cache"
 import { notifyIfRemoteNewer } from "@/lib/webdav/remote-newer-notify"
 import type { BackupPackageV3 } from "@/lib/data/types"
+import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
 
 export const BACKUP_CHECK_INTERVAL_MS = 30 * 60 * 1000
 
@@ -81,10 +82,11 @@ export async function runScheduledBackupOnce(opts: ScheduledBackupOptions): Prom
   }
 
   try {
-    const pkg = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
-    const plaintext = serializePackage(pkg)
     const passphrase = await getDefaultBackupPassphrase()
     if (!passphrase) throw new Error(opts.messages.autoKeyUnavailable)
+    const basePackage = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
+    const pkg = await attachPortableRetrievalKeys(basePackage, passphrase)
+    const plaintext = serializePackage(pkg)
     const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
     const fileName = defaultExportFileName(opts.now?.() ?? new Date(), "encrypted")
     const sep = config.dirPath.includes("\\") ? "\\" : "/"
@@ -125,7 +127,12 @@ export async function runScheduledBackupOnce(opts: ScheduledBackupOptions): Prom
       deviceLabel: pkg.manifest.device?.label,
     })
 
-    await maybeUploadToWebDav(settings.webdavSync?.enabled === true, pkg, plaintext, opts.messages)
+    await maybeUploadToWebDav(
+      settings.webdavSync?.enabled === true,
+      basePackage,
+      plaintext,
+      opts.messages
+    )
 
     try {
       await saveSettings({
@@ -153,7 +160,7 @@ export async function runScheduledBackupOnce(opts: ScheduledBackupOptions): Prom
 export async function maybeUploadToWebDav(
   enabled: boolean,
   pkg: BackupPackageV3,
-  plaintext: string,
+  _plaintext: string,
   messages: Pick<ScheduledBackupMessages, "syncPassphraseLocked">
 ): Promise<void> {
   if (!enabled) return
@@ -169,11 +176,13 @@ export async function maybeUploadToWebDav(
   }
   try {
     const syncPassphrase = getSyncPassphrase() as string
-    const body = await encryptSnapshotBody(plaintext, pkg, syncPassphrase)
-    const filename = webdavSnapshotName(pkg.manifest.exportedAt)
+    const portablePackage = await attachPortableRetrievalKeys(pkg, syncPassphrase)
+    const plaintext = serializePackage(portablePackage)
+    const body = await encryptSnapshotBody(plaintext, portablePackage, syncPassphrase)
+    const filename = webdavSnapshotName(portablePackage.manifest.exportedAt)
     const result = await uploadSnapshotToWebDav(body, {
       filename,
-      exportedAt: pkg.manifest.exportedAt,
+      exportedAt: portablePackage.manifest.exportedAt,
       sizeBytes: body.length,
     })
     await appendBackupHistory({
@@ -184,8 +193,8 @@ export async function maybeUploadToWebDav(
       sizeBytes: result.ok ? body.length : undefined,
       filename: result.ok ? filename : undefined,
       errorMessage: result.ok ? undefined : result.error,
-      deviceId: pkg.manifest.device?.id,
-      deviceLabel: pkg.manifest.device?.label,
+      deviceId: portablePackage.manifest.device?.id,
+      deviceLabel: portablePackage.manifest.device?.label,
     })
     if (result.ok) {
       const settings = await getSettings()

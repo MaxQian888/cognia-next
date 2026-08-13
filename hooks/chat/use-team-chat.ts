@@ -10,8 +10,10 @@ import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import {
   applySdkEvent,
   makeUserMessage,
+  mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
-  type MemorySourcesContext,
+  mergeProjectKnowledgeSourcesIntoLastAssistant,
+  mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
 import {
   runTitleTask,
@@ -34,7 +36,8 @@ import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
-import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
+import { attachInteractiveGrounding } from "@/lib/rag/chat-grounding"
 import {
   buildSupervisorRoster,
   parseDispatches,
@@ -65,6 +68,7 @@ import type {
   ClaudeEvent,
   PendingApproval,
   SendContent,
+  SendOptions,
   Team,
   TeamMember,
 } from "@cognia/agent-config-types"
@@ -409,7 +413,12 @@ export function useTeamChat() {
         turnTwinDeps = await tryBuildTwinDeps()
         if (turnTwinDeps) {
           try {
-            const result = await generateEmbedding(userText, turnTwinDeps.embedding)
+            const result = await generateSafeEmbedding(userText, {
+              profileId: "team-chat-shared",
+              purpose: "query",
+              embedding: turnTwinDeps.embedding,
+              vectorBackend: turnTwinDeps.vectorBackend ?? "native",
+            })
             turnEmbedding = result.embedding
           } catch {
             turnEmbedding = undefined // resolver falls back to per-member embed
@@ -1187,10 +1196,9 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     startedAt: Date.now(),
     extraMetadata: messageMetadata,
     postProcessText,
-    // Recalled-memory transparency: direct chat folds this into the assistant
-    // message's SourcesPart at turnComplete; the team path seals per member in
-    // `handleTeamEvent`, so thread the context through the resolver ctx.
-    memoryContext: baseOpts.memoryContext,
+    // Thread the exact retrieval context through the per-member seal so source
+    // transparency and grounding match direct chat.
+    options: baseOpts,
     onRoutingCommit: () => controller?.commit(),
   }
   subResolverCtx.set(sub, ctx)
@@ -1262,8 +1270,8 @@ interface SubResolverCtx {
   startedAt: number
   extraMetadata?: Record<string, unknown>
   postProcessText?: (text: string) => string
-  /** Recalled long-term memories for this member's turn (SourcesPart merge). */
-  memoryContext?: MemorySourcesContext
+  /** Exact retrieval context used for this member's SourcesPart and grounding pass. */
+  options: SendOptions
   /** Marks the first visible assistant frame/tool dispatch as replay-unsafe. */
   onRoutingCommit?: () => void
 }
@@ -1474,7 +1482,17 @@ async function handleTeamEvent(
           if (duplicateIds.size > 0) {
             tagged = tagged.filter((message) => !duplicateIds.has(message.id))
           }
-          tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.memoryContext)
+          tagged = mergeTwinSourcesIntoLastAssistant(tagged, ctx?.options.twinContext)
+          tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.options.memoryContext)
+          tagged = mergeProjectKnowledgeSourcesIntoLastAssistant(
+            tagged,
+            ctx?.options.projectKnowledgeContext
+          )
+          tagged = mergeAgentKnowledgeSourcesIntoLastAssistant(
+            tagged,
+            ctx?.options.agentKnowledgeContext
+          )
+          tagged = attachInteractiveGrounding(tagged, ctx?.options)
           const completedAt = Date.now()
           const result = sdkResult as unknown as { duration_ms?: number; subtype?: string }
           tagged = attachRunMetadataToLastAssistant(

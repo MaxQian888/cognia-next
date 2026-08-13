@@ -1318,6 +1318,7 @@ mod tests {
                     "sessions".into(),
                     7,
                     ACCOUNT_ID.into(),
+                    Some(1),
                     Duration::from_secs(5),
                 )
                 .await
@@ -1690,6 +1691,7 @@ mod tests {
                 "sessions".into(),
                 0,
                 "account".into(),
+                None,
                 Duration::from_secs(30),
             )
             .await

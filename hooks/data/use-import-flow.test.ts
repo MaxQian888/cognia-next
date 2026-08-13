@@ -12,13 +12,24 @@ import { encryptBackupPackage } from "@/lib/data/crypto"
 import { rotateBackupKey, getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { pickAndReadFiles } from "@/lib/files/file-bridge"
 
+const mockApplyBackupPackage = jest.fn(async () => ({
+  added: {},
+  overwritten: {},
+  skipped: {},
+  builtInsSkipped: {},
+}))
+
 jest.mock("@/lib/files/file-bridge", () => ({
   pickAndReadFiles: jest.fn(),
+}))
+jest.mock("@/lib/data/apply-package", () => ({
+  applyBackupPackage: (pkg: unknown, options: unknown) => mockApplyBackupPackage(pkg, options),
 }))
 
 const mockedPickAndReadFiles = pickAndReadFiles as jest.MockedFunction<typeof pickAndReadFiles>
 
 beforeEach(async () => {
+  mockApplyBackupPackage.mockClear()
   localStorage.clear()
   await getDb().delete()
   __resetDbForTesting()
@@ -86,6 +97,17 @@ describe("useImportFlow", () => {
       await result.current.submitPassphrase("special-pass")
     })
     expect(result.current.state.status).toBe("preview")
+    await act(async () => {
+      await result.current.applyPreview({
+        mergeStrategy: "skip",
+        includeSessions: false,
+        includeApiKey: false,
+      })
+    })
+    expect(mockApplyBackupPackage).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ retrievalDekPassphrase: "special-pass" })
+    )
   })
 
   it("wrong passphrase returns to needsPassphrase with lastError", async () => {

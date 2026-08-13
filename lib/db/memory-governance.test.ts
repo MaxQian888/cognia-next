@@ -1,19 +1,25 @@
 import { createDbTestFixture } from "./test-fixture"
 import {
   appendMemoryAuditEvent,
+  bindMemoryGovernanceOutcome,
   claimMemoryJob,
   claimNextMemoryJob,
+  cancelMemoryJob,
   completeMemoryJob,
   createMemoryEvidence,
   enqueueMemoryJob,
   failMemoryJob,
+  finishMemoryJob,
+  heartbeatMemoryJob,
   findEarliestInstrumentedAuditAt,
   getMemoryJob,
   listMemoryAuditEvents,
   listMemoryAuditEventsSince,
   listMemoryEvidence,
   listMemoryJobs,
+  pruneMemoryGovernanceData,
 } from "./memory-governance"
+import { createMemory, getMemory } from "./memories"
 
 const dbFixture = createDbTestFixture()
 
@@ -46,6 +52,42 @@ describe("memory evidence and audit", () => {
       metadata: { candidateCount: 2 },
     })
     expect(await listMemoryAuditEvents({ sessionId: "session-1" })).toEqual([event])
+  })
+
+  it("binds governance, evidence, and content-free audit in one transaction", async () => {
+    await createMemory({
+      id: "m-atomic",
+      scope: "global",
+      type: "semantic",
+      text: "fact",
+      importance: 5,
+      provenance: "user",
+      evidenceState: "legacy",
+      reviewStatus: "unreviewed",
+      contaminationState: "unknown",
+      sensitivity: "unknown",
+    })
+    await bindMemoryGovernanceOutcome({
+      memoryId: "m-atomic",
+      patch: { evidenceState: "supported", contaminationState: "clean" },
+      evidence: {
+        id: "e-atomic",
+        kind: "message",
+        sourceId: "message-1",
+        contaminationState: "clean",
+        reviewed: false,
+      },
+      audit: { id: "a-atomic", action: "created", reason: "automatic_learning" },
+      now: 10,
+    })
+
+    expect(await getMemory("m-atomic")).toMatchObject({
+      evidenceState: "supported",
+      contaminationState: "clean",
+      updatedAt: 10,
+    })
+    expect(await listMemoryEvidence("m-atomic")).toHaveLength(1)
+    expect(await listMemoryAuditEvents({ memoryId: "m-atomic" })).toHaveLength(1)
   })
 })
 
@@ -110,7 +152,7 @@ describe("durable memory jobs", () => {
     await enqueueMemoryJob(draft)
     await claimNextMemoryJob("worker", 1_000, 50)
     expect(await failMemoryJob("j1", "provider_unavailable", 1_100, { maxRetries: 1 })).toBe(
-      "queued"
+      "retry_wait"
     )
     expect(await claimNextMemoryJob("worker", 1_100)).toBeUndefined()
     expect(await claimNextMemoryJob("worker", 2_100)).toBeDefined()
@@ -123,14 +165,35 @@ describe("durable memory jobs", () => {
     await enqueueMemoryJob(draft)
     await claimNextMemoryJob("worker", 1_000)
     await completeMemoryJob("j1", 1_100)
-    expect(await getMemoryJob("j1")).toMatchObject({ status: "completed", completedAt: 1_100 })
+    expect(await getMemoryJob("j1")).toMatchObject({ status: "succeeded", completedAt: 1_100 })
     expect((await enqueueMemoryJob({ ...draft, id: "j2" })).id).toBe("j2")
   })
 
-  it("reuses only completed work and replaces a failed dedupe-key job", async () => {
+  it("reuses only successful work and replaces a failed dedupe-key job", async () => {
     await enqueueMemoryJob({ ...draft, status: "failed" })
     const retry = await enqueueMemoryJob({ ...draft, id: "j2" }, { reuseCompleted: true })
     expect(retry.id).toBe("j2")
+  })
+
+  it("renews the active lease and records no-output and cancellation outcomes", async () => {
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("worker", 1_000, 100)
+    expect(await heartbeatMemoryJob("j1", "other", 1_050, 100)).toBeUndefined()
+    expect(await heartbeatMemoryJob("j1", "worker", 1_050, 100)).toMatchObject({
+      heartbeatAt: 1_050,
+      leaseExpiresAt: 1_150,
+    })
+    await finishMemoryJob("j1", "no_output", "nothing_durable", 1_100)
+    expect(await getMemoryJob("j1")).toMatchObject({
+      status: "no_output",
+      resultCode: "nothing_durable",
+    })
+
+    await enqueueMemoryJob({ ...draft, id: "j2", dedupeKey: "k2" })
+    expect(await cancelMemoryJob("j2", 1_200)).toMatchObject({
+      status: "cancelled",
+      resultCode: "cancelled_by_user",
+    })
   })
 })
 
@@ -191,6 +254,33 @@ describe("insight readers", () => {
     const jobs = await listMemoryJobs()
     expect(jobs.map((j) => j.id)).toEqual(["j-new", "j-old"])
     // Completed jobs are retained, which is what makes "last run" reportable.
-    expect(jobs[1]).toMatchObject({ status: "completed", completedAt: 150 })
+    expect(jobs[1]).toMatchObject({ status: "succeeded", completedAt: 150 })
+  })
+
+  it("enforces job and content-free audit retention", async () => {
+    const now = 200 * 24 * 60 * 60 * 1000
+    const base = {
+      kind: "turn-extraction" as const,
+      scope: "global" as const,
+      provenance: "user" as const,
+      evidenceIds: [],
+    }
+    await enqueueMemoryJob({
+      ...base,
+      id: "old-success",
+      dedupeKey: "old-success",
+      status: "succeeded",
+      queuedAt: 1,
+    })
+    await appendMemoryAuditEvent({
+      id: "old-audit",
+      action: "deleted",
+      reason: "user_requested",
+      createdAt: 1,
+    })
+    await expect(pruneMemoryGovernanceData(now)).resolves.toEqual({
+      jobsDeleted: 1,
+      auditsDeleted: 1,
+    })
   })
 })

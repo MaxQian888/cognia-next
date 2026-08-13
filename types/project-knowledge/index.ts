@@ -40,6 +40,8 @@ export interface ProjectChunk {
   vectorCollection: string
   /** Remote doc id; resolves a search hit back to this chunk. */
   vectorDocId: string
+  /** Immutable generation containing this chunk; absent only on legacy rows. */
+  generationId?: string
 
   strategy: ChunkingStrategyId
   /** Approximate token count (js-tiktoken style). */

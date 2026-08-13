@@ -12,6 +12,8 @@ export interface MemoryEvidence {
   sourceId: string
   sessionId?: string
   messageId?: string
+  /** Prevents assistant/tool evidence from being mistaken for a user assertion. */
+  sourceRole?: "user" | "assistant" | "tool" | "system"
   /** Hash of the redacted excerpt used to support this memory. */
   excerptHash?: string
   contaminationState: MemoryContaminationState
@@ -20,7 +22,15 @@ export interface MemoryEvidence {
 }
 
 export type MemoryJobKind = "turn-extraction" | "session-distill" | "vector-reconcile"
-export type MemoryJobStatus = "queued" | "running" | "completed" | "failed"
+export type MemoryJobStatus =
+  | "queued"
+  | "running"
+  | "retry_wait"
+  | "succeeded"
+  | "no_output"
+  | "skipped"
+  | "failed"
+  | "cancelled"
 
 export interface MemoryJob {
   id: string
@@ -40,9 +50,14 @@ export interface MemoryJob {
   completedAt?: number
   leaseOwner?: string
   leaseExpiresAt?: number
+  heartbeatAt?: number
+  attempt?: number
+  maxAttempts?: number
+  cancellationRequestedAt?: number
   retryCount: number
   nextAttemptAt?: number
   errorCode?: string
+  resultCode?: string
 }
 
 export type MemoryAuditAction =

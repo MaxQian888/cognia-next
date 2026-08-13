@@ -202,9 +202,17 @@ export interface SourcesPartItem {
    * - `twin-rag`  — chunk pulled from the user's Digital Twin vector store
    * - `twin-style`— style few-shot sample selected for this turn
    * - `memory`    — long-term memory recalled for this turn (autonomous memory)
+   * - `project-knowledge` — active workspace knowledge file
    * - `footnote`  — markdown footnote definition in the assistant text
    */
-  origin: "anthropic" | "twin-rag" | "twin-style" | "agent-knowledge-base" | "memory" | "footnote"
+  origin:
+    | "anthropic"
+    | "twin-rag"
+    | "twin-style"
+    | "agent-knowledge-base"
+    | "project-knowledge"
+    | "memory"
+    | "footnote"
   /** Optional similarity / confidence score (0..1). */
   score?: number
   /**
@@ -255,6 +263,32 @@ export function isSourcesPart(part: unknown): part is SourcesPart {
   const p = part as { type?: unknown; sources?: unknown }
   return (
     typeof part === "object" && part !== null && p.type === "sources" && Array.isArray(p.sources)
+  )
+}
+
+export interface GroundingPart {
+  type: "grounding"
+  supportRatio: number
+  action: "allow" | "annotate"
+  claims: Array<{
+    id: string
+    text: string
+    startOffset: number
+    endOffset: number
+    supported: boolean
+    hitIds: string[]
+  }>
+}
+
+export function isGroundingPart(part: unknown): part is GroundingPart {
+  const candidate = part as Partial<GroundingPart> | null
+  return (
+    typeof candidate === "object" &&
+    candidate !== null &&
+    candidate.type === "grounding" &&
+    typeof candidate.supportRatio === "number" &&
+    (candidate.action === "allow" || candidate.action === "annotate") &&
+    Array.isArray(candidate.claims)
   )
 }
 

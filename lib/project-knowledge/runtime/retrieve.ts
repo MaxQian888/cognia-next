@@ -12,7 +12,7 @@
  * memory runtimes).
  */
 
-import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import {
   ensureCollectionDimensionCompatible,
@@ -52,6 +52,7 @@ export interface ProjectKnowledgeRuntimeDeps {
   expansion?: { model: LanguageModel; strategy: "hyde" | "stepback" }
   /** Override the collection name. Defaults to `cognia_project_{projectId}`. */
   vectorCollection?: string
+  vectorBackend?: "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma" | "native"
 }
 
 export interface RetrievedProjectChunk {
@@ -95,7 +96,12 @@ export async function retrieveProjectChunks(
     // 1. Embed the query (reuse the turn's embedding when provided).
     let queryEmbedding = input.precomputedQueryEmbedding ?? null
     if (!queryEmbedding) {
-      const result = await generateEmbedding(userMessage, deps.embedding)
+      const result = await generateSafeEmbedding(userMessage, {
+        profileId: `project:${projectId}`,
+        purpose: "query",
+        embedding: deps.embedding,
+        vectorBackend: deps.vectorBackend ?? "native",
+      })
       queryEmbedding = result.embedding
     }
 
@@ -125,7 +131,14 @@ export async function retrieveProjectChunks(
               ? await generateStepBackQuery(userMessage, deps.expansion.model)
               : await generateHypotheticalAnswer(userMessage, deps.expansion.model)
           if (expandedText.trim().length > 0) {
-            const expEmbedding = (await generateEmbedding(expandedText, deps.embedding)).embedding
+            const expEmbedding = (
+              await generateSafeEmbedding(expandedText, {
+                profileId: `project:${projectId}`,
+                purpose: "query",
+                embedding: deps.embedding,
+                vectorBackend: deps.vectorBackend ?? "native",
+              })
+            ).embedding
             const expHits = await deps.store.searchByEmbedding(collection, expEmbedding, {
               limit: fetchLimit,
             })

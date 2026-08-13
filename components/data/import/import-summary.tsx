@@ -16,6 +16,14 @@ export function ImportSummary({ summary }: { summary: Summary }) {
       <SummaryGroup label={t("summaryOverwritten")} map={summary.overwritten} />
       <SummaryGroup label={t("summarySkipped")} map={summary.skipped} />
       <SummaryGroup label={t("summaryBuiltIns")} map={summary.builtInsSkipped} />
+      {summary.restoredRetrievalKeyProfiles && summary.restoredRetrievalKeyProfiles.length > 0 && (
+        <p className="border-t pt-1 text-muted-foreground">
+          <span className="font-medium">
+            {t("summaryRetrievalKeys", { count: summary.restoredRetrievalKeyProfiles.length })}:
+          </span>{" "}
+          {summary.restoredRetrievalKeyProfiles.join(", ")}
+        </p>
+      )}
       <LocalStorageReport summary={summary} />
       <SyncProjectionReportRow summary={summary} />
     </div>

@@ -91,7 +91,8 @@ describe("persistProjectChunks", () => {
     expect(rows[0].content).toBe("original secret")
     expect(rows[0].contentRedacted).toBe("original <EMAIL_001>")
     expect(rows[0].contentHash).toBe("h1")
-    expect(result.vectorDocIds[0]).toBe("proj-a__file-1__0")
+    expect(result.vectorDocIds[0]).toMatch(/^proj-a__file-1__pgen_.+__0$/)
+    expect(rows[0].generationId).toBe(result.generationId)
   })
 
   it("idempotent replace: drops prior chunks + remote vectors before re-inserting", async () => {
@@ -116,7 +117,7 @@ describe("persistProjectChunks", () => {
     })
 
     expect(deleted).toHaveLength(1)
-    expect(deleted[0].ids).toEqual(["proj-a__file-1__0"])
+    expect(deleted[0].ids[0]).toMatch(/^proj-a__file-1__pgen_.+__0$/)
     const rows = await listProjectChunksByFile("proj-a", "file-1")
     expect(rows).toHaveLength(2)
     expect(rows.every((r) => r.contentHash === "h2")).toBe(true)
@@ -136,6 +137,34 @@ describe("persistProjectChunks", () => {
       embeddings: [[0.1]],
     })
     // Second run: remote delete rejects, but the local rows are still replaced.
+    const result = await persistProjectChunks({
+      projectId: "proj-a",
+      fileId: "file-1",
+      vectorBackend: "qdrant",
+      store,
+      contentHash: "h2",
+      chunks: [chunk("v2")],
+      embeddings: [[0.2]],
+    })
+    expect(result.cleanupPending).toBe(true)
+    const rows = await listProjectChunksByFile("proj-a", "file-1")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].contentHash).toBe("h2")
+  })
+
+  it("keeps the active generation when the staging vector write fails", async () => {
+    const { store } = fakeStore()
+    const first = await persistProjectChunks({
+      projectId: "proj-a",
+      fileId: "file-1",
+      vectorBackend: "qdrant",
+      store,
+      contentHash: "h1",
+      chunks: [chunk("v1")],
+      embeddings: [[0.1]],
+    })
+    ;(store.addDocuments as jest.Mock).mockRejectedValueOnce(new Error("remote down"))
+
     await expect(
       persistProjectChunks({
         projectId: "proj-a",
@@ -146,9 +175,10 @@ describe("persistProjectChunks", () => {
         chunks: [chunk("v2")],
         embeddings: [[0.2]],
       })
-    ).resolves.toBeDefined()
+    ).rejects.toThrow("remote down")
     const rows = await listProjectChunksByFile("proj-a", "file-1")
     expect(rows).toHaveLength(1)
-    expect(rows[0].contentHash).toBe("h2")
+    expect(rows[0].contentHash).toBe("h1")
+    expect(rows[0].generationId).toBe(first.generationId)
   })
 })

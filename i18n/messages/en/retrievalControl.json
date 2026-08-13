@@ -1,0 +1,52 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "retry": "Retry"
+  },
+  "confirmKillSwitch": {
+    "cancel": "Keep retrieval enabled",
+    "confirm": "Stop new retrieval work",
+    "description": "This stops the new retrieval kernel, ingestion, and promotion. Decryption, export, deletion, reconciliation, and safe lexical reads remain available.",
+    "title": "Engage retrieval kill switch?"
+  },
+  "empty": "No retrieval generations or jobs are recorded for this scope.",
+  "error": "The retrieval control action failed.",
+  "generation": {
+    "active": "Active",
+    "failed": "Failed",
+    "retiring": "Retiring",
+    "staging": "Staging",
+    "validating": "Validating"
+  },
+  "jobs": {
+    "attempt": "Attempt {attempt} of {maxAttempts}",
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "no_output": "No output",
+    "queued": "Queued",
+    "retry_wait": "Waiting to retry",
+    "running": "Running",
+    "skipped": "Skipped",
+    "succeeded": "Succeeded",
+    "title": "Recent jobs"
+  },
+  "killSwitch": {
+    "disable": "Resume new retrieval work",
+    "enable": "Stop new retrieval work",
+    "engaged": "Kill switch engaged",
+    "normal": "Retrieval enabled"
+  },
+  "metrics": {
+    "activeGenerations": "Active generations",
+    "activeJobs": "Active jobs",
+    "quarantined": "Quarantined or failed",
+    "traces": "Content-free traces"
+  },
+  "title": "Retrieval control plane",
+  "vault": {
+    "locked": "Vault locked",
+    "secure": "Device secure storage",
+    "unavailable": "Vault unavailable",
+    "unlocked": "Vault unlocked"
+  }
+}

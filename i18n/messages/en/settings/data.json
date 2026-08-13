@@ -50,6 +50,9 @@
     "passphraseConfirm": "Confirm passphrase",
     "passphraseMismatch": "Passphrases don't match.",
     "passphraseRequired": "A passphrase is required for this mode.",
+    "plaintextConfirmAction": "Export plaintext",
+    "plaintextConfirmBody": "This backup will contain unencrypted data. Confirm your identity before exporting it.",
+    "plaintextConfirmTitle": "Export a plaintext backup?",
     "previewBackend": "From {backend} (app {appVersion}) — exported {exportedAt}",
     "quickSessionBody": "Bundle one or more conversations into a ZIP archive (Markdown / JSON / HTML / plain text).",
     "quickSessionButton": "Bulk export…",
@@ -463,6 +466,7 @@
   "summaryLsSkipped": "Skipped ({count})",
   "summaryLsWritten": "Written ({count})",
   "summaryOverwritten": "Overwritten",
+  "summaryRetrievalKeys": "{count, plural, =1 {Restored retrieval key for 1 profile} other {Restored retrieval keys for # profiles}}",
   "summarySkipped": "Skipped",
   "summarySyncResults": "Agent re-projection",
   "syncResults": {

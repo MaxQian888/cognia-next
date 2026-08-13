@@ -16,6 +16,7 @@ const mockEncryptBackupPackage = jest.fn()
 const mockDecryptBackupPackage = jest.fn()
 const mockApplyBackupPackage = jest.fn()
 const mockMigrateEnvelope = jest.fn()
+const mockAttachPortableRetrievalKeys = jest.fn()
 
 jest.mock("@/lib/files/save-export", () => ({
   saveExport: (...args: unknown[]) => mockSaveExport(...args),
@@ -34,6 +35,10 @@ jest.mock("sonner", () => ({
 
 jest.mock("@/lib/data/build-package", () => ({
   buildBackupPackage: (...args: unknown[]) => mockBuildBackupPackage(...args),
+}))
+
+jest.mock("@/lib/data/retrieval-key-backup", () => ({
+  attachPortableRetrievalKeys: (...args: unknown[]) => mockAttachPortableRetrievalKeys(...args),
 }))
 
 jest.mock("@/lib/data/crypto", () => ({
@@ -189,6 +194,7 @@ describe("<MobileBackupSection />", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockBuildBackupPackage.mockResolvedValue({ manifest: { version: "test" } })
+    mockAttachPortableRetrievalKeys.mockImplementation(async (pkg: unknown) => pkg)
     mockEncryptBackupPackage.mockResolvedValue({})
 
     // Reset mocks to default state
@@ -245,6 +251,10 @@ describe("<MobileBackupSection />", () => {
       expect(mockNotify).toHaveBeenCalledWith(
         outcome,
         expect.objectContaining({ shareTitle: "Cognia Backup" })
+      )
+      expect(mockAttachPortableRetrievalKeys).toHaveBeenCalledWith(
+        expect.any(Object),
+        "password123"
       )
     })
 
@@ -353,6 +363,10 @@ describe("<MobileBackupSection />", () => {
         "hunter2-passphrase"
       )
       expect(mockMigrateEnvelope).toHaveBeenCalledWith({ decrypted: true })
+      expect(mockApplyBackupPackage).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ retrievalDekPassphrase: "hunter2-passphrase" })
+      )
     })
 
     it("refuses to import an encrypted envelope without a valid passphrase", async () => {

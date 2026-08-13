@@ -12,7 +12,7 @@ jest.mock("./build-maintenance-deps", () => ({
 jest.mock("@/lib/db/memory-governance", () => ({
   enqueueMemoryJob: (...a: unknown[]) => mockEnqueueJob(...a),
   claimMemoryJob: (...a: unknown[]) => mockClaimJob(...a),
-  completeMemoryJob: (...a: unknown[]) => mockCompleteJob(...a),
+  finishMemoryJob: (...a: unknown[]) => mockCompleteJob(...a),
   failMemoryJob: (...a: unknown[]) => mockFailJob(...a),
 }))
 
@@ -404,7 +404,7 @@ describe("scheduleMemoryMaintenance", () => {
       { reuseCompleted: true }
     )
     expect(mockClaimJob).toHaveBeenCalledWith("job-1", "renderer-memory-maintenance")
-    expect(mockCompleteJob).toHaveBeenCalledWith("job-1")
+    expect(mockCompleteJob).toHaveBeenCalledWith("job-1", "succeeded", "maintenance_completed")
   })
 
   it("piggybacks a day-bucketed vector-reconcile enqueue on the maintenance tick", async () => {

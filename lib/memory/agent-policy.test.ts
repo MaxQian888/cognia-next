@@ -33,6 +33,15 @@ describe("resolveAgentMemoryPolicy", () => {
     expect(resolved.canUpdate).toBe(false)
   })
 
+  it("treats global recall and learning toggles as session-overridable defaults", () => {
+    const resolved = resolveAgentMemoryPolicy({
+      config: { ...DEFAULT_MEMORY_CONFIG, useMemory: false, learnFromChats: false },
+      session: { memoryUse: true, memoryLearn: true },
+    })
+    expect(resolved.canRecall).toBe(true)
+    expect(resolved.canAutoLearn).toBe(true)
+  })
+
   it("separates CRUD permissions and scope allowlists", () => {
     const resolved = resolveAgentMemoryPolicy({
       config: DEFAULT_MEMORY_CONFIG,

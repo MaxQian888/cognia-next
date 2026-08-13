@@ -87,6 +87,7 @@ jest.mock("./embedding-batcher", () => ({
 }))
 
 jest.mock("./hybrid-search", () => ({
+  ...jest.requireActual("./hybrid-search"),
   HybridSearchEngine: jest.fn().mockImplementation(() => ({
     addDocuments: jest.fn(),
     hybridSearch: jest.fn().mockReturnValue([
@@ -223,6 +224,7 @@ describe("rag-pipeline", () => {
     p as unknown as {
       vectorStore: {
         searchDocuments: jest.Mock
+        searchByEmbedding?: jest.Mock
         addDocuments: jest.Mock
         deleteDocuments: jest.Mock
         deleteAllDocuments?: jest.Mock
@@ -741,7 +743,7 @@ describe("rag-pipeline", () => {
       expect(failed.query).toBe("valid query")
     })
 
-    it("searches without hybrid search and falls back to mirror vector search when the vector store fails", async () => {
+    it("keeps the legacy API while delegating vector and BM25 fusion to the kernel", async () => {
       const p = new RAGPipeline({
         ...defaultConfig,
         hybridSearch: { enabled: false },
@@ -750,14 +752,22 @@ describe("rag-pipeline", () => {
         similarityThreshold: 0,
       })
       const internals = withInternals(p)
-      internals.vectorStore.searchDocuments = jest
+      internals.mirrorCollections.set("vector-only", [
+        {
+          id: "vector-1",
+          content: "Vector content",
+          embedding: new Array(1536).fill(0.1),
+          metadata: { source: "v.md" },
+        },
+      ])
+      internals.vectorStore.searchByEmbedding = jest
         .fn()
         .mockResolvedValueOnce([
           { id: "vector-1", content: "Vector content", metadata: { source: "v.md" }, score: 0.77 },
         ])
 
       const direct = await internals.searchSingle("vector-only", "query")
-      expect(direct).toEqual([expect.objectContaining({ id: "vector-1", rerankScore: 0.77 })])
+      expect(direct).toEqual([expect.objectContaining({ id: "vector-1", originalScore: 0.77 })])
 
       internals.mirrorCollections.set("fallback", [
         {
@@ -767,14 +777,14 @@ describe("rag-pipeline", () => {
           metadata: { source: "mirror.md" },
         },
       ])
-      internals.vectorStore.searchDocuments = jest.fn().mockRejectedValueOnce(new Error("down"))
+      internals.vectorStore.searchByEmbedding = undefined
       const fallback = await internals.searchSingle("fallback", "query")
 
       expect(generateEmbedding).toHaveBeenCalled()
-      expect(fallback[0]).toMatchObject({ id: "mirror-1", rerankScore: 0.85 })
+      expect(fallback[0]).toMatchObject({ id: "mirror-1", originalScore: 0.85 })
     })
 
-    it("runs sparse and late-interaction hybrid search branches", async () => {
+    it("maps legacy sparse and late flags onto the canonical kernel", async () => {
       const p = new RAGPipeline({
         ...defaultConfig,
         hybridSearch: {
@@ -793,7 +803,7 @@ describe("rag-pipeline", () => {
           metadata: { source: "hybrid.md" },
         },
       ])
-      internals.vectorStore.searchDocuments = jest
+      internals.vectorStore.searchByEmbedding = jest
         .fn()
         .mockResolvedValueOnce([
           { id: "chunk-1", content: "Sparse and late content", metadata: {}, score: 0.8 },

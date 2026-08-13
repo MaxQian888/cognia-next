@@ -4,7 +4,7 @@ import "fake-indexeddb/auto"
 import { PORTABLE_BACKUP_BINDINGS } from "@/lib/data-governance/table-catalog"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { saveSettings } from "@/lib/db/settings"
-import { buildBackupStream } from "./build-stream"
+import { buildBackupSections, buildBackupStream } from "./build-stream"
 import { readBackupStream, type BackupStreamReadEvent } from "./stream-format"
 
 async function collect(source: AsyncIterable<BackupStreamReadEvent>) {
@@ -27,6 +27,40 @@ afterAll(async () => {
 })
 
 describe("buildBackupStream", () => {
+  it("emits passphrase-wrapped retrieval keys only for an encrypted stream", async () => {
+    const envelope = {
+      version: 1 as const,
+      profileId: "memory-shared",
+      keyId: "dek-memory",
+      encryption: {
+        enabled: true as const,
+        format: "aes-gcm-chunks-v1" as const,
+        algorithm: "AES-GCM" as const,
+        kdf: {
+          algorithm: "PBKDF2" as const,
+          hash: "SHA-256" as const,
+          iterations: 600_000,
+          salt: "salt",
+        },
+        noncePrefix: "nonce",
+      },
+      ciphertext: "wrapped",
+    }
+    const profileDekStore = {
+      listProfileIds: jest.fn(async () => ["memory-shared"]),
+      exportPortable: jest.fn(async () => envelope),
+    }
+    const sections = []
+    for await (const section of buildBackupSections(
+      { includeSessions: false, includeApiKey: false },
+      { encryption: { passphrase: "backup-passphrase" }, profileDekStore, storage: null }
+    )) {
+      sections.push(section)
+    }
+
+    expect(sections).toContainEqual({ section: "retrievalProfileDeks", rows: [envelope] })
+  })
+
   it("reads portable data in bounded pages while applying v3 privacy filters", async () => {
     const db = getDb()
     await saveSettings({ apiKey: "raw-secret", defaultModel: "test" })

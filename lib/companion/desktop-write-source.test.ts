@@ -7,6 +7,11 @@ import "fake-indexeddb/auto"
 import { dispatchCommand } from "./desktop-write-source"
 import { getDb } from "@/lib/db/schema"
 
+const mockExportForPairing = jest.fn()
+jest.mock("@/lib/rag/profile-dek-store", () => ({
+  createProfileDekStore: () => ({ exportForPairing: mockExportForPairing }),
+}))
+
 // Stub workflow trigger bridge — the real one talks to the orchestrator
 // which runs the actual workflow. We want to assert the handler invokes
 // the bridge with the right shape, not execute a real workflow.
@@ -847,6 +852,47 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
     // Default settings row (fake-indexeddb) has memory enabled by default.
     const result = (await dispatchCommand("memory_list", { limit: 999 })) as { ok: boolean }
     expect(result.ok).toBe(true)
+  })
+})
+
+describe("dispatchCommand: retrieval profile DEK pairing", () => {
+  it("exports key material only through content protocol v1 and clears the temporary bytes", async () => {
+    const rawKey = Uint8Array.from({ length: 32 }, (_, index) => index)
+    mockExportForPairing.mockResolvedValue({
+      profileId: "memory-shared",
+      keyId: "dek-1",
+      rawKey,
+    })
+
+    const result = (await dispatchCommand("retrieval_profile_dek_export", {
+      profileId: "memory-shared",
+      contentProtocolVersion: 1,
+    })) as Record<string, unknown>
+
+    expect(mockExportForPairing).toHaveBeenCalledWith("memory-shared", {
+      authenticated: true,
+      protocolVersion: 1,
+    })
+    expect(result).toMatchObject({
+      protocolVersion: 1,
+      profileId: "memory-shared",
+      keyId: "dek-1",
+      rawKey: expect.any(String),
+    })
+    expect(rawKey.every((byte) => byte === 0)).toBe(true)
+  })
+
+  it("rejects missing profile ids and old clients before reading key material", async () => {
+    await expect(
+      dispatchCommand("retrieval_profile_dek_export", { contentProtocolVersion: 1 })
+    ).rejects.toThrow("profileId is required")
+    await expect(
+      dispatchCommand("retrieval_profile_dek_export", {
+        profileId: "memory-shared",
+        contentProtocolVersion: 0,
+      })
+    ).rejects.toThrow("upgrade_required")
+    expect(mockExportForPairing).not.toHaveBeenCalled()
   })
 })
 

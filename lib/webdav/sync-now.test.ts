@@ -20,6 +20,7 @@ const saveSettingsMock = jest.fn(async (..._a: unknown[]) => {})
 const setSyncPassphraseMock = jest.fn()
 const encryptBodyMock = jest.fn(async (..._a: unknown[]) => "ENC")
 const getSyncPassphraseMock = jest.fn<string | null, []>(() => null)
+const attachPortableRetrievalKeysMock = jest.fn(async (pkg: unknown) => pkg)
 
 jest.mock("@/lib/data/build-package", () => ({
   buildBackupPackage: (...a: unknown[]) => buildMock(...a),
@@ -29,6 +30,10 @@ jest.mock("@/lib/data/destinations/webdav", () => ({
   uploadSnapshotToWebDav: (...a: unknown[]) => uploadMock(...a),
   webdavSnapshotName: (iso: string) => `cognia-backup-${iso}.enc.cbk`,
   encryptSnapshotBody: (...a: unknown[]) => encryptBodyMock(...a),
+}))
+jest.mock("@/lib/data/retrieval-key-backup", () => ({
+  attachPortableRetrievalKeys: (pkg: unknown, passphrase: string) =>
+    attachPortableRetrievalKeysMock(pkg, passphrase),
 }))
 jest.mock("@/lib/db/backup-history", () => ({
   appendBackupHistory: (...a: unknown[]) => appendMock(...a),
@@ -54,6 +59,7 @@ beforeEach(() => {
   encryptBodyMock.mockClear()
   getSyncPassphraseMock.mockReset()
   getSyncPassphraseMock.mockReturnValue(null)
+  attachPortableRetrievalKeysMock.mockClear()
 })
 
 describe("runWebDavSyncNow", () => {
@@ -68,6 +74,7 @@ describe("runWebDavSyncNow", () => {
     expect(result).toEqual({ ok: true })
     // The cached passphrase is what encrypts + re-caches the snapshot.
     expect(encryptBodyMock).toHaveBeenCalledWith("PLAIN", expect.anything(), "cached-pass")
+    expect(attachPortableRetrievalKeysMock).toHaveBeenCalledWith(expect.anything(), "cached-pass")
     expect(uploadMock).toHaveBeenCalled()
     expect(setSyncPassphraseMock).toHaveBeenCalledWith("cached-pass")
   })

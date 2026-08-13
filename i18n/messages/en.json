@@ -4668,6 +4668,11 @@
     },
     "compactBoundary": {
       "auto": "automatic",
+      "checkpoint": {
+        "failed": "checkpoint failed",
+        "locked": "Vault locked",
+        "stored": "checkpoint saved"
+      },
       "detail": "{from} → {to} tokens",
       "effectiveness": "reclaimed {pct}%",
       "label": "Context compacted",
@@ -5248,6 +5253,10 @@
       "pdfFallback": "PDF preview is unavailable.",
       "preview": "Preview",
       "source": "Source"
+    },
+    "grounding": {
+      "supported": "Retrieved evidence supports the answer's claims.",
+      "unsupported": "{count, plural, =1 {1 claim lacks retrieval support} other {# claims lack retrieval support}}"
     },
     "header": {
       "accountSwitcher": {
@@ -6091,9 +6100,11 @@
         "anthropic": "Web",
         "footnote": "Note",
         "memory": "Memory",
+        "projectKnowledge": "Project",
         "twinRag": "Twin",
         "twinStyle": "Style"
       },
+      "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
       "recalledMemoriesHeader": "Recalled memories ({count})",
       "retrievedChunksHeader": "Retrieved chunks ({count})",
       "styleSamplesHeader": "Style samples ({count})",
@@ -19805,6 +19816,58 @@
       "skipped": "Not enough recent activity yet — nothing to report."
     }
   },
+  "retrievalControl": {
+    "actions": {
+      "cancel": "Cancel",
+      "retry": "Retry"
+    },
+    "confirmKillSwitch": {
+      "cancel": "Keep retrieval enabled",
+      "confirm": "Stop new retrieval work",
+      "description": "This stops the new retrieval kernel, ingestion, and promotion. Decryption, export, deletion, reconciliation, and safe lexical reads remain available.",
+      "title": "Engage retrieval kill switch?"
+    },
+    "empty": "No retrieval generations or jobs are recorded for this scope.",
+    "error": "The retrieval control action failed.",
+    "generation": {
+      "active": "Active",
+      "failed": "Failed",
+      "retiring": "Retiring",
+      "staging": "Staging",
+      "validating": "Validating"
+    },
+    "jobs": {
+      "attempt": "Attempt {attempt} of {maxAttempts}",
+      "cancelled": "Cancelled",
+      "failed": "Failed",
+      "no_output": "No output",
+      "queued": "Queued",
+      "retry_wait": "Waiting to retry",
+      "running": "Running",
+      "skipped": "Skipped",
+      "succeeded": "Succeeded",
+      "title": "Recent jobs"
+    },
+    "killSwitch": {
+      "disable": "Resume new retrieval work",
+      "enable": "Stop new retrieval work",
+      "engaged": "Kill switch engaged",
+      "normal": "Retrieval enabled"
+    },
+    "metrics": {
+      "activeGenerations": "Active generations",
+      "activeJobs": "Active jobs",
+      "quarantined": "Quarantined or failed",
+      "traces": "Content-free traces"
+    },
+    "title": "Retrieval control plane",
+    "vault": {
+      "locked": "Vault locked",
+      "secure": "Device secure storage",
+      "unavailable": "Vault unavailable",
+      "unlocked": "Vault unlocked"
+    }
+  },
   "routingFallback": {
     "answeredVia": "Answered via {provider} ({model})",
     "fallbackExhausted": "All fallback providers failed: {error}",
@@ -25688,6 +25751,9 @@
         "passphraseConfirm": "Confirm passphrase",
         "passphraseMismatch": "Passphrases don't match.",
         "passphraseRequired": "A passphrase is required for this mode.",
+        "plaintextConfirmAction": "Export plaintext",
+        "plaintextConfirmBody": "This backup will contain unencrypted data. Confirm your identity before exporting it.",
+        "plaintextConfirmTitle": "Export a plaintext backup?",
         "previewBackend": "From {backend} (app {appVersion}) — exported {exportedAt}",
         "quickSessionBody": "Bundle one or more conversations into a ZIP archive (Markdown / JSON / HTML / plain text).",
         "quickSessionButton": "Bulk export…",
@@ -26101,6 +26167,7 @@
       "summaryLsSkipped": "Skipped ({count})",
       "summaryLsWritten": "Written ({count})",
       "summaryOverwritten": "Overwritten",
+      "summaryRetrievalKeys": "{count, plural, =1 {Restored retrieval key for 1 profile} other {Restored retrieval keys for # profiles}}",
       "summarySkipped": "Skipped",
       "summarySyncResults": "Agent re-projection",
       "syncResults": {

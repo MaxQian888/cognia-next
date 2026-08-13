@@ -1,6 +1,7 @@
 import { resolveAutomaticMemoryScope, runTurnMemory } from "./run-turn-memory"
 
 const mockCreateEvidence = jest.fn()
+const mockBindOutcome = jest.fn()
 const mockEnqueueJob = jest.fn()
 const mockClaimJob = jest.fn()
 const mockCompleteJob = jest.fn()
@@ -26,13 +27,13 @@ jest.mock("@/lib/memory/lifecycle/maintenance", () => ({
 }))
 jest.mock("@/lib/db/memory-governance", () => ({
   appendMemoryAuditEvent: jest.fn(async (event) => event),
+  bindMemoryGovernanceOutcome: (...args: unknown[]) => mockBindOutcome(...args),
   createMemoryEvidence: (...args: unknown[]) => mockCreateEvidence(...args),
   enqueueMemoryJob: (...args: unknown[]) => mockEnqueueJob(...args),
   claimMemoryJob: (...args: unknown[]) => mockClaimJob(...args),
-  completeMemoryJob: (...args: unknown[]) => mockCompleteJob(...args),
+  finishMemoryJob: (...args: unknown[]) => mockCompleteJob(...args),
   failMemoryJob: (...args: unknown[]) => mockFailJob(...args),
 }))
-jest.mock("@/lib/db/memories", () => ({ updateMemory: jest.fn() }))
 
 import { getSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
@@ -43,7 +44,6 @@ import {
 } from "@/lib/memory/write/run-memory-extraction"
 import { scheduleMemoryMaintenance } from "@/lib/memory/lifecycle/maintenance"
 import { appendMemoryAuditEvent } from "@/lib/db/memory-governance"
-import { updateMemory } from "@/lib/db/memories"
 
 const mockGetSession = getSession as jest.Mock
 const mockGetState = useSettingsStore.getState as jest.Mock
@@ -52,7 +52,6 @@ const mockRunExtraction = runMemoryExtraction as jest.Mock
 const mockProvenance = sessionProvenance as jest.Mock
 const mockSchedule = scheduleMemoryMaintenance as jest.Mock
 const mockAppendAudit = appendMemoryAuditEvent as jest.Mock
-const mockUpdateMemory = updateMemory as jest.Mock
 
 const TRANSCRIPT = [
   { role: "user", text: "remember my timezone is UTC+8" },
@@ -72,6 +71,7 @@ const INPUT = {
 beforeEach(() => {
   jest.clearAllMocks()
   mockCreateEvidence.mockReset()
+  mockBindOutcome.mockReset().mockResolvedValue(undefined)
   mockEnqueueJob.mockReset()
   mockClaimJob.mockReset()
   mockCompleteJob.mockReset()
@@ -117,19 +117,18 @@ describe("runTurnMemory", () => {
       expect.objectContaining({ kind: "turn-extraction", evidenceIds: ["e-user", "e-assistant"] }),
       { reuseCompleted: true }
     )
-    expect(mockCompleteJob).toHaveBeenCalledWith("job-1")
+    expect(mockCompleteJob).toHaveBeenCalledWith("job-1", "no_output", "nothing_durable")
   })
 
-  it("learns agent-scoped memory into the shared Twin namespace", async () => {
+  it("does not narrow automatic memory below workspace without extractor rationale", async () => {
     setMemory({ scopeDefault: "agent" })
     mockResolveCharacter.mockResolvedValue({ id: "c1", twinId: "alice" })
     await runTurnMemory("s1", INPUT)
     expect(mockRunExtraction.mock.calls[0][0]).toMatchObject({
-      scope: "agent",
-      agentId: "twin:alice",
+      scope: "global",
     })
     expect(mockEnqueueJob).toHaveBeenCalledWith(
-      expect.objectContaining({ scope: "agent", agentId: "twin:alice" }),
+      expect.objectContaining({ scope: "global", agentId: undefined }),
       { reuseCompleted: true }
     )
     expect(mockSchedule).toHaveBeenCalledWith(expect.objectContaining({ agentId: "twin:alice" }))
@@ -245,9 +244,11 @@ describe("runTurnMemory", () => {
       1,
       expect.objectContaining({ contaminationState: "external-context" })
     )
-    expect(mockUpdateMemory).toHaveBeenCalledWith(
-      "mem-external",
-      expect.objectContaining({ contaminationState: "external-context" })
+    expect(mockBindOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memoryId: "mem-external",
+        patch: expect.objectContaining({ contaminationState: "external-context" }),
+      })
     )
     expect(mockSchedule).toHaveBeenCalledWith(
       expect.objectContaining({ contaminationState: "external-context" })
@@ -295,12 +296,12 @@ describe("runTurnMemory", () => {
 })
 
 describe("resolveAutomaticMemoryScope", () => {
-  it("uses only scopes that have both an identity and Agent write permission", () => {
-    expect(resolveAutomaticMemoryScope("agent", { projectId: "p1" })).toBe("global")
-    expect(resolveAutomaticMemoryScope("agent", { characterId: "c1" })).toBe("agent")
+  it("defaults automatic writes to workspace and never infers a narrower scope", () => {
+    expect(resolveAutomaticMemoryScope("agent", { projectId: "p1" })).toBe("workspace")
+    expect(resolveAutomaticMemoryScope("agent", { characterId: "c1" })).toBe("global")
     expect(resolveAutomaticMemoryScope("agent", {})).toBe("global")
     expect(resolveAutomaticMemoryScope("workspace", { projectId: "p1" })).toBe("workspace")
     expect(resolveAutomaticMemoryScope("global", {}, ["agent"])).toBeNull()
-    expect(resolveAutomaticMemoryScope("global", { characterId: "c1" }, ["agent"])).toBe("agent")
+    expect(resolveAutomaticMemoryScope("global", { characterId: "c1" }, ["agent"])).toBeNull()
   })
 })

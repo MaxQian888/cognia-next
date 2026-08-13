@@ -26,6 +26,7 @@ import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
+import { GroundingPart } from "@/components/chat/message-parts/grounding-part"
 import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
 import { ToolDetailBody, isBashToolPart } from "@/components/chat/message-parts/tool-detail-body"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
@@ -79,6 +80,7 @@ import type {
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
   ArtifactPart as ArtifactPartType,
   CanvasInlinePart as CanvasInlinePartType,
+  GroundingPart as GroundingPartType,
   SourcesPart as SourcesPartType,
 } from "@/lib/claude/parts-extensions"
 import { Button } from "@/components/ui/button"
@@ -1361,6 +1363,10 @@ function renderPart(
         defaultOpen={display.sources === "expanded"}
       />
     )
+  }
+
+  if (type === "grounding") {
+    return <GroundingPart key={key} part={part as unknown as GroundingPartType} />
   }
 
   if (type === "canvas") {

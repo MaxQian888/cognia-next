@@ -37,15 +37,24 @@ import { invoke } from "@tauri-apps/api/core"
 import { readTombstonesSince } from "./tombstones"
 import type { SyncDelta, SyncableTable } from "./types"
 import { portableExecutionContext } from "@/lib/task-workspace/managed-workspace"
+import { createProfileDekStore, type ProfileDekHandle } from "@/lib/rag/profile-dek-store"
+import { createMemorySyncRowV1, MEMORY_SYNC_PROFILE_ID } from "./memory-content-protocol"
 
 /** Page size for paged tables (messages). One round-trip pulls at most this many rows. */
 const MESSAGES_PAGE_SIZE = 500
+export const MEMORY_COLD_START_LIMIT = 500
 
 interface SyncPullRequestEvent {
   request_id: string
   table: SyncableTable | string
   since: number
   account_id?: string
+  content_protocol_version?: number
+}
+
+interface DesktopSyncContentDeps {
+  getMemoryDek: () => Promise<ProfileDekHandle>
+  memoryColdStartLimit?: number
 }
 
 const REQUEST_EVENT = "companion://sync-pull-request"
@@ -99,7 +108,7 @@ async function respondToSyncRequest(
   const { request_id, table, since } = request
   try {
     assertRequestAccountMatchesActiveAccount(request)
-    const delta = await readDexieDelta(table, since)
+    const delta = await readDexieDelta(table, since, request.content_protocol_version)
     await bridge.invoke(RESPONSE_COMMAND, { requestId: request_id, delta, error: null })
   } catch (err: unknown) {
     await bridge.invoke(RESPONSE_COMMAND, {
@@ -126,8 +135,15 @@ function assertRequestAccountMatchesActiveAccount(request: SyncPullRequestEvent)
 /** Exposed for tests — production callers use the listener installed above. */
 export async function readDexieDelta(
   table: SyncableTable | string,
-  since: number
+  since: number,
+  contentProtocolVersion?: number,
+  contentDeps: DesktopSyncContentDeps = {
+    getMemoryDek: () => createProfileDekStore().getOrCreate(MEMORY_SYNC_PROFILE_ID),
+  }
 ): Promise<SyncDelta<unknown>> {
+  if (table === "memories" && contentProtocolVersion !== 1) {
+    throw new Error("upgrade_required: retrieval content protocol v1 is required")
+  }
   switch (table) {
     case "characters":
       return readCharactersDelta(since)
@@ -160,7 +176,7 @@ export async function readDexieDelta(
     case "goals":
       return readGoalsDelta(since)
     case "memories":
-      return readMemoriesDelta(since)
+      return readMemoriesDelta(since, contentDeps)
     case "agentTeamBoard":
       return readAgentTeamBoardDelta(since)
     case "agentTasks":
@@ -363,13 +379,22 @@ async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {
   return finalizeDelta("goals", rows as UpdatedAtRow[], since)
 }
 
-async function readMemoriesDelta(since: number): Promise<SyncDelta<unknown>> {
-  // memories has an `updatedAt` field but NOT an index on it (schema indexes
-  // scope/type/status/…), so we can't `.where("updatedAt").above`. Read all
-  // and filter — mirrors readPluginsDelta. The personal memory store is small.
-  const all = await getDb().memories.toArray()
-  const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
-  return finalizeDelta("memories", rows as UpdatedAtRow[], since)
+async function readMemoriesDelta(
+  since: number,
+  contentDeps: DesktopSyncContentDeps
+): Promise<SyncDelta<unknown>> {
+  const coldStartLimit = contentDeps.memoryColdStartLimit ?? MEMORY_COLD_START_LIMIT
+  if (!Number.isInteger(coldStartLimit) || coldStartLimit < 1) {
+    throw new Error("Memory cold-start limit must be positive")
+  }
+  const rows =
+    since === 0
+      ? await getDb().memories.orderBy("updatedAt").reverse().limit(coldStartLimit).toArray()
+      : await getDb().memories.where("updatedAt").above(since).toArray()
+  if (rows.length === 0) return finalizeDelta("memories", [], since)
+  const dek = await contentDeps.getMemoryDek()
+  const encryptedRows = await Promise.all(rows.map((row) => createMemorySyncRowV1(row, dek)))
+  return finalizeDelta("memories", encryptedRows, since)
 }
 
 async function readAgentTeamBoardDelta(since: number): Promise<SyncDelta<unknown>> {

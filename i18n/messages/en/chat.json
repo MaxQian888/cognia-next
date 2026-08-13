@@ -149,6 +149,10 @@
     "searchPlaceholder": "Search characters…",
     "title": "Pick a character"
   },
+  "grounding": {
+    "supported": "Retrieved evidence supports the answer's claims.",
+    "unsupported": "{count, plural, =1 {1 claim lacks retrieval support} other {# claims lack retrieval support}}"
+  },
   "checkpoint": {
     "action": "Restore files to this checkpoint",
     "affectedFiles": "Affected files",
@@ -167,6 +171,11 @@
     "title": "Restore file checkpoint"
   },
   "compactBoundary": {
+    "checkpoint": {
+      "failed": "checkpoint failed",
+      "locked": "Vault locked",
+      "stored": "checkpoint saved"
+    },
     "auto": "automatic",
     "detail": "{from} → {to} tokens",
     "effectiveness": "reclaimed {pct}%",
@@ -1591,10 +1600,12 @@
       "anthropic": "Web",
       "footnote": "Note",
       "memory": "Memory",
+      "projectKnowledge": "Project",
       "twinRag": "Twin",
       "twinStyle": "Style"
     },
     "recalledMemoriesHeader": "Recalled memories ({count})",
+    "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
     "retrievedChunksHeader": "Retrieved chunks ({count})",
     "styleSamplesHeader": "Style samples ({count})",
     "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",

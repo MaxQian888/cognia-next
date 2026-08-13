@@ -31,6 +31,7 @@ import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 import { appendAudit } from "@/lib/connectors/audit"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
+import { groundSendOptionsAnswer } from "@/lib/rag/chat-grounding"
 
 export interface SafeSendPromptOptions extends RunAndCaptureOptions {
   /**
@@ -91,6 +92,19 @@ export class PiiGateBlocked extends Error {
   ) {
     super(`PII gate blocked auto-mode send (${source}) on ${adapterId}/${conversationKey}`)
     this.name = "PiiGateBlocked"
+  }
+}
+
+export class GroundingGateBlocked extends Error {
+  readonly code = "grounding_below_threshold"
+
+  constructor(
+    readonly adapterId: string,
+    readonly conversationKey: string,
+    readonly supportRatio: number
+  ) {
+    super(`Grounding gate blocked auto-mode reply on ${adapterId}/${conversationKey}`)
+    this.name = "GroundingGateBlocked"
   }
 }
 
@@ -157,6 +171,22 @@ export async function safeSendPrompt(
       label: `${opts.adapterId} · ${opts.conversationKey}`,
     },
   })
+  const grounding = groundSendOptionsAnswer(result.text, options, "external_send")
+  if (grounding?.blocked) {
+    await appendAudit({
+      adapterId: opts.adapterId,
+      kind: "adapter.error",
+      at: Date.now(),
+      conversationKey: opts.conversationKey,
+      reason: "grounding_below_threshold",
+      message: "auto-mode reply blocked before outbound delivery",
+      fields: {
+        supportedClaims: grounding.claims.length - grounding.unsupportedClaimIds.length,
+        unsupportedClaims: grounding.unsupportedClaimIds.length,
+      },
+    })
+    throw new GroundingGateBlocked(opts.adapterId, opts.conversationKey, grounding.supportRatio)
+  }
   if (result.usage) {
     const usage = result.usage
     swallowUsageWrite(

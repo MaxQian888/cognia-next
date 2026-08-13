@@ -28,6 +28,17 @@ import type {
 import type { Project } from "@/types"
 import type { ProjectChunk } from "@/types/project-knowledge"
 import type {
+  RetrievalActivePointerRow,
+  RetrievalEncryptedContentRow,
+  RetrievalGenerationRow,
+  RetrievalJobRow,
+  RetrievalMigrationJournalRow,
+  RetrievalProfileRow,
+  RetrievalRuntimeStateRow,
+  RetrievalTombstoneRow,
+  RetrievalTraceRow,
+} from "./retrieval-control-types"
+import type {
   KnowledgeBase,
   KnowledgeBaseChunk,
   KnowledgeBaseIngestJob,
@@ -274,6 +285,35 @@ export function backfillMemoryGovernanceV118(memory: Memory): Memory {
   memory.contaminationState ??= "unknown"
   memory.sensitivity ??= "normal"
   return memory
+}
+
+/** v164 makes legacy uncertainty and procedural review state explicit. */
+export function backfillMemoryGovernanceV164(memory: Memory): Memory {
+  memory.confidence ??= null
+  memory.expiresAt ??= null
+  memory.staleness ??= "unknown"
+  if (memory.evidenceState === "legacy" && memory.sensitivity === "normal") {
+    memory.sensitivity = "unknown"
+  } else {
+    memory.sensitivity ??= "unknown"
+  }
+  if (memory.type === "procedural" && memory.reviewStatus !== "verified") {
+    memory.reviewStatus = "pending_instruction"
+  }
+  return memory
+}
+
+/** Translate the v118 four-state job model without losing retry history. */
+export function backfillMemoryJobV164(job: MemoryJob): MemoryJob {
+  const legacyStatus = job.status as MemoryJob["status"] | "completed"
+  if (legacyStatus === "completed") job.status = "succeeded"
+  else if (legacyStatus === "queued" && job.retryCount > 0 && job.nextAttemptAt !== undefined) {
+    job.status = "retry_wait"
+  }
+  job.attempt ??= job.retryCount + (job.startedAt === undefined ? 0 : 1)
+  job.maxAttempts ??= 4
+  if (job.status === "succeeded") job.resultCode ??= "legacy_completed"
+  return job
 }
 
 export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
@@ -3852,6 +3892,7 @@ export class CogniaDB extends Dexie {
         connectorInboundJobs:
           "&id, &[adapterId+platformMessageId], [conversationKey+status+receivedAt], adapterId, conversationKey, status, leaseExpiresAt, executionRunId, receivedAt, [status+updatedAt]",
       })
+
       .upgrade(async (tx) => {
         const outbound = tx.table<OutboundJobRow, string>("outboundQueue")
         const rows = await outbound.toArray()
@@ -3914,6 +3955,76 @@ export class CogniaDB extends Dexie {
         "&id, &[adapterId+eventId], [adapterId+state+nextAttemptAt], adapterId, roomId, state, firstSeenAt, updatedAt",
     })
 
+    // v163 — Shared Memory/RAG control plane. Domain rows remain authoritative;
+    // these tables own profiles, atomic index generations, durable jobs,
+    // content-free traces, encrypted payload envelopes, tombstones, and the
+    // resumable migration journal.
+    this.version(163).stores({
+      retrievalProfiles: "&id, &fingerprint, active, updatedAt",
+      retrievalGenerations:
+        "&id, corpusId, domain, status, profileFingerprint, createdAt, [corpusId+status], [corpusId+profileFingerprint]",
+      retrievalActivePointers: "&corpusId, generationId, domain, profileFingerprint, updatedAt",
+      retrievalJobs:
+        "&id, dedupeKey, kind, corpusId, generationId, status, queuedAt, nextAttemptAt, leaseExpiresAt, [status+queuedAt], [corpusId+status]",
+      retrievalTraces:
+        "&traceId, corpusId, domain, generationId, profileFingerprint, createdAt, expiresAt, [corpusId+createdAt]",
+      retrievalEncryptedContent:
+        "&id, entityType, entityId, corpusId, generationId, kind, updatedAt, [entityType+entityId], [corpusId+generationId]",
+      retrievalTombstones:
+        "&id, entityType, entityId, corpusId, createdAt, eligiblePurgeAt, [entityType+entityId]",
+      retrievalMigrationJournal: "&id, phase, status, updatedAt, [phase+status]",
+    })
+
+    // v164 — Memory governance metadata and the shared eight-state job model.
+    // Legacy unknowns stay explicit; unreviewed procedural rows are withheld
+    // pending the existing inbound-draft review/promotion flow.
+    this.version(164)
+      .stores({
+        memories:
+          "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, staleness, expiresAt, lastAccessedAt, vectorDocId, sourceSessionId, sourceMessageId, pinned, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status]",
+        memoryJobs:
+          "&id, dedupeKey, status, kind, sessionId, projectId, queuedAt, nextAttemptAt, leaseExpiresAt, heartbeatAt, [status+queuedAt]",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table<Memory, string>("memories")
+          .toCollection()
+          .modify((memory) => {
+            backfillMemoryGovernanceV164(memory)
+          })
+        await tx
+          .table<MemoryJob, string>("memoryJobs")
+          .toCollection()
+          .modify((job) => {
+            backfillMemoryJobV164(job)
+          })
+      })
+
+    // v165 — generation identity on every derived RAG chunk. Legacy rows keep
+    // generationId absent and remain readable until their corpus is rebuilt.
+    this.version(165).stores({
+      projectChunks:
+        "&id, projectId, fileId, vectorDocId, generationId, [projectId+fileId], [projectId+generationId], [projectId+createdAt]",
+      knowledgeBaseChunks:
+        "&id, knowledgeBaseId, sourceId, vectorDocId, generationId, [knowledgeBaseId+sourceId], [knowledgeBaseId+generationId], [knowledgeBaseId+createdAt]",
+      twinChunks:
+        "&id, twinId, sourceId, vectorDocId, generationId, [twinId+sourceId], [twinId+generationId], [twinId+createdAt]",
+    })
+
+    // v166 — one durable rollout kill switch shared by kernel, ingest, and
+    // promotion. Safe lexical reads and recovery operations remain available.
+    this.version(166).stores({
+      retrievalRuntimeState: "&id, killSwitchEngaged, changedAt",
+    })
+
+    // v167 — bounded Companion memory mirroring. The host pages cold-start and
+    // incremental encrypted memory sync through updatedAt instead of scanning
+    // the full long-term store.
+    this.version(167).stores({
+      memories:
+        "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, staleness, expiresAt, updatedAt, lastAccessedAt, vectorDocId, sourceSessionId, sourceMessageId, pinned, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -3949,6 +4060,16 @@ export class CogniaDB extends Dexie {
   memoryEvidence!: Table<MemoryEvidence, string>
   memoryJobs!: Table<MemoryJob, string>
   memoryAuditEvents!: Table<MemoryAuditEvent, string>
+  // v163 — Shared Memory/RAG control plane.
+  retrievalProfiles!: Table<RetrievalProfileRow, string>
+  retrievalGenerations!: Table<RetrievalGenerationRow, string>
+  retrievalActivePointers!: Table<RetrievalActivePointerRow, string>
+  retrievalJobs!: Table<RetrievalJobRow, string>
+  retrievalTraces!: Table<RetrievalTraceRow, string>
+  retrievalEncryptedContent!: Table<RetrievalEncryptedContentRow, string>
+  retrievalTombstones!: Table<RetrievalTombstoneRow, string>
+  retrievalMigrationJournal!: Table<RetrievalMigrationJournalRow, string>
+  retrievalRuntimeState!: Table<RetrievalRuntimeStateRow, "global">
   // v61 — companion sync tombstones (deletions). See `lib/sync/tombstones.ts`.
   syncTombstones!: Table<SyncTombstoneRow, [SyncableTable, string]>
   // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.

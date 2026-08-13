@@ -1,5 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
+jest.mock("@/components/rag/retrieval-control-panel", () => ({
+  RetrievalControlPanel: ({ corpusPrefixes }: { corpusPrefixes: string[] }) => (
+    <div data-testid="retrieval-control-panel">{corpusPrefixes.join(",")}</div>
+  ),
+}))
+
 const listSourcesMock = jest.fn()
 const listJobsMock = jest.fn()
 const createSourceMock = jest.fn()
@@ -59,6 +65,13 @@ beforeEach(() => {
   rebuildMock
     .mockReset()
     .mockResolvedValue({ completedSourceIds: ["source-1"], failedSourceIds: [] })
+})
+
+it("wires the selected library into the shared retrieval control plane", async () => {
+  render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
+  expect(await screen.findByTestId("retrieval-control-panel")).toHaveTextContent(
+    "knowledge_base:kb-1:"
+  )
 })
 
 it("adds and immediately indexes a manual source in the selected reusable library", async () => {

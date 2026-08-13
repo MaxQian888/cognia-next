@@ -51,6 +51,11 @@ import {
   PROFILE_STORE_SCHEMA_VERSION,
 } from "@cognia/provider-types"
 import { deepStripSecrets } from "@/lib/settings/profile-transfer"
+import type {
+  RetrievalEncryptedContentRow,
+  RetrievalProfileRow,
+} from "@/lib/db/retrieval-control-types"
+import { importPortableRetrievalKeys, type PortableImportStore } from "./retrieval-key-backup"
 
 interface BuiltInRow {
   id: string
@@ -72,6 +77,8 @@ export interface ApplyBackupExtras {
   /** Stub the Tauri-only `syncToAgent` projection step. When omitted, the
    * built-in `projectMcpToAllAgents` is used. */
   projectMcp?: () => Promise<SyncProjectionReport[]>
+  /** Test/runtime seam for the native keyring or Browser Vault. */
+  profileDekStore?: PortableImportStore
 }
 
 /**
@@ -101,6 +108,15 @@ export async function applyBackupPackage(
   if (importedProfiles && !importedProfiles.ok) {
     throw new Error(`provider profile import failed: ${importedProfiles.errors.join("; ")}`)
   }
+  const retrievalProfiles = (env.retrievalProfiles ?? []).map(validateRetrievalProfileRow)
+  const retrievalEncryptedContent = (env.retrievalEncryptedContent ?? []).flatMap((row) =>
+    row.kind === "lexical_segment" ? [] : [validateRetrievalEncryptedContentRow(row)]
+  )
+  summary.restoredRetrievalKeyProfiles = await importPortableRetrievalKeys(
+    env.retrievalProfileDeks,
+    opts.retrievalDekPassphrase,
+    extras.profileDekStore
+  )
 
   // Stage 1: snapshot localStorage face *before* Dexie writes so we can
   // roll it back if something blows up after the Dexie commit. Tauri/web
@@ -146,6 +162,8 @@ export async function applyBackupPackage(
       db.memoryEvidence,
       db.memoryJobs,
       db.memoryAuditEvents,
+      db.retrievalProfiles,
+      db.retrievalEncryptedContent,
       db.templateDefinitions,
       db.templatePackages,
       db.templateInstances,
@@ -532,6 +550,31 @@ export async function applyBackupPackage(
         summary,
       })
 
+      // Retrieval profiles are portable configuration. Encrypted canonical
+      // rows keep their immutable ids because the AAD binds those ids; a
+      // duplicate import therefore uses conservative skip semantics rather
+      // than renaming or overwriting ciphertext under a mismatched identity.
+      const retrievalOpts =
+        opts.mergeStrategy === "duplicate" ? { ...opts, mergeStrategy: "skip" as const } : opts
+      await applyCollection<RetrievalProfileRow>({
+        rows: retrievalProfiles,
+        table: db.retrievalProfiles,
+        kind: "retrievalProfiles",
+        opts: retrievalOpts,
+        summary,
+        idPrefix: "retrieval-profile",
+        respectBuiltIn: false,
+      })
+      await applyCollection<RetrievalEncryptedContentRow>({
+        rows: retrievalEncryptedContent,
+        table: db.retrievalEncryptedContent,
+        kind: "retrievalEncryptedContent",
+        opts: retrievalOpts,
+        summary,
+        idPrefix: "retrieval-content",
+        respectBuiltIn: false,
+      })
+
       // --- sessions + messages + sessionState (off by default) -----------
       if (opts.includeSessions) {
         await applyCollection<ChatSession>({
@@ -619,6 +662,74 @@ export async function applyBackupPackage(
   }
 
   return summary
+}
+
+function validateRetrievalProfileRow(row: RetrievalProfileRow): RetrievalProfileRow {
+  if (
+    !row ||
+    typeof row !== "object" ||
+    row.schemaVersion !== 1 ||
+    !row.id ||
+    !row.fingerprint ||
+    row.profile?.version !== 1 ||
+    row.profile.id !== row.id ||
+    !Number.isFinite(row.createdAt) ||
+    !Number.isFinite(row.updatedAt)
+  ) {
+    throw new Error("Retrieval profile backup row is invalid")
+  }
+  return {
+    id: row.id,
+    schemaVersion: 1,
+    fingerprint: row.fingerprint,
+    profile: row.profile,
+    active: row.active === true,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+function validateRetrievalEncryptedContentRow(
+  row: RetrievalEncryptedContentRow
+): RetrievalEncryptedContentRow {
+  const allowedKinds = new Set(["canonical", "safe_projection", "evidence_excerpt"])
+  if (
+    !row ||
+    typeof row !== "object" ||
+    !row.id ||
+    !row.entityType ||
+    !row.entityId ||
+    !row.corpusId ||
+    !allowedKinds.has(row.kind) ||
+    row.envelope?.version !== 1 ||
+    row.envelope.algorithm !== "AES-256-GCM" ||
+    !row.envelope.keyId ||
+    !row.envelope.iv ||
+    !row.envelope.ciphertext ||
+    !row.envelope.aadHash ||
+    !Number.isFinite(row.createdAt) ||
+    !Number.isFinite(row.updatedAt)
+  ) {
+    throw new Error("Encrypted retrieval content backup row is invalid")
+  }
+  return {
+    id: row.id,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    corpusId: row.corpusId,
+    ...(row.generationId ? { generationId: row.generationId } : {}),
+    kind: row.kind,
+    envelope: {
+      version: 1,
+      algorithm: "AES-256-GCM",
+      keyId: row.envelope.keyId,
+      iv: row.envelope.iv,
+      ciphertext: row.envelope.ciphertext,
+      aadHash: row.envelope.aadHash,
+    },
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
 }
 
 interface ApplyArgs<T extends { id: string }> {
@@ -828,7 +939,17 @@ const EVIDENCE_KINDS = new Set([
   "agent-finding",
 ])
 const JOB_KINDS = new Set(["turn-extraction", "session-distill", "vector-reconcile"])
-const JOB_STATUSES = new Set(["queued", "running", "completed", "failed"])
+const JOB_STATUSES = new Set([
+  "queued",
+  "running",
+  "retry_wait",
+  "succeeded",
+  "no_output",
+  "skipped",
+  "failed",
+  "cancelled",
+  "completed",
+])
 const AUDIT_ACTIONS = new Set([
   "recall-allowed",
   "recall-denied",
@@ -979,6 +1100,57 @@ function sanitizeImportedMemory(value: unknown): Memory | undefined {
   if (value.sensitivity === "normal" || value.sensitivity === "sensitive") {
     row.sensitivity = value.sensitivity
   }
+  if (value.sensitivity === "unknown") row.sensitivity = "unknown"
+  if (
+    value.staleness === "unknown" ||
+    value.staleness === "fresh" ||
+    value.staleness === "stale" ||
+    value.staleness === "expired"
+  ) {
+    row.staleness = value.staleness
+  }
+  if (
+    value.trustState === "trusted" ||
+    value.trustState === "untrusted" ||
+    value.trustState === "quarantined"
+  ) {
+    row.trustState = value.trustState
+  }
+  if (value.confidence === null) row.confidence = null
+  else if (isFiniteNumber(value.confidence) && value.confidence >= 0 && value.confidence <= 1) {
+    row.confidence = value.confidence
+  }
+  if (value.expiresAt === null) row.expiresAt = null
+  else {
+    const expiresAt = optionalFiniteNumber(value.expiresAt)
+    if (expiresAt !== undefined) row.expiresAt = expiresAt
+  }
+  for (const field of ["sourceRevision", "evidenceHash"] as const) {
+    const safe = optionalIdentifier(value[field])
+    if (safe) row[field] = safe
+  }
+  if (isRecord(value.extractor)) {
+    const provider = optionalIdentifier(value.extractor.provider)
+    const model = optionalIdentifier(value.extractor.model)
+    const promptVersion = optionalIdentifier(value.extractor.promptVersion)
+    if (provider && model && promptVersion) row.extractor = { provider, model, promptVersion }
+  }
+  if (isRecord(value.retrievalFeedback)) {
+    const positive = value.retrievalFeedback.positive
+    const negative = value.retrievalFeedback.negative
+    const lastFeedbackAt = optionalFiniteNumber(value.retrievalFeedback.lastFeedbackAt)
+    if (isFiniteNumber(positive) && positive >= 0 && isFiniteNumber(negative) && negative >= 0) {
+      row.retrievalFeedback = {
+        positive,
+        negative,
+        ...(lastFeedbackAt !== undefined ? { lastFeedbackAt } : {}),
+      }
+    }
+  }
+  if (typeof value.scopeRationale === "string") {
+    const scopeRationale = redactText(value.scopeRationale).redacted.trim()
+    if (scopeRationale && hasNoLeakingPii(scopeRationale)) row.scopeRationale = scopeRationale
+  }
   if (Array.isArray(value.conflictWithIds)) {
     row.conflictWithIds = value.conflictWithIds.flatMap((item) => {
       const safe = optionalIdentifier(item)
@@ -1013,6 +1185,12 @@ function sanitizeImportedEvidence(value: unknown): MemoryEvidence | undefined {
     contaminationState: value.contaminationState as MemoryEvidence["contaminationState"],
     reviewed: value.reviewed,
     createdAt: value.createdAt,
+    ...(value.sourceRole === "user" ||
+    value.sourceRole === "assistant" ||
+    value.sourceRole === "tool" ||
+    value.sourceRole === "system"
+      ? { sourceRole: value.sourceRole }
+      : {}),
     ...(optionalIdentifier(value.memoryId) ? { memoryId: optionalIdentifier(value.memoryId) } : {}),
     ...(optionalIdentifier(value.sessionId)
       ? { sessionId: optionalIdentifier(value.sessionId) }
@@ -1057,7 +1235,7 @@ function sanitizeImportedJob(value: unknown): MemoryJob | undefined {
     id,
     dedupeKey,
     kind: value.kind as MemoryJob["kind"],
-    status: value.status as MemoryJob["status"],
+    status: (value.status === "completed" ? "succeeded" : value.status) as MemoryJob["status"],
     scope: value.scope as MemoryJob["scope"],
     provenance: value.provenance as MemoryJob["provenance"],
     evidenceIds,
@@ -1068,6 +1246,7 @@ function sanitizeImportedJob(value: unknown): MemoryJob | undefined {
     "sessionId",
     "projectId",
     "characterId",
+    "agentId",
     "leaseOwner",
     "errorCode",
   ] as const) {
@@ -1078,6 +1257,17 @@ function sanitizeImportedJob(value: unknown): MemoryJob | undefined {
     const safe = optionalFiniteNumber(value[field])
     if (safe !== undefined) row[field] = safe
   }
+  for (const field of [
+    "heartbeatAt",
+    "attempt",
+    "maxAttempts",
+    "cancellationRequestedAt",
+  ] as const) {
+    const safe = optionalFiniteNumber(value[field])
+    if (safe !== undefined) row[field] = safe
+  }
+  const resultCode = optionalIdentifier(value.resultCode)
+  if (resultCode) row.resultCode = resultCode
   return row
 }
 

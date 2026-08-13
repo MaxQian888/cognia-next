@@ -113,6 +113,7 @@
     "0111-managed-workspace-registry-and-bundle",
     "0112-unified-decision-provenance-conflict-ledger",
     "0113-agent-team-multi-host-remote-dispatch",
-    "0114-chat-message-presentation"
+    "0114-chat-message-presentation",
+    "0115-unified-memory-rag-infrastructure"
   ]
 }

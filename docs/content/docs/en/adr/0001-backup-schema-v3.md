@@ -75,11 +75,16 @@ user files keep working forever.
 
 The export dialog offers three modes:
 
-1. **Plaintext** (default) — easiest to inspect.
-2. **Auto-key** — encrypted with a device-stored key (Tauri:
+1. **Auto-key** (default) — encrypted with a device-stored key (Tauri:
    `@tauri-apps/plugin-store`, web: `localStorage`). One-click, unreadable on
    other devices unless the user also exports the key.
-3. **Custom passphrase** — PBKDF2-SHA256 with 600 000 iterations + AES-GCM.
+2. **Custom passphrase** — PBKDF2-SHA256 with 600 000 iterations + AES-GCM.
+3. **Plaintext** — readable and therefore gated by a separate warning
+   confirmation. It never carries retrieval DEKs.
+
+Encrypted backups include canonical retrieval ciphertext and independently
+wrap every provisioned retrieval-profile DEK with the same backup key or
+passphrase. Lexical segments remain derived and are rebuilt after restore.
 
 The importer detects the encrypted shape, tries the auto-key silently first,
 and falls back to a passphrase prompt only if that fails.

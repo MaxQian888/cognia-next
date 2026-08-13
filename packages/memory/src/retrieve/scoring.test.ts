@@ -2,6 +2,7 @@ import {
   PROVENANCE_VERACITY,
   RECENCY_HALF_LIFE_MULTIPLIER,
   recencyHalfLifeDaysForType,
+  governanceScoreFor,
   scoreMemories,
   veracityFor,
   type ScorableMemory,
@@ -141,6 +142,26 @@ describe("scoreMemories", () => {
     for (const o of out) {
       expect(o.score).toBeCloseTo(o.parts.recency + o.parts.importance + o.parts.relevance)
     }
+  })
+
+  it("ranks verified positive-feedback governance above stale contaminated rows", () => {
+    const trusted = governanceScoreFor({
+      confidence: 0.9,
+      reviewStatus: "verified",
+      contaminationState: "clean",
+      staleness: "fresh",
+      trustState: "trusted",
+      retrievalFeedback: { positive: 5, negative: 0 },
+    } as never)
+    const doubted = governanceScoreFor({
+      confidence: 0.2,
+      reviewStatus: "unreviewed",
+      contaminationState: "external-context",
+      staleness: "stale",
+      trustState: "untrusted",
+      retrievalFeedback: { positive: 0, negative: 4 },
+    } as never)
+    expect(trusted).toBeGreaterThan(doubted)
   })
 })
 

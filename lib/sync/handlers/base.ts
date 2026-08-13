@@ -28,6 +28,7 @@ export interface SyncHandlerOptions<TRow extends { id: string }> {
 }
 
 const SYNC_RPC = "sync_pull"
+export const RETRIEVAL_CONTENT_PROTOCOL_VERSION = 1
 
 /**
  * Safety cap on the pagination drain loop. Single-shot tables exit after one
@@ -63,6 +64,7 @@ export async function runSyncHandler<TRow extends { id: string }>(
       delta = await transport.call<SyncDelta<TRow>>(SYNC_RPC, {
         table: opts.table,
         since,
+        content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
       })
     } catch (err: unknown) {
       return { ok: false, failure: classifyTransportError(opts.table, err) }
@@ -107,6 +109,9 @@ export async function runSyncHandler<TRow extends { id: string }>(
 
 function classifyTransportError(table: SyncableTable, err: unknown): SyncFailure {
   const message = err instanceof Error ? err.message : String(err)
+  if (/upgrade_required/i.test(message)) {
+    return { table, reason: "upgrade_required", message }
+  }
   // The Rust server rejects unknown RPCs with a 404 / "command not found"
   // response — surface as `not_implemented` so the orchestrator can mark
   // the table as "server doesn't ship sync_pull yet" rather than red.

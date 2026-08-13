@@ -156,6 +156,13 @@ impl RpcError {
         )
     }
 
+    fn upgrade_required(detail: String) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::UPGRADE_REQUIRED,
+            Json(Self::new("upgrade_required", detail)),
+        )
+    }
+
     /// ADR-0059 R5 — the command's body still requires the desktop Tauri
     /// runtime and this process is a headless `cognia-server`. Distinct code
     /// from `service_unavailable` so clients can tell "retry later" (server
@@ -862,6 +869,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "memory_store",
     "memory_update",
     "memory_forget",
+    "retrieval_profile_dek_export",
     // ── Settings / conversation overrides ───────────────────────────────────
     "conversation_overrides_update",
     // ── App-data backup ─────────────────────────────────────────────────────
@@ -1120,6 +1128,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // `lastAccessedAt`/`accessCount` (the recency signal), so it must not be
     // served from the idempotency cache.
     "memory_list",
+    "retrieval_profile_dek_export",
     // App-data backup export is a pure read (snapshots current state).
     "backup_export",
     // Native log read-back — bounded tail reads over on-disk log files.

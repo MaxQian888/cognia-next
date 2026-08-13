@@ -8,6 +8,12 @@
  * - Query expansion
  */
 
+// Canonical retrieval contracts and outbound embedding boundary
+export * from "./retrieval-profile"
+export * from "./safe-embedding-gateway"
+export * from "./retrieval-kernel"
+export * from "./control-plane"
+
 // Hybrid Search
 export {
   type BM25Config,
@@ -21,6 +27,12 @@ export {
   deduplicateResults,
   createHybridSearchEngine,
 } from "./hybrid-search"
+export {
+  decryptBM25Segment,
+  encryptBM25Segment,
+  type BM25SegmentIdentity,
+  type EncryptedBM25SegmentV1,
+} from "./bm25-segment"
 
 // Reranking
 export {
@@ -230,10 +242,17 @@ export {
 export {
   type GroundingCheckConfig,
   type GroundingCheckResult,
+  type GroundingPath,
+  type GroundingClaim,
+  type ClaimSupport,
+  type GroundingResult,
+  type GroundingOptions,
   checkGroundingHeuristic,
   checkGroundingLLM,
   checkAnswerGrounding,
   isAnswerGrounded,
+  groundAnswer,
+  attachGroundingToTrace,
 } from "./answer-grounding"
 
 // RAG Evaluator (Quality Metrics)

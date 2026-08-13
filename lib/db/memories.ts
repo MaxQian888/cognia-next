@@ -273,14 +273,56 @@ export async function countActive(scope: MemoryScope, characterId?: string): Pro
 
 /** Hard-delete a single memory (user-initiated only). */
 export async function hardDeleteMemory(id: string): Promise<void> {
-  await getDb().memories.delete(id)
+  await hardDeleteMemories([id])
 }
 
 /** Hard-delete a specific set of memories (bulk panel action). Returns the count. */
 export async function hardDeleteMemories(ids: string[]): Promise<number> {
   if (ids.length === 0) return 0
-  await getDb().memories.bulkDelete(ids)
-  return ids.length
+  const db = getDb()
+  const uniqueIds = [...new Set(ids)]
+  return db.transaction(
+    "rw",
+    [
+      db.memories,
+      db.memoryEvidence,
+      db.memoryAuditEvents,
+      db.retrievalEncryptedContent,
+      db.retrievalTombstones,
+    ],
+    async () => {
+      const rows = (await db.memories.bulkGet(uniqueIds)).filter(
+        (row): row is Memory => row !== undefined
+      )
+      const now = Date.now()
+      for (const row of rows) {
+        await db.memoryEvidence.where("memoryId").equals(row.id).delete()
+        await db.retrievalEncryptedContent
+          .where("[entityType+entityId]")
+          .equals(["memory", row.id])
+          .delete()
+        await db.retrievalTombstones.put({
+          id: `memory:${row.id}`,
+          entityType: "memory",
+          entityId: row.id,
+          corpusId: `memory:${row.projectId ?? row.characterId ?? row.agentId ?? "global"}`,
+          createdAt: now,
+          acknowledgedDeviceIds: [],
+          pendingDeviceIds: [],
+          eligiblePurgeAt: now + 30 * 24 * 60 * 60 * 1000,
+        })
+        await db.memoryAuditEvents.add({
+          id: `mau_delete_${row.id}_${now}`,
+          action: "deleted",
+          memoryId: row.id,
+          reason: "user_requested",
+          createdAt: now,
+        })
+      }
+      await db.memories.bulkDelete(rows.map((row) => row.id))
+      return rows.length
+    }
+  )
 }
 
 /** Pin / unpin a specific set of memories in one transaction (bulk panel action). */
@@ -303,6 +345,5 @@ export async function clearMemories(query: ListMemoriesQuery = {}): Promise<numb
   const rows = await listMemories(query)
   const ids = rows.map((m) => m.id)
   if (ids.length === 0) return 0
-  await getDb().memories.bulkDelete(ids)
-  return ids.length
+  return hardDeleteMemories(ids)
 }

@@ -37,6 +37,7 @@ import { loggers } from "@cognia/logging"
 import { dispatchBackupDestination } from "@/lib/data/destinations"
 import { encryptSnapshotBody, webdavSnapshotName } from "@/lib/data/destinations/webdav"
 import { getSyncPassphrase } from "@/lib/webdav/passphrase-cache"
+import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
 
 const log = loggers.scheduler
 
@@ -161,13 +162,14 @@ export async function executeBackupTask(
 
   try {
     const buildOpts = payloadToBuildOptions(payload.backupType, payload.options)
-    const pkg = await buildBackupPackage(buildOpts)
-    const plaintext = serializePackage(pkg)
+    const basePackage = await buildBackupPackage(buildOpts)
     const output: Record<string, unknown> = {}
 
     if (wantsLocal(destination)) {
       const passphrase = await getDefaultBackupPassphrase()
       if (!passphrase) throw new Error("Auto-key not available on this runtime.")
+      const pkg = await attachPortableRetrievalKeys(basePackage, passphrase)
+      const plaintext = serializePackage(pkg)
       const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
       const filename = defaultExportFileName(new Date(), "encrypted")
       const target = await resolveBackupPath(filename)
@@ -197,6 +199,8 @@ export async function executeBackupTask(
         if (destination === "webdav") return { success: false, error }
         output.webdav = { skipped: true, error }
       } else {
+        const pkg = await attachPortableRetrievalKeys(basePackage, syncPass)
+        const plaintext = serializePackage(pkg)
         const body = await encryptSnapshotBody(plaintext, pkg, syncPass)
         const filename = webdavSnapshotName(pkg.manifest.exportedAt)
         const result = await dispatchBackupDestination("webdav", body, {

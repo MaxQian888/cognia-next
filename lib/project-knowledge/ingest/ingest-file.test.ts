@@ -78,24 +78,28 @@ describe("ingestKnowledgeFile", () => {
     expect(persistMock).toHaveBeenCalled()
   })
 
-  it("returns a no-op for empty content", async () => {
+  it("activates an empty generation so stale chunks are removed", async () => {
     const result = await ingestKnowledgeFile({
       projectId: "p",
       file: file({ content: "   " }),
       deps: nativeDeps,
     })
     expect(result).toEqual({ chunkCount: 0, skipped: false })
-    expect(persistMock).not.toHaveBeenCalled()
+    expect(persistMock).toHaveBeenCalledWith(
+      expect.objectContaining({ chunks: [], embeddings: [] })
+    )
   })
 
-  it("treats missing content as empty (no crash, no-op)", async () => {
+  it("treats missing content as an empty generation", async () => {
     const result = await ingestKnowledgeFile({
       projectId: "p",
       file: file({ content: undefined as unknown as string }),
       deps: nativeDeps,
     })
     expect(result).toEqual({ chunkCount: 0, skipped: false })
-    expect(persistMock).not.toHaveBeenCalled()
+    expect(persistMock).toHaveBeenCalledWith(
+      expect.objectContaining({ chunks: [], embeddings: [] })
+    )
   })
 
   it("native backend embeds the ORIGINAL text (no redaction)", async () => {

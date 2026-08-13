@@ -957,6 +957,15 @@ describe("applyBackupPackage — learned memory", () => {
           reviewStatus: "verified",
           contaminationState: "clean",
           sensitivity: "normal",
+          confidence: null,
+          expiresAt: null,
+          staleness: "unknown",
+          trustState: "trusted",
+          sourceRevision: "revision-1",
+          evidenceHash: "evidence-hash-1",
+          extractor: { provider: "local", model: "extractor-1", promptVersion: "v1" },
+          retrievalFeedback: { positive: 2, negative: 1, lastFeedbackAt: 2 },
+          scopeRationale: "Applies to this workspace",
         },
       ],
       memoryEvidence: [
@@ -967,6 +976,7 @@ describe("applyBackupPackage — learned memory", () => {
           sourceId: "source_1",
           contaminationState: "clean",
           reviewed: true,
+          sourceRole: "user",
           createdAt: 1,
         },
       ],
@@ -975,7 +985,7 @@ describe("applyBackupPackage — learned memory", () => {
           id: "mjob_1",
           dedupeKey: "turn:s1:m1",
           kind: "turn-extraction",
-          status: "completed",
+          status: "succeeded",
           scope: "workspace",
           projectId: "project_1",
           provenance: "user",
@@ -983,6 +993,10 @@ describe("applyBackupPackage — learned memory", () => {
           queuedAt: 1,
           completedAt: 2,
           retryCount: 0,
+          attempt: 1,
+          maxAttempts: 4,
+          heartbeatAt: 2,
+          resultCode: "memory_created",
         },
       ],
       memoryAuditEvents: [
@@ -1007,6 +1021,23 @@ describe("applyBackupPackage — learned memory", () => {
 
     expect((await db.memoryEvidence.get("mev_1"))?.memoryId).toBe("mem_1")
     expect((await db.memoryJobs.get("mjob_1"))?.evidenceIds).toEqual(["mev_1"])
+    expect(await db.memories.get("mem_1")).toMatchObject({
+      confidence: null,
+      expiresAt: null,
+      staleness: "unknown",
+      trustState: "trusted",
+      extractor: { provider: "local", model: "extractor-1", promptVersion: "v1" },
+      retrievalFeedback: { positive: 2, negative: 1, lastFeedbackAt: 2 },
+      scopeRationale: "Applies to this workspace",
+    })
+    expect(await db.memoryEvidence.get("mev_1")).toMatchObject({ sourceRole: "user" })
+    expect(await db.memoryJobs.get("mjob_1")).toMatchObject({
+      status: "succeeded",
+      attempt: 1,
+      maxAttempts: 4,
+      heartbeatAt: 2,
+      resultCode: "memory_created",
+    })
     expect((await db.memoryAuditEvents.get("maudit_1"))?.memoryId).toBe("mem_1")
     expect(summary.added.memories).toBe(1)
     expect(summary.added.memoryEvidence).toBe(1)
@@ -1103,5 +1134,113 @@ describe("applyBackupPackage — learned memory", () => {
       reason: "imported",
       metadata: { safeCount: 1 },
     })
+  })
+})
+
+describe("applyBackupPackage — encrypted retrieval content", () => {
+  const portableDek = {
+    version: 1 as const,
+    profileId: "memory-shared",
+    keyId: "dek-memory",
+    encryption: {
+      enabled: true as const,
+      format: "aes-gcm-chunks-v1" as const,
+      algorithm: "AES-GCM" as const,
+      kdf: {
+        algorithm: "PBKDF2" as const,
+        hash: "SHA-256" as const,
+        iterations: 600_000,
+        salt: "salt",
+      },
+      noncePrefix: "nonce",
+    },
+    ciphertext: "wrapped",
+  }
+
+  it("restores wrapped DEKs before committing ciphertext rows", async () => {
+    const importPortableBatch = jest.fn(async () => undefined)
+    const summary = await applyBackupPackage(
+      pkg({
+        retrievalProfileDeks: [portableDek],
+        retrievalEncryptedContent: [
+          {
+            id: "memory:m1:canonical",
+            entityType: "memory",
+            entityId: "m1",
+            corpusId: "memory",
+            kind: "canonical",
+            envelope: {
+              version: 1,
+              algorithm: "AES-256-GCM",
+              keyId: "dek-memory",
+              iv: "iv",
+              ciphertext: "ciphertext",
+              aadHash: "aad",
+            },
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      }),
+      {
+        mergeStrategy: "overwrite",
+        includeSessions: false,
+        includeApiKey: false,
+        retrievalDekPassphrase: "backup-passphrase",
+      },
+      { projectMcp: async () => [], profileDekStore: { importPortableBatch } }
+    )
+
+    expect(importPortableBatch).toHaveBeenCalledWith([portableDek], "backup-passphrase", {
+      activate: "if-missing",
+    })
+    expect(await getDb().retrievalEncryptedContent.get("memory:m1:canonical")).toMatchObject({
+      envelope: { keyId: "dek-memory", ciphertext: "ciphertext" },
+    })
+    expect(summary.restoredRetrievalKeyProfiles).toEqual(["memory-shared"])
+  })
+
+  it("fails closed before writing ciphertext when the DEK passphrase is absent", async () => {
+    await expect(
+      applyBackupPackage(
+        pkg({ retrievalProfileDeks: [portableDek] }),
+        { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+        { projectMcp: async () => [], profileDekStore: { importPortableBatch: jest.fn() } }
+      )
+    ).rejects.toThrow("backup passphrase")
+    expect(await getDb().retrievalEncryptedContent.count()).toBe(0)
+  })
+
+  it("strips undeclared plaintext fields from imported encrypted rows", async () => {
+    await applyBackupPackage(
+      pkg({
+        retrievalEncryptedContent: [
+          {
+            id: "memory:m1:canonical",
+            entityType: "memory",
+            entityId: "m1",
+            corpusId: "memory",
+            kind: "canonical",
+            envelope: {
+              version: 1,
+              algorithm: "AES-256-GCM",
+              keyId: "dek-memory",
+              iv: "iv",
+              ciphertext: "ciphertext",
+              aadHash: "aad",
+            },
+            createdAt: 1,
+            updatedAt: 1,
+            text: "must not persist",
+          } as never,
+        ],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    expect(JSON.stringify(await getDb().retrievalEncryptedContent.toArray())).not.toContain(
+      "must not persist"
+    )
   })
 })

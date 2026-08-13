@@ -13,6 +13,8 @@ import {
   LEGACY_COGNIA_DB_NAME,
   __resetDbForTesting,
   activateAccountDatabase,
+  backfillMemoryGovernanceV164,
+  backfillMemoryJobV164,
   backfillMemoryGovernanceV118,
   backfillRootsForRow,
   clearAccountDatabaseSelection,
@@ -399,6 +401,15 @@ describe("getDb", () => {
     expect(db.memoryEvidence).toBeDefined()
     expect(db.memoryJobs).toBeDefined()
     expect(db.memoryAuditEvents).toBeDefined()
+    expect(db.retrievalProfiles).toBeDefined()
+    expect(db.retrievalGenerations).toBeDefined()
+    expect(db.retrievalActivePointers).toBeDefined()
+    expect(db.retrievalJobs).toBeDefined()
+    expect(db.retrievalTraces).toBeDefined()
+    expect(db.retrievalEncryptedContent).toBeDefined()
+    expect(db.retrievalTombstones).toBeDefined()
+    expect(db.retrievalMigrationJournal).toBeDefined()
+    expect(db.retrievalRuntimeState).toBeDefined()
     expect(db.petSpritePacks).toBeDefined()
     expect(db.connectorConversationStates).toBeDefined()
     expect(db.connectorInboundJobs).toBeDefined()
@@ -409,6 +420,72 @@ describe("getDb", () => {
     await db.open()
     expect(db.verno).toBeGreaterThanOrEqual(122)
     expect(db.memories.schema.indexes.map((index) => index.name)).toContain("sourceMessageId")
+  })
+
+  it("v163 opens the shared retrieval control-plane tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(163)
+    expect(db.tables.map((table) => table.name)).toEqual(
+      expect.arrayContaining([
+        "retrievalProfiles",
+        "retrievalGenerations",
+        "retrievalActivePointers",
+        "retrievalJobs",
+        "retrievalTraces",
+        "retrievalEncryptedContent",
+        "retrievalTombstones",
+        "retrievalMigrationJournal",
+      ])
+    )
+  })
+
+  it("v164 preserves unknown memory governance and expands legacy job outcomes", () => {
+    const memory = backfillMemoryGovernanceV164({
+      type: "procedural",
+      evidenceState: "legacy",
+      sensitivity: "normal",
+      reviewStatus: "unreviewed",
+    } as never)
+    expect(memory).toMatchObject({
+      confidence: null,
+      expiresAt: null,
+      staleness: "unknown",
+      sensitivity: "unknown",
+      reviewStatus: "pending_instruction",
+    })
+    expect(
+      backfillMemoryJobV164({
+        status: "completed",
+        retryCount: 0,
+        startedAt: 10,
+      } as never)
+    ).toMatchObject({
+      status: "succeeded",
+      attempt: 1,
+      maxAttempts: 4,
+      resultCode: "legacy_completed",
+    })
+  })
+
+  it("v165 indexes all derived RAG chunks by immutable generation", async () => {
+    const db = getDb()
+    await db.open()
+    for (const table of [db.projectChunks, db.knowledgeBaseChunks, db.twinChunks]) {
+      expect(table.schema.indexes.map((index) => index.name)).toContain("generationId")
+    }
+  })
+
+  it("v166 opens the durable retrieval rollout kill switch", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.retrievalRuntimeState.schema.primKey.name).toBe("id")
+  })
+
+  it("v167 indexes memory updatedAt for bounded companion sync", async () => {
+    const db = getDb()
+    const indexNames = db.memories.schema.indexes.map((index) => index.name)
+    expect(indexNames).toContain("updatedAt")
   })
 
   it("v123 opens the certification projection table", async () => {

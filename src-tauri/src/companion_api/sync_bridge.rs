@@ -10,7 +10,7 @@
 //! # Wire protocol
 //!
 //! 1. Rust: emit Tauri event `companion://sync-pull-request` with payload
-//!    `{ request_id, table, since, account_id }`.
+//!    `{ request_id, table, since, account_id, content_protocol_version }`.
 //! 2. TS (`lib/sync/desktop-sync-source.ts`): listen for the event,
 //!    query Dexie, call Tauri command `companion_sync_pull_response` with
 //!    `{ request_id, delta }`.
@@ -42,6 +42,8 @@ pub struct SyncPullRequest {
     pub table: String,
     pub since: i64,
     pub account_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_protocol_version: Option<u64>,
 }
 
 /// Payload received back from the WebView.
@@ -82,6 +84,7 @@ impl SyncBridge {
         table: String,
         since: i64,
         account_id: String,
+        content_protocol_version: Option<u64>,
         timeout: Duration,
     ) -> Result<Value, String> {
         let mut request_guard = transport.reserve_request()?;
@@ -98,6 +101,7 @@ impl SyncBridge {
             table,
             since,
             account_id,
+            content_protocol_version,
         };
 
         // Preserve the wire shape: SyncPullRequest serializes snake_case
@@ -221,6 +225,7 @@ mod tests {
                 "sessions".into(),
                 7,
                 "local_acct_a".into(),
+                Some(1),
                 DEFAULT_TIMEOUT,
             )
             .await
@@ -238,6 +243,7 @@ mod tests {
         assert_eq!(payload["since"], 7);
         // Snake_case on the wire — distinct from the camelCase messages/writes payloads.
         assert_eq!(payload["account_id"], "local_acct_a");
+        assert_eq!(payload["content_protocol_version"], 1);
         let request_id = payload["request_id"].as_str().unwrap().to_string();
 
         bridge.resolve(SyncPullResponse {
@@ -258,6 +264,7 @@ mod tests {
                 "sessions".into(),
                 0,
                 "a".into(),
+                None,
                 DEFAULT_TIMEOUT,
             )
             .await
@@ -279,6 +286,7 @@ mod tests {
                     "sessions".into(),
                     0,
                     "a".into(),
+                    None,
                     DEFAULT_TIMEOUT,
                 )
                 .await

@@ -31,9 +31,11 @@ export type MemoryType = "semantic" | "episodic" | "procedural"
 export type MemoryScope = "global" | "workspace" | "character" | "agent"
 
 export type MemoryEvidenceState = "legacy" | "supported"
-export type MemoryReviewStatus = "unreviewed" | "verified" | "conflict"
+export type MemoryReviewStatus = "unreviewed" | "verified" | "conflict" | "pending_instruction"
 export type MemoryContaminationState = "clean" | "external-context" | "unknown"
-export type MemorySensitivity = "normal" | "sensitive"
+export type MemorySensitivity = "unknown" | "normal" | "sensitive"
+export type MemoryStaleness = "unknown" | "fresh" | "stale" | "expired"
+export type MemoryTrustState = "trusted" | "untrusted" | "quarantined"
 
 /**
  * `active` rows are retrievable; `invalidated` rows are soft-deleted (kept for
@@ -131,6 +133,26 @@ export interface Memory {
   /** Whether the learning turn included external, untrusted context. */
   contaminationState?: MemoryContaminationState
   sensitivity?: MemorySensitivity
+  /** Extractor confidence in [0,1]; null means legacy/unknown, never fabricated. */
+  confidence?: number | null
+  /** Explicit expiry; null means unknown/no policy-derived expiry. */
+  expiresAt?: number | null
+  staleness?: MemoryStaleness
+  trustState?: MemoryTrustState
+  sourceRevision?: string
+  evidenceHash?: string
+  extractor?: {
+    provider: string
+    model: string
+    promptVersion: string
+  }
+  retrievalFeedback?: {
+    positive: number
+    negative: number
+    lastFeedbackAt?: number
+  }
+  /** Why an automatic candidate was narrowed below workspace scope. */
+  scopeRationale?: string
 }
 
 export interface MemoryReaderContext {

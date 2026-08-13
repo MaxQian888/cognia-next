@@ -22,7 +22,7 @@ jest.mock("@/lib/db/messages", () => ({ listMessages: () => mockListMessages() }
 jest.mock("@/lib/db/memory-governance", () => ({
   appendMemoryAuditEvent: (...args: unknown[]) => mockAppendAudit(...args),
   claimNextMemoryJob: jest.fn(),
-  completeMemoryJob: jest.fn(),
+  finishMemoryJob: jest.fn(),
   createMemoryEvidence: (...args: unknown[]) => mockCreateEvidence(...args),
   failMemoryJob: jest.fn(),
 }))
@@ -67,11 +67,14 @@ function job(id: string): MemoryJob {
 
 function deps(
   queue: MemoryJob[],
-  process: MemoryJobWorkerDeps["process"] = jest.fn(async () => undefined)
+  process: MemoryJobWorkerDeps["process"] = jest.fn(async () => ({
+    status: "succeeded" as const,
+    resultCode: "done",
+  }))
 ): MemoryJobWorkerDeps {
   return {
     claimNext: jest.fn(async () => queue.shift()),
-    complete: jest.fn(async () => undefined),
+    finish: jest.fn(async () => undefined),
     fail: jest.fn(async () => "queued"),
     process,
   }
@@ -107,19 +110,19 @@ describe("memory job worker", () => {
     const d = deps([job("a"), job("b")])
     await expect(drainMemoryJobs({ workerId: "test" }, d)).resolves.toBe(2)
     expect(d.process).toHaveBeenCalledTimes(2)
-    expect(d.complete).toHaveBeenCalledWith("a")
-    expect(d.complete).toHaveBeenCalledWith("b")
+    expect(d.finish).toHaveBeenCalledWith("a", { status: "succeeded", resultCode: "done" })
+    expect(d.finish).toHaveBeenCalledWith("b", { status: "succeeded", resultCode: "done" })
   })
 
   it("fails a job and continues draining later work", async () => {
     const process = jest
       .fn()
       .mockRejectedValueOnce(new Error("boom"))
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ status: "succeeded", resultCode: "done" })
     const d = deps([job("a"), job("b")], process)
     await drainMemoryJobs({}, d)
     expect(d.fail).toHaveBeenCalledWith("a", "memory_job_processing_failed")
-    expect(d.complete).toHaveBeenCalledWith("b")
+    expect(d.finish).toHaveBeenCalledWith("b", { status: "succeeded", resultCode: "done" })
   })
 
   it("starts immediately and returns a teardown for the periodic timer", async () => {
@@ -217,12 +220,15 @@ describe("memory job worker", () => {
     expect(del).toHaveBeenCalledWith(["orphan"])
   })
 
-  it("completes (not fails) a job that dies with a terminal error", async () => {
+  it("skips (not succeeds or fails) a job that dies with a terminal error", async () => {
     // A turn job without a sessionId is terminally unprocessable — the drain
     // loop completes it instead of retry-failing.
     const d = deps([job("terminal")], processMemoryJob)
     await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
-    expect(d.complete).toHaveBeenCalledWith("terminal")
+    expect(d.finish).toHaveBeenCalledWith("terminal", {
+      status: "skipped",
+      resultCode: "session_missing",
+    })
     expect(d.fail).not.toHaveBeenCalled()
   })
 

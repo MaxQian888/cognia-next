@@ -12,6 +12,7 @@ import {
 import { appendBackupHistory, type BackupHistoryType } from "@/lib/db/backup-history"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { getSyncPassphrase, persistSyncPassphrase, setSyncPassphrase } from "./passphrase-cache"
+import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
 
 /** Coarse progress phases — the transport isn't byte-streaming, so the UI
  * shows a phase label rather than a percentage. */
@@ -37,7 +38,8 @@ export async function runWebDavSyncNow(
   if (!pass) return { ok: false, error: "A sync passphrase is required." }
 
   onProgress("building")
-  const pkg = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
+  const basePackage = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
+  const pkg = await attachPortableRetrievalKeys(basePackage, pass)
   const plaintext = serializePackage(pkg)
   onProgress("encrypting")
   const body = await encryptSnapshotBody(plaintext, pkg, pass)

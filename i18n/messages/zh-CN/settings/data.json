@@ -50,6 +50,9 @@
     "passphraseConfirm": "确认密码短语",
     "passphraseMismatch": "两次输入的密码短语不一致。",
     "passphraseRequired": "此模式必须提供密码短语。",
+    "plaintextConfirmAction": "导出明文备份",
+    "plaintextConfirmBody": "此备份将包含未加密数据。导出前请验证你的身份。",
+    "plaintextConfirmTitle": "要导出明文备份吗？",
     "previewBackend": "来自 {backend}（应用 {appVersion}）— 导出于 {exportedAt}",
     "quickSessionBody": "把一个或多个会话打包为 ZIP（Markdown / JSON / HTML / 纯文本）。",
     "quickSessionButton": "批量导出…",
@@ -463,6 +466,7 @@
   "summaryLsSkipped": "已跳过 ({count})",
   "summaryLsWritten": "已写入 ({count})",
   "summaryOverwritten": "覆盖",
+  "summaryRetrievalKeys": "已恢复 {count} 个检索配置的密钥",
   "summarySkipped": "跳过",
   "summarySyncResults": "Agent 重投影",
   "syncResults": {

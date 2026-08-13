@@ -34,6 +34,11 @@ import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/templat
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { ProfilesExport } from "@cognia/provider-types/profile-migration"
 import type { ContextCommentRow } from "@/types/context-comment"
+import type { PortableProfileDekEnvelopeV1 } from "@/lib/rag/profile-dek-store"
+import type {
+  RetrievalEncryptedContentRow,
+  RetrievalProfileRow,
+} from "@/lib/db/retrieval-control-types"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
 export const EXPORT_SCHEMA_VERSION = 3 as const
@@ -164,6 +169,13 @@ export interface BackupPayloadV3 {
   memoryEvidence?: MemoryEvidence[]
   memoryJobs?: MemoryJob[]
   memoryAuditEvents?: MemoryAuditEvent[]
+  /** Secret-free retrieval configuration and ciphertext content. Lexical
+   * segments remain derived and are rebuilt after restore. */
+  retrievalProfiles?: RetrievalProfileRow[]
+  retrievalEncryptedContent?: RetrievalEncryptedContentRow[]
+  /** Present only inside an encrypted backup. Each DEK is independently
+   * wrapped by the same backup passphrase/auto-key as the outer package. */
+  retrievalProfileDeks?: PortableProfileDekEnvelopeV1[]
 }
 
 /** The on-disk plaintext shape. JSON-serialized verbatim. */
@@ -207,6 +219,9 @@ export interface ImportOptions {
   includeSessions: boolean
   /** Carry the API key field over too. Off by default. */
   includeApiKey: boolean
+  /** Required when the package contains portable retrieval DEKs. The value is
+   * held only for the duration of import and is never persisted in Dexie. */
+  retrievalDekPassphrase?: string
 }
 
 /**
@@ -232,6 +247,8 @@ export interface ImportSummary {
    * skipped (e.g. read-only adapter, agent not installed).
    */
   syncResults?: SyncProjectionReport[]
+  /** Profile ids whose wrapped DEKs were restored before ciphertext rows. */
+  restoredRetrievalKeyProfiles?: string[]
 }
 
 export interface LocalStorageImportReport {

@@ -229,6 +229,15 @@ export const CORE_TABLE_NAMES = [
   "radarReports",
   "remoteControlAudit",
   "remoteControlRunStatus",
+  "retrievalActivePointers",
+  "retrievalEncryptedContent",
+  "retrievalGenerations",
+  "retrievalJobs",
+  "retrievalMigrationJournal",
+  "retrievalProfiles",
+  "retrievalRuntimeState",
+  "retrievalTombstones",
+  "retrievalTraces",
   "runLearningProposals",
   "runRecords",
   "runRetrospectives",
@@ -335,6 +344,8 @@ export const PORTABLE_BACKUP_BINDINGS = {
   memoryEvidence: "memoryEvidence",
   memoryJobs: "memoryJobs",
   memoryAuditEvents: "memoryAuditEvents",
+  retrievalProfiles: "retrievalProfiles",
+  retrievalEncryptedContent: "retrievalEncryptedContent",
   plugins: "plugins",
   pluginPermissions: "pluginPermissions",
   pluginReviews: "pluginReviews",
@@ -426,6 +437,8 @@ const CACHE_TABLES = new Set<CoreTableName>([
   "providerCatalogState",
   "providerConnectionInventory",
   "remoteControlRunStatus",
+  "retrievalActivePointers",
+  "retrievalGenerations",
   "syncTombstones",
   "twinChunks",
   "vscodeExtensionRuntime",
@@ -444,6 +457,8 @@ const PROJECTION_TABLES = new Set<CoreTableName>([
   "profileStoreMeta",
   "providerCostDaily",
   "remoteControlRunStatus",
+  "retrievalActivePointers",
+  "retrievalGenerations",
 ])
 
 // Cleanup is deliberately more conservative than role inference. A table may
@@ -550,6 +565,7 @@ const VERY_LARGE_TABLES = new Set<CoreTableName>([
   "messages",
   "matrixPendingEncryptedEvents",
   "projectChunks",
+  "retrievalEncryptedContent",
   "twinChunks",
   "workflowRunEvents",
 ])
@@ -600,7 +616,7 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
 
 function ownerFor(name: CoreTableName): string {
   const prefix = name.match(
-    /^(agentTeam|agent|workflow|provider|plugin|connector|integration|twin|wiki|eval|site|pet|browser|canvas|memory|session|chat|template|knowledgeBase)/
+    /^(agentTeam|agent|workflow|provider|plugin|connector|integration|twin|wiki|eval|site|pet|browser|canvas|memory|retrieval|session|chat|template|knowledgeBase)/
   )?.[1]
   return prefix ?? "core"
 }

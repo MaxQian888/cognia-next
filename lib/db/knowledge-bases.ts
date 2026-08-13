@@ -190,6 +190,16 @@ export async function listKnowledgeBaseChunks(
   return getDb().knowledgeBaseChunks.where("knowledgeBaseId").equals(knowledgeBaseId).toArray()
 }
 
+export async function listKnowledgeBaseVectorCollections(
+  knowledgeBaseId: string
+): Promise<string[]> {
+  const rows = await getDb()
+    .knowledgeBaseChunks.where("knowledgeBaseId")
+    .equals(knowledgeBaseId)
+    .toArray()
+  return [...new Set(rows.map((row) => row.vectorCollection).filter(Boolean))].sort()
+}
+
 export async function listKnowledgeBaseChunksBySource(
   sourceId: string
 ): Promise<KnowledgeBaseChunk[]> {

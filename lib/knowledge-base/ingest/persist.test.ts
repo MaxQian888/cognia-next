@@ -83,7 +83,7 @@ describe("persistKnowledgeBaseChunks", () => {
     expect(store.createCollection).toHaveBeenCalledWith(collection, { dimension: 2 })
     expect(store.addDocuments).toHaveBeenCalledWith(collection, [
       expect.objectContaining({
-        id: "kb-1__source-1__0",
+        id: expect.stringMatching(/^kb-1__source-1__kbgen_.+__0$/),
         content: chunk.contentRedacted,
         metadata: expect.objectContaining({
           knowledgeBaseId: "kb-1",
@@ -91,13 +91,14 @@ describe("persistKnowledgeBaseChunks", () => {
         }),
       }),
     ])
-    expect(result.vectorDocIds).toEqual(["kb-1__source-1__0"])
+    expect(result.vectorDocIds[0]).toMatch(/^kb-1__source-1__kbgen_.+__0$/)
     expect(await listKnowledgeBaseChunks("kb-1")).toEqual([
       expect.objectContaining({
         content: chunk.content,
         contentRedacted: chunk.contentRedacted,
         contentHash: "sha256:guide",
-        vectorDocId: "kb-1__source-1__0",
+        vectorDocId: result.vectorDocIds[0],
+        generationId: result.generationId,
       }),
     ])
   })
@@ -124,11 +125,11 @@ describe("persistKnowledgeBaseChunks", () => {
     })
 
     expect(store.deleteDocuments).toHaveBeenCalledWith(knowledgeBaseVectorCollectionName("kb-1"), [
-      "kb-1__source-1__0",
+      expect.stringMatching(/^kb-1__source-1__kbgen_.+__0$/),
     ])
     expect((await listKnowledgeBaseChunks("kb-1")).map((row) => row.vectorDocId)).toEqual([
-      "kb-1__source-1__0",
-      "kb-1__source-1__1",
+      expect.stringMatching(/^kb-1__source-1__kbgen_.+__0$/),
+      expect.stringMatching(/^kb-1__source-1__kbgen_.+__1$/),
     ])
   })
 
@@ -167,7 +168,9 @@ describe("persistKnowledgeBaseChunks", () => {
 
     const result = await persistKnowledgeBaseChunks({ ...base, chunks: [], embeddings: [] })
 
-    expect(result).toEqual({ rows: [], vectorDocIds: [] })
+    expect(result).toEqual(
+      expect.objectContaining({ rows: [], vectorDocIds: [], generationId: expect.any(String) })
+    )
     expect(await listKnowledgeBaseChunks("kb-1")).toEqual([])
   })
 
@@ -203,16 +206,46 @@ describe("persistKnowledgeBaseChunks", () => {
     jest.mocked(store.createCollection).mockRejectedValueOnce(new Error("already exists"))
     jest.mocked(store.deleteDocuments).mockRejectedValueOnce(new Error("cleanup unavailable"))
 
+    const result = await persistKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      sourceId: "source-1",
+      vectorBackend: "native",
+      store,
+      contentHash: "hash-2",
+      chunks: [{ ...chunk, content: "updated", contentRedacted: "updated" }],
+      embeddings: [[0.3, 0.4]],
+    })
+    expect(result.cleanupPending).toBe(true)
+    expect(result.vectorDocIds[0]).toMatch(/^kb-1__source-1__kbgen_.+__0$/)
+  })
+
+  it("keeps the active chunks when a replacement vector write fails", async () => {
+    await seedSource()
+    const store = createStore()
+    const base = {
+      knowledgeBaseId: "kb-1",
+      sourceId: "source-1",
+      vectorBackend: "native" as const,
+      store,
+      contentHash: "sha256:guide",
+    }
+    const first = await persistKnowledgeBaseChunks({
+      ...base,
+      chunks: [chunk],
+      embeddings: [[0.1, 0.2]],
+    })
+    store.addDocuments.mockRejectedValueOnce(new Error("remote down"))
+
     await expect(
       persistKnowledgeBaseChunks({
-        knowledgeBaseId: "kb-1",
-        sourceId: "source-1",
-        vectorBackend: "native",
-        store,
-        contentHash: "hash-2",
+        ...base,
+        contentHash: "sha256:updated",
         chunks: [{ ...chunk, content: "updated", contentRedacted: "updated" }],
         embeddings: [[0.3, 0.4]],
       })
-    ).resolves.toEqual(expect.objectContaining({ vectorDocIds: ["kb-1__source-1__0"] }))
+    ).rejects.toThrow("remote down")
+    expect(await listKnowledgeBaseChunks("kb-1")).toEqual([
+      expect.objectContaining({ generationId: first.generationId, content: chunk.content }),
+    ])
   })
 })

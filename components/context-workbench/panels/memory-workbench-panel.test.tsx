@@ -1,6 +1,10 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 import { MemoryWorkbenchPanel } from "./memory-workbench-panel"
 
+jest.mock("@/components/rag/retrieval-control-panel", () => ({
+  RetrievalControlPanel: () => <div data-testid="retrieval-control-panel" />,
+}))
+
 // Mock next-intl
 jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => {

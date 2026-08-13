@@ -17,6 +17,7 @@ import {
   type BackupStreamManifestV4,
 } from "./stream-format"
 import type { ExportOptions } from "./types"
+import { exportPortableRetrievalKeys, type PortableExportStore } from "./retrieval-key-backup"
 
 type RowFilter<T> = (row: T) => boolean | Promise<boolean>
 const APP_VERSION = "0.1.0"
@@ -35,6 +36,7 @@ export interface BuildBackupStreamExtras {
   encryption?: { passphrase: string }
   storage?: SnapshotStorage | null
   warn?: SnapshotEnv["warn"]
+  profileDekStore?: PortableExportStore
 }
 
 /**
@@ -141,6 +143,29 @@ export async function* buildBackupSections(
     yield* tableSections("memoryEvidence", db.memoryEvidence, iterate)
     yield* tableSections("memoryJobs", db.memoryJobs, iterate)
     yield* tableSections("memoryAuditEvents", db.memoryAuditEvents, iterate)
+  }
+
+  if (includeCoreData || options.includeSessions) {
+    yield* tableSections("retrievalProfiles", db.retrievalProfiles, iterate)
+    yield* tableSections(
+      "retrievalEncryptedContent",
+      db.retrievalEncryptedContent,
+      iterate,
+      (row) =>
+        row.kind !== "lexical_segment" &&
+        (row.entityType === "memory"
+          ? includeMemories
+          : row.entityType === "compaction_checkpoint"
+            ? options.includeSessions
+            : includeCoreData)
+    )
+    if (extras.encryption?.passphrase) {
+      const envelopes = await exportPortableRetrievalKeys(
+        extras.encryption.passphrase,
+        extras.profileDekStore
+      )
+      yield { section: "retrievalProfileDeks", rows: envelopes }
+    }
   }
 
   if (options.includeSessions) {

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
+import { RetrievalControlPanel } from "@/components/rag/retrieval-control-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -281,6 +282,7 @@ export function KnowledgeBaseManager({ knowledgeBases }: { knowledgeBases: Knowl
 
   return (
     <div className="space-y-3 border-t pt-3">
+      <RetrievalControlPanel corpusPrefixes={[`knowledge_base:${activeSelectedId}:`]} compact />
       <div className="space-y-1">
         <Label>{t("library")}</Label>
         <Select value={activeSelectedId} onValueChange={setSelectedId}>

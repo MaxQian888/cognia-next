@@ -6,6 +6,7 @@ import {
   makeUserMessage,
   mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
+  mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
   resetStreamingToolInputs,
 } from "./adapter"
@@ -1407,6 +1408,33 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
       selectedStyleSamples: [],
     })
     expect(next).toBe(userOnly)
+  })
+})
+
+describe("mergeProjectKnowledgeSourcesIntoLastAssistant", () => {
+  it("persists workspace knowledge as a distinct source domain", () => {
+    const messages = [
+      { id: "assistant", role: "assistant" as const, parts: [{ type: "text", text: "Answer" }] },
+    ]
+
+    const next = mergeProjectKnowledgeSourcesIntoLastAssistant(messages, {
+      retrievedChunks: [
+        { fileId: "file-1", fileName: "ARCHITECTURE.md", content: "Workspace fact", score: 0.8 },
+      ],
+    })
+
+    expect(next[0].parts).toContainEqual(
+      expect.objectContaining({
+        type: "sources",
+        sources: [
+          expect.objectContaining({
+            id: "project-knowledge-file-1",
+            origin: "project-knowledge",
+            title: "ARCHITECTURE.md",
+          }),
+        ],
+      })
+    )
   })
 })
 

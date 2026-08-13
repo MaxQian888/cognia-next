@@ -1,0 +1,52 @@
+{
+  "actions": {
+    "cancel": "取消",
+    "retry": "重试"
+  },
+  "confirmKillSwitch": {
+    "cancel": "保持检索启用",
+    "confirm": "停止新的检索工作",
+    "description": "这会停止新的检索内核、摄取和晋升。解密、导出、删除、对账和安全词法读取仍可使用。",
+    "title": "启用检索总开关？"
+  },
+  "empty": "当前范围没有已记录的检索代或任务。",
+  "error": "检索控制操作失败。",
+  "generation": {
+    "active": "活动",
+    "failed": "失败",
+    "retiring": "退役中",
+    "staging": "暂存中",
+    "validating": "校验中"
+  },
+  "jobs": {
+    "attempt": "第 {attempt}/{maxAttempts} 次尝试",
+    "cancelled": "已取消",
+    "failed": "失败",
+    "no_output": "无输出",
+    "queued": "排队中",
+    "retry_wait": "等待重试",
+    "running": "运行中",
+    "skipped": "已跳过",
+    "succeeded": "成功",
+    "title": "最近任务"
+  },
+  "killSwitch": {
+    "disable": "恢复新的检索工作",
+    "enable": "停止新的检索工作",
+    "engaged": "总开关已启用",
+    "normal": "检索已启用"
+  },
+  "metrics": {
+    "activeGenerations": "活动索引代",
+    "activeJobs": "活动任务",
+    "quarantined": "隔离或失败",
+    "traces": "无正文追踪"
+  },
+  "title": "检索控制面",
+  "vault": {
+    "locked": "Vault 已锁定",
+    "secure": "设备安全存储",
+    "unavailable": "Vault 不可用",
+    "unlocked": "Vault 已解锁"
+  }
+}

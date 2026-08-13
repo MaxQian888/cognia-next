@@ -52,7 +52,7 @@ export const MAX_INBOUND_TITLE_CHARS = 200
 export const MAX_INBOUND_SOURCE_CHARS = 200
 
 /** Where a submission came from. Recorded on the draft for the review UI. */
-export type InboundOrigin = "mcp" | "ide-scanner" | "crawler"
+export type InboundOrigin = "mcp" | "ide-scanner" | "crawler" | "agent-finding"
 
 export interface InboundSubmission {
   kind: InboundDraftKind

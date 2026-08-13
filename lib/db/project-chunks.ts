@@ -34,6 +34,7 @@ function toRow(draft: ProjectChunkDraft, fallbackCreatedAt: number): ProjectChun
     vectorBackend: draft.vectorBackend,
     vectorCollection: draft.vectorCollection,
     vectorDocId: draft.vectorDocId,
+    generationId: draft.generationId,
     strategy: draft.strategy,
     tokenCount: draft.tokenCount,
     metadata: draft.metadata,

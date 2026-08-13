@@ -7,6 +7,7 @@ jest.mock("@cognia/vector/dimension-guard", () => ({
 }))
 jest.mock("@/lib/db/knowledge-bases", () => ({
   getKnowledgeBaseChunksByVectorDocIds: jest.fn(),
+  listKnowledgeBaseVectorCollections: jest.fn(async () => []),
 }))
 
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
@@ -118,7 +119,7 @@ describe("retrieveKnowledgeBaseChunks", () => {
     })
   })
 
-  it("uses original text for a fully local embedding backend", async () => {
+  it("uses provider locality rather than vector locality for the PII boundary", async () => {
     const deps = makeDeps([])
     loadMock.mockResolvedValue([])
 
@@ -129,7 +130,7 @@ describe("retrieveKnowledgeBaseChunks", () => {
       deps,
     })
 
-    expect(embedMock).toHaveBeenCalledWith("Email alice@example.com", deps.embedding)
+    expect(embedMock).toHaveBeenCalledWith("Email <EMAIL_001>", deps.embedding)
   })
 
   it("reports dimension incompatibility without throwing", async () => {

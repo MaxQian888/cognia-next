@@ -1,5 +1,10 @@
 import type { Memory } from "../types/memory"
-import { retrieveMemories, __resetMemoryBm25Cache, type MemoryRetrieverDeps } from "./retriever"
+import {
+  retrieveMemories,
+  __resetMemoryBm25Cache,
+  isMemoryEligibleForRetrieval,
+  type MemoryRetrieverDeps,
+} from "./retriever"
 
 // The BM25 index is cached by corpus signature at module scope; reset between
 // cases so a shared cache key (e.g. `global::`) can't return another test's
@@ -37,6 +42,29 @@ const base = {
 }
 
 describe("retrieveMemories", () => {
+  it("hard-excludes expired, conflicted, quarantined, and pending procedural rows", () => {
+    const now = 1_700_000_000_000
+    expect(isMemoryEligibleForRetrieval(mem("ok"), now)).toBe(true)
+    expect(isMemoryEligibleForRetrieval(mem("expired", { expiresAt: now }), now)).toBe(false)
+    expect(isMemoryEligibleForRetrieval(mem("conflict", { reviewStatus: "conflict" }), now)).toBe(
+      false
+    )
+    expect(
+      isMemoryEligibleForRetrieval(mem("quarantine", { trustState: "quarantined" }), now)
+    ).toBe(false)
+    expect(
+      isMemoryEligibleForRetrieval(
+        mem("instruction", { type: "procedural", reviewStatus: "pending_instruction" }),
+        now
+      )
+    ).toBe(false)
+    expect(
+      isMemoryEligibleForRetrieval(
+        mem("instruction", { type: "procedural", reviewStatus: "verified" }),
+        now
+      )
+    ).toBe(true)
+  })
   it("returns [] for blank query", async () => {
     const deps: MemoryRetrieverDeps = { loadCandidates: async () => [mem("pnpm")] }
     expect(await retrieveMemories({ queryText: "   ", ...base }, deps)).toEqual([])

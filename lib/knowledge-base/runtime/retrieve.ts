@@ -1,12 +1,14 @@
-import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import {
   EmbeddingDimensionMismatchError,
   ensureCollectionDimensionCompatible,
 } from "@cognia/vector/dimension-guard"
-import { redactText } from "@cognia/redact"
 import type { IVectorStore } from "@cognia/vector/store"
-import { getKnowledgeBaseChunksByVectorDocIds } from "@/lib/db/knowledge-bases"
+import {
+  getKnowledgeBaseChunksByVectorDocIds,
+  listKnowledgeBaseVectorCollections,
+} from "@/lib/db/knowledge-bases"
 import type { VectorBackend } from "@/types/twin"
 import type { AgentKnowledgeLibraryResult } from "./apply-agent-knowledge-context"
 
@@ -53,30 +55,59 @@ export async function retrieveKnowledgeBaseChunks(
     const queryEmbedding =
       input.precomputedQueryEmbedding ??
       (
-        await generateEmbedding(
-          input.deps.vectorBackend === "native" ? query : redactText(query).redacted,
-          input.deps.embedding
-        )
+        await generateSafeEmbedding(query, {
+          profileId: `kb:${input.knowledgeBaseId}`,
+          purpose: "query",
+          embedding: input.deps.embedding,
+          vectorBackend: input.deps.vectorBackend,
+        })
       ).embedding
-    const collection = knowledgeBaseVectorCollectionName(input.knowledgeBaseId)
-    await ensureCollectionDimensionCompatible(input.deps.store, collection, queryEmbedding.length, {
-      provider: input.deps.embedding.provider,
-      model: input.deps.embedding.model,
-    })
-    const hits = await search(collection, queryEmbedding, { limit: Math.floor(input.topK) })
+    const storedCollections = await listKnowledgeBaseVectorCollections(input.knowledgeBaseId)
+    const collections =
+      storedCollections.length > 0
+        ? storedCollections
+        : [knowledgeBaseVectorCollectionName(input.knowledgeBaseId)]
+    const hits: Array<{ id: string; content: string; score: number }> = []
+    let incompatibleCollections = 0
+    for (const collection of collections) {
+      try {
+        await ensureCollectionDimensionCompatible(
+          input.deps.store,
+          collection,
+          queryEmbedding.length,
+          {
+            provider: input.deps.embedding.provider,
+            model: input.deps.embedding.model,
+          }
+        )
+      } catch (error) {
+        if (error instanceof EmbeddingDimensionMismatchError) {
+          incompatibleCollections += 1
+          continue
+        }
+        throw error
+      }
+      hits.push(...(await search(collection, queryEmbedding, { limit: Math.floor(input.topK) })))
+    }
+    if (incompatibleCollections === collections.length) {
+      return { chunks: [], degraded: true, degradedReason: "dimension-mismatch" }
+    }
+    hits.sort((left, right) => right.score - left.score)
+    const limitedHits = hits.slice(0, Math.floor(input.topK))
     const rows = await getKnowledgeBaseChunksByVectorDocIds(
       input.knowledgeBaseId,
-      hits.map((hit) => hit.id)
+      limitedHits.map((hit) => hit.id)
     )
     const rowByVectorId = new Map(rows.map((row) => [row.vectorDocId, row]))
     return {
-      chunks: hits
+      chunks: limitedHits
         .map((hit) => {
           const chunk = rowByVectorId.get(hit.id)
           return chunk ? { chunk, score: hit.score } : null
         })
         .filter((value): value is AgentKnowledgeLibraryResult["chunks"][number] => value !== null),
-      degraded: false,
+      degraded: incompatibleCollections > 0,
+      ...(incompatibleCollections > 0 ? { degradedReason: "incompatible-generation" } : {}),
     }
   } catch (error) {
     return {

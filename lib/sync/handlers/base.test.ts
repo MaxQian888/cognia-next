@@ -181,6 +181,23 @@ describe("runSyncHandler", () => {
     expect(transport.call).toHaveBeenCalledWith("sync_pull", {
       table: "characters",
       since: 25,
+      content_protocol_version: 1,
+    })
+  })
+
+  it("surfaces protocol rejection as upgrade_required", async () => {
+    const fake = makeFakeTable()
+    const transport = makeTransport(new Error("upgrade_required: content protocol v1 is required"))
+
+    const out = await runSyncHandler<FakeRow>(
+      { table: "memories", getTable: () => fake.table },
+      transport,
+      { since: 0 }
+    )
+
+    expect(out).toMatchObject({
+      ok: false,
+      failure: { table: "memories", reason: "upgrade_required" },
     })
   })
 
@@ -217,8 +234,16 @@ describe("runSyncHandler", () => {
       { since: 0 }
     )
     expect(call).toHaveBeenCalledTimes(3)
-    expect((call.mock.calls[1] as unknown[])[1]).toEqual({ table: "messages", since: 1 })
-    expect((call.mock.calls[2] as unknown[])[1]).toEqual({ table: "messages", since: 2 })
+    expect((call.mock.calls[1] as unknown[])[1]).toEqual({
+      table: "messages",
+      since: 1,
+      content_protocol_version: 1,
+    })
+    expect((call.mock.calls[2] as unknown[])[1]).toEqual({
+      table: "messages",
+      since: 2,
+      content_protocol_version: 1,
+    })
     expect(out.ok && out.result.applied).toBe(2)
     expect(out.ok && out.result.nextSince).toBe(2)
   })

@@ -6,7 +6,7 @@ import { listMessages } from "@/lib/db/messages"
 import {
   appendMemoryAuditEvent,
   claimNextMemoryJob,
-  completeMemoryJob,
+  finishMemoryJob,
   createMemoryEvidence,
   failMemoryJob,
 } from "@/lib/db/memory-governance"
@@ -15,18 +15,21 @@ import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import type { MemoryJob } from "@/types/memory/governance"
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
-import {
-  hasUntrustedMemoryContext,
-} from "@/lib/memory/control-plane/policy"
+import { hasUntrustedMemoryContext } from "@/lib/memory/control-plane/policy"
 import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
 import type { ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
 import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface MemoryJobWorkerDeps {
   claimNext: (workerId: string) => Promise<MemoryJob | undefined>
-  complete: (id: string) => Promise<void>
+  finish: (id: string, outcome: MemoryJobProcessOutcome) => Promise<void>
   fail: (id: string, code: string) => Promise<unknown>
-  process: (job: MemoryJob) => Promise<void>
+  process: (job: MemoryJob) => Promise<MemoryJobProcessOutcome>
+}
+
+export interface MemoryJobProcessOutcome {
+  status: "succeeded" | "no_output" | "skipped"
+  resultCode: string
 }
 
 export interface DrainMemoryJobsOptions {
@@ -45,11 +48,11 @@ export async function drainMemoryJobs(
     const job = await deps.claimNext(workerId)
     if (!job) break
     try {
-      await deps.process(job)
-      await deps.complete(job.id)
+      const outcome = await deps.process(job)
+      await deps.finish(job.id, outcome)
     } catch (error) {
       if (error instanceof MemoryJobTerminalError) {
-        await deps.complete(job.id)
+        await deps.finish(job.id, { status: "skipped", resultCode: error.code })
         processed += 1
         continue
       }
@@ -90,7 +93,11 @@ class MemoryJobProcessingError extends Error {
   }
 }
 
-class MemoryJobTerminalError extends Error {}
+class MemoryJobTerminalError extends Error {
+  constructor(readonly code: string) {
+    super(code)
+  }
+}
 
 function effectiveConfig(settings: AppSettings): MemoryConfig {
   return resolveMemoryConfig(settings.memory)
@@ -200,9 +207,16 @@ async function recordRecoveredOperations(
           ? operation.targetId
           : undefined
     if (!memoryId) continue
+    const addedType =
+      operation.op === "ADD" || operation.op === "CONFLICT" ? operation.memory.type : undefined
     await updateMemory(memoryId, {
       evidenceState: "supported",
-      reviewStatus: operation.op === "CONFLICT" ? "conflict" : "unreviewed",
+      reviewStatus:
+        operation.op === "CONFLICT"
+          ? "conflict"
+          : addedType === "procedural"
+            ? "pending_instruction"
+            : "unreviewed",
       contaminationState,
       sensitivity: "normal",
     })
@@ -213,6 +227,7 @@ async function recordRecoveredOperations(
       sessionId: job.sessionId,
       contaminationState,
       reviewed: false,
+      sourceRole: "user",
     })
     await appendMemoryAuditEvent({
       action:
@@ -224,7 +239,7 @@ async function recordRecoveredOperations(
   }
 }
 
-async function processTurnExtraction(job: MemoryJob): Promise<void> {
+async function processTurnExtraction(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
   const context = await loadJobContext(job)
   const pair = lastCompletedPair(context.transcript)
   if (!pair) throw new MemoryJobProcessingError("turn_pair_unavailable")
@@ -250,9 +265,12 @@ async function processTurnExtraction(job: MemoryJob): Promise<void> {
     deps
   )
   await recordRecoveredOperations(job, result.applied, context.contaminationState)
+  return result.applied.some((operation) => operation.op !== "NOOP")
+    ? { status: "succeeded", resultCode: "memories_applied" }
+    : { status: "no_output", resultCode: "nothing_durable" }
 }
 
-async function processSessionDistill(job: MemoryJob): Promise<void> {
+async function processSessionDistill(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
   const context = await loadJobContext(job)
   const { buildEpisodicMaintenanceDeps } =
     await import("@/lib/memory/lifecycle/build-maintenance-deps")
@@ -276,9 +294,10 @@ async function processSessionDistill(job: MemoryJob): Promise<void> {
     },
     deps
   )
+  return { status: "succeeded", resultCode: "maintenance_completed" }
 }
 
-async function processVectorReconcile(): Promise<void> {
+async function processVectorReconcile(): Promise<MemoryJobProcessOutcome> {
   const settings = await getSettings()
   const config = resolveMemoryConfig(settings?.memory)
   const { tryBuildMemoryVectorSink } = await import("@/lib/memory/runtime/build-deps")
@@ -291,6 +310,7 @@ async function processVectorReconcile(): Promise<void> {
 
   const rows = await listMemories({ status: "active" })
   const activeDocIds = new Set<string>()
+  let changes = 0
   for (const row of rows) {
     // PII-bearing text must not live in the vector store; skipping the row
     // also lets the orphan sweep below remove any legacy embedding of it.
@@ -299,12 +319,14 @@ async function processVectorReconcile(): Promise<void> {
       // Never indexed (e.g. upsert failed at write time) — index it now.
       await sink.upsert(row.id, row.text)
       await updateMemory(row.id, { vectorDocId: row.id })
+      changes += 1
       activeDocIds.add(row.id)
     } else {
       activeDocIds.add(row.vectorDocId)
       // Indexed on our side but missing backend-side — re-upsert.
       if (backendIds && !backendIds.has(row.vectorDocId)) {
         await sink.upsert(row.vectorDocId, row.text)
+        changes += 1
       }
     }
   }
@@ -313,11 +335,17 @@ async function processVectorReconcile(): Promise<void> {
   // rows whose vector cleanup failed). Only possible with a listing API.
   if (backendIds) {
     const orphans = [...backendIds].filter((id) => !activeDocIds.has(id))
-    if (orphans.length > 0) await sink.delete(orphans)
+    if (orphans.length > 0) {
+      await sink.delete(orphans)
+      changes += orphans.length
+    }
   }
+  return changes > 0
+    ? { status: "succeeded", resultCode: "vectors_reconciled" }
+    : { status: "no_output", resultCode: "already_consistent" }
 }
 
-export async function processMemoryJob(job: MemoryJob): Promise<void> {
+export async function processMemoryJob(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
   if (job.kind === "turn-extraction") return processTurnExtraction(job)
   if (job.kind === "session-distill") return processSessionDistill(job)
   return processVectorReconcile()
@@ -325,7 +353,7 @@ export async function processMemoryJob(job: MemoryJob): Promise<void> {
 
 const defaultWorkerDeps: MemoryJobWorkerDeps = {
   claimNext: claimNextMemoryJob,
-  complete: completeMemoryJob,
+  finish: (id, outcome) => finishMemoryJob(id, outcome.status, outcome.resultCode),
   fail: failMemoryJob,
   process: processMemoryJob,
 }

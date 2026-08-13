@@ -148,8 +148,8 @@ describe("summarizeMemoryJobs", () => {
 
   it("keeps the newest completion timestamp per kind", () => {
     const summaries = summarizeMemoryJobs([
-      job({ kind: "session-distill", status: "completed", completedAt: NOW - 5000 }),
-      job({ kind: "session-distill", status: "completed", completedAt: NOW - 100 }),
+      job({ kind: "session-distill", status: "succeeded", completedAt: NOW - 5000 }),
+      job({ kind: "session-distill", status: "no_output", completedAt: NOW - 100 }),
     ])
     const distill = summaries.find((s) => s.kind === "session-distill")
     expect(distill?.lastCompletedAt).toBe(NOW - 100)

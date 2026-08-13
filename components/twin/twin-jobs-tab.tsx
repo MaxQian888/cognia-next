@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/status-badge"
+import { RetrievalControlPanel } from "@/components/rag/retrieval-control-panel"
 import {
   cancelJob,
   listTwinJobsByTwin,
@@ -47,6 +48,7 @@ export function TwinJobsTab({ twinId }: { twinId: string }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <RetrievalControlPanel corpusPrefixes={[`twin:${twinId}:`]} compact />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-medium">{t("headerCount", { count: jobs.length })}</h2>
         <div className="flex gap-2">

@@ -58,9 +58,9 @@ export async function buildBackupPackage(
 ): Promise<BackupPackageV3> {
   const db = getDb()
   const includeBuiltIns = opts.includeBuiltIns ?? false
-  const includeMemories = opts.includeMemories ?? true
   const includeSettings = opts.includeSettings ?? true
   const includeCoreData = opts.includeCoreData ?? true
+  const includeMemories = includeCoreData && (opts.includeMemories ?? true)
   const includePlugins = opts.includePlugins ?? true
   const includeLocalStorage = opts.includeLocalStorage ?? true
   const readTable = createPagedTableReader({ pageSize: 500, concurrency: 4 })
@@ -94,6 +94,8 @@ export async function buildBackupPackage(
     memoryEvidence,
     memoryJobs,
     memoryAuditEvents,
+    retrievalProfiles,
+    retrievalEncryptedContent,
     plugins,
     pluginPermissions,
     pluginReviews,
@@ -131,6 +133,10 @@ export async function buildBackupPackage(
     includeMemories ? readTable(db.memoryEvidence) : Promise.resolve([]),
     includeMemories ? readTable(db.memoryJobs) : Promise.resolve([]),
     includeMemories ? readTable(db.memoryAuditEvents) : Promise.resolve([]),
+    includeCoreData || opts.includeSessions ? readTable(db.retrievalProfiles) : Promise.resolve([]),
+    includeCoreData || opts.includeSessions
+      ? readTable(db.retrievalEncryptedContent)
+      : Promise.resolve([]),
     readTable(db.plugins),
     readTable(db.pluginPermissions),
     readTable(db.pluginReviews),
@@ -161,6 +167,15 @@ export async function buildBackupPackage(
     : plugins.filter((plugin) => plugin.source !== "builtin")
   const keptPluginIds = new Set(filteredPlugins.map((plugin) => plugin.id))
   const redactedMcp = mcpServers.map(redactMcpServerForExport)
+  const portableRetrievalContent = retrievalEncryptedContent.filter(
+    (row) =>
+      row.kind !== "lexical_segment" &&
+      (row.entityType === "memory"
+        ? includeMemories
+        : row.entityType === "compaction_checkpoint"
+          ? opts.includeSessions
+          : includeCoreData)
+  )
 
   const payload: BackupPayloadV3 = {
     settings,
@@ -192,6 +207,12 @@ export async function buildBackupPackage(
     twinDrafts,
     twinJobs,
     ...(includeMemories ? { memories, memoryEvidence, memoryJobs, memoryAuditEvents } : {}),
+    ...(includeCoreData || portableRetrievalContent.length > 0
+      ? {
+          retrievalProfiles,
+          retrievalEncryptedContent: portableRetrievalContent,
+        }
+      : {}),
     plugins: filteredPlugins,
     pluginPermissions: pluginPermissions.filter((row) => keptPluginIds.has(row.pluginId)),
     pluginReviews: pluginReviews.filter((row) => keptPluginIds.has(row.pluginId)),
@@ -239,6 +260,7 @@ export async function buildBackupPackage(
       "memoryEvidence",
       "memoryJobs",
       "memoryAuditEvents",
+      "retrievalProfileDeks",
       "templateDefinitions",
       "templatePackages",
       "templateInstances",

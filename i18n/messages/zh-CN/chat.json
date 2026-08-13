@@ -149,6 +149,10 @@
     "searchPlaceholder": "搜索角色…",
     "title": "选择一个角色"
   },
+  "grounding": {
+    "supported": "检索证据支持本次回答中的陈述。",
+    "unsupported": "{count, plural, other {# 条陈述缺少检索证据支持}}"
+  },
   "checkpoint": {
     "action": "恢复到此文件检查点",
     "affectedFiles": "受影响的文件",
@@ -167,6 +171,11 @@
     "title": "恢复文件检查点"
   },
   "compactBoundary": {
+    "checkpoint": {
+      "failed": "检查点保存失败",
+      "locked": "保险库已锁定",
+      "stored": "检查点已保存"
+    },
     "auto": "自动",
     "detail": "{from} → {to} tokens",
     "effectiveness": "已回收 {pct}%",
@@ -1591,10 +1600,12 @@
       "anthropic": "网络",
       "footnote": "脚注",
       "memory": "记忆",
+      "projectKnowledge": "项目",
       "twinRag": "数字分身",
       "twinStyle": "风格"
     },
     "recalledMemoriesHeader": "召回的记忆（{count}）",
+    "projectKnowledgeHeader": "项目知识片段（{count}）",
     "retrievedChunksHeader": "检索片段（{count}）",
     "styleSamplesHeader": "风格样本（{count}）",
     "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",

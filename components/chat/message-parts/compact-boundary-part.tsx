@@ -42,6 +42,8 @@ export interface CompactBoundaryPartData {
   opticalFrameCount?: number
   /** True when the optical strategy fell back to a text summary this boundary. */
   opticalFallback?: boolean
+  checkpointId?: string
+  checkpointState?: "stored" | "locked" | "failed"
 }
 
 /** True when a message is the synthetic compact-boundary marker. */
@@ -130,6 +132,11 @@ export function CompactBoundaryMarker({ message }: { message: UIMessage }) {
       {effectivenessLabel && (
         <span className="shrink-0 text-muted-foreground/70" data-testid="compact-effectiveness">
           · {effectivenessLabel}
+        </span>
+      )}
+      {part.checkpointState && (
+        <span className="shrink-0 text-muted-foreground/70" data-testid="compact-checkpoint-state">
+          · {t(`checkpoint.${part.checkpointState}`)}
         </span>
       )}
       {canUndo && (
