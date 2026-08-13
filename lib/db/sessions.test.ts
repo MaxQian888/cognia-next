@@ -24,6 +24,7 @@ import {
   bulkUnarchiveSessions,
   bulkSetSessionsPinned,
   setSessionOrder,
+  forkSessionFromParent,
 } from "./sessions"
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
@@ -163,6 +164,37 @@ describe("createSession — without default preset", () => {
 
     expect(session.executionContext).toEqual(executionContext)
     await expect(getSession(session.id)).resolves.toMatchObject({ executionContext })
+  })
+})
+
+describe("forkSessionFromParent", () => {
+  it("inherits the parent's message display override", async () => {
+    const parent = await createSession({
+      title: "Parent",
+      sdkSessionId: "sdk-parent",
+      messageDisplayOverride: { preset: "focused", overrides: { actions: "hover" } },
+    })
+
+    const child = await forkSessionFromParent(parent.id)
+
+    expect(child.messageDisplayOverride).toEqual({
+      preset: "focused",
+      overrides: { actions: "hover" },
+    })
+  })
+
+  it("round-trips and resets a session override to inheritance", async () => {
+    const session = await createSession({
+      title: "Presentation",
+      messageDisplayOverride: { preset: "inspector" },
+    })
+    await expect(getSession(session.id)).resolves.toMatchObject({
+      messageDisplayOverride: { preset: "inspector" },
+    })
+
+    await updateSession(session.id, { messageDisplayOverride: undefined })
+
+    expect((await getSession(session.id))?.messageDisplayOverride).toBeUndefined()
   })
 })
 
