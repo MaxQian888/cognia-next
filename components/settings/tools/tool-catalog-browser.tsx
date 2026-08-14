@@ -27,7 +27,7 @@ import {
   type ToolSource,
 } from "@/lib/tools/tool-catalog"
 
-const ALL_SOURCES: ToolSource[] = ["builtin", "mcp", "plugin", "native-anthropic"]
+const ALL_SOURCES: ToolSource[] = ["builtin", "sdk-native", "mcp", "plugin", "native-anthropic"]
 const ALL_RISKS: ToolRiskLevel[] = ["low", "medium", "high"]
 const FILTER_MODES: ToolFilterMode[] = ["all", "allow", "deny"]
 

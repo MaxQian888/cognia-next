@@ -123,6 +123,40 @@ export function toolInputJsonSchema(inputSchema) {
   }
 }
 
+/**
+ * Validate + normalise raw JSON-RPC arguments against a tool's zod shape.
+ *
+ * The bridge previously called `def.handler(args ?? {}, {})` on whatever the
+ * external agent sent, using the zod shape ONLY to advertise a JSON Schema. So
+ * on this rail every `.default()`, `.min()`, `.max()` and `.enum()` was inert:
+ * `content_search`'s `maxResults` cap vanished (`length >= undefined` is always
+ * false), `shell_execute_advanced` ran with no timeout, `start_process` got a
+ * `NaN` timeout, and `terminal_repl_read` returned an empty string. The
+ * Anthropic and ai-sdk rails both parse; this one now does too.
+ *
+ * Fails OPEN on an unrepresentable schema (same posture as
+ * `toolInputJsonSchema`) so a conversion quirk cannot brick a working tool.
+ *
+ * @returns {{ ok: true, value: unknown } | { ok: false, message: string }}
+ */
+export function parseToolArgs(inputSchema, args) {
+  const input = args ?? {}
+  if (!inputSchema || typeof inputSchema !== "object") return { ok: true, value: input }
+  let object
+  try {
+    object = typeof inputSchema.safeParse === "function" ? inputSchema : z.object(inputSchema)
+  } catch {
+    return { ok: true, value: input }
+  }
+  const parsed = object.safeParse(input)
+  if (parsed.success) return { ok: true, value: parsed.data }
+  const detail = parsed.error?.issues
+    ?.slice(0, 5)
+    .map((i) => `${i.path?.length ? i.path.join(".") : "(root)"}: ${i.message}`)
+    .join("; ")
+  return { ok: false, message: detail || "invalid arguments" }
+}
+
 /** Flatten an SDK tool result into the MCP content shape. */
 export function toMcpContent(result) {
   if (result && Array.isArray(result.content)) {
@@ -226,15 +260,27 @@ export function buildToolSurface(serverName, session, broker) {
       description: def.description ?? "",
       inputSchema: toolInputJsonSchema(def.inputSchema),
       async run(args) {
-        // Cognia decides. The bridge never infers permission from the agent's
-        // own approval — that governs the agent's tools, not Cognia's.
+        // Cognia decides FIRST. The bridge never infers permission from the
+        // agent's own approval — that governs the agent's tools, not Cognia's.
+        // Authorisation deliberately precedes validation: a refused caller must
+        // not be able to probe the schema, and the permission decision must not
+        // be preemptable by an argument error.
         const verdict = await broker.call("authorize", { name: def.name, args })
         if (!verdict.allow) {
           return { content: [{ type: "text", text: `Error: ${verdict.reason}` }], isError: true }
         }
+        // Only then validate + normalise, so the handler receives the same
+        // parsed shape it would get on the Anthropic and ai-sdk rails.
+        const parsed = parseToolArgs(def.inputSchema, args)
+        if (!parsed.ok) {
+          return {
+            content: [{ type: "text", text: `Error: invalid arguments — ${parsed.message}` }],
+            isError: true,
+          }
+        }
         let result
         try {
-          result = toMcpContent(await def.handler(args ?? {}, {}))
+          result = toMcpContent(await def.handler(parsed.value, {}))
         } catch (err) {
           result = {
             content: [{ type: "text", text: `Error: ${err?.message ?? String(err)}` }],

@@ -43,7 +43,15 @@ import {
   type ToolSource,
 } from "@/lib/tools/tool-catalog"
 
-const SOURCE_ORDER: readonly ToolSource[] = ["builtin", "native-anthropic", "mcp", "plugin"]
+// Any source missing here is silently dropped by the grouping below, so this
+// must list every `ToolSource` variant.
+const SOURCE_ORDER: readonly ToolSource[] = [
+  "builtin",
+  "sdk-native",
+  "native-anthropic",
+  "mcp",
+  "plugin",
+]
 
 export interface ToolCatalogDialogProps {
   open: boolean

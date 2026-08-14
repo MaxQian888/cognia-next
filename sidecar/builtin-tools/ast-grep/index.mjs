@@ -39,9 +39,9 @@ export const astGrepSearchShape = {
 
 /**
  * @param {z.infer<z.ZodObject<typeof astGrepSearchShape>>} args
- * @param {{ run?: typeof runSg }} [deps] Injected runner (tests); the SDK passes
- *        its tool context here at runtime, which has no `run` field, so we fall
- *        back to the real `runSg`.
+ * @param {{ run?: typeof runSg, cwd?: string }} [deps] Injected runner (tests)
+ *        plus the session cwd. The SDK passes its tool context here at runtime,
+ *        which has neither field, so both fall back safely.
  */
 export async function execAstGrepSearch(args, deps = {}) {
   const run = deps && typeof deps === "object" && typeof deps.run === "function" ? deps.run : runSg
@@ -52,6 +52,10 @@ export async function execAstGrepSearch(args, deps = {}) {
       paths: args.paths,
       globs: args.globs,
       context: args.context,
+      // Without this the child inherits the SIDECAR process cwd, so the
+      // documented `paths: ['.']` default resolved against wherever Tauri/the
+      // CLI was launched rather than the agent's workspace.
+      cwd: deps?.cwd,
     })
     let output = formatSearchResult(result)
     if (result.matches.length === 0 && !result.error) {
@@ -94,7 +98,8 @@ export const astGrepReplaceShape = {
 
 /**
  * @param {z.infer<z.ZodObject<typeof astGrepReplaceShape>>} args
- * @param {{ run?: typeof runSg }} [deps] Injected runner (tests); see search.
+ * @param {{ run?: typeof runSg, cwd?: string }} [deps] Injected runner (tests)
+ *        plus the session cwd; see search.
  */
 export async function execAstGrepReplace(args, deps = {}) {
   const run = deps && typeof deps === "object" && typeof deps.run === "function" ? deps.run : runSg
@@ -108,6 +113,9 @@ export async function execAstGrepReplace(args, deps = {}) {
       globs: args.globs,
       // Only write to disk when explicitly not a dry run.
       updateAll: !dryRun,
+      // Critical for the write path: without the session cwd a non-dry-run
+      // rewrite applied to an unrelated directory tree.
+      cwd: deps?.cwd,
     })
     const output = formatReplaceResult(result, dryRun)
     return result.error ? toolError(output) : toolText(output)
@@ -128,6 +136,25 @@ export const astGrepReplaceTool = tool(
 
 /** Fixed registration order — do not reorder (prompt-cache stability). New tools APPEND. */
 export const AST_GREP_TOOL_NAMES = Object.freeze(["ast_grep_search", "ast_grep_replace"])
+
+/**
+ * Session-bound ast-grep tools. The `ast-grep` child process must run in the
+ * SESSION cwd, not the sidecar's — mirrors the `createProcessTools` pattern in
+ * `../index.mjs`, which swaps a static category for a bound one at the same
+ * registration position.
+ *
+ * @param {{ cwd?: string }} [ctx]
+ */
+export function createAstGrepTools({ cwd } = {}) {
+  return [
+    tool("ast_grep_search", astGrepSearchTool.description, astGrepSearchShape, (args) =>
+      execAstGrepSearch(args, { cwd })
+    ),
+    tool("ast_grep_replace", astGrepReplaceTool.description, astGrepReplaceShape, (args) =>
+      execAstGrepReplace(args, { cwd })
+    ),
+  ]
+}
 
 /** All ast-grep tool definitions, in AST_GREP_TOOL_NAMES order. */
 export const astGrepTools = [astGrepSearchTool, astGrepReplaceTool]

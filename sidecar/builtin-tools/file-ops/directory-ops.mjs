@@ -4,6 +4,7 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
+import { assertNotSecretEscape } from "../confinement.mjs"
 import { toolError, toolText } from "../safety.mjs"
 import { statOrNull } from "../shared/fs-stat.mjs"
 
@@ -16,8 +17,16 @@ const directoryCreateShape = {
 
 async function execDirectoryCreate(args) {
   try {
+    assertNotSecretEscape(undefined, args.path)
+    // `mkdir -p` on an existing directory is a no-op — report what actually
+    // happened rather than an unconditional `created: true`.
+    const existing = await statOrNull(args.path)
     await fsp.mkdir(args.path, { recursive: args.recursive })
-    return toolText({ path: args.path, created: true })
+    return toolText({
+      path: args.path,
+      created: !existing,
+      alreadyExisted: Boolean(existing?.isDirectory()),
+    })
   } catch (err) {
     return toolError(err, "directory_create")
   }
@@ -42,6 +51,7 @@ const directoryDeleteShape = {
 
 async function execDirectoryDelete(args) {
   try {
+    assertNotSecretEscape(undefined, args.path)
     const st = await statOrNull(args.path)
     if (!st) return toolError(`directory not found: ${args.path}`)
     if (!st.isDirectory()) return toolError(`not a directory: ${args.path}`)

@@ -131,7 +131,13 @@ export function classifyPathForConfinement(cwd, roots, target, op) {
 // PascalCase spellings both resolve to the same class. Namespaced
 // `mcp__cognia-tools__<name>` forms are reduced to the bare name first.
 
+// Membership here is what makes a tool VISIBLE to confinement at all: an
+// unlisted name yields a `null` verdict, which every downstream `!== "ask"`
+// guard treats as permission. Any tool that writes, deletes, or executes must
+// therefore be listed, or it silently bypasses both the out-of-root "ask" and
+// the credential hard-deny (including under `acceptEdits`/`bypassPermissions`).
 const WRITE_TOOLS = new Set([
+  // core file suite (ai-sdk bare + SDK PascalCase spellings)
   "write",
   "edit",
   "multi_edit",
@@ -141,9 +147,90 @@ const WRITE_TOOLS = new Set([
   "MultiEdit",
   "NotebookEdit",
   "str_replace_based_edit_tool",
+  "apply_patch",
+  // fileExtras mutators
+  "file_append",
+  "file_binary_write",
+  "file_copy",
+  "file_rename",
+  "file_move",
+  "directory_create",
+  "directory_delete",
+  // git mutators
+  "git_stage",
+  "git_commit",
+  // process / shell / pty — they carry a `cwd` and run arbitrary programs
+  "start_process",
+  "shell_execute_advanced",
+  "terminal_repl_spawn",
+  // structural rewrite
+  "ast_grep_replace",
+  // network-sourced writers
+  "clone_dep_source",
+  "web_clone",
+  "web_clone_convert",
+  // recurring shell predicate with an arbitrary cwd
+  "Monitor",
 ])
-const READ_TOOLS = new Set(["read", "ls", "grep", "glob", "Read", "Grep", "Glob"])
+const READ_TOOLS = new Set([
+  "read",
+  "ls",
+  "grep",
+  "glob",
+  "Read",
+  "Grep",
+  "Glob",
+  // fileExtras readers — these reach the same bytes as `read`/`grep` and were
+  // previously unclassified, so the credential deny did not apply to them.
+  "file_hash",
+  "file_diff",
+  "file_info",
+  "file_exists",
+  "file_search",
+  "content_search",
+  "ast_grep_search",
+  "list_cloned_deps",
+  // git readers (cwd-scoped)
+  "git_status",
+  "git_diff",
+  "git_log",
+  "git_history",
+  "git_branch",
+  "git_remote",
+  "git_tag",
+  "git_repo_inspect",
+  "git_changes",
+])
 const BASH_TOOLS = new Set(["bash", "Bash"])
+
+/**
+ * Every input key that can carry a filesystem path across the built-in tools.
+ * `collectPathTargets` gathers ALL present keys — a tool carrying both
+ * `file_path` and `path`, or both `source` and `destination`, must have every
+ * one of them judged, not just the first that matches.
+ */
+const PATH_KEYS = [
+  "file_path",
+  "path",
+  "notebook_path",
+  "source",
+  "source_path",
+  "destination",
+  "destination_path",
+  "dest",
+  "oldPath",
+  "newPath",
+  "pathA",
+  "pathB",
+  "directory",
+  "dir",
+  "output",
+  "output_path",
+  "cwd",
+]
+
+/** Keys holding an array of paths (e.g. `ast_grep_replace.paths`). */
+const PATH_ARRAY_KEYS = ["paths"]
 
 /** Reduce a namespaced tool name (`mcp__server__name`) to its bare `name`. */
 export function bareToolName(toolName) {
@@ -155,13 +242,21 @@ export function bareToolName(toolName) {
 function collectPathTargets(bare, obj) {
   if (BASH_TOOLS.has(bare)) {
     // Default workdir is the cwd (inside the root) — only an explicit,
-    // out-of-tree workdir is a target worth checking.
+    // out-of-tree workdir is a target worth checking. The command string is
+    // deliberately NOT parsed; see the module header.
     const wd = typeof obj.workdir === "string" && obj.workdir.trim() ? obj.workdir : null
     return wd ? [wd] : []
   }
   const out = []
-  if (typeof obj.file_path === "string" && obj.file_path) out.push(obj.file_path)
-  else if (typeof obj.path === "string" && obj.path) out.push(obj.path)
+  for (const key of PATH_KEYS) {
+    const v = obj[key]
+    if (typeof v === "string" && v.trim()) out.push(v)
+  }
+  for (const key of PATH_ARRAY_KEYS) {
+    const arr = obj[key]
+    if (!Array.isArray(arr)) continue
+    for (const v of arr) if (typeof v === "string" && v.trim()) out.push(v)
+  }
   return out
 }
 

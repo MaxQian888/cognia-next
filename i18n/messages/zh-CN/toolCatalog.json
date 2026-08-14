@@ -20,6 +20,7 @@
   "source_mcp": "MCP",
   "source_native-anthropic": "原生",
   "source_plugin": "插件",
+  "source_sdk-native": "SDK 原生",
   "title": "工具搜索与筛选",
   "toggleTool": "在筛选中切换 {tool}"
 }

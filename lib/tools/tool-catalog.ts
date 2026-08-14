@@ -1,5 +1,5 @@
 // Unified tool catalog — a single searchable view over every tool/MCP source
-// the agent can be granted. Aggregates four sources:
+// the agent can be granted. Aggregates five sources:
 //
 //   1. builtin  — the in-process `cognia-tools` MCP server (category-toggled),
 //                 from `lib/settings/builtin-tools.ts`.
@@ -10,6 +10,10 @@
 //                 via the synthetic `cognia-plugin-tools` server).
 //   4. native-anthropic — plugin-contributed first-party Anthropic tools
 //                 (computer/bash/text_editor) from the overlay registry.
+//   5. sdk-native — tools the Claude Agent SDK provides itself (Read/Bash/
+//                 Task/EnterWorktree/…). Not registered at runtime, so they
+//                 must be enumerated; without them the filtering UI presented
+//                 an inventory that silently omitted the SDK's own tools.
 //
 // This is the data layer behind the tool-search / filtering UI and behind the
 // `resolveSendOptions` filtering step. It is i18n-agnostic: builtin entries
@@ -26,9 +30,10 @@ import {
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { SDK_CORE_TOOL_NAMES } from "@/lib/skills/recording/tool-catalog"
 import type { AnthropicNativeToolType } from "@/types/plugin/plugin-native-tool"
 
-export type ToolSource = "builtin" | "mcp" | "plugin" | "native-anthropic"
+export type ToolSource = "builtin" | "mcp" | "plugin" | "native-anthropic" | "sdk-native"
 
 export type ToolRiskLevel = "low" | "medium" | "high"
 
@@ -171,12 +176,38 @@ export function buildNativeCatalogEntries(
 }
 
 /**
+ * Pure: build catalog entries for the tools the Claude Agent SDK provides
+ * itself (`Read`, `Bash`, `Task`, `EnterWorktree`, `TaskStop`, …).
+ *
+ * These are NOT registered anywhere at runtime — the SDK owns them — so they
+ * were absent from a catalog the filtering UI presents as the complete tool
+ * inventory. In allow-mode, `resolveSendOptions` rebuilds `allowedTools` from
+ * that catalog, so a user scoping an agent could neither see nor grant the
+ * SDK's own tools. Sourced from `SDK_CORE_TOOL_NAMES`, whose docblock records
+ * why that list is a floor rather than a complete roster.
+ *
+ * Bare names (not `mcp__`-namespaced) because that is how the SDK exposes them
+ * and how `Character.allowedTools` must spell them.
+ */
+export function buildSdkNativeCatalogEntries(): ToolCatalogEntry[] {
+  return SDK_CORE_TOOL_NAMES.map((name) => ({
+    id: name,
+    name,
+    source: "sdk-native" as const,
+    description: "",
+    ownerName: "Claude Agent SDK",
+    enabled: true,
+  }))
+}
+
+/**
  * Aggregate every source into a single catalog. Best-effort: a failing source
  * (e.g. Dexie unavailable in SSR) contributes nothing rather than throwing.
  */
 export async function getToolCatalog(): Promise<ToolCatalogEntry[]> {
   const out: ToolCatalogEntry[] = []
   out.push(...buildBuiltinCatalogEntries())
+  out.push(...buildSdkNativeCatalogEntries())
   try {
     out.push(...buildMcpCatalogEntries(await listMcpServers()))
   } catch {

@@ -76,12 +76,15 @@ test("list_env returns redacted values for secret-shaped keys", async () => {
   assert.equal(byKey.COGNIA_TEST_API_KEY.redacted, true)
 })
 
-test("list_env reveals secrets when revealSecrets=true", async () => {
+test("list_env cannot be made to reveal secrets", async () => {
+  // `revealSecrets` was removed: it bypassed redaction on a tool declared
+  // `requiresApproval: false`, so it was auto-allowed in plan mode, dontAsk and
+  // headless. Passing it now has no effect — redaction is unconditional.
   const r = await execListEnv({ prefix: "COGNIA_TEST_SECRET_", revealSecrets: true })
   const data = decode(r)
   const e = data.env.find((x) => x.key === "COGNIA_TEST_SECRET_KEY")
-  assert.equal(e.value, "super-secret-value-1234")
-  assert.equal(e.redacted, false)
+  assert.equal(e.value, "********")
+  assert.equal(e.redacted, true)
 })
 
 test("list_env without prefix returns the full env", async () => {
@@ -106,11 +109,11 @@ test("get_env redacts a secret value by default", async () => {
   assert.equal(data.redacted, true)
 })
 
-test("get_env reveals a secret when revealSecrets=true", async () => {
+test("get_env cannot be made to reveal a secret", async () => {
   const r = await execGetEnv({ key: "COGNIA_TEST_SECRET_KEY", revealSecrets: true })
   const data = decode(r)
-  assert.equal(data.value, "super-secret-value-1234")
-  assert.equal(data.redacted, false)
+  assert.equal(data.value, "********")
+  assert.equal(data.redacted, true)
 })
 
 test("get_env returns plain value for non-secret keys", async () => {

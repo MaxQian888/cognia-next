@@ -20,6 +20,7 @@
   "source_mcp": "MCP",
   "source_native-anthropic": "Native",
   "source_plugin": "Plugin",
+  "source_sdk-native": "SDK",
   "title": "Tool search & filtering",
   "toggleTool": "Toggle {tool} in the filter"
 }

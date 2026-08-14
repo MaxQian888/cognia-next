@@ -23,6 +23,7 @@ import {
   READ_ONLY_TOOL_NAMES,
 } from "../builtin-tools/index.mjs"
 import { EXIT_PLAN_TOOL_NAME } from "../builtin-tools/exit-plan.mjs"
+import { PLAN_ALLOWED_PLUGIN_TOOLS } from "./plan-mode-policy.mjs"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   toolBudgetMessage,
@@ -47,14 +48,13 @@ const TOOL_RESULT_PII_ERROR = "Tool result blocked by the PII redaction gate"
  * (`dispatch_agent` / its `Task` alias) and `load_skill`. Plan mode's
  * `PLAN_MODE_PROMPT_SECTION` explicitly tells the model to dispatch the
  * read-only `Explore` / `Plan` subagents, so blocking these would break the
- * explore→plan flow on every non-Anthropic provider. Permitting the dispatch
- * CALL does not widen the read-only guarantee: the dispatched child inherits
- * `permissionMode: "plan"` (its own gate stays read-only) and the built-in
- * Explore/Plan agents additionally carry a read-only tool allowlist. `load_skill`
- * only reads a skill's instructions. Kept as a set so the plan gate reads
- * declaratively and stays in sync with the CLI's `DISPATCH_AGENT_TOOL_NAME` /
- * `TASK_TOOL_NAME`. */
-const PLAN_ALLOWED_PLUGIN_TOOLS = new Set(["dispatch_agent", "Task", "load_skill"])
+ * explore→plan flow on every non-Anthropic provider.
+ *
+ * The set itself now lives in `./plan-mode-policy.mjs` (imported at the top of
+ * this file) — the Anthropic rail applies the SAME set to the cognia-owned MCP
+ * servers, and the hand-maintained copies had already drifted from the CLI's
+ * `PLAN_ALLOWED_HOST_TOOLS`.
+ */
 
 /**
  * Built-in file-edit-class tools auto-approved in `acceptEdits` mode — the

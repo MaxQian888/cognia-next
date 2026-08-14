@@ -13,6 +13,7 @@ import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 
 import { toolError, toolText } from "../safety.mjs"
+import { GRAPH_TRAVERSAL_MAX } from "./graph.mjs"
 
 // Output bounds — mirror the file-ops/process tools' `{total, truncated, note}`
 // contract so a large graph traversal or source body never dumps unbounded
@@ -105,7 +106,7 @@ export function createCodeGraphTools(resolver) {
   return [
     tool(
       "codegraph_status",
-      "Report code-graph index health: indexed file/node/edge counts, language histogram, storage backend, and pending (changed-on-disk) files. Cheap — call first to confirm the graph is ready.",
+      "Report code-graph index health: indexed file/node/edge counts, language histogram, storage backend, and pending (changed-on-disk) files. Call first to confirm the graph is ready — note this syncs stale files, so the FIRST call on a cold or heavily-changed repo builds the index and can take a while; later calls are fast.",
       {},
       async () =>
         run(resolver, "codegraph_status", async () => withBanner(resolver, resolver.status()))
@@ -204,12 +205,22 @@ export function createCodeGraphTools(resolver) {
           const node = resolveTarget(resolver, args.target)
           const reached = resolver.impact(node.id, args.depth)
           const impacted = reached.map((r) => ({ ...row(r.node), distance: r.distance }))
-          // `impactCount` always reflects the TRUE blast-radius size; the
-          // `impacted` array itself is row-capped so a wide radius can't flood
-          // the context.
+          // The BFS stops at GRAPH_TRAVERSAL_MAX with no internal signal, so a
+          // saturated traversal makes `impactCount` a FLOOR, not a total. Say so
+          // — this is the number an agent uses to judge whether a change is safe.
+          const traversalSaturated = reached.length >= GRAPH_TRAVERSAL_MAX
           return withCappedRows(
             resolver,
-            { target: node.qualified_name, impactCount: reached.length },
+            {
+              target: node.qualified_name,
+              impactCount: reached.length,
+              impactCountExact: !traversalSaturated,
+              ...(traversalSaturated
+                ? {
+                    impactCountNote: `traversal stopped at the ${GRAPH_TRAVERSAL_MAX}-node cap — the true blast radius is at least this large and probably larger; lower depth to narrow it, or treat this change as wide-reaching`,
+                  }
+                : {}),
+            },
             "impacted",
             impacted,
             { hint: "lower depth to focus the blast radius" }

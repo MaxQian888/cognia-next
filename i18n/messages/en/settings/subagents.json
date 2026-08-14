@@ -231,6 +231,7 @@
       "mcp": "MCP servers",
       "native-anthropic": "Native",
       "plugin": "Plugins",
+      "sdk-native": "Agent SDK",
       "unknown": "Granted but unavailable"
     },
     "loading": "Loading tools…",

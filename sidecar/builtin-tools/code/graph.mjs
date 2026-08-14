@@ -13,7 +13,14 @@ const CALL_KINDS = new Set(["calls", "references"])
 const IMPACT_KINDS = new Set(["calls", "references", "imports", "extends", "implements"])
 
 const DEFAULT_DEPTH = 3
-const MAX_RESULTS = 500
+
+/**
+ * Hard cap on nodes returned by one BFS traversal. Exported because a result
+ * that reaches this cap is a FLOOR, not a total — `codegraph_impact` must not
+ * present a capped count as the true blast radius.
+ */
+export const GRAPH_TRAVERSAL_MAX = 500
+const MAX_RESULTS = GRAPH_TRAVERSAL_MAX
 
 /**
  * @typedef {{ id: string, distance: number, node: object|null }} Reached

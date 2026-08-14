@@ -15,8 +15,10 @@ import { randomUUID } from "node:crypto"
 import {
   buildCogniaToolsServer,
   namesForDisabledCategories,
+  READ_ONLY_TOOL_NAMES,
   SERVER_NAME as BUILTIN_SERVER_NAME,
 } from "../builtin-tools/index.mjs"
+import { classifyPlanMode } from "./plan-mode-policy.mjs"
 import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "../a2ui-tools/index.mjs"
 import {
   buildPluginToolsServer,
@@ -327,7 +329,17 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // Defence-in-depth: stamp disabled-category tool names onto disallowedTools.
   const disallowed = new Set(sendOptions.disallowedTools ?? [])
   if (builtinEnabled !== undefined) {
-    for (const name of namesForDisabledCategories(builtinEnabled)) {
+    // Pass the resolvers so an enabled-but-unresolvable `lsp` / `codeGraph`
+    // category is denied rather than silently absent (registration guards on
+    // `flag && resolver`, so those tools would otherwise be neither served nor
+    // rejected at the SDK boundary).
+    // Mirror the registration guards above EXACTLY (`buildCogniaToolsServer`
+    // receives these same two values) so a category is denied iff it was not
+    // registered — over-denying would break a working session.
+    for (const name of namesForDisabledCategories(builtinEnabled, {
+      lspResolver,
+      codeGraphResolver: codeGraph.codeGraphResolver,
+    })) {
       disallowed.add(name)
     }
   }
@@ -473,6 +485,29 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       // so allow it unconditionally — ahead of even the doom-loop guard.
       if (isAskUserTool(toolName)) {
         return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
+      // Plan mode over the servers COGNIA owns. The Agent SDK enforces plan
+      // mode for its own native tools, but has no idea what
+      // `mcp__cognia-tools__*` / `mcp__cognia-plugin-tools__*` do — so without
+      // this every mutating plugin tool (perform_action, browser_evaluate,
+      // terminal_dock_write, ocr.extract, …) and, under the
+      // `coreFilesOnAnthropic` hatch, write/bash/directory_delete, all ran
+      // inside a mode the UI presents as read-only. `not-governed` means the
+      // tool belongs to the SDK or a user MCP server: fall through untouched,
+      // since denying those here would break plan mode for Read/Grep.
+      if (sendOptions.permissionMode === "plan") {
+        const verdict = classifyPlanMode(toolName, {
+          builtinServerName: BUILTIN_SERVER_NAME,
+          pluginServerName: PLUGIN_TOOLS_SERVER_NAME,
+          readOnlyBuiltins: READ_ONLY_TOOL_NAMES,
+          governOnlyCogniaServers: true,
+        })
+        if (verdict === "deny") {
+          return Promise.resolve({
+            behavior: "deny",
+            message: `plan mode: tool "${toolName}" is not permitted (read-only tools only)`,
+          })
+        }
       }
       // Doom-loop guard: the Nth identical call must round-trip through the
       // user even when the suppress-list / ruleset would allow it silently.

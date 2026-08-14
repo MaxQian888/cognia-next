@@ -3,6 +3,8 @@ import {
   buildMcpCatalogEntries,
   buildNativeCatalogEntries,
   buildPluginCatalogEntries,
+  buildSdkNativeCatalogEntries,
+  getToolCatalog,
   namespacedPluginTool,
   searchToolCatalog,
   type ToolCatalogEntry,
@@ -152,6 +154,26 @@ describe("buildNativeCatalogEntries", () => {
   it("treats non-preauth policies as requiring approval, preauth as not", () => {
     expect(out[0].requiresApproval).toBe(true) // default always-ask
     expect(out[1].requiresApproval).toBe(false) // preauth
+  })
+})
+
+describe("buildSdkNativeCatalogEntries", () => {
+  it("exposes bare Claude Agent SDK tool names as enabled sdk-native entries", () => {
+    const entries = buildSdkNativeCatalogEntries()
+
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "Read", name: "Read", source: "sdk-native", enabled: true }),
+        expect.objectContaining({ id: "Bash", name: "Bash", source: "sdk-native", enabled: true }),
+      ])
+    )
+    expect(entries.every((entry) => !entry.id.startsWith("mcp__"))).toBe(true)
+  })
+
+  it("includes sdk-native tools in the aggregate catalog", async () => {
+    await expect(getToolCatalog()).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "Read", source: "sdk-native" })])
+    )
   })
 })
 

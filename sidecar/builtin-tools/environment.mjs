@@ -1,9 +1,16 @@
 // Environment tools — list_env, get_env, system_info.
 //
 // All read-only, low-risk. Secret-shaped keys (KEY/TOKEN/SECRET/PASSWORD/
-// CREDENTIAL) are redacted by default; the caller can pass
-// `revealSecrets: true` to bypass redaction, but that flag itself is gated
-// by the per-call approval flow at the parent.
+// CREDENTIAL) are ALWAYS redacted — there is no reveal escape hatch.
+//
+// A `revealSecrets` flag used to exist here, documented as "gated by the
+// per-call approval flow at the parent". No such gate existed: both tools are
+// `requiresApproval: false`, which puts them in READ_ONLY_TOOL_NAMES and
+// auto-allows them in plan mode, dontAsk, and headless. Since the sidecar's own
+// `process.env` carries ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN
+// (`sidecar/dispatch/subprocess-env.mjs`), the flag was an ungated credential
+// read. It is removed rather than gated: handing raw secrets to the model also
+// contradicts the repo-wide PII redaction gate that fronts every LLM call.
 
 import os from "node:os"
 import process from "node:process"
@@ -46,12 +53,6 @@ const listEnvShape = {
     .string()
     .optional()
     .describe("Filter to env keys starting with this prefix (case-insensitive)."),
-  revealSecrets: z
-    .boolean()
-    .default(false)
-    .describe(
-      "When true, return values for keys that look like secrets. Defaults to false; flagged for approval at the parent."
-    ),
 }
 
 async function execListEnv(args) {
@@ -61,8 +62,8 @@ async function execListEnv(args) {
     const filtered = lower ? entries.filter(([k]) => k.toLowerCase().startsWith(lower)) : entries
     const out = filtered.map(([key, value]) => ({
       key,
-      value: isSecretKey(key) && !args.revealSecrets ? redactValue() : (value ?? ""),
-      redacted: isSecretKey(key) && !args.revealSecrets,
+      value: isSecretKey(key) ? redactValue() : (value ?? ""),
+      redacted: isSecretKey(key),
     }))
     return toolText({ count: out.length, env: out })
   } catch (err) {
@@ -72,7 +73,7 @@ async function execListEnv(args) {
 
 export const listEnvTool = tool(
   "list_env",
-  "List process environment variables (read-only). Secret-shaped keys are redacted unless revealSecrets=true.",
+  "List process environment variables (read-only). Values of secret-shaped keys (KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL) are always redacted and cannot be revealed.",
   listEnvShape,
   execListEnv,
   { alwaysLoad: true }
@@ -82,10 +83,6 @@ export const listEnvTool = tool(
 
 const getEnvShape = {
   key: z.string().min(1).describe("Environment variable name."),
-  revealSecrets: z
-    .boolean()
-    .default(false)
-    .describe("Return the literal value even if the key looks secret."),
 }
 
 async function execGetEnv(args) {
@@ -94,7 +91,7 @@ async function execGetEnv(args) {
     if (value === undefined) {
       return toolText({ key: args.key, set: false })
     }
-    const redacted = isSecretKey(args.key) && !args.revealSecrets
+    const redacted = isSecretKey(args.key)
     return toolText({
       key: args.key,
       set: true,
@@ -108,7 +105,7 @@ async function execGetEnv(args) {
 
 export const getEnvTool = tool(
   "get_env",
-  "Read a single environment variable. Returns set:false when the key is undefined.",
+  "Read a single environment variable. Returns set:false when the key is undefined. Secret-shaped keys are always redacted and cannot be revealed.",
   getEnvShape,
   execGetEnv,
   { alwaysLoad: true }

@@ -4,8 +4,18 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
+import { assertNotSecretEscape } from "../confinement.mjs"
 import { toolError, toolText } from "../safety.mjs"
 import { statOrNull } from "../shared/fs-stat.mjs"
+
+/**
+ * Refuse a transfer touching a credential path in EITHER position. Guarding the
+ * source too is deliberate: copying `~/.ssh/id_rsa` into the workspace is
+ * exfiltration even though the write itself lands somewhere innocuous.
+ */
+function assertTransferPaths(...targets) {
+  for (const t of targets) assertNotSecretEscape(undefined, t)
+}
 
 // ---- file_copy ------------------------------------------------------------
 
@@ -17,6 +27,7 @@ const fileCopyShape = {
 
 async function execFileCopy(args) {
   try {
+    assertTransferPaths(args.source, args.destination)
     if (!args.overwrite) {
       const exists = await statOrNull(args.destination)
       if (exists) return toolError(`destination already exists: ${args.destination}`)
@@ -50,6 +61,7 @@ const fileRenameShape = {
 
 async function execFileRename(args) {
   try {
+    assertTransferPaths(args.oldPath, args.newPath)
     // Guard against silently clobbering an existing file (matches file_copy).
     if (!args.overwrite) {
       const exists = await statOrNull(args.newPath)
@@ -79,6 +91,7 @@ const fileMoveShape = {
 
 async function execFileMove(args) {
   try {
+    assertTransferPaths(args.source, args.destination)
     // Guard against silently clobbering an existing file (matches file_copy).
     if (!args.overwrite) {
       const exists = await statOrNull(args.destination)

@@ -230,6 +230,16 @@ export async function runSg(options, opts = {}) {
           ...parsed,
           truncated: true,
           truncatedReason: parsed.truncatedReason ?? "output size",
+          // A truncated SEARCH is just a partial result. A truncated REWRITE
+          // means the child was killed mid-`--update-all`: some files may be
+          // rewritten and others not. Reporting that as a clean
+          // "[APPLIED] changed N matches" is a lie the agent cannot detect.
+          ...(opts.updateAll
+            ? {
+                error:
+                  "the rewrite was interrupted by the output-size cap — some files may have been modified and others not. Inspect `git status` / `git diff` before continuing, then re-run with a narrower `paths` or `globs` scope.",
+              }
+            : {}),
         })
         return
       }

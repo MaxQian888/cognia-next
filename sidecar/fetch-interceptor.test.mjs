@@ -11,8 +11,12 @@
 //   2. Bypass is honoured — hosts in NO_PROXY (localhost / local providers)
 //      go direct; everything else is tunnelled through the proxy.
 //
-// undici tunnels ALL targets (http and https) to the proxy via CONNECT, so
-// the fake proxy below handles `connect` and pipes to a local origin.
+// undici >= 7 only CONNECT-tunnels when the target protocol is NOT `http:`
+// (see `shouldProxyTunnel` in undici's proxy-agent). A plain `http://` target
+// is sent to the proxy in RFC 7230 absolute-form instead — still through the
+// proxy, so the geo invariant holds; only the wire form differs. The fake
+// proxy below therefore handles BOTH forms and records each separately, and
+// the assertions check that the proxy saw the request, not which form it used.
 //
 // Run: node --test fetch-interceptor.test.mjs
 
@@ -23,6 +27,7 @@ import http from "node:http"
 import net from "node:net"
 
 let connectHits = []
+let forwardHits = []
 let originHits = []
 let proxyServer
 let originServer
@@ -66,11 +71,33 @@ before(async () => {
   })
   originPort = await listen(originServer)
 
-  // Fake forward proxy: record CONNECT targets and tunnel them to the local
-  // origin (ignoring the requested host — we only need to prove routing).
-  proxyServer = http.createServer((_req, res) => {
-    res.writeHead(400)
-    res.end("expected CONNECT")
+  // Fake forward proxy. Two accepted forms, both recorded and both forwarded
+  // to the local origin (ignoring the requested host — we only need to prove
+  // routing):
+  //   - absolute-form `GET http://host/path` (undici's path for http: targets)
+  //   - `CONNECT host:port` tunnel (undici's path for https: targets)
+  proxyServer = http.createServer((req, res) => {
+    let target
+    try {
+      target = new URL(req.url)
+    } catch {
+      res.writeHead(400)
+      res.end("expected absolute-form request or CONNECT")
+      return
+    }
+    forwardHits.push(`${target.host}${target.pathname}`)
+    const upstream = http.request(
+      { host: "127.0.0.1", port: originPort, method: req.method, path: target.pathname },
+      (upstreamRes) => {
+        res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers)
+        upstreamRes.pipe(res)
+      }
+    )
+    upstream.on("error", () => {
+      res.writeHead(502)
+      res.end("proxy upstream failed")
+    })
+    req.pipe(upstream)
   })
   proxyServer.on("connect", (req, clientSocket, head) => {
     connectHits.push(req.url)
@@ -119,26 +146,31 @@ test("installs the proxy dispatcher deterministically (no race)", async () => {
   assert.equal(typeof dispatcher.dispatch, "function")
 })
 
-test("tunnels a non-bypassed host through the proxy", async () => {
+test("routes a non-bypassed host through the proxy", async () => {
   connectHits = []
+  forwardHits = []
   originHits = []
   const res = await fetch("http://geo-proxied.test/v1/chat")
   const body = await res.text()
   assert.equal(body, "origin-ok")
   assert.ok(
-    connectHits.some((u) => u.startsWith("geo-proxied.test")),
-    `expected a CONNECT for the target host, got: ${JSON.stringify(connectHits)}`
+    [...connectHits, ...forwardHits].some((u) => u.startsWith("geo-proxied.test")),
+    `expected the proxy to receive the target host, got connect=${JSON.stringify(
+      connectHits
+    )} forward=${JSON.stringify(forwardHits)}`
   )
 })
 
 test("bypasses the proxy for NO_PROXY hosts (local providers)", async () => {
   connectHits = []
+  forwardHits = []
   originHits = []
   const res = await fetch(`http://127.0.0.1:${originPort}/v1/models`)
   const body = await res.text()
   assert.equal(body, "origin-ok")
   assert.ok(originHits.length > 0, "expected the origin to receive a direct request")
   assert.equal(connectHits.length, 0, "local-provider traffic must NOT tunnel through the proxy")
+  assert.equal(forwardHits.length, 0, "local-provider traffic must NOT be forwarded via the proxy")
 })
 
 test("supports IP/CIDR bypass without weakening all other proxy routing", async () => {

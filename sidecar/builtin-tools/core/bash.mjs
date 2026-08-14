@@ -324,9 +324,13 @@ export function createBashTool({ cwd, bgShells, shell }) {
         child.on("error", (err) => {
           fileOk = false
           append(String(err.message ?? err))
-          finish({ code: null })
+          // Carry the error through: `code: null` alone is indistinguishable
+          // from a signal-terminated run, and the old code treated both as
+          // success — so a missing shell binary (ENOENT) reached the model as
+          // ordinary command output with no isError flag.
+          finish({ code: null, spawnError: err })
         })
-        child.on("close", (code) => finish({ code }))
+        child.on("close", (code, signal) => finish({ code, signal }))
       })
 
       const tailPreview = result.mem.slice(-(MAX_OUTPUT_CHARS - PREVIEW_HEAD_CHARS))
@@ -348,9 +352,19 @@ export function createBashTool({ cwd, bgShells, shell }) {
       const lines = [outBody.trimEnd()]
       if (truncated && !fullPath) lines.push("(output truncated — only the tail is shown)")
       if (result.timedOut) lines.push(`(command timed out after ${timeoutMs} ms and was killed)`)
+      if (result.spawnError) {
+        const code = result.spawnError.code ? ` (${result.spawnError.code})` : ""
+        lines.push(`(the command could not be started${code} — it never ran)`)
+      } else if (result.signal && !result.timedOut) {
+        lines.push(`(terminated by signal ${result.signal})`)
+      }
       if (result.code !== 0 && result.code !== null) lines.push(`(exit code ${result.code})`)
       const body = lines.filter((l) => l.length > 0).join("\n")
-      const failed = result.timedOut || (result.code !== 0 && result.code !== null)
+      const failed =
+        result.timedOut ||
+        Boolean(result.spawnError) ||
+        Boolean(result.signal) ||
+        (result.code !== 0 && result.code !== null)
       return failed ? toolText(body, { isError: true }) : toolText(body || "(no output)")
     } catch (err) {
       return toolError(err, "bash")

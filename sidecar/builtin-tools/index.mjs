@@ -19,7 +19,7 @@ import { processTools, createProcessTools } from "./process/index.mjs"
 import { environmentTools } from "./environment.mjs"
 import { shellAdvancedTools } from "./shell-advanced.mjs"
 import { terminalReplTools } from "./terminal-repl-tool.mjs"
-import { astGrepTools } from "./ast-grep/index.mjs"
+import { astGrepTools, createAstGrepTools } from "./ast-grep/index.mjs"
 import { clonedepsTools } from "./clonedeps/index.mjs"
 import { webcloneTools } from "./webclone/index.mjs"
 import { createLspTools } from "./lsp.mjs"
@@ -159,9 +159,13 @@ export function collectCogniaToolDefs({
   const tools = []
   for (const [category, toolList] of Object.entries(TOOLS_BY_CATEGORY)) {
     if (!enabled[category]) continue
-    // `process` is the one static category with a session-bound variant; swap
-    // it in HERE so it keeps its registration position (see the map entry).
-    tools.push(...(category === "process" ? createProcessTools({ bgShells }) : toolList))
+    // `process` and `astGrep` are the static categories with session-bound
+    // variants; swap them in HERE so each keeps its registration position
+    // (see the map entries). `astGrep` needs the session cwd — without it the
+    // ast-grep child inherited the sidecar's cwd and rewrote the wrong tree.
+    if (category === "process") tools.push(...createProcessTools({ bgShells }))
+    else if (category === "astGrep") tools.push(...createAstGrepTools({ cwd }))
+    else tools.push(...toolList)
   }
   // The `lsp` category is resolver-bound (per-session), so it is not part of
   // the static TOOLS_BY_CATEGORY map — build its tools on demand when the
@@ -274,21 +278,40 @@ export function buildCogniaToolsServer({
 }
 
 /**
- * Return the namespaced tool names for any disabled categories. The sidecar
- * pushes these onto `disallowedTools` as defence-in-depth so a stray
- * reference to a disabled tool is rejected at the SDK boundary.
+ * Return the namespaced tool names for any UNAVAILABLE category. The sidecar
+ * pushes these onto `disallowedTools` as defence-in-depth so a stray reference
+ * to an absent tool is rejected at the SDK boundary.
  *
- * @param {{ fileExtras?: boolean, git?: boolean, process?: boolean, environment?: boolean, shellAdvanced?: boolean }} enabled
+ * A category is unavailable when its flag is off OR — for the resolver-bound
+ * `lsp` / `codeGraph` categories — when the flag is on but the dispatch layer
+ * supplied no resolver. Registration guards on `flag && resolver` while this
+ * used to guard on `!flag` alone, so that combination left the tools NEITHER
+ * registered NOR denied: a stale `Character.allowedTools` entry or a
+ * hallucinated `mcp__cognia-tools__lsp_hover` fell through the SDK boundary
+ * unhandled. `lsp` is easy to land in — `opts.lsp` is only populated when
+ * `settings.lsp.enabled && cwd && !supportAgent`, while the category flag is
+ * `builtinTools.lsp`.
+ *
+ * @param {{ fileExtras?: boolean, git?: boolean, process?: boolean, environment?: boolean, shellAdvanced?: boolean, lsp?: boolean, codeGraph?: boolean }} enabled
+ * @param {{ lspResolver?: unknown, codeGraphResolver?: unknown }} [resolvers]
+ *        Omit to assume both are present (back-compat for callers that do not
+ *        build resolvers).
  * @returns {string[]}
  */
-export function namesForDisabledCategories(enabled) {
+export function namesForDisabledCategories(enabled, resolvers) {
   if (!enabled || typeof enabled !== "object") {
     // No flags — return everything as disallowed.
     return Object.values(TOOL_NAMES_BY_CATEGORY).flat().map(namespacedName)
   }
+  const resolverMissing = (category) => {
+    if (!resolvers || typeof resolvers !== "object") return false
+    if (category === "lsp") return !resolvers.lspResolver
+    if (category === "codeGraph") return !resolvers.codeGraphResolver
+    return false
+  }
   const out = []
   for (const [category, names] of Object.entries(TOOL_NAMES_BY_CATEGORY)) {
-    if (!enabled[category]) {
+    if (!enabled[category] || resolverMissing(category)) {
       for (const n of names) out.push(namespacedName(n))
     }
   }

@@ -1,5 +1,29 @@
 # Built-in Agent tool gap analysis (2026-07-18)
 
+> **REVISED 2026-08-14 — parts of this note are superseded.**
+> Every conclusion below was re-verified against code by
+> [`agent-builtin-tool-completeness-audit-2026-08-14.md`](./agent-builtin-tool-completeness-audit-2026-08-14.md)
+> ([中文](./agent-builtin-tool-completeness-audit-2026-08-14.zh.md)). Four corrections:
+>
+> 1. **"Remaining opportunity #2 — push-driven monitoring" is CLOSED.** `Monitor`,
+>    `monitor_cancel` and `monitor_list` ship today in the `coreFiles` category, backed by
+>    Rust `crates/cognia-jobs`. Read §86–94 below with that in mind.
+> 2. **"Remaining opportunity #3 — checkpoint/rewind and worktree lifecycle" is PARTLY MOOT.**
+>    `EnterWorktree`/`ExitWorktree` ship natively in the vendored Agent SDK
+>    (`sdk-tools.d.ts:2922,2932`), and SDK-owned checkpoint control already exists behind the
+>    `checkpoint` capability (`sidecar/dispatch/control.mjs:15-39`). What is missing is
+>    agent-facing access, not the mechanism.
+> 3. **"Waitable background commands" is CLOSED ONLY ON THE DESKTOP.** On the external-agent
+>    bridge the Monitor family is advertised but always errors (no `hostRpc` is passed,
+>    `sidecar/cognia-tool-bridge.mjs:199-212`), and under the headless CLI every background-shell
+>    call stalls 30 s and fails because nothing answers `host_rpc`.
+> 4. **This note's own verification contract is UNMET.** It requires that "English and Chinese
+>    tool catalog messages remain in parity"; 9 `codegraph_*` `descriptionKey`s are missing from
+>    both locales.
+>
+> The "Existing Cognia coverage" table below remains accurate. Its claim that adding duplicate
+> tools "would increase prompt cost without adding capability" also still holds.
+
 ## Scope
 
 This note records the cross-vendor research behind the built-in tool changes. It is intentionally a research artifact rather than an ADR: the existing Agent dispatch, permission, confinement, and tool-registry decisions remain unchanged.

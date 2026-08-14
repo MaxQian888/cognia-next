@@ -30,7 +30,9 @@ test("every core tool def is well-shaped (name/description/inputSchema/handler)"
 test("mutating subset includes the shell-capable Monitor tool", () => {
   assert.deepEqual(
     [...CORE_MUTATING_TOOL_NAMES],
-    ["edit", "multi_edit", "write", "bash", "NotebookEdit", "apply_patch", "Monitor"]
+    // kill_shell terminates an OS process — the same action class as
+    // terminate_process, which has always been approval-gated.
+    ["edit", "multi_edit", "write", "bash", "NotebookEdit", "apply_patch", "Monitor", "kill_shell"]
   )
   for (const n of CORE_MUTATING_TOOL_NAMES) assert.ok(CORE_TOOL_NAMES.includes(n))
 })

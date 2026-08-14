@@ -185,8 +185,8 @@
         {
           "name": "kill_shell",
           "descriptionKey": "tools.coreKillShell",
-          "riskLevel": "low",
-          "requiresApproval": false,
+          "riskLevel": "medium",
+          "requiresApproval": true,
           "alwaysLoad": false
         },
         {

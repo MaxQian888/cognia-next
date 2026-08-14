@@ -5,6 +5,7 @@ import fsp from "node:fs/promises"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
+import { assertNotSecretEscape } from "../confinement.mjs"
 import { toolError, toolText } from "../safety.mjs"
 import { statOrNull } from "../shared/fs-stat.mjs"
 
@@ -21,6 +22,9 @@ const fileAppendShape = {
 
 async function execFileAppend(args) {
   try {
+    // Tool-body backstop: these tools carry absolute paths and are auto-approved
+    // in `acceptEdits`, so the credential deny must hold here too.
+    assertNotSecretEscape(undefined, args.path)
     let payload = args.content
     if (args.ensureTrailingNewline && !payload.endsWith("\n")) payload += "\n"
     await fsp.appendFile(args.path, payload, "utf-8")
@@ -75,6 +79,7 @@ async function execFileBinaryWrite(args) {
         "file_binary_write"
       )
     }
+    assertNotSecretEscape(undefined, args.path)
     if (args.createDirectories) {
       const parent = path.dirname(args.path)
       await fsp.mkdir(parent, { recursive: true })

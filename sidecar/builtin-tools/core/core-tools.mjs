@@ -51,7 +51,14 @@ export const CORE_TOOL_NAMES = Object.freeze([
   ...MONITOR_TOOL_NAMES,
 ])
 
-/** Core tools that mutate state (restricted mode / IM channels deny these). */
+/**
+ * Core tools that mutate state (restricted mode / IM channels deny these).
+ *
+ * Consumed by `lib/workspace/restricted-tools.ts` and the IM ceiling in
+ * `lib/claude/build-options.ts` — do not hand-maintain a second copy there.
+ * `kill_shell` is included because it terminates an OS process, the same action
+ * class as `terminate_process`.
+ */
 export const CORE_MUTATING_TOOL_NAMES = Object.freeze([
   "edit",
   "multi_edit",
@@ -60,6 +67,7 @@ export const CORE_MUTATING_TOOL_NAMES = Object.freeze([
   NOTEBOOK_EDIT_NAME,
   "apply_patch",
   "Monitor",
+  "kill_shell",
 ])
 
 /**

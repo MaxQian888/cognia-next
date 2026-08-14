@@ -19,8 +19,23 @@
 /**
  * Tools the agent SDK provides itself. Not registered anywhere at runtime — the
  * SDK owns them — so they have to be enumerated.
+ *
+ * The list was previously 11 names, so `intersectAllowedTools` classified every
+ * other SDK tool as `unknown` and `generate-skill` stripped it from the saved
+ * skill while telling the user it does not exist — `ReadMcpResource` being the
+ * clearest case: the SDK ships it and the Anthropic rail would run it.
+ *
+ * CAVEAT on how this is maintained. The vendored `sdk-tools.d.ts` exposes only
+ * `ToolInputSchemas`, a union of INPUT type names — and those are not tool
+ * names (`FileReadInput` backs the `Read` tool). So this list cannot be derived
+ * mechanically. The entries below are the subset whose input-type name matches
+ * the documented tool name one-for-one; names requiring a guess at the mapping
+ * (`FileEdit`/`FileRead`/`FileWrite`, `Mcp`, `REPL`, `Agent`, …) are
+ * deliberately omitted rather than invented. Treat this as a floor, not a
+ * complete roster, and re-check on SDK upgrade.
  */
 export const SDK_CORE_TOOL_NAMES: readonly string[] = [
+  // Pre-existing entries (the documented Claude Code core surface).
   "Bash",
   "Edit",
   "Glob",
@@ -32,6 +47,28 @@ export const SDK_CORE_TOOL_NAMES: readonly string[] = [
   "WebFetch",
   "WebSearch",
   "Write",
+  // Structured session tasks — same spelling as `builtin-tools-data.json`.
+  "TaskCreate",
+  "TaskGet",
+  "TaskList",
+  "TaskUpdate",
+  "TaskStop",
+  // Plan-mode signal (the Anthropic rail uses the SDK-native one; the ai-sdk
+  // rail synthesises its own lowercase `exit_plan_mode`).
+  "ExitPlanMode",
+  // Elicitation — cognia's host-routed `ask_user` mirrors this.
+  "AskUserQuestion",
+  // Long-running condition watch — same spelling as the sidecar's own Monitor.
+  "Monitor",
+  // MCP resource surface. Absent from every cognia rail today; see the
+  // implementation chapter of the 2026-08-14 tool audit.
+  "ListMcpResources",
+  "ReadMcpResource",
+  "ReadMcpResourceDir",
+  "RefreshMcpTools",
+  // Worktree lifecycle. Ships natively; cognia has no equivalent.
+  "EnterWorktree",
+  "ExitWorktree",
 ] as const
 
 export interface ToolIntersection {

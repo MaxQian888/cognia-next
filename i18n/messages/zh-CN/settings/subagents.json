@@ -231,6 +231,7 @@
       "mcp": "MCP 服务",
       "native-anthropic": "原生",
       "plugin": "插件",
+      "sdk-native": "Agent SDK 自带",
       "unknown": "已授予但当前不可用"
     },
     "loading": "正在加载工具…",
