@@ -11,12 +11,12 @@
  * WAN where mDNS LAN is unreachable).
  *
  * Both peers exchange `{ id, method, params }` envelopes over a single
- * ordered/reliable DataChannel named `cognia.v2`. Responses come back as
+ * ordered/reliable DataChannel named `cognia.signaling`. Responses come back as
  * `{ id, ok, result | error }`. Events flow as `{ event, payload, seq }`
  * with the same EventBus `seq` semantics as the existing
  * `/ws/events` channel.
  *
- * Signaling v2 authenticates each role with ECDSA P-256, derives directional
+ * Signaling authenticates each role with ECDSA P-256, derives directional
  * session keys with ephemeral P-256 ECDH + HKDF-SHA-256, and encrypts SDP/ICE
  * using AES-256-GCM. The relay sees only authenticated metadata and
  * ciphertext. DTLS then protects the negotiated DataChannel itself.
@@ -29,7 +29,7 @@
 // → @/lib/signaling → desktop-controller → @/lib/tauri/transport-*` cycle
 // and trip TDZ on the `transport` binding.
 import { SignalingClient } from "@/lib/signaling/client"
-import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import type { RoomDescriptor } from "@/lib/signaling/crypto"
 import {
   decodeRtcBinaryResourceChunk,
   encodeRtcChunkAck,
@@ -134,12 +134,12 @@ export interface RtcEvent {
 // ---------------------------------------------------------------------------
 
 export interface TransportRtcOptions {
-  /** Public signaling endpoint URL (e.g. `wss://signaling.cognia.cn/v2/signaling`). */
+  /** Public signaling endpoint URL (e.g. `wss://signaling.cognia.cn/signaling`). */
   signalingUrl: string
   /** Rendezvous id minted at pair time, baked into CompanionConfig. */
   rendezvousId: string
-  /** Self-certifying room descriptor returned by the v2 pair exchange. */
-  signalingRoomDescriptor: RoomDescriptorV2
+  /** Self-certifying room descriptor returned by the pair exchange. */
+  signalingRoomDescriptor: RoomDescriptor
   /** Non-extractable mobile role signing key loaded from secure storage. */
   signalingPrivateKey: CryptoKey
   /** Stable device identifier — sent in the `hello` envelope. */
@@ -312,7 +312,7 @@ export class TransportRtc {
 
   constructor(opts: TransportRtcOptions) {
     if (opts.signalingRoomDescriptor.roomId !== opts.rendezvousId) {
-      throw new Error("TransportRtc: rendezvousId does not match the v2 room descriptor")
+      throw new Error("TransportRtc: rendezvousId does not match the room descriptor")
     }
     this.opts = {
       signalingUrl: opts.signalingUrl,

@@ -5,7 +5,7 @@
 //! `rendezvous_id`, which is exactly what the native axum server's
 //! `RoomRegistry` did in a single process — here the platform shards it.
 //!
-//! Flow: the client connects to `wss://<host>/v2/signaling?rid=<rendezvousId>`.
+//! Flow: the client connects to `wss://<host>/signaling?rid=<rendezvousId>`.
 //! The `rid` query param picks the room's Durable Object via `id_from_name`;
 //! the upgrade request is forwarded to that DO's stub, which terminates the
 //! WebSocket (hibernatable) and returns the client end back through here.
@@ -33,7 +33,9 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             "version": env!("CARGO_PKG_VERSION"),
             "backend": "worker",
         })),
-        "/v2/signaling" => route_signaling(req, env).await,
+        // `/v2/signaling` is the pre-rename path, still baked into the endpoint
+        // that already-paired devices dial. Keep serving it.
+        "/signaling" | "/v2/signaling" => route_signaling(req, env).await,
         _ => Response::error("not found", 404),
     }
 }

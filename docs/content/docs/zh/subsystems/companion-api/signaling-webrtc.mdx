@@ -1,6 +1,6 @@
 ---
 title: WebRTC 信令与 DataChannel
-description: 仅 v2 的桌面/headless answerer、端到端加密信令、受界 peer 会话、RPC 桥与事件恢复。
+description: 单一协议的桌面/headless answerer、端到端加密信令、受界 peer 会话、RPC 桥与事件恢复。
 ---
 
 # WebRTC 信令与 DataChannel
@@ -13,9 +13,9 @@ renderer 参与。
 | 模块 | 职责 |
 | --- | --- |
 | `signaling/mod.rs` | `SignalingHub`、每设备任务生命周期、配置和恢复 |
-| `signaling/registration_store.rs` | v2 room descriptor 与 host key ref 的 SQLite 权威源 |
+| `signaling/registration_store.rs` | room descriptor 与 host key ref 的 SQLite 权威源 |
 | `signaling/client.rs` | challenge/subscribe、加密 SDP/ICE、deadline、心跳和重连 |
-| `signaling/envelope_v2.rs` | 规范字段、ECDSA/ECDH/HKDF/AES-GCM、epoch/seq 防重放 |
+| `signaling/envelope.rs` | 规范字段、ECDSA/ECDH/HKDF/AES-GCM、epoch/seq 防重放 |
 | `signaling/peer.rs` | `webrtc-rs` answerer 与受界 ICE/DataChannel 队列 |
 | `signaling/datachannel_framing.rs` | 32 KiB 帧、1 MiB 消息及受界分片重组 |
 | `signaling/dispatch.rs` | RPC、持久幂等、事件 resume/ack/replay/resync |
@@ -35,11 +35,11 @@ sequenceDiagram
   R->>H: "不透明转发"
   H->>R: "加密 answer + ICE"
   R->>M: "不透明转发"
-  M->>H: "DTLS + cognia.v2 DataChannel"
+  M->>H: "DTLS + cognia.signaling DataChannel"
 ```
 
 配对将 host 角色私钥放入原生 secret store，将公开
-`RoomDescriptorV2` 放入 SQLite。Tauri 可幂等导入 renderer 记录；
+`RoomDescriptor` 放入 SQLite。Tauri 可幂等导入 renderer 记录；
 headless 启动时从同一 store 恢复全部 answerer。
 
 五秒 challenge 绑定 room、role、session、随机 epoch、签发时间和临时
@@ -57,7 +57,7 @@ HKDF-SHA-256；ECDSA P-256 签名覆盖长度前缀的规范 header 和密文。
 
 ## 数据面边界
 
-有序可靠的 `cognia.v2` 通道最多并发 32 个 RPC。物理帧最大 32 KiB，
+有序可靠的 `cognia.signaling` 通道最多并发 32 个 RPC。物理帧最大 32 KiB，
 逻辑消息最大 1 MiB；每 peer 最多 8 个重组、4 MiB 内存、15 秒期限。
 入站队列最多 128 帧；pending ICE 最多 256 条、保存 30 秒，并且只在
 匹配 epoch 的 remote description 设置后应用。

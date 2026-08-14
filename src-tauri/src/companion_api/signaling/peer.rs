@@ -5,7 +5,7 @@
 //! data-channel events into tokio mpsc channels consumed by the signaling task.
 //!
 //! Role split (matches `lib/tauri/transport-rtc.ts`):
-//! - **mobile** is the offerer — it calls `pc.createDataChannel("cognia.v2", ...)`
+//! - **mobile** is the offerer — it calls `pc.createDataChannel("cognia.signaling", ...)`
 //!   and produces the SDP offer.
 //! - **desktop** (this file) is the answerer — it waits for the offer via
 //!   signaling, calls `set_remote_description` + `create_answer` +
@@ -26,8 +26,17 @@ use webrtc::peer_connection::{
 
 /// DataChannel label both peers agree on. Mirrored in
 /// `lib/signaling/types.ts:DATACHANNEL_LABEL`.
-pub const DATACHANNEL_LABEL: &str = "cognia.v2";
+pub const DATACHANNEL_LABEL: &str = "cognia.signaling";
+/// Label used before the protocol-version suffix was dropped. The desktop is
+/// the answerer, so it has to keep accepting what an older mobile build offers
+/// — otherwise upgrading the desktop alone silently breaks every WAN session.
+pub const LEGACY_DATACHANNEL_LABEL: &str = "cognia.v2";
 pub const TERMINAL_DATACHANNEL_LABEL: &str = "cognia.terminal";
+
+/// True for the current label and the pre-rename one.
+pub fn is_agent_datachannel_label(label: &str) -> bool {
+    label == DATACHANNEL_LABEL || label == LEGACY_DATACHANNEL_LABEL
+}
 pub const ICE_QUEUE_CAPACITY: usize = 256;
 pub const INBOUND_FRAME_QUEUE_CAPACITY: usize = 128;
 pub const STATE_QUEUE_CAPACITY: usize = 32;
@@ -140,7 +149,7 @@ async fn handle_inbound_channel(
         (callbacks.terminal_channel)(channel);
         return;
     }
-    if label != DATACHANNEL_LABEL {
+    if !is_agent_datachannel_label(&label) {
         log::warn!("signaling::peer: rejecting data channel with unexpected label {label:?}");
         let _ = channel.close().await;
         return;
@@ -485,7 +494,7 @@ fn classify_inbound_channel(
     max_retransmits: Option<u16>,
     main_occupied: bool,
 ) -> InboundChannelDecision {
-    debug_assert_eq!(label, DATACHANNEL_LABEL);
+    debug_assert!(is_agent_datachannel_label(label));
     if !is_reliable_ordered_channel(ordered, max_packet_lifetime, max_retransmits) {
         InboundChannelDecision::RejectUnreliable
     } else if main_occupied {

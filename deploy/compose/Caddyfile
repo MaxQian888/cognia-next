@@ -10,7 +10,8 @@
 	@no_cache path *.html /sw.js /service-worker.js
 	header @no_cache Cache-Control "no-store"
 
-	handle /v2/signaling* {
+	@signaling path /signaling* /v2/signaling*
+	handle @signaling {
 		reverse_proxy signaling:7892
 	}
 

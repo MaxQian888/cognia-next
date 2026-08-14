@@ -293,7 +293,7 @@ cbc = { version = "0.2", features = ["alloc"] }
 pbkdf2 = "0.13"
 psl = "2.1"
 rand = "0.10"
-jsonwebtoken = "11"
+jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 serde_urlencoded = "0.7"
 
 # Local IP detection — used by `companion_issue_pair_jwt` to render the

@@ -28,8 +28,8 @@ function renderCard() {
 
 describe("displaySignalingUrl", () => {
   it("drops the query string so rendezvous ids never reach the screen", () => {
-    expect(displaySignalingUrl("wss://sig.example/v2/signaling?rid=abc-123")).toBe(
-      "wss://sig.example/v2/signaling"
+    expect(displaySignalingUrl("wss://sig.example/signaling?rid=abc-123")).toBe(
+      "wss://sig.example/signaling"
     )
   })
 
@@ -51,11 +51,11 @@ describe("<RendezvousCard />", () => {
     // The regression this card makes visible: a self-hosted signaling server
     // configured on the desktop never reached the phone, and the only symptom
     // was WebRTC failing behind a strict NAT.
-    seed({ signalingUrl: "wss://self-hosted.example/v2/signaling" })
+    seed({ signalingUrl: "wss://self-hosted.example/signaling" })
     renderCard()
 
     const row = screen.getByTestId("rendezvous-signaling")
-    expect(row).toHaveTextContent("wss://self-hosted.example/v2/signaling")
+    expect(row).toHaveTextContent("wss://self-hosted.example/signaling")
     expect(row).toHaveTextContent("From host")
   })
 

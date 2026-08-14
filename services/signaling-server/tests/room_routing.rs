@@ -2,9 +2,9 @@
 //! WS clients, drive a subscribe→relay→leave dance, assert ordering.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use cognia_signaling_core::v2::{derive_room_id, subscribe_proof_bytes};
+use cognia_signaling_core::protocol::{derive_room_id, subscribe_proof_bytes};
 use cognia_signaling_server::{
-    proto::{ClientFrame, PeerRole, RoomDescriptorV2, ServerFrame, SubscribeProofV2},
+    proto::{ClientFrame, PeerRole, RoomDescriptor, ServerFrame, SubscribeProof},
     serve_for_test,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -18,7 +18,7 @@ use tokio_tungstenite::{
 type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn connect(addr: std::net::SocketAddr) -> WsClient {
-    connect_path(addr, "/v2/signaling").await
+    connect_path(addr, "/signaling").await
 }
 
 async fn connect_path(addr: std::net::SocketAddr, path: &str) -> WsClient {
@@ -53,11 +53,11 @@ fn identity(role: PeerRole) -> SigningKey {
     SigningKey::from_slice(&[byte; 32]).unwrap()
 }
 
-fn descriptor(seed: u8) -> RoomDescriptorV2 {
+fn descriptor(seed: u8) -> RoomDescriptor {
     let encode = |key: &SigningKey| {
         URL_SAFE_NO_PAD.encode(key.verifying_key().to_encoded_point(false).as_bytes())
     };
-    let mut descriptor = RoomDescriptorV2 {
+    let mut descriptor = RoomDescriptor {
         v: 2,
         room_id: String::new(),
         room_nonce: URL_SAFE_NO_PAD.encode([seed; 16]),
@@ -69,13 +69,13 @@ fn descriptor(seed: u8) -> RoomDescriptorV2 {
     descriptor
 }
 
-async fn subscribe(client: &mut WsClient, descriptor: &RoomDescriptorV2, role: PeerRole) {
+async fn subscribe(client: &mut WsClient, descriptor: &RoomDescriptor, role: PeerRole) {
     let challenge = match recv(client).await {
         ServerFrame::Challenge { challenge, .. } => challenge,
         other => panic!("expected Challenge, got {other:?}"),
     };
     let ephemeral = SigningKey::from_slice(&[3u8; 32]).unwrap();
-    let mut proof = SubscribeProofV2 {
+    let mut proof = SubscribeProof {
         v: 2,
         room_id: descriptor.room_id.clone(),
         role,
@@ -284,7 +284,7 @@ async fn one_socket_can_join_multiple_self_certifying_rooms() {
     let rooms = [descriptor(3), descriptor(4)];
     for room in &rooms {
         let ephemeral = SigningKey::from_slice(&[3u8; 32]).unwrap();
-        let mut proof = SubscribeProofV2 {
+        let mut proof = SubscribeProof {
             v: 2,
             room_id: room.room_id.clone(),
             role: PeerRole::Desktop,
@@ -354,7 +354,7 @@ async fn upgrade_rid_rejects_mismatched_frame_room() {
     let bound = descriptor(5);
     let other_room = descriptor(6);
 
-    let path = format!("/v2/signaling?rid={}", bound.room_id);
+    let path = format!("/signaling?rid={}", bound.room_id);
     let mut desktop = connect_path(addr, &path).await;
     subscribe(&mut desktop, &bound, PeerRole::Desktop).await;
     assert!(matches!(

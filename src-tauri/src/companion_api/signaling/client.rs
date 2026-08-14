@@ -23,10 +23,10 @@ use std::time::{Duration, Instant};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_signaling_core::{
     proto::{
-        ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RoomDescriptorV2, ServerFrame,
-        SignalingEnvelopeV2, SubscribeProofV2,
+        ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RoomDescriptor, ServerFrame,
+        SignalingEnvelope, SubscribeProof,
     },
-    v2::{validate_room_descriptor, verify_subscribe_proof},
+    protocol::{validate_room_descriptor, verify_subscribe_proof},
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -38,9 +38,9 @@ use tokio_tungstenite::{
 use webrtc::peer_connection::{RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionState};
 
 use super::dispatch::spawn as spawn_dispatcher;
-use super::envelope_v2::{
-    build_envelope, build_subscribe_proof, now_ms, verify_and_decrypt_envelope,
-    StrictReplayWindowV2, V2EnvelopeError, V2EphemeralKey, V2Identity,
+use super::envelope::{
+    build_envelope, build_subscribe_proof, now_ms, verify_and_decrypt_envelope, EnvelopeError,
+    EphemeralKey, SignalingIdentity, StrictReplayWindow,
 };
 use super::peer::{
     PeerCallbacks, PeerSession, ICE_QUEUE_CAPACITY, INBOUND_FRAME_QUEUE_CAPACITY,
@@ -111,7 +111,7 @@ impl PendingRemoteIce {
 pub struct ClientConfig {
     pub signaling_url: String,
     pub rendezvous_id: String,
-    pub room_descriptor: RoomDescriptorV2,
+    pub room_descriptor: RoomDescriptor,
     pub signaling_key_ref: String,
     pub signing_private_key: String,
     pub device_id: String,
@@ -166,12 +166,12 @@ async fn run_with_reconnect(
         || config.room_descriptor.room_id != config.rendezvous_id
     {
         log::error!(
-            "signaling::client[{}]: invalid signaling v2 room descriptor",
+            "signaling::client[{}]: invalid signaling room descriptor",
             config.device_id
         );
         config
             .tier_writer
-            .set_with_error(DeviceTier::Failed, "invalid signaling v2 room descriptor");
+            .set_with_error(DeviceTier::Failed, "invalid signaling room descriptor");
         return;
     }
 
@@ -249,23 +249,23 @@ impl std::fmt::Display for SessionError {
 }
 
 struct PeerCrypto {
-    proof: SubscribeProofV2,
+    proof: SubscribeProof,
     inbound_key: [u8; 32],
     outbound_key: [u8; 32],
 }
 
 struct SessionCrypto {
-    identity: V2Identity,
-    ephemeral: V2EphemeralKey,
-    own_proof: SubscribeProofV2,
+    identity: SignalingIdentity,
+    ephemeral: EphemeralKey,
+    own_proof: SubscribeProof,
     peer: Option<PeerCrypto>,
-    replay: StrictReplayWindowV2,
+    replay: StrictReplayWindow,
 }
 
 impl SessionCrypto {
     fn accept_peer(
         &mut self,
-        descriptor: &RoomDescriptorV2,
+        descriptor: &RoomDescriptor,
         snapshot: &PeerSnapshot,
     ) -> Result<(), SessionError> {
         if snapshot.proof.role != PeerRole::Mobile {
@@ -288,7 +288,7 @@ impl SessionCrypto {
                 PeerRole::Mobile,
                 &snapshot.proof.epoch,
             )
-            .map_err(v2_envelope_err)?;
+            .map_err(envelope_err)?;
         let outbound_key = self
             .ephemeral
             .derive_direction_key(
@@ -297,13 +297,13 @@ impl SessionCrypto {
                 PeerRole::Desktop,
                 &self.own_proof.epoch,
             )
-            .map_err(v2_envelope_err)?;
+            .map_err(envelope_err)?;
         self.peer = Some(PeerCrypto {
             proof: snapshot.proof.clone(),
             inbound_key,
             outbound_key,
         });
-        self.replay = StrictReplayWindowV2::default();
+        self.replay = StrictReplayWindow::default();
         Ok(())
     }
 
@@ -313,7 +313,7 @@ impl SessionCrypto {
         seq: u64,
         kind: EnvelopeKind,
         body: &Value,
-    ) -> Result<SignalingEnvelopeV2, SessionError> {
+    ) -> Result<SignalingEnvelope, SessionError> {
         let peer = self
             .peer
             .as_ref()
@@ -330,7 +330,7 @@ impl SessionCrypto {
             &self.identity,
             &peer.outbound_key,
         )
-        .map_err(v2_envelope_err)
+        .map_err(envelope_err)
     }
 }
 
@@ -379,7 +379,7 @@ async fn run_one_session(
             } if expires_at >= now_ms() => challenge,
             _ => {
                 return Err(SessionError::Protocol(
-                    "expected a live signaling v2 challenge".into(),
+                    "expected a live signaling challenge".into(),
                 ))
             }
         },
@@ -392,18 +392,18 @@ async fn run_one_session(
     let private_bytes = URL_SAFE_NO_PAD
         .decode(config.signing_private_key.as_bytes())
         .map_err(|error| SessionError::Protocol(format!("signing key base64: {error}")))?;
-    let identity = V2Identity::from_private_bytes(&private_bytes).map_err(v2_envelope_err)?;
+    let identity = SignalingIdentity::from_private_bytes(&private_bytes).map_err(envelope_err)?;
     if identity.public_key_base64() != config.room_descriptor.desktop_signing_key {
         return Err(SessionError::Protocol(
             "desktop signing key does not match the room descriptor".into(),
         ));
     }
-    let ephemeral = V2EphemeralKey::generate();
+    let ephemeral = EphemeralKey::generate();
     let own_proof = build_subscribe_proof(
         &config.room_descriptor,
         PeerRole::Desktop,
-        fresh_v2_id(),
-        fresh_v2_id(),
+        fresh_id(),
+        fresh_id(),
         now_ms(),
         challenge,
         &ephemeral,
@@ -427,7 +427,7 @@ async fn run_one_session(
         ephemeral,
         own_proof,
         peer: None,
-        replay: StrictReplayWindowV2::default(),
+        replay: StrictReplayWindow::default(),
     };
 
     // Outbound queue → any task that wants to push a frame to the WSS sink
@@ -639,7 +639,7 @@ async fn run_one_session(
                                     continue;
                                 }
                                 crypto.peer = None;
-                                crypto.replay = StrictReplayWindowV2::default();
+                                crypto.replay = StrictReplayWindow::default();
                                 // Mobile dropped — tear down our peer too.
                                 teardown(
                                     &config.device_id,
@@ -717,7 +717,7 @@ async fn run_one_session(
 async fn push_relay(
     out_tx: &mpsc::Sender<String>,
     rendezvous_id: &str,
-    envelope: &SignalingEnvelopeV2,
+    envelope: &SignalingEnvelope,
 ) -> Result<(), SessionError> {
     let payload =
         serde_json::to_string(envelope).map_err(|e| SessionError::Protocol(e.to_string()))?;
@@ -749,11 +749,11 @@ fn append_rid(url: &str, rendezvous_id: &str) -> String {
     format!("{url}{sep}rid={rendezvous_id}")
 }
 
-fn v2_envelope_err(e: V2EnvelopeError) -> SessionError {
-    SessionError::Protocol(format!("signaling v2 envelope: {e}"))
+fn envelope_err(e: EnvelopeError) -> SessionError {
+    SessionError::Protocol(format!("signaling envelope: {e}"))
 }
 
-fn fresh_v2_id() -> String {
+fn fresh_id() -> String {
     let mut bytes = [0u8; 16];
     rand::fill(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
@@ -779,7 +779,7 @@ async fn handle_relay(
     dispatcher: &mut Option<tokio::task::JoinHandle<()>>,
     pending_remote_ice: &mut PendingRemoteIce,
 ) -> Result<(), SessionError> {
-    let envelope: SignalingEnvelopeV2 = serde_json::from_str(payload)
+    let envelope: SignalingEnvelope = serde_json::from_str(payload)
         .map_err(|e| SessionError::Protocol(format!("relay envelope json: {e}")))?;
     let Some(peer_crypto) = crypto.peer.as_ref() else {
         log::warn!(
@@ -810,7 +810,7 @@ async fn handle_relay(
         Ok(body) => body,
         Err(error) => {
             log::warn!(
-                "signaling::client[{}]: rejected v2 envelope: {error}",
+                "signaling::client[{}]: rejected envelope: {error}",
                 config.device_id
             );
             return Ok(());
@@ -1050,16 +1050,16 @@ mod tests {
     #[test]
     fn append_rid_adds_query_param() {
         assert_eq!(
-            append_rid("wss://host/v2/signaling", "r1"),
-            "wss://host/v2/signaling?rid=r1"
+            append_rid("wss://host/signaling", "r1"),
+            "wss://host/signaling?rid=r1"
         );
     }
 
     #[test]
     fn append_rid_preserves_existing_query() {
         assert_eq!(
-            append_rid("wss://host/v2/signaling?x=1", "r1"),
-            "wss://host/v2/signaling?x=1&rid=r1"
+            append_rid("wss://host/signaling?x=1", "r1"),
+            "wss://host/signaling?x=1&rid=r1"
         );
     }
 
@@ -1129,7 +1129,7 @@ mod tests {
     #[test]
     fn desktop_subscribe_frame_serializes_with_desktop_role() {
         let frame = ClientFrame::Subscribe {
-            descriptor: Box::new(RoomDescriptorV2 {
+            descriptor: Box::new(RoomDescriptor {
                 v: 2,
                 room_id: "r1".into(),
                 room_nonce: "nonce".into(),
@@ -1137,7 +1137,7 @@ mod tests {
                 mobile_signing_key: "mobile-key".into(),
                 not_after: 1_800_000_000_000,
             }),
-            proof: Box::new(SubscribeProofV2 {
+            proof: Box::new(SubscribeProof {
                 v: 2,
                 room_id: "r1".into(),
                 role: PeerRole::Desktop,

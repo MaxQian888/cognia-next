@@ -9,18 +9,21 @@
 
 export type PeerRole = "desktop" | "mobile"
 
+/** The only signaling wire protocol accepted by every transport. */
+export const SIGNALING_PROTOCOL_VERSION = 2 as const
+
 // ---------------------------------------------------------------------------
 // Server-visible envelope frames
 // ---------------------------------------------------------------------------
 
 export type ClientFrame =
-  | { kind: "subscribe"; descriptor: RoomDescriptorV2; proof: SubscribeProofV2 }
+  | { kind: "subscribe"; descriptor: RoomDescriptor; proof: SubscribeProof }
   | { kind: "unsubscribe"; rendezvousId: string }
   | { kind: "relay"; rendezvousId: string; payload: string }
   | { kind: "ping" }
 
 export interface PeerSnapshot {
-  proof: SubscribeProofV2
+  proof: SubscribeProof
   joinedAtMs: number
 }
 
@@ -46,7 +49,7 @@ export type ServerFrame =
 export type EnvelopeKind = "hello" | "rtc:offer" | "rtc:answer" | "rtc:ice" | "rtc:close"
 
 export interface Envelope {
-  ver: 2
+  ver: typeof SIGNALING_PROTOCOL_VERSION
   roomId: string
   senderRole: PeerRole
   sessionId: string
@@ -57,8 +60,8 @@ export interface Envelope {
   body: unknown
 }
 
-export interface RoomDescriptorV2 {
-  v: 2
+export interface RoomDescriptor {
+  v: typeof SIGNALING_PROTOCOL_VERSION
   roomId: string
   roomNonce: string
   desktopSigningKey: string
@@ -66,8 +69,8 @@ export interface RoomDescriptorV2 {
   notAfter: number
 }
 
-export interface SubscribeProofV2 {
-  v: 2
+export interface SubscribeProof {
+  v: typeof SIGNALING_PROTOCOL_VERSION
   roomId: string
   role: PeerRole
   sessionId: string
@@ -124,7 +127,7 @@ export const SIGNALING_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000, 60000
 export const SIGNALING_PING_INTERVAL_MS = 20_000
 
 /** Default DataChannel label, matched on both sides. */
-export const DATACHANNEL_LABEL = "cognia.v2"
+export const DATACHANNEL_LABEL = "cognia.signaling"
 
 /**
  * Default public signaling rendezvous endpoint. Customizable on three levels:
@@ -136,4 +139,4 @@ export const DATACHANNEL_LABEL = "cognia.v2"
  *     Worker's `wrangler.toml` route) if you operate a different domain.
  */
 export const DEFAULT_SIGNALING_URL =
-  process.env.NEXT_PUBLIC_SIGNALING_URL ?? "wss://signaling.cognia.cn/v2/signaling"
+  process.env.NEXT_PUBLIC_SIGNALING_URL ?? "wss://signaling.cognia.cn/signaling"

@@ -394,12 +394,13 @@ export function PairOnboardingClient() {
 
   return (
     <main
-      className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col gap-4 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] safe-area-pt sm:max-w-lg sm:px-6 md:max-w-xl"
+      className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col px-4 py-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] safe-area-pt sm:max-w-lg sm:px-6 md:max-w-xl"
       data-testid="pair-onboarding"
       data-step={step}
       data-mode={pairParams.mode}
     >
-      <header className="flex flex-col gap-3">
+      <div className="my-auto flex w-full flex-col gap-4" data-testid="pair-onboarding-content">
+        <header className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
             {isWebHost ? t("web.title") : t("title")}
@@ -456,16 +457,16 @@ export function PairOnboardingClient() {
             ) : null}
           </div>
         ) : null}
-      </header>
+        </header>
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={step}
-          initial={reduce ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reduce ? undefined : { opacity: 0, y: -8 }}
-          transition={mobileTransition("fast")}
-        >
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={step}
+            initial={reduce ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduce ? undefined : { opacity: 0, y: -8 }}
+            transition={mobileTransition("fast")}
+          >
           {step === "discover" && !isWebHost ? (
             <DiscoverStep
               history={recentServers}
@@ -496,8 +497,9 @@ export function PairOnboardingClient() {
               onAfterSignOut={onAfterSignOut}
             />
           ) : null}
-        </motion.div>
-      </AnimatePresence>
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </main>
   )
 }

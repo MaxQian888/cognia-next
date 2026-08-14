@@ -21,7 +21,7 @@ use cognia_signaling_core::policy::{
     rendezvous_id_matches_upgrade_room, ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE,
 };
 use cognia_signaling_core::proto::{ClientFrame, PeerRole, PeerSnapshot, ServerFrame};
-use cognia_signaling_core::v2::verify_subscribe_proof;
+use cognia_signaling_core::protocol::verify_subscribe_proof;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
@@ -53,7 +53,7 @@ struct Attachment {
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default)]
-    proof: Option<cognia_signaling_core::proto::SubscribeProofV2>,
+    proof: Option<cognia_signaling_core::proto::SubscribeProof>,
     challenge: String,
     challenge_expires_at: i64,
     joined_at_ms: i64,
@@ -256,7 +256,7 @@ impl DurableObject for RoomDurableObject {
                     send_error(
                         &ws,
                         "auth_failed",
-                        "signaling v2 subscription authentication failed",
+                        "signaling subscription authentication failed",
                     );
                     return Ok(());
                 }

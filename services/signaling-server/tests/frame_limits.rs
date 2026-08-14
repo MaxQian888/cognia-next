@@ -15,7 +15,7 @@ use tokio_tungstenite::{
 type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn connect(addr: std::net::SocketAddr) -> WsClient {
-    let url = format!("ws://{}/v2/signaling", addr);
+    let url = format!("ws://{}/signaling", addr);
     let (ws, _) = tokio_tungstenite::connect_async(url)
         .await
         .expect("ws connect");

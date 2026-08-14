@@ -65,6 +65,10 @@
   "fingerprintPinned": "桌面身份已锁定",
   "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
   "formCardTitle": "配对手机",
+  "invitationSummary": {
+    "description": "服务器 v{version} · {expiresAt, time, short} 过期",
+    "title": "已识别 {host} 的配对邀请"
+  },
   "health": {
     "checking": "检查中",
     "continueToChat": "进入聊天",
@@ -100,8 +104,8 @@
   "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",
   "offlineTitle": "连接已断开",
   "payloadError": {
-    "invalid": "无法解析该配对载荷——请从服务器完整复制 cgnp2|… 字符串后重新粘贴。",
-    "versionMismatch": "该配对载荷版本为 {got}，当前应用无法识别。请升级应用或服务器，使两端载荷版本一致。"
+    "invalid": "无法解析该配对邀请——请从服务器完整复制 cgnp3|… 字符串后重新粘贴。",
+    "versionMismatch": "服务器签发了 cgnp{got}，但当前浏览器要求 cgnp3。请重新构建本地服务器，或更新并重启部署镜像，再签发新邀请。"
   },
   "payloadPlaceholder": "cgnp3|…",
   "permissions": {
@@ -163,16 +167,30 @@
     "jwt": "配对 JWT"
   },
   "title": "连接桌面",
-  "tokenLabel": "配对令牌",
+  "tokenLabel": "配对邀请",
   "transportLabel": "传输层",
   "web": {
     "baseUrlLocked": "服务器地址由部署方预设",
-    "codeHint": "在服务器上运行 “cognia-server pair” 生成配对码，或从桌面端 设置 → 伴侣 中复制。",
-    "formCardDescription": "粘贴配对载荷，或输入服务器签发的 6 位配对码——两者共用同一枚 5 分钟有效的配对令牌。",
+    "clearPayload": "清空",
+    "clipboardReadFailed": "浏览器无法读取剪贴板，请手动粘贴完整配对邀请。",
+    "clipboardWriteFailed": "浏览器无法复制命令，请手动选择并复制。",
+    "codeHint": "在服务器上运行 “cognia-server pair” 生成一次性邀请，或从桌面端 设置 → 伴侣 中复制。",
+    "commandCopied": "命令已复制",
+    "commandMode": {
+      "compose": "Docker",
+      "development": "开发环境",
+      "kubernetes": "Kubernetes"
+    },
+    "copyCommand": "复制 Headless 配对命令",
+    "deploymentCommandHint": "请在目标 Host 实例内部执行。多租户或多副本部署中，请把 namespace 和 Pod 名替换为浏览器实际要连接的 Host。如果输出 cgnp2，请先更新部署镜像并重启或 rollout 该 Host。",
+    "formCardDescription": "粘贴 Cognia 服务器签发的一次性 cgnp3 配对邀请。",
     "formCardTitle": "配对此浏览器",
+    "headlessDescription": "保持 Headless 服务运行，在另一个终端执行此命令，然后把输出的 cgnp3 邀请粘贴到下方。",
+    "headlessTitle": "正在使用 Headless 服务器？",
     "httpsRequired": "浏览器配对必须使用 HTTPS，避免配对凭据以明文发送。请输入 HTTPS Companion 地址。",
-    "intro": "将此浏览器连接到你的 cognia 服务器。粘贴配对载荷或输入 6 位配对码即可登录。",
-    "pasteHint": "粘贴完整的 cgnp2|… 载荷（服务器地址会自动填入），或直接粘贴配对 JWT。",
+    "intro": "使用 Cognia 服务器签发的一次性邀请连接此浏览器。",
+    "pasteHint": "粘贴完整的 cgnp3|… 邀请，系统会自动验证服务器地址和身份。",
+    "pasteClipboard": "粘贴",
     "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
     "storageNoticeTitle": "凭据保存在此浏览器中",
     "title": "连接到服务器"

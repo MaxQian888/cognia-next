@@ -1,4 +1,4 @@
-//! Signaling v2 canonical encoding and admission verification.
+//! Canonical signaling encoding and admission verification.
 //!
 //! This module is intentionally WASM-safe so both the Axum service and the
 //! Cloudflare Durable Object execute exactly the same room-id and ECDSA
@@ -11,13 +11,13 @@ use p256::{
 };
 use sha2::{Digest, Sha256};
 
-use crate::proto::{PeerRole, RoomDescriptorV2, SubscribeProofV2};
+use crate::proto::{PeerRole, RoomDescriptor, SubscribeProof};
 
-pub const PROTOCOL_VERSION_V2: u8 = 2;
+pub const PROTOCOL_VERSION: u8 = 2;
 pub const SUBSCRIBE_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum V2AdmissionError {
+pub enum AdmissionError {
     BadVersion,
     InvalidRoomId,
     InvalidDescriptor,
@@ -29,7 +29,7 @@ pub enum V2AdmissionError {
     InvalidSignature,
 }
 
-impl std::fmt::Display for V2AdmissionError {
+impl std::fmt::Display for AdmissionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
             Self::BadVersion => "unsupported signaling protocol version",
@@ -46,7 +46,7 @@ impl std::fmt::Display for V2AdmissionError {
     }
 }
 
-impl std::error::Error for V2AdmissionError {}
+impl std::error::Error for AdmissionError {}
 
 pub fn encode_fields(fields: &[&[u8]]) -> Vec<u8> {
     let capacity = fields
@@ -55,14 +55,14 @@ pub fn encode_fields(fields: &[&[u8]]) -> Vec<u8> {
         .sum();
     let mut output = Vec::with_capacity(capacity);
     for field in fields {
-        let length = u32::try_from(field.len()).expect("v2 canonical field exceeds u32");
+        let length = u32::try_from(field.len()).expect("canonical field exceeds u32");
         output.extend_from_slice(&length.to_be_bytes());
         output.extend_from_slice(field);
     }
     output
 }
 
-pub fn room_descriptor_bytes(descriptor: &RoomDescriptorV2) -> Vec<u8> {
+pub fn room_descriptor_bytes(descriptor: &RoomDescriptor) -> Vec<u8> {
     let version = descriptor.v.to_string();
     let not_after = descriptor.not_after.to_string();
     encode_fields(&[
@@ -74,32 +74,32 @@ pub fn room_descriptor_bytes(descriptor: &RoomDescriptorV2) -> Vec<u8> {
     ])
 }
 
-pub fn derive_room_id(descriptor: &RoomDescriptorV2) -> String {
+pub fn derive_room_id(descriptor: &RoomDescriptor) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(room_descriptor_bytes(descriptor)))
 }
 
 pub fn validate_room_descriptor(
-    descriptor: &RoomDescriptorV2,
+    descriptor: &RoomDescriptor,
     now_ms: i64,
-) -> Result<(), V2AdmissionError> {
-    if descriptor.v != PROTOCOL_VERSION_V2 {
-        return Err(V2AdmissionError::BadVersion);
+) -> Result<(), AdmissionError> {
+    if descriptor.v != PROTOCOL_VERSION {
+        return Err(AdmissionError::BadVersion);
     }
     decode_canonical(&descriptor.room_nonce)
         .filter(|bytes| bytes.len() == 16)
-        .ok_or(V2AdmissionError::InvalidDescriptor)?;
+        .ok_or(AdmissionError::InvalidDescriptor)?;
     decode_public_key(&descriptor.desktop_signing_key)?;
     decode_public_key(&descriptor.mobile_signing_key)?;
     if descriptor.not_after < now_ms.saturating_sub(SUBSCRIBE_CLOCK_SKEW_MS) {
-        return Err(V2AdmissionError::ExpiredDescriptor);
+        return Err(AdmissionError::ExpiredDescriptor);
     }
     if derive_room_id(descriptor) != descriptor.room_id {
-        return Err(V2AdmissionError::InvalidRoomId);
+        return Err(AdmissionError::InvalidRoomId);
     }
     Ok(())
 }
 
-pub fn subscribe_proof_bytes(proof: &SubscribeProofV2) -> Vec<u8> {
+pub fn subscribe_proof_bytes(proof: &SubscribeProof) -> Vec<u8> {
     let version = proof.v.to_string();
     let issued_at = proof.issued_at.to_string();
     encode_fields(&[
@@ -115,23 +115,23 @@ pub fn subscribe_proof_bytes(proof: &SubscribeProofV2) -> Vec<u8> {
 }
 
 pub fn verify_subscribe_proof(
-    descriptor: &RoomDescriptorV2,
-    proof: &SubscribeProofV2,
+    descriptor: &RoomDescriptor,
+    proof: &SubscribeProof,
     expected_challenge: &str,
     now_ms: i64,
-) -> Result<(), V2AdmissionError> {
+) -> Result<(), AdmissionError> {
     validate_room_descriptor(descriptor, now_ms)?;
-    if proof.v != PROTOCOL_VERSION_V2 || proof.room_id != descriptor.room_id {
-        return Err(V2AdmissionError::BadVersion);
+    if proof.v != PROTOCOL_VERSION || proof.room_id != descriptor.room_id {
+        return Err(AdmissionError::BadVersion);
     }
     if proof.challenge != expected_challenge {
-        return Err(V2AdmissionError::InvalidChallenge);
+        return Err(AdmissionError::InvalidChallenge);
     }
     if proof.session_id.is_empty() || proof.epoch.is_empty() {
-        return Err(V2AdmissionError::InvalidSession);
+        return Err(AdmissionError::InvalidSession);
     }
     if proof.issued_at.abs_diff(now_ms) > SUBSCRIBE_CLOCK_SKEW_MS as u64 {
-        return Err(V2AdmissionError::ClockSkew);
+        return Err(AdmissionError::ClockSkew);
     }
     // Validate the ephemeral ECDH key as a real SEC1 point even though the
     // relay never derives the shared secret.
@@ -141,23 +141,21 @@ pub fn verify_subscribe_proof(
         PeerRole::Mobile => &descriptor.mobile_signing_key,
     };
     let verifying_key = VerifyingKey::from_sec1_bytes(
-        &decode_canonical(signing_key).ok_or(V2AdmissionError::InvalidPublicKey)?,
+        &decode_canonical(signing_key).ok_or(AdmissionError::InvalidPublicKey)?,
     )
-    .map_err(|_| V2AdmissionError::InvalidPublicKey)?;
+    .map_err(|_| AdmissionError::InvalidPublicKey)?;
     let signature = Signature::from_slice(
-        &decode_canonical(&proof.signature).ok_or(V2AdmissionError::InvalidSignature)?,
+        &decode_canonical(&proof.signature).ok_or(AdmissionError::InvalidSignature)?,
     )
-    .map_err(|_| V2AdmissionError::InvalidSignature)?;
+    .map_err(|_| AdmissionError::InvalidSignature)?;
     verifying_key
         .verify(&subscribe_proof_bytes(proof), &signature)
-        .map_err(|_| V2AdmissionError::InvalidSignature)
+        .map_err(|_| AdmissionError::InvalidSignature)
 }
 
-fn decode_public_key(encoded: &str) -> Result<PublicKey, V2AdmissionError> {
-    PublicKey::from_sec1_bytes(
-        &decode_canonical(encoded).ok_or(V2AdmissionError::InvalidPublicKey)?,
-    )
-    .map_err(|_| V2AdmissionError::InvalidPublicKey)
+fn decode_public_key(encoded: &str) -> Result<PublicKey, AdmissionError> {
+    PublicKey::from_sec1_bytes(&decode_canonical(encoded).ok_or(AdmissionError::InvalidPublicKey)?)
+        .map_err(|_| AdmissionError::InvalidPublicKey)
 }
 
 fn decode_canonical(value: &str) -> Option<Vec<u8>> {
@@ -174,8 +172,8 @@ mod tests {
         URL_SAFE_NO_PAD.encode(signing.verifying_key().to_encoded_point(false).as_bytes())
     }
 
-    fn descriptor(desktop: &SigningKey, mobile: &SigningKey) -> RoomDescriptorV2 {
-        let mut descriptor = RoomDescriptorV2 {
+    fn descriptor(desktop: &SigningKey, mobile: &SigningKey) -> RoomDescriptor {
+        let mut descriptor = RoomDescriptor {
             v: 2,
             room_id: String::new(),
             room_nonce: "AAECAwQFBgcICQoLDA0ODw".to_string(),
@@ -199,13 +197,13 @@ mod tests {
         tampered.mobile_signing_key = public_key(&desktop);
         assert_eq!(
             validate_room_descriptor(&tampered, 1_700_000_000_000),
-            Err(V2AdmissionError::InvalidRoomId)
+            Err(AdmissionError::InvalidRoomId)
         );
     }
 
     #[test]
     fn room_id_matches_the_typescript_vector() {
-        let mut descriptor = RoomDescriptorV2 {
+        let mut descriptor = RoomDescriptor {
             v: 2,
             room_id: String::new(),
             room_nonce: "AAECAwQFBgcICQoLDA0ODw".into(),
@@ -231,7 +229,7 @@ mod tests {
         let mobile = SigningKey::from_slice(&[2u8; 32]).unwrap();
         let ephemeral = SigningKey::from_slice(&[3u8; 32]).unwrap();
         let descriptor = descriptor(&desktop, &mobile);
-        let mut proof = SubscribeProofV2 {
+        let mut proof = SubscribeProof {
             v: 2,
             room_id: descriptor.room_id.clone(),
             role: PeerRole::Mobile,
@@ -250,11 +248,11 @@ mod tests {
         tampered.epoch = "epoch-2".into();
         assert_eq!(
             verify_subscribe_proof(&descriptor, &tampered, "challenge-1", 1_700_000_000_000,),
-            Err(V2AdmissionError::InvalidSignature)
+            Err(AdmissionError::InvalidSignature)
         );
         assert_eq!(
             verify_subscribe_proof(&descriptor, &proof, "challenge-2", 1_700_000_000_000,),
-            Err(V2AdmissionError::InvalidChallenge)
+            Err(AdmissionError::InvalidChallenge)
         );
     }
 }

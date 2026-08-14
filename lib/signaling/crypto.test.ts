@@ -1,20 +1,20 @@
 /** @jest-environment jsdom */
 
 import {
-  StrictReplayWindowV2,
-  buildRoomDescriptorV2,
-  buildSubscribeProofV2,
-  buildV2Envelope,
-  deriveV2DirectionKey,
-  generateV2EcdhKeyPair,
-  generateV2SigningKeyPair,
-  verifySubscribeProofV2,
-  verifyAndDecryptV2Envelope,
-} from "./v2-crypto"
+  StrictReplayWindow,
+  buildRoomDescriptor,
+  buildSubscribeProof,
+  buildEnvelope,
+  deriveDirectionKey,
+  generateEcdhKeyPair,
+  generateSigningKeyPair,
+  verifySubscribeProof,
+  verifyAndDecryptEnvelope,
+} from "./crypto"
 
-describe("signaling v2 crypto", () => {
+describe("signaling crypto", () => {
   it("derives a stable self-certifying room id from the role public keys", async () => {
-    const descriptor = await buildRoomDescriptorV2({
+    const descriptor = await buildRoomDescriptor({
       roomNonce: "AAECAwQFBgcICQoLDA0ODw",
       desktopSigningKey:
         "BG_wO5SSQc4drdQ1GeaWDgqFtBppoFwygQOqK84VlMoWPE91OlW_AdxT9sCwx-7ni0DG_30lqW4igrmJzvccFEo",
@@ -26,7 +26,7 @@ describe("signaling v2 crypto", () => {
     expect(descriptor.v).toBe(2)
     expect(descriptor.roomId).toBe("Yqb8u27ftwZjP7sGIEESUSotgIEBjEBkPNAj5hLk_ic")
     expect(
-      await buildRoomDescriptorV2({
+      await buildRoomDescriptor({
         roomNonce: descriptor.roomNonce,
         desktopSigningKey: descriptor.desktopSigningKey,
         mobileSigningKey: descriptor.mobileSigningKey,
@@ -36,16 +36,16 @@ describe("signaling v2 crypto", () => {
   })
 
   it("binds a signed subscription to the challenge, role, session, epoch, and ECDH key", async () => {
-    const desktopIdentity = await generateV2SigningKeyPair()
-    const mobileIdentity = await generateV2SigningKeyPair()
-    const mobileEcdh = await generateV2EcdhKeyPair()
-    const descriptor = await buildRoomDescriptorV2({
+    const desktopIdentity = await generateSigningKeyPair()
+    const mobileIdentity = await generateSigningKeyPair()
+    const mobileEcdh = await generateEcdhKeyPair()
+    const descriptor = await buildRoomDescriptor({
       roomNonce: "AAECAwQFBgcICQoLDA0ODw",
       desktopSigningKey: desktopIdentity.encodedPublicKey,
       mobileSigningKey: mobileIdentity.encodedPublicKey,
       notAfter: 1_800_000_000_000,
     })
-    const proof = await buildSubscribeProofV2({
+    const proof = await buildSubscribeProof({
       roomId: descriptor.roomId,
       role: "mobile",
       sessionId: "mobile-session",
@@ -57,13 +57,13 @@ describe("signaling v2 crypto", () => {
     })
 
     await expect(
-      verifySubscribeProofV2(descriptor, proof, {
+      verifySubscribeProof(descriptor, proof, {
         expectedChallenge: "server-challenge",
         nowMs: 1_700_000_000_000,
       })
     ).resolves.toBeUndefined()
     await expect(
-      verifySubscribeProofV2(
+      verifySubscribeProof(
         descriptor,
         { ...proof, role: "desktop" },
         {
@@ -73,7 +73,7 @@ describe("signaling v2 crypto", () => {
       )
     ).rejects.toThrow(/signature/i)
     await expect(
-      verifySubscribeProofV2(descriptor, proof, {
+      verifySubscribeProof(descriptor, proof, {
         expectedChallenge: "other-challenge",
         nowMs: 1_700_000_000_000,
       })
@@ -81,26 +81,26 @@ describe("signaling v2 crypto", () => {
   })
 
   it("encrypts, signs, verifies, and decrypts an envelope across independent peers", async () => {
-    const senderIdentity = await generateV2SigningKeyPair()
-    const senderEcdh = await generateV2EcdhKeyPair()
-    const receiverEcdh = await generateV2EcdhKeyPair()
-    const senderKey = await deriveV2DirectionKey({
+    const senderIdentity = await generateSigningKeyPair()
+    const senderEcdh = await generateEcdhKeyPair()
+    const receiverEcdh = await generateEcdhKeyPair()
+    const senderKey = await deriveDirectionKey({
       privateKey: senderEcdh.privateKey,
       peerPublicKey: receiverEcdh.publicKey,
-      roomId: "room-v2",
+      roomId: "room",
       senderRole: "mobile",
       epoch: "epoch-1",
     })
-    const receiverKey = await deriveV2DirectionKey({
+    const receiverKey = await deriveDirectionKey({
       privateKey: receiverEcdh.privateKey,
       peerPublicKey: senderEcdh.publicKey,
-      roomId: "room-v2",
+      roomId: "room",
       senderRole: "mobile",
       epoch: "epoch-1",
     })
 
-    const envelope = await buildV2Envelope({
-      roomId: "room-v2",
+    const envelope = await buildEnvelope({
+      roomId: "room",
       senderRole: "mobile",
       sessionId: "session-1",
       epoch: "epoch-1",
@@ -114,8 +114,8 @@ describe("signaling v2 crypto", () => {
 
     expect(JSON.stringify(envelope)).not.toContain("secret-candidate")
     await expect(
-      verifyAndDecryptV2Envelope(envelope, {
-        expectedRoomId: "room-v2",
+      verifyAndDecryptEnvelope(envelope, {
+        expectedRoomId: "room",
         expectedSenderRole: "mobile",
         signingPublicKey: senderIdentity.publicKey,
         encryptionKey: receiverKey,
@@ -128,18 +128,18 @@ describe("signaling v2 crypto", () => {
   })
 
   it("rejects ciphertext or sender-role tampering", async () => {
-    const identity = await generateV2SigningKeyPair()
-    const senderEcdh = await generateV2EcdhKeyPair()
-    const receiverEcdh = await generateV2EcdhKeyPair()
-    const key = await deriveV2DirectionKey({
+    const identity = await generateSigningKeyPair()
+    const senderEcdh = await generateEcdhKeyPair()
+    const receiverEcdh = await generateEcdhKeyPair()
+    const key = await deriveDirectionKey({
       privateKey: senderEcdh.privateKey,
       peerPublicKey: receiverEcdh.publicKey,
-      roomId: "room-v2",
+      roomId: "room",
       senderRole: "mobile",
       epoch: "epoch-1",
     })
-    const envelope = await buildV2Envelope({
-      roomId: "room-v2",
+    const envelope = await buildEnvelope({
+      roomId: "room",
       senderRole: "mobile",
       sessionId: "session-1",
       epoch: "epoch-1",
@@ -152,10 +152,10 @@ describe("signaling v2 crypto", () => {
     })
 
     await expect(
-      verifyAndDecryptV2Envelope(
+      verifyAndDecryptEnvelope(
         { ...envelope, senderRole: "desktop" },
         {
-          expectedRoomId: "room-v2",
+          expectedRoomId: "room",
           expectedSenderRole: "mobile",
           signingPublicKey: identity.publicKey,
           encryptionKey: key,
@@ -163,13 +163,13 @@ describe("signaling v2 crypto", () => {
       )
     ).rejects.toThrow(/sender role/i)
     await expect(
-      verifyAndDecryptV2Envelope(
+      verifyAndDecryptEnvelope(
         {
           ...envelope,
           ciphertext: `${envelope.ciphertext[0] === "A" ? "B" : "A"}${envelope.ciphertext.slice(1)}`,
         },
         {
-          expectedRoomId: "room-v2",
+          expectedRoomId: "room",
           expectedSenderRole: "mobile",
           signingPublicKey: identity.publicKey,
           encryptionKey: key,
@@ -179,7 +179,7 @@ describe("signaling v2 crypto", () => {
   })
 
   it("retires old epochs and enforces strictly increasing sequence numbers", () => {
-    const replay = new StrictReplayWindowV2()
+    const replay = new StrictReplayWindow()
     expect(replay.observe("epoch-a", 1, 1000)).toBe(true)
     expect(replay.observe("epoch-a", 1, 1001)).toBe(false)
     expect(replay.observe("epoch-a", 2, 1002)).toBe(true)

@@ -74,19 +74,19 @@ jest.mock("@/lib/tauri", () => ({
 // Stub the QR scanner; keep the legacy mock path so any transitive callers keep working.
 jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
 jest.mock("@/lib/qr/barcode-scanner", () => ({ scanQrCode: jest.fn() }))
-jest.mock("@/lib/signaling/v2-crypto", () => ({
-  generatePersistableV2SigningIdentity: async () => ({
+jest.mock("@/lib/signaling/crypto", () => ({
+  generatePersistableSigningIdentity: async () => ({
     privateKey: {},
     publicKey: {},
     privateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
     encodedPublicKey: "mobile-signing-key",
   }),
-  buildRoomDescriptorV2: async (input: Record<string, unknown>) => ({
+  buildRoomDescriptor: async (input: Record<string, unknown>) => ({
     v: 2,
     roomId: "room-1",
     ...input,
   }),
-  importV2SigningPrivateKey: async () => ({}),
+  importSigningPrivateKey: async () => ({}),
 }))
 
 // Control hydration timing so the loading-screen escape paths are testable.
@@ -503,6 +503,13 @@ describe("<PairOnboardingClient /> — web host (ADR-0059 C2)", () => {
     expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
     expect(screen.queryByTestId("pair-discover-step")).not.toBeInTheDocument()
     expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
+  })
+
+  it("centers the web pairing flow vertically without removing the full-height container", async () => {
+    render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-pair-step")
+    expect(screen.getByTestId("pair-onboarding")).toHaveClass("min-h-[100dvh]", "py-6")
+    expect(screen.getByTestId("pair-onboarding-content")).toHaveClass("my-auto")
   })
 
   it("renders a two-step stepper (no Discover) and hides QR + back affordances", async () => {

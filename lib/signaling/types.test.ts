@@ -8,7 +8,7 @@ import {
 } from "./types"
 
 it("exports bounded signaling protocol defaults", () => {
-  expect(DATACHANNEL_LABEL).toBe("cognia.v2")
+  expect(DATACHANNEL_LABEL).toBe("cognia.signaling")
   expect(DEFAULT_SIGNALING_URL).toMatch(/^wss:\/\//)
   expect(REPLAY_CLOCK_SKEW_MS).toBe(5 * 60 * 1000)
   expect(REPLAY_LRU_CAPACITY).toBe(256)

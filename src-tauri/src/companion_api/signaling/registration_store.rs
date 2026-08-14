@@ -169,13 +169,13 @@ CREATE TABLE IF NOT EXISTS signaling_registrations (
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cognia_signaling_core::proto::RoomDescriptorV2;
+    use cognia_signaling_core::proto::RoomDescriptor;
 
     fn registration(device: &str, room: &str, key: &str) -> DeviceRegistration {
         DeviceRegistration {
             device_id: device.into(),
             rendezvous_id: room.into(),
-            room_descriptor: RoomDescriptorV2 {
+            room_descriptor: RoomDescriptor {
                 v: 2,
                 room_id: room.into(),
                 room_nonce: "nonce".into(),

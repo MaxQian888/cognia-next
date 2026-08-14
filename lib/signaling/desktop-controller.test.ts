@@ -81,14 +81,14 @@ describe("buildSignalingConfigPatch", () => {
     const patch = buildSignalingConfigPatch(
       settings({
         webrtcEnabled: true,
-        signalingUrl: "wss://sig.example/v2/signaling",
+        signalingUrl: "wss://sig.example/signaling",
         iceServers: [{ urls: "stun:s" }],
       }),
       [{ urls: "turn:static", username: "u", credential: "c" }],
       [{ urls: "turn:prov" }]
     )
     expect(patch.enabled).toBe(true)
-    expect(patch.signalingUrl).toBe("wss://sig.example/v2/signaling")
+    expect(patch.signalingUrl).toBe("wss://sig.example/signaling")
     expect(patch.iceServers).toEqual([
       { urls: ["stun:s"], username: undefined, credential: undefined },
     ])

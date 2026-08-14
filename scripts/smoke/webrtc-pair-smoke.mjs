@@ -344,7 +344,7 @@ async function run() {
   ensureExport()
 
   const { child: sigChild, port } = await bootSignaling()
-  const signalingUrl = `ws://127.0.0.1:${port}/v2/signaling`
+  const signalingUrl = `ws://127.0.0.1:${port}/signaling`
   log(`signaling server on ${signalingUrl}`)
 
   const outServer = createOutServer(OUT_ROOT)

@@ -19,8 +19,8 @@ configMapGenerator:
   - name: cognia-config
     literals:
       - publicUrl=https://server.invalid
-      - signalingUrl=ws://signaling:7892/v2/signaling
-      - publicSignalingUrl=wss://server.invalid/v2/signaling
+      - signalingUrl=ws://signaling:7892/signaling
+      - publicSignalingUrl=wss://server.invalid/signaling
   - name: cognia-deploy-agent
     files:
       - deploy-agent.yaml

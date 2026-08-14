@@ -4,7 +4,7 @@
  * the desktop's "Mobile companion" settings tab (M2.8).
  */
 
-import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import type { RoomDescriptor } from "@/lib/signaling/crypto"
 
 export type DevicePlatform = "ios" | "android" | "web" | "unknown"
 
@@ -141,8 +141,8 @@ export interface PairedDeviceRow {
    */
   rendezvousId?: string
 
-  /** Public signaling v2 descriptor; safe for Dexie and diagnostics. */
-  signalingRoomDescriptor?: RoomDescriptorV2
+  /** Public signaling descriptor; safe for Dexie and diagnostics. */
+  signalingRoomDescriptor?: RoomDescriptor
 
   /** Opaque reference to the desktop role private key in the host keyring. */
   signalingKeyRef?: string

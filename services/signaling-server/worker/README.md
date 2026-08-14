@@ -110,7 +110,7 @@ The signaling hostname is configured in **one** place per side, kept in sync:
 
 - **App default** — `DEFAULT_SIGNALING_URL` in `lib/signaling/types.ts` reads
   the `NEXT_PUBLIC_SIGNALING_URL` build var, falling back to
-  `wss://signaling.cognia.cn/v2/signaling`. Set the env var at `pnpm build`
+  `wss://signaling.cognia.cn/signaling`. Set the env var at `pnpm build`
   time to point every shell (browser/Tauri/Capacitor) and the Rust desktop
   peer (via `option_env!`) at your domain. Users can override per-install at
   runtime in Settings → Companion → WebRTC.
@@ -139,7 +139,7 @@ a Cloudflare **Rate Limiting rule** (dashboard → Security → WAF → Rate lim
 rules) on this Worker — this is the analogue of the axum server's `ip_limits.rs`
 (50/IP process-wide):
 
-- Match: URI Path equals `/v2/signaling`
+- Match: URI Path equals `/signaling`
 - Rate: 60 requests per 1 minute, counting by IP
 - Action: Block (or Managed Challenge)
 

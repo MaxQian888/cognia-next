@@ -249,7 +249,7 @@ function makeRtc(
   const sig = new FakeSignaling()
   const pcs: FakePeerConnection[] = []
   const rtc = new TransportRtc({
-    signalingUrl: "wss://signaling.test/v2/signaling",
+    signalingUrl: "wss://signaling.test/signaling",
     rendezvousId: "room-1",
     signalingRoomDescriptor: ROOM_DESCRIPTOR,
     signalingPrivateKey: SIGNALING_PRIVATE_KEY,
@@ -317,7 +317,7 @@ describe("TransportRtc", () => {
     await new Promise((resolve) => setTimeout(resolve, 5))
 
     expect(pcs[0].channels.map((channel) => channel.label)).toEqual([
-      "cognia.v2",
+      "cognia.signaling",
       "cognia.terminal",
     ])
     expect(rtc.getTerminalDataChannel()).toBe(pcs[0].channels[1])
@@ -807,7 +807,7 @@ describe("TransportRtc", () => {
       const sigs: FakeSignaling[] = []
       const pcs: FakePeerConnection[] = []
       const rtc = new TransportRtc({
-        signalingUrl: "wss://signaling.test/v2/signaling",
+        signalingUrl: "wss://signaling.test/signaling",
         rendezvousId: "room-1",
         signalingRoomDescriptor: ROOM_DESCRIPTOR,
         signalingPrivateKey: SIGNALING_PRIVATE_KEY,
@@ -1093,7 +1093,7 @@ describe("TransportRtc", () => {
       const sigs: FakeSignaling[] = []
       const pcs: FakePeerConnection[] = []
       const rtc = new TransportRtc({
-        signalingUrl: "wss://signaling.test/v2/signaling",
+        signalingUrl: "wss://signaling.test/signaling",
         rendezvousId: "room-1",
         signalingRoomDescriptor: ROOM_DESCRIPTOR,
         signalingPrivateKey: SIGNALING_PRIVATE_KEY,

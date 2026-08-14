@@ -1,21 +1,21 @@
 ---
 title: "ADR-0021 — WebRTC DataChannel WAN 传输"
-description: "仅支持v2的端到端加密信令和信令DataChannel 传输，用于配对mobile/browser客户端与Cognia主机之间。"
+description: "用于配对 mobile/browser 客户端与 Cognia 主机之间的单一端到端加密信令和 DataChannel 传输。"
 ---
 
 # ADR-0021 — WebRTC DataChannel WAN 传输
 
-状态：已接受并已实现。线路协议仅支持v2。没有v1兼容模式、降级路径或共享信令秘密。
+状态：已接受并已实现。线路协议只有一个实现，没有兼容模式、降级路径或共享信令秘密。
 
 ## 决策
 
-Cognia将LAN HTTPS/WebSocket作为首选。当配对主机在LAN上不健康时，客户端尝试一条可靠、有序的WebRTC DataChannel，名为`cognia.v2`。经过认证的HTTPS/WebSocket路由仍然是命令元数据允许重试的命令的安全回退。
+Cognia将LAN HTTPS/WebSocket作为首选。当配对主机在LAN上不健康时，客户端尝试一条可靠、有序的WebRTC DataChannel，名为`cognia.signaling`。经过认证的HTTPS/WebSocket路由仍然是命令元数据允许重试的命令的安全回退。
 
-公共Worker是主要的会合点。Axum服务实现了相同的自托管和灾难恢复协议。两者都暴露了`/v2/signaling`。
+公共Worker是主要的会合点。Axum服务实现了相同的自托管和灾难恢复协议。两者都暴露了`/signaling`。
 
 ## 配对材料
 
-配对形成一个`RoomDescriptorV2`：
+配对形成一个`RoomDescriptor`：
 
 - 版本`2`;
 - 一个随机的128位房间随机化;
@@ -64,7 +64,7 @@ DataChannel携带JSON RPC、事件重放控制和有界块帧：
 - 浏览器与 Rust 发送端统一采用 1 MiB 高水位、256 KiB 低水位的背压;
 - 每个节点有32个并发RPCs和128个排队的入站帧。
 
-每个 peer 只接受一个有序、完全可靠的 `cognia.v2` 主通道。无序、部分可靠或重复的主通道会在注册回调前关闭；`cognia.terminal` 保持独立且行为不变。
+每个 peer 只接受一个有序、完全可靠的 `cognia.signaling` 主通道。无序、部分可靠或重复的主通道会在注册回调前关闭；`cognia.terminal` 保持独立且行为不变。
 
 RPC请求使用`{id, method, params, idempotencyKey, protocolVersion: 2}`。命令行为来自共享命令清单。HTTPS和RTC共享一个由`(deviceId, method, idempotencyKey)`键的持久24小时账本及参数摘要。完成的结果会被重放;不同的参数返回`idempotency_conflict`;崩溃后留下的待处理记录返回`idempotency_indeterminate`。
 

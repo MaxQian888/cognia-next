@@ -20,7 +20,7 @@ description: "一个分层的计划，用于在桌面、移动端、浏览器和
 1. **工作流程模型中没有设备身份。** `WorkflowTriggeredFrom`携带`source`但未显示*哪台设备*;伴触发的运行记录为`"ui"`。
 2. **无能力模型。** 平台门槛是一个编辑器端布尔值（`NodeCatalogEntry.desktopOnly`，17个条目）;编排器在前检运行时不做，例如网页上的15个`action.desktop.*`节点在其执行者内部失败——而之前的步骤已经运行并产生了副作用。~426 个分支文件在 `isTauri()`/`usePlatform()` 上临时添加。
 3. **`pairedDevices` 是认证账本，** 不是调度基底：JWT、TLS pin、rendezvous 元组、`allowRemoteControl`——没有宣告功能，也无法询问“这部手机能扫描条码”。
-4. **强传输基础未被使用**：伴随的RPC允许表是spec-对等性，采用跨传输幂零测试;WebRTC DataChannel（`cognia.v2`，ADR 0021）是对称的——电话可以*服务*RPCs;push + 移动批准卡管道存在，但从不承载工作流程事件;`lib/capacitor/`封装摄像头/定位/条码/语音/共享，没有作为工作流程节点暴露。
+4. **强传输基础未被使用**：伴随的RPC允许表是spec-对等性，采用跨传输幂零测试;WebRTC DataChannel（`cognia.signaling`，ADR 0021）是对称的——电话可以*服务*RPCs;push + 移动批准卡管道存在，但从不承载工作流程事件;`lib/capacitor/`封装摄像头/定位/条码/语音/共享，没有作为工作流程节点暴露。
 5. **现有的三种“切换”机制**（团队background/external切换执行器、任务委托、CLI→桌面会话传输）没有设备概念;`externalPickup.claimedBy` 是硬编码字符串`"external-bridge"`。
 
 ## 决策

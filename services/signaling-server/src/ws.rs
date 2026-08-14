@@ -29,7 +29,7 @@ use cognia_signaling_core::policy::{
     is_origin_allowed, rendezvous_id_matches_upgrade_room, ROOM_MISMATCH_CODE,
     ROOM_MISMATCH_MESSAGE,
 };
-use cognia_signaling_core::v2::verify_subscribe_proof;
+use cognia_signaling_core::protocol::verify_subscribe_proof;
 use futures_util::{SinkExt, StreamExt};
 use rand::RngCore;
 use tokio::sync::mpsc;
@@ -374,7 +374,7 @@ async fn handle_frame(
                 state.metrics.frame_rejected(RejectReason::Malformed);
                 let _ = tx.try_send(ServerFrame::Error {
                     code: "auth_failed".into(),
-                    message: "signaling v2 subscription authentication failed".into(),
+                    message: "signaling subscription authentication failed".into(),
                 });
                 return;
             }
@@ -546,8 +546,8 @@ mod tests {
     };
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use cognia_signaling_core::{
-        proto::{RoomDescriptorV2, SubscribeProofV2},
-        v2::{derive_room_id, subscribe_proof_bytes},
+        proto::{RoomDescriptor, SubscribeProof},
+        protocol::{derive_room_id, subscribe_proof_bytes},
     };
     use p256::ecdsa::{signature::Signer, Signature, SigningKey};
     use std::sync::atomic::Ordering;
@@ -614,13 +614,13 @@ mod tests {
         SigningKey::from_slice(&[byte; 32]).unwrap()
     }
 
-    fn descriptor() -> RoomDescriptorV2 {
+    fn descriptor() -> RoomDescriptor {
         let desktop = identity(PeerRole::Desktop);
         let mobile = identity(PeerRole::Mobile);
         let encode = |key: &SigningKey| {
             URL_SAFE_NO_PAD.encode(key.verifying_key().to_encoded_point(false).as_bytes())
         };
-        let mut descriptor = RoomDescriptorV2 {
+        let mut descriptor = RoomDescriptor {
             v: 2,
             room_id: String::new(),
             room_nonce: "AAECAwQFBgcICQoLDA0ODw".into(),
@@ -636,10 +636,10 @@ mod tests {
         descriptor().room_id
     }
 
-    fn proof(role: PeerRole, challenge: &str) -> SubscribeProofV2 {
+    fn proof(role: PeerRole, challenge: &str) -> SubscribeProof {
         let descriptor = descriptor();
         let ephemeral = SigningKey::from_slice(&[3u8; 32]).unwrap();
-        let mut proof = SubscribeProofV2 {
+        let mut proof = SubscribeProof {
             v: 2,
             room_id: descriptor.room_id,
             role,
@@ -688,19 +688,19 @@ mod tests {
     #[test]
     fn upgrade_room_from_uri_reads_non_empty_rid() {
         assert_eq!(
-            super::upgrade_room_from_uri(&"/v2/signaling?rid=room-a".parse().unwrap()),
+            super::upgrade_room_from_uri(&"/signaling?rid=room-a".parse().unwrap()),
             Some("room-a".to_string())
         );
         assert_eq!(
-            super::upgrade_room_from_uri(&"/v2/signaling?foo=1&rid=room-b".parse().unwrap()),
+            super::upgrade_room_from_uri(&"/signaling?foo=1&rid=room-b".parse().unwrap()),
             Some("room-b".to_string())
         );
         assert_eq!(
-            super::upgrade_room_from_uri(&"/v2/signaling?rid=".parse().unwrap()),
+            super::upgrade_room_from_uri(&"/signaling?rid=".parse().unwrap()),
             None
         );
         assert_eq!(
-            super::upgrade_room_from_uri(&"/v2/signaling".parse().unwrap()),
+            super::upgrade_room_from_uri(&"/signaling".parse().unwrap()),
             None
         );
     }

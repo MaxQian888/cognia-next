@@ -11,7 +11,7 @@
 //!
 //! Submodules:
 //!
-//! - [`envelope_v2`] — ECDSA/ECDH/AES-GCM signaling protocol.
+//! - [`envelope`] — ECDSA/ECDH/AES-GCM signaling protocol.
 //! - [`peer`] — `webrtc-rs` `RTCPeerConnection` wrapper.
 //! - [`dispatch`] — DataChannel ↔ `remote_execution` + `EventBus` bridge.
 //! - [`client`] — long-lived WSS client (one task per paired device).
@@ -19,7 +19,7 @@
 pub mod client;
 pub mod datachannel_framing;
 pub mod dispatch;
-pub mod envelope_v2;
+pub mod envelope;
 pub mod peer;
 pub mod registration_store;
 
@@ -33,7 +33,7 @@ use webrtc::peer_connection::RTCIceServer;
 use std::time::{Duration, Instant};
 
 use self::client::{spawn as spawn_client, ClientConfig, ClientHandle};
-use self::envelope_v2::{now_ms, SIGNALING_KEY_NAMESPACE};
+use self::envelope::now_ms;
 use crate::companion_api::SharedState;
 
 static INSTALLED_HUB: once_cell::sync::Lazy<
@@ -74,7 +74,7 @@ const RECONNECT_DEVICE_MIN_SPACING: Duration = Duration::from_secs(5);
 /// overrides still arrive from the renderer via `AppSettings.signalingUrl`.
 pub const DEFAULT_SIGNALING_URL: &str = match option_env!("NEXT_PUBLIC_SIGNALING_URL") {
     Some(url) => url,
-    None => "wss://signaling.cognia.cn/v2/signaling",
+    None => "wss://signaling.cognia.cn/signaling",
 };
 
 /// Default STUN servers (Google + Cloudflare public). Mirrored in the
@@ -273,26 +273,24 @@ impl SignalingHub {
         // `sync_devices` already shows the device — clients land in
         // `Offline` until the WSS task transitions them to `Awaiting`.
         tier_writer.set(DeviceTier::Offline);
-        let signing_private_key = match cognia_secrets::keyring_secrets::get(
-            SIGNALING_KEY_NAMESPACE,
-            &registration.signaling_key_ref,
-        ) {
-            Ok(Some(key)) => key,
-            Ok(None) => {
-                tier_writer.set_with_error(
-                    DeviceTier::Failed,
-                    "signaling v2 identity is missing from the host keyring",
-                );
-                return;
-            }
-            Err(error) => {
-                tier_writer.set_with_error(
-                    DeviceTier::Failed,
-                    format!("failed to load signaling v2 identity: {error}"),
-                );
-                return;
-            }
-        };
+        let signing_private_key =
+            match self::envelope::load_signaling_key(&registration.signaling_key_ref) {
+                Ok(Some(key)) => key,
+                Ok(None) => {
+                    tier_writer.set_with_error(
+                        DeviceTier::Failed,
+                        "signaling identity is missing from the host keyring",
+                    );
+                    return;
+                }
+                Err(error) => {
+                    tier_writer.set_with_error(
+                        DeviceTier::Failed,
+                        format!("failed to load signaling identity: {error}"),
+                    );
+                    return;
+                }
+            };
         let config = ClientConfig {
             signaling_url,
             rendezvous_id: rendezvous_id.clone(),
@@ -512,13 +510,13 @@ impl Default for SignalingHub {
 
 /// Per-device configuration the renderer pushes via
 /// `companion_signaling_sync_devices`. One entry per paired device that
-/// has a v2 room descriptor and a host signing-key reference.
+/// has a room descriptor and a host signing-key reference.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRegistration {
     pub device_id: String,
     pub rendezvous_id: String,
-    pub room_descriptor: cognia_signaling_core::proto::RoomDescriptorV2,
+    pub room_descriptor: cognia_signaling_core::proto::RoomDescriptor,
     pub signaling_key_ref: String,
 }
 
@@ -744,7 +742,7 @@ mod tests {
         DeviceRegistration {
             device_id: device_id.into(),
             rendezvous_id: rendezvous_id.into(),
-            room_descriptor: cognia_signaling_core::proto::RoomDescriptorV2 {
+            room_descriptor: cognia_signaling_core::proto::RoomDescriptor {
                 v: 2,
                 room_id: rendezvous_id.into(),
                 room_nonce: "nonce".into(),

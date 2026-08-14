@@ -107,7 +107,7 @@ it("starts canonical Logto PKCE when an oidc pairing has no active session", asy
       webClientId: session.clientId,
       scopes: ["openid", "offline_access"],
     },
-    signaling: { url: "wss://host.example/v2/signaling", iceServers: [] },
+    signaling: { url: "wss://host.example/signaling", iceServers: [] },
   })
   signIn.mockResolvedValue(session)
   register.mockResolvedValue(config)

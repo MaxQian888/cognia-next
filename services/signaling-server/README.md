@@ -5,7 +5,7 @@ transport. Implements ADR-0021.
 
 ## What it does
 
-- Exposes `GET /v2/signaling` as a WebSocket endpoint.
+- Exposes `GET /signaling` as a WebSocket endpoint.
 - Maintains an in-memory `HashMap<rendezvousId, Vec<PeerSocket>>` of
   subscribed peers per room.
 - Enforces one active desktop role and one active mobile role per room. A
@@ -51,7 +51,7 @@ flyctl deploy
 ```
 
 The container listens on `$PORT` (default 7892). Fly's edge serves TLS so
-clients connect with `wss://<app>.fly.dev/v2/signaling`.
+clients connect with `wss://<app>.fly.dev/signaling`.
 
 ## Deploy from CI
 
@@ -75,8 +75,8 @@ limit. The reference deployment uses a `shared-cpu-1x` Fly machine with
 
 ```
 Client → Server
-  connect ws(s)://host/v2/signaling?rid=<rendezvousId>  # required by Worker, room-bound by axum when present
-  { kind: "subscribe", descriptor: RoomDescriptorV2, proof: SubscribeProofV2 }
+  connect ws(s)://host/signaling?rid=<rendezvousId>  # required by Worker, room-bound by axum when present
+  { kind: "subscribe", descriptor: RoomDescriptor, proof: SubscribeProof }
   { kind: "unsubscribe", rendezvousId }
   { kind: "relay", rendezvousId, payload: <base64url> }   # opaque
   { kind: "ping" }
@@ -91,7 +91,7 @@ Server → Client
   { kind: "error", code, message }
 ```
 
-The opaque `payload` carries `SignalingEnvelopeV2`: signed metadata plus
+The opaque `payload` carries `SignalingEnvelope`: signed metadata plus
 AES-256-GCM ciphertext. Canonical fields are length-prefixed, so signature
 verification does not depend on JSON property order.
 

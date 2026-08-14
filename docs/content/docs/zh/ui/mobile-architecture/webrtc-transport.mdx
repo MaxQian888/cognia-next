@@ -1,6 +1,6 @@
 ---
 title: WebRTC 传输
-description: 仅 v2 的移动端/浏览器 offerer、端到端加密信令、受界 DataChannel、恢复阶梯与 LAN-first 控制器。
+description: 单一协议的移动端/浏览器 offerer、端到端加密信令、受界 DataChannel、恢复阶梯与 LAN-first 控制器。
 ---
 
 # WebRTC 传输
@@ -9,18 +9,18 @@ description: 仅 v2 的移动端/浏览器 offerer、端到端加密信令、受
 选路：
 
 1. 健康的 LAN HTTPS/WebSocket；
-2. 已打开的 WebRTC `cognia.v2` DataChannel；
+2. 已打开的 WebRTC `cognia.signaling` DataChannel；
 3. 命令元数据允许时，回退到已认证 HTTPS/WebSocket。
 
 客户端不存在旧信令协议降级。
 
 ## 配对与信令
 
-配对响应包含公开 `RoomDescriptorV2` 和 mobile 角色私钥。Capacitor 将
+配对响应包含公开 `RoomDescriptor` 和 mobile 角色私钥。Capacitor 将
 私钥放入 SecureStorage；普通浏览器使用 non-extractable WebCrypto key
 与加密 IndexedDB pairing blob。
 
-`SignalingClient` 连接 `/v2/signaling`，用 ECDSA P-256 签名 challenge，
+`SignalingClient` 连接 `/signaling`，用 ECDSA P-256 签名 challenge，
 生成临时 P-256 ECDH key，并以 mobile 角色订阅。SDP/ICE 使用方向性的
 HKDF-SHA-256/AES-256-GCM key 加密，签名覆盖长度前缀的规范字段；中继
 无法读取密文内容。
@@ -30,7 +30,7 @@ HKDF-SHA-256/AES-256-GCM key 加密，签名覆盖长度前缀的规范字段；
 
 ## 协商与恢复
 
-移动端创建一个有序可靠的 `cognia.v2` DataChannel。remote description
+移动端创建一个有序可靠的 `cognia.signaling` DataChannel。remote description
 尚未设置时，ICE 按序保留（最多 256 条、30 秒）。每个异步协商回调在
 修改 peer 前校验 epoch。
 

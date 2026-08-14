@@ -182,7 +182,7 @@
     "test:e2e:report": "playwright show-report",
     "webrtc:smoke": "node scripts/smoke/signaling-smoke.mjs",
     "webrtc:pair": "node scripts/smoke/webrtc-pair-smoke.mjs",
-    "webrtc:crypto-vector": "pnpm exec jest lib/signaling/v2-crypto.test.ts --runInBand && cargo test --manifest-path services/signaling-server/core/Cargo.toml room_id_matches_the_typescript_vector && cargo test --manifest-path src-tauri/Cargo.toml companion_api::signaling::envelope_v2 --lib",
+    "webrtc:crypto-vector": "pnpm exec jest lib/signaling/crypto.test.ts --runInBand && cargo test --manifest-path services/signaling-server/core/Cargo.toml room_id_matches_the_typescript_vector && cargo test --manifest-path src-tauri/Cargo.toml companion_api::signaling::envelope --lib",
     "compose:smoke": "node scripts/smoke/compose-smoke.mjs",
     "sync:plugin-sdk-wit": "node scripts/sync/sync-plugin-sdk-wit.mjs",
     "sync:models-dev": "node scripts/sync/sync-models-dev.mjs",

@@ -113,7 +113,7 @@ async function bootServer() {
 }
 
 function connect(port, label) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/v2/signaling`)
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/signaling`)
   const inbox = []
   const waiters = []
   const drainWaiters = () => {

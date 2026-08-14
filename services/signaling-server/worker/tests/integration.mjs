@@ -1,4 +1,4 @@
-// Black-box v2 conformance smoke for the Cloudflare Worker rendezvous.
+// Black-box protocol conformance smoke for the Cloudflare Worker rendezvous.
 // Run against `wrangler dev` or a deployed Worker via SIGNALING_URL.
 
 import { randomBytes, webcrypto } from "node:crypto"
@@ -94,7 +94,7 @@ async function subscribeFrame(room, role, challenge) {
 }
 
 function connect(label, roomId) {
-  const ws = new WebSocket(`${BASE}/v2/signaling?rid=${encodeURIComponent(roomId)}`)
+  const ws = new WebSocket(`${BASE}/signaling?rid=${encodeURIComponent(roomId)}`)
   const inbox = []
   const waiters = []
   ws.addEventListener("message", (event) => {
@@ -274,7 +274,7 @@ async function main() {
   ]) {
     client.close()
   }
-  console.log("worker signaling v2 integration: PASS")
+  console.log("worker signaling integration: PASS")
 }
 
 main().catch((error) => {

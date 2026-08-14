@@ -1,7 +1,7 @@
 //! Wire protocol between signaling clients and the rendezvous service.
 //!
 //! [`ClientFrame`] and [`ServerFrame`] are the server-visible routing layer.
-//! The application payload is a serialized [`SignalingEnvelopeV2`] containing
+//! The application payload is a serialized [`SignalingEnvelope`] containing
 //! only authenticated metadata and AES-GCM ciphertext. The relay forwards it
 //! without access to SDP or ICE plaintext.
 //!
@@ -26,7 +26,7 @@ pub enum PeerRole {
 /// descriptor contains public keys only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RoomDescriptorV2 {
+pub struct RoomDescriptor {
     pub v: u8,
     pub room_id: String,
     pub room_nonce: String,
@@ -40,7 +40,7 @@ pub struct RoomDescriptorV2 {
 /// untrusted relay cannot substitute a key or sender role.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SubscribeProofV2 {
+pub struct SubscribeProof {
     pub v: u8,
     pub room_id: String,
     pub role: PeerRole,
@@ -57,7 +57,7 @@ pub struct SubscribeProofV2 {
 /// authenticated by both ECDSA and AES-GCM additional data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SignalingEnvelopeV2 {
+pub struct SignalingEnvelope {
     pub v: u8,
     pub room_id: String,
     pub sender_role: PeerRole,
@@ -105,17 +105,17 @@ pub enum ClientFrame {
     /// Join the self-certifying room after receiving a server challenge.
     /// Admission validates the descriptor hash and the role's ECDSA proof.
     Subscribe {
-        descriptor: Box<RoomDescriptorV2>,
-        proof: Box<SubscribeProofV2>,
+        descriptor: Box<RoomDescriptor>,
+        proof: Box<SubscribeProof>,
     },
     /// Leave a room. Idempotent.
     Unsubscribe { rendezvous_id: String },
     /// Forward an opaque payload to every other subscriber of
     /// `rendezvous_id`. The server does not parse `payload`; receivers verify
-    /// the v2 ECDSA signature and AES-GCM authentication.
+    /// the ECDSA signature and AES-GCM authentication.
     Relay {
         rendezvous_id: String,
-        /// Serialized v2 application envelope. The per-frame cap is
+        /// Serialized application envelope. The per-frame cap is
         /// enforced in `ws::handle_socket` (`MAX_FRAME_BYTES`), backed by a
         /// hard `max_message_size` on the WS upgrade — `tower-http`'s body
         /// limit only bounds the pre-upgrade handshake, not WS frames.
@@ -179,7 +179,7 @@ pub enum ServerFrame {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerSnapshot {
-    pub proof: SubscribeProofV2,
+    pub proof: SubscribeProof,
     /// Wall-clock ms of when the peer joined the room.
     pub joined_at_ms: i64,
 }
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn subscribe_round_trips() {
-        let descriptor = RoomDescriptorV2 {
+        let descriptor = RoomDescriptor {
             v: 2,
             room_id: "r1".into(),
             room_nonce: "nonce".into(),
@@ -218,7 +218,7 @@ mod tests {
         };
         let frame = ClientFrame::Subscribe {
             descriptor: Box::new(descriptor),
-            proof: Box::new(SubscribeProofV2 {
+            proof: Box::new(SubscribeProof {
                 v: 2,
                 room_id: "r1".into(),
                 role: PeerRole::Mobile,
@@ -266,7 +266,7 @@ mod tests {
         let frame = ServerFrame::PeerJoined {
             rendezvous_id: "r1".into(),
             peer: PeerSnapshot {
-                proof: SubscribeProofV2 {
+                proof: SubscribeProof {
                     v: 2,
                     room_id: "r1".into(),
                     role: PeerRole::Desktop,

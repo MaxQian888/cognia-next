@@ -1,6 +1,6 @@
 ---
 title: WebRTC transport
-description: The v2-only mobile/browser offerer, encrypted signaling client, bounded DataChannel protocol, recovery ladder, and LAN-first controller.
+description: The single-protocol mobile/browser offerer, encrypted signaling client, bounded DataChannel protocol, recovery ladder, and LAN-first controller.
 ---
 
 # WebRTC transport
@@ -9,18 +9,18 @@ description: The v2-only mobile/browser offerer, encrypted signaling client, bou
 route in this order:
 
 1. healthy LAN HTTPS/WebSocket;
-2. open WebRTC `cognia.v2` DataChannel;
+2. open WebRTC `cognia.signaling` DataChannel;
 3. authenticated HTTPS/WebSocket fallback when command metadata permits it.
 
 The client never downgrades to a legacy signaling protocol.
 
 ## Pairing and signaling
 
-The pairing response contains a public `RoomDescriptorV2` and a mobile role
+The pairing response contains a public `RoomDescriptor` and a mobile role
 private key. Capacitor stores the key in SecureStorage. A normal browser uses
 a non-extractable WebCrypto key and an encrypted IndexedDB pairing blob.
 
-`SignalingClient` connects to `/v2/signaling`, signs the server challenge with
+`SignalingClient` connects to `/signaling`, signs the server challenge with
 ECDSA P-256, generates an ephemeral P-256 ECDH key, and subscribes for the
 mobile role. SDP/ICE are encrypted with directional HKDF-SHA-256/AES-256-GCM
 keys and signed over canonical length-prefixed fields. The relay cannot read
@@ -32,7 +32,7 @@ advancing its replay state, then applies a bounded reorder window.
 
 ## Negotiation
 
-The mobile creates one ordered reliable DataChannel named `cognia.v2`. ICE
+The mobile creates one ordered reliable DataChannel named `cognia.signaling`. ICE
 received before the remote description is retained in order (256 entries, 30
 seconds). Every async negotiation callback checks its epoch before mutating
 the peer.

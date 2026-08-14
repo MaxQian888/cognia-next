@@ -147,13 +147,13 @@ describe("applySettings", () => {
       tx as unknown as Tx,
       settings({
         webrtcEnabled: true,
-        signalingUrl: "wss://my.signaling.example/v2/signaling",
+        signalingUrl: "wss://my.signaling.example/signaling",
         iceServers: [{ urls: "stun:stun.example:3478" }],
         turnServers: [{ urls: "turn:turn.example:3478", username: "u", credential: "p" }],
       })
     )
     expect(tx.enableCalls.length).toBe(1)
-    expect(tx.enableCalls[0].signalingUrl).toBe("wss://my.signaling.example/v2/signaling")
+    expect(tx.enableCalls[0].signalingUrl).toBe("wss://my.signaling.example/signaling")
     expect(tx.enableCalls[0].rtcConfiguration?.iceServers).toEqual([
       { urls: "stun:stun.example:3478" },
       { urls: "turn:turn.example:3478", username: "u", credential: "p" },
@@ -164,7 +164,7 @@ describe("applySettings", () => {
     const tx = new FakeTransport()
     await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: true }))
     expect(tx.enableCalls.length).toBe(1)
-    expect(tx.enableCalls[0].signalingUrl).toBe("wss://signaling.cognia.cn/v2/signaling")
+    expect(tx.enableCalls[0].signalingUrl).toBe("wss://signaling.cognia.cn/signaling")
     expect(tx.enableCalls[0].rtcConfiguration?.iceServers).toEqual([
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun.cloudflare.com:3478" },

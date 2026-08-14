@@ -10,11 +10,18 @@ import { saveCompanionConfig } from "@/lib/tauri/transport-companion"
 import { PairStep } from "./pair-step"
 import { registerPairPayload } from "./pair-api"
 
+const mockReadClipboardText = jest.fn()
+const mockWriteClipboardText = jest.fn()
+
 jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
 jest.mock("@/lib/capacitor/haptics", () => ({ notify: jest.fn() }))
 jest.mock("@/lib/capacitor/app-settings", () => ({ openAppSettings: jest.fn() }))
 jest.mock("@/lib/connectivity/recent-servers", () => ({ recordRecentServer: jest.fn() }))
 jest.mock("@/lib/tauri/transport-companion", () => ({ saveCompanionConfig: jest.fn() }))
+jest.mock("@/lib/tauri/clipboard", () => ({
+  readClipboardText: () => mockReadClipboardText(),
+  writeClipboardText: (value: string) => mockWriteClipboardText(value),
+}))
 jest.mock("./pair-api", () => ({ registerPairPayload: jest.fn() }))
 jest.mock("./discover-help", () => ({ DiscoverHelp: () => <div>help</div> }))
 jest.mock("@/hooks/ui/use-keyboard-insets", () => ({
@@ -22,7 +29,11 @@ jest.mock("@/hooks/ui/use-keyboard-insets", () => ({
 }))
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    key === "payloadError.versionMismatch" ? `version ${String(vars?.got)}` : key,
+    key === "payloadError.versionMismatch"
+      ? `version ${String(vars?.got)}`
+      : key === "invitationSummary.title"
+        ? `Ready for ${String(vars?.host)}`
+        : key,
 }))
 
 const register = registerPairPayload as jest.MockedFunction<typeof registerPairPayload>
@@ -50,6 +61,9 @@ beforeEach(() => {
   register.mockReset()
   scan.mockReset()
   save.mockReset()
+  mockReadClipboardText.mockReset()
+  mockWriteClipboardText.mockReset()
+  mockWriteClipboardText.mockResolvedValue(undefined)
 })
 
 it("shows only the canonical invitation payload surface", () => {
@@ -150,4 +164,42 @@ it("does not expose the camera action in web mode", () => {
   render(<PairStep webMode onPaired={jest.fn()} />)
   expect(screen.queryByTestId("pair-scan-qr")).not.toBeInTheDocument()
   fireEvent.change(screen.getByTestId("pair-payload"), { target: { value: payload } })
+})
+
+it("helps a web user issue, paste, inspect, and clear a headless invitation", async () => {
+  mockReadClipboardText.mockResolvedValue(payload)
+  const user = userEvent.setup()
+
+  render(<PairStep webMode onPaired={jest.fn()} />)
+
+  expect(screen.getByTestId("pair-headless-command")).toHaveTextContent(
+    "pnpm --silent dev:headless pair --device-name browser"
+  )
+  await user.click(screen.getByTestId("pair-copy-command"))
+  expect(mockWriteClipboardText).toHaveBeenCalledWith(
+    "pnpm --silent dev:headless pair --device-name browser"
+  )
+
+  await user.click(screen.getByRole("tab", { name: "web.commandMode.compose" }))
+  expect(screen.getByTestId("pair-headless-command")).toHaveTextContent(
+    "docker compose -f deploy/compose/docker-compose.yml"
+  )
+  await user.click(screen.getByTestId("pair-copy-command"))
+  expect(mockWriteClipboardText).toHaveBeenLastCalledWith(
+    "docker compose -f deploy/compose/docker-compose.yml --profile server exec cognia-server cognia-server pair --device-name browser"
+  )
+
+  await user.click(screen.getByRole("tab", { name: "web.commandMode.kubernetes" }))
+  expect(screen.getByTestId("pair-headless-command")).toHaveTextContent(
+    "kubectl -n <namespace> exec -i cognia-server-0"
+  )
+
+  await user.click(screen.getByTestId("pair-paste-clipboard"))
+  expect(mockReadClipboardText).toHaveBeenCalledTimes(1)
+  expect(screen.getByTestId("pair-payload")).toHaveValue(payload)
+  expect(screen.getByTestId("pair-invitation-summary")).toHaveTextContent("host.local:27890")
+
+  await user.click(screen.getByTestId("pair-clear-payload"))
+  expect(screen.getByTestId("pair-payload")).toHaveValue("")
+  expect(screen.queryByTestId("pair-invitation-summary")).not.toBeInTheDocument()
 })

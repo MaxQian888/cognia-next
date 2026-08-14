@@ -1,6 +1,6 @@
 ---
 title: WebRTC signaling and DataChannel
-description: The v2-only desktop/headless answerer, encrypted signaling client, bounded peer session, RPC bridge, and event replay path.
+description: The single-protocol desktop/headless answerer, encrypted signaling client, bounded peer session, RPC bridge, and event replay path.
 ---
 
 # WebRTC signaling and DataChannel
@@ -13,9 +13,9 @@ does not depend on a renderer being present.
 | Module | Responsibility |
 | --- | --- |
 | `signaling/mod.rs` | `SignalingHub`, per-device task lifecycle, configuration and recovery |
-| `signaling/registration_store.rs` | SQLite source of truth for v2 room descriptors and host key references |
+| `signaling/registration_store.rs` | SQLite source of truth for room descriptors and host key references |
 | `signaling/client.rs` | challenge/subscription, encrypted SDP/ICE relay, deadlines, heartbeat and reconnect |
-| `signaling/envelope_v2.rs` | canonical fields, ECDSA/ECDH/HKDF/AES-GCM, epoch/sequence replay guard |
+| `signaling/envelope.rs` | canonical fields, ECDSA/ECDH/HKDF/AES-GCM, epoch/sequence replay guard |
 | `signaling/peer.rs` | `webrtc-rs` answerer and bounded ICE/DataChannel queues |
 | `signaling/datachannel_framing.rs` | 32 KiB frames, 1 MiB messages, bounded chunk reassembly |
 | `signaling/dispatch.rs` | RPC dispatch, durable idempotency, event resume/ack/replay/resync |
@@ -35,11 +35,11 @@ sequenceDiagram
   R->>H: "opaque relay"
   H->>R: "encrypted answer + ICE"
   R->>M: "opaque relay"
-  M->>H: "DTLS + cognia.v2 DataChannel"
+  M->>H: "DTLS + cognia.signaling DataChannel"
 ```
 
 Pairing stores the host private role key in the native secret store and the
-public `RoomDescriptorV2` in SQLite. Tauri imports any renderer-owned records
+public `RoomDescriptor` in SQLite. Tauri imports any renderer-owned records
 idempotently. Headless startup loads the same store and recreates every
 answerer task before serving clients.
 
@@ -61,7 +61,7 @@ bounded reorder window. No v1 parser or downgrade exists.
 
 ## Data plane bounds
 
-The ordered reliable `cognia.v2` channel permits 32 concurrent RPCs. Physical
+The ordered reliable `cognia.signaling` channel permits 32 concurrent RPCs. Physical
 frames are capped at 32 KiB and logical messages at 1 MiB. Reassembly permits
 eight messages and 4 MiB per peer with a 15-second deadline. Inbound peer
 queues are bounded at 128 frames; pending ICE is bounded at 256 entries for 30

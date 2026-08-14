@@ -19,6 +19,7 @@
 
 use std::sync::Arc;
 
+use cognia_signaling_core::protocol::PROTOCOL_VERSION;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -157,7 +158,7 @@ async fn run(
     // Subscribe to EventBus with since=None → start at high-water mark
     // (matches the existing WS subscription default behaviour).
     use crate::companion_api::event_bus::SubscribeResult;
-    let now_ms = crate::companion_api::signaling::envelope_v2::now_ms();
+    let now_ms = crate::companion_api::signaling::envelope::now_ms();
     let mut event_rx = match state.event_bus.subscribe(None, now_ms) {
         SubscribeResult::Ok { receiver, .. } => receiver,
         SubscribeResult::ResyncRequired => {
@@ -184,7 +185,7 @@ async fn run(
                 use crate::companion_api::signaling::datachannel_framing::ReassemblyResult;
                 match reassembler.accept(
                     &bytes,
-                    crate::companion_api::signaling::envelope_v2::now_ms(),
+                    crate::companion_api::signaling::envelope::now_ms(),
                 ) {
                     ReassemblyResult::Message { bytes, message_id } => {
                         if let Some(message_id) = message_id {
@@ -197,7 +198,7 @@ async fn run(
                                 EventControl::Resume { since } => {
                                     match state.event_bus.subscribe(
                                         Some(since),
-                                        crate::companion_api::signaling::envelope_v2::now_ms(),
+                                        crate::companion_api::signaling::envelope::now_ms(),
                                     ) {
         SubscribeResult::Ok {
             receiver, replay, ..
@@ -303,14 +304,11 @@ async fn run(
     }
 }
 
-/// The only RTC frame version this host speaks.
-const RTC_PROTOCOL_VERSION: u8 = 2;
-
 /// Reject a frame whose `protocolVersion` this host does not speak, or `None`
 /// when it does. Shaped like [`revocation_reject`] so the gate is reachable
 /// from a test — `handle_inbound` itself needs a live peer and shared state.
 fn protocol_version_reject(version: u8, request_id: &str) -> Option<OutboundFrame> {
-    if version == RTC_PROTOCOL_VERSION {
+    if version == PROTOCOL_VERSION {
         return None;
     }
     Some(OutboundFrame::Response(ResponseFrame {
@@ -319,7 +317,7 @@ fn protocol_version_reject(version: u8, request_id: &str) -> Option<OutboundFram
         result: None,
         error: Some(ErrorBody {
             code: "unsupported_protocol".into(),
-            message: format!("only RTC protocolVersion {RTC_PROTOCOL_VERSION} is supported"),
+            message: format!("only RTC protocolVersion {PROTOCOL_VERSION} is supported"),
         }),
     }))
 }
@@ -361,7 +359,7 @@ async fn handle_inbound(
         return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
     }
 
-    // Revocation parity with the HTTP path (`middleware.rs` step 4). The v2
+    // Revocation parity with the HTTP path (`middleware.rs` step 4). The
     // DataChannel is bound to authenticated role keys, but unlike the HTTP JWT
     // middleware this path does not otherwise consult the deny list.
     if let Some(frame) = revocation_reject(&state.deny_list, device_id, &request_id) {
@@ -447,7 +445,7 @@ async fn handle_binary_resource(
     state: &SharedState,
     device_id: &str,
 ) -> Result<(), String> {
-    if request.kind != "binary-resource" || request.protocol_version != RTC_PROTOCOL_VERSION {
+    if request.kind != "binary-resource" || request.protocol_version != PROTOCOL_VERSION {
         return send_binary_resource_error(peer, request.id, "unsupported_protocol").await;
     }
     if uuid::Uuid::parse_str(&request.id).is_err()
@@ -653,7 +651,7 @@ mod tests {
 
     #[test]
     fn a_frame_from_another_protocol_version_is_refused() {
-        // The version is not decoration: a v1 client reaching a v2 host must be
+        // The version is not decoration: a client using an unsupported protocol version reaching the host must be
         // told so rather than having its params interpreted under the wrong
         // contract. Only the parse was covered before.
         let frame = protocol_version_reject(1, "r1").expect("v1 must be refused");
@@ -670,7 +668,7 @@ mod tests {
 
     #[test]
     fn the_supported_protocol_version_passes_the_gate() {
-        assert!(protocol_version_reject(RTC_PROTOCOL_VERSION, "r1").is_none());
+        assert!(protocol_version_reject(PROTOCOL_VERSION, "r1").is_none());
     }
 
     #[test]

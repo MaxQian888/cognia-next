@@ -1,18 +1,18 @@
 /** @jest-environment jsdom */
 
 import {
-  buildRoomDescriptorV2,
-  buildSubscribeProofV2,
-  buildV2Envelope,
-  deriveV2DirectionKey,
-  generateV2EcdhKeyPair,
-  generateV2SigningKeyPair,
-  importV2EcdhPublicKey,
-  verifyAndDecryptV2Envelope,
-  type RoomDescriptorV2,
-  type SubscribeProofV2,
-  type V2KeyPair,
-} from "./v2-crypto"
+  buildRoomDescriptor,
+  buildSubscribeProof,
+  buildEnvelope,
+  deriveDirectionKey,
+  generateEcdhKeyPair,
+  generateSigningKeyPair,
+  importEcdhPublicKey,
+  verifyAndDecryptEnvelope,
+  type RoomDescriptor,
+  type SubscribeProof,
+  type SignalingKeyPair,
+} from "./crypto"
 import { SignalingClient } from "./client"
 import type { ClientFrame, ServerFrame } from "./types"
 
@@ -56,10 +56,10 @@ class FakeWebSocket {
 
 interface Fixture {
   client: SignalingClient
-  descriptor: RoomDescriptorV2
-  mobileIdentity: V2KeyPair
-  desktopIdentity: V2KeyPair
-  desktopEcdh: V2KeyPair
+  descriptor: RoomDescriptor
+  mobileIdentity: SignalingKeyPair
+  desktopIdentity: SignalingKeyPair
+  desktopEcdh: SignalingKeyPair
 }
 
 const instances: FakeWebSocket[] = []
@@ -81,18 +81,18 @@ async function fixture(
   overrides: Partial<ConstructorParameters<typeof SignalingClient>[0]> = {}
 ): Promise<Fixture> {
   const [mobileIdentity, desktopIdentity, desktopEcdh] = await Promise.all([
-    generateV2SigningKeyPair(),
-    generateV2SigningKeyPair(),
-    generateV2EcdhKeyPair(),
+    generateSigningKeyPair(),
+    generateSigningKeyPair(),
+    generateEcdhKeyPair(),
   ])
-  const descriptor = await buildRoomDescriptorV2({
+  const descriptor = await buildRoomDescriptor({
     roomNonce: "AAECAwQFBgcICQoLDA0ODw",
     desktopSigningKey: desktopIdentity.encodedPublicKey,
     mobileSigningKey: mobileIdentity.encodedPublicKey,
     notAfter: Date.now() + 60_000,
   })
   const client = new SignalingClient({
-    url: "wss://signaling.test/v2/signaling",
+    url: "wss://signaling.test/signaling",
     descriptor,
     signingPrivateKey: mobileIdentity.privateKey,
     role: "mobile",
@@ -134,8 +134,8 @@ async function authenticateClient(
   connect = true
 ): Promise<{
   socket: FakeWebSocket
-  mobileProof: SubscribeProofV2
-  desktopProof: SubscribeProofV2
+  mobileProof: SubscribeProof
+  desktopProof: SubscribeProof
 }> {
   if (connect) value.client.connect()
   const socket = instances.at(-1)!
@@ -154,7 +154,7 @@ async function authenticateClient(
     })
   expect(subscribe).toBeDefined()
   const mobileProof = subscribe!.proof
-  const desktopProof = await buildSubscribeProofV2({
+  const desktopProof = await buildSubscribeProof({
     roomId: value.descriptor.roomId,
     role: "desktop",
     sessionId: "desktop-session",
@@ -172,8 +172,8 @@ async function authenticateClient(
   return { socket, mobileProof, desktopProof }
 }
 
-describe("SignalingClient v2", () => {
-  it("waits for a challenge and sends a role-authenticated v2 subscription", async () => {
+describe("SignalingClient", () => {
+  it("waits for a challenge and sends a role-authenticated subscription", async () => {
     const value = await fixture()
     value.client.connect()
     const socket = instances[0]
@@ -211,7 +211,7 @@ describe("SignalingClient v2", () => {
       buildEnvelope: async (args) => {
         started.push(args.seq)
         if (args.seq === 1) await firstGate
-        return buildV2Envelope(args)
+        return buildEnvelope(args)
       },
     })
     const { socket, mobileProof } = await authenticateClient(value)
@@ -230,8 +230,8 @@ describe("SignalingClient v2", () => {
     expect(relays.map((relay) => JSON.parse(relay.payload).seq)).toEqual([1, 2])
     expect(relays.map((relay) => relay.payload).join("")).not.toContain("private-sdp")
 
-    const mobilePublic = await importV2EcdhPublicKey(mobileProof.ecdhPublicKey)
-    const receiveKey = await deriveV2DirectionKey({
+    const mobilePublic = await importEcdhPublicKey(mobileProof.ecdhPublicKey)
+    const receiveKey = await deriveDirectionKey({
       privateKey: value.desktopEcdh.privateKey,
       peerPublicKey: mobilePublic,
       roomId: value.descriptor.roomId,
@@ -239,7 +239,7 @@ describe("SignalingClient v2", () => {
       epoch: mobileProof.epoch,
     })
     await expect(
-      verifyAndDecryptV2Envelope(JSON.parse(relays[1].payload), {
+      verifyAndDecryptEnvelope(JSON.parse(relays[1].payload), {
         expectedRoomId: value.descriptor.roomId,
         expectedSenderRole: "mobile",
         signingPublicKey: value.mobileIdentity.publicKey,
@@ -256,7 +256,7 @@ describe("SignalingClient v2", () => {
     const value = await fixture({
       buildEnvelope: async (args) => {
         if (args.seq === 1) await firstGate
-        return buildV2Envelope(args)
+        return buildEnvelope(args)
       },
     })
     const { socket } = await authenticateClient(value)
@@ -291,7 +291,7 @@ describe("SignalingClient v2", () => {
           blockNextEnvelope = false
           await oldGate
         }
-        return buildV2Envelope(args)
+        return buildEnvelope(args)
       },
     })
     const { socket: oldSocket } = await authenticateClient(value)
@@ -316,15 +316,15 @@ describe("SignalingClient v2", () => {
     value.client.on("envelope", ({ envelope }) => events.push(envelope))
     value.client.on("error", ({ code }) => errors.push(code))
 
-    const mobilePublic = await importV2EcdhPublicKey(mobileProof.ecdhPublicKey)
-    const outboundKey = await deriveV2DirectionKey({
+    const mobilePublic = await importEcdhPublicKey(mobileProof.ecdhPublicKey)
+    const outboundKey = await deriveDirectionKey({
       privateKey: value.desktopEcdh.privateKey,
       peerPublicKey: mobilePublic,
       roomId: value.descriptor.roomId,
       senderRole: "desktop",
       epoch: desktopProof.epoch,
     })
-    const envelope = await buildV2Envelope({
+    const envelope = await buildEnvelope({
       roomId: value.descriptor.roomId,
       senderRole: "desktop",
       sessionId: desktopProof.sessionId,

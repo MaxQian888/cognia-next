@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 
 use cognia_signaling_core::policy::{evaluate_subscribe, RoomLimits, SubscribeDecision};
 
-use crate::proto::{PeerRole, ServerFrame, SubscribeProofV2};
+use crate::proto::{PeerRole, ServerFrame, SubscribeProof};
 
 /// Outbound channel buffer (frames). Sized generously — peers that fall
 /// behind by more than this many frames are forcibly disconnected to bound
@@ -37,7 +37,7 @@ pub struct PeerHandle {
     pub peer_id: PeerId,
     pub role: PeerRole,
     pub session_id: String,
-    pub proof: SubscribeProofV2,
+    pub proof: SubscribeProof,
     pub joined_at_ms: i64,
     pub tx: mpsc::Sender<ServerFrame>,
 }
@@ -116,7 +116,7 @@ impl RoomRegistry {
         Ok((existing, others))
     }
 
-    /// Atomically install the authenticated session for its role. Signaling v2
+    /// Atomically install the authenticated session for its role. Signaling
     /// permits exactly one desktop and one mobile; a newer valid proof replaces
     /// the old socket instead of leaving a stale role lock behind.
     pub fn join_authenticated(&self, rendezvous_id: &str, handle: PeerHandle) -> AuthenticatedJoin {
@@ -242,7 +242,7 @@ mod tests {
             peer_id: reg.next_peer_id(),
             role,
             session_id: format!("session-{}", reg.next_peer_id()),
-            proof: SubscribeProofV2 {
+            proof: SubscribeProof {
                 v: 2,
                 room_id: "r".into(),
                 role,

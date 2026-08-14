@@ -7,23 +7,23 @@
  */
 
 export {
-  buildRoomDescriptorV2,
-  buildSubscribeProofV2,
-  buildV2Envelope,
-  deriveV2DirectionKey,
-  exportV2PublicKey,
-  generatePersistableV2SigningIdentity,
-  generateV2EcdhKeyPair,
-  generateV2SigningKeyPair,
-  importV2EcdhPublicKey,
-  importV2SigningPrivateKey,
-  importV2SigningPublicKey,
-  StrictReplayWindowV2,
-  verifyAndDecryptV2Envelope,
-  verifyPeerSessionProofV2,
-  verifySubscribeProofV2,
-} from "./v2-crypto"
-export type { PersistableV2SigningIdentity, SignalingEnvelopeV2, V2KeyPair } from "./v2-crypto"
+  buildRoomDescriptor,
+  buildSubscribeProof,
+  buildEnvelope,
+  deriveDirectionKey,
+  exportPublicKey,
+  generatePersistableSigningIdentity,
+  generateEcdhKeyPair,
+  generateSigningKeyPair,
+  importEcdhPublicKey,
+  importSigningPrivateKey,
+  importSigningPublicKey,
+  StrictReplayWindow,
+  verifyAndDecryptEnvelope,
+  verifyPeerSessionProof,
+  verifySubscribeProof,
+} from "./crypto"
+export type { PersistableSigningIdentity, SignalingEnvelope, SignalingKeyPair } from "./crypto"
 
 export { SignalingClient } from "./client"
 export type {

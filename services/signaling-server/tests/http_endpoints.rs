@@ -69,7 +69,7 @@ async fn per_ip_cap_rejects_overflow_websocket_upgrades() {
     async fn open_ws(addr: std::net::SocketAddr) -> TcpStream {
         let mut s = TcpStream::connect(addr).await.expect("connect");
         let req = format!(
-            "GET /v2/signaling HTTP/1.1\r\n\
+            "GET /signaling HTTP/1.1\r\n\
              Host: {addr}\r\n\
              Upgrade: websocket\r\n\
              Connection: Upgrade\r\n\
@@ -89,7 +89,7 @@ async fn per_ip_cap_rejects_overflow_websocket_upgrades() {
     // Third upgrade must be rejected with 429.
     let mut c = TcpStream::connect(addr).await.expect("connect 3");
     let req = format!(
-        "GET /v2/signaling HTTP/1.1\r\n\
+        "GET /signaling HTTP/1.1\r\n\
          Host: {addr}\r\n\
          Upgrade: websocket\r\n\
          Connection: Upgrade\r\n\

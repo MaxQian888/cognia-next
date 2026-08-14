@@ -13,6 +13,13 @@ spec:
     - host: server.invalid
       http:
         paths:
+          - path: /signaling
+            pathType: Prefix
+            backend:
+              service:
+                name: signaling
+                port:
+                  number: 7892
           - path: /v2/signaling
             pathType: Prefix
             backend:

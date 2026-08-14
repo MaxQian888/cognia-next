@@ -1,5 +1,5 @@
 /**
- * Browser-side signaling v2 client.
+ * Browser-side signaling client.
  *
  * The rendezvous service authenticates a challenge-bound role proof and only
  * relays ECDSA-signed AES-256-GCM envelopes. SDP and ICE never appear in
@@ -7,23 +7,24 @@
  */
 
 import {
-  StrictReplayWindowV2,
-  buildSubscribeProofV2,
-  buildV2Envelope,
-  deriveV2DirectionKey,
-  generateV2EcdhKeyPair,
-  importV2EcdhPublicKey,
-  importV2SigningPublicKey,
-  verifyAndDecryptV2Envelope,
-  verifyPeerSessionProofV2,
-  type RoomDescriptorV2,
-  type SignalingEnvelopeV2,
-  type SubscribeProofV2,
-  type V2KeyPair,
-} from "./v2-crypto"
+  StrictReplayWindow,
+  buildSubscribeProof,
+  buildEnvelope,
+  deriveDirectionKey,
+  generateEcdhKeyPair,
+  importEcdhPublicKey,
+  importSigningPublicKey,
+  verifyAndDecryptEnvelope,
+  verifyPeerSessionProof,
+  type RoomDescriptor,
+  type SignalingEnvelope,
+  type SubscribeProof,
+  type SignalingKeyPair,
+} from "./crypto"
 import {
   SIGNALING_BACKOFF_MS,
   SIGNALING_PING_INTERVAL_MS,
+  SIGNALING_PROTOCOL_VERSION,
   type ClientFrame,
   type Envelope,
   type EnvelopeKind,
@@ -58,12 +59,12 @@ export type SignalingListener<K extends keyof SignalingEventMap> = (
 
 export interface SignalingClientOptions {
   url: string
-  descriptor: RoomDescriptorV2
+  descriptor: RoomDescriptor
   signingPrivateKey: CryptoKey
   role: PeerRole
   webSocketFactory?: (url: string) => WebSocket
-  generateEcdhKeyPair?: typeof generateV2EcdhKeyPair
-  buildEnvelope?: typeof buildV2Envelope
+  generateEcdhKeyPair?: typeof generateEcdhKeyPair
+  buildEnvelope?: typeof buildEnvelope
   scheduler?: {
     setTimeout: typeof globalThis.setTimeout
     clearTimeout: typeof globalThis.clearTimeout
@@ -71,7 +72,7 @@ export interface SignalingClientOptions {
 }
 
 interface PeerCrypto {
-  proof: SubscribeProofV2
+  proof: SubscribeProof
   outboundKey: CryptoKey
   inboundKey: CryptoKey
 }
@@ -90,8 +91,8 @@ export class SignalingClient {
     >
   > & {
     webSocketFactory: (url: string) => WebSocket
-    generateEcdhKeyPair: typeof generateV2EcdhKeyPair
-    buildEnvelope: typeof buildV2Envelope
+    generateEcdhKeyPair: typeof generateEcdhKeyPair
+    buildEnvelope: typeof buildEnvelope
     scheduler: {
       setTimeout: typeof globalThis.setTimeout
       clearTimeout: typeof globalThis.clearTimeout
@@ -100,9 +101,9 @@ export class SignalingClient {
   private ws: WebSocket | null = null
   private state: SignalingState = "idle"
   private outboundSeq = 1
-  private replay = new StrictReplayWindowV2()
-  private ephemeral: V2KeyPair | null = null
-  private ownProof: SubscribeProofV2 | null = null
+  private replay = new StrictReplayWindow()
+  private ephemeral: SignalingKeyPair | null = null
+  private ownProof: SubscribeProof | null = null
   private peerCrypto: PeerCrypto | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingTimer: ReturnType<typeof setTimeout> | null = null
@@ -127,8 +128,8 @@ export class SignalingClient {
   }
 
   constructor(opts: SignalingClientOptions) {
-    if (opts.descriptor.v !== 2) {
-      throw new Error("signaling: only protocol v2 is supported")
+    if (opts.descriptor.v !== SIGNALING_PROTOCOL_VERSION) {
+      throw new Error("signaling: unsupported signaling protocol version")
     }
     this.opts = {
       url: opts.url,
@@ -136,8 +137,8 @@ export class SignalingClient {
       signingPrivateKey: opts.signingPrivateKey,
       role: opts.role,
       webSocketFactory: opts.webSocketFactory ?? ((url) => new WebSocket(url)),
-      generateEcdhKeyPair: opts.generateEcdhKeyPair ?? generateV2EcdhKeyPair,
-      buildEnvelope: opts.buildEnvelope ?? buildV2Envelope,
+      generateEcdhKeyPair: opts.generateEcdhKeyPair ?? generateEcdhKeyPair,
+      buildEnvelope: opts.buildEnvelope ?? buildEnvelope,
       scheduler: opts.scheduler ?? {
         setTimeout: globalThis.setTimeout.bind(globalThis),
         clearTimeout: globalThis.clearTimeout.bind(globalThis),
@@ -293,7 +294,7 @@ export class SignalingClient {
       case "peerLeft":
         if (this.peerCrypto?.proof.sessionId === frame.sessionId) {
           this.peerCrypto = null
-          this.replay = new StrictReplayWindowV2()
+          this.replay = new StrictReplayWindow()
           this.setState("awaiting-peer")
           this.emit("peerLeft", frame.role)
         }
@@ -320,7 +321,7 @@ export class SignalingClient {
     try {
       const ephemeral = await this.opts.generateEcdhKeyPair()
       if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return
-      const proof = await buildSubscribeProofV2({
+      const proof = await buildSubscribeProof({
         roomId: this.opts.descriptor.roomId,
         role: this.opts.role,
         sessionId: cryptoRandomBase64Url(16),
@@ -370,17 +371,17 @@ export class SignalingClient {
     const ownProof = this.ownProof
     if (!ephemeral || !ownProof) return
     try {
-      await verifyPeerSessionProofV2(this.opts.descriptor, peer.proof)
-      const peerPublicKey = await importV2EcdhPublicKey(peer.proof.ecdhPublicKey)
+      await verifyPeerSessionProof(this.opts.descriptor, peer.proof)
+      const peerPublicKey = await importEcdhPublicKey(peer.proof.ecdhPublicKey)
       const [outboundKey, inboundKey] = await Promise.all([
-        deriveV2DirectionKey({
+        deriveDirectionKey({
           privateKey: ephemeral.privateKey,
           peerPublicKey,
           roomId: this.opts.descriptor.roomId,
           senderRole: this.opts.role,
           epoch: ownProof.epoch,
         }),
-        deriveV2DirectionKey({
+        deriveDirectionKey({
           privateKey: ephemeral.privateKey,
           peerPublicKey,
           roomId: this.opts.descriptor.roomId,
@@ -389,7 +390,7 @@ export class SignalingClient {
         }),
       ])
       this.peerCrypto = { proof: peer.proof, outboundKey, inboundKey }
-      this.replay = new StrictReplayWindowV2()
+      this.replay = new StrictReplayWindow()
       this.setState("subscribed")
     } catch (error) {
       this.emit("error", {
@@ -409,9 +410,9 @@ export class SignalingClient {
       this.emit("error", { code: "relay_session", message: "relay sender session mismatch" })
       return
     }
-    let raw: SignalingEnvelopeV2
+    let raw: SignalingEnvelope
     try {
-      raw = JSON.parse(frame.payload) as SignalingEnvelopeV2
+      raw = JSON.parse(frame.payload) as SignalingEnvelope
     } catch {
       this.emit("error", { code: "relay_parse", message: "relay payload is not JSON" })
       return
@@ -421,7 +422,7 @@ export class SignalingClient {
       return
     }
     try {
-      const decrypted = await verifyAndDecryptV2Envelope(raw, {
+      const decrypted = await verifyAndDecryptEnvelope(raw, {
         expectedRoomId: this.opts.descriptor.roomId,
         expectedSenderRole: peer.proof.role,
         signingPublicKey: await this.peerSigningPublicKey(peer.proof.role),
@@ -437,7 +438,7 @@ export class SignalingClient {
       this.emit("envelope", {
         fromRole: peer.proof.role,
         envelope: {
-          ver: 2,
+          ver: SIGNALING_PROTOCOL_VERSION,
           roomId: raw.roomId,
           senderRole: raw.senderRole,
           sessionId: raw.sessionId,
@@ -457,7 +458,7 @@ export class SignalingClient {
   }
 
   private async peerSigningPublicKey(role: PeerRole): Promise<CryptoKey> {
-    return importV2SigningPublicKey(
+    return importSigningPublicKey(
       role === "desktop"
         ? this.opts.descriptor.desktopSigningKey
         : this.opts.descriptor.mobileSigningKey
@@ -504,7 +505,7 @@ export class SignalingClient {
     this.ownProof = null
     this.peerCrypto = null
     this.outboundSeq = 1
-    this.replay = new StrictReplayWindowV2()
+    this.replay = new StrictReplayWindow()
   }
 
   private scheduleReconnect(): void {

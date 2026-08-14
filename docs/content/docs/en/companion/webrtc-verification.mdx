@@ -34,7 +34,7 @@ You need:
    Pair device → Generate QR).
 2. On the phone, run the in-app pair flow: Discover → Pair → scan the
    `cgnp3` QR. The phone completes challenge + P-256 registration at
-   `POST /api/auth/device/register`; this returns a `RoomDescriptorV2` and
+   `POST /api/auth/device/register`; this returns a `RoomDescriptor` and
    stores the independent mobile-role signaling key in secure storage.
 3. Within ~5 seconds the desktop's WebRTC card should show the new
    device transitioning **offline → awaiting → negotiating → connected**.
@@ -48,7 +48,7 @@ minute, jump to [Step 4](#step-4--symmetric-nat--turn).
 
 1. With the DataChannel open, open `chrome://webrtc-internals` on the
    desktop.
-2. Find the `RTCDataChannel:cognia.v2` row → expand the parent peer
+2. Find the `RTCDataChannel:cognia.signaling` row → expand the parent peer
    connection → `RTCIceCandidatePair` → look at the **local candidate's**
    `type`.
 3. Expected: `host` (same LAN; you shouldn't be on cellular if so) or
@@ -56,8 +56,8 @@ minute, jump to [Step 4](#step-4--symmetric-nat--turn).
    `relay`, see [Step 4](#step-4--symmetric-nat--turn).
 4. Screenshot this row for the PR description.
 
-Confirm the connection uses `/v2/signaling` and the status reports
-`v2 role-isolated`. Any v1 route or downgrade is a release blocker.
+Confirm the connection uses `/signaling` and the status reports
+`Role-isolated protocol`. Any alternate route or downgrade is a release blocker.
 
 ## Step 3 — Mid-session reconnect
 

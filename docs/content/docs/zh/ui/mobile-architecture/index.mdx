@@ -115,13 +115,13 @@ flowchart TB
   <Card title="Transport 层" href="./transport-layer" description="Transport 接口、三态选择器、CompanionTransport（HTTPS _rpc + 带重放的 WSS 事件）、WebRTC 子层级、TLS 固定 fetch、层级分类器，以及 SecureStorage 凭据存储。" />
   <Card title="发现与配对" href="./discovery-pairing" description="mDNS 订阅、LAN IP 段扫描器、WebRTC-ICE 本地 IP 技巧、connection-strategy 候选遍历、三步配对向导、QR 载荷，以及 TLS 指纹固定。" />
   <Card title="同步与离线" href="./sync-offline" description="runSyncDown 编排器、10 个分表处理器、分页增量、持久化游标存储、设置的允许列表合并、四种同步触发器，以及 Dexie 优先查询 hook。" />
-  <Card title="WebRTC Transport" href="./webrtc-transport" description="仅 v2 的 ECDSA/ECDH/AES-GCM 信令、受界 DataChannel offerer、恢复控制，以及 Cloudflare Durable Object rendezvous（ADR-0021）。" />
+  <Card title="WebRTC Transport" href="./webrtc-transport" description="单一 ECDSA/ECDH/AES-GCM 信令、受界 DataChannel offerer、恢复控制，以及 Cloudflare Durable Object rendezvous（ADR-0021）。" />
 </Cards>
 
 ## 为什么手机是客户端而非服务器
 
 所有有状态且需特权的内容都保留在 Host。手机仅持有 P-256 设备 key、固定的 TLS 指纹、
-v2 room descriptor、独立 signaling key 和本地 Dexie 缓存——仅此而已。它无法运行 agent sidecar、向量存储、
+room descriptor、独立 signaling key 和本地 Dexie 缓存——仅此而已。它无法运行 agent sidecar、向量存储、
 MCP 或 connector webhook。这使攻击面保持最小（丢失的手机可从桌面端的
 [SecurityStore](../../subsystems/companion-api/server-and-auth) 中撤销），并保持 bundle
 完全相同——这正是 Capacitor 方案的核心价值所在。

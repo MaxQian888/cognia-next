@@ -7,7 +7,7 @@
  * Responsibilities:
  *
  * 1. **Hydrate at boot.** After Dexie is open, push the current list of
- *    paired devices (those with a v2 room descriptor + host key reference)
+ *    paired devices (those with a room descriptor + host key reference)
  *    plus the current signaling URL / ICE / TURN configuration to the
  *    Rust hub via Tauri commands.
  * 2. **Subscribe to changes.** Dexie's `liveQuery` fires on every
@@ -53,13 +53,13 @@ import { publishProvisionedTurnServers } from "@/lib/signaling/provisioned-turn-
 // Leaf `types` module (constants only) — avoids the `@/lib/signaling` barrel
 // and its TDZ cycle described above.
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
-import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import type { RoomDescriptor } from "@/lib/signaling/crypto"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 interface DeviceRegistration {
   deviceId: string
   rendezvousId: string
-  roomDescriptor: RoomDescriptorV2
+  roomDescriptor: RoomDescriptor
   signalingKeyRef: string
 }
 

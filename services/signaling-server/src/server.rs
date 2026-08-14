@@ -90,6 +90,10 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics_handler))
+        .route("/signaling", any(ws_upgrade))
+        // Pre-rename path. Clients bake their endpoint in at pair time, so
+        // already-paired devices keep dialing this one; dropping it would make
+        // a relay redeploy silently cut them off.
         .route("/v2/signaling", any(ws_upgrade))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
@@ -278,6 +282,17 @@ mod tests {
         assert_eq!(v["peers"], 0);
         assert!(v["version"].is_string());
         assert!(v["uptimeSeconds"].is_number());
+    }
+
+    /// A plain GET on either signaling path reaches the upgrade handler (which
+    /// then refuses a non-WebSocket request) rather than falling through to
+    /// 404. Devices paired before the rename still dial `/v2/signaling`.
+    #[tokio::test]
+    async fn both_signaling_paths_are_routed() {
+        for uri in ["/signaling", "/v2/signaling"] {
+            let (status, _headers, _body) = get(uri).await;
+            assert_ne!(status, StatusCode::NOT_FOUND, "{uri} must stay routed");
+        }
     }
 
     #[tokio::test]

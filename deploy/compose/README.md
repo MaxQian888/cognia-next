@@ -39,11 +39,11 @@ and other encrypted secrets) unreadable. Paired device private keys remain on
 the client and five-minute access tokens are process-memory only.
 
 The server-side WebRTC rendezvous uses `COGNIA_SIGNALING_URL`, which defaults
-to the Compose-internal `ws://signaling:7892/v2/signaling`. Browsers and mobile
+to the Compose-internal `ws://signaling:7892/signaling`. Browsers and mobile
 clients must never receive that Docker DNS name: set
-`COGNIA_PUBLIC_SIGNALING_URL` to the public `wss://<domain>/v2/signaling` URL,
+`COGNIA_PUBLIC_SIGNALING_URL` to the public `wss://<domain>/signaling` URL,
 or leave it empty for `/api/auth/config` to derive the same-origin URL from the
-Caddy forwarded host and scheme. Caddy routes `/v2/signaling` to the signaling
+Caddy forwarded host and scheme. Caddy routes `/signaling` to the signaling
 service while keeping the remaining API and WebSocket paths on
 `cognia-server`.
 

@@ -1,27 +1,27 @@
 ---
 title: "ADR-0021: WebRTC DataChannel WAN transport"
-description: "The v2-only, end-to-end encrypted signaling and DataChannel transport used between a paired mobile/browser client and a Cognia host."
+description: "The single end-to-end encrypted signaling and DataChannel transport used between a paired mobile/browser client and a Cognia host."
 ---
 
 # ADR-0021: WebRTC DataChannel WAN transport
 
-Status: accepted and implemented. The wire protocol is **v2 only**. There is
-no v1 compatibility mode, downgrade path, or shared signaling secret.
+Status: accepted and implemented. There is one wire protocol, with no
+compatibility mode, downgrade path, or shared signaling secret.
 
 ## Decision
 
 Cognia keeps LAN HTTPS/WebSocket as the first choice. When the paired host is
 not healthy on the LAN, the client attempts a reliable, ordered WebRTC
-DataChannel named `cognia.v2`. An authenticated HTTPS/WebSocket route remains
+DataChannel named `cognia.signaling`. An authenticated HTTPS/WebSocket route remains
 the safe fallback for commands whose command metadata permits retry.
 
 The public Worker is the primary rendezvous. The Axum service implements the
 same protocol for self-hosting and disaster recovery. Both expose
-`/v2/signaling`.
+`/signaling`.
 
 ## Pairing material
 
-Pairing creates a `RoomDescriptorV2`:
+Pairing creates a `RoomDescriptor`:
 
 - version `2`;
 - a random 128-bit room nonce;
@@ -87,7 +87,7 @@ frames:
 - browser and Rust-sender backpressure at 1 MiB high-water / 256 KiB low-water;
 - 32 concurrent RPCs and 128 queued inbound frames per peer.
 
-Each peer accepts exactly one ordered, fully reliable `cognia.v2` main channel.
+Each peer accepts exactly one ordered, fully reliable `cognia.signaling` main channel.
 Unordered, partial-reliable, and duplicate main channels are closed before
 callbacks are registered; `cognia.terminal` remains independent.
 

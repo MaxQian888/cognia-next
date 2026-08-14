@@ -1,6 +1,6 @@
-import type { EnvelopeKind, PeerRole } from "./types"
+import { SIGNALING_PROTOCOL_VERSION, type EnvelopeKind, type PeerRole } from "./types"
 
-const V2_CLOCK_SKEW_MS = 5 * 60 * 1000
+const CLOCK_SKEW_MS = 5 * 60 * 1000
 const TEXT_ENCODER = new TextEncoder()
 const BASE64URL_RE = /^[A-Za-z0-9_-]*$/
 
@@ -20,18 +20,18 @@ function cryptoProvider(): CryptoProvider {
   return globalThis.crypto as CryptoProvider
 }
 
-export interface V2KeyPair {
+export interface SignalingKeyPair {
   privateKey: CryptoKey
   publicKey: CryptoKey
   encodedPublicKey: string
 }
 
-export interface PersistableV2SigningIdentity extends V2KeyPair {
+export interface PersistableSigningIdentity extends SignalingKeyPair {
   privateKeyJwk: JsonWebKey
 }
 
-export interface RoomDescriptorV2 {
-  v: 2
+export interface RoomDescriptor {
+  v: typeof SIGNALING_PROTOCOL_VERSION
   roomId: string
   roomNonce: string
   desktopSigningKey: string
@@ -39,10 +39,10 @@ export interface RoomDescriptorV2 {
   notAfter: number
 }
 
-type RoomDescriptorInput = Omit<RoomDescriptorV2, "v" | "roomId">
+type RoomDescriptorInput = Omit<RoomDescriptor, "v" | "roomId">
 
-export interface SignalingEnvelopeV2 {
-  v: 2
+export interface SignalingEnvelope {
+  v: typeof SIGNALING_PROTOCOL_VERSION
   roomId: string
   senderRole: PeerRole
   sessionId: string
@@ -55,8 +55,8 @@ export interface SignalingEnvelopeV2 {
   signature: string
 }
 
-export interface SubscribeProofV2 {
-  v: 2
+export interface SubscribeProof {
+  v: typeof SIGNALING_PROTOCOL_VERSION
   roomId: string
   role: PeerRole
   sessionId: string
@@ -67,7 +67,7 @@ export interface SubscribeProofV2 {
   signature: string
 }
 
-export async function generateV2SigningKeyPair(): Promise<V2KeyPair> {
+export async function generateSigningKeyPair(): Promise<SignalingKeyPair> {
   const subtle = cryptoProvider().subtle
   const generated = (await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
     "sign",
@@ -87,11 +87,11 @@ export async function generateV2SigningKeyPair(): Promise<V2KeyPair> {
   return {
     privateKey,
     publicKey: generated.publicKey,
-    encodedPublicKey: await exportV2PublicKey(generated.publicKey),
+    encodedPublicKey: await exportPublicKey(generated.publicKey),
   }
 }
 
-export async function generatePersistableV2SigningIdentity(): Promise<PersistableV2SigningIdentity> {
+export async function generatePersistableSigningIdentity(): Promise<PersistableSigningIdentity> {
   const subtle = cryptoProvider().subtle
   const generated = (await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
     "sign",
@@ -99,14 +99,14 @@ export async function generatePersistableV2SigningIdentity(): Promise<Persistabl
   ])) as CryptoKeyPair
   const privateKeyJwk = await subtle.exportKey("jwk", generated.privateKey)
   return {
-    privateKey: await importV2SigningPrivateKey(privateKeyJwk),
+    privateKey: await importSigningPrivateKey(privateKeyJwk),
     publicKey: generated.publicKey,
-    encodedPublicKey: await exportV2PublicKey(generated.publicKey),
+    encodedPublicKey: await exportPublicKey(generated.publicKey),
     privateKeyJwk,
   }
 }
 
-export async function importV2SigningPrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
+export async function importSigningPrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
   return cryptoProvider().subtle.importKey(
     "jwk",
     jwk,
@@ -116,7 +116,7 @@ export async function importV2SigningPrivateKey(jwk: JsonWebKey): Promise<Crypto
   )
 }
 
-export async function generateV2EcdhKeyPair(): Promise<V2KeyPair> {
+export async function generateEcdhKeyPair(): Promise<SignalingKeyPair> {
   const subtle = cryptoProvider().subtle
   const generated = (await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
     "deriveBits",
@@ -132,16 +132,16 @@ export async function generateV2EcdhKeyPair(): Promise<V2KeyPair> {
   return {
     privateKey,
     publicKey: generated.publicKey,
-    encodedPublicKey: await exportV2PublicKey(generated.publicKey),
+    encodedPublicKey: await exportPublicKey(generated.publicKey),
   }
 }
 
-export async function exportV2PublicKey(key: CryptoKey): Promise<string> {
+export async function exportPublicKey(key: CryptoKey): Promise<string> {
   const raw = await cryptoProvider().subtle.exportKey("raw", key)
   return bytesToBase64Url(new Uint8Array(raw))
 }
 
-export async function importV2SigningPublicKey(encoded: string): Promise<CryptoKey> {
+export async function importSigningPublicKey(encoded: string): Promise<CryptoKey> {
   return cryptoProvider().subtle.importKey(
     "raw",
     base64UrlToBytes(encoded) as unknown as BufferSource,
@@ -151,7 +151,7 @@ export async function importV2SigningPublicKey(encoded: string): Promise<CryptoK
   )
 }
 
-export async function importV2EcdhPublicKey(encoded: string): Promise<CryptoKey> {
+export async function importEcdhPublicKey(encoded: string): Promise<CryptoKey> {
   return cryptoProvider().subtle.importKey(
     "raw",
     base64UrlToBytes(encoded) as unknown as BufferSource,
@@ -161,9 +161,9 @@ export async function importV2EcdhPublicKey(encoded: string): Promise<CryptoKey>
   )
 }
 
-export async function buildRoomDescriptorV2(input: RoomDescriptorInput): Promise<RoomDescriptorV2> {
+export async function buildRoomDescriptor(input: RoomDescriptorInput): Promise<RoomDescriptor> {
   const unsigned = {
-    v: 2 as const,
+    v: SIGNALING_PROTOCOL_VERSION,
     roomNonce: input.roomNonce,
     desktopSigningKey: input.desktopSigningKey,
     mobileSigningKey: input.mobileSigningKey,
@@ -185,7 +185,7 @@ export async function buildRoomDescriptorV2(input: RoomDescriptorInput): Promise
   }
 }
 
-export async function buildSubscribeProofV2(args: {
+export async function buildSubscribeProof(args: {
   roomId: string
   role: PeerRole
   sessionId: string
@@ -194,9 +194,9 @@ export async function buildSubscribeProofV2(args: {
   challenge: string
   ecdhPublicKey: string
   signingPrivateKey: CryptoKey
-}): Promise<SubscribeProofV2> {
-  const unsigned: Omit<SubscribeProofV2, "signature"> = {
-    v: 2,
+}): Promise<SubscribeProof> {
+  const unsigned: Omit<SubscribeProof, "signature"> = {
+    v: SIGNALING_PROTOCOL_VERSION,
     roomId: args.roomId,
     role: args.role,
     sessionId: args.sessionId,
@@ -216,9 +216,9 @@ export async function buildSubscribeProofV2(args: {
   }
 }
 
-export async function verifySubscribeProofV2(
-  descriptor: RoomDescriptorV2,
-  proof: SubscribeProofV2,
+export async function verifySubscribeProof(
+  descriptor: RoomDescriptor,
+  proof: SubscribeProof,
   args: {
     expectedChallenge: string
     nowMs?: number
@@ -227,53 +227,53 @@ export async function verifySubscribeProofV2(
 ): Promise<void> {
   await verifySubscribeProofCore(descriptor, proof, args.nowMs, args.clockSkewMs)
   if (proof.challenge !== args.expectedChallenge) {
-    throw new Error("signaling v2 subscription challenge mismatch")
+    throw new Error("signaling subscription challenge mismatch")
   }
 }
 
 /** Verify a peer's forwarded session proof. The peer cannot know the relay's
  * private per-socket challenge, but the challenge remains signature-bound;
  * the relay already checked equality during admission. */
-export async function verifyPeerSessionProofV2(
-  descriptor: RoomDescriptorV2,
-  proof: SubscribeProofV2,
+export async function verifyPeerSessionProof(
+  descriptor: RoomDescriptor,
+  proof: SubscribeProof,
   args: { nowMs?: number; clockSkewMs?: number } = {}
 ): Promise<void> {
   await verifySubscribeProofCore(descriptor, proof, args.nowMs, args.clockSkewMs)
 }
 
 async function verifySubscribeProofCore(
-  descriptor: RoomDescriptorV2,
-  proof: SubscribeProofV2,
+  descriptor: RoomDescriptor,
+  proof: SubscribeProof,
   nowMs?: number,
   clockSkewMs?: number
 ): Promise<void> {
-  const recomputed = await buildRoomDescriptorV2({
+  const recomputed = await buildRoomDescriptor({
     roomNonce: descriptor.roomNonce,
     desktopSigningKey: descriptor.desktopSigningKey,
     mobileSigningKey: descriptor.mobileSigningKey,
     notAfter: descriptor.notAfter,
   })
-  if (descriptor.v !== 2 || recomputed.roomId !== descriptor.roomId) {
-    throw new Error("signaling v2 room descriptor mismatch")
+  if (descriptor.v !== SIGNALING_PROTOCOL_VERSION || recomputed.roomId !== descriptor.roomId) {
+    throw new Error("signaling room descriptor mismatch")
   }
   if (
-    proof.v !== 2 ||
+    proof.v !== SIGNALING_PROTOCOL_VERSION ||
     proof.roomId !== descriptor.roomId ||
     !proof.sessionId ||
     !proof.epoch ||
     !proof.ecdhPublicKey
   ) {
-    throw new Error("signaling v2 subscription shape")
+    throw new Error("signaling subscription shape")
   }
   const now = nowMs ?? Date.now()
-  const clockSkew = clockSkewMs ?? V2_CLOCK_SKEW_MS
+  const clockSkew = clockSkewMs ?? CLOCK_SKEW_MS
   if (Math.abs(proof.issuedAt - now) > clockSkew || descriptor.notAfter < now - clockSkew) {
-    throw new Error("signaling v2 subscription expired")
+    throw new Error("signaling subscription expired")
   }
   const encodedSigningKey =
     proof.role === "desktop" ? descriptor.desktopSigningKey : descriptor.mobileSigningKey
-  const signingPublicKey = await importV2SigningPublicKey(encodedSigningKey)
+  const signingPublicKey = await importSigningPublicKey(encodedSigningKey)
   const signature = base64UrlToBytes(proof.signature)
   const verified = await cryptoProvider().subtle.verify(
     { name: "ECDSA", hash: "SHA-256" },
@@ -282,14 +282,14 @@ async function verifySubscribeProofCore(
     encodeSubscribeProof(proof) as BufferSource
   )
   if (!verified) {
-    throw new Error("signaling v2 subscription signature verification failed")
+    throw new Error("signaling subscription signature verification failed")
   }
   // Parse the ephemeral key now so invalid curve points never enter the room
   // registry or get forwarded to the other peer.
-  await importV2EcdhPublicKey(proof.ecdhPublicKey)
+  await importEcdhPublicKey(proof.ecdhPublicKey)
 }
 
-export async function deriveV2DirectionKey(args: {
+export async function deriveDirectionKey(args: {
   privateKey: CryptoKey
   peerPublicKey: CryptoKey
   roomId: string
@@ -320,7 +320,7 @@ export async function deriveV2DirectionKey(args: {
   )
 }
 
-export async function buildV2Envelope(args: {
+export async function buildEnvelope(args: {
   roomId: string
   senderRole: PeerRole
   sessionId: string
@@ -331,14 +331,14 @@ export async function buildV2Envelope(args: {
   body: unknown
   signingPrivateKey: CryptoKey
   encryptionKey: CryptoKey
-}): Promise<SignalingEnvelopeV2> {
+}): Promise<SignalingEnvelope> {
   if (!Number.isSafeInteger(args.seq) || args.seq < 1) {
-    throw new Error("signaling v2 sequence must be a positive safe integer")
+    throw new Error("signaling sequence must be a positive safe integer")
   }
   const issuedAt = args.issuedAt ?? Date.now()
   const nonceBytes = await deriveNonce(args.epoch, args.senderRole, args.seq)
-  const header: Omit<SignalingEnvelopeV2, "ciphertext" | "signature"> = {
-    v: 2,
+  const header: Omit<SignalingEnvelope, "ciphertext" | "signature"> = {
+    v: SIGNALING_PROTOCOL_VERSION,
     roomId: args.roomId,
     senderRole: args.senderRole,
     sessionId: args.sessionId,
@@ -372,8 +372,8 @@ export async function buildV2Envelope(args: {
   }
 }
 
-export async function verifyAndDecryptV2Envelope(
-  raw: SignalingEnvelopeV2,
+export async function verifyAndDecryptEnvelope(
+  raw: SignalingEnvelope,
   args: {
     expectedRoomId: string
     expectedSenderRole: PeerRole
@@ -384,16 +384,16 @@ export async function verifyAndDecryptV2Envelope(
   }
 ): Promise<{ kind: EnvelopeKind; body: unknown }> {
   assertEnvelopeShape(raw)
-  if (raw.roomId !== args.expectedRoomId) throw new Error("signaling v2 room id mismatch")
+  if (raw.roomId !== args.expectedRoomId) throw new Error("signaling room id mismatch")
   if (raw.senderRole !== args.expectedSenderRole) {
-    throw new Error("signaling v2 sender role mismatch")
+    throw new Error("signaling sender role mismatch")
   }
   const now = args.nowMs ?? Date.now()
-  if (Math.abs(raw.issuedAt - now) > (args.clockSkewMs ?? V2_CLOCK_SKEW_MS)) {
-    throw new Error("signaling v2 clock skew")
+  if (Math.abs(raw.issuedAt - now) > (args.clockSkewMs ?? CLOCK_SKEW_MS)) {
+    throw new Error("signaling clock skew")
   }
   const header = {
-    v: 2 as const,
+    v: SIGNALING_PROTOCOL_VERSION,
     roomId: raw.roomId,
     senderRole: raw.senderRole,
     sessionId: raw.sessionId,
@@ -411,11 +411,11 @@ export async function verifyAndDecryptV2Envelope(
     signature as unknown as BufferSource,
     encodeFields([...headerFields(header), ciphertext]) as BufferSource
   )
-  if (!verified) throw new Error("signaling v2 signature verification failed")
+  if (!verified) throw new Error("signaling signature verification failed")
   const nonce = base64UrlToBytes(raw.nonce)
   const expectedNonce = await deriveNonce(raw.epoch, raw.senderRole, raw.seq)
   if (!constantTimeEqual(nonce, expectedNonce)) {
-    throw new Error("signaling v2 nonce mismatch")
+    throw new Error("signaling nonce mismatch")
   }
   let plaintext: ArrayBuffer
   try {
@@ -429,7 +429,7 @@ export async function verifyAndDecryptV2Envelope(
       ownedBytes(ciphertext)
     )
   } catch {
-    throw new Error("signaling v2 ciphertext authentication failed")
+    throw new Error("signaling ciphertext authentication failed")
   }
   try {
     return {
@@ -437,11 +437,11 @@ export async function verifyAndDecryptV2Envelope(
       body: JSON.parse(new TextDecoder().decode(plaintext)),
     }
   } catch {
-    throw new Error("signaling v2 plaintext is not valid JSON")
+    throw new Error("signaling plaintext is not valid JSON")
   }
 }
 
-export class StrictReplayWindowV2 {
+export class StrictReplayWindow {
   private currentEpoch: string | null = null
   private lastSeq = 0
   private readonly retiredEpochs = new Map<string, number>()
@@ -454,7 +454,7 @@ export class StrictReplayWindowV2 {
     if (this.retiredEpochs.has(epoch)) return false
     if (this.currentEpoch !== epoch) {
       if (this.currentEpoch) {
-        this.retiredEpochs.set(this.currentEpoch, nowMs + V2_CLOCK_SKEW_MS * 2)
+        this.retiredEpochs.set(this.currentEpoch, nowMs + CLOCK_SKEW_MS * 2)
       }
       this.currentEpoch = epoch
       this.lastSeq = seq
@@ -475,7 +475,7 @@ async function deriveNonce(epoch: string, senderRole: PeerRole, seq: number): Pr
 }
 
 function headerFields(
-  header: Omit<SignalingEnvelopeV2, "ciphertext" | "signature">
+  header: Omit<SignalingEnvelope, "ciphertext" | "signature">
 ): Array<string | Uint8Array> {
   return [
     String(header.v),
@@ -490,12 +490,12 @@ function headerFields(
   ]
 }
 
-function encodeHeader(header: Omit<SignalingEnvelopeV2, "ciphertext" | "signature">): Uint8Array {
+function encodeHeader(header: Omit<SignalingEnvelope, "ciphertext" | "signature">): Uint8Array {
   return encodeFields(headerFields(header))
 }
 
 function encodeSubscribeProof(
-  proof: Omit<SubscribeProofV2, "signature"> | SubscribeProofV2
+  proof: Omit<SubscribeProof, "signature"> | SubscribeProof
 ): Uint8Array {
   return encodeFields([
     String(proof.v),
@@ -526,11 +526,11 @@ function encodeFields(fields: Array<string | Uint8Array>): Uint8Array {
   return output
 }
 
-function assertEnvelopeShape(value: unknown): asserts value is SignalingEnvelopeV2 {
-  if (!value || typeof value !== "object") throw new Error("signaling v2 envelope shape")
+function assertEnvelopeShape(value: unknown): asserts value is SignalingEnvelope {
+  if (!value || typeof value !== "object") throw new Error("signaling envelope shape")
   const envelope = value as Record<string, unknown>
   if (
-    envelope.v !== 2 ||
+    envelope.v !== SIGNALING_PROTOCOL_VERSION ||
     typeof envelope.roomId !== "string" ||
     (envelope.senderRole !== "desktop" && envelope.senderRole !== "mobile") ||
     typeof envelope.sessionId !== "string" ||
@@ -542,7 +542,7 @@ function assertEnvelopeShape(value: unknown): asserts value is SignalingEnvelope
     typeof envelope.ciphertext !== "string" ||
     typeof envelope.signature !== "string"
   ) {
-    throw new Error("signaling v2 envelope shape")
+    throw new Error("signaling envelope shape")
   }
 }
 
@@ -554,13 +554,13 @@ function bytesToBase64Url(bytes: Uint8Array): string {
 
 function base64UrlToBytes(value: string): Uint8Array {
   if (!BASE64URL_RE.test(value) || value.length % 4 === 1) {
-    throw new Error("signaling v2 invalid base64url")
+    throw new Error("signaling invalid base64url")
   }
   const padded = value + "=".repeat((4 - (value.length % 4)) % 4)
   const binary = atob(padded.replace(/-/g, "+").replace(/_/g, "/"))
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
   if (bytesToBase64Url(bytes) !== value) {
-    throw new Error("signaling v2 non-canonical base64url")
+    throw new Error("signaling non-canonical base64url")
   }
   return bytes
 }
