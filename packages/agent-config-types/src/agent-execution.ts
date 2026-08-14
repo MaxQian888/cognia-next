@@ -360,6 +360,25 @@ export type CanonicalContentPart =
  * failure kinds. Raw runtime payloads are allowed only inside the controlled
  * `diagnostic` attachment.
  */
+/**
+ * Why a model was called. Replay matches per purpose as well as per actor, so
+ * a title or compaction call can never be served a tape recorded for the turn
+ * itself even when the two happen to normalize to the same request.
+ */
+export type ModelRequestPurpose =
+  "turn" | "subagent" | "compaction" | "title" | "summary" | "judge" | "embedding" | "other"
+
+export const MODEL_REQUEST_PURPOSES: readonly ModelRequestPurpose[] = [
+  "turn",
+  "subagent",
+  "compaction",
+  "title",
+  "summary",
+  "judge",
+  "embedding",
+  "other",
+]
+
 export type CanonicalAgentEvent =
   | { kind: "lifecycle"; phase: "started" | "ended" | "interrupted"; detail?: string }
   | {
@@ -789,6 +808,29 @@ export type CanonicalAgentEvent =
       status: "ok" | "missing" | "retries-exhausted" | "turn-incomplete"
       output?: unknown
     }
+  | {
+      /**
+       * Shadow record of one model request (ADR-0118).
+       *
+       * Digests and artifact references ONLY. The prompt, the normalized
+       * messages, the tool schemas and the response never ride this event —
+       * when recording is enabled they go to the encrypted eval asset store and
+       * `surfaceRef` points at them, so an ordinary run's durable log stays
+       * free of model content.
+       */
+      kind: "model-request"
+      purpose: ModelRequestPurpose
+      provider: string
+      model: string
+      /** Replay match key: normalized messages + resolved config + tools. */
+      requestDigest: string
+      promptDigest: string
+      toolDigest: string
+      compositionDigest?: string
+      executionFingerprint?: string
+      /** Encrypted-asset reference; absent unless recording was enabled. */
+      surfaceRef?: string
+    }
   | { kind: "warning"; code: string; message: string }
   | { kind: "failure"; code: string; message: string; retryable?: boolean }
   | { kind: "capability-error"; capability: AgentCapabilityId; command?: string }
@@ -1209,6 +1251,7 @@ const CANONICAL_EVENT_KINDS: readonly string[] = [
   "plugin-install",
   "user-replay",
   "structured-output",
+  "model-request",
   "warning",
   "failure",
   "capability-error",

@@ -5,7 +5,9 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import type { EvalProject } from "@cognia/eval-core"
 import { evalCommand } from "./eval-command"
+import { sealReplayFixture } from "../eval/replay/fixture-maintenance"
 import type { OutputSink } from "./output"
+import type { ReplayFixtureV1 } from "@/lib/ai/replay/fixture"
 
 const environmentCompatibility = {
   checkedAt: 1,
@@ -65,6 +67,21 @@ const project = (ready = true): EvalProject => ({
   createdAt: 1,
   updatedAt: 1,
 })
+
+const replayFixture: ReplayFixtureV1 = {
+  scenario: {
+    schemaVersion: 1,
+    scenarioId: "cli-replay",
+    title: "CLI replay",
+    level: "canonical",
+    platform: "headless",
+    actors: [{ actorRef: "root", role: "root" }],
+    inputSteps: [],
+    permissionScript: [],
+    expectations: { assertConsumed: true, fidelity: "full" },
+  },
+  tapes: [],
+}
 
 function sink() {
   const stdout: string[] = []
@@ -281,11 +298,11 @@ describe("cognia eval command", () => {
       samples: [
         {
           variantId: "a",
-          caseId: "case-1",
+          caseId: 'case,"1',
           repetition: 1,
           status: "completed",
           quality: 1,
-          cost: 0,
+          cost: null,
           latencyMs: 10,
         },
       ],
@@ -320,6 +337,256 @@ describe("cognia eval command", () => {
     expect(JSON.parse(await readFile(`${prefix}.cognia-eval`, "utf8"))).toMatchObject({
       schema: "cognia-eval-bundle/v1",
     })
+  })
+
+  it("writes live replay recordings only as password-encrypted bundles", async () => {
+    const output = sink()
+    const writeJson = jest.fn(async (_pathname: string, _value: unknown) => {})
+    const privateFixture = {
+      scenario: {
+        schemaVersion: 1 as const,
+        scenarioId: "recorded",
+        title: "Recorded",
+        level: "runtime" as const,
+        platform: "headless" as const,
+        actors: [{ actorRef: "root", role: "root" as const }],
+        inputSteps: [],
+        permissionScript: [],
+        expectations: { assertConsumed: true, fidelity: "full" as const },
+      },
+      tapes: [],
+      assets: { private: ["sensitive model output"] },
+      actors: ["root"],
+    }
+
+    expect(
+      await evalCommand(
+        {
+          command: "eval",
+          subcommand: "record",
+          positionals: ["scenario.json"],
+          rest: [],
+          flags: {
+            live: true,
+            output: "recording.cognia-replay",
+            password: "strong replay password",
+          },
+          help: false,
+          version: false,
+        },
+        { out: output.out },
+        {
+          readJson: async () => privateFixture,
+          writeJson,
+          waitForInterrupt: async () => undefined,
+          recordSession: async (options) => {
+            await options.waitForCompletion({
+              baseUrl: "http://127.0.0.1:1234",
+              baseUrlFor: (actorRef: string) => `http://127.0.0.1:1234/a/${actorRef}`,
+            } as never)
+            return privateFixture
+          },
+        }
+      )
+    ).toBe(0)
+
+    expect(writeJson).toHaveBeenCalledWith(
+      "recording.cognia-replay",
+      expect.objectContaining({ schema: "cognia-replay-fixture-bundle/v1" })
+    )
+    expect(JSON.stringify(writeJson.mock.calls[0]?.[1])).not.toContain("sensitive model output")
+  })
+
+  it("requires a password before recording a live replay", async () => {
+    const output = sink()
+    expect(
+      await evalCommand(
+        {
+          command: "eval",
+          subcommand: "record",
+          positionals: ["scenario.json"],
+          rest: [],
+          flags: { live: true, output: "recording.cognia-replay" },
+          help: false,
+          version: false,
+        },
+        { out: output.out },
+        { readJson: async () => ({}) }
+      )
+    ).toBe(1)
+    expect(output.stderr.join(" ")).toContain("--password")
+  })
+
+  it("replays raw and encrypted canonical fixtures", async () => {
+    const rawOutput = sink()
+    expect(
+      await evalCommand(
+        {
+          command: "eval",
+          subcommand: "replay",
+          positionals: ["fixture.json"],
+          rest: [],
+          flags: {},
+          help: false,
+          version: false,
+        },
+        { out: rawOutput.out },
+        { readJson: async () => replayFixture }
+      )
+    ).toBe(0)
+    expect(rawOutput.stdout.join(" ")).toContain("cli-replay")
+
+    const password = "strong replay password"
+    const encrypted = await sealReplayFixture(replayFixture, password)
+    const encryptedOutput = sink()
+    expect(
+      await evalCommand(
+        {
+          command: "eval",
+          subcommand: "replay",
+          positionals: ["fixture.cognia-replay"],
+          rest: [],
+          flags: { password, platform: "tauri" },
+          help: false,
+          version: false,
+        },
+        { out: encryptedOutput.out },
+        { readJson: async () => encrypted }
+      )
+    ).toBe(0)
+  })
+
+  it("refreshes raw fixtures and preserves encryption for encrypted fixtures", async () => {
+    const rawWrite = jest.fn(async (_pathname: string, _value: unknown) => {})
+    expect(
+      await evalCommand(
+        {
+          command: "eval",
+          subcommand: "refresh",
+          positionals: ["fixture.json"],
+          rest: [],
+          flags: {},
+          help: false,
+          version: false,
+        },
+        { out: sink().out },
+        { readJson: async () => replayFixture, writeJson: rawWrite }
+      )
+    ).toBe(0)
+    expect(rawWrite).toHaveBeenCalledWith("fixture.json", replayFixture)
+
+    const password = "strong replay password"
+    const encrypted = await sealReplayFixture(replayFixture, password)
+    const encryptedWrite = jest.fn(async (_pathname: string, _value: unknown) => {})
+    expect(
+      await evalCommand(
+        {
+          command: "eval",
+          subcommand: "refresh",
+          positionals: ["fixture.cognia-replay"],
+          rest: [],
+          flags: { password, output: "refreshed.cognia-replay" },
+          help: false,
+          version: false,
+        },
+        { out: sink().out },
+        { readJson: async () => encrypted, writeJson: encryptedWrite }
+      )
+    ).toBe(0)
+    expect(encryptedWrite.mock.calls[0]?.[1]).toMatchObject({
+      schema: "cognia-replay-fixture-bundle/v1",
+    })
+  })
+
+  it("fails closed at replay, recording, refresh, and import guard rails", async () => {
+    const encrypted = await sealReplayFixture(replayFixture, "strong replay password")
+    const cases = [
+      {
+        subcommand: "replay",
+        flags: {},
+        readJson: async () => ({}),
+        message: "fixture rejected",
+      },
+      {
+        subcommand: "replay",
+        flags: {},
+        readJson: async () => encrypted,
+        message: "--password",
+      },
+      {
+        subcommand: "record",
+        flags: {},
+        readJson: async () => replayFixture,
+        message: "--live",
+      },
+      {
+        subcommand: "record",
+        flags: { live: true },
+        readJson: async () => replayFixture,
+        message: "--output",
+      },
+      {
+        subcommand: "refresh",
+        flags: {},
+        readJson: async () => encrypted,
+        message: "--password",
+      },
+      {
+        subcommand: "import",
+        flags: {},
+        readJson: async () => ({}),
+        message: "--password",
+      },
+      {
+        subcommand: "import",
+        flags: { password: "strong password" },
+        readJson: async () => ({}),
+        message: "--output",
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      const output = sink()
+      expect(
+        await evalCommand(
+          {
+            command: "eval",
+            subcommand: testCase.subcommand,
+            positionals: ["fixture.json"],
+            rest: [],
+            flags: testCase.flags,
+            help: false,
+            version: false,
+          },
+          { out: output.out },
+          { readJson: testCase.readJson }
+        )
+      ).toBe(1)
+      expect([...output.stdout, ...output.stderr].join(" ")).toContain(testCase.message)
+    }
+  })
+
+  it("reports non-object and inconclusive checkpoint statuses", async () => {
+    for (const [checkpoint, expected] of [
+      [null, 1],
+      [{ status: "completed", outcome: "no_conclusion" }, 2],
+    ] as const) {
+      expect(
+        await evalCommand(
+          {
+            command: "eval",
+            subcommand: "status",
+            positionals: ["checkpoint.json"],
+            rest: [],
+            flags: {},
+            help: false,
+            version: false,
+          },
+          { out: sink().out },
+          { readJson: async () => checkpoint }
+        )
+      ).toBe(expected)
+    }
   })
 
   it("surfaces malformed project files and executor failures as configuration errors", async () => {

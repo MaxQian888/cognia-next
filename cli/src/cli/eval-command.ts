@@ -7,7 +7,7 @@ import type {
 } from "@cognia/eval-core"
 import { serializePortableManifest } from "@cognia/eval-core"
 import { checkCliEvalPreflight } from "../eval/preflight"
-import { stringFlag, type ParsedArgs } from "./args"
+import { boolFlag, stringFlag, type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
 
 export interface CliEvalProjectDocument {
@@ -36,6 +36,12 @@ export interface EvalCommandDeps {
     environmentCompatibility: EvalEnvironmentCompatibility
     result: EvalPreflightResult
   }>
+  /** Resolves on SIGINT; injected so `eval record` is testable without signals. */
+  waitForInterrupt(): Promise<void>
+  /** The CLI config a runtime replay drives a real agent session with. */
+  resolveConfig(): Promise<import("../config/schema").ResolvedConfig>
+  /** Capture seam for live recording; injected by tests to avoid opening a socket. */
+  recordSession: typeof import("../eval/replay/fixture-maintenance").recordSession
 }
 
 const HELP = `Usage:
@@ -45,6 +51,9 @@ const HELP = `Usage:
   cognia eval report <checkpoint>
   cognia eval export <checkpoint> --password <password> [--output <prefix>]
   cognia eval import <bundle> --password <password> --output <path>
+  cognia eval replay <fixture> [--runtime] [--allow-recorded] [--password <password>] [--platform <headless|tauri>]
+  cognia eval record <fixture> --live --password <password> --output <path>
+  cognia eval refresh <fixture> [--password <password>] [--output <path>]
 `
 
 async function readJson(pathname: string): Promise<unknown> {
@@ -66,11 +75,32 @@ async function executeProject(
   return executeCliEvalProject(document, checkpointPath)
 }
 
+function waitForInterrupt(): Promise<void> {
+  return new Promise((resolve) => {
+    process.once("SIGINT", () => resolve())
+  })
+}
+
+async function resolveConfig(): Promise<import("../config/schema").ResolvedConfig> {
+  const { loadConfig } = await import("../config/load")
+  return loadConfig()
+}
+
+async function recordSession(
+  options: import("../eval/replay/fixture-maintenance").RecordSessionOptions
+) {
+  const maintenance = await import("../eval/replay/fixture-maintenance")
+  return maintenance.recordSession(options)
+}
+
 const defaultDeps: EvalCommandDeps = {
   readJson,
   writeJson,
   executeProject,
   preflightProject: checkCliEvalPreflight,
+  waitForInterrupt,
+  resolveConfig,
+  recordSession,
 }
 
 function parseDocument(value: unknown): CliEvalProjectDocument {
@@ -218,6 +248,121 @@ export async function evalCommand(
       )
       await deps.writeJson(checkpointPath, result.checkpoint)
       return result.exitCode
+    }
+    if (args.subcommand === "replay") {
+      const { runReplay, canonicalDriver } = await import("../eval/replay/run-replay")
+      const { isEncryptedReplayFixtureBundle, openEncryptedReplayFixture } =
+        await import("../eval/replay/fixture-maintenance")
+      const platform = stringFlag(args, "platform") === "tauri" ? "tauri" : "headless"
+      // Canonical replay drives nothing; runtime replay runs the real agent
+      // session against the tape server. The flag is explicit rather than
+      // inferred from the scenario level so spawning a sidecar is always a
+      // choice the operator made.
+      const driver = boolFlag(args, "runtime")
+        ? (await import("../eval/replay/runtime-driver")).createRuntimeDriver({
+            config: await deps.resolveConfig(),
+          })
+        : canonicalDriver
+      const document = await deps.readJson(target)
+      const replayInput = isEncryptedReplayFixtureBundle(document)
+        ? await openEncryptedReplayFixture(
+            document,
+            stringFlag(args, "password") ??
+              (() => {
+                throw new Error("eval replay requires --password for an encrypted recording")
+              })()
+          )
+        : document
+      const result = await runReplay({
+        raw: replayInput,
+        // A fixture read off disk is repository content unless the operator
+        // says otherwise, and repository content must be synthetic.
+        requireSynthetic: !boolFlag(args, "allow-recorded"),
+        platform,
+        driver,
+      })
+      out.write(`${result.summary}\n`)
+      return result.ok ? 0 : 1
+    }
+    if (args.subcommand === "record") {
+      // Recording is the one path that reaches a real provider and spends real
+      // money, so it cannot be reached by a typo: `--live` is mandatory and has
+      // no default.
+      if (!boolFlag(args, "live")) {
+        throw new Error("eval record talks to a real provider and requires an explicit --live flag")
+      }
+      const output = stringFlag(args, "output")
+      if (!output) throw new Error("eval record requires --output <path>")
+      const password = stringFlag(args, "password")
+      if (!password) throw new Error("eval record requires --password <password>")
+
+      const { sealReplayFixture } = await import("../eval/replay/fixture-maintenance")
+      const document = (await deps.readJson(target)) as { scenario?: unknown }
+      const scenario = (document.scenario ??
+        document) as import("@cognia/agent-config-types/model-request-surface").ReplayScenarioV1
+
+      const recorded = await deps.recordSession({
+        scenario,
+        upstream: stringFlag(args, "upstream"),
+        waitForCompletion: async (proxy) => {
+          out.write(
+            `recording on ${proxy.baseUrl}\n` +
+              `  point the agent at it, e.g. ANTHROPIC_BASE_URL=${proxy.baseUrlFor("root")}\n` +
+              `  press Ctrl-C when the session is done\n`
+          )
+          await deps.waitForInterrupt()
+        },
+      })
+
+      const encrypted = await sealReplayFixture(
+        {
+          scenario: recorded.scenario,
+          tapes: recorded.tapes,
+          assets: recorded.assets,
+        },
+        password
+      )
+      await deps.writeJson(output, encrypted)
+      out.json({
+        recorded: output,
+        tapes: recorded.tapes.length,
+        actors: recorded.actors,
+        synthetic: false,
+        encrypted: true,
+        note: "real recording encrypted; keep its password outside the repository",
+      })
+      return 0
+    }
+    if (args.subcommand === "refresh") {
+      const {
+        isEncryptedReplayFixtureBundle,
+        openEncryptedReplayFixture,
+        refreshFixture,
+        sealReplayFixture,
+      } = await import("../eval/replay/fixture-maintenance")
+      const document = await deps.readJson(target)
+      const encrypted = isEncryptedReplayFixtureBundle(document)
+      const password = stringFlag(args, "password")
+      if (encrypted && !password) {
+        throw new Error("eval refresh requires --password for an encrypted recording")
+      }
+      const fixture = encrypted
+        ? await openEncryptedReplayFixture(document, password as string)
+        : document
+      const result = refreshFixture(fixture)
+      const output = stringFlag(args, "output") ?? target
+      await deps.writeJson(
+        output,
+        encrypted ? await sealReplayFixture(result.fixture, password as string) : result.fixture
+      )
+      out.json({
+        refreshed: output,
+        changes: result.changes,
+        warnings: result.warnings,
+      })
+      // Warnings are things refresh is not allowed to fix by itself, so they
+      // must not read as success.
+      return result.warnings.length > 0 ? 2 : 0
     }
     if (args.subcommand === "import") {
       const password = stringFlag(args, "password")
