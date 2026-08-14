@@ -1322,6 +1322,15 @@
     "host_feature_manifest": {
       "$ref": "#/$defs/LegacyRecord"
     },
+    "host_state_snapshot": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "host_state_status": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "host_state_submit": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
     "integration_ingress_ack": {
       "$ref": "#/$defs/NullResult"
     },
@@ -1566,7 +1575,14 @@
       "$ref": "#/$defs/LegacyList"
     },
     "plugin_load_vscode": {
-      "$ref": "#/$defs/NullResult"
+      "type": "object",
+      "required": ["generation"],
+      "properties": {
+        "generation": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "plugin_permission_grant": {
       "$ref": "#/$defs/LegacyResult"
@@ -1720,6 +1736,29 @@
     },
     "remote_notification_publish": {
       "$ref": "#/$defs/LegacyResult"
+    },
+    "retrieval_profile_dek_export": {
+      "type": "object",
+      "required": ["protocolVersion", "profileId", "keyId", "rawKey"],
+      "properties": {
+        "protocolVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "profileId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rawKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]{43}=$"
+        }
+      },
+      "additionalProperties": false
     },
     "revoke_push_token": {
       "$ref": "#/$defs/NullResult"

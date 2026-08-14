@@ -7,6 +7,33 @@ import {
 } from "./host-feature-manifest"
 
 describe("host feature manifest", () => {
+  it("advertises HostState v1 through the existing manifest on execution hosts", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
+
+    expect(manifest.features["session.state-sync"]).toEqual({
+      version: 1,
+      operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],
+    })
+    expect(manifest.limits).toMatchObject({
+      maxHostStateSnapshotBytes: 512 * 1024,
+      maxHostStateActionBatch: 50,
+      maxPendingHostStateActions: 1000,
+      hostStateReplayRetentionMs: 24 * 60 * 60 * 1000,
+    })
+    expect(supportsHostFeatureOperation(manifest, "session.state-sync", "host_state_submit")).toBe(
+      true
+    )
+  })
+
+  it("does not advertise HostState from non-authoritative web or mobile clients", () => {
+    expect(
+      buildLocalHostFeatureManifest({ platform: "web" }).features["session.state-sync"]
+    ).toBeUndefined()
+    expect(
+      buildLocalHostFeatureManifest({ platform: "mobile" }).features["session.state-sync"]
+    ).toBeUndefined()
+  })
+
   it("advertises the versioned Twin draft review operation on execution hosts", () => {
     const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
 

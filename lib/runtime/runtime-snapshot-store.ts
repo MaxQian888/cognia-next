@@ -49,7 +49,10 @@ export function updateRuntimeSnapshot(patch: Partial<RuntimeSnapshot>): void {
  * grants from the capabilities of operations that the old host advertised;
  * the host remains the final authorization boundary for every RPC.
  */
-export function runtimeHostSnapshotFromManifest(value: unknown): HostRuntimeSnapshot {
+export function runtimeHostSnapshotFromManifest(
+  value: unknown,
+  options: { hostStateWriteEnabled?: boolean } = {}
+): HostRuntimeSnapshot {
   const manifest = parseHostFeatureManifest(value)
   if (!manifest) return { compatible: false, operations: [], grants: [] }
   if (
@@ -71,17 +74,22 @@ export function runtimeHostSnapshotFromManifest(value: unknown): HostRuntimeSnap
           .map((operation) => operation.name)
       : listV1Operations(manifest)
 
+  const gatedOperations =
+    options.hostStateWriteEnabled === false
+      ? operations.filter((operation) => operation !== "host_state_submit")
+      : operations
+
   const grants =
     manifest.schemaVersion === 2
       ? manifest.deviceGrants
-      : operations.flatMap((operation) => {
+      : gatedOperations.flatMap((operation) => {
           const descriptor = getCommandDescriptor(operation)
           return descriptor ? [descriptor.capability] : []
         })
 
   return {
     compatible: true,
-    operations: [...new Set(operations)],
+    operations: [...new Set(gatedOperations)],
     grants: [...new Set(grants)],
   }
 }

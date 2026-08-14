@@ -1468,7 +1468,10 @@
       "passwordLabel": "Password",
       "passwordPlaceholder": "Password",
       "recoveryContinue": "Continue",
+      "recoveryCopied": "Copied",
+      "recoveryCopy": "Copy recovery key",
       "recoveryDescription": "Save this one-time recovery key before continuing. It can unlock your browser Vault if you forget the account password.",
+      "recoveryDownload": "Download .txt",
       "recoveryForm": "Save recovery key",
       "recoverySaved": "I saved this recovery key",
       "recoveryTitle": "Save your recovery key",
@@ -4947,10 +4950,12 @@
           "diagnostics": "Diagnostics",
           "goal": "Goal",
           "help": "Help",
+          "loop": "Loop",
           "other": "Other",
           "plugins": "Plugins",
           "system": "System",
-          "template": "Prompts"
+          "template": "Prompts",
+          "workflow": "Workflow"
         },
         "comingSoon": "Coming soon",
         "fileTitle": "Reference a file or folder",
@@ -6252,6 +6257,21 @@
     "failed": "Failed to import the handed-off session",
     "received": "Session \"{title}\" handed off from the CLI"
   },
+  "cliHostState": {
+    "abortPending": "Host abort pending: {error}",
+    "approvalPending": "Host approval pending: {error}",
+    "attached": "Attached to {target}{session} (generation {generation}).",
+    "detached": "Detached; standalone JSONL sessions were not modified.",
+    "disconnected": "Host attachment disconnected: {error}",
+    "invalidSavedAttachment": "Saved Host attachment is invalid: {error}",
+    "outcome": "HostState {outcome}: {code}",
+    "reattachFailed": "Host reattach failed: {error}",
+    "sessionRequired": "Attached Host requires a session. Reattach with --session ID.",
+    "sessionSuffix": " session {session}",
+    "standalone": "Standalone (not attached).",
+    "status": "Attached to {target}; generation {generation}; hostSeq {hostSeq}; local pending {pending}; local rejected/conflicted {terminal}; pending dispatch {pendingDispatch}; pending broadcast {pendingBroadcast}.",
+    "transcriptBoundaryRequired": "Attached transcript edits require a canonical Host message boundary."
+  },
   "common": {
     "add": "Add",
     "all": "All",
@@ -6916,6 +6936,7 @@
       },
       "cancel": "Cancel",
       "clearSearch": "Clear search",
+      "collapseSidebar": "Collapse conversation list",
       "compactDensity": "Compact rows",
       "conversationsTitle": "Conversations",
       "deleteFolder": "Delete folder",
@@ -6928,6 +6949,7 @@
       "emptyFolder": "Empty — move conversations here.",
       "emptySearch": "No conversations match “{query}”.",
       "emptyTeam": "No conversations yet. Start one above.",
+      "expandSidebar": "Expand conversation list",
       "folderActions": "Folder actions",
       "groupBy": {
         "label": "Group by",
@@ -6960,6 +6982,7 @@
       "searchTruncated": "Some results may be hidden — refine your search.",
       "sectionPinned": "Pinned",
       "sectionRecent": "Recent",
+      "showCustomIcons": "Show custom Agent and Team icons",
       "showPreview": "Show message previews",
       "showUnreadBadges": "Show unread badges",
       "teamFallback": "Team",
@@ -7503,6 +7526,57 @@
       "connOffline": "Offline",
       "connOnline": "Online",
       "connReconnecting": "Reconnecting…",
+      "connectionCenter": {
+        "actions": {
+          "connectHost": "Connect Host",
+          "reconnect": "Reconnect now",
+          "recover": "Repair connection",
+          "settings": "Companion settings"
+        },
+        "address": "Host address",
+        "auth": {
+          "locked": "Locked",
+          "unavailable": "Unavailable",
+          "unlocked": "Unlocked"
+        },
+        "authentication": "Credential vault",
+        "capabilities": "Host capabilities",
+        "capabilityCount": "{count, plural, =0 {None advertised} one {# operation} other {# operations}}",
+        "cloudHost": "Cloud Host",
+        "desktopHost": "Desktop Host",
+        "hostLink": "Host link",
+        "lastConnected": "Last connected",
+        "lastError": "Latest connection error",
+        "localRuntime": "Local runtime",
+        "network": "Device network",
+        "networkType": {
+          "cellular": "Cellular",
+          "none": "Offline",
+          "unknown": "Connected",
+          "wifi": "Wi-Fi"
+        },
+        "protocol": "Protocol compatibility",
+        "protocolStatus": {
+          "checking": "Checking",
+          "compatible": "Compatible",
+          "incompatible": "Incompatible"
+        },
+        "remoteRuntime": "Remote Host",
+        "runtimeTarget": "Execution",
+        "serverVersion": "Host version",
+        "thisBrowser": "This browser",
+        "thisDesktop": "This desktop",
+        "tier": {
+          "offline": "Offline",
+          "rtc-direct": "RTC direct",
+          "rtc-relay": "RTC relay",
+          "unknown": "Negotiating",
+          "ws-lan": "WebSocket · LAN",
+          "ws-tunnel": "WebSocket · tunnel"
+        },
+        "title": "Runtime connection",
+        "transport": "Transport"
+      },
       "error": "Error",
       "idle": "Idle",
       "perf": "Performance",
@@ -12816,7 +12890,7 @@
         "tokenPlaceholder": "eyJ..."
       },
       "webrtc": {
-        "description": "Third transport tier (ADR-0021). Uses signaling v2 role authentication and end-to-end encrypted envelopes, so the rendezvous cannot read SDP or ICE.",
+        "description": "Third transport tier (ADR-0021). Uses role-authenticated signaling and end-to-end encrypted envelopes, so the rendezvous cannot read SDP or ICE.",
         "deviceTier": {
           "awaiting": "Awaiting peer",
           "connected": "Connected",
@@ -12839,7 +12913,7 @@
         "invalidUrl": "Signaling URL must start with ws:// or wss://",
         "noDevices": "No paired devices with WebRTC enabled yet. Pair a phone running the latest mobile build to populate this list.",
         "pollFailed": "Couldn't read the signaling hub status ({reason}). The device list below may be stale.",
-        "protocolMode": "v2 role-isolated",
+        "protocolMode": "Role-isolated protocol",
         "reconnectButton": "Reconnect",
         "reconnectFailed": "Reconnect failed ({reason}).",
         "reconnectSuccess": "Reconnect requested.",
@@ -12850,7 +12924,7 @@
         "savingButton": "Saving…",
         "signalingUrlHelp": "WebSocket endpoint for the public rendezvous. Self-hosted deployments swap this for their own URL.",
         "signalingUrlLabel": "Signaling server URL",
-        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v2/signaling",
+        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/signaling",
         "title": "WebRTC remote access",
         "turnProviderAuthTokenLabel": "Twilio Auth Token",
         "turnProviderCloudflare": "Cloudflare Calls",
@@ -13819,6 +13893,10 @@
         "generic": "Pairing failed (HTTP {status})."
       },
       "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+      "invitationSummary": {
+        "description": "Server v{version} · expires at {expiresAt, time, short}",
+        "title": "Invitation ready for {host}"
+      },
       "loadingManualCta": "Set up manually",
       "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
       "loadingTitle": "Checking for an existing pairing…",
@@ -13834,8 +13912,8 @@
       "offlineSubtitle": "Couldn't reach the desktop — verify the desktop is awake and on the same network.",
       "offlineTitle": "Connection lost",
       "payloadError": {
-        "invalid": "That pairing payload couldn't be decoded — copy the full cgnp2|… string from the server and paste it again.",
-        "versionMismatch": "This pairing payload is version {got}, which this app doesn't understand. Update the app or the server so both speak the same payload version."
+        "invalid": "That pairing invitation couldn't be decoded — copy the full cgnp3|… string from the server and paste it again.",
+        "versionMismatch": "The server issued cgnp{got}, but this browser requires cgnp3. Rebuild the local server binary, or update and restart the deployed image, then issue a fresh invitation."
       },
       "payloadPlaceholder": "cgnp3|…",
       "permissions": {
@@ -13897,16 +13975,30 @@
         "jwt": "Pair JWT"
       },
       "title": "Connect to desktop",
-      "tokenLabel": "Pair token",
+      "tokenLabel": "Pair invitation",
       "transportLabel": "Transport",
       "web": {
         "baseUrlLocked": "Server URL is set by this deployment",
-        "codeHint": "Generate a code on the server with “cognia-server pair”, or copy it from desktop Settings → Companion.",
-        "formCardDescription": "Paste the pairing payload or the 6-digit code issued by your cognia server — both use the same 5-minute pair token.",
+        "clearPayload": "Clear",
+        "clipboardReadFailed": "The browser could not read the clipboard. Paste the full invitation manually.",
+        "clipboardWriteFailed": "The browser could not copy the command. Select it and copy it manually.",
+        "codeHint": "Generate a one-time invitation on the server with “cognia-server pair”, or copy it from desktop Settings → Companion.",
+        "commandCopied": "Command copied",
+        "commandMode": {
+          "compose": "Docker",
+          "development": "Development",
+          "kubernetes": "Kubernetes"
+        },
+        "copyCommand": "Copy headless pairing command",
+        "deploymentCommandHint": "Run this inside the target Host instance. In a multi-tenant or multi-replica deployment, replace the namespace and Pod name with the exact Host the browser should connect to. If it prints cgnp2, update the deployed image and restart or roll out that Host before retrying.",
+        "formCardDescription": "Paste the one-time cgnp3 invitation issued by your cognia server.",
         "formCardTitle": "Pair this browser",
+        "headlessDescription": "Run this in a second terminal while the headless server is running, then paste the printed cgnp3 invitation below.",
+        "headlessTitle": "Using a headless server?",
         "httpsRequired": "Browser pairing requires HTTPS so the pair credential is never sent in cleartext. Use an HTTPS companion URL.",
-        "intro": "Connect this browser to your cognia server. Paste the pairing payload or enter the 6-digit code to sign in.",
-        "pasteHint": "Paste the full cgnp2|… payload — the server URL fills in automatically — or just the raw pair JWT.",
+        "intro": "Connect this browser with a one-time invitation issued by your cognia server.",
+        "pasteClipboard": "Paste",
+        "pasteHint": "Paste the full cgnp3|… invitation; the server address and identity are verified automatically.",
         "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
         "storageNoticeTitle": "Credential stays in this browser",
         "title": "Connect to your server"
@@ -16843,6 +16935,16 @@
         "switchAria": "Trust this plugin's frontend code",
         "title": "Trust frontend code"
       },
+      "lifecycle": {
+        "activating": "Activating",
+        "dirty": "Cleanup required",
+        "error": "Runtime error",
+        "retryCleanup": "Retry cleanup",
+        "retryFailed": "Cleanup is still unconfirmed. Restart the host or retry after the native runtime exits.",
+        "retrying": "Retrying cleanup",
+        "stopping": "Stopping",
+        "waiting": "Waiting for service"
+      },
       "logs": {
         "aria": "Python host log entries",
         "clear": "Clear",
@@ -17015,6 +17117,13 @@
         "loading": "Inspecting plugins…",
         "refresh": "Refresh"
       },
+      "lifecycle": {
+        "effects": "Effects (active / pending / failed)",
+        "empty": "No lifecycle generations have been observed.",
+        "plugin": "Plugin",
+        "services": "Services",
+        "state": "Generation and state"
+      },
       "logs": {
         "empty": "No logs captured."
       },
@@ -17034,6 +17143,7 @@
         "hooks": "Hook history",
         "hotReload": "Hot reload",
         "inspect": "Inspect",
+        "lifecycle": "Lifecycle",
         "logs": "Logs",
         "profiler": "Profiler",
         "triggers": "Triggers"
@@ -29474,6 +29584,7 @@
           "mcp": "MCP servers",
           "native-anthropic": "Native",
           "plugin": "Plugins",
+          "sdk-native": "Agent SDK",
           "unknown": "Granted but unavailable"
         },
         "loading": "Loading tools…",
@@ -32989,6 +33100,7 @@
     "source_mcp": "MCP",
     "source_native-anthropic": "Native",
     "source_plugin": "Plugin",
+    "source_sdk-native": "SDK",
     "title": "Tool search & filtering",
     "toggleTool": "Toggle {tool} in the filter"
   },
@@ -33049,6 +33161,15 @@
       "astGrepSearch": "Search code by AST structure (meta-variables $VAR / $$$) across 25 languages. Read-only; more precise than text grep.",
       "checkProgramAllowed": "Test whether a program would be allowed to start_process.",
       "cloneDepSource": "Clone a dependency's HTTPS source repo into .cognia/clonedeps/ (idempotent) so you can read its internals.",
+      "codegraphCallees": "What a symbol calls or references, transitively.",
+      "codegraphCallers": "Who calls or references a symbol, transitively.",
+      "codegraphContext": "Task-relevant context for a natural-language query in one call: entry-point symbols, the related subgraph, snippets, and files.",
+      "codegraphExplore": "Survey the neighbourhood around symbols you name explicitly. Use when you already know one or two symbol names.",
+      "codegraphFiles": "List indexed source files with per-file symbol counts, language, and any extraction errors.",
+      "codegraphImpact": "Blast radius: everything that transitively depends on a symbol. Check before changing it.",
+      "codegraphNode": "Fetch one symbol by id or qualified name: kind, signature, docstring, location, and verbatim source.",
+      "codegraphSearch": "Full-text search the graph for symbols by name or doc. Returns ranked rows whose ids feed the other codegraph tools.",
+      "codegraphStatus": "Report index health: file / node / edge counts, language histogram, storage backend, and files pending re-index.",
       "contentSearch": "Search file contents (substring or regex) with line numbers.",
       "coreApplyPatch": "Apply a unified diff across one or more files atomically (create / modify / delete).",
       "coreBash": "Execute a free-form shell command (approval-gated; output keeps the tail).",

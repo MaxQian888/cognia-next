@@ -278,6 +278,11 @@
       "category": "extensions"
     },
     {
+      "id": "retrieval",
+      "title": "Retrieval",
+      "category": "knowledge"
+    },
+    {
       "id": "scheduled-tasks",
       "title": "Scheduled Tasks",
       "category": "automation"
@@ -11808,6 +11813,227 @@
       "outputTyped": true
     },
     {
+      "name": "host_state_snapshot",
+      "category": "system",
+      "resource": "host",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "host_state_snapshot (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "protocolVersion",
+          "accountId",
+          "runtimeTargetId",
+          "channel"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runtimeTargetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "channel": {
+            "type": "string",
+            "pattern": "^cognia://target/"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "host"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_state_status",
+      "category": "system",
+      "resource": "host",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "host_state_status (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "protocolVersion",
+          "accountId",
+          "runtimeTargetId"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runtimeTargetId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "host"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_state_submit",
+      "category": "system",
+      "resource": "host",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "host_state_submit (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "protocolVersion",
+          "accountId",
+          "runtimeTargetId",
+          "actions"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runtimeTargetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": [
+                "protocolVersion",
+                "channel",
+                "accountId",
+                "runtimeTargetId",
+                "hostId",
+                "hostGeneration",
+                "clientId",
+                "clientSeq",
+                "actionId",
+                "createdAt",
+                "action"
+              ],
+              "properties": {
+                "protocolVersion": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "channel": {
+                  "type": "string",
+                  "pattern": "^cognia://target/"
+                },
+                "accountId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "runtimeTargetId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "hostId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "hostGeneration": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "clientId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "clientSeq": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "actionId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "createdAt": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "action": {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": {},
+                  "example": {}
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "host"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "integration_ingress_ack",
       "category": "connectors",
       "resource": "integration-ingress",
@@ -15317,13 +15543,17 @@
         "type": "object",
         "required": [
           "pluginId",
-          "configJson"
+          "configJson",
+          "generation"
         ],
         "properties": {
           "pluginId": {
             "type": "string"
           },
           "configJson": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -15655,7 +15885,8 @@
         "required": [
           "plugin_id",
           "plugin_path",
-          "entry"
+          "entry",
+          "generation"
         ],
         "properties": {
           "plugin_id": {
@@ -15669,6 +15900,10 @@
             "description": "Also accepted as `pluginPath`."
           },
           "entry": {
+            "type": "string",
+            "example": ""
+          },
+          "generation": {
             "type": "string",
             "example": ""
           }
@@ -15697,10 +15932,14 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId"
+          "pluginId",
+          "generation"
         ],
         "properties": {
           "pluginId": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -15937,7 +16176,8 @@
           "plugin_path",
           "entry",
           "callback_id",
-          "args"
+          "args",
+          "generation"
         ],
         "properties": {
           "plugin_id": {
@@ -15959,7 +16199,11 @@
             "example": "",
             "description": "Also accepted as `callbackId`."
           },
-          "args": {}
+          "args": {},
+          "generation": {
+            "type": "string",
+            "example": ""
+          }
         },
         "additionalProperties": false
       },
@@ -15996,7 +16240,8 @@
         "required": [
           "pluginId",
           "method",
-          "payloadJson"
+          "payloadJson",
+          "generation"
         ],
         "properties": {
           "pluginId": {
@@ -16006,6 +16251,9 @@
             "type": "string"
           },
           "payloadJson": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -16185,7 +16433,16 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "null"
+        "type": "object",
+        "required": [
+          "generation"
+        ],
+        "properties": {
+          "generation": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -16443,7 +16700,8 @@
           "pluginId",
           "event",
           "name",
-          "payload"
+          "payload",
+          "generation"
         ],
         "properties": {
           "pluginId": {
@@ -16455,7 +16713,10 @@
           "name": {
             "type": "string"
           },
-          "payload": {}
+          "payload": {},
+          "generation": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
@@ -16492,7 +16753,8 @@
         "required": [
           "pluginId",
           "toolName",
-          "args"
+          "args",
+          "generation"
         ],
         "properties": {
           "pluginId": {
@@ -16505,6 +16767,9 @@
             "type": "object",
             "additionalProperties": {},
             "example": {}
+          },
+          "generation": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -16541,7 +16806,8 @@
         "type": "object",
         "required": [
           "pluginId",
-          "code"
+          "code",
+          "generation"
         ],
         "properties": {
           "pluginId": {
@@ -16557,6 +16823,9 @@
             ],
             "additionalProperties": {},
             "example": {}
+          },
+          "generation": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -16592,10 +16861,14 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId"
+          "pluginId",
+          "generation"
         ],
         "properties": {
           "pluginId": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -16632,10 +16905,14 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId"
+          "pluginId",
+          "generation"
         ],
         "properties": {
           "pluginId": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -16673,13 +16950,17 @@
         "type": "object",
         "required": [
           "pluginId",
-          "moduleName"
+          "moduleName",
+          "generation"
         ],
         "properties": {
           "pluginId": {
             "type": "string"
           },
           "moduleName": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -16785,10 +17066,14 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId"
+          "pluginId",
+          "generation"
         ],
         "properties": {
           "pluginId": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -17032,7 +17317,8 @@
         "required": [
           "pluginId",
           "moduleName",
-          "attrName"
+          "attrName",
+          "generation"
         ],
         "properties": {
           "pluginId": {
@@ -17042,6 +17328,9 @@
             "type": "string"
           },
           "attrName": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -17079,7 +17368,8 @@
         "type": "object",
         "required": [
           "pluginId",
-          "config"
+          "config",
+          "generation"
         ],
         "properties": {
           "pluginId": {
@@ -17089,6 +17379,9 @@
             "type": "object",
             "additionalProperties": {},
             "example": {}
+          },
+          "generation": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -17146,10 +17439,14 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId"
+          "pluginId",
+          "generation"
         ],
         "properties": {
           "pluginId": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -17509,10 +17806,14 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId"
+          "pluginId",
+          "generation"
         ],
         "properties": {
           "pluginId": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -17541,13 +17842,17 @@
         "type": "object",
         "required": [
           "pluginId",
-          "responseJson"
+          "responseJson",
+          "generation"
         ],
         "properties": {
           "pluginId": {
             "type": "string"
           },
           "responseJson": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -17576,13 +17881,17 @@
         "type": "object",
         "required": [
           "pluginId",
-          "configJson"
+          "configJson",
+          "generation"
         ],
         "properties": {
           "pluginId": {
             "type": "string"
           },
           "configJson": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -17621,7 +17930,8 @@
         "required": [
           "pluginId",
           "exportName",
-          "payloadJson"
+          "payloadJson",
+          "generation"
         ],
         "properties": {
           "pluginId": {
@@ -17631,6 +17941,9 @@
             "type": "string"
           },
           "payloadJson": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -17658,10 +17971,14 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId"
+          "pluginId",
+          "generation"
         ],
         "properties": {
           "pluginId": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -17781,10 +18098,14 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId"
+          "pluginId",
+          "generation"
         ],
         "properties": {
           "pluginId": {
+            "type": "string"
+          },
+          "generation": {
             "type": "string"
           }
         },
@@ -18517,6 +18838,68 @@
         ],
         "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
         "x-cognia-schema-owner": "notifications"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "retrieval_profile_dek_export",
+      "category": "knowledge",
+      "resource": "retrieval",
+      "target": "execution",
+      "operation": "read",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "retrieval_profile_dek_export (secret.manage)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "contentProtocolVersion"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentProtocolVersion": {
+            "type": "integer",
+            "const": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "protocolVersion",
+          "profileId",
+          "keyId",
+          "rawKey"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "profileId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "keyId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rawKey": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]{43}=$"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -25237,5 +25620,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "ae0ad5199c9c07b1498be6053d81e8ad73e87b8628e8fe78ea55f4fdf6260c86"
+  "catalogHash": "d701e8b044d0adb7ac9434158bbaf8935863b069a1d437c4b26c289454986254"
 }

@@ -15,7 +15,7 @@ import { addPairedDevice, touchPairedDevice } from "@/lib/db/paired-devices"
 import { transport } from "@/lib/tauri"
 import { useAccountStore } from "@/stores/account/account-store"
 import type { DevicePlatform } from "@/types/mobile/paired-device"
-import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import type { RoomDescriptor } from "@/lib/signaling/crypto"
 
 // ---------------------------------------------------------------------------
 // Event payloads — mirror the JSON shape emitted by the Rust handlers.
@@ -31,7 +31,7 @@ interface DevicePairedPayload {
   app_version: string
   /** ADR-0021: optional for legacy desktop servers that predate WebRTC. */
   rendezvous_id?: string
-  room_descriptor?: RoomDescriptorV2
+  room_descriptor?: RoomDescriptor
   signaling_key_ref?: string
 }
 

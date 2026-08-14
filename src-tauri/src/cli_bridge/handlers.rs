@@ -14,13 +14,14 @@
 
 use ::anyhow;
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
@@ -175,6 +176,179 @@ pub async fn teams_run_status(
     Json(payload): Json<serde_json::Value>,
 ) -> Response {
     renderer_roundtrip(&state, "agent_team_run_status", payload).await
+}
+
+async fn host_state_roundtrip(
+    state: &SharedState,
+    command: &str,
+    mut payload: serde_json::Value,
+) -> Response {
+    let Some(map) = payload.as_object_mut() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": "HostState request must be an object" })),
+        )
+            .into_response();
+    };
+    let account_id = map
+        .get("accountId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let Some(account_id) = account_id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": "accountId is required" })),
+        )
+            .into_response();
+    };
+    let host_id = state
+        .app_handle
+        .state::<crate::companion_api::CompanionServerState>()
+        .host_id()
+        .unwrap_or_else(|| "host-unavailable".to_string());
+    map.insert(
+        "callerAccountId".to_string(),
+        serde_json::Value::String(account_id),
+    );
+    map.insert(
+        "authoritativeHostId".to_string(),
+        serde_json::Value::String(host_id),
+    );
+    renderer_roundtrip(state, command, payload).await
+}
+
+pub async fn host_state_snapshot(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    host_state_roundtrip(&state, "host_state_snapshot", payload).await
+}
+
+pub async fn host_state_submit(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    host_state_roundtrip(&state, "host_state_submit", payload).await
+}
+
+pub async fn host_state_status(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    host_state_roundtrip(&state, "host_state_status", payload).await
+}
+
+/// Long poll served from the replay ring first, then from the live broadcast.
+///
+/// The CLI reopens this immediately after each response, so anything published
+/// during that turnaround was already sent before the new receiver existed.
+/// Reading the ring — after subscribing, so the two cannot race — is what makes
+/// those events recoverable instead of silently skipped. `gap` tells the client
+/// the retained window no longer reaches its cursor, so it must re-snapshot
+/// rather than resume from a hole.
+pub async fn host_state_events(
+    State(state): State<SharedState>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let after = query
+        .get("afterHostSeq")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let log = state.host_state_events.clone();
+    // Subscribe BEFORE reading the ring: an event landing between the two is
+    // then seen by the receiver, never dropped by both.
+    let mut receiver = log.subscribe();
+    let mut events = log.replay_after(after);
+    let mut lagged = false;
+
+    if events.is_empty() {
+        let waited = tokio::time::timeout(std::time::Duration::from_secs(25), async {
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => {
+                        if crate::cli_bridge::event_host_seq(&event) > after {
+                            break Some(event);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        lagged = true;
+                        break None;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break None,
+                }
+            }
+        })
+        .await
+        .ok()
+        .flatten();
+        events.extend(waited);
+    }
+
+    // `after == 0` means the caller just snapshotted, so there is nothing older
+    // it could be missing.
+    let truncated = after > 0
+        && log
+            .oldest_host_seq()
+            .is_some_and(|oldest| oldest > after.saturating_add(1));
+    Json(json!({ "ok": true, "events": events, "gap": lagged || truncated })).into_response()
+}
+
+/// Cursor-based long poll for canonical Agent RPC v2 envelopes. Attached TUI
+/// clients feed these unchanged through `canonicalEnvelopeToActions`.
+pub async fn host_state_agent_events(
+    State(state): State<SharedState>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let after = query
+        .get("afterCursor")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let log = state.agent_events.clone();
+    let mut receiver = log.subscribe();
+    let mut records = log.replay_after(after);
+    let mut lagged = false;
+
+    if records.is_empty() {
+        let waited = tokio::time::timeout(std::time::Duration::from_secs(25), async {
+            loop {
+                match receiver.recv().await {
+                    Ok(record) if record.cursor > after => break Some(record),
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        lagged = true;
+                        break None;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break None,
+                }
+            }
+        })
+        .await
+        .ok()
+        .flatten();
+        records.extend(waited);
+        // Drain the replay ring again so a burst that followed the wake-up
+        // event is returned in the same response instead of stranding records
+        // between consecutive long polls.
+        let cursor = records.last().map_or(after, |record| record.cursor);
+        records.extend(log.replay_after(cursor));
+    }
+
+    let truncated = after > 0
+        && log
+            .oldest_cursor()
+            .is_some_and(|oldest| oldest > after.saturating_add(1));
+    let cursor = records.last().map_or(after, |record| record.cursor);
+    let events = records
+        .into_iter()
+        .map(|record| record.event)
+        .collect::<Vec<_>>();
+    Json(json!({
+        "ok": true,
+        "events": events,
+        "cursor": cursor,
+        "gap": lagged || truncated,
+    }))
+    .into_response()
 }
 
 /// Wire shape for `GET /api/dev/plugins/installed` — a privacy-safe

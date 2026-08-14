@@ -1,0 +1,15 @@
+{
+  "abortPending": "Host abort pending: {error}",
+  "approvalPending": "Host approval pending: {error}",
+  "attached": "Attached to {target}{session} (generation {generation}).",
+  "detached": "Detached; standalone JSONL sessions were not modified.",
+  "disconnected": "Host attachment disconnected: {error}",
+  "invalidSavedAttachment": "Saved Host attachment is invalid: {error}",
+  "outcome": "HostState {outcome}: {code}",
+  "reattachFailed": "Host reattach failed: {error}",
+  "sessionRequired": "Attached Host requires a session. Reattach with --session ID.",
+  "sessionSuffix": " session {session}",
+  "standalone": "Standalone (not attached).",
+  "status": "Attached to {target}; generation {generation}; hostSeq {hostSeq}; local pending {pending}; local rejected/conflicted {terminal}; pending dispatch {pendingDispatch}; pending broadcast {pendingBroadcast}.",
+  "transcriptBoundaryRequired": "Attached transcript edits require a canonical Host message boundary."
+}

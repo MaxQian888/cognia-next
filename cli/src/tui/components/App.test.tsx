@@ -31,6 +31,46 @@ jest.mock("@/plugins/cognia-builtin-characters/src/index", () => ({
   BUILTIN_PLUGIN_ID: "cognia-builtin-characters",
 }))
 
+// marked@18 is ESM-only; this suite exercises App orchestration rather than
+// markdown tokenization, which has its own focused tests.
+jest.mock("../render/cell-terminal-block", () => ({
+  cellToTerminalBlock: (cell: { id?: string; text?: string; raw?: string; result?: string }) => {
+    const plainText = cell.text ?? cell.raw ?? cell.result ?? ""
+    return {
+      id: cell.id ?? "cell",
+      plainText,
+      rowCount: 1,
+      lines: [{ plain: plainText, spans: [{ text: plainText, style: "plain" }] }],
+    }
+  },
+  TerminalBlockCache: class {
+    get(_key: unknown, build: () => unknown) {
+      return build()
+    }
+    stats() {
+      return { hits: 0, misses: 0, size: 0, hitRate: 0 }
+    }
+  },
+}))
+jest.mock("./Markdown", () => ({
+  Markdown: ({ raw }: { raw: string }) => raw,
+  MarkdownLine: ({ line }: { line: { spans?: Array<{ text?: string }> } }) =>
+    line.spans?.map((span) => span.text ?? "").join("") ?? "",
+}))
+jest.mock("../markdown/tokenize", () => ({
+  tokenizeMarkdown: (raw: string) =>
+    raw.split("\n").map((text) => ({ kind: "paragraph", spans: [{ text }] })),
+}))
+jest.mock("../../handoff/host-state-client", () => ({
+  attachLocalHost: jest.fn(),
+  attachedHostStatus: jest.fn(async () => null),
+  detachLocalHost: jest.fn(),
+  flushAttachedHostStateOutbox: jest.fn(async () => []),
+  queueAttachedHostStateAction: jest.fn(),
+  readAttachedHostStateOutbox: jest.fn(() => []),
+  readAttachedHost: jest.fn(() => null),
+}))
+
 import { App } from "./App"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
@@ -39,6 +79,15 @@ import type { TranscriptEntry, TranscriptFs } from "../../agent/transcript"
 import type { RunShellOpts, ShellResult } from "../../agent/run-shell"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "../state/types"
+import {
+  attachLocalHost,
+  flushAttachedHostStateOutbox,
+  queueAttachedHostStateAction,
+} from "../../handoff/host-state-client"
+import {
+  createEmptyHostStateSession,
+  sessionStateChannel,
+} from "@cognia/agent-config-types/host-state"
 
 const config: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,
@@ -126,6 +175,87 @@ describe("App", () => {
     })
     await waitFor(() => expect(container.textContent).toContain("hello there"))
     expect(container.textContent).toContain("hi")
+  })
+
+  it("routes attached sends through the HostState outbox instead of the standalone session", async () => {
+    const targetId = "target-remote"
+    const sessionId = "session-remote"
+    const channel = sessionStateChannel(targetId, sessionId)
+    const state = createEmptyHostStateSession(channel, sessionId)
+    const queuedAction = {
+      protocolVersion: 1 as const,
+      channel,
+      accountId: "local-default",
+      runtimeTargetId: targetId,
+      hostId: "host-remote",
+      hostGeneration: 2,
+      sessionId,
+      clientId: "tui-client",
+      clientSeq: 1,
+      actionId: "tui-action",
+      createdAt: 1,
+      action: {
+        kind: "message.enqueue" as const,
+        messageId: "message-remote",
+        text: "remote prompt",
+        attachments: [],
+      },
+    }
+    jest.mocked(attachLocalHost).mockResolvedValueOnce({
+      record: {
+        protocolVersion: 1,
+        accountId: "local-default",
+        runtimeTargetId: targetId,
+        hostId: "host-remote",
+        hostGeneration: 2,
+        sessionId,
+        attachedAt: 1,
+      },
+      client: {} as never,
+      snapshot: {
+        protocolVersion: 1,
+        channel,
+        hostId: "host-remote",
+        hostGeneration: 2,
+        cutHostSeq: 0,
+        revision: 0,
+        digest: "hsv1-test",
+        state,
+      },
+      subscriptions: [],
+    })
+    jest.mocked(queueAttachedHostStateAction).mockReturnValueOnce(queuedAction)
+    jest
+      .mocked(flushAttachedHostStateOutbox)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          action: queuedAction,
+          status: "sent",
+          receipt: {
+            actionId: queuedAction.actionId,
+            outcome: "applied",
+            hostGeneration: 2,
+            hostSeq: 1,
+          },
+        },
+      ])
+    const local = fakeSession("must not run")
+    render(<App config={config} sessionId="local" createSession={local.create} home="/tmp/tui" />)
+
+    type(`/attach --target ${targetId} --session ${sessionId}`)
+    submit()
+    await waitFor(() => expect(attachLocalHost).toHaveBeenCalled())
+    type("remote prompt")
+    submit()
+    await waitFor(() => expect(queueAttachedHostStateAction).toHaveBeenCalled())
+
+    expect(local.prompts).toEqual([])
+    expect(queueAttachedHostStateAction).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeTargetId: targetId, sessionId }),
+      expect.objectContaining({ kind: "message.enqueue", text: "remote prompt" }),
+      expect.objectContaining({ home: "/tmp/tui" })
+    )
   })
 
   it("backtracks to edit the last user message on double-Esc then Enter", async () => {

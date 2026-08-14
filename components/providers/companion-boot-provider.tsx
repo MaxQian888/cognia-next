@@ -54,6 +54,11 @@ import {
 import { installRemoteStepServer } from "@/lib/companion/remote-step-server"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import { getSettings } from "@/lib/db/settings"
+import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import {
+  hostStateStatusAllowsWrites,
+  installHostStateSyncForTarget,
+} from "@/lib/sync/host-state-service"
 import { loggers } from "@cognia/logging"
 import {
   registerMobileHostBindingController,
@@ -266,22 +271,47 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         return
       }
 
-      await registerCompanionRuntimeTarget({
+      const registeredTarget = await registerCompanionRuntimeTarget({
         ...config,
         accountId: DEFAULT_LOCAL_ACCOUNT_ID,
         targetId: config.targetId,
       })
       if (isStale()) return
+      if (!registeredTarget) {
+        updateRuntimeSnapshot({ connectionState: "offline" })
+        return
+      }
       addHostCleanup(registerRuntimeTargetSubscriptionStopper(stopHostBindings))
 
       try {
-        const manifest = await transport.call("host_feature_manifest", {})
+        const manifestValue = await transport.call("host_feature_manifest", {})
         if (isStale()) return
-        const host = runtimeHostSnapshotFromManifest(manifest)
+        const manifest = parseHostFeatureManifest(manifestValue)
+        const host = runtimeHostSnapshotFromManifest(manifestValue, {
+          hostStateWriteEnabled: false,
+        })
         updateRuntimeSnapshot({ host })
         if (!host.compatible) {
           updateRuntimeSnapshot({ connectionState: "offline" })
           return
+        }
+        if (manifest?.features["session.state-sync"]?.version === 1) {
+          const hostStateSync = await installHostStateSyncForTarget({
+            transport,
+            accountId: DEFAULT_LOCAL_ACCOUNT_ID,
+            runtimeTargetId: registeredTarget.id,
+          })
+          if (isStale()) {
+            hostStateSync.stop()
+            return
+          }
+          addHostCleanup(() => hostStateSync.stop())
+          if (hostStateStatusAllowsWrites(hostStateSync.status)) {
+            updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifestValue) })
+          }
+          addHostCleanup(
+            remoteEventResyncCoordinator.register("host-state", () => hostStateSync.resync())
+          )
         }
       } catch (error) {
         if (!isStale()) {

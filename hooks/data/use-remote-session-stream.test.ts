@@ -45,10 +45,14 @@ jest.mock("@/lib/tauri/transport-companion", () => ({
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
 const interruptMock = jest.fn().mockResolvedValue(undefined)
 const approveToolMock = jest.fn().mockResolvedValue(undefined)
+const enqueueHostStateIntentMock = jest.fn().mockResolvedValue(null)
 jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
   interruptSession: (...a: unknown[]) => interruptMock(...a),
   approveTool: (...a: unknown[]) => approveToolMock(...a),
+}))
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
 }))
 
 const listMessagesMock = jest.fn().mockResolvedValue([])
@@ -75,6 +79,7 @@ beforeEach(() => {
   sendPromptMock.mockClear().mockResolvedValue(undefined)
   interruptMock.mockClear().mockResolvedValue(undefined)
   approveToolMock.mockClear().mockResolvedValue(undefined)
+  enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
   listMessagesMock.mockClear().mockResolvedValue([])
   runSyncDownMock.mockClear().mockResolvedValue([])
   toastError.mockClear()
@@ -92,9 +97,7 @@ describe("useRemoteSessionStream", () => {
   })
 
   it("releases a completed live turn after the folded timeline adopts it", async () => {
-    const { result } = renderHook(() =>
-      useRemoteSessionStream("sess-1", { seedHistory: false })
-    )
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1", { seedHistory: false }))
     await waitFor(() => expect(streamHandler).toBeTruthy())
 
     act(() => {
@@ -113,9 +116,7 @@ describe("useRemoteSessionStream", () => {
 
   it("keeps an active live turn during timeline reconciliation", async () => {
     mockAdapterTurnComplete = false
-    const { result } = renderHook(() =>
-      useRemoteSessionStream("sess-1", { seedHistory: false })
-    )
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1", { seedHistory: false }))
     await waitFor(() => expect(streamHandler).toBeTruthy())
 
     act(() => {
@@ -250,6 +251,49 @@ describe("useRemoteSessionStream", () => {
     expect(interruptMock).toHaveBeenCalledWith("sess-1")
   })
 
+  it("uses durable HostState actions for attached send, interrupt, and approval", async () => {
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "queued", status: "pending" })
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+
+    await act(async () => {
+      await result.current.send("host message")
+      await result.current.interrupt()
+    })
+    act(() => {
+      streamHandler?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-host",
+        toolUseID: "tu-host",
+        toolName: "write",
+        input: {},
+      } as unknown as ClaudeEvent)
+    })
+    await waitFor(() => expect(result.current.pendingApproval?.requestId).toBe("req-host"))
+    await act(async () => {
+      await result.current.respond("allow")
+    })
+
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess-1",
+        action: expect.objectContaining({ kind: "message.enqueue", text: "host message" }),
+      })
+    )
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: { kind: "turn.abort" },
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: { kind: "approval.respond", requestId: "req-host", decision: "allow" },
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(interruptMock).not.toHaveBeenCalled()
+    expect(approveToolMock).not.toHaveBeenCalled()
+  })
+
   it("marks the session ended on session_ended and clears any pending approval", async () => {
     const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
     await waitFor(() => expect(streamHandler).toBeTruthy())
@@ -307,9 +351,9 @@ describe("useRemoteSessionStream", () => {
     })
 
     await waitFor(() => {
-      expect(
-        (result.current.messages[0]?.parts[0] as { text?: string } | undefined)?.text
-      ).toBe("corrected")
+      expect((result.current.messages[0]?.parts[0] as { text?: string } | undefined)?.text).toBe(
+        "corrected"
+      )
     })
   })
 

@@ -1,0 +1,15 @@
+{
+  "abortPending": "Host 中止请求待处理：{error}",
+  "approvalPending": "Host 审批待处理：{error}",
+  "attached": "已连接到 {target}{session}（第 {generation} 代）。",
+  "detached": "已断开连接；独立 JSONL 会话未被修改。",
+  "disconnected": "Host 连接已断开：{error}",
+  "invalidSavedAttachment": "已保存的 Host 连接无效：{error}",
+  "outcome": "HostState {outcome}：{code}",
+  "reattachFailed": "Host 重新连接失败：{error}",
+  "sessionRequired": "连接 Host 时必须指定会话。请使用 --session ID 重新连接。",
+  "sessionSuffix": " 会话 {session}",
+  "standalone": "独立模式（未连接）。",
+  "status": "已连接到 {target}；第 {generation} 代；hostSeq {hostSeq}；本地待处理 {pending}；本地已拒绝/冲突 {terminal}；待分发 {pendingDispatch}；待广播 {pendingBroadcast}。",
+  "transcriptBoundaryRequired": "编辑已连接的记录需要规范的 Host 消息边界。"
+}

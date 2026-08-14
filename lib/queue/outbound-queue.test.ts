@@ -3,7 +3,12 @@
  */
 import "fake-indexeddb/auto"
 
-import { enqueue, listByStatus, listAll } from "@/lib/db/mobile-outbound-queue"
+import {
+  enqueue,
+  enqueueHostStateAction,
+  listByStatus,
+  listAll,
+} from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
 import { createOutboundRunner } from "./outbound-queue"
 import {
@@ -11,7 +16,7 @@ import {
   setActiveRuntimeTargetContext,
 } from "@/lib/runtime/runtime-target-context"
 
-const scope = { accountId: "acct_queue", targetId: "desktop-studio" }
+const scope = { accountId: "acct_queue", targetId: "desktop-studio", routingGeneration: 1 }
 
 // Stub the network subscriber so the runner doesn't try to reach Capacitor.
 jest.mock("@/lib/capacitor/network", () => ({
@@ -51,6 +56,130 @@ describe("createOutboundRunner", () => {
     )
     const sent = await listByStatus("sent")
     expect(sent).toHaveLength(1)
+    await runner.stop()
+  })
+
+  it("retains HostState conflict receipts instead of marking them sent", async () => {
+    const call = jest.fn().mockResolvedValue({
+      protocolVersion: 1,
+      results: [
+        {
+          actionId: "host-action-1",
+          outcome: "conflicted",
+          hostGeneration: 1,
+          hostSeq: 2,
+          rejection: {
+            code: "host_state_revision_conflict",
+            message: "revision changed",
+            currentRevision: 3,
+          },
+        },
+      ],
+    })
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    await enqueueHostStateAction({
+      protocolVersion: 1,
+      channel: "cognia://target/desktop-studio/sessions/s1",
+      accountId: scope.accountId,
+      runtimeTargetId: scope.targetId,
+      hostId: scope.targetId,
+      hostGeneration: 1,
+      sessionId: "s1",
+      clientId: "client-a",
+      clientSeq: 1,
+      actionId: "host-action-1",
+      baseRevision: 1,
+      createdAt: Date.now(),
+      action: { kind: "draft.replace", text: "draft", attachments: [] },
+    })
+
+    await runner.kick()
+
+    expect(await listByStatus("sent")).toHaveLength(0)
+    expect(await listByStatus("conflicted")).toEqual([
+      expect.objectContaining({
+        actionId: "host-action-1",
+        rejectionCode: "host_state_revision_conflict",
+        currentRevision: 3,
+      }),
+    ])
+    await runner.stop()
+  })
+
+  it("freezes HostState rows without consuming a retry when rollout disables submit", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true })
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      canDispatch: (row) => row.protocol !== "host-state-v1",
+    })
+    await enqueueHostStateAction({
+      protocolVersion: 1,
+      channel: "cognia://target/desktop-studio/sessions/s1",
+      accountId: scope.accountId,
+      runtimeTargetId: scope.targetId,
+      hostId: scope.targetId,
+      hostGeneration: 1,
+      sessionId: "s1",
+      clientId: "client-a",
+      clientSeq: 1,
+      actionId: "frozen-action",
+      createdAt: Date.now(),
+      action: { kind: "turn.abort" },
+    })
+    await enqueue({
+      id: "legacy-behind-frozen",
+      command: "memory_update",
+      payload: { text: "legacy compatibility write" },
+      accountId: scope.accountId,
+      targetId: scope.targetId,
+    })
+
+    await runner.kick()
+
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(call).toHaveBeenCalledWith(
+      "memory_update",
+      { text: "legacy compatibility write" },
+      expect.any(Object)
+    )
+    expect(await listByStatus("pending")).toEqual([
+      expect.objectContaining({ actionId: "frozen-action", attempts: 0 }),
+    ])
+    expect(await listByStatus("sent")).toEqual([
+      expect.objectContaining({ id: "legacy-behind-frozen" }),
+    ])
+    await runner.stop()
+  })
+
+  it("retains a stale Host generation as a visible terminal rejection", async () => {
+    const call = jest.fn().mockRejectedValue(new Error("stale_host_generation"))
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    await enqueueHostStateAction({
+      protocolVersion: 1,
+      channel: "cognia://target/desktop-studio/sessions/s1",
+      accountId: scope.accountId,
+      runtimeTargetId: scope.targetId,
+      hostId: scope.targetId,
+      hostGeneration: 1,
+      sessionId: "s1",
+      clientId: "client-a",
+      clientSeq: 1,
+      actionId: "stale-action",
+      createdAt: Date.now(),
+      action: { kind: "turn.abort" },
+    })
+
+    await runner.kick()
+
+    expect(await listByStatus("rejected")).toEqual([
+      expect.objectContaining({
+        actionId: "stale-action",
+        rejectionCode: "stale_host_generation",
+      }),
+    ])
+    expect(call).toHaveBeenCalledTimes(1)
     await runner.stop()
   })
 

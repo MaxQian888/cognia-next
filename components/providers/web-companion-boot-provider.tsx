@@ -26,6 +26,11 @@ import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import { transport } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
 import {
+  hostStateStatusAllowsWrites,
+  installHostStateSyncForTarget,
+  type InstalledHostStateSync,
+} from "@/lib/sync/host-state-service"
+import {
   notifyWebHostBindingsFailed,
   notifyWebHostBindingsReady,
   registerWebHostBindingOwner,
@@ -173,6 +178,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       let recoveryInFlight: Promise<void> | null = null
       let backgroundSyncInstalled = false
       let bindingsReady = false
+      let hostStateSync: InstalledHostStateSync | null = null
 
       cleanup.push(() => {
         if (recoveryTimer !== null) clearTimeout(recoveryTimer)
@@ -196,7 +202,26 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
           )
           return false
         }
-        updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
+        updateRuntimeSnapshot({
+          host: runtimeHostSnapshotFromManifest(manifest, { hostStateWriteEnabled: false }),
+        })
+        if (manifest.features["session.state-sync"]?.version === 1 && !hostStateSync) {
+          hostStateSync = await installHostStateSyncForTarget({
+            transport,
+            accountId: config.accountId ?? "local-default",
+            runtimeTargetId: config.targetId ?? "web-companion",
+          })
+          if (hostStateStatusAllowsWrites(hostStateSync.status)) {
+            updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
+          }
+          cleanup.push(() => hostStateSync?.stop())
+          cleanup.push(
+            remoteEventResyncCoordinator.register(
+              "host-state",
+              () => hostStateSync?.resync() ?? Promise.resolve()
+            )
+          )
+        }
         return true
       }
 
@@ -235,6 +260,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       cleanup.push(
         remoteEventResyncCoordinator.register("*", async () => {
           await runSyncDown()
+          await hostStateSync?.resync()
         })
       )
       // Subscribe before the authoritative sync so invalidations cannot fall

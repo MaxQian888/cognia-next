@@ -72,7 +72,7 @@ export async function installCliRendererRequestSource(
 async function respond(req: RendererRequestEvent, bridge: TauriBridge): Promise<void> {
   const { requestId, command, payload } = req
   try {
-    const result = await dispatchCommand(command, payload ?? {})
+    const result = await dispatchCommand(command, payload ?? {}, bridge)
     await bridge.invoke(RESPONSE_COMMAND, { response: { requestId, result, error: null } })
   } catch (err: unknown) {
     await bridge.invoke(RESPONSE_COMMAND, {
@@ -88,7 +88,8 @@ async function respond(req: RendererRequestEvent, bridge: TauriBridge): Promise<
 /** Exposed for tests — production callers go through the listener above. */
 export async function dispatchCommand(
   command: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  bridge?: TauriBridge
 ): Promise<unknown> {
   switch (command) {
     case "twin_context_get": {
@@ -106,6 +107,13 @@ export async function dispatchCommand(
     case "agent_team_run_status": {
       const { agentTeamRunStatus } = await import("./handlers/agent-team")
       return agentTeamRunStatus(payload)
+    }
+    case "host_state_snapshot":
+    case "host_state_submit":
+    case "host_state_status": {
+      const { dispatchCommand: dispatchDesktopWrite } =
+        await import("@/lib/companion/desktop-write-source")
+      return dispatchDesktopWrite(command, payload, bridge)
     }
     default:
       throw new Error(`unknown cli-bridge renderer command: ${command}`)

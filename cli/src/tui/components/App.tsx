@@ -9,8 +9,11 @@
 import fs from "node:fs"
 import os from "node:os"
 import nodePath from "node:path"
+import { randomUUID } from "node:crypto"
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { useApp, useBoxMetrics, useStdout, type DOMElement } from "ink"
+import cliHostStateMessages from "@/i18n/messages/en/cliHostState.json"
+import { createMessageResolver } from "@/lib/headless/i18n"
 
 import { Banner } from "./Banner"
 import { useScroll } from "../hooks/useScroll"
@@ -77,6 +80,8 @@ import {
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { buildAgents, discoverAgentFiles } from "../../agent/discover-agents"
 import { parseBang } from "../commands/bash-shellout"
+
+const resolveHostStateMessage = createMessageResolver(cliHostStateMessages)
 import { parseHashMemory } from "../input/hash-memory"
 import {
   runInteractiveShell as defaultRunInteractiveShell,
@@ -114,7 +119,7 @@ import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-im
 import { searchHistory } from "../input/history-search"
 import { bufferText, insertText } from "../input/buffer"
 import { appendHistory } from "../input/history-store"
-import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
+import { useAgentSession, type AgentSessionApi, type CreateSession } from "../hooks/useAgentSession"
 import { useLogIngest } from "../hooks/use-log-ingest"
 import { useTerminalSize } from "../hooks/useTerminalSize"
 import { terminalLayout } from "../layout/terminal-layout"
@@ -187,6 +192,18 @@ import { TuiViewportFrame } from "./app/TuiViewportFrame"
 import type { AgentTreeHit } from "./BottomStatus"
 import { useGlobalKeys } from "./app/use-global-keys"
 import { useApplyEffect } from "./app/use-apply-effect"
+import {
+  attachLocalHost,
+  attachedHostStatus,
+  detachLocalHost,
+  flushAttachedHostStateOutbox,
+  queueAttachedHostStateAction,
+  readAttachedHostStateOutbox,
+  readAttachedHost,
+  type AttachedHostConnection,
+} from "../../handoff/host-state-client"
+import { canonicalEnvelopeToActions } from "../state/event-mapper"
+import type { AllowedHostStateIntentV1 } from "@cognia/agent-config-types/host-state"
 
 // Register the feature-command clusters (Cognia runtime, MCP, plugins, skills)
 // on top of the core catalog. Idempotent — safe at module load.
@@ -575,7 +592,7 @@ export function App({
   // emitter has the default 10-listener cap, and a MaxListenersExceededWarning
   // would print to stderr straight through the Ink frame.
   const { pushLog, clearLogs } = useLogIngest({ dispatch })
-  const agent = useAgentSession({
+  const standaloneAgent = useAgentSession({
     config: state.config,
     dispatch,
     onLog: pushLog,
@@ -589,6 +606,258 @@ export function App({
     // it matches `persistToolApproval`'s store and stays hermetic under test.
     resolveApprovedTools: () => readToolApprovals(home, undefined, state.config.cwd),
   })
+  const attachedHostAbortRef = useRef<AbortController | null>(null)
+  const attachedHostConnectionRef = useRef<AttachedHostConnection | null>(null)
+  const attachedHostRevisionRef = useRef<number>(0)
+  const attachHost = useCallback(
+    async (options: { targetId: string; sessionId?: string; accountId?: string }) => {
+      attachedHostAbortRef.current?.abort()
+      const controller = new AbortController()
+      attachedHostAbortRef.current = controller
+      try {
+        const connection = await attachLocalHost(
+          {
+            ...options,
+            signal: controller.signal,
+            onHostStateSnapshot: (snapshot) => {
+              attachedHostRevisionRef.current = snapshot.revision
+            },
+            onHostStateEvent: (event) => {
+              if (event.mutation && "revision" in event.mutation) {
+                attachedHostRevisionRef.current = Math.max(
+                  attachedHostRevisionRef.current,
+                  event.mutation.revision
+                )
+              }
+              if (event.outcome === "rejected" || event.outcome === "conflicted") {
+                dispatch({
+                  type: "NOTICE",
+                  message: resolveHostStateMessage("outcome", {
+                    outcome: event.outcome,
+                    code: event.rejection?.code ?? "unknown",
+                  }),
+                  severity: "warn",
+                })
+              }
+            },
+            onAgentEvent: (envelope) => {
+              if (!options.sessionId || envelope.sessionId !== options.sessionId) return
+              for (const action of canonicalEnvelopeToActions(envelope)) dispatch(action)
+            },
+          },
+          { home }
+        )
+        attachedHostConnectionRef.current = connection
+        attachedHostRevisionRef.current = Math.max(
+          attachedHostRevisionRef.current,
+          connection.snapshot.revision
+        )
+        await flushAttachedHostStateOutbox(connection, { home })
+        for (const subscription of connection.subscriptions) {
+          void subscription.catch((error: unknown) => {
+            if (controller.signal.aborted) return
+            dispatch({
+              type: "NOTICE",
+              message: resolveHostStateMessage("disconnected", {
+                error: error instanceof Error ? error.message : String(error),
+              }),
+              severity: "error",
+            })
+          })
+        }
+        return resolveHostStateMessage("attached", {
+          target: connection.record.runtimeTargetId,
+          session: connection.record.sessionId
+            ? resolveHostStateMessage("sessionSuffix", { session: connection.record.sessionId })
+            : "",
+          generation: connection.record.hostGeneration,
+        })
+      } catch (error) {
+        controller.abort()
+        attachedHostConnectionRef.current = null
+        if (attachedHostAbortRef.current === controller) attachedHostAbortRef.current = null
+        throw error
+      }
+    },
+    [home]
+  )
+  const detachHost = useCallback(async () => {
+    attachedHostAbortRef.current?.abort()
+    attachedHostAbortRef.current = null
+    attachedHostConnectionRef.current = null
+    attachedHostRevisionRef.current = 0
+    detachLocalHost({ home })
+    return resolveHostStateMessage("detached")
+  }, [home])
+  const hostSyncStatus = useCallback(async () => {
+    const connection = await attachedHostStatus({ home })
+    if (!connection) return resolveHostStateMessage("standalone")
+    const { record, status } = connection
+    const rows = readAttachedHostStateOutbox({ home }).filter(
+      (row) =>
+        row.action.accountId === record.accountId &&
+        row.action.runtimeTargetId === record.runtimeTargetId
+    )
+    const pending = rows.filter(
+      (row) => row.status === "pending" || row.status === "sending"
+    ).length
+    const terminal = rows.filter(
+      (row) => row.status === "rejected" || row.status === "conflicted"
+    ).length
+    return resolveHostStateMessage("status", {
+      target: record.runtimeTargetId,
+      generation: status.hostGeneration,
+      hostSeq: status.hostSeq,
+      pending,
+      terminal,
+      pendingDispatch: status.pendingDispatch,
+      pendingBroadcast: status.pendingBroadcast,
+    })
+  }, [home])
+  useEffect(
+    () => () => {
+      attachedHostAbortRef.current?.abort()
+      attachedHostAbortRef.current = null
+      attachedHostConnectionRef.current = null
+    },
+    []
+  )
+  useEffect(() => {
+    let record: ReturnType<typeof readAttachedHost>
+    try {
+      record = readAttachedHost({ home })
+    } catch (error) {
+      dispatch({
+        type: "NOTICE",
+        message: resolveHostStateMessage("invalidSavedAttachment", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+        severity: "error",
+      })
+      return
+    }
+    if (!record) return
+    void attachHost({
+      targetId: record.runtimeTargetId,
+      ...(record.sessionId ? { sessionId: record.sessionId } : {}),
+      accountId: record.accountId,
+    })
+      .then((message) => dispatch({ type: "NOTICE", message }))
+      .catch((error: unknown) =>
+        dispatch({
+          type: "NOTICE",
+          message: resolveHostStateMessage("reattachFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+          severity: "warn",
+        })
+      )
+  }, [attachHost, home])
+  const submitAttachedIntent = useCallback(
+    async (intent: AllowedHostStateIntentV1) => {
+      const connection = attachedHostConnectionRef.current
+      if (!connection) return null
+      const action = queueAttachedHostStateAction(connection.record, intent, { home })
+      const rows = await flushAttachedHostStateOutbox(connection, { home })
+      const row = rows.find((candidate) => candidate.action.actionId === action.actionId)
+      if (!row?.receipt) throw new Error(row?.lastError ?? "host_state_receipt_missing")
+      if (row.status === "rejected" || row.status === "conflicted") {
+        throw new Error(row.receipt.rejection?.code ?? `host_state_${row.status}`)
+      }
+      return row.receipt
+    },
+    [home]
+  )
+  const agent = useMemo<AgentSessionApi>(
+    () => ({
+      ...standaloneAgent,
+      async send(prompt) {
+        const connection = attachedHostConnectionRef.current
+        if (!connection) return standaloneAgent.send(prompt)
+        if (!connection.record.sessionId) {
+          dispatch({
+            type: "TURN_ERROR",
+            message: resolveHostStateMessage("sessionRequired"),
+          })
+          return null
+        }
+        try {
+          const action = queueAttachedHostStateAction(
+            connection.record,
+            {
+              kind: "message.enqueue",
+              messageId: randomUUID(),
+              text: prompt,
+              attachments: [],
+            },
+            { home }
+          )
+          dispatch({ type: "TURN_START", prompt })
+          const rows = await flushAttachedHostStateOutbox(connection, { home })
+          const row = rows.find((candidate) => candidate.action.actionId === action.actionId)
+          if (row?.status === "rejected" || row?.status === "conflicted") {
+            throw new Error(row.receipt?.rejection?.code ?? `host_state_${row.status}`)
+          }
+        } catch (error) {
+          dispatch({
+            type: "TURN_ERROR",
+            message: error instanceof Error ? error.message : String(error),
+          })
+        }
+        return null
+      },
+      abort() {
+        if (!attachedHostConnectionRef.current) {
+          standaloneAgent.abort()
+          return
+        }
+        void submitAttachedIntent({ kind: "turn.abort" }).catch((error: unknown) =>
+          dispatch({
+            type: "NOTICE",
+            message: resolveHostStateMessage("abortPending", {
+              error: error instanceof Error ? error.message : String(error),
+            }),
+            severity: "warn",
+          })
+        )
+      },
+      resolvePermission(decision) {
+        const connection = attachedHostConnectionRef.current
+        if (!connection) {
+          standaloneAgent.resolvePermission(decision)
+          return
+        }
+        if (state.overlay.kind !== "permission") return
+        const requestId = state.overlay.req.requestId
+        void submitAttachedIntent({
+          kind: "approval.respond",
+          requestId,
+          decision: decision.decision,
+        })
+          .then(() => dispatch({ type: "OVERLAY_CLOSE" }))
+          .catch((error: unknown) =>
+            dispatch({
+              type: "NOTICE",
+              message: resolveHostStateMessage("approvalPending", {
+                error: error instanceof Error ? error.message : String(error),
+              }),
+              severity: "warn",
+            })
+          )
+      },
+      async forkConversationAt(cellCount, cells) {
+        if (!attachedHostConnectionRef.current) {
+          return standaloneAgent.forkConversationAt(cellCount, cells)
+        }
+        dispatch({
+          type: "NOTICE",
+          message: resolveHostStateMessage("transcriptBoundaryRequired"),
+          severity: "warn",
+        })
+      },
+    }),
+    [dispatch, home, standaloneAgent, state.overlay, submitAttachedIntent]
+  )
   const busy = isBusy(state)
   const overlayOpen = state.overlay.kind !== "none"
   const [interruptedBackgroundSubagents, setInterruptedBackgroundSubagents] = useState(0)
@@ -1492,6 +1761,9 @@ export function App({
     copyClipboard,
     notices,
     pushHandoff,
+    attachHost,
+    detachHost,
+    hostSyncStatus,
     openSessions,
     openModelPicker,
     resumeMostRecent,
@@ -2155,7 +2427,11 @@ export function App({
   // invalidate the cached SendOptions so the next turn re-resolves with it.
   const resolvePermission = useCallback(
     (decision: CapturePermissionDecision) => {
-      if (decision.decision === "allow_always" && state.overlay.kind === "permission") {
+      if (
+        !attachedHostConnectionRef.current &&
+        decision.decision === "allow_always" &&
+        state.overlay.kind === "permission"
+      ) {
         const toolName = state.overlay.req.toolName
         try {
           persistToolApproval(home, toolName)

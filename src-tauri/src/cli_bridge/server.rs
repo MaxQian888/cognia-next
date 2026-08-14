@@ -84,6 +84,26 @@ pub fn build_router(state: SharedState) -> Router {
         // The CLI POSTs a session transcript; we emit it on
         // `cli-bridge:session-handoff` for the renderer to import + open.
         .route("/api/dev/sessions/handoff", post(handlers::handoff))
+        .route(
+            "/api/dev/host-state/snapshot",
+            post(handlers::host_state_snapshot),
+        )
+        .route(
+            "/api/dev/host-state/submit",
+            post(handlers::host_state_submit),
+        )
+        .route(
+            "/api/dev/host-state/status",
+            post(handlers::host_state_status),
+        )
+        .route(
+            "/api/dev/host-state/events",
+            get(handlers::host_state_events),
+        )
+        .route(
+            "/api/dev/host-state/agent-events",
+            get(handlers::host_state_agent_events),
+        )
         // ── Renderer-backed routes (twin context / agent teams) ─────────
         // These round-trip through the WebView via the renderer bridge —
         // twin retrieval reads Dexie + the vector store, and AgentTeam
@@ -163,7 +183,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 mod tests {
     use super::*;
 
-    const DOCUMENTED_DEV_ROUTES: [&str; 12] = [
+    const DOCUMENTED_DEV_ROUTES: [&str; 17] = [
         "/api/dev/health",
         "/api/dev/plugins/installed",
         "/api/dev/plugins/install",
@@ -172,6 +192,11 @@ mod tests {
         "/api/dev/plugins/reload",
         "/api/dev/acp/ticket",
         "/api/dev/sessions/handoff",
+        "/api/dev/host-state/snapshot",
+        "/api/dev/host-state/submit",
+        "/api/dev/host-state/status",
+        "/api/dev/host-state/events",
+        "/api/dev/host-state/agent-events",
         "/api/dev/twin/context",
         "/api/dev/teams/list",
         "/api/dev/teams/run",

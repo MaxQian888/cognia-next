@@ -88,10 +88,10 @@ jest.mock("@/stores/chat", () => ({
   ),
 }))
 
-const isTauriMock = jest.fn().mockReturnValue(true)
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+  isTauri: jest.fn().mockReturnValue(true),
 }))
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 
 const isCapacitorMock = jest.fn().mockReturnValue(false)
 jest.mock("@/lib/platform/detect", () => ({
@@ -108,13 +108,19 @@ jest.mock("@/lib/sync/session-history", () => ({
   hydrateSessionHistory: (...args: unknown[]) => hydrateSessionHistoryMock(...args),
 }))
 
-const companionTransportMock = {
-  call: jest.fn(),
-  subscribe: jest.fn(),
-}
-jest.mock("@/lib/tauri/transport-instance", () => ({
-  transport: companionTransportMock,
+const enqueueHostStateIntentMock = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
 }))
+
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: { call: jest.fn(), subscribe: jest.fn() },
+}))
+const companionTransportMock = (
+  jest.requireMock("@/lib/tauri/transport-instance") as {
+    transport: { call: jest.Mock; subscribe: jest.Mock }
+  }
+).transport
 
 const mockProjectState = {
   activeProjectId: null as string | null,
@@ -175,6 +181,7 @@ beforeEach(() => {
     total: 0,
     mode: "legacy",
   })
+  enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
   mockProjectState.activeProjectId = null
   mockProjectState.loaded = false
   mockProjectState.addSessionToProject.mockReset()
@@ -489,6 +496,33 @@ describe("useSessions", () => {
       await result.current.rename("s1", "Hi")
     })
     expect(updateSessionMock).toHaveBeenCalledWith("s1", { title: "Hi", titleAuto: false })
+  })
+
+  it("routes attached rename and archive mutations through the durable HostState outbox", async () => {
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "queued", status: "pending" })
+    const { result } = renderHook(() => useSessions())
+
+    await act(async () => {
+      await result.current.rename("s1", "Host title")
+      await result.current.archive("s1")
+      await result.current.unarchive("s2")
+    })
+
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "s1",
+      action: { kind: "session.rename", title: "Host title" },
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "s1",
+      action: { kind: "session.archive", archived: true },
+    })
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "s2",
+      action: { kind: "session.archive", archived: false },
+    })
+    expect(updateSessionMock).not.toHaveBeenCalled()
+    expect(archiveSessionMock).not.toHaveBeenCalled()
+    expect(unarchiveSessionMock).not.toHaveBeenCalled()
   })
 
   it("bulkRemove tears down every session via IPC then deletes them in one Dexie tx", async () => {

@@ -121,6 +121,56 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
  */
 export const SYNC_HANDLER_TABLES: readonly SyncableTable[] = DEFAULT_HANDLERS.map((h) => h.table)
 
+export interface CompanionSyncDomainDescriptor {
+  authority: "host"
+  direction: "host-to-client"
+  sensitivity: "internal" | "confidential"
+  cursor: "updated-at" | "opaque"
+  deletionPolicy: "tombstone" | "append-only" | "ttl"
+  allowedWrites: readonly ["host"]
+}
+
+const syncDomain = (
+  deletionPolicy: CompanionSyncDomainDescriptor["deletionPolicy"],
+  sensitivity: CompanionSyncDomainDescriptor["sensitivity"] = "confidential",
+  cursor: CompanionSyncDomainDescriptor["cursor"] = "updated-at"
+): CompanionSyncDomainDescriptor => ({
+  authority: "host",
+  direction: "host-to-client",
+  sensitivity,
+  cursor,
+  deletionPolicy,
+  allowedWrites: ["host"],
+})
+
+/** Governance contract for every installed table handler. */
+export const COMPANION_SYNC_DOMAINS: Readonly<
+  Record<SyncableTable, CompanionSyncDomainDescriptor>
+> = Object.freeze({
+  characters: syncDomain("tombstone"),
+  skills: syncDomain("tombstone"),
+  sessions: syncDomain("tombstone"),
+  agentTasks: syncDomain("tombstone"),
+  agentTaskAttempts: syncDomain("append-only"),
+  messages: syncDomain("tombstone"),
+  workflows: syncDomain("tombstone"),
+  twinProfile: syncDomain("tombstone"),
+  plugins: syncDomain("tombstone"),
+  adapterInstances: syncDomain("tombstone"),
+  settings: syncDomain("tombstone", "internal"),
+  conversationOverrides: syncDomain("tombstone"),
+  goals: syncDomain("tombstone"),
+  memories: syncDomain("tombstone"),
+  executionRuns: syncDomain("append-only", "confidential", "opaque"),
+  workflowRuns: syncDomain("append-only", "confidential", "opaque"),
+  mcpServers: syncDomain("tombstone"),
+  terminalHistory: syncDomain("ttl", "confidential", "opaque"),
+  agentTeamBoard: syncDomain("tombstone"),
+  templateDefinitions: syncDomain("tombstone"),
+  templatePackages: syncDomain("tombstone"),
+  templateInstances: syncDomain("tombstone"),
+})
+
 interface SyncState {
   /** When the last successful sync of this table finished. */
   lastSyncAt: number | null
@@ -450,8 +500,13 @@ export function installForegroundSync(opts: RunSyncDownOptions = {}): () => void
  */
 export function installEventDrivenSync(opts: RunSyncDownOptions = {}): () => void {
   const t = opts.transport ?? transport
-  const unsub = t.subscribe<{ table?: SyncableTable }>("sync://invalidate", () => {
-    void runSyncDown(opts)
+  const unsub = t.subscribe<{ table?: SyncableTable }>("sync://invalidate", (payload) => {
+    const only = payload?.table
+      ? opts.only === undefined
+        ? [payload.table]
+        : opts.only.filter((table) => table === payload.table)
+      : opts.only
+    void runSyncDown({ ...opts, ...(only === undefined ? {} : { only }) })
   })
   return unsub
 }

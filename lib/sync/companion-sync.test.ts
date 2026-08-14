@@ -15,6 +15,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import { getDb, whenSeeded } from "@/lib/db/schema"
 
 import {
+  COMPANION_SYNC_DOMAINS,
   __resetSyncStateForTests,
   SYNC_HANDLER_TABLES,
   installEventDrivenSync,
@@ -55,6 +56,16 @@ describe("SYNC_HANDLER_TABLES registry", () => {
   it("has exactly one handler for every governed sync table", () => {
     expect(new Set(SYNC_HANDLER_TABLES)).toEqual(new Set(SYNCABLE_TABLE_NAMES))
     expect(SYNC_HANDLER_TABLES).toHaveLength(SYNCABLE_TABLE_NAMES.length)
+  })
+
+  it("has one closed authority/direction/deletion descriptor per handler", () => {
+    expect(new Set(Object.keys(COMPANION_SYNC_DOMAINS))).toEqual(new Set(SYNC_HANDLER_TABLES))
+    for (const descriptor of Object.values(COMPANION_SYNC_DOMAINS)) {
+      expect(descriptor.authority).toBe("host")
+      expect(descriptor.direction).toBe("host-to-client")
+      expect(descriptor.allowedWrites).toEqual(["host"])
+      expect(["tombstone", "append-only", "ttl"]).toContain(descriptor.deletionPolicy)
+    }
   })
 })
 
@@ -338,6 +349,33 @@ describe("installResumeSync", () => {
 })
 
 describe("installEventDrivenSync", () => {
+  it("runs only the invalidated table handler when the event names one", async () => {
+    const characters = jest.fn().mockResolvedValue(makeOkOutcome("characters"))
+    const messages = jest.fn().mockResolvedValue(makeOkOutcome("messages"))
+    let subscriber: ((payload: { table?: "characters" | "messages" }) => void) | undefined
+    const transport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as typeof subscriber
+        return jest.fn()
+      }),
+    }
+
+    const teardown = installEventDrivenSync({
+      transport,
+      handlers: [
+        { table: "characters", run: characters },
+        { table: "messages", run: messages },
+      ],
+    })
+    subscriber?.({ table: "messages" })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(messages).toHaveBeenCalledTimes(1)
+    expect(characters).not.toHaveBeenCalled()
+    teardown()
+  })
+
   it("subscribes once and triggers a sync per inbound event", async () => {
     const handlers = [
       {

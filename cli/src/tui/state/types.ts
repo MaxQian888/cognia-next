@@ -1086,6 +1086,7 @@ export type TuiAction =
   | { type: "TURN_COMMIT"; result: RunAndCaptureResult }
   | { type: "TURN_ERROR"; message: string; hint?: string; category?: string; title?: string }
   | { type: "TURN_ABORTED" }
+  | { type: "REMOTE_PERMISSION_RESOLVED"; requestId: string }
   // Background activity (goal / workflow / subagent runs)
   | { type: "ACTIVITY_START"; kind: ActivityKind; label: string; max?: number }
   | { type: "ACTIVITY_PROGRESS"; turns?: number; note?: string }

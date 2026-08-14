@@ -1034,6 +1034,42 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "host_state_snapshot",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "host_state_submit",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "host_state_status",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "provider_diagnostics_status",
       "target": "execution",
       "operation": "read",
@@ -4497,6 +4533,18 @@
       "risk": "high",
       "approval": "interactive",
       "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "retrieval_profile_dek_export",
+      "target": "execution",
+      "operation": "read",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "structural",
       "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"

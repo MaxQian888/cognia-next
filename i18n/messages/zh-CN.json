@@ -1468,7 +1468,10 @@
       "passwordLabel": "密码",
       "passwordPlaceholder": "密码",
       "recoveryContinue": "继续",
+      "recoveryCopied": "已复制",
+      "recoveryCopy": "复制恢复密钥",
       "recoveryDescription": "继续前请保存这枚一次性恢复密钥。忘记账户密码时，可用它解锁浏览器 Vault。",
+      "recoveryDownload": "下载 .txt",
       "recoveryForm": "保存恢复密钥",
       "recoverySaved": "我已保存此恢复密钥",
       "recoveryTitle": "保存恢复密钥",
@@ -4947,10 +4950,12 @@
           "diagnostics": "诊断",
           "goal": "目标",
           "help": "帮助",
+          "loop": "循环",
           "other": "其他",
           "plugins": "插件",
           "system": "系统",
-          "template": "提示词"
+          "template": "提示词",
+          "workflow": "工作流"
         },
         "comingSoon": "即将上线",
         "fileTitle": "引用文件或文件夹",
@@ -6252,6 +6257,21 @@
     "failed": "导入移交的会话失败",
     "received": "已从 CLI 移交会话「{title}」"
   },
+  "cliHostState": {
+    "abortPending": "Host 中止请求待处理：{error}",
+    "approvalPending": "Host 审批待处理：{error}",
+    "attached": "已连接到 {target}{session}（第 {generation} 代）。",
+    "detached": "已断开连接；独立 JSONL 会话未被修改。",
+    "disconnected": "Host 连接已断开：{error}",
+    "invalidSavedAttachment": "已保存的 Host 连接无效：{error}",
+    "outcome": "HostState {outcome}：{code}",
+    "reattachFailed": "Host 重新连接失败：{error}",
+    "sessionRequired": "连接 Host 时必须指定会话。请使用 --session ID 重新连接。",
+    "sessionSuffix": " 会话 {session}",
+    "standalone": "独立模式（未连接）。",
+    "status": "已连接到 {target}；第 {generation} 代；hostSeq {hostSeq}；本地待处理 {pending}；本地已拒绝/冲突 {terminal}；待分发 {pendingDispatch}；待广播 {pendingBroadcast}。",
+    "transcriptBoundaryRequired": "编辑已连接的记录需要规范的 Host 消息边界。"
+  },
   "common": {
     "add": "添加",
     "all": "全部",
@@ -6916,6 +6936,7 @@
       },
       "cancel": "取消",
       "clearSearch": "清空搜索",
+      "collapseSidebar": "折叠会话列表",
       "compactDensity": "紧凑行距",
       "conversationsTitle": "会话",
       "deleteFolder": "删除文件夹",
@@ -6928,6 +6949,7 @@
       "emptyFolder": "空文件夹——把会话移动到这里。",
       "emptySearch": "没有与「{query}」匹配的会话。",
       "emptyTeam": "还没有会话，从上方开启一个吧。",
+      "expandSidebar": "展开会话列表",
       "folderActions": "文件夹操作",
       "groupBy": {
         "label": "分组方式",
@@ -6960,6 +6982,7 @@
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
       "sectionPinned": "置顶",
       "sectionRecent": "最近",
+      "showCustomIcons": "显示自定义 Agent 和团队图标",
       "showPreview": "显示消息预览",
       "showUnreadBadges": "显示未读角标",
       "teamFallback": "团队",
@@ -7503,6 +7526,57 @@
       "connOffline": "离线",
       "connOnline": "在线",
       "connReconnecting": "重新连接中…",
+      "connectionCenter": {
+        "actions": {
+          "connectHost": "连接 Host",
+          "reconnect": "立即重连",
+          "recover": "修复连接",
+          "settings": "Companion 设置"
+        },
+        "address": "Host 地址",
+        "auth": {
+          "locked": "已锁定",
+          "unavailable": "不可用",
+          "unlocked": "已解锁"
+        },
+        "authentication": "凭据保险库",
+        "capabilities": "Host 能力",
+        "capabilityCount": "{count, plural, =0 {未发布能力} other {# 项操作}}",
+        "cloudHost": "云端 Host",
+        "desktopHost": "桌面 Host",
+        "hostLink": "Host 链路",
+        "lastConnected": "最近成功连接",
+        "lastError": "最近连接错误",
+        "localRuntime": "本地运行",
+        "network": "设备网络",
+        "networkType": {
+          "cellular": "蜂窝网络",
+          "none": "离线",
+          "unknown": "已连接",
+          "wifi": "Wi-Fi"
+        },
+        "protocol": "协议兼容性",
+        "protocolStatus": {
+          "checking": "检查中",
+          "compatible": "兼容",
+          "incompatible": "不兼容"
+        },
+        "remoteRuntime": "远程 Host",
+        "runtimeTarget": "执行位置",
+        "serverVersion": "Host 版本",
+        "thisBrowser": "当前浏览器",
+        "thisDesktop": "当前桌面",
+        "tier": {
+          "offline": "离线",
+          "rtc-direct": "RTC 直连",
+          "rtc-relay": "RTC 中继",
+          "unknown": "协商中",
+          "ws-lan": "WebSocket · 局域网",
+          "ws-tunnel": "WebSocket · 隧道"
+        },
+        "title": "运行连接",
+        "transport": "传输通道"
+      },
       "error": "错误",
       "idle": "空闲",
       "perf": "性能",
@@ -12816,7 +12890,7 @@
         "tokenPlaceholder": "eyJ..."
       },
       "webrtc": {
-        "description": "第三层传输通道（ADR-0021）。使用信令 v2 角色认证和端到端加密信封，汇合服务无法读取 SDP 或 ICE。",
+        "description": "第三层传输通道（ADR-0021）。使用角色认证信令和端到端加密信封，汇合服务无法读取 SDP 或 ICE。",
         "deviceTier": {
           "awaiting": "等待对端",
           "connected": "已连接",
@@ -12839,7 +12913,7 @@
         "invalidUrl": "信令 URL 必须以 ws:// 或 wss:// 开头",
         "noDevices": "暂无启用 WebRTC 的已配对设备。用最新版移动端重新配对一台手机，这里就会出现。",
         "pollFailed": "无法读取信令枢纽状态（{reason}）。下方设备列表可能过期。",
-        "protocolMode": "v2 角色隔离",
+        "protocolMode": "角色隔离协议",
         "reconnectButton": "重连",
         "reconnectFailed": "重连失败（{reason}）。",
         "reconnectSuccess": "已发起重连。",
@@ -12850,7 +12924,7 @@
         "savingButton": "保存中…",
         "signalingUrlHelp": "公共汇合点的 WebSocket 接入地址。自部署时替换为你自己的 URL。",
         "signalingUrlLabel": "信令服务器 URL",
-        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v2/signaling",
+        "signalingUrlPlaceholder": "wss://signaling.cognia.cn/signaling",
         "title": "WebRTC 远程访问",
         "turnProviderAuthTokenLabel": "Twilio Auth Token",
         "turnProviderCloudflare": "Cloudflare Calls",
@@ -13819,6 +13893,10 @@
         "generic": "配对失败（HTTP {status}）。"
       },
       "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+      "invitationSummary": {
+        "description": "服务器 v{version} · {expiresAt, time, short} 过期",
+        "title": "已识别 {host} 的配对邀请"
+      },
       "loadingManualCta": "手动配对",
       "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
       "loadingTitle": "正在检查既有配对…",
@@ -13834,8 +13912,8 @@
       "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",
       "offlineTitle": "连接已断开",
       "payloadError": {
-        "invalid": "无法解析该配对载荷——请从服务器完整复制 cgnp2|… 字符串后重新粘贴。",
-        "versionMismatch": "该配对载荷版本为 {got}，当前应用无法识别。请升级应用或服务器，使两端载荷版本一致。"
+        "invalid": "无法解析该配对邀请——请从服务器完整复制 cgnp3|… 字符串后重新粘贴。",
+        "versionMismatch": "服务器签发了 cgnp{got}，但当前浏览器要求 cgnp3。请重新构建本地服务器，或更新并重启部署镜像，再签发新邀请。"
       },
       "payloadPlaceholder": "cgnp3|…",
       "permissions": {
@@ -13897,16 +13975,30 @@
         "jwt": "配对 JWT"
       },
       "title": "连接桌面",
-      "tokenLabel": "配对令牌",
+      "tokenLabel": "配对邀请",
       "transportLabel": "传输层",
       "web": {
         "baseUrlLocked": "服务器地址由部署方预设",
-        "codeHint": "在服务器上运行 “cognia-server pair” 生成配对码，或从桌面端 设置 → 伴侣 中复制。",
-        "formCardDescription": "粘贴配对载荷，或输入服务器签发的 6 位配对码——两者共用同一枚 5 分钟有效的配对令牌。",
+        "clearPayload": "清空",
+        "clipboardReadFailed": "浏览器无法读取剪贴板，请手动粘贴完整配对邀请。",
+        "clipboardWriteFailed": "浏览器无法复制命令，请手动选择并复制。",
+        "codeHint": "在服务器上运行 “cognia-server pair” 生成一次性邀请，或从桌面端 设置 → 伴侣 中复制。",
+        "commandCopied": "命令已复制",
+        "commandMode": {
+          "compose": "Docker",
+          "development": "开发环境",
+          "kubernetes": "Kubernetes"
+        },
+        "copyCommand": "复制 Headless 配对命令",
+        "deploymentCommandHint": "请在目标 Host 实例内部执行。多租户或多副本部署中，请把 namespace 和 Pod 名替换为浏览器实际要连接的 Host。如果输出 cgnp2，请先更新部署镜像并重启或 rollout 该 Host。",
+        "formCardDescription": "粘贴 Cognia 服务器签发的一次性 cgnp3 配对邀请。",
         "formCardTitle": "配对此浏览器",
+        "headlessDescription": "保持 Headless 服务运行，在另一个终端执行此命令，然后把输出的 cgnp3 邀请粘贴到下方。",
+        "headlessTitle": "正在使用 Headless 服务器？",
         "httpsRequired": "浏览器配对必须使用 HTTPS，避免配对凭据以明文发送。请输入 HTTPS Companion 地址。",
-        "intro": "将此浏览器连接到你的 cognia 服务器。粘贴配对载荷或输入 6 位配对码即可登录。",
-        "pasteHint": "粘贴完整的 cgnp2|… 载荷（服务器地址会自动填入），或直接粘贴配对 JWT。",
+        "intro": "使用 Cognia 服务器签发的一次性邀请连接此浏览器。",
+        "pasteClipboard": "粘贴",
+        "pasteHint": "粘贴完整的 cgnp3|… 邀请，系统会自动验证服务器地址和身份。",
         "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
         "storageNoticeTitle": "凭据保存在此浏览器中",
         "title": "连接到服务器"
@@ -16843,6 +16935,16 @@
         "switchAria": "信任此插件的前端代码",
         "title": "信任前端代码"
       },
+      "lifecycle": {
+        "activating": "正在激活",
+        "dirty": "需要清理",
+        "error": "运行时错误",
+        "retryCleanup": "重试清理",
+        "retryFailed": "仍无法确认清理完成。请等待原生运行时退出后重试，或重启宿主。",
+        "retrying": "正在重试清理",
+        "stopping": "正在停止",
+        "waiting": "正在等待服务"
+      },
       "logs": {
         "aria": "Python 宿主日志条目",
         "clear": "清空",
@@ -17015,6 +17117,13 @@
         "loading": "正在采集插件信息…",
         "refresh": "刷新"
       },
+      "lifecycle": {
+        "effects": "资源（活动 / 等待 / 失败）",
+        "empty": "尚未观测到插件生命周期 generation。",
+        "plugin": "插件",
+        "services": "服务",
+        "state": "Generation 与状态"
+      },
       "logs": {
         "empty": "未捕获到日志。"
       },
@@ -17034,6 +17143,7 @@
         "hooks": "Hook 历史",
         "hotReload": "热重载",
         "inspect": "运行时检查",
+        "lifecycle": "生命周期",
         "logs": "日志",
         "profiler": "性能分析",
         "triggers": "触发记录"
@@ -29474,6 +29584,7 @@
           "mcp": "MCP 服务",
           "native-anthropic": "原生",
           "plugin": "插件",
+          "sdk-native": "Agent SDK 自带",
           "unknown": "已授予但当前不可用"
         },
         "loading": "正在加载工具…",
@@ -32989,6 +33100,7 @@
     "source_mcp": "MCP",
     "source_native-anthropic": "原生",
     "source_plugin": "插件",
+    "source_sdk-native": "SDK 原生",
     "title": "工具搜索与筛选",
     "toggleTool": "在筛选中切换 {tool}"
   },
@@ -33049,6 +33161,15 @@
       "astGrepSearch": "按 AST 结构搜索代码（元变量 $VAR / $$$），覆盖 25 种语言。只读，比纯文本 grep 更精确。",
       "checkProgramAllowed": "测试某程序是否会被 start_process 接受。",
       "cloneDepSource": "将依赖的 HTTPS 源码仓库克隆到 .cognia/clonedeps/（幂等），以便阅读其内部实现。",
+      "codegraphCallees": "某个符号调用或引用了什么（含传递关系）。",
+      "codegraphCallers": "谁在调用或引用某个符号（含传递关系）。",
+      "codegraphContext": "一次调用即获取与自然语言查询相关的上下文：入口符号、相关子图、代码片段与文件。",
+      "codegraphExplore": "围绕你明确指定的符号勘察其邻域。已知一两个符号名时使用。",
+      "codegraphFiles": "列出已索引的源文件及其符号数量、语言与解析错误。",
+      "codegraphImpact": "影响范围：传递依赖该符号的全部内容。修改前先查。",
+      "codegraphNode": "按 id 或限定名获取单个符号：类型、签名、文档串、位置与原始源码。",
+      "codegraphSearch": "按名称或文档全文检索图谱中的符号。返回带 id 的排序结果，可传给其他 codegraph 工具。",
+      "codegraphStatus": "报告索引健康度：文件 / 节点 / 边数量、语言分布、存储后端，以及待重新索引的文件。",
       "contentSearch": "在文件内容中按子串或正则查找，返回行号。",
       "coreApplyPatch": "原子地对一个或多个文件应用统一 diff（创建 / 修改 / 删除）。",
       "coreBash": "执行任意 shell 命令（需审批；超长输出保留尾部）。",

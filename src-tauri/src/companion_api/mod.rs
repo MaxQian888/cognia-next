@@ -90,6 +90,7 @@ use std::sync::Arc;
 use deny_list::DenyList;
 use event_bus::EventBus;
 use idempotency::IdempotencyCache;
+use sha2::{Digest, Sha256};
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -99,6 +100,18 @@ use idempotency::IdempotencyCache;
 ///
 /// Wrapped in `Arc` for cheap cloning into tower layers.
 pub type SharedState = Arc<CompanionState>;
+
+/// Stable opaque id shared by the public Companion plane and the loopback CLI
+/// bridge. It reveals no signing-secret material.
+pub fn opaque_host_id_from_secret(secret: &[u8]) -> String {
+    let digest = Sha256::digest(secret);
+    format!("host-{}", hex::encode(&digest[..12]))
+}
+
+pub fn opaque_local_host_id() -> Result<String, String> {
+    let secret = secret::load_or_generate()?;
+    Ok(opaque_host_id_from_secret(&secret))
+}
 
 /// Application state for the companion API server.
 pub struct CompanionState {
@@ -289,6 +302,9 @@ pub struct CompanionServerState {
     /// targeted ephemeral events share authentication and never enter the
     /// durable replay buffer.
     pub event_bus: RwLock<Option<Arc<EventBus>>>,
+    /// Opaque identity derived from the active Companion signing secret.
+    /// Co-located bridges use it so local TUI and paired clients share fencing.
+    pub host_id: RwLock<Option<String>>,
     /// Declarative sync-table registry (Wave 3.5). Shared with the axum
     /// `SharedState` so plugin registration done at boot — before the
     /// server starts — propagates to the running HTTP handler.
@@ -367,6 +383,7 @@ impl CompanionServerState {
             desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(),
             event_bus: RwLock::new(None),
+            host_id: RwLock::new(None),
             sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
             rate_limiter: rate_limit::RateLimiter::with_defaults(),
             push_tokens,
@@ -383,6 +400,10 @@ impl CompanionServerState {
     /// The port the server is bound to, if running.
     pub fn bound_port(&self) -> Option<u16> {
         self.inner.lock().bound_port
+    }
+
+    pub fn host_id(&self) -> Option<String> {
+        self.host_id.read().clone()
     }
 
     /// Spawn the server and store the handle.  Returns the bound port.

@@ -38,10 +38,16 @@ export const TOMBSTONE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
 export async function recordTombstones(
   table: SyncableTable,
   ids: readonly string[],
-  at: number = Date.now()
+  at: number = Date.now(),
+  host?: { generation: number; sequence: number }
 ): Promise<void> {
   if (ids.length === 0) return
-  const rows: SyncTombstoneRow[] = ids.map((id) => ({ table, id, deletedAt: at }))
+  const rows: SyncTombstoneRow[] = ids.map((id) => ({
+    table,
+    id,
+    deletedAt: at,
+    ...(host ? { hostGeneration: host.generation, hostSeq: host.sequence } : {}),
+  }))
   try {
     await getDb().syncTombstones.bulkPut(rows)
   } catch {

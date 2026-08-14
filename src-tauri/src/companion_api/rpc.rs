@@ -43,6 +43,7 @@ mod codex_app;
 mod data_sync;
 mod diagnostics;
 mod filesystem;
+mod host_state;
 mod native_tools;
 mod plugins;
 mod service_plane;
@@ -410,6 +411,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     // stays single-sourced in `lib/platform/capabilities.ts`.
     "host_capabilities",
     "host_feature_manifest",
+    "host_state_snapshot",
+    "host_state_submit",
+    "host_state_status",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
     "provider_diagnostics_start",
@@ -1010,6 +1014,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "twin_profile_get",
     "host_capabilities",
     "host_feature_manifest",
+    "host_state_snapshot",
+    "host_state_status",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
     "scheduled_task_list",
@@ -1154,6 +1160,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 ///
 /// Command arms are added by their respective milestones; the gate fires for a
 /// name as soon as it appears here (it runs before the dispatch `match`).
+#[cfg(test)]
 const CONTROL_COMMANDS: &[&str] = &[
     "provider_diagnostics_start",
     "provider_diagnostics_cancel",
@@ -1202,6 +1209,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "browser_set_files",
     "browser_set_zoom",
     "session_attach",
+    "host_state_submit",
     "session_detach",
     "goal_pause",
     "goal_resume",
@@ -1412,6 +1420,7 @@ static READ_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
             .map(|command| command.name.as_str())
             .collect()
     });
+#[cfg(test)]
 static CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| CONTROL_COMMANDS.iter().copied().collect());
 
@@ -1434,10 +1443,12 @@ const STEP_UP_COMMANDS: &[&str] = &[
 ];
 
 /// True when `name` requires the remote-control capability.
+#[cfg(test)]
 fn is_control_command(name: &str) -> bool {
     CONTROL_COMMANDS_SET.contains(name)
 }
 
+#[cfg(test)]
 fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
     !is_control_command(name)
         || (scope == Some("service")
@@ -1457,6 +1468,7 @@ fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bo
         || canonical_device_capability(device_id, name)
 }
 
+#[cfg(test)]
 fn canonical_device_capability(device_id: &str, command: &str) -> bool {
     let Some(descriptor) = super::command_manifest::descriptor(command) else {
         return false;
@@ -1542,11 +1554,16 @@ fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Valu
 fn inject_caller_device_grants(
     name: &str,
     mut args: Value,
+    state: &SharedState,
     device_id: &str,
     account_id: Option<&str>,
 ) -> Value {
     if name == "host_feature_manifest" {
         if let Value::Object(map) = &mut args {
+            map.insert(
+                "authoritativeHostId".to_string(),
+                Value::String(opaque_host_id(state)),
+            );
             let grants = account_id
                 .and_then(|tenant_id| {
                     super::security_store::security_store().map(|store| (tenant_id, store))
@@ -1742,6 +1759,7 @@ fn is_service_only_command(name: &str) -> bool {
 /// workspaces root, default-deny env) and every allow/deny is audited. That
 /// check runs on the value, not on the caller, so it applies identically to the
 /// service token and to a granted device.
+#[cfg(test)]
 const AGENT_CONTROL_COMMANDS: &[&str] = &[
     "spawn_external_agent",
     "send_to_external_agent",
@@ -1749,10 +1767,12 @@ const AGENT_CONTROL_COMMANDS: &[&str] = &[
     "get_external_agent_status",
 ];
 
+#[cfg(test)]
 static AGENT_CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| AGENT_CONTROL_COMMANDS.iter().copied().collect());
 
 /// True when `name` needs the agent-control grant (or a service token).
+#[cfg(test)]
 fn is_agent_control_command(name: &str) -> bool {
     AGENT_CONTROL_COMMANDS_SET.contains(name)
 }
@@ -1763,6 +1783,7 @@ fn is_agent_control_command(name: &str) -> bool {
 /// device needs an explicit grant, which on a desktop host comes from the
 /// paired-devices toggle and on a headless host from
 /// `cognia-server devices grant --agent-control`.
+#[cfg(test)]
 fn is_agent_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
     if !is_agent_control_command(name) {
         return true;
@@ -1821,59 +1842,13 @@ fn scheduled_task_requires_agent_control(name: &str, args: &Value) -> bool {
     }
 }
 
-fn payload_agent_control_authorized(
-    name: &str,
-    args: &Value,
-    device_id: &str,
-    scope: Option<&str>,
-) -> bool {
-    if !scheduled_task_requires_agent_control(name, args) {
-        return true;
-    }
-    if scope == Some("service") {
-        return true;
-    }
-    canonical_device_has_capability(device_id, "process.spawn")
-}
-
-/// Shared refusal for the agent-control gate. One string for both the HTTP
-/// handler and the WebRTC `dispatch` mirror — the two must not be able to
-/// drift into saying different things about the same grant.
-const AGENT_CONTROL_FORBIDDEN: &str = "this device is not authorized to run agents on this host; grant it from the host's paired-devices settings, or with `cognia-server devices grant --agent-control <device-id>`";
-
-/// Refuse an agent-control command *and* record the refusal.
-///
-/// The grant's contract is that every start and every refusal is written to the
-/// host's audit log with the device that asked. The `SpawnPolicy` refusals
-/// inside the `spawn_external_agent` arm were audited, but this gate — the one
-/// an ungranted device actually hits — returned 403 straight to the caller, so
-/// the single most interesting denial (an unauthorized device probing the
-/// execution plane) was the one that left no trace.
-///
-/// Both the HTTP handler and the WebRTC `dispatch` mirror route their 403
-/// through here so the two transports cannot drift into auditing differently.
-async fn refuse_agent_control(
-    name: &str,
-    device_id: &str,
-    scope: Option<&str>,
-) -> (StatusCode, Json<RpcError>) {
-    super::audit::record_async(
-        "external_agent_authorize",
-        device_id,
-        scope.unwrap_or(""),
-        "deny",
-        serde_json::json!({
-            "command": name,
-            "reason": "device lacks the agent-control grant",
-        }),
-    )
-    .await;
-    RpcError::forbidden(AGENT_CONTROL_FORBIDDEN)
+pub(super) fn payload_required_capability(name: &str, args: &Value) -> Option<&'static str> {
+    scheduled_task_requires_agent_control(name, args).then_some("process.spawn")
 }
 
 /// Public read-only accessor for the remote-control command set. Used by
 /// in-file tests to assert the gate covers the intended surfaces.
-#[allow(dead_code)] // referenced from tests only.
+#[cfg(test)]
 pub fn control_commands() -> &'static [&'static str] {
     CONTROL_COMMANDS
 }

@@ -867,6 +867,10 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         sidecarDown: false,
       }
     }
+    case "REMOTE_PERMISSION_RESOLVED":
+      return state.overlay.kind === "permission" && state.overlay.req.requestId === action.requestId
+        ? { ...state, overlay: { kind: "none" } }
+        : state
     case "TURN_COMMIT": {
       // Guarded fallback to the text heuristic: only when the structured
       // ExitPlanMode signal did NOT already capture a plan this turn, we're in

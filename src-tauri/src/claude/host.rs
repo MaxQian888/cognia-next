@@ -104,8 +104,27 @@ impl SidecarHost for TauriSidecarHost {
 
     fn emit(&self, channel: &str, payload: &Value) {
         use tauri::Emitter;
+        use tauri::Manager;
         if let Err(e) = self.0.emit(channel, payload) {
             log::error!("failed to emit {channel}: {e}");
+        }
+        if channel == super::sidecar::AGENT_EVENT {
+            if let Some(state) = self
+                .0
+                .try_state::<crate::cli_bridge::CliBridgeServerState>()
+            {
+                if let Some(envelope) = crate::cli_bridge::canonical_agent_envelope(payload) {
+                    state.agent_events().publish(envelope);
+                }
+            }
+            if let Some(state) = self
+                .0
+                .try_state::<crate::companion_api::CompanionServerState>()
+            {
+                if let Some(event_bus) = state.event_bus.read().clone() {
+                    event_bus.publish(channel.to_string(), payload.clone());
+                }
+            }
         }
     }
 
@@ -206,6 +225,7 @@ pub(crate) mod test_support {
     }
 
     impl RecordingSidecarHost {
+        #[cfg(not(unix))]
         pub fn with_script(script: PathBuf) -> Arc<Self> {
             Arc::new(Self {
                 emitted: Mutex::new(Vec::new()),

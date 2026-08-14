@@ -52,11 +52,15 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "memory_forget",
   // External agents (ADR-0056, Wave 4) — enable/disable + permission-mode edit.
   "external_agent_update",
+  // HostStateProtocolV1 — the same durable queue now carries attached-client
+  // session intents from Web, Mobile, Desktop, and TUI adapters.
+  "host_state_submit",
 ] as const
 
 export type MobileOutboundCommand = (typeof MOBILE_OUTBOUND_COMMANDS)[number]
 
-export type MobileOutboundStatus = "pending" | "sending" | "sent" | "failed" | "deadlettered"
+export type MobileOutboundStatus =
+  "pending" | "sending" | "sent" | "failed" | "deadlettered" | "rejected" | "conflicted"
 
 export interface MobileOutboundJobRow {
   /** UUIDv4 primary key. */
@@ -89,4 +93,14 @@ export interface MobileOutboundJobRow {
    *   "Trigger workflow Daily Digest"
    */
   label?: string
+  /** Absent on v25-v167 rows, which are interpreted as legacy RPC jobs. */
+  protocol?: "legacy-rpc" | "host-state-v1"
+  channel?: string
+  hostGeneration?: number
+  clientId?: string
+  clientSeq?: number
+  actionId?: string
+  baseRevision?: number
+  rejectionCode?: string
+  currentRevision?: number
 }

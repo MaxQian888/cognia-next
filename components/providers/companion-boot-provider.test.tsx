@@ -5,6 +5,7 @@
 import { render, waitFor } from "@testing-library/react"
 
 import { CompanionBootProvider } from "./companion-boot-provider"
+import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
 // ── Navigation mocks ─────────────────────────────────────────────────────────
 const replaceMock = jest.fn()
@@ -32,8 +33,10 @@ jest.mock("@/lib/db/schema", () => ({ activateAccountDatabase: jest.fn() }))
 jest.mock("@/lib/runtime/runtime-target-context", () => ({
   setActiveRuntimeTargetContext: jest.fn(),
 }))
+const registerCompanionRuntimeTargetMock = jest.fn().mockResolvedValue({ id: "host-a" })
 jest.mock("@/lib/runtime/account-runtime-target", () => ({
-  registerCompanionRuntimeTarget: jest.fn().mockResolvedValue({ id: "host-a" }),
+  registerCompanionRuntimeTarget: (...args: unknown[]) =>
+    registerCompanionRuntimeTargetMock(...args),
 }))
 jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
   runtimeHostSnapshotFromManifest: () => ({
@@ -48,11 +51,24 @@ jest.mock("@/lib/runtime/runtime-target-lifecycle", () => ({
   registerRuntimeTargetSubscriptionStopper: () => jest.fn(),
 }))
 jest.mock("@/lib/connectivity/lan-classify", () => ({ classifyWsHost: () => "ws-lan" }))
+const transportCallMock = jest.fn().mockResolvedValue({ schemaVersion: 2 })
 jest.mock("@/lib/tauri/transport-instance", () => ({
   transport: {
-    call: jest.fn().mockResolvedValue({ schemaVersion: 2 }),
+    call: (...args: unknown[]) => transportCallMock(...args),
     subscribe: jest.fn().mockReturnValue(() => {}),
   },
+}))
+
+const hostStateStopMock = jest.fn()
+const hostStateResyncMock = jest.fn().mockResolvedValue(undefined)
+const installHostStateSyncMock = jest.fn().mockResolvedValue({
+  status: { migrationStage: "host-authoritative" },
+  stop: hostStateStopMock,
+  resync: hostStateResyncMock,
+})
+jest.mock("@/lib/sync/host-state-service", () => ({
+  hostStateStatusAllowsWrites: () => true,
+  installHostStateSyncForTarget: (...args: unknown[]) => installHostStateSyncMock(...args),
 }))
 
 const getSettingsMock = jest.fn(async () => ({}) as Record<string, unknown>)
@@ -196,6 +212,11 @@ beforeEach(() => {
   registerNativePluginsMock.mockClear()
   syncStatusBarMock.mockClear()
   syncNavBarMock.mockClear()
+  transportCallMock.mockReset().mockResolvedValue({ schemaVersion: 2 })
+  registerCompanionRuntimeTargetMock.mockReset().mockResolvedValue({ id: "host-a" })
+  installHostStateSyncMock.mockClear()
+  hostStateStopMock.mockClear()
+  hostStateResyncMock.mockClear()
   delete (window as { Capacitor?: unknown }).Capacitor
   delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
 })
@@ -477,6 +498,44 @@ describe("<CompanionBootProvider /> — unpaired", () => {
 })
 
 describe("<CompanionBootProvider /> — paired", () => {
+  it("installs HostState sync for the registered runtime target and stops it on unmount", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(pairedConfig)
+    transportCallMock.mockResolvedValueOnce(
+      buildLocalHostFeatureManifest({ platform: "tauri", hostId: "host-a" })
+    )
+
+    const view = render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+
+    await waitFor(() =>
+      expect(installHostStateSyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: "local_acct_a", runtimeTargetId: "host-a" })
+      )
+    )
+    view.unmount()
+    expect(hostStateStopMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not install host bindings when target registration fails", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(pairedConfig)
+    registerCompanionRuntimeTargetMock.mockResolvedValueOnce(null)
+
+    render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+
+    await waitFor(() => expect(registerCompanionRuntimeTargetMock).toHaveBeenCalled())
+    expect(transportCallMock).not.toHaveBeenCalledWith("host_feature_manifest", {})
+    expect(installHostStateSyncMock).not.toHaveBeenCalled()
+  })
+
   it("triggers sync + installs listeners + registers push when paired", async () => {
     setMobile()
     hydrateMock.mockResolvedValueOnce(pairedConfig)

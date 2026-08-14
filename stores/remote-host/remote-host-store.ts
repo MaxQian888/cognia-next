@@ -7,7 +7,7 @@
  * Owns:
  *   - `hosts`: the persisted list of paired remote hosts (label + full
  *     `CompanionConfig`). Persisted to localStorage; the credential lives with
- *     only in the secure credential vault. Public v2 room metadata remains in
+ *     only in the secure credential vault. Public room metadata remains in
  *     the persisted config.
  *   - `activeHostId`: which host is currently driving the desktop. This is
  *     SESSION-scoped and deliberately NOT persisted — every launch starts local

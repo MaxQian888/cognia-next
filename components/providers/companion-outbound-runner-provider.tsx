@@ -12,12 +12,25 @@ import { createOutboundRunner, type OutboundDispatcher } from "@/lib/queue/outbo
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
 import {
+  getActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
   type RuntimeTargetScope,
 } from "@/lib/runtime/runtime-target-context"
 import { registerRuntimeTargetTransitionParticipant } from "@/lib/runtime/runtime-target-lifecycle"
 import { useAccountStore } from "@/stores/account/account-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import {
+  hostStateStatusAllowsWrites,
+  installHostStateSyncForTarget,
+} from "@/lib/sync/host-state-service"
+import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
+import {
+  getRuntimeSnapshot,
+  runtimeHostSnapshotFromManifest,
+  subscribeRuntimeSnapshot,
+  updateRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
 
 const POST_TRIGGER_RUN_SYNC_DELAY_MS = 2500
 
@@ -60,8 +73,9 @@ export interface CompanionOutboundRunnerProviderProps {
 }
 
 /**
- * Shared outbound lifecycle for native mobile and paired browser companions.
- * Standalone Web and Tauri never allocate a runner.
+ * Shared outbound lifecycle for every attached surface. Standalone Web remains
+ * local-only; Tauri deliberately uses the same durable queue as companions so
+ * local UI writes exercise identical HostState semantics.
  */
 export function CompanionOutboundRunnerProvider({
   dispatcher = liveDispatcher,
@@ -77,22 +91,37 @@ export function CompanionOutboundRunnerProvider({
   const platform = platformOverride ?? detectedPlatform
   const hasWebTarget = webCompanionOverride ?? hasWebCompanionTarget()
   const mobilePaired = mobilePairedOverride ?? mobileRuntimeMode === "paired"
-  const enabled = (platform === "mobile" && mobilePaired) || (platform === "web" && hasWebTarget)
+  const enabled =
+    platform === "tauri" ||
+    (platform === "mobile" && mobilePaired) ||
+    (platform === "web" && hasWebTarget)
   const accountId = platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : unlockedAccountId
-  const targetId = runtimeTarget?.id ?? null
-  const scope = useMemo(
-    () => scopeOverride ?? (accountId && targetId ? { accountId, targetId } : null),
-    [accountId, scopeOverride, targetId]
-  )
+  const targetId = runtimeTarget?.id ?? (platform === "tauri" ? "local-host" : null)
+  const scope = useMemo(() => {
+    if (scopeOverride) return scopeOverride
+    if (!accountId || !targetId) return null
+    const activeScope = getActiveRuntimeTargetContext()
+    return {
+      accountId,
+      targetId,
+      routingGeneration:
+        activeScope?.accountId === accountId && activeScope.targetId === targetId
+          ? activeScope.routingGeneration
+          : 0,
+    }
+  }, [accountId, scopeOverride, targetId])
 
   useEffect(() => {
     if (!enabled || !scope) return
 
-    setActiveRuntimeTargetContext(scope.accountId, scope.targetId)
+    setActiveRuntimeTargetContext(scope.accountId, scope.targetId, scope.routingGeneration)
     const runner = createOutboundRunner({
       dispatcher,
       enforceMobile: false,
       scope,
+      canDispatch: (row) =>
+        row.protocol !== "host-state-v1" ||
+        getRuntimeSnapshot().host?.operations.includes("host_state_submit") === true,
     })
     const kick = () => {
       void runner.kick().catch((error) => {
@@ -100,6 +129,7 @@ export function CompanionOutboundRunnerProvider({
       })
     }
     const unsubscribePendingJobs = subscribeToPendingJobs(scope, kick)
+    const unsubscribeRuntime = subscribeRuntimeSnapshot(kick)
     const unregisterTransitionParticipant = registerRuntimeTargetTransitionParticipant({
       id: "companion-outbound-runner",
       phase: "finalize-captures",
@@ -110,10 +140,51 @@ export function CompanionOutboundRunnerProvider({
 
     return () => {
       unsubscribePendingJobs()
+      unsubscribeRuntime()
       unregisterTransitionParticipant()
       void runner.stop()
     }
   }, [dispatcher, enabled, scope])
+
+  useEffect(() => {
+    if (platform !== "tauri" || !scope) return
+    let cancelled = false
+    let stopSync = () => {}
+    let unregisterResync = () => {}
+
+    void (async () => {
+      const manifest = parseHostFeatureManifest(await transport.call("host_feature_manifest", {}))
+      if (cancelled || !manifest) return
+      updateRuntimeSnapshot({
+        host: runtimeHostSnapshotFromManifest(manifest, { hostStateWriteEnabled: false }),
+      })
+      if (manifest.features["session.state-sync"]?.version !== 1) return
+      const installed = await installHostStateSyncForTarget({
+        transport,
+        accountId: scope.accountId,
+        runtimeTargetId: scope.targetId,
+      })
+      if (cancelled) {
+        installed.stop()
+        return
+      }
+      stopSync = () => installed.stop()
+      if (hostStateStatusAllowsWrites(installed.status)) {
+        updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
+      }
+      unregisterResync = remoteEventResyncCoordinator.register("host-state", () =>
+        installed.resync()
+      )
+    })().catch((error) => {
+      console.warn("desktop-host-state: initialization failed; retaining legacy writes", error)
+    })
+
+    return () => {
+      cancelled = true
+      unregisterResync()
+      stopSync()
+    }
+  }, [platform, scope])
 
   return null
 }

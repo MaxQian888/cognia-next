@@ -154,6 +154,26 @@ describe("useApplyEffect", () => {
     expect(deps.agent.send).toHaveBeenCalledWith("do it")
   })
 
+  it("routes attached-mode effects through the HostState lifecycle callbacks", async () => {
+    const attachHost = jest.fn(async () => "attached")
+    const detachHost = jest.fn(async () => "detached")
+    const hostSyncStatus = jest.fn(async () => "healthy")
+    const deps = buildDeps({ attachHost, detachHost, hostSyncStatus })
+    const apply = run(deps)
+
+    apply({ kind: "attachHost", targetId: "desktop-a", sessionId: "s-1" })
+    apply({ kind: "hostSyncStatus" })
+    apply({ kind: "detachHost" })
+    await flush()
+
+    expect(attachHost).toHaveBeenCalledWith({ targetId: "desktop-a", sessionId: "s-1" })
+    expect(hostSyncStatus).toHaveBeenCalledTimes(1)
+    expect(detachHost).toHaveBeenCalledTimes(1)
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "NOTICE", message: "attached" })
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "NOTICE", message: "healthy" })
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "NOTICE", message: "detached" })
+  })
+
   it("does NOT invalidate the session for a read-only /mcp action (panel open)", async () => {
     const deps = buildDeps()
     run(deps)({ kind: "runtime", runtime: { feature: "mcp", action: "panel" } })

@@ -12,6 +12,7 @@ import {
 
 import type { TuiAction } from "./types"
 import { validateContentPart } from "../render/content-part-policy"
+import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 
 export type CanonicalTuiClassification = "transcript" | "status" | "interactive" | "audit"
 
@@ -64,6 +65,7 @@ export const CANONICAL_TUI_CLASSIFICATION = {
   "plugin-install": "interactive",
   "user-replay": "audit",
   "structured-output": "transcript",
+  "model-request": "audit",
   warning: "transcript",
   failure: "transcript",
   "capability-error": "transcript",
@@ -241,6 +243,8 @@ function eventSummary(event: CanonicalAgentEvent): string {
       return event.preview ?? event.messageId
     case "structured-output":
       return event.status
+    case "model-request":
+      return `${event.purpose}: ${event.provider}/${event.model}`
     case "warning":
       return `${event.code}: ${event.message}`
     case "failure":
@@ -386,6 +390,27 @@ export function canonicalEnvelopeToActions(envelope: AgentEventEnvelope): TuiAct
           postTokens: event.postTokens ?? 0,
         },
       ]
+    case "permission-request":
+      return [
+        {
+          type: "OVERLAY_OPEN",
+          overlay: {
+            kind: "permission",
+            req: {
+              type: "permission_request",
+              sessionId: envelope.sessionId,
+              requestId: event.requestId,
+              toolUseID: event.requestId,
+              toolName: event.toolName,
+              input: event.input ?? {},
+            },
+            choices: DEFAULT_PERMISSION_CHOICES,
+            index: 0,
+          },
+        },
+      ]
+    case "permission-resolved":
+      return [{ type: "REMOTE_PERMISSION_RESOLVED", requestId: event.requestId }]
     default: {
       const classification = CANONICAL_TUI_CLASSIFICATION[event.kind]
       return [

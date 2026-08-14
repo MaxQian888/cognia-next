@@ -235,6 +235,29 @@ describe("canonicalEnvelopeToActions", () => {
     ])
   })
 
+  it("maps canonical permission events into the existing approval overlay", () => {
+    const [request] = canonicalEnvelopeToActions(
+      envelope({
+        kind: "permission-request",
+        requestId: "permission-1",
+        toolName: "bash",
+        input: { command: "pwd" },
+      })
+    )
+    expect(request).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "permission",
+        req: { requestId: "permission-1", sessionId: "s1", toolName: "bash" },
+      },
+    })
+    expect(
+      canonicalEnvelopeToActions(
+        envelope({ kind: "permission-resolved", requestId: "permission-1", behavior: "allow" })
+      )
+    ).toEqual([{ type: "REMOTE_PERMISSION_RESOLVED", requestId: "permission-1" }])
+  })
+
   it("upserts and removes structured content parts by stable id", () => {
     const part = {
       type: "file" as const,

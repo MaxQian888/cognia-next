@@ -58,6 +58,7 @@ const onClaudeMessageMock = jest.fn(async (cb: (evt: unknown) => void) => {
   return onClaudeUnsub
 })
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
+const enqueueHostStateIntentMock = jest.fn().mockResolvedValue(null)
 const interruptSessionMock = jest.fn().mockResolvedValue(undefined)
 // Live mid-turn steer into the Anthropic sidecar's streaming input. Rejecting
 // is the realistic default for most tests: an idle/closed query refuses, and
@@ -73,6 +74,10 @@ jest.mock("@/lib/claude/ipc", () => ({
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
   sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
   steerSession: (...a: unknown[]) => steerSessionMock(...a),
+}))
+
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
 }))
 
 // Standalone (BYOK) chat — off by default so the sidecar-path suite is
@@ -545,6 +550,7 @@ beforeEach(() => {
   onClaudeMessageMock.mockClear()
   onClaudeUnsub.mockClear()
   sendPromptMock.mockReset().mockResolvedValue(undefined)
+  enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
   standaloneFlag.value = false
   runStandaloneTurnMock.mockReset().mockResolvedValue(undefined)
@@ -689,6 +695,31 @@ describe("useClaudeChat — actions", () => {
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
+  })
+
+  it("persists an attached HostState action before rendering optimism and skips direct RPC", async () => {
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "action-1", status: "pending" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("host-owned")
+    })
+
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: {
+        kind: "message.enqueue",
+        messageId: "u1",
+        text: "host-owned",
+        attachments: [],
+      },
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(persistMessagesMock).not.toHaveBeenCalled()
+    expect(chatState.sessions["sess-1"]?.messages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "u1" })])
+    )
   })
 
   it("reuses the persisted managed-worktree binding and redirects the turn", async () => {
@@ -1232,6 +1263,23 @@ describe("useClaudeChat — actions", () => {
     expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "cancelled")
   })
 
+  it("stop() durably queues an attached HostState abort instead of direct interrupt", async () => {
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "abort-action", status: "pending" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.stop()
+    })
+
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: { kind: "turn.abort" },
+    })
+    expect(interruptSessionMock).not.toHaveBeenCalled()
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+  })
+
   it("stop() releases the GUI before a slow interrupt acknowledgement returns", async () => {
     chatState.status = "streaming"
     let acknowledgeInterrupt: (() => void) | undefined
@@ -1247,6 +1295,12 @@ describe("useClaudeChat — actions", () => {
     let stopPromise: Promise<void> | undefined
     act(() => {
       stopPromise = result.current.stop()
+    })
+
+    // Capability probing is asynchronous. Let the legacy fallback reach the
+    // direct interrupt call without resolving its deliberately slow receipt.
+    await act(async () => {
+      await Promise.resolve()
     })
 
     expect(interruptSessionMock).toHaveBeenCalledWith("sess-1")
@@ -1308,6 +1362,26 @@ describe("useClaudeChat — actions", () => {
     })
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
     expect(chatState.clearApproval).toHaveBeenCalledWith("r-1", "sess-1")
+  })
+
+  it("respondToApproval queues the attached decision and skips direct approval RPC", async () => {
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "approval-action", status: "pending" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.respondToApproval(
+        { sessionId: "sess-1", requestId: "r-host", toolName: "read" } as never,
+        "deny"
+      )
+    })
+
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: { kind: "approval.respond", requestId: "r-host", decision: "deny" },
+    })
+    expect(approveToolMock).not.toHaveBeenCalled()
+    expect(chatState.clearApproval).toHaveBeenCalledWith("r-host", "sess-1")
   })
 
   it("respondToApproval records a session grant for OCR visual tools", async () => {
@@ -2068,6 +2142,28 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     }>
     expect(appended.at(-1)?.metadata?.steer?.state).toBe("accepted")
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("persists an attached HostState steer before accepting its optimistic bubble", async () => {
+    chatState.status = "streaming"
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "steer-action", status: "pending" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("change direction")
+    })
+
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: { kind: "turn.steer", text: "change direction" },
+    })
+    expect(steerSessionMock).not.toHaveBeenCalled()
+    expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+    const appended = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      metadata?: { steer?: { state: string } }
+    }>
+    expect(appended.at(-1)?.metadata?.steer?.state).toBe("accepted")
   })
 
   it("falls back to the queue when the live steer is refused", async () => {

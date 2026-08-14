@@ -276,6 +276,50 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     handler: () => ({ kind: "handoff" }),
   },
   {
+    name: "attach",
+    description: "attach this TUI to a Host-authoritative target/session",
+    category: "session",
+    argumentHint: "--target <id> [--session <id>] [--account <id>]",
+    handler: (ctx) => {
+      const tokens = ctx.args.trim().split(/\s+/).filter(Boolean)
+      const valueAfter = (flag: string): string | undefined => {
+        const index = tokens.indexOf(flag)
+        return index >= 0 ? tokens[index + 1] : undefined
+      }
+      const targetId =
+        valueAfter("--target") ?? (!tokens[0]?.startsWith("--") ? tokens[0] : undefined)
+      if (!targetId) {
+        return { kind: "notice", message: "Usage: /attach --target <id> [--session <id>]" }
+      }
+      const sessionId = valueAfter("--session")
+      const accountId = valueAfter("--account")
+      return {
+        kind: "attachHost",
+        targetId,
+        ...(sessionId ? { sessionId } : {}),
+        ...(accountId ? { accountId } : {}),
+      }
+    },
+  },
+  {
+    name: "detach",
+    description: "detach from the Host and keep standalone JSONL unchanged",
+    category: "session",
+    handler: () => ({ kind: "detachHost" }),
+  },
+  {
+    name: "sync",
+    description: "inspect attached HostState synchronization",
+    category: "session",
+    subcommands: [
+      {
+        name: "status",
+        description: "show Host generation, sequence, and recovery queues",
+        handler: () => ({ kind: "hostSyncStatus" }),
+      },
+    ],
+  },
+  {
     name: "clear",
     aliases: ["new"],
     description: "start a fresh session",

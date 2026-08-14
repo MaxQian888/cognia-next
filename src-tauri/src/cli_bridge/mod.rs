@@ -61,10 +61,166 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 
 /// Path inside the cognia config dir for the endpoint discovery file.
 pub const ENDPOINT_FILE_REL: &str = "cognia/cli-endpoint.json";
+
+/// How many published HostState events stay replayable. One entry per applied
+/// action, so this covers a poller that was away for a long burst.
+const HOST_STATE_EVENT_LOG_CAPACITY: usize = 1024;
+const AGENT_EVENT_LOG_CAPACITY: usize = 1024;
+
+/// `hostSeq` carried by a published HostState event (0 when absent).
+pub fn event_host_seq(event: &serde_json::Value) -> u64 {
+    event
+        .get("hostSeq")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
+/// Extract the canonical Agent RPC envelope from the sidecar's Tauri wrapper.
+pub fn canonical_agent_envelope(payload: &serde_json::Value) -> Option<serde_json::Value> {
+    payload.get("envelope").cloned()
+}
+
+/// Bounded replay log sitting in front of the broadcast fan-out.
+///
+/// `broadcast` only reaches receivers that already exist when `send` runs, so a
+/// long poll that subscribes inside the request misses everything published
+/// between two polls — the CLI would skip those actions with no way to notice.
+/// The ring lets a reconnecting poller collect them, and [`oldest_host_seq`]
+/// lets it detect having fallen off the back of the ring entirely.
+///
+/// [`oldest_host_seq`]: HostStateEventLog::oldest_host_seq
+pub struct HostStateEventLog {
+    sender: broadcast::Sender<serde_json::Value>,
+    recent: Mutex<std::collections::VecDeque<serde_json::Value>>,
+}
+
+impl Default for HostStateEventLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HostStateEventLog {
+    pub fn new() -> Self {
+        let (sender, _) = broadcast::channel(HOST_STATE_EVENT_LOG_CAPACITY);
+        Self {
+            sender,
+            recent: Mutex::new(std::collections::VecDeque::new()),
+        }
+    }
+
+    /// Retain then fan out. Ordering matters: a poller that subscribes between
+    /// these two steps still finds the event in the ring.
+    pub fn publish(&self, event: serde_json::Value) {
+        {
+            let mut recent = self.recent.lock();
+            if recent.len() >= HOST_STATE_EVENT_LOG_CAPACITY {
+                recent.pop_front();
+            }
+            recent.push_back(event.clone());
+        }
+        let _ = self.sender.send(event);
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<serde_json::Value> {
+        self.sender.subscribe()
+    }
+
+    /// Retained events with `hostSeq > after`, oldest first.
+    pub fn replay_after(&self, after: u64) -> Vec<serde_json::Value> {
+        self.recent
+            .lock()
+            .iter()
+            .filter(|event| event_host_seq(event) > after)
+            .cloned()
+            .collect()
+    }
+
+    /// Oldest retained `hostSeq`; `None` when nothing has been published yet.
+    pub fn oldest_host_seq(&self) -> Option<u64> {
+        self.recent.lock().front().map(event_host_seq)
+    }
+}
+
+#[derive(Clone)]
+pub struct AgentEventRecord {
+    pub cursor: u64,
+    pub event: serde_json::Value,
+}
+
+struct AgentEventLogState {
+    next_cursor: u64,
+    recent: std::collections::VecDeque<AgentEventRecord>,
+}
+
+/// Bounded replay log for canonical Agent RPC envelopes.
+///
+/// Agent envelopes do not carry the HostState `hostSeq`, so the bridge assigns
+/// a transport-local cursor. This prevents the CLI long-poll handoff from
+/// losing bursts published between consecutive HTTP requests.
+pub struct AgentEventLog {
+    sender: broadcast::Sender<AgentEventRecord>,
+    state: Mutex<AgentEventLogState>,
+}
+
+impl Default for AgentEventLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AgentEventLog {
+    pub fn new() -> Self {
+        let (sender, _) = broadcast::channel(AGENT_EVENT_LOG_CAPACITY);
+        Self {
+            sender,
+            state: Mutex::new(AgentEventLogState {
+                next_cursor: 1,
+                recent: std::collections::VecDeque::new(),
+            }),
+        }
+    }
+
+    pub fn publish(&self, event: serde_json::Value) -> u64 {
+        let record = {
+            let mut state = self.state.lock();
+            let record = AgentEventRecord {
+                cursor: state.next_cursor,
+                event,
+            };
+            state.next_cursor = state.next_cursor.saturating_add(1);
+            if state.recent.len() >= AGENT_EVENT_LOG_CAPACITY {
+                state.recent.pop_front();
+            }
+            state.recent.push_back(record.clone());
+            record
+        };
+        let _ = self.sender.send(record.clone());
+        record.cursor
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<AgentEventRecord> {
+        self.sender.subscribe()
+    }
+
+    pub fn replay_after(&self, after: u64) -> Vec<AgentEventRecord> {
+        self.state
+            .lock()
+            .recent
+            .iter()
+            .filter(|record| record.cursor > after)
+            .cloned()
+            .collect()
+    }
+
+    pub fn oldest_cursor(&self) -> Option<u64> {
+        self.state.lock().recent.front().map(|record| record.cursor)
+    }
+}
 
 /// Per-launch state for the CLI bridge. Cloned into every axum handler
 /// via `Arc`.
@@ -80,6 +236,8 @@ pub struct CliBridgeState {
     /// `cli_bridge_renderer_response` Tauri command can resolve pending
     /// requests without reaching into the axum task.
     pub renderer: Arc<renderer_bridge::RendererBridge>,
+    pub host_state_events: Arc<HostStateEventLog>,
+    pub agent_events: Arc<AgentEventLog>,
 }
 
 pub type SharedState = Arc<CliBridgeState>;
@@ -91,6 +249,8 @@ pub struct CliBridgeServerState {
     /// Created eagerly (before `init`) so the `cli_bridge_renderer_response`
     /// command always has a target, even if the axum spawn failed.
     renderer: Arc<renderer_bridge::RendererBridge>,
+    host_state_events: Arc<HostStateEventLog>,
+    agent_events: Arc<AgentEventLog>,
 }
 
 struct RunningBridge {
@@ -103,6 +263,8 @@ impl Default for CliBridgeServerState {
         Self {
             inner: Mutex::new(None),
             renderer: renderer_bridge::RendererBridge::new(),
+            host_state_events: Arc::new(HostStateEventLog::new()),
+            agent_events: Arc::new(AgentEventLog::new()),
         }
     }
 }
@@ -128,6 +290,14 @@ impl CliBridgeServerState {
 
     pub fn renderer(&self) -> Arc<renderer_bridge::RendererBridge> {
         self.renderer.clone()
+    }
+
+    pub fn host_state_events(&self) -> Arc<HostStateEventLog> {
+        self.host_state_events.clone()
+    }
+
+    pub fn agent_events(&self) -> Arc<AgentEventLog> {
+        self.agent_events.clone()
     }
 }
 
@@ -188,6 +358,8 @@ pub async fn init(app_handle: tauri::AppHandle, state: &CliBridgeServerState) ->
         dev_token: dev_token.clone(),
         app_handle: app_handle.clone(),
         renderer: state.renderer(),
+        host_state_events: state.host_state_events(),
+        agent_events: state.agent_events(),
     });
     let (bound_port, shutdown) = server::spawn(shared)
         .await
@@ -243,6 +415,41 @@ pub fn cli_bridge_status(state: tauri::State<'_, CliBridgeServerState>) -> CliBr
     }
 }
 
+#[cfg(test)]
+mod event_log_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn agent_event_log_replays_bursts_after_cursor() {
+        let log = AgentEventLog::new();
+        assert_eq!(log.publish(json!({ "eventId": "a" })), 1);
+        assert_eq!(log.publish(json!({ "eventId": "b" })), 2);
+
+        let replay = log.replay_after(1);
+        assert_eq!(replay.len(), 1);
+        assert_eq!(replay[0].cursor, 2);
+        assert_eq!(replay[0].event["eventId"], "b");
+    }
+
+    #[test]
+    fn extracts_only_the_canonical_agent_envelope() {
+        let payload = json!({
+            "type": "agent_event",
+            "sessionId": "session-a",
+            "envelope": { "eventId": "event-a" }
+        });
+        assert_eq!(
+            canonical_agent_envelope(&payload),
+            Some(json!({ "eventId": "event-a" }))
+        );
+        assert_eq!(
+            canonical_agent_envelope(&json!({ "type": "agent_event" })),
+            None
+        );
+    }
+}
+
 /// IPC surface — resolve a pending renderer-backed CLI bridge request. The
 /// renderer's `cli-bridge://renderer-request` listener calls this with the
 /// request id + result/error; unknown ids are a no-op (the request may have
@@ -253,6 +460,14 @@ pub fn cli_bridge_renderer_response(
     response: renderer_bridge::RendererResponse,
 ) {
     state.renderer.resolve(response);
+}
+
+#[tauri::command]
+pub fn cli_bridge_host_state_publish(
+    state: tauri::State<'_, CliBridgeServerState>,
+    event: serde_json::Value,
+) {
+    state.host_state_events.publish(event);
 }
 
 /// IPC surface — resolve the cognia CLI home (`$COGNIA_HOME` or `~/.cognia`)

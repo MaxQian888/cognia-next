@@ -114,6 +114,18 @@ import type {
 } from "@/types/agent/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
+import { transport } from "@/lib/tauri"
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
+import {
+  createAgentRpcHostStateDispatcher,
+  createHostStateService,
+  type HostStateService,
+} from "@/lib/sync/host-state-service"
+import type {
+  HostStateSnapshotRequestV1,
+  HostStateSubmitRequestV1,
+} from "@cognia/agent-config-types/host-state"
+import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 const REQUEST_EVENT = "companion://desktop-write-request"
 const RESPONSE_COMMAND = "companion_desktop_write_response"
@@ -131,6 +143,10 @@ interface TauriBridge {
 }
 
 let installed = false
+let hostStateAuthority: { key: string; service: HostStateService } | null = null
+let hostStateProjection = Promise.resolve()
+const hostStateOwnerId = `brain-${crypto.randomUUID()}`
+const hostStateRuntimeDispatcher = createAgentRpcHostStateDispatcher()
 
 export interface InstallOptions {
   bridge?: TauriBridge
@@ -156,17 +172,30 @@ export async function installDesktopWriteSource(opts: InstallOptions = {}): Prom
   const unlisten = await bridge.listen<DesktopWriteRequestEvent>(REQUEST_EVENT, (event) => {
     void respond(event.payload, bridge)
   })
+  const unsubscribeAgentEvents = transport.subscribe<{ envelope?: unknown }>(
+    "agent://message",
+    (payload) => {
+      const authority = hostStateAuthority
+      const envelope = payload?.envelope
+      if (!authority || !isAgentEventEnvelope(envelope)) return
+      hostStateProjection = hostStateProjection
+        .then(() => authority.service.projectRuntimeEnvelope(envelope))
+        .then(() => undefined)
+        .catch(() => undefined)
+    }
+  )
 
   return () => {
     installed = false
     unlisten()
+    unsubscribeAgentEvents()
   }
 }
 
 async function respond(req: DesktopWriteRequestEvent, bridge: TauriBridge): Promise<void> {
   const { requestId, command, payload } = req
   try {
-    const result = await dispatchCommand(command, payload)
+    const result = await dispatchCommand(command, payload, bridge)
     await bridge.invoke(RESPONSE_COMMAND, { requestId, result, error: null })
   } catch (err: unknown) {
     await bridge.invoke(RESPONSE_COMMAND, {
@@ -180,7 +209,8 @@ async function respond(req: DesktopWriteRequestEvent, bridge: TauriBridge): Prom
 /** Exposed for tests — production callers go through the listener above. */
 export async function dispatchCommand(
   command: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  bridge?: TauriBridge
 ): Promise<unknown> {
   const { isPerformanceHostCommand, dispatchPerformanceHostCommand } =
     await import("@/lib/perf/host-dispatch")
@@ -221,6 +251,12 @@ export async function dispatchCommand(
       return hostCapabilities()
     case "host_feature_manifest":
       return hostFeatureManifest(payload)
+    case "host_state_snapshot":
+      return hostStateSnapshot(payload, bridge)
+    case "host_state_submit":
+      return hostStateSubmit(payload, bridge)
+    case "host_state_status":
+      return hostStateStatus(payload, bridge)
     case "provider_diagnostics_status": {
       const { getRemoteProviderDiagnosticsStatus } =
         await import("@/lib/provider-diagnostics/companion")
@@ -402,6 +438,80 @@ export async function dispatchCommand(
     default:
       throw new Error(`unknown desktop-write command: ${command}`)
   }
+}
+
+async function resolveHostStateService(
+  payload: Record<string, unknown>,
+  bridge?: TauriBridge
+): Promise<HostStateService> {
+  const active = getActiveRuntimeTargetContext()
+  const callerAccountId = payload.callerAccountId
+  const authoritativeHostId = payload.authoritativeHostId
+  const runtimeTargetId = payload.runtimeTargetId
+  if (
+    !active ||
+    typeof callerAccountId !== "string" ||
+    typeof authoritativeHostId !== "string" ||
+    typeof runtimeTargetId !== "string" ||
+    active.accountId !== callerAccountId ||
+    active.targetId !== runtimeTargetId
+  ) {
+    throw new Error("host_state_scope_mismatch")
+  }
+  const key = `${active.accountId}:${active.targetId}:${authoritativeHostId}`
+  if (hostStateAuthority?.key === key) return hostStateAuthority.service
+  if (hostStateAuthority) await hostStateAuthority.service.stop()
+  const service = createHostStateService({
+    accountId: active.accountId,
+    runtimeTargetId: active.targetId,
+    hostId: authoritativeHostId,
+    ownerId: hostStateOwnerId,
+    dispatchRuntime: hostStateRuntimeDispatcher,
+    publish: async (topic, event) => {
+      const publish = bridge
+        ? (name: string, args: Record<string, unknown>) => bridge.invoke(name, args)
+        : (name: string, args: Record<string, unknown>) => invoke(name, args)
+      const outcomes = await Promise.allSettled([
+        publish("companion_host_state_publish", { topic, event }),
+        publish("cli_bridge_host_state_publish", { event }),
+      ])
+      if (outcomes.every((outcome) => outcome.status === "rejected")) {
+        throw new Error("host_state_event_publisher_unavailable")
+      }
+    },
+  })
+  await service.start()
+  hostStateAuthority = { key, service }
+  return service
+}
+
+async function hostStateSnapshot(
+  payload: Record<string, unknown>,
+  bridge?: TauriBridge
+): Promise<unknown> {
+  const service = await resolveHostStateService(payload, bridge)
+  return service.snapshot(stripHostStateInternal(payload) as unknown as HostStateSnapshotRequestV1)
+}
+
+async function hostStateSubmit(
+  payload: Record<string, unknown>,
+  bridge?: TauriBridge
+): Promise<unknown> {
+  const service = await resolveHostStateService(payload, bridge)
+  return service.submit(stripHostStateInternal(payload) as unknown as HostStateSubmitRequestV1)
+}
+
+async function hostStateStatus(
+  payload: Record<string, unknown>,
+  bridge?: TauriBridge
+): Promise<unknown> {
+  const service = await resolveHostStateService(payload, bridge)
+  return service.status()
+}
+
+function stripHostStateInternal(payload: Record<string, unknown>): Record<string, unknown> {
+  const { authoritativeHostId: _hostId, callerAccountId: _accountId, ...request } = payload
+  return request
 }
 
 function sessionAttach(payload: Record<string, unknown>): null {
@@ -930,6 +1040,10 @@ async function hostFeatureManifest(payload: Record<string, unknown>): Promise<un
   }
   return buildLocalHostFeatureManifest({
     platform,
+    hostId:
+      typeof payload.authoritativeHostId === "string"
+        ? payload.authoritativeHostId
+        : `local-${platform}`,
     deviceGrants,
     operationHealth,
   })

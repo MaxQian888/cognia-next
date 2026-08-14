@@ -13,6 +13,12 @@ import {
 import type { CommandDescriptor } from "./types"
 import { externalCapabilities } from "../runtime/backend-capabilities"
 
+jest.mock("../render/cell-terminal-block", () => ({
+  cellToTerminalBlock: (cell: { text?: string; raw?: string; result?: string }) => ({
+    plainText: cell.text ?? cell.raw ?? cell.result ?? "",
+  }),
+}))
+
 const stub = (name: string, over: Partial<CommandDescriptor> = {}): CommandDescriptor => ({
   name,
   description: `the ${name} command`,
@@ -202,6 +208,22 @@ describe("command registry", () => {
       ({ state: {}, config: { cwd: "/w" }, version: "0", args }) as never
     expect(cwd?.handler?.(ctx(""))).toEqual({ kind: "notice", message: "/w" })
     expect(cwd?.handler?.(ctx("  ../other  "))).toEqual({ kind: "changeCwd", dir: "../other" })
+  })
+
+  it("exposes HostState attach, detach, and sync status effects", () => {
+    const commandCtx = (args: string) => ({ state: {}, config: {}, version: "0", args }) as never
+    expect(getCommand("attach")?.handler?.(commandCtx("--target desktop-a --session s-1"))).toEqual(
+      {
+        kind: "attachHost",
+        targetId: "desktop-a",
+        sessionId: "s-1",
+      }
+    )
+    expect(getCommand("attach")?.handler?.(commandCtx(""))).toMatchObject({ kind: "notice" })
+    expect(getCommand("detach")?.handler?.(commandCtx(""))).toEqual({ kind: "detachHost" })
+    expect(getCommand("sync")?.subcommands?.[0]?.handler(commandCtx(""))).toEqual({
+      kind: "hostSyncStatus",
+    })
   })
 
   describe("backend capability gating", () => {

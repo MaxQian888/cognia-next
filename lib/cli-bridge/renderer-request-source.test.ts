@@ -18,6 +18,11 @@ jest.mock("./handlers/agent-team", () => ({
   agentTeamRunStatus: (...args: unknown[]) => agentTeamRunStatusMock(...args),
 }))
 
+const desktopWriteDispatchMock = jest.fn()
+jest.mock("@/lib/companion/desktop-write-source", () => ({
+  dispatchCommand: (...args: unknown[]) => desktopWriteDispatchMock(...args),
+}))
+
 // The real @tauri-apps imports must never load in jsdom-free node tests —
 // every test below injects a fake bridge.
 jest.mock("@tauri-apps/api/event", () => ({ listen: jest.fn() }))
@@ -56,6 +61,7 @@ beforeEach(() => {
   agentTeamListMock.mockReset()
   agentTeamRunMock.mockReset()
   agentTeamRunStatusMock.mockReset()
+  desktopWriteDispatchMock.mockReset()
 })
 
 describe("dispatchCommand", () => {
@@ -81,6 +87,18 @@ describe("dispatchCommand", () => {
   it("throws on an unknown command", async () => {
     await expect(dispatchCommand("bogus", {})).rejects.toThrow(/unknown cli-bridge/)
   })
+
+  it.each(["host_state_snapshot", "host_state_submit", "host_state_status"])(
+    "routes %s through the desktop HostState authority with the bridge",
+    async (command) => {
+      const { bridge } = makeBridge()
+      desktopWriteDispatchMock.mockResolvedValue({ ok: true })
+      const payload = { runtimeTargetId: "target-a" }
+
+      await expect(dispatchCommand(command, payload, bridge)).resolves.toEqual({ ok: true })
+      expect(desktopWriteDispatchMock).toHaveBeenCalledWith(command, payload, bridge)
+    }
+  )
 })
 
 describe("installCliRendererRequestSource", () => {

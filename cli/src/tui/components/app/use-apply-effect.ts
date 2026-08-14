@@ -82,6 +82,13 @@ export interface ApplyEffectDeps {
   copyClipboard: (text: string) => Promise<CopyResult>
   notices: ResolvedNotices
   pushHandoff?: (sessionId: string) => boolean | Promise<boolean>
+  attachHost?: (options: {
+    targetId: string
+    sessionId?: string
+    accountId?: string
+  }) => Promise<string>
+  detachHost?: () => Promise<string>
+  hostSyncStatus?: () => Promise<string>
   openSessions: () => void
   /** Open the `/model` switcher — backend-aware, so it may query the external
    * agent for its own catalog before the overlay can be built. */
@@ -156,6 +163,9 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     copyClipboard,
     notices,
     pushHandoff,
+    attachHost,
+    detachHost,
+    hostSyncStatus,
     openSessions,
     openModelPicker,
     resumeMostRecent,
@@ -295,6 +305,67 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
               dispatch({
                 type: "NOTICE",
                 message: `Handoff failed: ${error instanceof Error ? error.message : String(error)}`,
+                severity: "error",
+              })
+            )
+          break
+        case "attachHost":
+          if (!attachHost) {
+            dispatch({
+              type: "NOTICE",
+              message: "Host attachment is unavailable.",
+              severity: "warn",
+            })
+            break
+          }
+          void attachHost({
+            targetId: effect.targetId,
+            ...(effect.sessionId ? { sessionId: effect.sessionId } : {}),
+            ...(effect.accountId ? { accountId: effect.accountId } : {}),
+          })
+            .then((message) => dispatch({ type: "NOTICE", message }))
+            .catch((error: unknown) =>
+              dispatch({
+                type: "NOTICE",
+                message: `Attach failed: ${error instanceof Error ? error.message : String(error)}`,
+                severity: "error",
+              })
+            )
+          break
+        case "detachHost":
+          if (!detachHost) {
+            dispatch({
+              type: "NOTICE",
+              message: "Host attachment is unavailable.",
+              severity: "warn",
+            })
+            break
+          }
+          void detachHost()
+            .then((message) => dispatch({ type: "NOTICE", message }))
+            .catch((error: unknown) =>
+              dispatch({
+                type: "NOTICE",
+                message: `Detach failed: ${error instanceof Error ? error.message : String(error)}`,
+                severity: "error",
+              })
+            )
+          break
+        case "hostSyncStatus":
+          if (!hostSyncStatus) {
+            dispatch({
+              type: "NOTICE",
+              message: "Host attachment is unavailable.",
+              severity: "warn",
+            })
+            break
+          }
+          void hostSyncStatus()
+            .then((message) => dispatch({ type: "NOTICE", message }))
+            .catch((error: unknown) =>
+              dispatch({
+                type: "NOTICE",
+                message: `Sync status failed: ${error instanceof Error ? error.message : String(error)}`,
                 severity: "error",
               })
             )
@@ -952,6 +1023,9 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       persistEditor,
       openInEditorFn,
       pushHandoff,
+      attachHost,
+      detachHost,
+      hostSyncStatus,
       resumeMostRecent,
       resumeSession,
       runBash,

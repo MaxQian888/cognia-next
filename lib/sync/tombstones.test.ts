@@ -25,6 +25,17 @@ describe("tombstones", () => {
     expect(rows.every((r) => r.deletedAt === 1000)).toBe(true)
   })
 
+  it("keeps HostState generation and sequence on ordered deletions", async () => {
+    await recordTombstones("sessions", ["ordered"], 1000, {
+      generation: 3,
+      sequence: 42,
+    })
+    await expect(getDb().syncTombstones.get(["sessions", "ordered"])).resolves.toMatchObject({
+      hostGeneration: 3,
+      hostSeq: 42,
+    })
+  })
+
   it("no-ops on an empty id list", async () => {
     await recordTombstones("messages", [])
     expect(await getDb().syncTombstones.count()).toBe(0)

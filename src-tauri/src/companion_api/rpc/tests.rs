@@ -2958,9 +2958,11 @@ fn inject_caller_device_id_ignores_non_object_payloads() {
 
 #[test]
 fn host_feature_manifest_rejects_client_reported_grants_without_an_authority_snapshot() {
+    let state = test_state();
     let out = inject_caller_device_grants(
         "host_feature_manifest",
         json!({ "callerDeviceGrants": ["agent.run"] }),
+        &state,
         "dev-observer",
         None,
     );
@@ -2970,9 +2972,11 @@ fn host_feature_manifest_rejects_client_reported_grants_without_an_authority_sna
 
 #[test]
 fn caller_device_grants_only_touch_the_manifest_command() {
+    let state = test_state();
     let out = inject_caller_device_grants(
         "character_upsert",
         json!({ "callerDeviceGrants": ["spoofed"] }),
+        &state,
         "dev-real",
         None,
     );

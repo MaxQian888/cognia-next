@@ -61,6 +61,7 @@ import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-p
 import { clearSessionGrants } from "@/lib/claude/computer-use-session-grants"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import { listMessages, persistMessages, persistStreamingMessages } from "@/lib/db/messages"
+import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import {
   getSession,
@@ -458,6 +459,29 @@ export function useClaudeChat() {
             ...((optimistic as { metadata?: Record<string, unknown> }).metadata ?? {}),
             steer: steerMeta,
           }
+
+          const externalAgentId = sessionExternalLane(sessionId)
+          if (!externalAgentId && text && blocks.length === 0 && !isStandaloneChatMode()) {
+            try {
+              const queued = await enqueueHostStateIntentIfAvailable({
+                sessionId,
+                action: { kind: "turn.steer", text },
+              })
+              if (queued) {
+                appendSteerMessage(sessionId, optimistic)
+                setSteerMessageState(sessionId, entryId, "accepted")
+                return
+              }
+            } catch (error) {
+              store
+                .getState()
+                .setSessionDiagnostic(
+                  sessionId,
+                  toDiagnostic(error, { source: "chat", meta: { sessionId } })
+                )
+              return
+            }
+          }
           appendSteerMessage(sessionId, optimistic)
 
           // Live steer — the message reaches the model without ending the turn.
@@ -477,7 +501,6 @@ export function useClaudeChat() {
           // The lane comes from what THIS session dispatched
           // (`sessionExternalLane`), not the composer's global runtime pick,
           // which in split view describes whichever pane happens to be focused.
-          const externalAgentId = sessionExternalLane(sessionId)
           if (externalAgentId) {
             // Adapter steering carries text only (`turn/steer` takes a string),
             // so an attachment-only follow-up has to queue on this lane.
@@ -806,6 +829,52 @@ export function useClaudeChat() {
               effectiveContent.find((block) => block.type === "text") as
                 { text?: string } | undefined
             )?.text ?? "")
+      const hostStateEligible =
+        !skipAppend &&
+        typeof effectiveContent === "string" &&
+        callOptions?.resourceContext === undefined &&
+        (callOptions?.attachmentManifest?.length ?? 0) === 0 &&
+        useAgentRuntimeStore.getState().runtime !== "external" &&
+        !isStandaloneChatMode()
+      if (hostStateEligible) {
+        try {
+          const queued = await enqueueHostStateIntentIfAvailable({
+            sessionId,
+            action: {
+              kind: "message.enqueue",
+              messageId: userMsg.id,
+              text: providerText,
+              attachments: [],
+            },
+          })
+          if (queued) {
+            // The outbox transaction completed before this optimistic write.
+            // Runtime dispatch, transcript persistence and authoritative title
+            // updates now belong to HostStateService on every attached surface.
+            store.getState().replaceSessionMessages(sessionId, next)
+            store.getState().setSessionStatus(sessionId, "streaming")
+            store.getState().setSessionError(sessionId, null)
+            lastUserContentRef.current.set(sessionId, displayContent)
+            emitSystemBusEvent(SystemEvents.MESSAGE_SENT, { sessionId })
+            emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId })
+            behaviorTurnStartedAt.set(sessionId, Date.now())
+            void trackEvent("chat.message.sent", {
+              sessionId,
+              provider: sendOptions.provider ?? "host-state",
+              surface: "chat",
+            })
+            return
+          }
+        } catch (error) {
+          store
+            .getState()
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(error, { source: "chat", meta: { sessionId } })
+            )
+          return
+        }
+      }
       if (!skipAppend) {
         store.getState().replaceSessionMessages(sessionId, next)
       }
@@ -1554,6 +1623,23 @@ export function useClaudeChat() {
       // Each pane wires its own Stop to its own session id; default to focused.
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
+      let hostStateAbortQueued = false
+      try {
+        hostStateAbortQueued = Boolean(
+          await enqueueHostStateIntentIfAvailable({
+            sessionId,
+            action: { kind: "turn.abort" },
+          })
+        )
+      } catch (error) {
+        store
+          .getState()
+          .setSessionDiagnostic(
+            sessionId,
+            toDiagnostic(error, { source: "chat", meta: { sessionId } })
+          )
+        return
+      }
       // Plain stop discards any queued steer — the user is taking over, not
       // steering — and disarms the drain so the settle doesn't replay it.
       useChatStore.getState().clearSteerQueue(sessionId)
@@ -1588,7 +1674,10 @@ export function useClaudeChat() {
         // sidecar path interrupts the host instead. The follow-up
         // `session_ended` remains idempotent with the optimistic local seal.
         const standaloneController = standaloneAbortRef.current.get(sessionId)
-        if (standaloneController) {
+        if (hostStateAbortQueued) {
+          // Durable HostState action owns the interrupt; the runner retries it
+          // with the same action id after reconnect.
+        } else if (standaloneController) {
           standaloneController.abort()
           standaloneAbortRef.current.delete(sessionId)
         } else {
@@ -1717,6 +1806,32 @@ export function useClaudeChat() {
           const { recordSessionGrant } = await import("@/lib/claude/computer-use-session-grants")
           recordSessionGrant(approval.sessionId, approval.toolName)
         }
+      }
+      try {
+        const queued = await enqueueHostStateIntentIfAvailable({
+          sessionId: approval.sessionId,
+          action: {
+            kind: "approval.respond",
+            requestId: approval.requestId,
+            decision,
+          },
+        })
+        if (queued) {
+          store.getState().clearApproval(approval.requestId, approval.sessionId)
+          return
+        }
+      } catch (error) {
+        store.getState().setSessionDiagnostic(
+          approval.sessionId,
+          toDiagnostic(error, {
+            source: "chat",
+            meta: {
+              sessionId: approval.sessionId,
+              extra: { requestId: approval.requestId },
+            },
+          })
+        )
+        return
       }
       try {
         const handle = getExecutionHandle(approval.sessionId)

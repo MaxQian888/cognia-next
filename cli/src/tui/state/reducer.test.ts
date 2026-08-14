@@ -1256,6 +1256,25 @@ describe("tuiReducer", () => {
     expect(s.overlay.kind).toBe("none")
   })
 
+  it("closes only the matching remotely resolved permission", () => {
+    const request = {
+      type: "permission_request" as const,
+      sessionId: "session-a",
+      requestId: "request-a",
+      toolUseID: "tool-a",
+      toolName: "bash",
+      input: {},
+    }
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "permission", req: request, choices: [], index: 0 },
+    })
+    s = reduce(s, { type: "REMOTE_PERMISSION_RESOLVED", requestId: "request-b" })
+    expect(s.overlay.kind).toBe("permission")
+    s = reduce(s, { type: "REMOTE_PERMISSION_RESOLVED", requestId: "request-a" })
+    expect(s.overlay.kind).toBe("none")
+  })
+
   it("applies completed limits only while the same panel is still open", () => {
     const limits = {
       kind: "limits" as const,

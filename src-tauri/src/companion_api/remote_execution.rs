@@ -246,7 +246,20 @@ async fn execute_inner(
         )
     })?;
     authorize_transport(&request, descriptor)?;
-    authorize_capability(&request, descriptor)?;
+    if let Err(error) = authorize_capability(&request, descriptor) {
+        super::audit::record_async(
+            "remote_execution_authorize",
+            &request.principal.device_id,
+            &request.principal.scope,
+            "deny",
+            json!({
+                "command": &request.command,
+                "reason": &error.message,
+            }),
+        )
+        .await;
+        return Err(error);
+    }
     authorize_approval(&request, descriptor)?;
     validate_contract_value(
         &request.request_id,
@@ -507,24 +520,32 @@ fn authorize_capability(
     if request.principal.scope == "service" {
         return Ok(());
     }
-    let granted = match snapshot_capability_decision(&request.principal, &descriptor.capability) {
-        Some(granted) => granted,
-        None => security_store()
-            .ok_or_else(|| store_unavailable(&request.request_id))?
-            .has_capability(
-                &request.principal.account_id,
-                &request.principal.device_id,
-                &descriptor.capability,
-            )
-            .map_err(|error| map_store_error(&request.request_id, error))?,
-    };
-    if !granted {
-        return Err(ExecutionError::new(
-            &request.request_id,
-            StatusCode::FORBIDDEN,
-            "missing_capability",
-            "the device is not authorized for this command",
-        ));
+    let required = [
+        Some(descriptor.capability.as_str()),
+        super::rpc::payload_required_capability(&request.command, &request.args),
+    ];
+    for capability in required.into_iter().flatten() {
+        let granted = match snapshot_capability_decision(&request.principal, capability) {
+            Some(granted) => granted,
+            None => security_store()
+                .ok_or_else(|| store_unavailable(&request.request_id))?
+                .has_capability(
+                    &request.principal.account_id,
+                    &request.principal.device_id,
+                    capability,
+                )
+                .map_err(|error| map_store_error(&request.request_id, error))?,
+        };
+        if !granted {
+            let mut error = ExecutionError::new(
+                &request.request_id,
+                StatusCode::FORBIDDEN,
+                "missing_capability",
+                "the device is not authorized for this command",
+            );
+            error.details = json!({ "capability": capability });
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -953,6 +974,38 @@ mod tests {
         let request = execution_request("service", None);
         let descriptor = super::super::command_manifest::descriptor("claude_send").unwrap();
 
+        assert!(authorize_capability(&request, descriptor).is_ok());
+    }
+
+    #[test]
+    fn agent_schedules_require_scheduler_and_process_capabilities() {
+        let mut request = ExecutionRequest::new(
+            "scheduled_task_create",
+            json!({ "input": { "type": "agent" } }),
+            DeviceContext {
+                device_id: "device-a".to_string(),
+                account_id: "tenant-a".to_string(),
+                scope: "device".to_string(),
+                granted_scopes: Vec::new(),
+                authorization_capabilities: Some(vec!["scheduler.manage".to_string()]),
+            },
+            ExecutionTransport::Http,
+            None,
+        );
+        let descriptor =
+            super::super::command_manifest::descriptor("scheduled_task_create").unwrap();
+
+        assert_eq!(
+            authorize_capability(&request, descriptor).unwrap_err().code,
+            "missing_capability"
+        );
+
+        request
+            .principal
+            .authorization_capabilities
+            .as_mut()
+            .unwrap()
+            .push("process.spawn".to_string());
         assert!(authorize_capability(&request, descriptor).is_ok());
     }
 

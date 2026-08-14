@@ -844,6 +844,18 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 Err(e) => log::warn!("companion-api ws-bridge: bad write respond payload: {e}"),
             }
         }
+        "companion_host_state_publish" => {
+            let topic = payload.get("topic").and_then(Value::as_str);
+            let event = payload.get("event").cloned();
+            match (topic, event) {
+                (Some("host-state://action"), Some(event)) => {
+                    state
+                        .event_bus
+                        .publish("host-state://action".to_string(), event);
+                }
+                _ => log::warn!("companion-api ws-bridge: bad HostState publish payload"),
+            }
+        }
         "orchestration_proxy_response" => {
             if let Err(error) = resolve_orchestration_response(payload) {
                 log::warn!("companion-api ws-bridge: bad orchestration respond payload: {error}");
@@ -1281,7 +1293,9 @@ mod tests {
             "contractVersion": crate::companion_api::command_manifest::headless_contract().expect("contract").schema_version()
         }))
         .unwrap();
-        ws.send(WsMessage::Text(wrong_account.into())).await.unwrap();
+        ws.send(WsMessage::Text(wrong_account.into()))
+            .await
+            .unwrap();
 
         let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await

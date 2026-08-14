@@ -64,6 +64,18 @@ jest.mock("@/lib/sync/companion-sync", () => ({
   installNetworkSync: () => installNetworkSyncMock(),
 }))
 
+const hostStateStopMock = jest.fn()
+const hostStateResyncMock = jest.fn().mockResolvedValue(undefined)
+const installHostStateSyncMock = jest.fn().mockResolvedValue({
+  status: { migrationStage: "host-authoritative" },
+  stop: hostStateStopMock,
+  resync: hostStateResyncMock,
+})
+jest.mock("@/lib/sync/host-state-service", () => ({
+  hostStateStatusAllowsWrites: () => true,
+  installHostStateSyncForTarget: (...args: unknown[]) => installHostStateSyncMock(...args),
+}))
+
 import { WebCompanionBootProvider } from "./web-companion-boot-provider"
 import {
   __resetRuntimeSnapshotForTesting,
@@ -72,6 +84,7 @@ import {
 import { stopRuntimeTargetSubscriptions } from "@/lib/runtime/runtime-target-lifecycle"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import { restartWebHostBindings } from "@/lib/companion/web-host-binding-lifecycle"
+import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
 const ENV_KEY = "NEXT_PUBLIC_COGNIA_SERVER_URL"
 
@@ -117,6 +130,9 @@ beforeEach(() => {
       maxConcurrentProxyCalls: 1,
     },
   })
+  installHostStateSyncMock.mockClear()
+  hostStateStopMock.mockClear()
+  hostStateResyncMock.mockClear()
 })
 
 afterEach(() => {
@@ -180,6 +196,35 @@ describe("WebCompanionBootProvider", () => {
       })
     )
     expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it("installs and resyncs HostState when the Web Host advertises state sync", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+      accountId: "acct-web",
+      targetId: "companion-cloud",
+    })
+    transportCallMock.mockResolvedValue(
+      buildLocalHostFeatureManifest({ platform: "headless", hostId: "host-cloud" })
+    )
+
+    const view = render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() =>
+      expect(installHostStateSyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: "acct-web", runtimeTargetId: "companion-cloud" })
+      )
+    )
+    view.unmount()
+    expect(hostStateStopMock).toHaveBeenCalledTimes(1)
   })
 
   it("keeps Web connecting until the event replay boundary is ready", async () => {

@@ -364,7 +364,7 @@ describe("readDexieDelta", () => {
       id: "singleton",
       updatedAt: 100,
       theme: "dark",
-      signalingUrl: "wss://self-hosted.example/v2/signaling",
+      signalingUrl: "wss://self-hosted.example/signaling",
       apiKey: "sk-ant-secret",
       apiBaseUrl: "https://internal.example",
       providerSettings: { openai: { apiKey: "sk-openai-secret" } },
@@ -382,7 +382,7 @@ describe("readDexieDelta", () => {
     // Mirrored fields still arrive — including the transport config the phone
     // needs to reach a self-hosted signaling server.
     expect(row.theme).toBe("dark")
-    expect(row.signalingUrl).toBe("wss://self-hosted.example/v2/signaling")
+    expect(row.signalingUrl).toBe("wss://self-hosted.example/signaling")
     // Envelope fields the client keys and cursors on.
     expect(row.id).toBe("singleton")
     expect(row.updatedAt).toBe(100)

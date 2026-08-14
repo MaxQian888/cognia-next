@@ -37,6 +37,7 @@ import type { ClaudeAgentSdkOptionsV1 } from "./claude-agent-sdk-options"
 
 export * from "./transcript"
 export * from "./working-set"
+export * from "./host-state"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 

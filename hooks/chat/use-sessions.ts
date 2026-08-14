@@ -37,6 +37,7 @@ import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { hydrateSessionHistory } from "@/lib/sync/session-history"
+import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
 
 /**
  * How far the active session id has been resolved to a row.
@@ -267,6 +268,14 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
 
   const rename = useCallback(async (id: string, title: string) => {
     // A manual rename opts the session out of auto-title generation.
+    if (
+      await enqueueHostStateIntentIfAvailable({
+        sessionId: id,
+        action: { kind: "session.rename", title },
+      })
+    ) {
+      return
+    }
     await updateSession(id, { title, titleAuto: false })
   }, [])
 
@@ -303,7 +312,11 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
 
   const archive = useCallback(
     async (id: string) => {
-      await archiveSession(id)
+      const queued = await enqueueHostStateIntentIfAvailable({
+        sessionId: id,
+        action: { kind: "session.archive", archived: true },
+      })
+      if (!queued) await archiveSession(id)
       // An archived session leaves the active list; deselect it if active so
       // the chat panel doesn't keep showing a now-hidden conversation.
       if (useChatStore.getState().activeSessionId === id) setActiveSession(null)
@@ -312,13 +325,26 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
   )
 
   const unarchive = useCallback(async (id: string) => {
-    await unarchiveSession(id)
+    const queued = await enqueueHostStateIntentIfAvailable({
+      sessionId: id,
+      action: { kind: "session.archive", archived: false },
+    })
+    if (!queued) await unarchiveSession(id)
   }, [])
 
   const bulkArchive = useCallback(
     async (ids: readonly string[]) => {
       if (ids.length === 0) return
-      await bulkArchiveSessions(ids)
+      const queued = await Promise.all(
+        ids.map((sessionId) =>
+          enqueueHostStateIntentIfAvailable({
+            sessionId,
+            action: { kind: "session.archive", archived: true },
+          })
+        )
+      )
+      const legacyIds = ids.filter((_, index) => !queued[index])
+      if (legacyIds.length > 0) await bulkArchiveSessions(legacyIds)
       const current = useChatStore.getState().activeSessionId
       if (current && ids.includes(current)) setActiveSession(null)
     },
@@ -326,7 +352,16 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
   )
 
   const bulkUnarchive = useCallback(async (ids: readonly string[]) => {
-    await bulkUnarchiveSessions(ids)
+    const queued = await Promise.all(
+      ids.map((sessionId) =>
+        enqueueHostStateIntentIfAvailable({
+          sessionId,
+          action: { kind: "session.archive", archived: false },
+        })
+      )
+    )
+    const legacyIds = ids.filter((_, index) => !queued[index])
+    if (legacyIds.length > 0) await bulkUnarchiveSessions(legacyIds)
   }, [])
 
   const createFolder = useCallback((name: string) => createFolderDb(name), [])

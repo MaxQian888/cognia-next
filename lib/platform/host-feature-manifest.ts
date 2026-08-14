@@ -24,6 +24,7 @@ export const HOST_FEATURE_IDS = [
   "workspace.files",
   "source-control.git",
   "twin.runtime",
+  "session.state-sync",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -48,6 +49,10 @@ export interface HostFeatureLimits {
   skillUploadChunkBytes: number
   mcpRequestBodyBytes: number
   maxConcurrentProxyCalls: number
+  maxHostStateSnapshotBytes?: number
+  maxHostStateActionBatch?: number
+  maxPendingHostStateActions?: number
+  hostStateReplayRetentionMs?: number
 }
 
 interface HostFeatureManifestBase {
@@ -99,6 +104,10 @@ const DEFAULT_LIMITS: HostFeatureLimits = Object.freeze({
   skillUploadChunkBytes: 32 * 1024,
   mcpRequestBodyBytes: 1024 * 1024,
   maxConcurrentProxyCalls: 32,
+  maxHostStateSnapshotBytes: 512 * 1024,
+  maxHostStateActionBatch: 50,
+  maxPendingHostStateActions: 1000,
+  hostStateReplayRetentionMs: 24 * 60 * 60 * 1000,
 })
 
 /** Git operations implemented by the remote execution host (native watchers remain client-local). */
@@ -159,6 +168,10 @@ export function buildLocalHostFeatureManifest({
     }
   }
   if (platform === "tauri" || platform === "headless") {
+    features["session.state-sync"] = {
+      version: 1,
+      operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],
+    }
     features["twin.runtime"] = {
       version: 1,
       operations: ["twin_draft_review"],
@@ -332,6 +345,20 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
       limits.mcpRequestBodyBytes,
       limits.maxConcurrentProxyCalls,
     ].every((limit) => typeof limit === "number" && Number.isSafeInteger(limit) && limit > 0)
+  ) {
+    return null
+  }
+  if (
+    [
+      limits.maxHostStateSnapshotBytes,
+      limits.maxHostStateActionBatch,
+      limits.maxPendingHostStateActions,
+      limits.hostStateReplayRetentionMs,
+    ].some(
+      (limit) =>
+        limit !== undefined &&
+        (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit <= 0)
+    )
   ) {
     return null
   }

@@ -4,8 +4,34 @@
 
 import "fake-indexeddb/auto"
 
-import { dispatchCommand } from "./desktop-write-source"
 import { getDb } from "@/lib/db/schema"
+
+const mockActiveRuntimeTarget = jest.fn()
+jest.mock("@/lib/runtime/runtime-target-context", () => ({
+  getActiveRuntimeTargetContext: () => mockActiveRuntimeTarget(),
+}))
+
+const mockHostStateService = {
+  start: jest.fn().mockResolvedValue(undefined),
+  stop: jest.fn().mockResolvedValue(undefined),
+  snapshot: jest.fn().mockResolvedValue({ protocolVersion: 1, revision: 0 }),
+  submit: jest.fn().mockResolvedValue({ protocolVersion: 1, receipts: [] }),
+  status: jest.fn().mockReturnValue({ protocolVersion: 1, hostSeq: 0 }),
+  projectRuntimeEnvelope: jest.fn().mockResolvedValue(undefined),
+}
+const mockCreateHostStateService = jest.fn(() => mockHostStateService)
+jest.mock("@/lib/sync/host-state-service", () => ({
+  createAgentRpcHostStateDispatcher: () => jest.fn(),
+  createHostStateService: (...args: unknown[]) => mockCreateHostStateService(...args),
+}))
+
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => false,
+  invoke: jest.fn(),
+  transport: { subscribe: jest.fn(() => jest.fn()) },
+}))
+
+import { dispatchCommand } from "./desktop-write-source"
 
 const mockExportForPairing = jest.fn()
 jest.mock("@/lib/rag/profile-dek-store", () => ({
@@ -122,6 +148,45 @@ beforeEach(async () => {
   await db.connectorDrafts.clear().catch(() => undefined)
   await db.outboundQueue.clear().catch(() => undefined)
   await db.plugins.clear().catch(() => undefined)
+  mockActiveRuntimeTarget.mockReturnValue({ accountId: "local-default", targetId: "target-a" })
+})
+
+describe("dispatchCommand: HostState authority", () => {
+  it("validates the caller scope and reuses the authoritative service", async () => {
+    const payload = {
+      protocolVersion: 1,
+      accountId: "local-default",
+      callerAccountId: "local-default",
+      runtimeTargetId: "target-a",
+      authoritativeHostId: "host-a",
+    }
+
+    await expect(dispatchCommand("host_state_status", payload)).resolves.toEqual({
+      protocolVersion: 1,
+      hostSeq: 0,
+    })
+    await expect(dispatchCommand("host_state_snapshot", payload)).resolves.toEqual({
+      protocolVersion: 1,
+      revision: 0,
+    })
+    expect(mockCreateHostStateService).toHaveBeenCalledTimes(1)
+    expect(mockHostStateService.start).toHaveBeenCalledTimes(1)
+    expect(mockHostStateService.snapshot).toHaveBeenCalledWith({
+      protocolVersion: 1,
+      accountId: "local-default",
+      runtimeTargetId: "target-a",
+    })
+  })
+
+  it("rejects a HostState request outside the active runtime target", async () => {
+    await expect(
+      dispatchCommand("host_state_status", {
+        callerAccountId: "other-account",
+        runtimeTargetId: "target-a",
+        authoritativeHostId: "host-a",
+      })
+    ).rejects.toThrow("host_state_scope_mismatch")
+  })
 })
 
 describe("dispatchCommand: Agent task board", () => {

@@ -360,7 +360,7 @@ const HOST_CATEGORIES = [
     title: "Knowledge and intelligence",
     description: "Memory, digital twins, ingestion jobs, and OCR models.",
     skill: "cognia-host-knowledge",
-    pattern: /^(memory_|twin_|ocr_)/,
+    pattern: /^(memory_|twin_|ocr_|retrieval_)/,
   },
   {
     id: "development",

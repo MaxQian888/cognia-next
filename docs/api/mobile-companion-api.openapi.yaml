@@ -25888,6 +25888,449 @@ paths:
         - dpopAccess: []
       parameters:
         - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/host_state_snapshot:
+    post:
+      operationId: publicRpcHostStateSnapshot
+      tags:
+        - rpc-dispatch
+      summary: host_state_snapshot (host.observe)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - protocolVersion
+                - accountId
+                - runtimeTargetId
+                - channel
+              properties:
+                protocolVersion:
+                  type: integer
+                  const: 1
+                accountId:
+                  type: string
+                  minLength: 1
+                runtimeTargetId:
+                  type: string
+                  minLength: 1
+                channel:
+                  type: string
+                  pattern: ^cognia://target/
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/host_state_status:
+    post:
+      operationId: publicRpcHostStateStatus
+      tags:
+        - rpc-dispatch
+      summary: host_state_status (host.observe)
+      description: "Device-reachable read command. Risk: low; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - protocolVersion
+                - accountId
+                - runtimeTargetId
+              properties:
+                protocolVersion:
+                  type: integer
+                  const: 1
+                accountId:
+                  type: string
+                  minLength: 1
+                runtimeTargetId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/host_state_submit:
+    post:
+      operationId: publicRpcHostStateSubmit
+      tags:
+        - rpc-dispatch
+      summary: host_state_submit (workspace.write)
+      description: "Device-reachable write command. Risk: high; approval: interactive."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - protocolVersion
+                - accountId
+                - runtimeTargetId
+                - actions
+              properties:
+                protocolVersion:
+                  type: integer
+                  const: 1
+                accountId:
+                  type: string
+                  minLength: 1
+                runtimeTargetId:
+                  type: string
+                  minLength: 1
+                actions:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    required:
+                      - protocolVersion
+                      - channel
+                      - accountId
+                      - runtimeTargetId
+                      - hostId
+                      - hostGeneration
+                      - clientId
+                      - clientSeq
+                      - actionId
+                      - createdAt
+                      - action
+                    properties:
+                      protocolVersion:
+                        type: integer
+                        const: 1
+                      channel:
+                        type: string
+                        pattern: ^cognia://target/
+                      accountId:
+                        type: string
+                        minLength: 1
+                      runtimeTargetId:
+                        type: string
+                        minLength: 1
+                      hostId:
+                        type: string
+                        minLength: 1
+                      hostGeneration:
+                        type: integer
+                        minimum: 1
+                      sessionId:
+                        type: string
+                        minLength: 1
+                      clientId:
+                        type: string
+                        minLength: 1
+                      clientSeq:
+                        type: integer
+                        minimum: 0
+                      actionId:
+                        type: string
+                        minLength: 1
+                      baseRevision:
+                        type: integer
+                        minimum: 0
+                      createdAt:
+                        type: integer
+                        minimum: 0
+                      action:
+                        type: object
+                        required:
+                          - kind
+                        additionalProperties: {}
+                        example: {}
+                    additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
   /api/_rpc/kill_external_agent:
     post:
       operationId: publicRpcKillExternalAgent
@@ -31978,6 +32421,127 @@ paths:
               properties:
                 path:
                   type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
+  /api/_rpc/retrieval_profile_dek_export:
+    post:
+      operationId: publicRpcRetrievalProfileDekExport
+      tags:
+        - rpc-dispatch
+      summary: retrieval_profile_dek_export (secret.manage)
+      description: "Device-reachable read command. Risk: critical; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - contentProtocolVersion
+              properties:
+                profileId:
+                  type: string
+                  minLength: 1
+                contentProtocolVersion:
+                  type: integer
+                  const: 1
               additionalProperties: false
       responses:
         "200":
@@ -45480,6 +46044,9 @@ components:
           - host_admin_lease_revoke
           - host_capabilities
           - host_feature_manifest
+          - host_state_snapshot
+          - host_state_status
+          - host_state_submit
           - kill_external_agent
           - logs_list_files
           - logs_query
@@ -45530,6 +46097,7 @@ components:
           - provider_diagnostics_status
           - read_agent_config
           - read_text_file
+          - retrieval_profile_dek_export
           - scheduled_task_backfill
           - scheduled_task_cleanup
           - scheduled_task_create
@@ -46639,7 +47207,7 @@ components:
         updatedAt:
           type: integer
           format: int64
-    RoomDescriptorV2:
+    RoomDescriptor:
       type: object
       required:
         - v
@@ -47210,9 +47778,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 346
-  generatedRequestSchemaCount: 346
+  publicCommandCount: 350
+  generatedRequestSchemaCount: 350
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 346
+  contractRequestSchemaCount: 350
   genericRequestSchemaCount: 0
   legacyCompatibility: false

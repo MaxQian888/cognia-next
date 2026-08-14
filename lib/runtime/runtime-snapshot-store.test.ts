@@ -49,6 +49,17 @@ it("uses only healthy v2 operations and explicit device grants", () => {
   })
 })
 
+it("withholds HostState submit until the migration stage is authoritative", () => {
+  const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
+  const snapshot = runtimeHostSnapshotFromManifest(manifest, {
+    hostStateWriteEnabled: false,
+  })
+
+  expect(snapshot.operations).not.toContain("host_state_submit")
+  expect(snapshot.operations).toContain("host_state_snapshot")
+  expect(snapshot.operations).toContain("host_state_status")
+})
+
 it("keeps v1 hosts usable by deriving grants from their advertised operations", () => {
   const v2 = buildLocalHostFeatureManifest({ platform: "tauri" })
   const v1 = {

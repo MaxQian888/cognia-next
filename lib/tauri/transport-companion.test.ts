@@ -1803,7 +1803,7 @@ describe("reconnectRtc()", () => {
     // no-tier — it must rebuild from the cached options.
     let enableCalls = 0
     ;(transport as unknown as { lastEnableOptions: unknown }).lastEnableOptions = {
-      signalingUrl: "wss://signaling.test/v2/signaling",
+      signalingUrl: "wss://signaling.test/signaling",
     }
     ;(
       transport as unknown as { enableWebRtcTier: (o: unknown) => Promise<void> }

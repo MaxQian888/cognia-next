@@ -37,6 +37,7 @@ import type {
   SDKEventEnvelope,
 } from "@cognia/agent-config-types"
 import { listMessages } from "@/lib/db/messages"
+import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
@@ -299,11 +300,20 @@ export function useRemoteSessionStream(
   const send = useCallback(
     async (text: string) => {
       if (!sessionId || !text.trim()) return
-      // Optimistic streaming state for immediate feedback; reverted on failure
-      // so a rejected/offline send never leaves the composer stuck showing the
-      // interrupt control over nothing in flight.
-      setStatusBoth("streaming")
       try {
+        const queued = await enqueueHostStateIntentIfAvailable({
+          sessionId,
+          action: {
+            kind: "message.enqueue",
+            messageId: crypto.randomUUID(),
+            text,
+            attachments: [],
+          },
+        })
+        // The durable write must win the race with optimism. A negotiated
+        // HostState target now owns dispatch; old Hosts retain the direct path.
+        setStatusBoth("streaming")
+        if (queued) return
         await sendPrompt(sessionId, text)
       } catch (err) {
         setStatusBoth("idle")
@@ -323,6 +333,14 @@ export function useRemoteSessionStream(
     // Nothing in flight — don't fire a spurious interrupt RPC.
     if (statusRef.current !== "streaming") return
     try {
+      const queued = await enqueueHostStateIntentIfAvailable({
+        sessionId,
+        action: { kind: "turn.abort" },
+      })
+      if (queued) {
+        setStatusBoth("idle")
+        return
+      }
       await interruptSession(sessionId)
       setStatusBoth("idle")
     } catch (err) {
@@ -340,6 +358,18 @@ export function useRemoteSessionStream(
       const approval = pendingApproval
       if (!approval) return
       try {
+        const queued = await enqueueHostStateIntentIfAvailable({
+          sessionId: approval.sessionId,
+          action: {
+            kind: "approval.respond",
+            requestId: approval.requestId,
+            decision,
+          },
+        })
+        if (queued) {
+          setPendingApproval(null)
+          return
+        }
         await approveTool(
           approval.sessionId,
           approval.requestId,

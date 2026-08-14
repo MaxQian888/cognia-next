@@ -290,6 +290,7 @@ pub async fn agent_send(
     session_id: String,
     prompt: Value,
     options: Option<SendOptions>,
+    command_id: Option<String>,
 ) -> Result<(), String> {
     if let Some(opts) = &options {
         if let Some(execution) = opts.extra.get("execution") {
@@ -301,12 +302,13 @@ pub async fn agent_send(
         }
     }
     let span = tracing::info_span!("agent.send", session_id = %session_id);
-    claude_send_with_host(
+    claude_send_with_host_and_id(
         Arc::new(TauriSidecarHost(app)),
         state.inner().clone(),
         session_id,
         prompt,
         options,
+        command_id,
     )
     .instrument(span)
     .await
@@ -416,6 +418,17 @@ pub async fn claude_send_with_host(
     prompt: Value,
     options: Option<SendOptions>,
 ) -> Result<(), String> {
+    claude_send_with_host_and_id(host, state, session_id, prompt, options, None).await
+}
+
+pub async fn claude_send_with_host_and_id(
+    host: Arc<dyn SidecarHost>,
+    state: SidecarState,
+    session_id: String,
+    prompt: Value,
+    options: Option<SendOptions>,
+    command_id: Option<String>,
+) -> Result<(), String> {
     let _perf = crate::perf::guard("claude.send");
     spawn_sidecar(Arc::clone(&host), state.clone()).await?;
     let mut opts_value = match options {
@@ -447,12 +460,15 @@ pub async fn claude_send_with_host(
         }
     }
 
-    let msg = json!({
-      "type": "send",
-      "sessionId": session_id,
-      "prompt": prompt,
-      "options": opts_value,
-    });
+    let msg = with_command_id(
+        json!({
+          "type": "send",
+          "sessionId": session_id,
+          "prompt": prompt,
+          "options": opts_value,
+        }),
+        command_id,
+    );
     state.write_command(&msg).await
 }
 
@@ -1301,6 +1317,20 @@ mod tests {
         assert_eq!(p["method"], "setModel");
         assert_eq!(p["params"]["model"], "claude-opus-4-8");
         assert_eq!(p["commandId"], "cmd-1");
+    }
+
+    #[test]
+    fn attaches_command_id_to_canonical_send_payload() {
+        let payload = with_command_id(
+            json!({
+                "type": "send",
+                "sessionId": "s1",
+                "prompt": "hello",
+                "options": {},
+            }),
+            Some("action-1".into()),
+        );
+        assert_eq!(payload["commandId"], "action-1");
     }
 
     #[test]

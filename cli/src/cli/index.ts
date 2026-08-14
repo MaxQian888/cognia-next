@@ -19,6 +19,11 @@ import { serveCommand as defaultServe } from "../serve/serve-command"
 import { xCommand as defaultX } from "./x-command"
 import { rpcCommand as defaultRpc } from "./rpc-command"
 import { workerCommand as defaultWorker } from "./worker-command"
+import {
+  attachCommand as defaultAttach,
+  detachCommand as defaultDetach,
+  syncStatusCommand as defaultSyncStatus,
+} from "../handoff/host-state-client"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
 
@@ -39,6 +44,9 @@ Usage:
                               [--timeout ms] [--handoff]
                               [--plugin-tools] [--dev-plugins [--dev-plugins-dir d]]
   cognia-agent handoff <sessionId>          push a session to the desktop app
+  cognia-agent attach --target <id> [--session <id>]  attach to HostState
+  cognia-agent detach                       leave attached mode; keep standalone JSONL
+  cognia-agent sync status                  show attached HostState status
   cognia-agent resume <id> ["<prompt>"]     continue a desktop hand-back (prompts on TTY)
   cognia-agent auth <login|status|logout> [--provider p] [--api-key k]
   cognia-agent logto <login|status|logout>          cloud OIDC (Logto) session
@@ -107,6 +115,9 @@ const KNOWN_COMMANDS = new Set([
   "x",
   "rpc",
   "worker",
+  "attach",
+  "detach",
+  "sync",
 ])
 
 export interface MainDeps {
@@ -125,6 +136,9 @@ export interface MainDeps {
   x?: typeof defaultX
   rpc?: typeof defaultRpc
   worker?: typeof defaultWorker
+  attach?: typeof defaultAttach
+  detach?: typeof defaultDetach
+  syncStatus?: typeof defaultSyncStatus
   out?: OutputSink
 }
 
@@ -200,6 +214,12 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.rpc ?? defaultRpc)(args, { out })
     case "worker":
       return (deps.worker ?? defaultWorker)(args, { out })
+    case "attach":
+      return (deps.attach ?? defaultAttach)(args, { out })
+    case "detach":
+      return (deps.detach ?? defaultDetach)(args, { out })
+    case "sync":
+      return (deps.syncStatus ?? defaultSyncStatus)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

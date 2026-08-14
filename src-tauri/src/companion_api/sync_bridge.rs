@@ -312,6 +312,7 @@ mod tests {
             table: "sessions".to_string(),
             since: 42,
             account_id: "local_acct_a".to_string(),
+            content_protocol_version: None,
         };
 
         let value = serde_json::to_value(payload).expect("serialize payload");

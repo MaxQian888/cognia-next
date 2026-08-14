@@ -88,6 +88,9 @@ export type CommandEffect =
   | { kind: "clear" }
   | { kind: "copy"; text: string }
   | { kind: "handoff" }
+  | { kind: "attachHost"; targetId: string; sessionId?: string; accountId?: string }
+  | { kind: "detachHost" }
+  | { kind: "hostSyncStatus" }
   | { kind: "openSessions" }
   /** Open the `/model` switcher. An effect rather than a ready-made overlay
    * because the option list depends on WHO is answering: an external agent is

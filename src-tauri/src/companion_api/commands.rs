@@ -60,6 +60,7 @@ pub async fn companion_server_start(
         addr: std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), port),
         source: std::io::Error::other(e),
     })?;
+    *state.host_id.write() = Some(super::opaque_host_id_from_secret(&signing_secret));
 
     // Build the event bus and register default Tauri event channels before
     // starting the server so no events are missed.
@@ -289,6 +290,27 @@ pub fn companion_desktop_write_response(
     Ok(())
 }
 
+/// Publish a committed HostState action through the existing replayable
+/// EventBus. The TS authority calls this only after its ledger transaction;
+/// returning success is the broadcast receipt persisted by HostStateService.
+#[tauri::command]
+pub fn companion_host_state_publish(
+    topic: String,
+    event: serde_json::Value,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    if topic != "host-state://action" {
+        return Err("unsupported HostState topic".to_string());
+    }
+    let event_bus = state
+        .event_bus
+        .read()
+        .clone()
+        .ok_or_else(|| "companion EventBus is not running".to_string())?;
+    event_bus.publish(topic, event);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Deny-list management commands (M2.4)
 // ---------------------------------------------------------------------------
@@ -334,10 +356,7 @@ pub async fn companion_revoke_device(
             .remove_device(&device_id)
             .map_err(|error| error.to_string())?
         {
-            cognia_secrets::keyring_secrets::clear(
-                super::signaling::envelope_v2::SIGNALING_KEY_NAMESPACE,
-                &key_ref,
-            )?;
+            super::signaling::envelope::clear_signaling_key(&key_ref)?;
         }
         super::signaling::refresh_installed_hub()?;
     }

@@ -106,4 +106,8 @@ export interface SyncTombstoneRow {
   id: string
   /** Epoch ms the deletion was recorded; doubles as the cursor watermark. */
   deletedAt: number
+  /** HostState fencing metadata when deletion came from the ordered Host ledger. */
+  hostGeneration?: number
+  /** Global HostState sequence assigned to the delete. */
+  hostSeq?: number
 }
