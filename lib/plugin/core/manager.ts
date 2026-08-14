@@ -10,10 +10,7 @@ import { usePluginStore } from "@/stores/plugin-runtime"
 import type {
   ExtensionCompatibilityDiagnostic,
   ExtensionDescriptor,
-  ExtensionRegistration,
-  A2UITemplateDef,
   Plugin,
-  PluginA2UIComponent,
   PluginInstallRootKind,
   PluginManifest,
   PluginSource,
@@ -34,8 +31,16 @@ import type {
   PythonHookDeclaration,
   PythonHostSettings,
   PythonLoadResult,
+  PluginChildLifecycleAPI,
+  PluginOptionalServiceListener,
 } from "@/types/plugin"
 import { PluginLoader } from "@/lib/plugin/core/loader"
+import {
+  PluginServiceRegistry,
+  pluginServiceRegistry,
+  type PluginServiceEvaluation,
+  type PluginServiceRecord,
+} from "@/lib/plugin/core/service-registry"
 import { PluginRegistry } from "@/lib/plugin/core/registry"
 import {
   createFullPluginContext,
@@ -56,6 +61,7 @@ import {
 } from "@/lib/plugin/core/plugins-policy-storage"
 import { emitPluginConfigChange } from "@/lib/plugin/api/config-api"
 import { clearPluginSecrets } from "@/lib/plugin/api/secrets-api"
+import { createWorkspaceAPI } from "@/lib/plugin/api/workspace-api"
 
 /** How often the idle sweep runs (only active when a plugin opts into idleSuspend). */
 const IDLE_SWEEP_INTERVAL_MS = 5 * 60 * 1000
@@ -99,17 +105,22 @@ import {
 import { getDb } from "@/lib/db/schema"
 import {
   updatePlugin,
+  compareAndSetPluginLifecycle,
   upsertPlugin,
   getPlugin,
+  setPluginEnabled,
   setPluginConfig,
   getPythonHostSettings,
   setPythonHostSettings,
 } from "@/lib/db/plugins"
 import { appendPythonEvent, type PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
+import {
+  bindPythonRuntimeGeneration,
+  unbindPythonRuntimeGeneration,
+} from "@/lib/plugin/python/runtime-generation"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { loadPluginStyles, removePluginStyles } from "@/lib/plugin/styles/plugin-stylesheet"
 import { unregisterUriHandlersByPlugin } from "@/lib/plugin/uri/uri-handler-registry"
-import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
   evaluatePluginCompatibility,
   type CompatibilityDiagnostic,
@@ -197,6 +208,24 @@ import {
   type PluginEnableFailedEventDetail,
 } from "@/lib/plugin/error-bus"
 import { PluginDisposableScope } from "./disposable-scope"
+import {
+  InMemoryPluginLifecycleStateAdapter,
+  PluginLifecycleRevisionError,
+  createPersistentPluginLifecycleStateAdapter,
+  type PluginActualState,
+  type PluginDirtyDiagnostic,
+  type PluginIntent,
+  type PluginLifecyclePatch,
+  type PluginLifecycleRecord,
+  type PluginLifecycleStateAdapter,
+} from "./lifecycle-state"
+import {
+  PluginLifecycleCoordinator,
+  pluginLifecycleCoordinator,
+  type PluginActivationLease,
+  type PluginGraphReservation,
+  type PluginLifecycleCoordinatorSnapshot,
+} from "./lifecycle-coordinator"
 
 // =============================================================================
 // Governance mode resolution
@@ -252,10 +281,26 @@ export interface PluginManagerConfig {
    * sidecar. Default 4. Tests pin it to 1 for deterministic ordering.
    */
   maxLoadConcurrency?: number
+  activationTimeoutMs?: number
+  pendingRegistrationGraceMs?: number
+  /** Host-specific durable lifecycle control-plane storage. */
+  lifecycleStateAdapter?: PluginLifecycleStateAdapter
+  /** Shared within one host realm; injectable for isolated tests/dev hosts. */
+  lifecycleCoordinator?: PluginLifecycleCoordinator
+  managerId?: string
+  /** Stage-gated lifecycle features; omitted features keep legacy behavior. */
+  lifecycleFeatures?: {
+    ledgerV2?: boolean
+    runtimeServices?: boolean
+    scopedRealms?: boolean
+  }
+  serviceRegistry?: PluginServiceRegistry
 }
 
 /** Default concurrency for layered startup restore. */
 const DEFAULT_MAX_LOAD_CONCURRENCY = 4
+let pluginManagerSequence = 0
+const PLUGIN_HOST_EPOCH = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
 interface DiscoveredPlugin {
   manifest: PluginManifest
@@ -299,17 +344,14 @@ interface ParsedActivationSpec {
   rawEvents: PluginActivationEvent[]
 }
 
-interface PluginRuntimeRollbackSnapshot {
-  status: Plugin["status"]
-  context?: FullPluginContext
-  hooks?: PluginHooks
-  tools: PluginTool[]
-  components: PluginA2UIComponent[]
-  templates: A2UITemplateDef[]
-  extensions: ExtensionRegistration[]
-  permissions: PluginPermission[]
-  definition?: import("@/types/plugin").PluginDefinition
-  moduleExports?: Record<string, unknown>
+interface OptionalServiceSubscription {
+  pluginId: string
+  serviceId: string
+  generation: number
+  listener: PluginOptionalServiceListener
+  child?: PluginDisposableScope
+  refreshSequence: number
+  refreshQueue: Promise<void>
 }
 
 /**
@@ -320,9 +362,8 @@ interface PluginRuntimeRollbackSnapshot {
  *
  * Kept narrow on purpose — install only needs to undo a handful of
  * side effects (`plugin_install` Tauri call, store row, permission
- * grants, WASM preload). The richer `PluginRuntimeRollbackSnapshot`
- * applies to disable/unload/uninstall which have to restore activation
- * state too.
+ * grants, WASM preload). Runtime teardown deliberately has no shallow
+ * resurrection path: once teardown starts, old effects stay detached.
  */
 interface InstallTransactionState {
   pluginId: string | null
@@ -351,6 +392,7 @@ export interface PythonRuntimeInfo {
 /** Python plugin information */
 export interface PythonPluginInfo {
   plugin_id: string
+  generation: string
   sdk_version: string
   protocol_version: string
   contract_version: string
@@ -420,6 +462,34 @@ export class PluginDependencyError extends Error {
         .join(", ")}`
     )
     this.name = "PluginDependencyError"
+  }
+}
+
+export class PluginDependencyInUseError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly blockedBy: readonly string[]
+  ) {
+    super(
+      `Cannot stop plugin "${pluginId}": required by ${blockedBy
+        .map((dependentId) => `"${dependentId}"`)
+        .join(", ")}`
+    )
+    this.name = "PluginDependencyInUseError"
+  }
+}
+
+export class PluginIntentDisabledError extends Error {
+  constructor(public readonly pluginId: string) {
+    super(`Plugin "${pluginId}" is explicitly disabled`)
+    this.name = "PluginIntentDisabledError"
+  }
+}
+
+export class PluginDirtyRuntimeError extends Error {
+  constructor(public readonly pluginId: string) {
+    super(`Plugin "${pluginId}" has unconfirmed runtime resources; recover it before activation`)
+    this.name = "PluginDirtyRuntimeError"
   }
 }
 
@@ -564,6 +634,23 @@ export class PluginManager {
   private themesBridge: PluginThemesBridge | null = null
   private contexts: Map<string, FullPluginContext> = new Map()
   private disposableScopes: Map<string, PluginDisposableScope> = new Map()
+  private readonly runtimeCleanupFailures = new Map<
+    string,
+    { runtime: PluginDirtyDiagnostic["runtime"]; error: unknown; runtimeGeneration?: string }
+  >()
+  private readonly activationLeases = new Map<string, PluginActivationLease>()
+  private readonly pythonRuntimeGenerations = new Map<string, string>()
+  private readonly pendingPythonEvents = new Map<string, PythonPluginEvent[]>()
+  private readonly lifecycleState: PluginLifecycleStateAdapter
+  private readonly lifecycleCoordinator: PluginLifecycleCoordinator
+  private readonly managerId: string
+  private readonly serviceRegistry: PluginServiceRegistry
+  private readonly optionalServiceRefreshes = new Set<string>()
+  private readonly pendingOptionalServiceConsumers = new Map<string, string[]>()
+  private readonly optionalServiceSubscriptions = new Map<
+    string,
+    Map<string, Set<OptionalServiceSubscription>>
+  >()
   private registeredSlashCommandsByPlugin: Map<string, string[]> = new Map()
   private activationInFlight: Set<string> = new Set()
   /**
@@ -616,6 +703,24 @@ export class PluginManager {
 
   constructor(config: PluginManagerConfig) {
     this.config = config
+    this.managerId = config.managerId ?? `plugin-manager-${++pluginManagerSequence}`
+    this.serviceRegistry =
+      config.serviceRegistry ??
+      (process.env.NODE_ENV === "test" ? new PluginServiceRegistry() : pluginServiceRegistry)
+    this.lifecycleCoordinator =
+      config.lifecycleCoordinator ??
+      (process.env.NODE_ENV === "test"
+        ? new PluginLifecycleCoordinator()
+        : pluginLifecycleCoordinator)
+    this.lifecycleState =
+      config.lifecycleStateAdapter ??
+      (process.env.NODE_ENV === "test"
+        ? new InMemoryPluginLifecycleStateAdapter()
+        : createPersistentPluginLifecycleStateAdapter({
+            readRow: getPlugin,
+            writeLifecycle: (pluginId, lifecycle) => updatePlugin(pluginId, { lifecycle }),
+            compareAndWriteLifecycle: compareAndSetPluginLifecycle,
+          }))
     this.loader = new PluginLoader({
       frontendImporter: config.frontendImporter,
       nodeHostInvoker: config.nodeHostInvoker,
@@ -645,12 +750,725 @@ export class PluginManager {
     return invoke<T>(command, args)
   }
 
+  private requirePythonGeneration(pluginId: string): string {
+    const generation = this.pythonRuntimeGenerations.get(pluginId)
+    if (!generation) {
+      throw new Error(`Python runtime generation is unavailable for ${pluginId}`)
+    }
+    return generation
+  }
+
+  private ingestPythonEvent(event: PythonPluginEvent): void {
+    if (event.generation === "installation") {
+      appendPythonEvent(event)
+      return
+    }
+    const current = this.pythonRuntimeGenerations.get(event.pluginId)
+    if (current) {
+      if (event.generation === current) appendPythonEvent(event)
+      return
+    }
+    if (!event.generation) return
+    const pending = this.pendingPythonEvents.get(event.pluginId) ?? []
+    pending.push(event)
+    if (pending.length > 100) pending.splice(0, pending.length - 100)
+    this.pendingPythonEvents.set(event.pluginId, pending)
+  }
+
+  private bindPythonGeneration(pluginId: string, generation: string): void {
+    this.pythonRuntimeGenerations.set(pluginId, generation)
+    bindPythonRuntimeGeneration(pluginId, generation)
+    const pending = this.pendingPythonEvents.get(pluginId) ?? []
+    this.pendingPythonEvents.delete(pluginId)
+    for (const event of pending) {
+      if (event.generation === generation) appendPythonEvent(event)
+    }
+  }
+
   getPluginDisposableScope(pluginId: string): PluginDisposableScope {
     const existing = this.disposableScopes.get(pluginId)
     if (existing) return existing
-    const scope = new PluginDisposableScope(pluginId)
+    const lease = this.activationLeases.get(pluginId)
+    const scope = new PluginDisposableScope(pluginId, lease?.generation ?? 0, {
+      pendingGraceMs: this.config.pendingRegistrationGraceMs,
+    })
     this.disposableScopes.set(pluginId, scope)
     return scope
+  }
+
+  isPluginLedgerV2Enabled(): boolean {
+    return this.config.lifecycleFeatures?.ledgerV2 !== false
+  }
+
+  createPluginServicesAPI(pluginId?: string): import("@/types/plugin").PluginServicesAPI {
+    return {
+      isAvailable: (serviceId) => this.serviceRegistry.isAvailable(serviceId),
+      getProvider: (serviceId) => {
+        const provider = this.serviceRegistry.getProvider(serviceId)
+        return provider
+          ? {
+              pluginId: provider.providerPluginId,
+              version: provider.version,
+              generation: provider.generation,
+            }
+          : undefined
+      },
+      onOptionalServiceChange: (serviceId, listener) => {
+        if (!pluginId) {
+          throw new Error("Optional service subscriptions require an activated plugin context")
+        }
+        const plugin = usePluginStore.getState().plugins[pluginId]
+        if (!plugin?.manifest.optionalServices?.[serviceId]) {
+          throw new Error(`Plugin ${pluginId} does not declare optional service ${serviceId}`)
+        }
+        const lease = this.activationLeases.get(pluginId)
+        if (!lease || !this.lifecycleCoordinator.isCurrent(lease)) {
+          throw new Error(`Plugin ${pluginId} has no active lifecycle generation`)
+        }
+        const root = this.getPluginDisposableScope(pluginId)
+        if (root.signal.aborted) {
+          throw new Error(`Plugin ${pluginId} lifecycle is already stopping`)
+        }
+        const subscription: OptionalServiceSubscription = {
+          pluginId,
+          serviceId,
+          generation: lease.generation,
+          listener,
+          refreshSequence: 0,
+          refreshQueue: Promise.resolve(),
+        }
+        const byService = this.optionalServiceSubscriptions.get(pluginId) ?? new Map()
+        const subscriptions = byService.get(serviceId) ?? new Set()
+        subscriptions.add(subscription)
+        byService.set(serviceId, subscriptions)
+        this.optionalServiceSubscriptions.set(pluginId, byService)
+        void this.refreshOptionalServiceSubscription(subscription)
+        return root.track(async () => {
+          subscriptions.delete(subscription)
+          if (subscriptions.size === 0) byService.delete(serviceId)
+          if (byService.size === 0) this.optionalServiceSubscriptions.delete(pluginId)
+          await subscription.refreshQueue
+          await subscription.child?.dispose()
+        }, `ctx.services.onOptionalServiceChange:${serviceId}`)
+      },
+    }
+  }
+
+  getPluginServiceSnapshot(): PluginServiceRecord[] {
+    return this.serviceRegistry.snapshot()
+  }
+
+  subscribePluginServices(
+    listener: (snapshot: readonly PluginServiceRecord[]) => void
+  ): () => void {
+    return this.serviceRegistry.subscribe(listener)
+  }
+
+  private runtimeServicesEnabled(): boolean {
+    return this.config.lifecycleFeatures?.runtimeServices === true
+  }
+
+  private scopedRealmsEnabled(): boolean {
+    return this.config.lifecycleFeatures?.scopedRealms === true
+  }
+
+  private evaluatePluginServices(plugin: Plugin): PluginServiceEvaluation {
+    return this.serviceRegistry.evaluate(
+      plugin.manifest.requiresServices,
+      plugin.manifest.optionalServices
+    )
+  }
+
+  private requiredServiceCycle(pluginId: string): string[] | undefined {
+    const manifests = Object.values(usePluginStore.getState().plugins).map((plugin) => ({
+      id: plugin.manifest.id,
+      providesServices: plugin.manifest.providesServices,
+      requiresServices: plugin.manifest.requiresServices,
+      optionalServices: plugin.manifest.optionalServices,
+    }))
+    return this.serviceRegistry
+      .findRequiredCycles(manifests)
+      .find((cycle) => cycle.includes(pluginId))
+  }
+
+  private async publishPluginServices(plugin: Plugin): Promise<void> {
+    const generation = this.activationLeases.get(plugin.manifest.id)?.generation
+    if (generation === undefined) return
+    this.assertProvidedServiceContributionsCommitted(plugin)
+    this.serviceRegistry.publishProvider(plugin.manifest.id, generation)
+    this.publishLifecycleSnapshot(
+      plugin.manifest.id,
+      await this.lifecycleState.read(plugin.manifest.id)
+    )
+    await this.resumeWaitingServiceConsumers()
+  }
+
+  private async resumeWaitingServiceConsumers(): Promise<void> {
+    const plugins = Object.values(usePluginStore.getState().plugins)
+    for (const plugin of plugins) {
+      const lifecycle = await this.getPluginLifecycleState(plugin.manifest.id)
+      if (lifecycle.actual !== "waiting" || lifecycle.intent === "disabled") continue
+      if (this.evaluatePluginServices(plugin).required.length > 0) continue
+      await this.withLifecycleLock(plugin.manifest.id, () =>
+        this.enablePluginInner(plugin.manifest.id, "service-available")
+      )
+    }
+  }
+
+  private async quiesceServiceConsumers(providerPluginId: string): Promise<void> {
+    const store = usePluginStore.getState()
+    const manifests = Object.values(store.plugins).map((plugin) => plugin.manifest)
+    const consumerIds = this.serviceRegistry.consumersOf(providerPluginId, manifests)
+    const optionalConsumerIds = this.serviceRegistry
+      .optionalConsumersOf(providerPluginId, manifests)
+      .filter((pluginId) => !consumerIds.includes(pluginId))
+    this.pendingOptionalServiceConsumers.set(providerPluginId, optionalConsumerIds)
+    this.serviceRegistry.markProviderDraining(
+      providerPluginId,
+      this.activationLeases.get(providerPluginId)?.generation
+    )
+    try {
+      for (const consumerId of consumerIds) {
+        const lifecycle = await this.getPluginLifecycleState(consumerId)
+        if (lifecycle.intent === "disabled") continue
+        await this.withLifecycleLock(consumerId, async () => {
+          await this.disablePluginInner(consumerId, "service-draining")
+          const stopped = await this.getPluginLifecycleState(consumerId)
+          if (stopped.actual === "dirty") throw new PluginDirtyRuntimeError(consumerId)
+          await this.setActualState(consumerId, "waiting", { lastError: undefined })
+        })
+      }
+    } catch (error) {
+      this.pendingOptionalServiceConsumers.delete(providerPluginId)
+      const generation = this.activationLeases.get(providerPluginId)?.generation
+      if (generation !== undefined) {
+        this.serviceRegistry.publishProvider(providerPluginId, generation)
+        await this.resumeWaitingServiceConsumers()
+      }
+      throw error
+    }
+  }
+
+  private async flushOptionalServiceConsumers(providerPluginId: string): Promise<void> {
+    const consumerIds = this.pendingOptionalServiceConsumers.get(providerPluginId) ?? []
+    this.pendingOptionalServiceConsumers.delete(providerPluginId)
+    if (this.scopedRealmsEnabled()) {
+      await this.refreshScopedOptionalServiceConsumers(providerPluginId, consumerIds)
+      return
+    }
+    for (const consumerId of consumerIds) {
+      const lifecycle = await this.getPluginLifecycleState(consumerId)
+      if (lifecycle.intent === "disabled" || lifecycle.actual !== "active") continue
+      await this.withLifecycleLock(consumerId, async () => {
+        await this.disablePluginInner(consumerId, "optional-service-draining")
+        await this.enablePluginInner(consumerId, "optional-service-changed")
+      })
+      await this.flushOptionalServiceConsumers(consumerId)
+    }
+  }
+
+  private async refreshOptionalServiceConsumers(providerPluginId: string): Promise<void> {
+    if (this.optionalServiceRefreshes.has(providerPluginId)) return
+    this.optionalServiceRefreshes.add(providerPluginId)
+    try {
+      const store = usePluginStore.getState()
+      const manifests = Object.values(store.plugins).map((plugin) => plugin.manifest)
+      const consumerIds = this.serviceRegistry.optionalConsumersOf(providerPluginId, manifests)
+      if (this.scopedRealmsEnabled()) {
+        await this.refreshScopedOptionalServiceConsumers(providerPluginId, consumerIds)
+        return
+      }
+      for (const consumerId of consumerIds) {
+        if (consumerId === providerPluginId) continue
+        const lifecycle = await this.getPluginLifecycleState(consumerId)
+        if (lifecycle.intent === "disabled" || lifecycle.actual !== "active") continue
+        await this.withLifecycleLock(consumerId, async () => {
+          await this.disablePluginInner(consumerId, "optional-service-available")
+          await this.enablePluginInner(consumerId, "optional-service-changed")
+        })
+      }
+    } finally {
+      this.optionalServiceRefreshes.delete(providerPluginId)
+    }
+  }
+
+  private async refreshScopedOptionalServiceConsumers(
+    providerPluginId: string,
+    consumerIds: readonly string[]
+  ): Promise<void> {
+    const provider = usePluginStore.getState().plugins[providerPluginId]
+    const providedServices = new Set(Object.keys(provider?.manifest.providesServices ?? {}))
+    for (const consumerId of consumerIds) {
+      const subscriptions = this.optionalServiceSubscriptions.get(consumerId)
+      if (!subscriptions) continue
+      for (const [serviceId, listeners] of subscriptions) {
+        if (!providedServices.has(serviceId)) continue
+        for (const subscription of [...listeners]) {
+          await this.refreshOptionalServiceSubscription(subscription)
+        }
+      }
+    }
+  }
+
+  private async refreshOptionalServiceSubscription(
+    subscription: OptionalServiceSubscription
+  ): Promise<void> {
+    const refresh = subscription.refreshQueue.then(() =>
+      this.refreshOptionalServiceSubscriptionInner(subscription)
+    )
+    subscription.refreshQueue = refresh.catch(() => undefined)
+    await refresh
+  }
+
+  private async refreshOptionalServiceSubscriptionInner(
+    subscription: OptionalServiceSubscription
+  ): Promise<void> {
+    const lease = this.activationLeases.get(subscription.pluginId)
+    if (
+      !lease ||
+      lease.generation !== subscription.generation ||
+      !this.lifecycleCoordinator.isCurrent(lease)
+    ) {
+      return
+    }
+    if (subscription.child) {
+      await subscription.child.dispose()
+      if (subscription.child.hasUnresolvedResources()) {
+        await this.setActualState(subscription.pluginId, "dirty", {
+          dirty: this.buildDirtyDiagnostic(
+            subscription.pluginId,
+            `Optional service scope ${subscription.serviceId} cleanup was not confirmed`
+          ),
+        })
+        return
+      }
+    }
+    const root = this.disposableScopes.get(subscription.pluginId)
+    if (!root || root.signal.aborted) return
+    subscription.refreshSequence += 1
+    const child = root.createChildScope(
+      `optional:${subscription.serviceId}:${subscription.refreshSequence}`
+    )
+    subscription.child = child
+    const provider = this.serviceRegistry.getProvider(subscription.serviceId)
+    const lifecycle: PluginChildLifecycleAPI = {
+      token: child.token,
+      signal: child.signal,
+      onDispose: (dispose, label) => {
+        child.track(dispose, label ?? `ctx.services.optional:${subscription.serviceId}:onDispose`)
+      },
+    }
+    try {
+      const dispose = await child.trackPendingWork(
+        Promise.resolve().then(() =>
+          subscription.listener({
+            serviceId: subscription.serviceId,
+            provider: provider
+              ? {
+                  pluginId: provider.providerPluginId,
+                  version: provider.version,
+                  generation: provider.generation,
+                }
+              : undefined,
+            lifecycle,
+          })
+        ),
+        `ctx.services.optional:${subscription.serviceId}:listener-pending`
+      )
+      if (typeof dispose === "function") {
+        child.track(dispose, `ctx.services.optional:${subscription.serviceId}:listener`)
+      }
+    } catch (error) {
+      recordSilentFailure(
+        subscription.pluginId,
+        {
+          site: "manager.optionalServiceChange",
+          message: `Optional service listener failed for ${subscription.serviceId}.`,
+          expected: false,
+        },
+        error
+      )
+      await child.dispose()
+    }
+  }
+
+  private ensureActivationLease(pluginId: string): PluginActivationLease {
+    const current = this.activationLeases.get(pluginId)
+    if (current && this.lifecycleCoordinator.isCurrent(current)) return current
+    const lease = this.lifecycleCoordinator.acquire(this.managerId, pluginId)
+    this.activationLeases.set(pluginId, lease)
+    return lease
+  }
+
+  private releaseActivationLease(pluginId: string): void {
+    const lease = this.activationLeases.get(pluginId)
+    if (!lease) return
+    this.lifecycleCoordinator.release(lease)
+    this.activationLeases.delete(pluginId)
+  }
+
+  private ownsCurrentGeneration(pluginId: string): boolean {
+    const lease = this.activationLeases.get(pluginId)
+    return !lease || this.lifecycleCoordinator.isCurrent(lease)
+  }
+
+  async getPluginLifecycleState(pluginId: string): Promise<PluginLifecycleRecord> {
+    return this.lifecycleState.read(pluginId)
+  }
+
+  async getPluginLifecycleSnapshot(
+    pluginId: string
+  ): Promise<PluginLifecycleCoordinatorSnapshot | undefined> {
+    const lifecycle = await this.lifecycleState.read(pluginId)
+    this.publishLifecycleSnapshot(pluginId, lifecycle)
+    return this.lifecycleCoordinator.getSnapshot(pluginId)
+  }
+
+  subscribePluginLifecycleSnapshots(
+    listener: (snapshot: readonly PluginLifecycleCoordinatorSnapshot[]) => void
+  ): () => void {
+    return this.lifecycleCoordinator.subscribe(listener)
+  }
+
+  getPluginLifecycleSnapshots(): PluginLifecycleCoordinatorSnapshot[] {
+    return this.lifecycleCoordinator.snapshot()
+  }
+
+  reservePluginRuntimeGraph(pluginId: string): PluginGraphReservation {
+    return this.lifecycleCoordinator.reserveProviderDrain(this.managerId, pluginId)
+  }
+
+  releasePluginRuntimeGraph(reservation: PluginGraphReservation): boolean {
+    return this.lifecycleCoordinator.releaseProviderDrain(reservation)
+  }
+
+  async reloadPlugin(pluginId: string, reason = "hot-reload"): Promise<void> {
+    const reservation = this.reservePluginRuntimeGraph(pluginId)
+    try {
+      const lifecycle = await this.lifecycleState.read(pluginId)
+      if (lifecycle.actual === "dirty") {
+        throw new Error(`Plugin ${pluginId} has unresolved runtime resources`)
+      }
+      const plugin = usePluginStore.getState().plugins[pluginId]
+      if (!plugin) throw new Error(`Plugin not found: ${pluginId}`)
+      const shouldReactivate = plugin.status === "enabled" || plugin.status === "suspended"
+      if (shouldReactivate) {
+        await this.disablePlugin(pluginId, `${reason}-quiesce`)
+      }
+      await this.unloadPlugin(pluginId)
+      if (shouldReactivate && (await this.lifecycleState.read(pluginId)).intent !== "disabled") {
+        await this.enablePlugin(pluginId, reason)
+      }
+    } finally {
+      this.releasePluginRuntimeGraph(reservation)
+    }
+  }
+
+  private publishLifecycleSnapshot(pluginId: string, lifecycle: PluginLifecycleRecord): void {
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    const manifest = plugin?.manifest
+    const lease = this.activationLeases.get(pluginId)
+    const generation = lifecycle.generation ?? lease?.generation ?? 0
+    const scope = this.disposableScopes.get(pluginId)
+    const providedRecords = this.serviceRegistry
+      .snapshot()
+      .filter(
+        (record) =>
+          record.providerPluginId === pluginId &&
+          (generation === 0 || record.generation === generation)
+      )
+    const requiredServices = Object.keys(manifest?.requiresServices ?? {})
+    const currentProviders = requiredServices.flatMap((serviceId) => {
+      const provider = this.serviceRegistry.getProvider(serviceId)
+      return provider ? [`${serviceId}:${provider.providerPluginId}@${provider.generation}`] : []
+    })
+    this.lifecycleCoordinator.updateSnapshot({
+      managerId: this.managerId,
+      pluginId,
+      generation,
+      intent: lifecycle.intent,
+      actual: lifecycle.actual,
+      stateSince: lifecycle.updatedAt,
+      requiredServices,
+      providedServices: providedRecords.map(
+        (record) => `${record.serviceId}@${record.version}:${record.status}`
+      ),
+      currentProviders,
+      effects: scope?.getDiagnostics() ?? { active: 0, pending: 0, failed: 0, labels: [] },
+      ...(lifecycle.dirty ? { dirty: lifecycle.dirty } : {}),
+      ...(lifecycle.lastError ? { lastError: lifecycle.lastError } : {}),
+      ...(lifecycle.actual === "activating" ||
+      lifecycle.actual === "stopping" ||
+      lifecycle.actual === "waiting"
+        ? { pendingTransition: lifecycle.actual }
+        : {}),
+      ...(manifest?.version ? { packageRevision: manifest.version } : {}),
+      ...(plugin?.source ? { source: plugin.source } : {}),
+      configRevision: lifecycle.revision,
+    })
+  }
+
+  private async updatePluginLifecycleState(
+    pluginId: string,
+    patch: PluginLifecyclePatch
+  ): Promise<PluginLifecycleRecord> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = await this.lifecycleState.read(pluginId)
+      try {
+        const updated = await this.lifecycleState.write(pluginId, current.revision, patch)
+        this.publishLifecycleSnapshot(pluginId, updated)
+        return updated
+      } catch (error) {
+        if (!(error instanceof PluginLifecycleRevisionError) || attempt === 2) throw error
+      }
+    }
+    throw new PluginLifecycleRevisionError(pluginId)
+  }
+
+  private async setActualState(
+    pluginId: string,
+    actual: PluginActualState,
+    patch: Omit<PluginLifecyclePatch, "actual"> = {}
+  ): Promise<PluginLifecycleRecord> {
+    return this.updatePluginLifecycleState(pluginId, { ...patch, actual })
+  }
+
+  private buildDirtyDiagnostic(pluginId: string, fallbackMessage: string): PluginDirtyDiagnostic {
+    const loaderDirty = this.loader.getDirtyTeardown(pluginId)
+    const runtimeFailure = this.runtimeCleanupFailures.get(pluginId)
+    const labels = this.disposableScopes.get(pluginId)?.getUnresolvedLabels()
+    const ownsNativeHandle = labels?.some((label) =>
+      /^(ctx\.)?(webview|window|worker)(\.|$)/.test(label)
+    )
+    const manifestType =
+      loaderDirty?.manifestType ?? usePluginStore.getState().plugins[pluginId]?.manifest.type
+    const runtime: PluginDirtyDiagnostic["runtime"] =
+      runtimeFailure?.runtime ??
+      (ownsNativeHandle
+        ? "native"
+        : manifestType === "vscode-extension"
+          ? "vscode"
+          : manifestType === "python" || manifestType === "hybrid"
+            ? "python"
+            : manifestType === "wasm"
+              ? "wasm"
+              : "frontend")
+    const runtimeGeneration =
+      loaderDirty?.runtimeGeneration ??
+      runtimeFailure?.runtimeGeneration ??
+      this.pythonRuntimeGenerations.get(pluginId)
+    return {
+      runtime,
+      reason: loaderDirty?.reason ?? (runtimeFailure ? "error" : "unconfirmed"),
+      at: Date.now(),
+      message: String(loaderDirty?.message ?? runtimeFailure?.error ?? fallbackMessage).slice(
+        0,
+        512
+      ),
+      hostEpoch: PLUGIN_HOST_EPOCH,
+      ...(runtimeGeneration ? { runtimeGeneration } : {}),
+      labels,
+    }
+  }
+
+  private assertProvidedServiceContributionsCommitted(plugin: Plugin): void {
+    if (!("workspace.backend" in (plugin.manifest.providesServices ?? {}))) return
+    const expected = (plugin.manifest.workspaceBackends ?? []).map(
+      (backend) => `${plugin.manifest.id}:${backend.id}`
+    )
+    if (expected.length === 0) {
+      throw new Error(
+        `Service workspace.backend requires a workspaceBackends contribution for ${plugin.manifest.id}`
+      )
+    }
+    const registered = new Set(createWorkspaceAPI(plugin.manifest.id).listRegistered())
+    const missing = expected.filter((backendId) => !registered.has(backendId))
+    if (missing.length > 0) {
+      throw new Error(
+        `Service workspace.backend contribution commit failed for ${plugin.manifest.id}: ${missing.join(", ")}`
+      )
+    }
+  }
+
+  private runtimeKindForPlugin(plugin: Plugin): PluginDirtyDiagnostic["runtime"] {
+    if (plugin.manifest.type === "vscode-extension") return "vscode"
+    if (plugin.manifest.type === "python" || plugin.manifest.type === "hybrid") return "python"
+    if (plugin.manifest.type === "wasm") return "wasm"
+    if (
+      plugin.manifest.engines?.node ||
+      plugin.manifest.runtimeCompatibility?.tauri?.entrypoint === "node"
+    ) {
+      return "node"
+    }
+    return "frontend"
+  }
+
+  private hasUnresolvedActivationResources(pluginId: string): boolean {
+    return Boolean(
+      this.disposableScopes.get(pluginId)?.hasUnresolvedResources() ||
+      this.loader.getDirtyTeardown(pluginId) ||
+      this.runtimeCleanupFailures.has(pluginId)
+    )
+  }
+
+  private async confirmIsolatedRuntimeAbsent(
+    pluginId: string,
+    dirty: PluginDirtyDiagnostic
+  ): Promise<boolean> {
+    const generation = dirty.runtimeGeneration
+    if (!generation) return false
+    if (dirty.runtime === "node") {
+      const running = await this.invokeNativeHost<boolean>("plugin_js_status", {
+        pluginId,
+        generation,
+      })
+      if (running) {
+        await this.invokeNativeHost("plugin_stop_js", { pluginId, generation })
+      }
+      return !(await this.invokeNativeHost<boolean>("plugin_js_status", {
+        pluginId,
+        generation,
+      }))
+    }
+    if (dirty.runtime === "python") {
+      const info = await this.invokeNativeHost<unknown>("plugin_python_get_info", {
+        pluginId,
+        generation,
+      })
+      if (info !== null && info !== undefined) {
+        await this.invokeNativeHost("plugin_python_unload", { pluginId, generation })
+      }
+      return true
+    }
+    if (dirty.runtime === "wasm") {
+      await this.invokeNativeHost("plugin_wasm_unload", { pluginId, generation })
+      return true
+    }
+    if (dirty.runtime === "vscode") {
+      await this.invokeNativeHost("plugin_unload_vscode", { pluginId, generation })
+      return true
+    }
+    return false
+  }
+
+  async setPluginIntent(pluginId: string, intent: PluginIntent, reason = "manual"): Promise<void> {
+    await this.updatePluginLifecycleState(pluginId, { intent })
+    await setPluginEnabled(pluginId, intent === "enabled").catch(() => undefined)
+    if (intent === "disabled") {
+      await this.disablePlugin(pluginId, reason)
+    } else if (intent === "enabled") {
+      await this.enablePlugin(pluginId, reason)
+    }
+  }
+
+  async recoverPluginRuntime(pluginId: string): Promise<boolean> {
+    return this.withLifecycleLock(pluginId, async () => {
+      const lifecycle = await this.getPluginLifecycleState(pluginId)
+      if (lifecycle.actual !== "dirty") return true
+
+      // A different renderer epoch retires renderer-only closures after the
+      // registries rebuild. Isolated/native runtimes deliberately bypass this
+      // shortcut and require a generation-aware probe below.
+      if (
+        lifecycle.dirty?.runtime === "frontend" &&
+        lifecycle.dirty.hostEpoch &&
+        lifecycle.dirty.hostEpoch !== PLUGIN_HOST_EPOCH
+      ) {
+        this.disposableScopes.delete(pluginId)
+        this.loader.clearDirtyTeardown(pluginId)
+        this.runtimeCleanupFailures.delete(pluginId)
+        await this.setActualState(pluginId, "inactive", {
+          dirty: undefined,
+          lastError: undefined,
+        })
+        this.releaseActivationLease(pluginId)
+        return true
+      }
+
+      const scope = this.disposableScopes.get(pluginId)
+      const report = await scope?.dispose()
+      const runtimeFailure = this.runtimeCleanupFailures.get(pluginId)
+      if (runtimeFailure?.runtime === "python") {
+        try {
+          await this.unloadPythonPlugin(pluginId)
+          this.runtimeCleanupFailures.delete(pluginId)
+        } catch (error) {
+          const runtimeGeneration =
+            runtimeFailure.runtimeGeneration ?? lifecycle.dirty?.runtimeGeneration
+          this.runtimeCleanupFailures.set(pluginId, {
+            runtime: "python",
+            error,
+            ...(runtimeGeneration ? { runtimeGeneration } : {}),
+          })
+        }
+      }
+      if (this.loader.getDirtyTeardown(pluginId)) {
+        await this.loader.recoverDirtyTeardown(pluginId)
+      }
+      const loaderDirty = this.loader.getDirtyTeardown(pluginId)
+      let isolatedRuntimeAbsent = false
+      if (
+        lifecycle.dirty &&
+        ["node", "python", "wasm", "vscode"].includes(lifecycle.dirty.runtime)
+      ) {
+        try {
+          isolatedRuntimeAbsent = await this.confirmIsolatedRuntimeAbsent(pluginId, lifecycle.dirty)
+          if (isolatedRuntimeAbsent) this.runtimeCleanupFailures.delete(pluginId)
+        } catch (error) {
+          this.runtimeCleanupFailures.set(pluginId, {
+            runtime: lifecycle.dirty.runtime,
+            error,
+            ...(lifecycle.dirty.runtimeGeneration
+              ? { runtimeGeneration: lifecycle.dirty.runtimeGeneration }
+              : {}),
+          })
+        }
+      }
+      const missingRuntimeProbe = Boolean(
+        lifecycle.dirty &&
+        (lifecycle.dirty.hostEpoch === PLUGIN_HOST_EPOCH ||
+          lifecycle.dirty.runtime !== "frontend") &&
+        !scope &&
+        !loaderDirty &&
+        !isolatedRuntimeAbsent &&
+        !this.runtimeCleanupFailures.has(pluginId)
+      )
+      const unresolved = Boolean(
+        loaderDirty ||
+        missingRuntimeProbe ||
+        this.runtimeCleanupFailures.has(pluginId) ||
+        report?.failures.length ||
+        scope?.hasUnresolvedResources()
+      )
+      if (unresolved) {
+        await this.setActualState(pluginId, "dirty", {
+          dirty: {
+            runtime: lifecycle.dirty?.runtime ?? "frontend",
+            reason: loaderDirty?.reason ?? (report?.failures.length ? "error" : "unconfirmed"),
+            at: Date.now(),
+            message: String(
+              loaderDirty?.message ??
+                this.runtimeCleanupFailures.get(pluginId)?.error ??
+                report?.failures[0]?.error ??
+                (missingRuntimeProbe
+                  ? "No generation-aware runtime probe is available"
+                  : "Runtime cleanup unconfirmed")
+            ).slice(0, 512),
+            hostEpoch: PLUGIN_HOST_EPOCH,
+            labels: scope?.getUnresolvedLabels(),
+          },
+        })
+        return false
+      }
+
+      this.disposableScopes.delete(pluginId)
+      await this.setActualState(pluginId, "inactive", {
+        dirty: undefined,
+        lastError: undefined,
+      })
+      this.releaseActivationLease(pluginId)
+      return true
+    })
   }
 
   private ensureA2UIBridge(): PluginA2UIBridge {
@@ -917,87 +1735,6 @@ export class PluginManager {
     return snapshot
   }
 
-  private capturePluginRuntimeRollbackSnapshot(
-    pluginId: string
-  ): PluginRuntimeRollbackSnapshot | undefined {
-    const store = usePluginStore.getState()
-    const plugin = store.plugins[pluginId]
-    if (!plugin) return undefined
-
-    return {
-      status: plugin.status,
-      context: this.contexts.get(pluginId),
-      hooks: plugin.hooks,
-      tools: [...(plugin.tools || [])],
-      components: [...(plugin.components || [])],
-      templates: this.registry.getTemplatesByPlugin(pluginId),
-      extensions: getPluginExtensions(pluginId),
-      permissions: [...(plugin.manifest.permissions || [])],
-      definition: this.loader.getDefinition(pluginId),
-      moduleExports: this.loader.getModuleExports(pluginId),
-    }
-  }
-
-  private async restorePluginRuntimeRollbackSnapshot(
-    pluginId: string,
-    snapshot?: PluginRuntimeRollbackSnapshot
-  ): Promise<void> {
-    if (!snapshot) return
-
-    const store = usePluginStore.getState() as typeof usePluginStore.getState extends () => infer T
-      ? T & {
-          setPluginStatus?: (targetPluginId: string, status: Plugin["status"]) => void
-          registerPluginHooks?: (targetPluginId: string, hooks: PluginHooks) => void
-          registerPluginTool?: (targetPluginId: string, tool: PluginTool) => void
-        }
-      : never
-
-    if (snapshot.definition) {
-      this.loader.restoreModule(pluginId, snapshot.definition, snapshot.moduleExports || {})
-    }
-
-    if (snapshot.context) {
-      this.contexts.set(pluginId, snapshot.context)
-    }
-
-    if (snapshot.hooks) {
-      store.registerPluginHooks?.(pluginId, snapshot.hooks)
-      this.hooksManager.registerHooks(pluginId, snapshot.hooks)
-    }
-
-    if (snapshot.permissions.length > 0) {
-      this.registerPluginPermissions(pluginId, snapshot.permissions)
-    }
-
-    if (snapshot.components.length > 0 || snapshot.templates.length > 0) {
-      const bridge = this.ensureA2UIBridge()
-      for (const component of snapshot.components) {
-        bridge.registerComponent(pluginId, component)
-      }
-      for (const template of snapshot.templates) {
-        bridge.registerTemplate(pluginId, template)
-      }
-    }
-
-    for (const tool of snapshot.tools) {
-      this.registry.registerTool(pluginId, tool)
-      store.registerPluginTool?.(pluginId, tool)
-    }
-
-    restorePluginExtensions(pluginId, snapshot.extensions)
-    await this.registerPluginContributions(pluginId)
-
-    store.setPluginStatus?.(pluginId, snapshot.status)
-    if (
-      snapshot.status === "installed" ||
-      snapshot.status === "loaded" ||
-      snapshot.status === "enabled" ||
-      snapshot.status === "disabled"
-    ) {
-      await this.syncBackendStatus(pluginId, snapshot.status)
-    }
-  }
-
   // ===========================================================================
   // Initialization
   // ===========================================================================
@@ -1032,6 +1769,20 @@ export class PluginManager {
 
     // Sync persisted runtime status from backend when available.
     await this.syncRuntimeState()
+
+    // Retire dirty records only after the host epoch/probe rules confirm the
+    // previous generation no longer owns effects. This must happen before
+    // restore/startup activation, otherwise a persisted dirty row becomes a
+    // permanent activation block with no production recovery caller.
+    for (const pluginId of Object.keys(usePluginStore.getState().plugins)) {
+      const lifecycle = await this.lifecycleState.read(pluginId)
+      if (lifecycle.actual !== "dirty") continue
+      try {
+        await this.recoverPluginRuntime(pluginId)
+      } catch (error) {
+        loggers.manager.warn(`[manager] runtime recovery failed for ${pluginId}:`, String(error))
+      }
+    }
 
     // Re-declare persisted plugin Dexie tables into the live schema BEFORE any
     // activation. `new CogniaDB(...)` resets to the static core schema each
@@ -1092,13 +1843,13 @@ export class PluginManager {
       if (this.config.nodeHostSubscriber) {
         this.pythonEventsUnlisten = await this.config.nodeHostSubscriber<PythonPluginEvent>(
           "plugin:python",
-          appendPythonEvent
+          (event) => this.ingestPythonEvent(event)
         )
         return
       }
       const { listen } = await import("@tauri-apps/api/event")
       this.pythonEventsUnlisten = await listen<PythonPluginEvent>("plugin:python", (event) => {
-        appendPythonEvent(event.payload)
+        this.ingestPythonEvent(event.payload)
       })
     } catch (error) {
       // Web mode (no Tauri event bridge) — logs surface is desktop-only.
@@ -1218,6 +1969,50 @@ export class PluginManager {
     }
   }
 
+  private getRequiredDependentIds(providerId: string): string[] {
+    const store = usePluginStore.getState()
+    return Object.values(store.plugins)
+      .filter(
+        (candidate) =>
+          candidate.manifest.id !== providerId &&
+          Object.prototype.hasOwnProperty.call(candidate.manifest.dependencies ?? {}, providerId)
+      )
+      .map((candidate) => candidate.manifest.id)
+      .sort()
+  }
+
+  private async getRuntimeBlockingDependentIds(providerId: string): Promise<string[]> {
+    const store = usePluginStore.getState()
+    const blockingActualStates = new Set<PluginActualState>([
+      "activating",
+      "active",
+      "waiting",
+      "stopping",
+    ])
+    const blocked: string[] = []
+    for (const dependentId of this.getRequiredDependentIds(providerId)) {
+      const dependent = store.plugins[dependentId]
+      if (!dependent) continue
+      const lifecycle = await this.getPluginLifecycleState(dependentId)
+      if (
+        lifecycle.intent === "enabled" ||
+        blockingActualStates.has(lifecycle.actual) ||
+        ["loading", "loaded", "enabling", "enabled", "disabling", "suspended"].includes(
+          dependent.status
+        )
+      ) {
+        blocked.push(dependentId)
+      }
+    }
+    return blocked
+  }
+
+  private assertDependencyProvidersAccepting(plugin: Plugin): void {
+    this.lifecycleCoordinator.assertProvidersAccepting(
+      Object.keys(plugin.manifest.dependencies ?? {})
+    )
+  }
+
   /**
    * Re-declare every persisted plugin Dexie table into the live schema before
    * activation. Delegates to `restorePluginTables`, sourcing the authoritative
@@ -1255,12 +2050,24 @@ export class PluginManager {
     const store = usePluginStore.getState()
     const plugins = Object.values(store.plugins)
     const pluginsById = new Map(plugins.map((plugin) => [plugin.manifest.id, plugin]))
+    const intents = new Map(
+      await Promise.all(
+        plugins.map(
+          async (plugin) =>
+            [
+              plugin.manifest.id,
+              (await this.getPluginLifecycleState(plugin.manifest.id)).intent,
+            ] as const
+        )
+      )
+    )
 
     const candidateIds = new Set(
       plugins
         .filter(
           (plugin) =>
             plugin.status === "installed" &&
+            intents.get(plugin.manifest.id) !== "disabled" &&
             (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest)) &&
             // Preflight both the plugin and every required dependency. A
             // compatible parent with a host-blocked dependency must remain
@@ -2036,11 +2843,39 @@ export class PluginManager {
   }
 
   async loadPlugin(pluginId: string): Promise<void> {
+    return this.withLifecycleLock(pluginId, () => this.loadPluginInner(pluginId))
+  }
+
+  private async loadPluginInner(pluginId: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
     if (!plugin) {
       throw new Error(`Plugin not found: ${pluginId}`)
+    }
+
+    const lifecycle = await this.getPluginLifecycleState(pluginId)
+    if (lifecycle.intent === "disabled") throw new PluginIntentDisabledError(pluginId)
+    if (lifecycle.actual === "dirty") throw new PluginDirtyRuntimeError(pluginId)
+
+    if (this.runtimeServicesEnabled()) {
+      const cycle = this.requiredServiceCycle(pluginId)
+      if (cycle) {
+        await this.setActualState(pluginId, "waiting", {
+          lastError: JSON.stringify({ kind: "required-service-cycle", plugins: cycle }).slice(
+            0,
+            512
+          ),
+        })
+        return
+      }
+      const evaluation = this.evaluatePluginServices(plugin)
+      if (evaluation.required.length > 0) {
+        await this.setActualState(pluginId, "waiting", {
+          lastError: JSON.stringify(evaluation.required).slice(0, 512),
+        })
+        return
+      }
     }
 
     if (
@@ -2050,7 +2885,19 @@ export class PluginManager {
       return
     }
 
+    let activationGeneration: number | undefined
     try {
+      const lease = this.ensureActivationLease(pluginId)
+      activationGeneration = lease.generation
+      await this.setActualState(pluginId, "activating", { generation: lease.generation })
+      if (this.runtimeServicesEnabled()) {
+        this.serviceRegistry.beginProvider(
+          pluginId,
+          lease.generation,
+          plugin.manifest.providesServices
+        )
+      }
+
       const validation = validatePluginManifest(plugin.manifest, {
         governanceMode: this.pluginPointGovernanceMode,
       })
@@ -2227,10 +3074,14 @@ export class PluginManager {
       // lazy activation forever.
       let hooks: PluginHooks | undefined
       if (typeof definition.activate === "function") {
+        const activation = this.getPluginDisposableScope(pluginId).trackPendingWork(
+          Promise.resolve(definition.activate(context)),
+          "plugin.activate"
+        )
         hooks =
           (await withTimeout(
-            Promise.resolve(definition.activate(context)),
-            ACTIVATE_TIMEOUT_MS,
+            activation,
+            this.config.activationTimeoutMs ?? ACTIVATE_TIMEOUT_MS,
             `plugin.activate:${pluginId}`
           )) || undefined
       }
@@ -2276,7 +3127,15 @@ export class PluginManager {
         stage: "activation",
         successful: true,
       })
+      await this.setActualState(pluginId, "active", {
+        generation: lease.generation,
+        dirty: undefined,
+        lastError: undefined,
+      })
     } catch (error) {
+      if (this.runtimeServicesEnabled()) {
+        this.serviceRegistry.removeProvider(pluginId, activationGeneration)
+      }
       clearPluginExtensions(pluginId)
       unregisterPluginI18n(pluginId)
       removePluginStyles(pluginId)
@@ -2302,6 +3161,7 @@ export class PluginManager {
           },
         ],
       })
+      await this.cleanupFailedActivation(pluginId, error)
       throw error
     }
   }
@@ -2337,6 +3197,9 @@ export class PluginManager {
     } finally {
       this.enableInFlight.delete(pluginId)
     }
+    if (this.runtimeServicesEnabled()) {
+      await this.refreshOptionalServiceConsumers(pluginId)
+    }
   }
 
   private async enablePluginInner(
@@ -2350,6 +3213,10 @@ export class PluginManager {
     if (!plugin) {
       throw new Error(`Plugin not found: ${pluginId}`)
     }
+
+    const lifecycle = await this.getPluginLifecycleState(pluginId)
+    if (lifecycle.intent === "disabled") throw new PluginIntentDisabledError(pluginId)
+    if (lifecycle.actual === "dirty") throw new PluginDirtyRuntimeError(pluginId)
 
     if (plugin.status === "enabled") {
       return
@@ -2393,6 +3260,7 @@ export class PluginManager {
     // the required behaviour and falls out of the call graph rather than any
     // bookkeeping.
     advancePluginActivationProgress(pluginId, "dependencies")
+    this.assertDependencyProvidersAccepting(plugin)
     this.assertRequiredDependenciesSatisfied(pluginId)
 
     // Auto-enable required dependencies first so this plugin can rely on them
@@ -2469,8 +3337,22 @@ export class PluginManager {
         currentStatus === "disabled" ||
         !this.loader.isLoaded(pluginId)
       ) {
-        await this.loadPlugin(pluginId)
+        await this.loadPluginInner(pluginId)
       }
+
+      if (
+        this.runtimeServicesEnabled() &&
+        (await this.getPluginLifecycleState(pluginId)).actual === "waiting"
+      ) {
+        cancelPluginActivationProgress(pluginId, "waiting-for-service")
+        return
+      }
+
+      // Revalidate after activation: a provider may have started draining
+      // while this plugin was loading. The provider-side reservation sees our
+      // activating state, so one side deterministically wins without a
+      // multi-plugin lock.
+      this.assertDependencyProvidersAccepting(plugin)
 
       // Enable the plugin
       await store.enablePlugin(pluginId, { viaManager: false })
@@ -2486,6 +3368,10 @@ export class PluginManager {
       // catch below, which rolls back the contributions just registered — the
       // plugin reports enable failure rather than silently half-enabling.
       await this.hooksManager.dispatchOnEnable(pluginId)
+
+      if (this.runtimeServicesEnabled()) {
+        await this.publishPluginServices(plugin)
+      }
 
       // Phase 7/7 — commit.
       advancePluginActivationProgress(pluginId, "commit")
@@ -2524,7 +3410,30 @@ export class PluginManager {
           rollbackError
         )
       }
+      if (this.runtimeServicesEnabled()) {
+        this.serviceRegistry.removeProvider(
+          pluginId,
+          this.activationLeases.get(pluginId)?.generation
+        )
+      }
+      await this.deactivatePluginRuntime(pluginId, { unloadModule: true }).catch((cleanupError) => {
+        this.runtimeCleanupFailures.set(pluginId, {
+          runtime: this.runtimeKindForPlugin(plugin),
+          error: cleanupError,
+        })
+      })
+      this.contexts.delete(pluginId)
+      this.hooksManager.unregisterHooks(pluginId)
       store.setPluginError(pluginId, String(error))
+      store.setPluginStatus?.(pluginId, "error")
+      const dirty = this.hasUnresolvedActivationResources(pluginId)
+      await this.setActualState(pluginId, dirty ? "dirty" : "error", {
+        lastError: (error instanceof Error ? error.message : String(error)).slice(0, 512),
+        ...(dirty
+          ? { dirty: this.buildDirtyDiagnostic(pluginId, "Enable rollback was not confirmed") }
+          : { dirty: undefined }),
+      })
+      if (!dirty) this.releaseActivationLease(pluginId)
       this.recordPluginVerification(pluginId, {
         status: "error",
         action: "enable",
@@ -2574,7 +3483,11 @@ export class PluginManager {
   }
 
   async disablePlugin(pluginId: string, reason: string = "manual"): Promise<void> {
-    return this.withLifecycleLock(pluginId, () => this.disablePluginInner(pluginId, reason))
+    try {
+      await this.withLifecycleLock(pluginId, () => this.disablePluginInner(pluginId, reason))
+    } finally {
+      await this.flushOptionalServiceConsumers(pluginId)
+    }
   }
 
   private async disablePluginInner(pluginId: string, reason: string = "manual"): Promise<void> {
@@ -2589,75 +3502,129 @@ export class PluginManager {
       throw new Error(`Plugin not found: ${pluginId}`)
     }
 
+    if (plugin.status === "suspended") {
+      store.setPluginStatus?.(pluginId, "disabled")
+      await this.syncBackendStatus(pluginId, "disabled")
+      await this.setActualState(pluginId, "inactive", { dirty: undefined, lastError: undefined })
+      this.releaseActivationLease(pluginId)
+      return
+    }
+
     if (plugin.status !== "enabled") {
       return
     }
 
-    const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
-
+    const reservation = this.lifecycleCoordinator.reserveProviderDrain(this.managerId, pluginId)
     try {
-      // Notify the plugin it is about to be disabled BEFORE we tear anything
-      // down, so its handler can still flush state through its live APIs. A
-      // throw must not abort the teardown — log it and continue (the plugin
-      // doesn't get to veto disable).
-      await this.safeDispatchLifecycleHook(pluginId, "onDisable")
+      const blockedBy = await this.getRuntimeBlockingDependentIds(pluginId)
+      if (blockedBy.length > 0) throw new PluginDependencyInUseError(pluginId, blockedBy)
 
-      // Fully deactivate runtime resources for deterministic cleanup.
-      await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
+      // Service quiesce is a pre-teardown gate. If a consumer cannot prove a
+      // clean stop, it restores this provider's availability and rejects before
+      // the provider runtime or contributions are touched.
+      if (this.runtimeServicesEnabled()) {
+        await this.quiesceServiceConsumers(pluginId)
+      }
 
-      // Unregister contributions after runtime deactivation.
-      await this.unregisterPluginContributions(pluginId)
+      try {
+        await this.setActualState(pluginId, "stopping")
+        // Notify the plugin it is about to be disabled BEFORE we tear anything
+        // down, so its handler can still flush state through its live APIs. A
+        // throw must not abort the teardown — log it and continue (the plugin
+        // doesn't get to veto disable).
+        await this.safeDispatchLifecycleHook(pluginId, "onDisable")
 
-      // Drop plugin-provided i18n bundles so the merged messages object no
-      // longer surfaces `plugin.<id>.*` keys after disable.
-      unregisterPluginI18n(pluginId)
+        // Fully deactivate runtime resources for deterministic cleanup.
+        await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
+        if (this.runtimeServicesEnabled()) {
+          this.serviceRegistry.removeProvider(
+            pluginId,
+            this.activationLeases.get(pluginId)?.generation
+          )
+        }
 
-      // Disable in store
-      await store.disablePlugin(pluginId, { viaManager: false })
+        // Unregister contributions after runtime deactivation.
+        await this.unregisterPluginContributions(pluginId)
 
-      this.hooksManager.unregisterHooks(pluginId)
-      this.contexts.delete(pluginId)
+        // Drop plugin-provided i18n bundles so the merged messages object no
+        // longer surfaces `plugin.<id>.*` keys after disable.
+        unregisterPluginI18n(pluginId)
 
-      await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
-      // Drop any "always allow this session" consent grants so disabling a
-      // plugin actually revokes them — otherwise a dangerous-permission grant
-      // (e.g. shell:execute) silently outlives disable and is inherited on
-      // re-enable within the same app session.
-      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
-      // Drop the plugin's resilience circuit breakers so a re-enable starts
-      // from a clean (closed) state rather than inheriting a tripped breaker.
-      resetPluginBreakers(pluginId)
-      await this.syncBackendStatus(pluginId, "disabled")
-      this.emitLifecycleEvent(SystemEvents.PLUGIN_DISABLED, pluginId)
-      this.recordPluginVerification(pluginId, {
-        status: "disabled",
-        action: "disable",
-        stage: "cleanup",
-        successful: true,
-        metadata: { reason },
-      })
-      loggers.manager.debug(`[plugin:${pluginId}] disabled (${reason})`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      await this.restorePluginRuntimeRollbackSnapshot(pluginId, rollbackSnapshot)
-      store.setPluginError(pluginId, message)
-      store.setPluginStatus?.(pluginId, rollbackSnapshot?.status || plugin.status)
-      this.recordPluginVerification(pluginId, {
-        status: "error",
-        action: "disable",
-        stage: "cleanup",
-        successful: false,
-        diagnostics: [
-          {
-            code: "plugin.disable.failed",
-            severity: "error",
-            message,
-          },
-        ],
-        metadata: { reason },
-      })
-      loggers.manager.error(`[plugin:${pluginId}] disable failed (${reason})`, error)
-      throw error
+        // Disable in store
+        await store.disablePlugin(pluginId, { viaManager: false })
+
+        this.hooksManager.unregisterHooks(pluginId)
+        this.contexts.delete(pluginId)
+
+        await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
+        // Drop any "always allow this session" consent grants so disabling a
+        // plugin actually revokes them — otherwise a dangerous-permission grant
+        // (e.g. shell:execute) silently outlives disable and is inherited on
+        // re-enable within the same app session.
+        getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
+        // Drop the plugin's resilience circuit breakers so a re-enable starts
+        // from a clean (closed) state rather than inheriting a tripped breaker.
+        resetPluginBreakers(pluginId)
+        await this.syncBackendStatus(pluginId, "disabled")
+        this.emitLifecycleEvent(SystemEvents.PLUGIN_DISABLED, pluginId)
+        this.recordPluginVerification(pluginId, {
+          status: "disabled",
+          action: "disable",
+          stage: "cleanup",
+          successful: true,
+          metadata: { reason },
+        })
+        if (this.hasUnresolvedActivationResources(pluginId)) {
+          await this.setActualState(pluginId, "dirty", {
+            dirty: this.buildDirtyDiagnostic(pluginId, "Disable cleanup was not confirmed"),
+          })
+        } else {
+          await this.setActualState(pluginId, "inactive", {
+            dirty: undefined,
+            lastError: undefined,
+          })
+          this.releaseActivationLease(pluginId)
+        }
+        loggers.manager.debug(`[plugin:${pluginId}] disabled (${reason})`)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.contexts.delete(pluginId)
+        this.hooksManager.unregisterHooks(pluginId)
+        store.setPluginStatus?.(pluginId, "error")
+        store.setPluginError(pluginId, message)
+        const dirty = Boolean(
+          this.disposableScopes.get(pluginId)?.hasUnresolvedResources() ||
+          this.loader.getDirtyTeardown(pluginId) ||
+          this.runtimeCleanupFailures.has(pluginId)
+        )
+        await this.setActualState(pluginId, dirty ? "dirty" : "error", {
+          lastError: message.slice(0, 512),
+          ...(dirty
+            ? {
+                dirty: this.buildDirtyDiagnostic(pluginId, message),
+              }
+            : { dirty: undefined }),
+        })
+        if (!dirty) this.releaseActivationLease(pluginId)
+        this.recordPluginVerification(pluginId, {
+          status: "error",
+          action: "disable",
+          stage: "cleanup",
+          successful: false,
+          diagnostics: [
+            {
+              code: "plugin.disable.failed",
+              severity: "error",
+              message,
+            },
+          ],
+          metadata: { reason },
+        })
+        loggers.manager.error(`[plugin:${pluginId}] disable failed (${reason})`, error)
+        throw error
+      }
+    } finally {
+      this.lifecycleCoordinator.releaseProviderDrain(reservation)
     }
   }
 
@@ -2666,7 +3633,11 @@ export class PluginManager {
     // entry `running` forever otherwise. `withLifecycleLock` serializes these
     // against enable, so this never races a live advance.
     cancelPluginActivationProgress(pluginId, "unload")
-    return this.withLifecycleLock(pluginId, () => this.unloadPluginInner(pluginId))
+    try {
+      await this.withLifecycleLock(pluginId, () => this.unloadPluginInner(pluginId))
+    } finally {
+      await this.flushOptionalServiceConsumers(pluginId)
+    }
   }
 
   private async unloadPluginInner(pluginId: string): Promise<void> {
@@ -2677,77 +3648,118 @@ export class PluginManager {
       return
     }
 
-    const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
-
+    const reservation = this.lifecycleCoordinator.reserveProviderDrain(this.managerId, pluginId)
     try {
-      // Notify the plugin its module is being unloaded. Fired here — before any
-      // teardown — because this is the only point where the plugin's hooks are
-      // still registered on every unload path (the enabled→unload path below
-      // unregisters them inside disablePlugin). Log-only: unload cannot be vetoed.
-      await this.safeDispatchLifecycleHook(pluginId, "onUnload")
+      const blockedBy = await this.getRuntimeBlockingDependentIds(pluginId)
+      if (blockedBy.length > 0) throw new PluginDependencyInUseError(pluginId, blockedBy)
 
-      // Disable first if enabled
-      if (plugin.status === "enabled") {
-        // Inner variant — we already hold this plugin's lifecycle lock (W6.4).
-        await this.disablePluginInner(pluginId, "unload")
-      } else {
-        await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
-        await this.unregisterPluginContributions(pluginId)
+      try {
+        // Notify the plugin its module is being unloaded. Fired here — before any
+        // teardown — because this is the only point where the plugin's hooks are
+        // still registered on every unload path (the enabled→unload path below
+        // unregisters them inside disablePlugin). Log-only: unload cannot be vetoed.
+        await this.safeDispatchLifecycleHook(pluginId, "onUnload")
+
+        // Disable first if enabled
+        if (plugin.status === "enabled") {
+          // Inner variant — we already hold this plugin's lifecycle lock (W6.4).
+          await this.disablePluginInner(pluginId, "unload")
+        } else {
+          await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
+          await this.unregisterPluginContributions(pluginId)
+        }
+
+        // Terminal isolation cleanup — runs on EVERY unload path so a plugin
+        // returning to "installed" never leaks permission-guard registration,
+        // i18n bundles, or WASM capability grants. `disablePlugin` already drops
+        // i18n + revokes grants on the enabled→unload path; these calls are
+        // idempotent and additionally cover the loaded→unload / disabled→unload
+        // paths (and clear guard tiers + denials, which previously only happened
+        // on uninstall).
+        getPermissionGuard().unregisterPlugin(pluginId)
+        getPluginIPC().unregisterPlugin(pluginId)
+        unregisterPluginI18n(pluginId)
+        await clearWasmCapabilityGrant(pluginId)
+        getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
+
+        // Unregister hooks
+        this.hooksManager.unregisterHooks(pluginId)
+
+        // Remove context
+        this.contexts.delete(pluginId)
+
+        // Unload from loader (awaited so a hung runtime teardown can't
+        // race the store update — PR-B of the plugin optimization plan).
+        await this.loader.unload(pluginId)
+
+        // Update store
+        await store.unloadPlugin(pluginId, { viaManager: false })
+        await this.syncBackendStatus(pluginId, "installed")
+        this.emitLifecycleEvent(SystemEvents.PLUGIN_UNLOADED, pluginId)
+        this.recordPluginVerification(pluginId, {
+          status: "installed",
+          action: "unload",
+          stage: "cleanup",
+          successful: true,
+        })
+        if (this.hasUnresolvedActivationResources(pluginId)) {
+          await this.setActualState(pluginId, "dirty", {
+            dirty: this.buildDirtyDiagnostic(pluginId, "Unload cleanup was not confirmed"),
+          })
+        } else {
+          await this.setActualState(pluginId, "inactive", {
+            dirty: undefined,
+            lastError: undefined,
+          })
+          this.releaseActivationLease(pluginId)
+        }
+      } catch (error) {
+        const lifecycle = await this.getPluginLifecycleState(pluginId)
+        if (store.plugins[pluginId]?.status === "enabled" && lifecycle.actual === "active") {
+          // A dependency/service drain gate failed before provider teardown.
+          // Preserve the still-live generation; the caller can retry after the
+          // blocking consumer is cleanly stopped.
+          throw error
+        }
+        const message = error instanceof Error ? error.message : String(error)
+        await this.deactivatePluginRuntime(pluginId, { unloadModule: true }).catch(() => undefined)
+        await this.unregisterPluginContributions(pluginId).catch(() => undefined)
+        this.contexts.delete(pluginId)
+        this.hooksManager.unregisterHooks(pluginId)
+        store.setPluginError(pluginId, message)
+        store.setPluginStatus?.(pluginId, "error")
+        const dirty = Boolean(
+          this.disposableScopes.get(pluginId)?.hasUnresolvedResources() ||
+          this.loader.getDirtyTeardown(pluginId) ||
+          this.runtimeCleanupFailures.has(pluginId)
+        )
+        await this.setActualState(pluginId, dirty ? "dirty" : "error", {
+          lastError: message.slice(0, 512),
+          ...(dirty
+            ? {
+                dirty: this.buildDirtyDiagnostic(pluginId, message),
+              }
+            : { dirty: undefined }),
+        })
+        if (!dirty) this.releaseActivationLease(pluginId)
+        this.recordPluginVerification(pluginId, {
+          status: "error",
+          action: "unload",
+          stage: "cleanup",
+          successful: false,
+          diagnostics: [
+            {
+              code: "plugin.unload.failed",
+              severity: "error",
+              message,
+            },
+          ],
+        })
+        loggers.manager.error(`[plugin:${pluginId}] unload failed`, error)
+        throw error
       }
-
-      // Terminal isolation cleanup — runs on EVERY unload path so a plugin
-      // returning to "installed" never leaks permission-guard registration,
-      // i18n bundles, or WASM capability grants. `disablePlugin` already drops
-      // i18n + revokes grants on the enabled→unload path; these calls are
-      // idempotent and additionally cover the loaded→unload / disabled→unload
-      // paths (and clear guard tiers + denials, which previously only happened
-      // on uninstall).
-      getPermissionGuard().unregisterPlugin(pluginId)
-      getPluginIPC().unregisterPlugin(pluginId)
-      unregisterPluginI18n(pluginId)
-      await clearWasmCapabilityGrant(pluginId)
-      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
-
-      // Unregister hooks
-      this.hooksManager.unregisterHooks(pluginId)
-
-      // Remove context
-      this.contexts.delete(pluginId)
-
-      // Unload from loader (awaited so a hung runtime teardown can't
-      // race the store update — PR-B of the plugin optimization plan).
-      await this.loader.unload(pluginId)
-
-      // Update store
-      await store.unloadPlugin(pluginId, { viaManager: false })
-      await this.syncBackendStatus(pluginId, "installed")
-      this.emitLifecycleEvent(SystemEvents.PLUGIN_UNLOADED, pluginId)
-      this.recordPluginVerification(pluginId, {
-        status: "installed",
-        action: "unload",
-        stage: "cleanup",
-        successful: true,
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      await this.restorePluginRuntimeRollbackSnapshot(pluginId, rollbackSnapshot)
-      store.setPluginError(pluginId, message)
-      store.setPluginStatus?.(pluginId, rollbackSnapshot?.status || plugin.status)
-      this.recordPluginVerification(pluginId, {
-        status: "error",
-        action: "unload",
-        stage: "cleanup",
-        successful: false,
-        diagnostics: [
-          {
-            code: "plugin.unload.failed",
-            severity: "error",
-            message,
-          },
-        ],
-      })
-      loggers.manager.error(`[plugin:${pluginId}] unload failed`, error)
-      throw error
+    } finally {
+      this.lifecycleCoordinator.releaseProviderDrain(reservation)
     }
   }
 
@@ -2756,7 +3768,11 @@ export class PluginManager {
     // entry `running` forever otherwise. `withLifecycleLock` serializes these
     // against enable, so this never races a live advance.
     cancelPluginActivationProgress(pluginId, "uninstall")
-    return this.withLifecycleLock(pluginId, () => this.uninstallPluginInner(pluginId, options))
+    try {
+      await this.withLifecycleLock(pluginId, () => this.uninstallPluginInner(pluginId, options))
+    } finally {
+      await this.flushOptionalServiceConsumers(pluginId)
+    }
   }
 
   private async uninstallPluginInner(
@@ -2770,87 +3786,127 @@ export class PluginManager {
       throw new Error(`Plugin not found: ${pluginId}`)
     }
 
-    const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
-
+    const reservation = this.lifecycleCoordinator.reserveProviderDrain(this.managerId, pluginId)
     try {
-      // Last-chance notification BEFORE teardown + file removal, while the
-      // plugin's hooks are still registered (unloadPlugin below unregisters
-      // them). A never-activated ("installed"-only) plugin has no live handler,
-      // so this is a no-op for it. Log-only: uninstall cannot be vetoed.
-      await this.safeDispatchLifecycleHook(pluginId, "onUninstall")
+      const blockedBy = this.getRequiredDependentIds(pluginId)
+      if (blockedBy.length > 0) throw new PluginDependencyInUseError(pluginId, blockedBy)
 
-      // Unload first
-      if (["loaded", "enabled", "disabled"].includes(plugin.status)) {
-        // Inner variant — we already hold this plugin's lifecycle lock (W6.4).
-        await this.unloadPluginInner(pluginId)
-      }
-
-      // Drop plugin-provided i18n bundles in case disable didn't run (e.g.,
-      // direct uninstall from "installed" state). Idempotent.
-      unregisterPluginI18n(pluginId)
-
-      // Remove files via Tauri
-      await invoke("plugin_uninstall", {
-        pluginId,
-        pluginPath: plugin.path,
-      })
-
-      // Remove from store
-      await store.uninstallPlugin(pluginId, { skipFileRemoval: true, viaManager: false })
-
-      // Remove plugin Dexie tables. Default: keep data (allows reinstall to resume).
-      // Pass purgeData: true from the settings "Delete plugin data" action.
-      await removePluginTables(
-        () => getDb() as unknown as import("dexie").default,
-        pluginId,
-        options?.purgeData ? "purge" : "keep"
-      )
-
-      // Purge the plugin's secrets (uninstall is terminal — unlike disable,
-      // which keeps them for re-enable). Best-effort: never block uninstall.
       try {
-        await clearPluginSecrets(pluginId)
-      } catch (error) {
-        loggers.manager.warn(
-          `[plugin:${pluginId}] secret purge on uninstall failed (ignored):`,
-          error
-        )
-      }
+        // Last-chance notification BEFORE teardown + file removal, while the
+        // plugin's hooks are still registered (unloadPlugin below unregisters
+        // them). A never-activated ("installed"-only) plugin has no live handler,
+        // so this is a no-op for it. Log-only: uninstall cannot be vetoed.
+        await this.safeDispatchLifecycleHook(pluginId, "onUninstall")
 
-      await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
-      getPermissionGuard().unregisterPlugin(pluginId)
-      if (plugin.manifest.type === "wasm") {
-        await clearWasmCapabilityGrant(pluginId)
+        // Unload first
+        if (["loaded", "enabled", "disabled"].includes(plugin.status)) {
+          // Inner variant — we already hold this plugin's lifecycle lock (W6.4).
+          await this.unloadPluginInner(pluginId)
+        }
+
+        // Drop plugin-provided i18n bundles in case disable didn't run (e.g.,
+        // direct uninstall from "installed" state). Idempotent.
+        unregisterPluginI18n(pluginId)
+
+        // Remove files via Tauri
+        await invoke("plugin_uninstall", {
+          pluginId,
+          pluginPath: plugin.path,
+        })
+
+        // Remove from store
+        await store.uninstallPlugin(pluginId, { skipFileRemoval: true, viaManager: false })
+
+        // Remove plugin Dexie tables. Default: keep data (allows reinstall to resume).
+        // Pass purgeData: true from the settings "Delete plugin data" action.
+        await removePluginTables(
+          () => getDb() as unknown as import("dexie").default,
+          pluginId,
+          options?.purgeData ? "purge" : "keep"
+        )
+
+        // Purge the plugin's secrets (uninstall is terminal — unlike disable,
+        // which keeps them for re-enable). Best-effort: never block uninstall.
+        try {
+          await clearPluginSecrets(pluginId)
+        } catch (error) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] secret purge on uninstall failed (ignored):`,
+            error
+          )
+        }
+
+        await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
+        getPermissionGuard().unregisterPlugin(pluginId)
+        if (plugin.manifest.type === "wasm") {
+          await clearWasmCapabilityGrant(pluginId)
+        }
+        getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
+        this.registeredSlashCommandsByPlugin.delete(pluginId)
+        this.activationInFlight.delete(pluginId)
+        this.recordPluginVerification(pluginId, {
+          status: "installed",
+          action: "uninstall",
+          stage: "cleanup",
+          successful: true,
+        })
+        if (this.hasUnresolvedActivationResources(pluginId)) {
+          await this.setActualState(pluginId, "dirty", {
+            dirty: this.buildDirtyDiagnostic(pluginId, "Uninstall cleanup was not confirmed"),
+          })
+        } else {
+          await this.setActualState(pluginId, "inactive", {
+            dirty: undefined,
+            lastError: undefined,
+          })
+          this.releaseActivationLease(pluginId)
+        }
+      } catch (error) {
+        const lifecycle = await this.getPluginLifecycleState(pluginId)
+        if (store.plugins[pluginId]?.status === "enabled" && lifecycle.actual === "active") {
+          // unloadPluginInner rejected at a pre-teardown drain gate. Uninstall
+          // must not convert that live provider into an error or remove files.
+          throw error
+        }
+        const message = error instanceof Error ? error.message : String(error)
+        await this.deactivatePluginRuntime(pluginId, { unloadModule: true }).catch(() => undefined)
+        await this.unregisterPluginContributions(pluginId).catch(() => undefined)
+        this.contexts.delete(pluginId)
+        this.hooksManager.unregisterHooks(pluginId)
+        store.setPluginError(pluginId, message)
+        store.setPluginStatus?.(pluginId, "error")
+        const dirty = Boolean(
+          this.disposableScopes.get(pluginId)?.hasUnresolvedResources() ||
+          this.loader.getDirtyTeardown(pluginId) ||
+          this.runtimeCleanupFailures.has(pluginId)
+        )
+        await this.setActualState(pluginId, dirty ? "dirty" : "error", {
+          lastError: message.slice(0, 512),
+          ...(dirty
+            ? {
+                dirty: this.buildDirtyDiagnostic(pluginId, message),
+              }
+            : { dirty: undefined }),
+        })
+        if (!dirty) this.releaseActivationLease(pluginId)
+        this.recordPluginVerification(pluginId, {
+          status: "error",
+          action: "uninstall",
+          stage: "cleanup",
+          successful: false,
+          diagnostics: [
+            {
+              code: "plugin.uninstall.failed",
+              severity: "error",
+              message,
+            },
+          ],
+        })
+        loggers.manager.error(`[plugin:${pluginId}] uninstall failed`, error)
+        throw error
       }
-      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
-      this.registeredSlashCommandsByPlugin.delete(pluginId)
-      this.activationInFlight.delete(pluginId)
-      this.recordPluginVerification(pluginId, {
-        status: "installed",
-        action: "uninstall",
-        stage: "cleanup",
-        successful: true,
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      await this.restorePluginRuntimeRollbackSnapshot(pluginId, rollbackSnapshot)
-      store.setPluginError(pluginId, message)
-      store.setPluginStatus?.(pluginId, rollbackSnapshot?.status || plugin.status)
-      this.recordPluginVerification(pluginId, {
-        status: "error",
-        action: "uninstall",
-        stage: "cleanup",
-        successful: false,
-        diagnostics: [
-          {
-            code: "plugin.uninstall.failed",
-            severity: "error",
-            message,
-          },
-        ],
-      })
-      loggers.manager.error(`[plugin:${pluginId}] uninstall failed`, error)
-      throw error
+    } finally {
+      this.lifecycleCoordinator.releaseProviderDrain(reservation)
     }
   }
 
@@ -2941,7 +3997,11 @@ export class PluginManager {
     // Serialize with every other lifecycle transition (enable/disable/unload
     // and resume) so the status check-and-act is atomic — otherwise a suspend
     // can interleave with an in-flight tool call or a concurrent resume.
-    return this.withLifecycleLock(pluginId, () => this.suspendPluginInner(pluginId, reason))
+    try {
+      await this.withLifecycleLock(pluginId, () => this.suspendPluginInner(pluginId, reason))
+    } finally {
+      await this.flushOptionalServiceConsumers(pluginId)
+    }
   }
 
   private async suspendPluginInner(pluginId: string, reason: string): Promise<void> {
@@ -2951,10 +4011,19 @@ export class PluginManager {
       return
     }
     try {
+      if (this.runtimeServicesEnabled()) {
+        await this.quiesceServiceConsumers(pluginId)
+      }
       // Fire while hooks are still registered, before any teardown.
       await this.safeDispatchLifecycleHook(pluginId, "onSuspend")
       await this.unregisterPluginContributions(pluginId)
       await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
+      if (this.runtimeServicesEnabled()) {
+        this.serviceRegistry.removeProvider(
+          pluginId,
+          this.activationLeases.get(pluginId)?.generation
+        )
+      }
       this.hooksManager.unregisterHooks(pluginId)
       this.contexts.delete(pluginId)
       store.setPluginStatus?.(pluginId, "suspended")
@@ -2967,6 +4036,8 @@ export class PluginManager {
         successful: true,
         metadata: { reason },
       })
+      await this.setActualState(pluginId, "inactive", { dirty: undefined, lastError: undefined })
+      this.releaseActivationLease(pluginId)
       loggers.manager.debug(`[plugin:${pluginId}] suspended (${reason})`)
     } catch (error) {
       store.setPluginError(pluginId, String(error))
@@ -2987,7 +4058,10 @@ export class PluginManager {
     // `status === "suspended"` before either flipped to `enabled`, double-
     // loading the module. Under the lock the second call sees `enabled` and
     // no-ops.
-    return this.withLifecycleLock(pluginId, () => this.resumePluginInner(pluginId, reason))
+    await this.withLifecycleLock(pluginId, () => this.resumePluginInner(pluginId, reason))
+    if (this.runtimeServicesEnabled()) {
+      await this.refreshOptionalServiceConsumers(pluginId)
+    }
   }
 
   private async resumePluginInner(pluginId: string, reason: string): Promise<void> {
@@ -2996,9 +4070,14 @@ export class PluginManager {
     if (!plugin || plugin.status !== "suspended") {
       return
     }
+    const lifecycle = await this.lifecycleState.read(pluginId)
+    if (lifecycle.intent === "disabled") return
     try {
-      await this.loadPlugin(pluginId)
+      await this.loadPluginInner(pluginId)
       await this.registerPluginContributions(pluginId)
+      if (this.runtimeServicesEnabled()) {
+        await this.publishPluginServices(plugin)
+      }
       store.setPluginStatus?.(pluginId, "enabled")
       await this.syncBackendStatus(pluginId, "enabled")
       await this.safeDispatchLifecycleHook(pluginId, "onResume")
@@ -3200,6 +4279,10 @@ export class PluginManager {
           await grantPluginPermission(pluginId, permission, "manifest")
         }
       } catch (error) {
+        this.runtimeCleanupFailures.set(pluginId, {
+          runtime: this.config.nodeHostInvoker ? "node" : "frontend",
+          error,
+        })
         recordSilentFailure(
           pluginId,
           {
@@ -3413,6 +4496,10 @@ export class PluginManager {
       // that declared just `startup` permanently unreachable via tools/views
       // after it idle-suspends.
       const isSuspended = plugin.status === "suspended"
+      const lifecycle = await this.lifecycleState.read(plugin.manifest.id)
+      if (lifecycle.intent === "disabled") {
+        continue
+      }
       if (!isSuspended && !this.shouldActivateForEvent(plugin.manifest, event)) {
         continue
       }
@@ -3712,6 +4799,12 @@ export class PluginManager {
       try {
         await Promise.resolve(definition.deactivate(this.contexts.get(pluginId)))
       } catch (error) {
+        const runtimeGeneration = this.loader.getRuntimeGeneration(pluginId)
+        this.runtimeCleanupFailures.set(pluginId, {
+          runtime: plugin ? this.runtimeKindForPlugin(plugin) : "frontend",
+          error,
+          ...(runtimeGeneration ? { runtimeGeneration } : {}),
+        })
         recordSilentFailure(
           pluginId,
           {
@@ -4280,13 +5373,21 @@ export class PluginManager {
   }
 
   private async unregisterPluginContributions(pluginId: string): Promise<void> {
+    if (!this.ownsCurrentGeneration(pluginId)) {
+      loggers.manager.warn(
+        `[plugin:${pluginId}] ignored stale-generation cleanup from ${this.managerId}`
+      )
+      return
+    }
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
     const scope = this.disposableScopes.get(pluginId)
     if (scope) {
       const report = await scope.dispose()
-      this.disposableScopes.delete(pluginId)
+      if (!scope.hasUnresolvedResources()) {
+        this.disposableScopes.delete(pluginId)
+      }
       if (report.failures.length > 0) {
         recordSilentFailure(
           pluginId,
@@ -4483,7 +5584,9 @@ export class PluginManager {
     try {
       const { refreshAllInstanceCapabilityWarnings } =
         await import("@/lib/ai/agent/team/capability-audit")
-      void refreshAllInstanceCapabilityWarnings()
+      void refreshAllInstanceCapabilityWarnings().catch((err) => {
+        loggers.manager.warn(`[plugin:${pluginId}] capability-audit refresh failed:`, err)
+      })
     } catch (err) {
       loggers.manager.warn(`[plugin:${pluginId}] capability-audit refresh failed:`, err)
     }
@@ -4580,6 +5683,65 @@ export class PluginManager {
     this.registry.unregisterAll(pluginId)
   }
 
+  private async cleanupFailedActivation(pluginId: string, cause: unknown): Promise<void> {
+    let cleanupError: unknown
+    try {
+      await this.unregisterPluginContributions(pluginId)
+    } catch (error) {
+      cleanupError = error
+    }
+    try {
+      await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
+    } catch (error) {
+      cleanupError ??= error
+    }
+
+    this.hooksManager.unregisterHooks(pluginId)
+    this.contexts.delete(pluginId)
+    getPluginIPC().unsubscribe(pluginId)
+    getPluginIPC().unexpose(pluginId)
+    getPluginIPC().unregisterPlugin(pluginId)
+    getMessageBus().offAll(pluginId)
+    getPermissionGuard().unregisterPlugin(pluginId)
+    getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
+
+    const scope = this.disposableScopes.get(pluginId)
+    const runtimeDirty = this.loader.getDirtyTeardown(pluginId)
+    const unresolved = Boolean(
+      cleanupError ||
+      scope?.hasUnresolvedResources() ||
+      runtimeDirty ||
+      this.runtimeCleanupFailures.has(pluginId)
+    )
+    if (unresolved) {
+      const plugin = usePluginStore.getState().plugins[pluginId]
+      const manifestType = runtimeDirty?.manifestType ?? plugin?.manifest.type ?? "frontend"
+      const runtime: PluginDirtyDiagnostic["runtime"] =
+        this.runtimeCleanupFailures.get(pluginId)?.runtime ??
+        (manifestType === "vscode-extension"
+          ? "vscode"
+          : manifestType === "hybrid" || manifestType === "python"
+            ? "python"
+            : manifestType === "wasm"
+              ? "wasm"
+              : "frontend")
+      await this.setActualState(pluginId, "dirty", {
+        dirty: {
+          ...this.buildDirtyDiagnostic(pluginId, String(cleanupError ?? cause)),
+          runtime,
+        },
+        lastError: String(cause).slice(0, 512),
+      })
+      return
+    }
+
+    await this.setActualState(pluginId, "error", {
+      lastError: String(cause).slice(0, 512),
+      dirty: undefined,
+    })
+    this.releaseActivationLease(pluginId)
+  }
+
   // ===========================================================================
   // Python Plugin Support
   // ===========================================================================
@@ -4630,6 +5792,11 @@ export class PluginManager {
           hostSettings: effectiveHostSettings,
         }
       )
+      const pythonGeneration = loadResult?.generation
+      if (!pythonGeneration) {
+        throw new Error(`Python host did not return a runtime generation for ${pluginId}`)
+      }
+      this.bindPythonGeneration(pluginId, pythonGeneration)
 
       // Get registered tools from Python
       const pythonTools = await this.invokeNativeHost<
@@ -4638,7 +5805,7 @@ export class PluginManager {
           description: string
           parameters: Record<string, unknown>
         }>
-      >("plugin_python_get_tools", { pluginId })
+      >("plugin_python_get_tools", { pluginId, generation: pythonGeneration })
 
       // Register Python tools
       for (const toolDef of pythonTools) {
@@ -4653,6 +5820,7 @@ export class PluginManager {
           execute: async (args: Record<string, unknown>, _context: PluginToolContext) => {
             return this.invokeNativeHost("plugin_python_call_tool", {
               pluginId,
+              generation: pythonGeneration,
               toolName: toolDef.name,
               args,
             })
@@ -4664,8 +5832,11 @@ export class PluginManager {
 
       // Register python @hook handlers into the hooks system so host-side
       // dispatch reaches the interpreter.
-      this.registerPythonHooks(pluginId, loadResult?.hooks ?? [])
+      this.registerPythonHooks(pluginId, loadResult.hooks ?? [], pythonGeneration)
     } catch (error) {
+      if (!this.pythonRuntimeGenerations.has(pluginId)) {
+        this.pendingPythonEvents.delete(pluginId)
+      }
       store.setPluginError(pluginId, String(error))
       throw error
     }
@@ -4716,7 +5887,11 @@ export class PluginManager {
    * JS-side hooks win on name collision (python fills the gaps) — the JS
    * module is the richer runtime and already registered at activation.
    */
-  private registerPythonHooks(pluginId: string, declarations: PythonHookDeclaration[]): void {
+  private registerPythonHooks(
+    pluginId: string,
+    declarations: PythonHookDeclaration[],
+    generation: string
+  ): void {
     if (declarations.length === 0) {
       return
     }
@@ -4728,6 +5903,7 @@ export class PluginManager {
       pythonHooks[event] = async (...args: unknown[]) =>
         this.invokeNativeHost("plugin_python_call_hook", {
           pluginId,
+          generation,
           event,
           name,
           // call_hook carries one payload value; multi-arg hook signatures
@@ -4759,6 +5935,7 @@ export class PluginManager {
   ): Promise<T> {
     return this.invokeNativeHost<T>("plugin_python_call_hook", {
       pluginId,
+      generation: this.requirePythonGeneration(pluginId),
       event,
       name,
       payload: payload ?? null,
@@ -4770,7 +5947,11 @@ export class PluginManager {
    * (`on_config_updated`). A demoted host picks it up at respawn.
    */
   async pushPythonConfig(pluginId: string, config: Record<string, unknown>): Promise<void> {
-    await this.invokeNativeHost("plugin_python_push_config", { pluginId, config })
+    await this.invokeNativeHost("plugin_python_push_config", {
+      pluginId,
+      generation: this.requirePythonGeneration(pluginId),
+      config,
+    })
   }
 
   /**
@@ -4823,8 +6004,58 @@ export class PluginManager {
   async callPythonFunction<T>(pluginId: string, functionName: string, args: unknown[]): Promise<T> {
     return this.invokeNativeHost<T>("plugin_python_call", {
       pluginId,
+      generation: this.requirePythonGeneration(pluginId),
       functionName,
       args,
+    })
+  }
+
+  async evalPython<T>(
+    pluginId: string,
+    code: string,
+    locals?: Record<string, unknown>
+  ): Promise<T> {
+    return this.invokeNativeHost<T>("plugin_python_eval", {
+      pluginId,
+      generation: this.requirePythonGeneration(pluginId),
+      code,
+      locals: locals ?? {},
+    })
+  }
+
+  async importPythonModule(pluginId: string, moduleName: string): Promise<void> {
+    await this.invokeNativeHost("plugin_python_import", {
+      pluginId,
+      generation: this.requirePythonGeneration(pluginId),
+      moduleName,
+    })
+  }
+
+  async callPythonModule<T>(
+    pluginId: string,
+    moduleName: string,
+    functionName: string,
+    args: unknown[]
+  ): Promise<T> {
+    return this.invokeNativeHost<T>("plugin_python_module_call", {
+      pluginId,
+      generation: this.requirePythonGeneration(pluginId),
+      moduleName,
+      functionName,
+      args,
+    })
+  }
+
+  async getPythonModuleAttribute<T>(
+    pluginId: string,
+    moduleName: string,
+    attrName: string
+  ): Promise<T> {
+    return this.invokeNativeHost<T>("plugin_python_module_getattr", {
+      pluginId,
+      generation: this.requirePythonGeneration(pluginId),
+      moduleName,
+      attrName,
     })
   }
 
@@ -4864,7 +6095,10 @@ export class PluginManager {
    * Check if a Python plugin is initialized
    */
   async isPythonPluginInitialized(pluginId: string): Promise<boolean> {
-    return this.invokeNativeHost<boolean>("plugin_python_is_initialized", { pluginId })
+    return this.invokeNativeHost<boolean>("plugin_python_is_initialized", {
+      pluginId,
+      generation: this.requirePythonGeneration(pluginId),
+    })
   }
 
   /**
@@ -4873,7 +6107,7 @@ export class PluginManager {
   async getPythonPluginInfo(pluginId: string): Promise<PythonPluginInfo | null> {
     const info = await this.invokeNativeHost<Record<string, unknown> | null>(
       "plugin_python_get_info",
-      { pluginId }
+      { pluginId, generation: this.requirePythonGeneration(pluginId) }
     )
     if (!info) return null
     const { normalizePluginRuntimeHandshake } = await import("./transport")
@@ -4884,7 +6118,16 @@ export class PluginManager {
    * Unload a Python plugin
    */
   async unloadPythonPlugin(pluginId: string): Promise<void> {
-    return this.invokeNativeHost("plugin_python_unload", { pluginId })
+    const generation = this.requirePythonGeneration(pluginId)
+    await this.invokeNativeHost("plugin_python_unload", {
+      pluginId,
+      generation,
+    })
+    if (this.pythonRuntimeGenerations.get(pluginId) === generation) {
+      this.pythonRuntimeGenerations.delete(pluginId)
+    }
+    unbindPythonRuntimeGeneration(pluginId, generation)
+    this.pendingPythonEvents.delete(pluginId)
   }
 
   /**

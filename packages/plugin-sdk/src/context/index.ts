@@ -20,6 +20,13 @@ import type { PluginContext as CtxPluginContext } from "@/types/plugin/plugin"
 // =============================================================================
 export type {
   PluginContext,
+  PluginLifecycleAPI,
+  PluginLifecycleScopeToken,
+  PluginChildLifecycleAPI,
+  PluginServicesAPI,
+  PluginServiceProviderMetadata,
+  PluginOptionalServiceChange,
+  PluginOptionalServiceListener,
   PluginLogger,
   PluginStorage,
   PluginEventEmitter,

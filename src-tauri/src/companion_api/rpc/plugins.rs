@@ -568,16 +568,18 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let event: String = required(&args, "event")?;
             let hook_name: String = required(&args, "name")?;
             let payload: Value = required(&args, "payload")?;
-            crate::plugin_api::python::commands::plugin_python_call_hook_for_state(
+            crate::plugin_api::python::commands::plugin_python_call_hook_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 event,
                 hook_name,
                 payload,
+                generation,
             )
             .await
             .map_err(plugin_rpc_error)
@@ -587,12 +589,14 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let config: Value = required(&args, "config")?;
-            crate::plugin_api::python::commands::plugin_python_push_config_for_state(
+            crate::plugin_api::python::commands::plugin_python_push_config_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 config,
+                generation,
             )
             .await
             .map(|_| Value::Null)
@@ -603,9 +607,11 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            crate::plugin_api::python::commands::plugin_python_get_tools_for_state(
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::python::commands::plugin_python_get_tools_generation_for_state(
                 services.python_plugins.as_ref(),
                 plugin_id,
+                generation,
             )
             .await
             .map_err(plugin_rpc_error)
@@ -615,14 +621,16 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let tool_name: String = required_aliased(&args, "tool_name", "toolName")?;
             let tool_args: Value = required(&args, "args")?;
-            crate::plugin_api::python::commands::plugin_python_call_tool_for_state(
+            crate::plugin_api::python::commands::plugin_python_call_tool_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 tool_name,
                 tool_args,
+                generation,
             )
             .await
             .map_err(plugin_rpc_error)
@@ -632,14 +640,16 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let function_name: String = required_aliased(&args, "function_name", "functionName")?;
             let call_args: Vec<Value> = required(&args, "args")?;
-            crate::plugin_api::python::commands::plugin_python_call_for_state(
+            crate::plugin_api::python::commands::plugin_python_call_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 function_name,
                 call_args,
+                generation,
             )
             .await
             .map_err(plugin_rpc_error)
@@ -649,14 +659,16 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let code: String = required(&args, "code")?;
             let locals: Option<Value> = optional(&args, "locals")?;
-            crate::plugin_api::python::commands::plugin_python_eval_for_state(
+            crate::plugin_api::python::commands::plugin_python_eval_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 code,
                 locals,
+                generation,
             )
             .await
             .map_err(plugin_rpc_error)
@@ -666,12 +678,14 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
-            crate::plugin_api::python::commands::plugin_python_import_for_state(
+            crate::plugin_api::python::commands::plugin_python_import_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 module_name,
+                generation,
             )
             .await
             .map_err(plugin_rpc_error)
@@ -681,16 +695,18 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
             let function_name: String = required_aliased(&args, "function_name", "functionName")?;
             let call_args: Vec<Value> = required(&args, "args")?;
-            crate::plugin_api::python::commands::plugin_python_module_call_for_state(
+            crate::plugin_api::python::commands::plugin_python_module_call_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 module_name,
                 function_name,
                 call_args,
+                generation,
             )
             .await
             .map_err(plugin_rpc_error)
@@ -700,14 +716,16 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
             let attr_name: String = required_aliased(&args, "attr_name", "attrName")?;
-            crate::plugin_api::python::commands::plugin_python_module_getattr_for_state(
+            crate::plugin_api::python::commands::plugin_python_module_getattr_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 module_name,
                 attr_name,
+                generation,
             )
             .await
             .map_err(plugin_rpc_error)
@@ -717,9 +735,11 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            crate::plugin_api::python::commands::plugin_python_is_initialized_for_state(
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::python::commands::plugin_python_is_initialized_generation_for_state(
                 services.python_plugins.as_ref(),
                 plugin_id,
+                generation,
             )
             .await
             .map(Value::Bool)
@@ -730,11 +750,14 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             to_json(
-                crate::plugin_api::python::commands::plugin_python_get_info_for_state(
+                crate::plugin_api::python::commands::plugin_python_get_info_generation_for_state(
                     services.python_plugins.as_ref(),
                     &plugin_id,
-                ),
+                    &generation,
+                )
+                .map_err(plugin_rpc_error)?,
             )
         }
         "plugin_python_install_deps" => {
@@ -758,9 +781,11 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            crate::plugin_api::python::commands::plugin_python_unload_for_state(
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::python::commands::plugin_python_unload_generation_for_state(
                 services.python_plugins.as_ref(),
                 &plugin_id,
+                &generation,
             )
             .await
             .map(|_| Value::Null)
@@ -1000,18 +1025,20 @@ pub(super) async fn dispatch(
                 plugin_path,
             )
             .await
-            .map(|_| Value::Null)
             .map_err(vscode_rpc_error)
+            .and_then(to_json)
         }
         "plugin_activate_vscode" => {
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let config_json: String = required_aliased(&args, "config_json", "configJson")?;
-            crate::plugin_api::vscode::commands::plugin_activate_vscode_for_state(
+            crate::plugin_api::vscode::commands::plugin_activate_vscode_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
+                generation,
                 config_json,
             )
             .await
@@ -1023,9 +1050,11 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            crate::plugin_api::vscode::commands::plugin_deactivate_vscode_for_state(
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::vscode::commands::plugin_deactivate_vscode_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
+                generation,
             )
             .await
             .map(|_| Value::Null)
@@ -1036,9 +1065,11 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            crate::plugin_api::vscode::commands::plugin_unload_vscode_for_state(
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::vscode::commands::plugin_unload_vscode_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
+                generation,
             )
             .await
             .map(|_| Value::Null)
@@ -1049,11 +1080,13 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let method: String = required(&args, "method")?;
             let payload_json: String = required_aliased(&args, "payload_json", "payloadJson")?;
-            crate::plugin_api::vscode::commands::plugin_invoke_vscode_rpc_for_state(
+            crate::plugin_api::vscode::commands::plugin_invoke_vscode_rpc_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
+                generation,
                 method,
                 payload_json,
             )
@@ -1066,10 +1099,12 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let response_json: String = required_aliased(&args, "response_json", "responseJson")?;
-            crate::plugin_api::vscode::commands::plugin_vscode_send_response_for_state(
+            crate::plugin_api::vscode::commands::plugin_vscode_send_response_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
+                generation,
                 response_json,
             )
             .map(|_| Value::Null)
@@ -1108,6 +1143,7 @@ pub(super) async fn dispatch(
             let entry: String = required(&args, "entry")?;
             let callback_id: String = required_aliased(&args, "callback_id", "callbackId")?;
             let callback_args: Value = required(&args, "args")?;
+            let generation: String = required(&args, "generation")?;
             crate::plugin_api::lifecycle::plugin_invoke_js_callback_for_state(
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -1115,6 +1151,7 @@ pub(super) async fn dispatch(
                 entry,
                 callback_id,
                 callback_args,
+                generation,
                 None,
             )
             .await
@@ -1127,11 +1164,13 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
             let entry: String = required(&args, "entry")?;
+            let generation: String = required(&args, "generation")?;
             crate::plugin_api::lifecycle::plugin_deactivate_js_for_state(
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 plugin_path,
                 entry,
+                generation,
                 None,
             )
             .await
@@ -1195,12 +1234,14 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let config_json: String = required_aliased(&args, "config_json", "configJson")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_activate_for_state(
+            crate::plugin_api::wasm::commands::plugin_wasm_activate_generation_for_state(
                 services.wasm_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 config_json,
+                generation,
             )
             .await
             .map_err(RpcError::internal)
@@ -1211,9 +1252,11 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_deactivate_for_state(
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::wasm::commands::plugin_wasm_deactivate_generation_for_state(
                 services.wasm_plugins.as_ref(),
                 plugin_id,
+                generation,
             )
             .await
             .map_err(RpcError::internal)
@@ -1224,14 +1267,16 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
             let export_name: String = required_aliased(&args, "export_name", "exportName")?;
             let payload_json: String = required_aliased(&args, "payload_json", "payloadJson")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_call_for_state(
+            crate::plugin_api::wasm::commands::plugin_wasm_call_generation_for_state(
                 services.wasm_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 export_name,
                 payload_json,
+                generation,
             )
             .await
             .map(Value::String)
@@ -1242,9 +1287,11 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_unload_for_state(
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::wasm::commands::plugin_wasm_unload_generation_for_state(
                 services.wasm_plugins.as_ref(),
                 plugin_id,
+                generation,
             )
             .await
             .map(Value::Bool)

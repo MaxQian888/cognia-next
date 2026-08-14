@@ -155,7 +155,7 @@ interface PluginMessagePartAPI {
   ) => () => void
 }
 
-interface RoomDescriptorV2 {
+interface RoomDescriptor {
   v: 2
   roomId: string
   roomNonce: string
@@ -286,7 +286,7 @@ interface PairedDeviceRow {
    */
   rendezvousId?: string
   /** Public signaling v2 descriptor; safe for Dexie and diagnostics. */
-  signalingRoomDescriptor?: RoomDescriptorV2
+  signalingRoomDescriptor?: RoomDescriptor
   /** Opaque reference to the desktop role private key in the host keyring. */
   signalingKeyRef?: string
   /**

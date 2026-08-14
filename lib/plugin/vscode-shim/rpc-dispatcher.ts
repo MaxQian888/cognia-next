@@ -44,11 +44,20 @@ interface InboundFrame {
   error?: { code: number; message: string; data?: unknown }
 }
 
-type SendResponseFn = (pluginId: string, responseJson: string) => Promise<void>
+type SendResponseFn = (
+  pluginId: string,
+  generation: string | undefined,
+  responseJson: string
+) => Promise<void>
 type ListenFn = (event: string, cb: (payload: { payload: string }) => void) => Promise<() => void>
 
+interface RuntimeEventEnvelope {
+  generation: string
+  rawFrame: string
+}
+
 const handlers = new Map<string, RpcHandler>()
-const subscriptions = new Map<string, () => void>()
+const subscriptions = new Map<string, { generation?: string; dispose: () => void }>()
 
 let sendResponseImpl: SendResponseFn | null = null
 let listenImpl: ListenFn | null = null
@@ -67,9 +76,9 @@ export function configureRpcDispatcher(
   if (!options) {
     sendResponseImpl = null
     listenImpl = null
-    for (const unlisten of subscriptions.values()) {
+    for (const subscription of subscriptions.values()) {
       try {
-        unlisten()
+        subscription.dispose()
       } catch (err) {
         dispatcherLogger.warn("unlisten failed during teardown", {
           error: err instanceof Error ? err.message : String(err),
@@ -126,7 +135,10 @@ export function vscodeRpcEventName(pluginId: string): string {
  * `vscodeRpcEventName`) on behalf of a loaded extension. The returned
  * disposer unlistens and is safe to call multiple times.
  */
-export async function subscribeToVscodeEvents(pluginId: string): Promise<() => void> {
+export async function subscribeToVscodeEvents(
+  pluginId: string,
+  generation?: string
+): Promise<() => void> {
   if (!listenImpl) {
     throw new Error(
       "rpc-dispatcher: configureRpcDispatcher must be called before subscribeToVscodeEvents"
@@ -134,11 +146,31 @@ export async function subscribeToVscodeEvents(pluginId: string): Promise<() => v
   }
   // Idempotent: re-subscribing returns the existing disposer.
   const existing = subscriptions.get(pluginId)
-  if (existing) return existing
+  if (existing && existing.generation === generation) return existing.dispose
+  existing?.dispose()
 
   const eventName = vscodeRpcEventName(pluginId)
   const unlisten = await listenImpl(eventName, (event) => {
-    void handleInboundFrame(pluginId, event.payload)
+    let envelope: RuntimeEventEnvelope
+    try {
+      envelope = JSON.parse(event.payload) as RuntimeEventEnvelope
+    } catch {
+      dispatcherLogger.warn("dropping VS Code event without a runtime envelope", { pluginId })
+      return
+    }
+    if (
+      typeof envelope.generation !== "string" ||
+      typeof envelope.rawFrame !== "string" ||
+      (generation !== undefined && envelope.generation !== generation)
+    ) {
+      dispatcherLogger.warn("dropping stale VS Code runtime event", {
+        pluginId,
+        expectedGeneration: generation,
+        receivedGeneration: envelope.generation,
+      })
+      return
+    }
+    void handleInboundFrame(pluginId, envelope.rawFrame, envelope.generation)
   })
 
   let disposed = false
@@ -153,16 +185,22 @@ export async function subscribeToVscodeEvents(pluginId: string): Promise<() => v
         error: err instanceof Error ? err.message : String(err),
       })
     }
-    subscriptions.delete(pluginId)
+    if (subscriptions.get(pluginId)?.dispose === disposer) {
+      subscriptions.delete(pluginId)
+    }
   }
-  subscriptions.set(pluginId, disposer)
+  subscriptions.set(pluginId, { generation, dispose: disposer })
   return disposer
 }
 
 /**
  * Internal — dispatch a single inbound frame. Exported for tests.
  */
-export async function handleInboundFrame(pluginId: string, raw: string): Promise<void> {
+export async function handleInboundFrame(
+  pluginId: string,
+  raw: string,
+  generation?: string
+): Promise<void> {
   let frame: InboundFrame
   try {
     frame = JSON.parse(raw) as InboundFrame
@@ -188,7 +226,8 @@ export async function handleInboundFrame(pluginId: string, raw: string): Promise
         pluginId,
         frame.id as number | string,
         -32601,
-        `method not found: ${frame.method}`
+        `method not found: ${frame.method}`,
+        generation
       )
     } else {
       dispatcherLogger.debug("no handler for notification", { method: frame.method, pluginId })
@@ -203,12 +242,12 @@ export async function handleInboundFrame(pluginId: string, raw: string): Promise
       requestId: isRequest ? (frame.id as number | string) : null,
     })
     if (isRequest) {
-      await emitResult(pluginId, frame.id as number | string, result ?? null)
+      await emitResult(pluginId, frame.id as number | string, result ?? null, generation)
     }
   } catch (err) {
     if (isRequest) {
       const message = err instanceof Error ? err.message : String(err)
-      await emitError(pluginId, frame.id as number | string, -32000, message)
+      await emitError(pluginId, frame.id as number | string, -32000, message, generation)
     } else {
       dispatcherLogger.warn("notification handler threw", {
         method: frame.method,
@@ -219,7 +258,12 @@ export async function handleInboundFrame(pluginId: string, raw: string): Promise
   }
 }
 
-async function emitResult(pluginId: string, id: number | string, result: unknown): Promise<void> {
+async function emitResult(
+  pluginId: string,
+  id: number | string,
+  result: unknown,
+  generation?: string
+): Promise<void> {
   if (!sendResponseImpl) {
     dispatcherLogger.warn("emitResult called before configureRpcDispatcher; dropping", {
       pluginId,
@@ -229,7 +273,7 @@ async function emitResult(pluginId: string, id: number | string, result: unknown
   }
   const frame = JSON.stringify({ jsonrpc: "2.0", id, result })
   try {
-    await sendResponseImpl(pluginId, frame)
+    await sendResponseImpl(pluginId, generation, frame)
   } catch (err) {
     dispatcherLogger.warn("sendResponse failed", {
       pluginId,
@@ -243,7 +287,8 @@ async function emitError(
   pluginId: string,
   id: number | string,
   code: number,
-  message: string
+  message: string,
+  generation?: string
 ): Promise<void> {
   if (!sendResponseImpl) {
     dispatcherLogger.warn("emitError called before configureRpcDispatcher; dropping", {
@@ -254,7 +299,7 @@ async function emitError(
   }
   const frame = JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } })
   try {
-    await sendResponseImpl(pluginId, frame)
+    await sendResponseImpl(pluginId, generation, frame)
   } catch (err) {
     dispatcherLogger.warn("sendResponse (error frame) failed", {
       pluginId,

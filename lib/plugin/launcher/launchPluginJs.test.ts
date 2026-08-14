@@ -148,6 +148,7 @@ describe("launchPluginJs", () => {
       entry: "index.mjs",
       extraArgs: [],
     })
+    expect(result.generation).toBe("11111111-1111-4111-8111-111111111111")
     await expect(result.process.isRunning()).resolves.toBe(true)
     await result.process.kill()
     expect(hostInvoker).toHaveBeenNthCalledWith(2, "plugin_js_status", {
@@ -159,6 +160,45 @@ describe("launchPluginJs", () => {
       generation: "11111111-1111-4111-8111-111111111111",
     })
     expect(result.process.killed).toBe(true)
+  })
+
+  it("fences callbacks and deactivation with the launched generation", async () => {
+    const generation = "11111111-1111-4111-8111-111111111111"
+    const hostInvoker = jest
+      .fn()
+      .mockResolvedValueOnce({
+        command: "/opt/node26/bin/node",
+        argv: ["--permission", "/plugins/demo/index.mjs"],
+        generation,
+        activation: { calls: [], hooks: {}, exports: {} },
+      })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(undefined)
+    const result = await launchPluginJs({
+      pluginId: "demo.node",
+      entryPath: "index.mjs",
+      cwd: "/plugins/demo",
+      scope: EMPTY_SCOPE,
+      hostInvoker,
+    })
+
+    await result.invokeCallback("callback-1", ["value"])
+    await result.deactivate()
+
+    expect(hostInvoker).toHaveBeenNthCalledWith(2, "plugin_invoke_js_callback", {
+      pluginId: "demo.node",
+      pluginPath: "/plugins/demo",
+      entry: "index.mjs",
+      callbackId: "callback-1",
+      args: ["value"],
+      generation,
+    })
+    expect(hostInvoker).toHaveBeenNthCalledWith(3, "plugin_deactivate_js", {
+      pluginId: "demo.node",
+      pluginPath: "/plugins/demo",
+      entry: "index.mjs",
+      generation,
+    })
   })
 
   it("rejects missing plugin ids and entry paths before spawning", async () => {

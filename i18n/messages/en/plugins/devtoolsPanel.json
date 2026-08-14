@@ -41,6 +41,13 @@
   "logs": {
     "empty": "No logs captured."
   },
+  "lifecycle": {
+    "effects": "Effects (active / pending / failed)",
+    "empty": "No lifecycle generations have been observed.",
+    "plugin": "Plugin",
+    "services": "Services",
+    "state": "Generation and state"
+  },
   "profiler": {
     "avgDuration": "Average duration",
     "emptyAll": "No installed plugins to profile yet.",
@@ -58,6 +65,7 @@
     "hotReload": "Hot reload",
     "inspect": "Inspect",
     "logs": "Logs",
+    "lifecycle": "Lifecycle",
     "profiler": "Profiler",
     "triggers": "Triggers"
   },

@@ -38,6 +38,11 @@ export function resolvePluginRuntimeBootstrap(
         runtimeProfile: options.isMobile ? "mobile" : "browser",
         pluginDirectory: "",
         enablePython: false,
+        lifecycleFeatures: {
+          ledgerV2: true,
+          runtimeServices: true,
+          scopedRealms: false,
+        },
       },
     }
   }
@@ -62,6 +67,11 @@ export function resolvePluginRuntimeBootstrap(
       runtimeProfile: "tauri",
       pluginDirectory: options.pluginDirectory,
       enablePython: true,
+      lifecycleFeatures: {
+        ledgerV2: true,
+        runtimeServices: true,
+        scopedRealms: false,
+      },
     },
   }
 }

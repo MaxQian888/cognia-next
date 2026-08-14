@@ -88,13 +88,35 @@ describe("plugin contract generator", () => {
   test("projects every callable API into generated author documentation", () => {
     const docs = renderApiReference(catalog)
     const methods = catalog.apiNamespaces.flatMap((namespace) => namespace.methods)
-    assert.equal(catalog.apiNamespaces.length, 64)
-    assert.equal(methods.length, 628)
+    assert.equal(catalog.apiNamespaces.length, 65)
+    assert.equal(methods.length, 629)
     assert.match(docs, /`ctx\.session`/)
     assert.match(docs, /`session\.listSessions`/)
     assert.match(docs, /`templates\.instantiate`/)
     assert.match(docs, /`media\.video\.export`/)
     assert.doesNotMatch(docs, /ctx\.api\./)
+  })
+
+  test("requires canonical lifecycle ownership metadata for every API method", () => {
+    const methods = new Map(
+      catalog.apiNamespaces
+        .flatMap((namespace) => namespace.methods)
+        .map((method) => [method.id, method.resourceEffect])
+    )
+
+    assert.equal(methods.size, 629)
+    assert.deepEqual(methods.get("webview.create"), {
+      kind: "returned-handle",
+      disposeMethod: "dispose",
+    })
+    assert.deepEqual(methods.get("events.on"), { kind: "returned-disposer" })
+    assert.deepEqual(methods.get("lifecycle.onDispose"), { kind: "host-owned" })
+
+    const invalid = structuredClone(catalog)
+    invalid.apiNamespaces[0].methods[0].resourceEffect = {
+      kind: "returned-handle",
+    }
+    assert.throws(() => validateInterfaceCatalog(invalid), /requires disposeMethod/)
   })
 
   test("pins representative sensitive API governance", () => {

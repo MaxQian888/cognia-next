@@ -7,6 +7,7 @@ import {
   PluginManager,
   PluginEnableError,
   PluginDependencyError,
+  PluginDependencyInUseError,
   PluginFrontendTrustError,
   PythonRuntimeDisabledError,
   resolveGovernanceMode,
@@ -20,7 +21,8 @@ import {
   getPluginPointDiagnostics,
   __resetDiagnosticsStoreForTesting,
 } from "@/lib/plugin/contracts/diagnostics-store"
-import type { Plugin, PluginManifest } from "@/types/plugin"
+import type { Plugin, PluginContext, PluginManifest } from "@/types/plugin"
+import { PluginServiceRegistry } from "./service-registry"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { getMessageBus, SystemEvents, resetMessageBus } from "@/lib/plugin/messaging/message-bus"
@@ -43,6 +45,9 @@ import {
 } from "@/lib/plugin/registries/character-pack-registry"
 import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
 import { __resetPluginActivationProgressStoreForTesting } from "@/stores/plugin-runtime/plugin-activation-progress-store"
+import { PluginActivationConflictError, PluginLifecycleCoordinator } from "./lifecycle-coordinator"
+import { InMemoryPluginLifecycleStateAdapter } from "./lifecycle-state"
+import { clearPythonLogs, getPythonLogs } from "@/lib/plugin/python/log-buffer"
 
 const mockTransportCall = jest.fn()
 const mockTransportSubscribe = jest.fn()
@@ -131,6 +136,7 @@ jest.mock("@/lib/db/plugins", () => ({
   upsertPlugin: jest.fn(async () => undefined),
   getPythonHostSettings: jest.fn(async () => undefined),
   setPythonHostSettings: jest.fn(async () => undefined),
+  setPluginEnabled: jest.fn(async () => undefined),
 }))
 
 jest.mock("@/lib/plugin/security/wasm-grant", () => ({
@@ -296,7 +302,9 @@ describe("PluginManager", () => {
         return undefined
       })
       const unsubscribe = jest.fn()
-      const hostSubscriber = jest.fn(() => unsubscribe)
+      const hostSubscriber = jest.fn(
+        (_event: string, _handler: (event: unknown) => void) => unsubscribe
+      )
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
         enablePython: true,
@@ -334,6 +342,37 @@ describe("PluginManager", () => {
         rules: [],
       })
       expect(hostSubscriber).toHaveBeenCalledWith("plugin:python", expect.any(Function))
+      const onPythonEvent = hostSubscriber.mock.calls[0][1] as (event: {
+        pluginId: string
+        generation: string
+        kind: string
+        data: unknown
+      }) => void
+      clearPythonLogs("generation-event")
+      onPythonEvent({
+        pluginId: "generation-event",
+        generation: "old-generation",
+        kind: "log",
+        data: "old",
+      })
+      ;(
+        manager as unknown as {
+          bindPythonGeneration: (pluginId: string, generation: string) => void
+        }
+      ).bindPythonGeneration("generation-event", "new-generation")
+      onPythonEvent({
+        pluginId: "generation-event",
+        generation: "old-generation",
+        kind: "log",
+        data: "stale",
+      })
+      onPythonEvent({
+        pluginId: "generation-event",
+        generation: "new-generation",
+        kind: "log",
+        data: "current",
+      })
+      expect(getPythonLogs("generation-event").map((entry) => entry.data)).toEqual(["current"])
       expect(mockInvoke).not.toHaveBeenCalled()
       expect(mockTransportCall).not.toHaveBeenCalled()
     })
@@ -2061,10 +2100,15 @@ describe("PluginManager", () => {
       const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
 
       // The fixture declares a `dexie` block in its manifest, so
-      // applyPluginTables must fire. Stub the manager's loadPlugin (which is
+      // applyPluginTables must fire. Stub the manager's lock-internal load path (which is
       // what actually runs activate()) so we can observe invocation order
       // without a real IndexedDB / module load.
-      const loadSpy = jest.spyOn(manager, "loadPlugin").mockResolvedValue(undefined)
+      const loadSpy = jest
+        .spyOn(
+          manager as unknown as { loadPluginInner: (pluginId: string) => Promise<void> },
+          "loadPluginInner"
+        )
+        .mockResolvedValue(undefined)
 
       await manager.enablePlugin(pluginId)
 
@@ -2560,9 +2604,13 @@ describe("PluginManager", () => {
         "disable-failure",
         expect.stringMatching(/deactivate failed/)
       )
+      await expect(manager.getPluginLifecycleState("disable-failure")).resolves.toMatchObject({
+        actual: "dirty",
+        dirty: { runtime: "frontend", reason: "error" },
+      })
     })
 
-    it("restores runtime registrations when disable fails after cleanup has started", async () => {
+    it("keeps runtime inactive when disable fails after cleanup has started", async () => {
       const manifest = {
         ...createManifest("rollback-plugin"),
         permissions: ["network:fetch" as const],
@@ -2704,16 +2752,19 @@ describe("PluginManager", () => {
 
       await expect(manager.disablePlugin("rollback-plugin")).rejects.toThrow(/revoke failed/i)
 
-      expect(store.plugins["rollback-plugin"].status).toBe("enabled")
-      expect(manager.getPluginContext("rollback-plugin")).toBeDefined()
+      expect(store.plugins["rollback-plugin"].status).toBe("error")
+      expect(manager.getPluginContext("rollback-plugin")).toBeUndefined()
       expect(
         (
           manager as unknown as { loader: { getDefinition: (pluginId: string) => unknown } }
         ).loader.getDefinition("rollback-plugin")
-      ).toBeDefined()
-      expect(manager.getRegistry().getTool("tool-a")).toBeDefined()
-      expect(manager.getRegistry().getCommand("rollback-plugin.command-a")).toBeDefined()
-      expect(getPluginExtensionRegistrationCount("rollback-plugin")).toBe(1)
+      ).toBeUndefined()
+      expect(manager.getRegistry().getTool("tool-a")).toBeUndefined()
+      expect(manager.getRegistry().getCommand("rollback-plugin.command-a")).toBeUndefined()
+      expect(getPluginExtensionRegistrationCount("rollback-plugin")).toBe(0)
+      await expect(manager.getPluginLifecycleState("rollback-plugin")).resolves.toMatchObject({
+        actual: "error",
+      })
     })
   })
 
@@ -3151,6 +3202,34 @@ describe("PluginManager", () => {
       const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
 
       await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
+
+    it("never restores a startup plugin with explicit disabled intent", async () => {
+      const plugin: Plugin = {
+        manifest: {
+          ...createManifest("explicitly-disabled"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: { browser: { availability: "supported" } },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://explicitly-disabled",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "explicitly-disabled": plugin } })
+      const lifecycleStateAdapter = new InMemoryPluginLifecycleStateAdapter()
+      await lifecycleStateAdapter.write("explicitly-disabled", 0, { intent: "disabled" })
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+        lifecycleStateAdapter,
+      })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+      await manager.handleActivationEvent("startup")
 
       expect(enableSpy).not.toHaveBeenCalled()
     })
@@ -4033,6 +4112,129 @@ describe("PluginManager", () => {
 
       expect(dispose).toHaveBeenCalledTimes(1)
     })
+
+    it("recovers persisted dirty generations before startup restoration", async () => {
+      const plugin = {
+        manifest: createManifest("dirty-startup"),
+        status: "installed",
+        source: "builtin",
+        path: "/plugins/dirty-startup",
+        config: {},
+      } as Plugin
+      const store = {
+        plugins: { "dirty-startup": plugin },
+        initialize: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      const lifecycleState = new InMemoryPluginLifecycleStateAdapter()
+      await lifecycleState.write("dirty-startup", 0, {
+        actual: "dirty",
+        dirty: {
+          runtime: "frontend",
+          reason: "unconfirmed",
+          at: 1,
+          message: "previous renderer",
+          hostEpoch: "previous-host-epoch",
+        },
+      })
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleStateAdapter: lifecycleState,
+      })
+      const internals = manager as unknown as {
+        scanPlugins: () => Promise<void>
+        syncRuntimeState: () => Promise<void>
+        restorePluginDexieTables: () => Promise<void>
+        restorePluginStates: () => Promise<void>
+        handleActivationEvent: (event: string) => Promise<void>
+      }
+      jest.spyOn(internals, "scanPlugins").mockResolvedValue(undefined)
+      jest.spyOn(internals, "syncRuntimeState").mockResolvedValue(undefined)
+      jest.spyOn(internals, "restorePluginDexieTables").mockResolvedValue(undefined)
+      const restore = jest.spyOn(internals, "restorePluginStates").mockImplementation(async () => {
+        expect(await lifecycleState.read("dirty-startup")).toMatchObject({ actual: "inactive" })
+      })
+      jest.spyOn(internals, "handleActivationEvent").mockResolvedValue(undefined)
+
+      await manager.initialize()
+
+      expect(restore).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps an isolated runtime dirty when no generation-aware probe is possible", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      const lifecycleState = new InMemoryPluginLifecycleStateAdapter()
+      await lifecycleState.write("orphan-python", 0, {
+        actual: "dirty",
+        dirty: {
+          runtime: "python",
+          reason: "unconfirmed",
+          at: 1,
+          message: "previous Python host",
+          hostEpoch: "previous-host-epoch",
+        },
+      })
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleStateAdapter: lifecycleState,
+      })
+
+      await expect(manager.recoverPluginRuntime("orphan-python")).resolves.toBe(false)
+      await expect(lifecycleState.read("orphan-python")).resolves.toMatchObject({
+        actual: "dirty",
+        dirty: { message: "No generation-aware runtime probe is available" },
+      })
+    })
+
+    it("retires an isolated dirty record only after its generation probe confirms absence", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      const lifecycleState = new InMemoryPluginLifecycleStateAdapter()
+      const runtimeGeneration = "11111111-1111-4111-8111-111111111111"
+      await lifecycleState.write("orphan-node", 0, {
+        actual: "dirty",
+        dirty: {
+          runtime: "node",
+          reason: "unconfirmed",
+          at: 1,
+          message: "previous Node host",
+          hostEpoch: "previous-host-epoch",
+          runtimeGeneration,
+        },
+      })
+      mockInvoke.mockImplementation(async (command) => {
+        if (command === "plugin_js_status") return false
+        return undefined
+      })
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleStateAdapter: lifecycleState,
+      })
+
+      await expect(manager.recoverPluginRuntime("orphan-node")).resolves.toBe(true)
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_js_status", {
+        pluginId: "orphan-node",
+        generation: runtimeGeneration,
+      })
+      await expect(lifecycleState.read("orphan-node")).resolves.toMatchObject({
+        actual: "inactive",
+      })
+    })
+
+    it("classifies unresolved window and webview handles as native dirty resources", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const scope = manager.getPluginDisposableScope("native-handle")
+      scope.track(() => Promise.reject(new Error("webview still open")), "ctx.webview.create")
+      await scope.dispose()
+
+      expect(
+        (
+          manager as unknown as {
+            buildDirtyDiagnostic: (pluginId: string, message: string) => { runtime: string }
+          }
+        ).buildDirtyDiagnostic("native-handle", "cleanup failed")
+      ).toMatchObject({ runtime: "native" })
+    })
   })
 
   describe("resolveGovernanceMode", () => {
@@ -4132,6 +4334,9 @@ describe("PluginManager", () => {
       const store = createLoadStore(plugin)
       mockGetState.mockReturnValue(store)
       mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_load") {
+          return { tool_count: 1, hook_count: 0, generation: "python-gen-1" }
+        }
         if (cmd === "plugin_python_get_tools") {
           return [
             {
@@ -4173,6 +4378,7 @@ describe("PluginManager", () => {
           return {
             tool_count: 0,
             hook_count: 1,
+            generation: "python-gen-1",
             hooks: [{ event: "onMessageSend", name: "rewrite" }],
           }
         }
@@ -4196,6 +4402,7 @@ describe("PluginManager", () => {
       const result = await hooks.onMessageSend({ text: "hi" })
       expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call_hook", {
         pluginId: "py-plugin",
+        generation: "python-gen-1",
         event: "onMessageSend",
         name: "rewrite",
         payload: { text: "hi" },
@@ -4208,7 +4415,9 @@ describe("PluginManager", () => {
       const store = createLoadStore(plugin)
       mockGetState.mockReturnValue(store)
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "plugin_python_load") return { tool_count: 0, hook_count: 0, hooks: [] }
+        if (cmd === "plugin_python_load") {
+          return { tool_count: 0, hook_count: 0, generation: "python-gen-1", hooks: [] }
+        }
         if (cmd === "plugin_python_get_tools") return []
         return undefined
       })
@@ -4223,10 +4432,14 @@ describe("PluginManager", () => {
       const store = createLoadStore(plugin)
       mockGetState.mockReturnValue(store)
       const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      ;(
+        manager as unknown as { pythonRuntimeGenerations: Map<string, string> }
+      ).pythonRuntimeGenerations.set("py-plugin", "python-gen-1")
 
       await manager.notifyPluginConfigChanged("py-plugin", { greeting: "yo" })
       expect(mockInvoke).toHaveBeenCalledWith("plugin_python_push_config", {
         pluginId: "py-plugin",
+        generation: "python-gen-1",
         config: { greeting: "yo" },
       })
 
@@ -4250,6 +4463,9 @@ describe("PluginManager", () => {
 
     it("installPythonDeps and pushPythonConfig delegate to the backend commands", async () => {
       const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      ;(
+        manager as unknown as { pythonRuntimeGenerations: Map<string, string> }
+      ).pythonRuntimeGenerations.set("py-plugin", "python-gen-1")
       await manager.installPythonDeps("py-plugin", ["requests>=2"])
       expect(mockInvoke).toHaveBeenCalledWith("plugin_python_install_deps", {
         pluginId: "py-plugin",
@@ -4258,19 +4474,32 @@ describe("PluginManager", () => {
       await manager.callPythonHook("py-plugin", "onMessageSend", "rewrite", null)
       expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call_hook", {
         pluginId: "py-plugin",
+        generation: "python-gen-1",
         event: "onMessageSend",
         name: "rewrite",
         payload: null,
       })
     })
 
+    it("rejects python callbacks when no runtime generation is bound", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+
+      await expect(manager.callPythonFunction("py-plugin", "run", [])).rejects.toThrow(
+        /generation is unavailable/i
+      )
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_call", expect.anything())
+    })
+
     it("loadPlugin routes python plugins through the Python host", async () => {
       const plugin = createTypedPlugin("py-plugin", "python")
       const store = createLoadStore(plugin)
       mockGetState.mockReturnValue(store)
-      mockInvoke.mockImplementation(async (cmd: string) =>
-        cmd === "plugin_python_get_tools" ? [] : undefined
-      )
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_load") {
+          return { tool_count: 0, hook_count: 0, generation: "python-gen-1", hooks: [] }
+        }
+        return cmd === "plugin_python_get_tools" ? [] : undefined
+      })
 
       const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
       stubLoader(manager)
@@ -4374,6 +4603,157 @@ describe("PluginManager", () => {
       expect(JSON.stringify(errorEvents[0])).not.toContain("secret")
     })
 
+    it("disposes the failed activation generation before loadPlugin rejects", async () => {
+      const plugin = createTypedPlugin("activation-cleanup", "frontend")
+      plugin.source = "builtin"
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const dispose = jest.fn()
+      const loader = (
+        manager as unknown as {
+          loader: {
+            load: (plugin: Plugin) => Promise<unknown>
+            isLoaded: (pluginId: string) => boolean
+          }
+        }
+      ).loader
+      loader.load = jest.fn(async () => ({
+        manifest: plugin.manifest,
+        activate: () => {
+          manager.getPluginDisposableScope(plugin.manifest.id).track(dispose, "test-resource")
+          throw new Error("activate failed")
+        },
+      }))
+
+      await expect(manager.loadPlugin(plugin.manifest.id)).rejects.toThrow("activate failed")
+
+      expect(dispose).toHaveBeenCalledTimes(1)
+      expect(manager.getPluginContext(plugin.manifest.id)).toBeUndefined()
+      expect(loader.isLoaded(plugin.manifest.id)).toBe(false)
+      await expect(manager.getPluginLifecycleState(plugin.manifest.id)).resolves.toMatchObject({
+        actual: "error",
+      })
+    })
+
+    it("quarantines a timed-out activation and disposes its late registration", async () => {
+      const plugin = createTypedPlugin("activation-timeout", "frontend")
+      plugin.source = "builtin"
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        activationTimeoutMs: 5,
+        pendingRegistrationGraceMs: 5,
+      })
+      jest
+        .spyOn(
+          manager as unknown as {
+            unregisterPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "unregisterPluginContributions"
+        )
+        .mockImplementation(async (pluginId) => {
+          await manager.getPluginDisposableScope(pluginId).dispose()
+        })
+      const lateDispose = jest.fn()
+      let finishActivation!: () => void
+      const gate = new Promise<void>((resolve) => {
+        finishActivation = resolve
+      })
+      ;(
+        manager as unknown as {
+          loader: { load: (plugin: Plugin) => Promise<unknown> }
+        }
+      ).loader.load = jest.fn(async () => ({
+        manifest: plugin.manifest,
+        activate: async (context: {
+          lifecycle: { onDispose(dispose: () => void, label?: string): void }
+        }) => {
+          await gate
+          context.lifecycle.onDispose(lateDispose, "late-resource")
+        },
+      }))
+
+      await expect(manager.loadPlugin(plugin.manifest.id)).rejects.toThrow(/timed out/i)
+      await expect(manager.getPluginLifecycleState(plugin.manifest.id)).resolves.toMatchObject({
+        actual: "dirty",
+        dirty: { labels: expect.arrayContaining(["plugin.activate"]) },
+      })
+
+      finishActivation()
+      await gate
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(lateDispose).toHaveBeenCalledTimes(1)
+      await expect(manager.recoverPluginRuntime(plugin.manifest.id)).resolves.toBe(true)
+      await expect(manager.getPluginLifecycleState(plugin.manifest.id)).resolves.toMatchObject({
+        actual: "inactive",
+      })
+    })
+
+    it("retries a failed disposer before releasing a dirty generation", async () => {
+      const plugin = createTypedPlugin("activation-recovery", "frontend")
+      plugin.source = "builtin"
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const dispose = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("worker busy"))
+        .mockResolvedValueOnce(undefined)
+      ;(
+        manager as unknown as {
+          loader: { load: (plugin: Plugin) => Promise<unknown> }
+        }
+      ).loader.load = jest.fn(async () => ({
+        manifest: plugin.manifest,
+        activate: () => {
+          manager.getPluginDisposableScope(plugin.manifest.id).track(dispose, "worker")
+          throw new Error("activate failed")
+        },
+      }))
+
+      await expect(manager.loadPlugin(plugin.manifest.id)).rejects.toThrow("activate failed")
+      await expect(manager.getPluginLifecycleState(plugin.manifest.id)).resolves.toMatchObject({
+        actual: "dirty",
+      })
+      await expect(manager.recoverPluginRuntime(plugin.manifest.id)).resolves.toBe(true)
+      expect(dispose).toHaveBeenCalledTimes(2)
+    })
+
+    it("rejects a second manager activating the same host-global plugin id", async () => {
+      const plugin = createTypedPlugin("shared-generation", "frontend")
+      plugin.source = "builtin"
+      mockGetState.mockReturnValue(createLoadStore(plugin))
+      const coordinator = new PluginLifecycleCoordinator()
+      const first = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleCoordinator: coordinator,
+        managerId: "manager-a",
+      })
+      const second = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleCoordinator: coordinator,
+        managerId: "manager-b",
+      })
+      for (const manager of [first, second]) {
+        ;(
+          manager as unknown as {
+            loader: { load: (plugin: Plugin) => Promise<unknown> }
+          }
+        ).loader.load = jest.fn(async () => ({
+          manifest: plugin.manifest,
+          activate: () => undefined,
+        }))
+      }
+
+      await first.loadPlugin(plugin.manifest.id)
+
+      await expect(second.loadPlugin(plugin.manifest.id)).rejects.toBeInstanceOf(
+        PluginActivationConflictError
+      )
+    })
+
     it("disablePlugin unloads the Python module only for python/hybrid plugins", async () => {
       const pythonPlugin = createTypedPlugin("py-plugin", "hybrid", "enabled")
       const store = {
@@ -4382,8 +4762,16 @@ describe("PluginManager", () => {
       }
       mockGetState.mockReturnValue(store)
       const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      ;(
+        manager as unknown as {
+          bindPythonGeneration: (pluginId: string, generation: string) => void
+        }
+      ).bindPythonGeneration("py-plugin", "generation-1")
       await manager.disablePlugin("py-plugin")
-      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_unload", { pluginId: "py-plugin" })
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_unload", {
+        pluginId: "py-plugin",
+        generation: "generation-1",
+      })
 
       mockInvoke.mockClear()
       const wasmPlugin = createTypedPlugin("wasm-plugin", "wasm", "enabled")
@@ -4501,6 +4889,477 @@ describe("PluginManager", () => {
           manager as unknown as { initializePythonRuntime: () => Promise<void> }
         ).initializePythonRuntime()
       ).resolves.toBeUndefined()
+    })
+  })
+
+  describe("runtime service lifecycle", () => {
+    const createServicePlugin = (
+      id: string,
+      manifestPatch: Partial<PluginManifest> = {}
+    ): Plugin => ({
+      manifest: { ...createManifest(id), ...manifestPatch },
+      status: "installed",
+      source: "builtin",
+      path: `builtin://${id}`,
+      config: {},
+    })
+
+    const createServiceStore = (plugins: Plugin[]) => {
+      const store = {
+        plugins: Object.fromEntries(
+          plugins.map((plugin) => [plugin.manifest.id, plugin])
+        ) as Record<string, Plugin>,
+        loadPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "loaded" }
+        }),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        disablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "disabled" }
+        }),
+        setPluginStatus: jest.fn((pluginId: string, status: Plugin["status"]) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status }
+        }),
+        setPluginError: jest.fn(),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(),
+      }
+      return store
+    }
+
+    it("waits for a required service and activates a fresh generation when it appears", async () => {
+      const provider = createServicePlugin("provider", {
+        providesServices: { "example.service": "1.0.0" },
+      })
+      const consumer = createServicePlugin("consumer", {
+        requiresServices: { "example.service": "^1.0.0" },
+      })
+      const store = createServiceStore([provider, consumer])
+      mockGetState.mockReturnValue(store)
+      const serviceRegistry = new PluginServiceRegistry()
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleFeatures: { runtimeServices: true },
+        serviceRegistry,
+      })
+      const activated: string[] = []
+      const loaded = new Set<string>()
+      const loader = (
+        manager as unknown as {
+          loader: {
+            load: jest.Mock
+            isLoaded: (pluginId: string) => boolean
+          }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => {
+        loaded.add(plugin.manifest.id)
+        return {
+          manifest: plugin.manifest,
+          activate: () => void activated.push(plugin.manifest.id),
+        }
+      })
+      loader.isLoaded = (pluginId) => loaded.has(pluginId)
+      jest
+        .spyOn(
+          manager as unknown as {
+            registerPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "registerPluginContributions"
+        )
+        .mockResolvedValue(undefined)
+
+      await manager.enablePlugin("consumer")
+      await expect(manager.getPluginLifecycleState("consumer")).resolves.toMatchObject({
+        actual: "waiting",
+      })
+      expect(activated).not.toContain("consumer")
+
+      await manager.enablePlugin("provider")
+
+      expect(activated).toEqual(["provider", "consumer"])
+      await expect(manager.getPluginLifecycleState("consumer")).resolves.toMatchObject({
+        actual: "active",
+      })
+      expect(manager.createPluginServicesAPI().getProvider("example.service")).toMatchObject({
+        pluginId: "provider",
+        version: "1.0.0",
+      })
+      await expect(manager.getPluginLifecycleSnapshot("provider")).resolves.toMatchObject({
+        actual: "active",
+        providedServices: ["example.service@1.0.0:available"],
+        effects: { active: 1, pending: 0, failed: 0 },
+      })
+    })
+
+    it("tears down required consumers before a draining provider", async () => {
+      const provider = createServicePlugin("provider", {
+        providesServices: { "example.service": "1.0.0" },
+      })
+      const consumer = createServicePlugin("consumer", {
+        requiresServices: { "example.service": "^1.0.0" },
+      })
+      const store = createServiceStore([provider, consumer])
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleFeatures: { runtimeServices: true },
+        serviceRegistry: new PluginServiceRegistry(),
+      })
+      const loaded = new Set<string>()
+      const loader = (
+        manager as unknown as {
+          loader: { load: jest.Mock; isLoaded: (pluginId: string) => boolean; unload: jest.Mock }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => {
+        loaded.add(plugin.manifest.id)
+        return { manifest: plugin.manifest, activate: jest.fn() }
+      })
+      loader.isLoaded = (pluginId) => loaded.has(pluginId)
+      loader.unload = jest.fn(async (pluginId: string) => void loaded.delete(pluginId))
+      jest
+        .spyOn(
+          manager as unknown as {
+            registerPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "registerPluginContributions"
+        )
+        .mockResolvedValue(undefined)
+      jest
+        .spyOn(
+          manager as unknown as {
+            unregisterPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "unregisterPluginContributions"
+        )
+        .mockImplementation(async (pluginId) => {
+          await manager.getPluginDisposableScope(pluginId).dispose()
+        })
+
+      await manager.enablePlugin("provider")
+      await manager.enablePlugin("consumer")
+      const teardownOrder: string[] = []
+      jest
+        .spyOn(
+          manager as unknown as {
+            deactivatePluginRuntime: (pluginId: string) => Promise<void>
+          },
+          "deactivatePluginRuntime"
+        )
+        .mockImplementation(async (pluginId) => void teardownOrder.push(pluginId))
+
+      await manager.disablePlugin("provider")
+
+      expect(teardownOrder).toEqual(["consumer", "provider"])
+      await expect(manager.getPluginLifecycleState("consumer")).resolves.toMatchObject({
+        actual: "waiting",
+      })
+      expect(manager.createPluginServicesAPI().isAvailable("example.service")).toBe(false)
+    })
+
+    it("keeps the provider active when a required consumer cannot cleanly stop", async () => {
+      const provider = createServicePlugin("protected-provider", {
+        providesServices: { "protected.service": "1.0.0" },
+      })
+      const consumer = createServicePlugin("dirty-consumer", {
+        requiresServices: { "protected.service": "^1.0.0" },
+      })
+      const store = createServiceStore([provider, consumer])
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleFeatures: { runtimeServices: true },
+        serviceRegistry: new PluginServiceRegistry(),
+      })
+      const loaded = new Set<string>()
+      const loader = (
+        manager as unknown as {
+          loader: { load: jest.Mock; isLoaded: (pluginId: string) => boolean }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => {
+        loaded.add(plugin.manifest.id)
+        return { manifest: plugin.manifest, activate: jest.fn() }
+      })
+      loader.isLoaded = (pluginId) => loaded.has(pluginId)
+      jest
+        .spyOn(
+          manager as unknown as {
+            registerPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "registerPluginContributions"
+        )
+        .mockResolvedValue(undefined)
+
+      await manager.enablePlugin("protected-provider")
+      await manager.enablePlugin("dirty-consumer")
+      manager
+        .getPluginDisposableScope("dirty-consumer")
+        .track(() => Promise.reject(new Error("worker still running")), "worker")
+      jest
+        .spyOn(
+          manager as unknown as {
+            unregisterPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "unregisterPluginContributions"
+        )
+        .mockImplementation(async (pluginId) => {
+          await manager.getPluginDisposableScope(pluginId).dispose()
+        })
+      const deactivated: string[] = []
+      jest
+        .spyOn(
+          manager as unknown as {
+            deactivatePluginRuntime: (pluginId: string) => Promise<void>
+          },
+          "deactivatePluginRuntime"
+        )
+        .mockImplementation(async (pluginId) => void deactivated.push(pluginId))
+
+      await expect(manager.disablePlugin("protected-provider")).rejects.toThrow("dirty-consumer")
+
+      expect(deactivated).toEqual(["dirty-consumer"])
+      await expect(manager.getPluginLifecycleState("dirty-consumer")).resolves.toMatchObject({
+        actual: "dirty",
+      })
+      await expect(manager.getPluginLifecycleState("protected-provider")).resolves.toMatchObject({
+        actual: "active",
+      })
+      expect(manager.createPluginServicesAPI().isAvailable("protected.service")).toBe(true)
+      expect(store.plugins["protected-provider"].status).toBe("enabled")
+
+      await expect(manager.unloadPlugin("protected-provider")).rejects.toThrow("dirty-consumer")
+      mockInvoke.mockClear()
+      await expect(manager.uninstallPlugin("protected-provider")).rejects.toThrow("dirty-consumer")
+      await expect(manager.getPluginLifecycleState("protected-provider")).resolves.toMatchObject({
+        actual: "active",
+      })
+      expect(manager.createPluginServicesAPI().isAvailable("protected.service")).toBe(true)
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_uninstall", expect.anything())
+    })
+
+    it("restarts an active optional consumer with a fresh generation when its provider appears", async () => {
+      const provider = createServicePlugin("optional-provider", {
+        providesServices: { "optional.service": "1.0.0" },
+      })
+      const consumer = createServicePlugin("optional-consumer", {
+        optionalServices: { "optional.service": "^1.0.0" },
+      })
+      const store = createServiceStore([provider, consumer])
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleFeatures: { runtimeServices: true },
+        serviceRegistry: new PluginServiceRegistry(),
+      })
+      const activated: string[] = []
+      const loaded = new Set<string>()
+      const loader = (
+        manager as unknown as {
+          loader: { load: jest.Mock; isLoaded: (pluginId: string) => boolean }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => {
+        loaded.add(plugin.manifest.id)
+        return {
+          manifest: plugin.manifest,
+          activate: () => void activated.push(plugin.manifest.id),
+        }
+      })
+      loader.isLoaded = (pluginId) => loaded.has(pluginId)
+      jest
+        .spyOn(
+          manager as unknown as {
+            registerPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "registerPluginContributions"
+        )
+        .mockResolvedValue(undefined)
+      jest
+        .spyOn(
+          manager as unknown as {
+            unregisterPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "unregisterPluginContributions"
+        )
+        .mockImplementation(async (pluginId) => {
+          await manager.getPluginDisposableScope(pluginId).dispose()
+        })
+
+      await manager.enablePlugin("optional-consumer")
+      const firstGeneration = (await manager.getPluginLifecycleState("optional-consumer"))
+        .generation
+      await manager.enablePlugin("optional-provider")
+
+      expect(activated).toEqual(["optional-consumer", "optional-provider", "optional-consumer"])
+      await expect(manager.getPluginLifecycleState("optional-consumer")).resolves.toMatchObject({
+        actual: "active",
+        generation: expect.any(Number),
+      })
+      expect(
+        (await manager.getPluginLifecycleState("optional-consumer")).generation
+      ).toBeGreaterThan(firstGeneration ?? 0)
+    })
+
+    it("rebuilds only the optional child scope when scoped realms are enabled", async () => {
+      const provider = createServicePlugin("scoped-provider", {
+        providesServices: { "scoped.service": "1.0.0" },
+      })
+      const consumer = createServicePlugin("scoped-consumer", {
+        optionalServices: { "scoped.service": "^1.0.0" },
+      })
+      const store = createServiceStore([provider, consumer])
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleFeatures: { runtimeServices: true, scopedRealms: true },
+        serviceRegistry: new PluginServiceRegistry(),
+      })
+      const activations: string[] = []
+      const providerChanges: Array<string | undefined> = []
+      const childDisposals: Array<string | undefined> = []
+      const scopeIds: string[] = []
+      const loaded = new Set<string>()
+      const loader = (
+        manager as unknown as {
+          loader: { load: jest.Mock; isLoaded: (pluginId: string) => boolean }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => {
+        loaded.add(plugin.manifest.id)
+        return {
+          manifest: plugin.manifest,
+          activate: (context: PluginContext) => {
+            activations.push(plugin.manifest.id)
+            if (plugin.manifest.id === "scoped-consumer") {
+              context.services?.onOptionalServiceChange("scoped.service", (change) => {
+                const providerId = change.provider?.pluginId
+                providerChanges.push(providerId)
+                scopeIds.push(change.lifecycle.token.scopeId)
+                change.lifecycle.onDispose(() => void childDisposals.push(providerId))
+              })
+            }
+          },
+        }
+      })
+      loader.isLoaded = (pluginId) => loaded.has(pluginId)
+      jest
+        .spyOn(
+          manager as unknown as {
+            registerPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "registerPluginContributions"
+        )
+        .mockResolvedValue(undefined)
+      jest
+        .spyOn(
+          manager as unknown as {
+            unregisterPluginContributions: (pluginId: string) => Promise<void>
+          },
+          "unregisterPluginContributions"
+        )
+        .mockImplementation(async (pluginId) => {
+          await manager.getPluginDisposableScope(pluginId).dispose()
+        })
+
+      await manager.enablePlugin("scoped-consumer")
+      const generation = (await manager.getPluginLifecycleState("scoped-consumer")).generation
+      await manager.enablePlugin("scoped-provider")
+      await manager.disablePlugin("scoped-provider")
+
+      expect(activations).toEqual(["scoped-consumer", "scoped-provider"])
+      expect(providerChanges).toEqual([undefined, "scoped-provider", undefined])
+      expect(childDisposals).toEqual([undefined, "scoped-provider"])
+      expect(new Set(scopeIds).size).toBe(3)
+      await expect(manager.getPluginLifecycleState("scoped-consumer")).resolves.toMatchObject({
+        actual: "active",
+        generation,
+      })
+    })
+
+    it("does not publish the workspace service before its backend contribution commits", () => {
+      const provider = createServicePlugin("provider", {
+        providesServices: { "workspace.backend": "1.0.0" },
+      })
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleFeatures: { runtimeServices: true },
+      })
+
+      expect(() =>
+        (
+          manager as unknown as {
+            assertProvidedServiceContributionsCommitted: (plugin: Plugin) => void
+          }
+        ).assertProvidedServiceContributionsCommitted(provider)
+      ).toThrow("Service workspace.backend requires a workspaceBackends contribution")
+    })
+  })
+
+  describe("coordinated runtime reload", () => {
+    it("quiesces, unloads, and starts a fresh runtime while holding the graph reservation", async () => {
+      const plugin: Plugin = {
+        manifest: { ...createManifest("reloadable"), type: "frontend" },
+        status: "enabled",
+        source: "builtin",
+        path: "builtin://reloadable",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { reloadable: plugin } })
+      const coordinator = new PluginLifecycleCoordinator()
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleCoordinator: coordinator,
+      })
+      const order: string[] = []
+      jest
+        .spyOn(manager, "disablePlugin")
+        .mockImplementation(async () => void order.push("disable"))
+      jest.spyOn(manager, "unloadPlugin").mockImplementation(async () => void order.push("unload"))
+      jest.spyOn(manager, "enablePlugin").mockImplementation(async () => void order.push("enable"))
+
+      await manager.reloadPlugin("reloadable", "test-reload")
+
+      expect(order).toEqual(["disable", "unload", "enable"])
+      expect(coordinator.isProviderDraining("reloadable")).toBe(false)
+    })
+
+    it("refuses to reload a dirty generation before touching the runtime", async () => {
+      const plugin: Plugin = {
+        manifest: { ...createManifest("dirty-reload"), type: "frontend" },
+        status: "enabled",
+        source: "builtin",
+        path: "builtin://dirty-reload",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "dirty-reload": plugin } })
+      const lifecycleState = new InMemoryPluginLifecycleStateAdapter()
+      await lifecycleState.write("dirty-reload", 0, {
+        actual: "dirty",
+        dirty: {
+          runtime: "frontend",
+          reason: "unconfirmed",
+          at: Date.now(),
+          message: "resource still owned by previous generation",
+        },
+      })
+      const coordinator = new PluginLifecycleCoordinator()
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleStateAdapter: lifecycleState,
+        lifecycleCoordinator: coordinator,
+      })
+      const disable = jest.spyOn(manager, "disablePlugin")
+      const unload = jest.spyOn(manager, "unloadPlugin")
+
+      await expect(manager.reloadPlugin("dirty-reload")).rejects.toThrow(
+        "unresolved runtime resources"
+      )
+      expect(disable).not.toHaveBeenCalled()
+      expect(unload).not.toHaveBeenCalled()
+      expect(coordinator.isProviderDraining("dirty-reload")).toBe(false)
     })
   })
 
@@ -4939,6 +5798,76 @@ describe("PluginManager", () => {
       // Already enabled → no throw even though `a` is missing.
       await expect(manager.enablePlugin("b")).resolves.toBeUndefined()
     })
+
+    it("blocks provider disable while an active required dependent exists", async () => {
+      const store = {
+        plugins: {
+          provider: mkPlugin("provider", {}, "enabled"),
+          consumer: mkPlugin("consumer", { dependencies: { provider: "*" } }, "enabled"),
+        },
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      const error = await manager.disablePlugin("provider").catch((caught) => caught)
+
+      expect(error).toBeInstanceOf(PluginDependencyInUseError)
+      expect(error.blockedBy).toEqual(["consumer"])
+      expect(store.plugins.provider.status).toBe("enabled")
+    })
+
+    it("blocks provider uninstall while any required dependent remains installed", async () => {
+      const store = {
+        plugins: {
+          provider: mkPlugin("provider", {}, "installed"),
+          consumer: mkPlugin("consumer", { dependencies: { provider: "*" } }, "disabled"),
+        },
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      const error = await manager.uninstallPlugin("provider").catch((caught) => caught)
+
+      expect(error).toBeInstanceOf(PluginDependencyInUseError)
+      expect(error.blockedBy).toEqual(["consumer"])
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "plugin_uninstall",
+        expect.objectContaining({ pluginId: "provider" })
+      )
+    })
+
+    it("does not admit a dependent while its provider drain reservation is live", async () => {
+      const store = {
+        plugins: {
+          provider: mkPlugin("provider", {}, "enabled"),
+          consumer: mkPlugin("consumer", { dependencies: { provider: "*" } }),
+        },
+        enablePlugin: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      let finishPreflight!: (blockedBy: string[]) => void
+      jest
+        .spyOn(
+          manager as unknown as {
+            getRuntimeBlockingDependentIds: (pluginId: string) => Promise<string[]>
+          },
+          "getRuntimeBlockingDependentIds"
+        )
+        .mockReturnValueOnce(
+          new Promise<string[]>((resolve) => {
+            finishPreflight = resolve
+          })
+        )
+
+      const disable = manager.disablePlugin("provider")
+      await Promise.resolve()
+
+      await expect(manager.enablePlugin("consumer")).rejects.toThrow(/provider.*draining/i)
+      finishPreflight(["consumer"])
+      await expect(disable).rejects.toBeInstanceOf(PluginDependencyInUseError)
+      expect(store.enablePlugin).not.toHaveBeenCalled()
+    })
   })
 
   describe("lifecycle: install/update hooks + suspend/resume + idle sweep", () => {
@@ -5130,7 +6059,12 @@ describe("PluginManager", () => {
         syncBackendStatus: (id: string, status: string) => Promise<void>
         recordPluginVerification: (id: string, input: unknown) => void
       }
-      jest.spyOn(manager, "loadPlugin").mockResolvedValue(undefined)
+      jest
+        .spyOn(
+          manager as unknown as { loadPluginInner: (pluginId: string) => Promise<void> },
+          "loadPluginInner"
+        )
+        .mockResolvedValue(undefined)
       jest.spyOn(internals, "registerPluginContributions").mockResolvedValue(undefined)
       jest.spyOn(internals, "syncBackendStatus").mockResolvedValue(undefined)
       jest.spyOn(internals, "recordPluginVerification").mockReturnValue(undefined)
@@ -5241,6 +6175,31 @@ describe("PluginManager", () => {
       await manager.handleActivationEvent("onTool:some_tool")
 
       expect(resumeSpy).toHaveBeenCalledWith("p", "activation:onTool:some_tool")
+      resumeSpy.mockRestore()
+    })
+
+    it("manual disable of a suspended plugin persists intent and prevents wakeup", async () => {
+      const store = {
+        plugins: {
+          p: mkPlugin("p", "suspended", { activationEvents: ["onTool:*"] }),
+        },
+        setPluginStatus: jest.fn((id: string, status: Plugin["status"]) => {
+          ;(store.plugins as Record<string, Plugin>)[id].status = status
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const resumeSpy = jest.spyOn(manager, "resumePlugin").mockResolvedValue(undefined)
+
+      await manager.setPluginIntent("p", "disabled")
+      await manager.handleActivationEvent("onTool:any")
+
+      expect(store.plugins.p.status).toBe("disabled")
+      await expect(manager.getPluginLifecycleState("p")).resolves.toMatchObject({
+        intent: "disabled",
+        actual: "inactive",
+      })
+      expect(resumeSpy).not.toHaveBeenCalled()
       resumeSpy.mockRestore()
     })
 

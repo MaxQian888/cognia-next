@@ -27,6 +27,23 @@ export interface WasmActivateResult {
   exports: string[]
 }
 
+interface WasmLoadResult {
+  pluginApiVersion: string
+  generation: string
+}
+
+const wasmGenerations = new Map<string, string>()
+
+function requireWasmGeneration(pluginId: string): string {
+  const generation = wasmGenerations.get(pluginId)
+  if (!generation) throw new Error(`WASM runtime generation is unavailable for ${pluginId}`)
+  return generation
+}
+
+export function getWasmRuntimeGeneration(pluginId: string): string | undefined {
+  return wasmGenerations.get(pluginId)
+}
+
 async function invokeWasmHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core")
@@ -84,7 +101,11 @@ export async function loadWasmDefinition(
   }
 
   try {
-    await invokeWasmHost("plugin_wasm_load", { ...args })
+    const loaded = await invokeWasmHost<WasmLoadResult>("plugin_wasm_load", { ...args })
+    if (!loaded?.generation) {
+      throw new Error(`WASM host did not return a runtime generation for ${manifest.id}`)
+    }
+    wasmGenerations.set(manifest.id, loaded.generation)
   } catch (error) {
     throw new Error(
       `Failed to load WASM plugin ${manifest.id}: ${error instanceof Error ? error.message : String(error)}`
@@ -96,8 +117,10 @@ export async function loadWasmDefinition(
     activate: async (context) => {
       context.logger.info(`Activating WASM plugin ${manifest.id}`)
       try {
+        const generation = requireWasmGeneration(manifest.id)
         const result = await invokeWasmHost<WasmActivateResult>("plugin_wasm_activate", {
           pluginId: manifest.id,
+          generation,
           configJson: JSON.stringify(context.config ?? {}),
         })
         context.logger.debug("WASM plugin activated", {
@@ -112,7 +135,10 @@ export async function loadWasmDefinition(
     },
     deactivate: async () => {
       try {
-        await invokeWasmHost("plugin_wasm_deactivate", { pluginId: manifest.id })
+        await invokeWasmHost("plugin_wasm_deactivate", {
+          pluginId: manifest.id,
+          generation: requireWasmGeneration(manifest.id),
+        })
       } catch (error) {
         wasmLoaderLogger.warn("WASM deactivate failed", {
           pluginId: manifest.id,
@@ -130,13 +156,16 @@ export async function loadWasmDefinition(
 export async function callWasmExport<T = unknown>(
   pluginId: string,
   exportName: string,
-  payload: unknown
+  payload: unknown,
+  generation?: string
 ): Promise<T> {
   if (!isWasmHostAvailable()) {
     throw new Error("WASM host unavailable in this runtime")
   }
+  const boundGeneration = generation ?? requireWasmGeneration(pluginId)
   const result = await invokeWasmHost<string>("plugin_wasm_call", {
     pluginId,
+    generation: boundGeneration,
     exportName,
     payloadJson: JSON.stringify(payload ?? null),
   })
@@ -157,9 +186,15 @@ export async function callWasmExport<T = unknown>(
  * in `loadPythonPlugin`, but the definitions are declarative (the WIT contract
  * has no tool-listing export) rather than enumerated from the runtime.
  */
-export function buildWasmToolDefinitions(manifest: PluginManifest): PluginTool[] {
+export function buildWasmToolDefinitions(
+  manifest: PluginManifest,
+  generation?: string
+): PluginTool[] {
   const pluginId = manifest.id
-  return (manifest.tools ?? []).map((toolDef) => ({
+  const tools = manifest.tools ?? []
+  if (tools.length === 0) return []
+  const boundGeneration = generation
+  return tools.map((toolDef) => ({
     name: `${pluginId}:${toolDef.name}`,
     pluginId,
     definition: {
@@ -167,8 +202,19 @@ export function buildWasmToolDefinitions(manifest: PluginManifest): PluginTool[]
       description: toolDef.description,
       parametersSchema: toolDef.parametersSchema,
     },
-    execute: async (args: Record<string, unknown>) =>
-      callWasmExport(pluginId, "tool-execute", { kind: toolDef.name, ...args }),
+    execute: async (args: Record<string, unknown>) => {
+      if (!boundGeneration) {
+        throw new Error(
+          `WASM tool ${pluginId}:${toolDef.name} is not bound to a runtime generation`
+        )
+      }
+      return callWasmExport(
+        pluginId,
+        "tool-execute",
+        { kind: toolDef.name, ...args },
+        boundGeneration
+      )
+    },
   }))
 }
 
@@ -186,9 +232,11 @@ export function buildWasmToolDefinitions(manifest: PluginManifest): PluginTool[]
  * machinery as frontend plugins (kind-prefixing, catalog entry, unregister on
  * deactivate), so no registration logic is duplicated here.
  */
-export function buildWasmNodeDefs(manifest: PluginManifest): PluginNodeDef[] {
+export function buildWasmNodeDefs(manifest: PluginManifest, generation?: string): PluginNodeDef[] {
   const pluginId = manifest.id
   const nodes = manifest.workflows?.nodes ?? []
+  if (nodes.length === 0) return []
+  const boundGeneration = generation
   return nodes.map((node) => ({
     kind: node.kind,
     typeVersion: node.typeVersion,
@@ -206,11 +254,19 @@ export function buildWasmNodeDefs(manifest: PluginManifest): PluginNodeDef[] {
     // the pluginId-prefixed kind (applied by registerNode). Pass the resolved
     // params + upstream outputs so the guest node has its inputs.
     execute: async (ctx) => {
-      const output = await callWasmExport(pluginId, "workflow-node-execute", {
-        kind: node.kind,
-        params: ctx.params,
-        upstream: ctx.upstream,
-      })
+      if (!boundGeneration) {
+        throw new Error(`WASM node ${pluginId}:${node.kind} is not bound to a runtime generation`)
+      }
+      const output = await callWasmExport(
+        pluginId,
+        "workflow-node-execute",
+        {
+          kind: node.kind,
+          params: ctx.params,
+          upstream: ctx.upstream,
+        },
+        boundGeneration
+      )
       return { output }
     },
   }))
@@ -220,14 +276,17 @@ export function buildWasmNodeDefs(manifest: PluginManifest): PluginNodeDef[] {
  * Permanently remove a loaded WASM plugin from the host. Called by
  * `PluginManager.uninstall` after lifecycle cleanup.
  */
-export async function unloadWasmPlugin(pluginId: string): Promise<void> {
+export async function unloadWasmPlugin(pluginId: string, generation?: string): Promise<void> {
   if (!isWasmHostAvailable()) return
+  const boundGeneration = generation ?? requireWasmGeneration(pluginId)
   try {
-    await invokeWasmHost("plugin_wasm_unload", { pluginId })
+    await invokeWasmHost("plugin_wasm_unload", { pluginId, generation: boundGeneration })
+    wasmGenerations.delete(pluginId)
   } catch (error) {
     wasmLoaderLogger.warn("WASM unload failed", {
       pluginId,
       error: error instanceof Error ? error.message : String(error),
     })
+    throw error
   }
 }

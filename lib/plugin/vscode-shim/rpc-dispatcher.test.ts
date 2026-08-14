@@ -23,21 +23,24 @@ import {
 } from "./rpc-dispatcher"
 
 describe("rpc-dispatcher", () => {
-  let sentResponses: Array<{ pluginId: string; frame: unknown }>
+  let sentResponses: Array<{ pluginId: string; generation?: string; frame: unknown }>
   let listenCalls: Array<{ event: string }>
   let unlistenSpies: jest.Mock[]
+  let eventCallbacks: Array<(payload: { payload: string }) => void>
 
   beforeEach(() => {
     sentResponses = []
     listenCalls = []
     unlistenSpies = []
+    eventCallbacks = []
     resetRegistry()
     configureRpcDispatcher({
-      sendResponse: async (pluginId, frame) => {
-        sentResponses.push({ pluginId, frame: JSON.parse(frame) })
+      sendResponse: async (pluginId, generation, frame) => {
+        sentResponses.push({ pluginId, generation, frame: JSON.parse(frame) })
       },
-      listen: async (event, _cb) => {
+      listen: async (event, cb) => {
         listenCalls.push({ event })
+        eventCallbacks.push(cb)
         const spy = jest.fn()
         unlistenSpies.push(spy)
         return spy
@@ -132,6 +135,7 @@ describe("rpc-dispatcher", () => {
       expect(sentResponses).toHaveLength(1)
       expect(sentResponses[0]).toEqual({
         pluginId: "pub.ext",
+        generation: undefined,
         frame: {
           jsonrpc: "2.0",
           id: 42,
@@ -230,6 +234,30 @@ describe("rpc-dispatcher", () => {
       // Re-subscribing creates a fresh listen.
       await subscribeToVscodeEvents("pub.x")
       expect(listenCalls).toHaveLength(2)
+    })
+
+    it("drops events from an older runtime generation", async () => {
+      const handler = jest.fn()
+      registerMethod("test:event", handler)
+      await subscribeToVscodeEvents("pub.x", "generation-2")
+
+      eventCallbacks[0]?.({
+        payload: JSON.stringify({
+          generation: "generation-1",
+          rawFrame: JSON.stringify({ jsonrpc: "2.0", method: "test:event" }),
+        }),
+      })
+      await Promise.resolve()
+      expect(handler).not.toHaveBeenCalled()
+
+      eventCallbacks[0]?.({
+        payload: JSON.stringify({
+          generation: "generation-2",
+          rawFrame: JSON.stringify({ jsonrpc: "2.0", method: "test:event" }),
+        }),
+      })
+      await Promise.resolve()
+      expect(handler).toHaveBeenCalledTimes(1)
     })
 
     it("throws if not configured", async () => {

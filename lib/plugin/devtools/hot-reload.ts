@@ -46,6 +46,14 @@ export interface ReloadResult {
   preservedState?: Record<string, unknown>
 }
 
+interface PluginRuntimeStateEnvelope {
+  schemaVersion: number
+  pluginVersion: string
+  data: unknown
+}
+
+const MAX_RUNTIME_STATE_ENVELOPE_BYTES = 256 * 1024
+
 export interface HotReloadState {
   isWatching: boolean
   watchedPlugins: Set<string>
@@ -258,19 +266,17 @@ export class PluginHotReload {
       // Invalidate module cache
       await this.invalidateModuleCache(pluginId)
 
-      // Reload the plugin
-      if (this.pluginLoader && this.pluginReloader) {
+      // The lifecycle manager is the canonical reload path. It reserves the
+      // provider graph, quiesces consumers, closes the old generation, and
+      // starts a fresh generation without resurrecting runtime objects.
+      const lifecycleReloaded = await this.reloadThroughLifecycleManager(pluginId)
+      if (!lifecycleReloaded && this.pluginLoader && this.pluginReloader) {
         const definition = await this.pluginLoader(pluginId)
         await this.pluginReloader(pluginId, definition)
-      } else {
+      } else if (!lifecycleReloaded) {
         // Fallback: use Tauri command
         await invoke("plugin_reload", { pluginId })
       }
-
-      // python/hybrid plugins also carry a subprocess host running the old
-      // module — cycle it so edits to .py files actually land. Re-load
-      // re-reads persisted config + host settings.
-      await this.reloadPythonHost(pluginId)
 
       // Restore state if preserved
       const preservedState = this.pluginStates.get(pluginId)
@@ -323,28 +329,17 @@ export class PluginHotReload {
     }
   }
 
-  /**
-   * Cycle a python/hybrid plugin's subprocess host (unload → load) so the
-   * fresh module is imported. No-op for other plugin types or when the
-   * manager isn't initialized (web mode / unit tests).
-   */
-  private async reloadPythonHost(pluginId: string): Promise<void> {
+  private async reloadThroughLifecycleManager(pluginId: string): Promise<boolean> {
     let manager: import("@/lib/plugin/core/manager").PluginManager
     try {
       const { getPluginManager } = await import("@/lib/plugin/core/manager")
       manager = getPluginManager()
     } catch {
-      return // manager not initialized — nothing to cycle
+      return false
     }
-    const type = manager.getPlugin(pluginId)?.manifest.type
-    if (type !== "python" && type !== "hybrid") {
-      return
-    }
-    // Failures here are real reload failures (stale code keeps running) —
-    // let them propagate into the ReloadResult error path.
-    await manager.unloadPythonPlugin(pluginId)
-    await manager.loadPythonPlugin(pluginId)
-    loggers.hotReload.info(`Python host cycled for ${pluginId}`)
+    if (!manager.getPlugin(pluginId)) return false
+    await manager.reloadPlugin(pluginId, "dev-hot-reload")
+    return true
   }
 
   async reloadAll(): Promise<ReloadResult[]> {
@@ -364,23 +359,12 @@ export class PluginHotReload {
 
   private async preservePluginState(pluginId: string): Promise<void> {
     try {
-      // Get plugin state from storage
-      const storageKey = `cognia-plugin-storage:${pluginId}`
-      const stateJson = localStorage.getItem(storageKey)
-
-      if (stateJson) {
-        const state = JSON.parse(stateJson)
-        this.pluginStates.set(pluginId, state)
-      }
-
-      // Also try to get runtime state via event
-      const runtimeState = await invoke<Record<string, unknown> | null>("plugin_get_state", {
+      const runtimeState = await invoke<PluginRuntimeStateEnvelope | null>("plugin_get_state", {
         pluginId,
       }).catch(() => null)
 
-      if (runtimeState) {
-        const existingState = this.pluginStates.get(pluginId) || {}
-        this.pluginStates.set(pluginId, { ...existingState, _runtime: runtimeState })
+      if (this.isRuntimeStateEnvelope(runtimeState)) {
+        this.pluginStates.set(pluginId, runtimeState as unknown as Record<string, unknown>)
       }
     } catch (error) {
       loggers.hotReload.warn(`Failed to preserve state for ${pluginId}:`, error)
@@ -392,16 +376,10 @@ export class PluginHotReload {
     state: Record<string, unknown>
   ): Promise<void> {
     try {
-      // Restore storage state
-      const { _runtime, ...storageState } = state
-      const storageKey = `cognia-plugin-storage:${pluginId}`
-      localStorage.setItem(storageKey, JSON.stringify(storageState))
-
-      // Restore runtime state
-      if (_runtime) {
+      if (this.isRuntimeStateEnvelope(state)) {
         await invoke("plugin_set_state", {
           pluginId,
-          state: _runtime,
+          state,
         }).catch((error) =>
           recordSilentFailure(
             pluginId,
@@ -419,6 +397,28 @@ export class PluginHotReload {
       this.pluginStates.delete(pluginId)
     } catch (error) {
       loggers.hotReload.warn(`Failed to restore state for ${pluginId}:`, error)
+    }
+  }
+
+  private isRuntimeStateEnvelope(value: unknown): value is PluginRuntimeStateEnvelope {
+    if (!value || typeof value !== "object") return false
+    const envelope = value as Partial<PluginRuntimeStateEnvelope>
+    if (
+      !Number.isInteger(envelope.schemaVersion) ||
+      (envelope.schemaVersion ?? 0) < 1 ||
+      typeof envelope.pluginVersion !== "string" ||
+      envelope.pluginVersion.length === 0 ||
+      !("data" in envelope)
+    ) {
+      return false
+    }
+    try {
+      return (
+        new TextEncoder().encode(JSON.stringify(envelope)).byteLength <=
+        MAX_RUNTIME_STATE_ENVELOPE_BYTES
+      )
+    } catch {
+      return false
     }
   }
 

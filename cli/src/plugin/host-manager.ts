@@ -12,6 +12,7 @@ export interface ManagerLike {
   loadPlugin: (id: string) => Promise<void>
   enablePlugin: (id: string) => Promise<void>
   disablePlugin: (id: string) => Promise<void>
+  setPluginIntent: (id: string, intent: "enabled" | "disabled", reason?: string) => Promise<void>
   unloadPlugin: (id: string) => Promise<void>
 }
 
@@ -34,6 +35,7 @@ export function makeHostManager(deps: HostManagerDeps): HostManager {
     loadPlugin: (id) => deps.manager.loadPlugin(id),
     enablePlugin: (id) => deps.manager.enablePlugin(id),
     disablePlugin: (id) => deps.manager.disablePlugin(id),
+    setPluginIntent: (id, intent) => deps.manager.setPluginIntent(id, intent, "cli-command"),
     unloadPlugin: (id) => deps.manager.unloadPlugin(id),
     list: () =>
       Object.values(deps.getPlugins()).map((p) => ({

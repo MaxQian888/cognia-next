@@ -13,7 +13,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use wasmtime::component::{Component, Linker};
 
-use super::bridge::WasmRendererBridge;
+use super::bridge::{CancelReason, WasmRendererBridge};
 use super::engine::{api_version_compatible, engine, parse_plugin_api_version};
 use super::errors::upgrade_required;
 use super::services::WasmHostServices;
@@ -58,6 +58,7 @@ pub struct WasmFsBlock {
 /// artifact (shared across activations); the live `Store` + `Instance` for an
 /// active plugin live separately in [`WasmPluginState::activated`].
 pub struct LoadedPlugin {
+    pub generation: String,
     pub manifest: WasmManifestSlice,
     pub plugin_path: PathBuf,
     pub component: Component,
@@ -73,6 +74,7 @@ pub struct LoadedPlugin {
 /// unsound). `call_timeout_ms` mirrors the store's per-call epoch budget so the
 /// deadline can be reset before each reused call.
 pub struct ActivatedPlugin {
+    pub generation: String,
     pub store: wasmtime::Store<HostState>,
     pub bindings: since_v0_2::CogniaPlugin,
     pub call_timeout_ms: u64,
@@ -127,6 +129,7 @@ pub struct ActivateOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct WasmPluginSnapshot {
     pub plugin_id: String,
+    pub generation: String,
     pub version: String,
     pub plugin_api_version: String,
     pub plugin_path: String,
@@ -176,13 +179,21 @@ impl WasmPluginHost {
         let plugin_pre = Self::build_plugin_pre(&plugin_api_version, &component)?;
         let id = manifest.id.clone();
         let entry = LoadedPlugin {
+            generation: uuid::Uuid::now_v7().to_string(),
             manifest,
             plugin_path,
             component,
             plugin_api_version: plugin_api_version.clone(),
         };
-        state.loaded.write().insert(id.clone(), entry);
-        state.pres.write().insert(id, Arc::new(plugin_pre));
+        // Publish the replacement atomically with respect to generation-aware
+        // unload: every map follows the same loaded -> pres -> activated lock
+        // order, so stale cleanup cannot remove a newer component/instance.
+        let mut loaded = state.loaded.write();
+        let mut pres = state.pres.write();
+        let mut activated = state.activated.write();
+        activated.remove(&id);
+        loaded.insert(id.clone(), entry);
+        pres.insert(id, Arc::new(plugin_pre));
         Ok(plugin_api_version)
     }
 
@@ -292,6 +303,7 @@ impl WasmPluginHost {
             .values()
             .map(|p| WasmPluginSnapshot {
                 plugin_id: p.manifest.id.clone(),
+                generation: p.generation.clone(),
                 version: p.manifest.version.clone(),
                 plugin_api_version: p.plugin_api_version.clone(),
                 plugin_path: p.plugin_path.to_string_lossy().into_owned(),
@@ -307,6 +319,28 @@ impl WasmPluginHost {
         // Drop any live instance first so its Store (guest memory) is freed.
         state.activated.write().remove(plugin_id);
         state.loaded.write().remove(plugin_id).is_some()
+    }
+
+    pub fn unload_generation(
+        state: &WasmPluginState,
+        plugin_id: &str,
+        generation: &str,
+    ) -> Result<bool, String> {
+        let mut loaded = state.loaded.write();
+        let Some(entry) = loaded.get(plugin_id) else {
+            return Ok(false);
+        };
+        if entry.generation != generation {
+            return Err(format!("stale WASM generation for {plugin_id}"));
+        }
+        if let Some(bridge) = Self::renderer_bridge(state) {
+            bridge.cancel_plugin(plugin_id, CancelReason::Unload);
+        }
+        let mut pres = state.pres.write();
+        let mut activated = state.activated.write();
+        pres.remove(plugin_id);
+        activated.remove(plugin_id);
+        Ok(loaded.remove(plugin_id).is_some())
     }
 
     /// Drop the live instance for a plugin (if activated). Returns whether an
@@ -474,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_is_sorted_by_id() {
+    fn snapshot_is_sorted_by_id_and_unload_is_generation_bound() {
         let state = WasmPluginState::default();
         // Inject two synthetic entries directly so we don't need a real .wasm.
         {
@@ -491,6 +525,7 @@ mod tests {
             map.insert(
                 "z-plugin".into(),
                 LoadedPlugin {
+                    generation: "generation-z".into(),
                     manifest: WasmManifestSlice {
                         id: "z-plugin".into(),
                         version: "0.0.1".into(),
@@ -511,6 +546,7 @@ mod tests {
             map.insert(
                 "a-plugin".into(),
                 LoadedPlugin {
+                    generation: "generation-a".into(),
                     manifest: WasmManifestSlice {
                         id: "a-plugin".into(),
                         version: "0.0.1".into(),
@@ -532,7 +568,13 @@ mod tests {
         let snap = WasmPluginHost::snapshot(&state);
         assert_eq!(snap.len(), 2);
         assert_eq!(snap[0].plugin_id, "a-plugin");
+        assert_eq!(snap[0].generation, "generation-a");
         assert_eq!(snap[1].plugin_id, "z-plugin");
+
+        assert!(WasmPluginHost::unload_generation(&state, "a-plugin", "stale").is_err());
+        assert!(state.loaded.read().contains_key("a-plugin"));
+        assert!(WasmPluginHost::unload_generation(&state, "a-plugin", "generation-a").unwrap());
+        assert!(!state.loaded.read().contains_key("a-plugin"));
     }
 
     #[test]
@@ -566,6 +608,7 @@ mod tests {
         let component = Component::new(engine(), EMPTY_COMPONENT).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let plugin = LoadedPlugin {
+            generation: "generation-demo".into(),
             manifest: manifest_v02(),
             plugin_path: tmp.path().to_path_buf(),
             component,

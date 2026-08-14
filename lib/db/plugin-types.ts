@@ -37,6 +37,25 @@ export interface PluginRow {
   type: string
   /** Whether the user currently has the plugin enabled. */
   enabled: boolean
+  /**
+   * Non-indexed lifecycle control-plane state. Added without a Dexie version
+   * bump because the plugins table already stores arbitrary object fields.
+   */
+  lifecycle?: {
+    intent: "auto" | "enabled" | "disabled"
+    actual: "inactive" | "activating" | "active" | "waiting" | "stopping" | "error" | "dirty"
+    revision: number
+    generation?: number
+    dirty?: {
+      runtime: "frontend" | "node" | "python" | "wasm" | "vscode" | "native"
+      reason: "timeout" | "error" | "unconfirmed"
+      at: number
+      message: string
+      labels?: string[]
+    }
+    lastError?: string
+    updatedAt: number
+  }
   /** Capabilities the plugin declares (multi-entry index). */
   capabilities: string[]
   /** Resolved on-disk path (Tauri builds) or pseudo-path for builtins. */

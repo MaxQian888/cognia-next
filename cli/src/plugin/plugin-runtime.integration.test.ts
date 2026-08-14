@@ -9,9 +9,18 @@
  * plugin-manager singleton it creates does not leak into other suites.
  */
 import { ensurePluginRuntime, __resetPluginRuntimeForTesting } from "./plugin-runtime"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-plugin-runtime-"))
+const previousCogniaHome = process.env.COGNIA_HOME
 
 describe("plugin runtime (real bootstrap)", () => {
-  beforeEach(() => __resetPluginRuntimeForTesting())
+  beforeEach(() => {
+    process.env.COGNIA_HOME = testHome
+    __resetPluginRuntimeForTesting()
+  })
 
   // Some in-tree plugins (scheduler, share-watch) start background timers on
   // activation. Disable every enabled plugin so the worker can exit cleanly.
@@ -28,6 +37,9 @@ describe("plugin runtime (real bootstrap)", () => {
     } catch {
       // best-effort
     }
+    if (previousCogniaHome === undefined) delete process.env.COGNIA_HOME
+    else process.env.COGNIA_HOME = previousCogniaHome
+    fs.rmSync(testHome, { recursive: true, force: true })
   })
 
   it("loads in-tree plugins, builds a tools manifest, and resolves a tool handler", async () => {

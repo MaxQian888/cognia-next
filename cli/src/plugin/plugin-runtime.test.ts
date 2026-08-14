@@ -3,6 +3,7 @@
  */
 import {
   __resetPluginRuntimeForTesting,
+  applyDisabledPluginsToManager,
   applyDisabledPluginsToStore,
   ensurePluginRuntime,
   installPluginRuntimeShims,
@@ -120,6 +121,18 @@ describe("applyDisabledPluginsToStore", () => {
     const store = makeStore({ c: "disabled" })
     applyDisabledPluginsToStore(new Set(), store)
     expect(store.plugins.c.status).toBe("disabled")
+  })
+})
+
+describe("applyDisabledPluginsToManager", () => {
+  it("routes persisted CLI disables through canonical teardown intent", async () => {
+    const manager = { setPluginIntent: jest.fn(async () => undefined) }
+    const store = makeStore({ a: "enabled", b: "enabled" })
+
+    await applyDisabledPluginsToManager(new Set(["missing", "b"]), manager, store)
+
+    expect(manager.setPluginIntent).toHaveBeenCalledTimes(1)
+    expect(manager.setPluginIntent).toHaveBeenCalledWith("b", "disabled", "cli-state-restore")
   })
 })
 
@@ -264,6 +277,10 @@ describe("ensurePluginRuntime", () => {
         enablePython: true,
         frontendImporter,
         nodeHostInvoker: expect.any(Function),
+        lifecycleStateAdapter: expect.objectContaining({
+          read: expect.any(Function),
+          write: expect.any(Function),
+        }),
       })
     )
 

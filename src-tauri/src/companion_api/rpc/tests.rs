@@ -1977,7 +1977,7 @@ rl.on("line", (line) => {
     .expect_err("remote LSP facade must reject non-LSP methods");
     assert_eq!(denied_method.0, StatusCode::BAD_REQUEST);
 
-    call!(
+    let loaded = call!(
         "plugin_load_vscode",
         json!({
             "pluginId": plugin_id,
@@ -1990,10 +1990,14 @@ rl.on("line", (line) => {
         })
     )
     .expect("load VS Code extension");
+    let generation = loaded["generation"]
+        .as_str()
+        .expect("VS Code generation")
+        .to_string();
 
     let activated = call!(
         "plugin_activate_vscode",
-        json!({ "pluginId": plugin_id, "configJson": "{}" })
+        json!({ "pluginId": plugin_id, "generation": generation, "configJson": "{}" })
     )
     .expect("activate VS Code extension");
     assert_eq!(activated["registeredCommands"], json!(["headless.rpc"]));
@@ -2003,6 +2007,7 @@ rl.on("line", (line) => {
         "plugin_invoke_vscode_rpc",
         json!({
             "pluginId": plugin_id,
+            "generation": generation,
             "method": "test:echo",
             "payloadJson": r#"{"value":7}"#,
         })
@@ -2010,14 +2015,23 @@ rl.on("line", (line) => {
     .expect("invoke VS Code sidecar RPC");
     assert_eq!(echoed, json!(r#"{"value":7}"#));
 
-    call!("plugin_deactivate_vscode", json!({ "pluginId": plugin_id }))
-        .expect("deactivate VS Code extension");
-    call!("plugin_unload_vscode", json!({ "pluginId": plugin_id }))
-        .expect("unload VS Code extension");
+    call!(
+        "plugin_deactivate_vscode",
+        json!({ "pluginId": plugin_id, "generation": generation })
+    )
+    .expect("deactivate VS Code extension");
+    call!(
+        "plugin_unload_vscode",
+        json!({ "pluginId": plugin_id, "generation": generation })
+    )
+    .expect("unload VS Code extension");
     assert_eq!(services.vscode_plugins.sidecars.read().len(), 1);
     call!(
         "plugin_unload_vscode",
-        json!({ "pluginId": crate::plugin_api::vscode::commands::LSP_HOST_KEY })
+        json!({
+            "pluginId": crate::plugin_api::vscode::commands::LSP_HOST_KEY,
+            "generation": "system",
+        })
     )
     .expect("unload system LSP host");
     assert!(services.vscode_plugins.sidecars.read().is_empty());
@@ -2535,6 +2549,7 @@ async fn expired_idempotency_key_causes_re_execution() {
 fn every_known_command_has_a_dispatch_arm() {
     let body = [
         include_str!("chat.rs"),
+        include_str!("codex_app.rs"),
         include_str!("native_tools.rs"),
         include_str!("data_sync.rs"),
         include_str!("service_plane.rs"),
@@ -3655,6 +3670,7 @@ fn remote_claude_response_commands_are_control_gated() {
 fn command_families_cover_known_non_browser_commands_once() {
     let families = [
         super::chat::COMMANDS,
+        super::codex_app::COMMANDS,
         super::native_tools::COMMANDS,
         super::data_sync::COMMANDS,
         super::service_plane::COMMANDS,

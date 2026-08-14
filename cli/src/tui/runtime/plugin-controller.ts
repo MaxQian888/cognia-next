@@ -281,8 +281,7 @@ export async function pluginSetEnabled(
       deps.setLive ??
       (async (pid: string, on: boolean) => {
         const host = await realHost()
-        if (on) await host.enablePlugin(pid)
-        else await host.disablePlugin(pid)
+        await host.setPluginIntent(pid, on ? "enabled" : "disabled")
       })
     await setLive(id, enabled)
   } catch (err) {

@@ -11,6 +11,10 @@ import type { PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { invoke } from "@tauri-apps/api/core"
 import { transport } from "@/lib/tauri/transport-instance"
+import {
+  __resetPythonRuntimeGenerationsForTesting,
+  bindPythonRuntimeGeneration,
+} from "@/lib/plugin/python/runtime-generation"
 
 jest.mock("@/lib/platform/detect", () => ({ isHeadlessHost: jest.fn(() => false) }))
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn(async () => "via-invoke") }))
@@ -299,6 +303,8 @@ describe("default transport and stream ids", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockIsHeadlessHost.mockReturnValue(false)
+    __resetPythonRuntimeGenerationsForTesting()
+    bindPythonRuntimeGeneration("p", "generation-1")
   })
 
   it("invokes the Tauri command directly outside a headless host", async () => {
@@ -311,6 +317,7 @@ describe("default transport and stream ids", () => {
     await expect(proxy.extract("a.png")).resolves.toBe("via-invoke")
     expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call", {
       pluginId: "p",
+      generation: "generation-1",
       functionName: PYTHON_CONTRIBUTION_DISPATCH,
       args: ["c", "extract", ["a.png"], null],
     })
@@ -328,6 +335,7 @@ describe("default transport and stream ids", () => {
     await expect(proxy.extract("a.png")).resolves.toBe("via-transport")
     expect(mockTransportCall).toHaveBeenCalledWith("plugin_python_call", {
       pluginId: "p",
+      generation: "generation-1",
       functionName: PYTHON_CONTRIBUTION_DISPATCH,
       args: ["c", "extract", ["a.png"], null],
     })

@@ -29,6 +29,7 @@ import { AccountStoreInitializer } from "@/components/providers/initializers/acc
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
 import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
 import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
+import { DeveloperModeInitializer } from "@/components/providers/initializers/developer-mode-initializer"
 import { ApprovalJournalInitializer } from "@/components/providers/initializers/approval-journal-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
@@ -218,6 +219,7 @@ export default async function RootLayout({
                            * surface that reads plugin registries or calls
                            * getPluginManager(). */}
                           <PluginRuntimeInitializer />
+                          <DeveloperModeInitializer />
                           <ChatMiddlewareFlagInitializer />
                           <ApprovalJournalInitializer />
                           <SubscriptionInitializer />

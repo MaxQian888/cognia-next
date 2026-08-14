@@ -14,6 +14,9 @@
     "python": ">=3.9"
   },
   "permissions": ["python:execute"],
+  "providesServices": {
+    "workspace.backend": "1.0.0"
+  },
   "ocrProviders": [
     {
       "id": "echo-ocr",

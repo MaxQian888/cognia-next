@@ -9,6 +9,8 @@ import { dispatchPythonPluginEvent } from "./event-bus"
 /** Wire payload of one `plugin:python` event (see events.rs PythonEvent). */
 export interface PythonPluginEvent {
   pluginId: string
+  /** Opaque runtime generation. Legacy test/adapters may omit it. */
+  generation?: string
   kind: "log" | "progress" | "chunk" | "chunk_end" | "exit" | (string & {})
   callId?: number
   data: unknown

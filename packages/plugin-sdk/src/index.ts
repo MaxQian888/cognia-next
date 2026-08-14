@@ -54,9 +54,11 @@ export {
   PLUGIN_MANIFEST_CONTRIBUTIONS,
   PLUGIN_PATH_FIELD_CONTRACTS,
   PLUGIN_RUNTIME_ENTRY_CONTRACTS,
+  PLUGIN_SERVICE_CONTRACTS,
   type CanonicalPluginErrorCode,
   type PluginApiMethodContract,
   type PluginApiNamespaceContract,
+  type PluginServiceContract,
 } from "./contracts/catalog"
 export {
   PluginAdapterError,

@@ -13,6 +13,27 @@ import type { ContextResourceKind } from "@/types/context-workbench"
 
 describe("Plugin Validation", () => {
   describe("validatePluginManifest", () => {
+    it("validates runtime service ids, provider versions, and consumer constraints", () => {
+      const manifest = createValidManifest()
+      Object.assign(manifest, {
+        providesServices: { "workspace.backend": "1.2.0" },
+        requiresServices: { "workspace.storage": "^2.0.0" },
+        optionalServices: { "workspace.preview": ">=1.0.0" },
+      })
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+
+      Object.assign(manifest, {
+        providesServices: { "Bad Service": "latest" },
+        requiresServices: { valid: "not-semver" },
+      })
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "manifest.providesServices.service_id.invalid" }),
+          expect.objectContaining({ code: "manifest.providesServices.version.invalid" }),
+          expect.objectContaining({ code: "manifest.requiresServices.version.invalid" }),
+        ])
+      )
+    })
     const createValidManifest = (): PluginManifest => ({
       id: "test-plugin",
       name: "Test Plugin",

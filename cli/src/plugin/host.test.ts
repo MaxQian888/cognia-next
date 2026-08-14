@@ -35,6 +35,10 @@ function fakeManager() {
     loadPlugin: jest.fn(async (id: string) => void events.push(`load:${id}`)),
     enablePlugin: jest.fn(async (id: string) => void events.push(`enable:${id}`)),
     disablePlugin: jest.fn(async (id: string) => void events.push(`disable:${id}`)),
+    setPluginIntent: jest.fn(
+      async (id: string, intent: "enabled" | "disabled") =>
+        void events.push(`intent:${id}:${intent}`)
+    ),
     unloadPlugin: jest.fn(async (id: string) => void events.push(`unload:${id}`)),
     list: jest.fn(() => [
       {

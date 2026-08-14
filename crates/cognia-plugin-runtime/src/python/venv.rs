@@ -67,6 +67,7 @@ fn emit_progress(sink: &Option<EventSink>, plugin_id: &str, phase: &str, line: S
     if let Some(sink) = sink {
         sink(PythonEvent {
             plugin_id: plugin_id.to_string(),
+            generation: "installation".into(),
             kind: "progress".into(),
             call_id: None,
             data: json!({ "phase": phase, "message": line }),

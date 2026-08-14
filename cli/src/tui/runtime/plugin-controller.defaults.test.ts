@@ -9,6 +9,10 @@ import type { TuiAction } from "../state/types"
 
 const managerCalls: string[] = []
 const fakeManager = {
+  setPluginIntent: jest.fn(
+    async (id: string, intent: "enabled" | "disabled") =>
+      void managerCalls.push(`intent:${intent}:${id}`)
+  ),
   enablePlugin: jest.fn(async (id: string) => void managerCalls.push(`enable:${id}`)),
   disablePlugin: jest.fn(async (id: string) => void managerCalls.push(`disable:${id}`)),
   loadPlugin: jest.fn(async (id: string) => void managerCalls.push(`load:${id}`)),
@@ -105,13 +109,13 @@ describe("controller default seams", () => {
   it("pluginSetEnabled flips the real manager on", async () => {
     const { dispatch } = recorder()
     await pluginSetEnabled("demo", true, { ...base, dispatch, setEnabled: () => {} })
-    expect(managerCalls).toContain("enable:demo")
+    expect(managerCalls).toContain("intent:enabled:demo")
   })
 
   it("pluginSetEnabled flips the real manager off", async () => {
     const { dispatch } = recorder()
     await pluginSetEnabled("demo", false, { ...base, dispatch, setEnabled: () => {} })
-    expect(managerCalls).toContain("disable:demo")
+    expect(managerCalls).toContain("intent:disabled:demo")
   })
 
   it("pluginReload runs the manager lifecycle", async () => {

@@ -37,6 +37,7 @@ pub type VscodeEventSink = Arc<dyn Fn(String, String) + Send + Sync + 'static>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionRuntime {
     pub extension_id: String,
+    pub generation: String,
     pub sidecar_pid: u32,
     pub last_activated_at: Option<i64>,
     pub last_error: Option<String>,

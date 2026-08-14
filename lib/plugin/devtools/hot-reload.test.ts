@@ -15,7 +15,7 @@ jest.mock("@tauri-apps/api/event", () => ({
   listen: jest.fn().mockResolvedValue(() => {}),
 }))
 
-// reloadPythonHost dynamic-imports the manager; default to "not initialized"
+// The canonical reload path dynamically imports the manager; default to "not initialized"
 // so non-python tests exercise the silent no-op path.
 jest.mock("@/lib/plugin/core/manager", () => ({
   getPluginManager: jest.fn(() => {
@@ -156,7 +156,7 @@ describe("PluginHotReload", () => {
     })
   })
 
-  describe("Python host cycling", () => {
+  describe("Lifecycle-coordinated reload", () => {
     afterEach(() => {
       getPluginManagerMock.mockReset()
       getPluginManagerMock.mockImplementation(() => {
@@ -166,37 +166,30 @@ describe("PluginHotReload", () => {
 
     const fakeManager = (type: string) => ({
       getPlugin: jest.fn(() => ({ manifest: { id: "py-plugin", type } })),
-      unloadPythonPlugin: jest.fn().mockResolvedValue(undefined),
-      loadPythonPlugin: jest.fn().mockResolvedValue(undefined),
+      reloadPlugin: jest.fn().mockResolvedValue(undefined),
     })
 
-    it("cycles the python host (unload then load) for python plugins", async () => {
+    it("routes Python reload through the lifecycle manager", async () => {
       const manager = fakeManager("python")
       getPluginManagerMock.mockImplementation(() => manager)
 
       const result = await reloader.reloadPlugin("py-plugin")
       expect(result.success).toBe(true)
-      expect(manager.unloadPythonPlugin).toHaveBeenCalledWith("py-plugin")
-      expect(manager.loadPythonPlugin).toHaveBeenCalledWith("py-plugin")
-      // Order: unload strictly before load.
-      const unloadOrder = manager.unloadPythonPlugin.mock.invocationCallOrder[0]
-      const loadOrder = manager.loadPythonPlugin.mock.invocationCallOrder[0]
-      expect(unloadOrder).toBeLessThan(loadOrder)
+      expect(manager.reloadPlugin).toHaveBeenCalledWith("py-plugin", "dev-hot-reload")
     })
 
-    it("does not touch the python host for frontend plugins", async () => {
+    it("uses the same lifecycle path for frontend plugins", async () => {
       const manager = fakeManager("frontend")
       getPluginManagerMock.mockImplementation(() => manager)
 
       const result = await reloader.reloadPlugin("js-plugin")
       expect(result.success).toBe(true)
-      expect(manager.unloadPythonPlugin).not.toHaveBeenCalled()
-      expect(manager.loadPythonPlugin).not.toHaveBeenCalled()
+      expect(manager.reloadPlugin).toHaveBeenCalledWith("js-plugin", "dev-hot-reload")
     })
 
-    it("reports a failed reload when the python host cycle fails", async () => {
+    it("reports a failed reload when coordinated reload fails", async () => {
       const manager = fakeManager("hybrid")
-      manager.loadPythonPlugin.mockRejectedValue(new Error("import boom"))
+      manager.reloadPlugin.mockRejectedValue(new Error("import boom"))
       getPluginManagerMock.mockImplementation(() => manager)
 
       const result = await reloader.reloadPlugin("py-plugin")

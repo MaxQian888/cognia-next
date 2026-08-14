@@ -45,6 +45,12 @@ use super::installer::{install_vsix, InstallError, InstallResult};
 use super::VscodeExtensionState;
 use crate::PluginRuntimeState;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VscodeLoadResult {
+    pub generation: String,
+}
+
 /// Wall-clock cap on any single sidecar request. 30s matches the VS Code
 /// extension activation budget that real extensions assume.
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -188,6 +194,42 @@ impl From<InstallError> for VscodeCommandError {
     }
 }
 
+fn stale_generation(plugin_id: &str, generation: &str) -> VscodeCommandError {
+    VscodeCommandError::new(
+        "stale_generation",
+        format!("stale VS Code runtime generation for {plugin_id}: {generation}"),
+    )
+}
+
+fn current_generation(
+    state: &VscodeExtensionState,
+    plugin_id: &str,
+) -> Result<String, VscodeCommandError> {
+    state
+        .sidecars
+        .read()
+        .get(plugin_id)
+        .map(|sidecar| sidecar.generation.clone())
+        .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))
+}
+
+fn sidecar_for_generation(
+    state: &VscodeExtensionState,
+    plugin_id: &str,
+    generation: &str,
+) -> Result<Arc<Sidecar>, VscodeCommandError> {
+    let sidecar = state
+        .sidecars
+        .read()
+        .get(plugin_id)
+        .cloned()
+        .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))?;
+    if sidecar.generation != generation {
+        return Err(stale_generation(plugin_id, generation));
+    }
+    Ok(sidecar)
+}
+
 #[tauri::command]
 pub async fn plugin_vscode_install_vsix(
     vsix_base64: String,
@@ -280,7 +322,7 @@ pub async fn plugin_load_vscode(
     app_handle: AppHandle,
     state: State<'_, VscodeExtensionState>,
     runtime: State<'_, PluginRuntimeState>,
-) -> Result<(), VscodeCommandError> {
+) -> Result<VscodeLoadResult, VscodeCommandError> {
     let script = match sidecar_script {
         Some(path) => PathBuf::from(path),
         None => resolve_lsp_host_script(&app_handle)
@@ -325,9 +367,11 @@ pub async fn plugin_load_vscode_for_state(
     plugin_id: String,
     manifest_json: String,
     plugin_path: String,
-) -> Result<(), VscodeCommandError> {
-    if state.sidecars.read().contains_key(&plugin_id) {
-        return Ok(());
+) -> Result<VscodeLoadResult, VscodeCommandError> {
+    if let Some(sidecar) = state.sidecars.read().get(&plugin_id) {
+        return Ok(VscodeLoadResult {
+            generation: sidecar.generation.clone(),
+        });
     }
     let manifest: serde_json::Value = serde_json::from_str(&manifest_json)
         .map_err(|e| VscodeCommandError::new("bad_manifest", e.to_string()))?;
@@ -383,9 +427,11 @@ pub async fn plugin_load_vscode_for_state(
     let event_sink = state.event_sink.read().as_ref().cloned().ok_or_else(|| {
         VscodeCommandError::new("event_sink_missing", "VS Code event sink is not configured")
     })?;
+    let generation = uuid::Uuid::now_v7().to_string();
     let request = SpawnRequest {
         extension_id: plugin_id.clone(),
         extension_path: extension_root.to_string_lossy().to_string(),
+        generation: generation.clone(),
         node_binary: state.node_binary.read().clone(),
         sidecar_script: Some(sidecar_script.to_string_lossy().to_string()),
     };
@@ -401,9 +447,15 @@ pub async fn plugin_load_vscode_for_state(
     let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<InboundFrame>();
     sidecar.set_notify_sink(notify_tx);
     let event_name = inbound_event_name(&plugin_id);
+    let event_generation = generation.clone();
     tokio::spawn(async move {
         while let Some(frame) = notify_rx.recv().await {
-            event_sink(event_name.clone(), frame.raw_frame);
+            let payload = serde_json::json!({
+                "generation": event_generation,
+                "rawFrame": frame.raw_frame,
+            })
+            .to_string();
+            event_sink(event_name.clone(), payload);
         }
     });
 
@@ -424,8 +476,22 @@ pub async fn plugin_load_vscode_for_state(
         return Err(error);
     }
 
-    state.sidecars.write().insert(plugin_id, Arc::new(sidecar));
-    Ok(())
+    let sidecar = Arc::new(sidecar);
+    let (published_generation, inserted) = {
+        let mut sidecars = state.sidecars.write();
+        if let Some(existing) = sidecars.get(&plugin_id) {
+            (existing.generation.clone(), false)
+        } else {
+            sidecars.insert(plugin_id, Arc::clone(&sidecar));
+            (generation, true)
+        }
+    };
+    if !inserted {
+        sidecar.kill().await;
+    }
+    Ok(VscodeLoadResult {
+        generation: published_generation,
+    })
 }
 
 /// Fixed sidecar key for the system LSP host. MUST equal the renderer's
@@ -536,6 +602,7 @@ pub async fn ensure_system_lsp_host_for_state(
         // host.ts never reads extension_path/COGNIA_VSCODE_EXTENSION_PATH at
         // boot; pass the script path itself so the arg is non-empty/valid.
         extension_path: script_str.clone(),
+        generation: "system".to_string(),
         node_binary,
         sidecar_script: Some(script_str),
     })
@@ -550,7 +617,12 @@ pub async fn ensure_system_lsp_host_for_state(
     let event_name = inbound_event_name(LSP_HOST_KEY);
     tokio::spawn(async move {
         while let Some(frame) = notify_rx.recv().await {
-            event_sink(event_name.clone(), frame.raw_frame);
+            let payload = serde_json::json!({
+                "generation": "system",
+                "rawFrame": frame.raw_frame,
+            })
+            .to_string();
+            event_sink(event_name.clone(), payload);
         }
     });
 
@@ -576,10 +648,12 @@ pub struct ActivateResult {
 #[tauri::command]
 pub async fn plugin_activate_vscode(
     plugin_id: String,
+    generation: String,
     config_json: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<ActivateResult, VscodeCommandError> {
-    plugin_activate_vscode_for_state(state.inner(), plugin_id, config_json).await
+    plugin_activate_vscode_generation_for_state(state.inner(), plugin_id, generation, config_json)
+        .await
 }
 
 pub async fn plugin_activate_vscode_for_state(
@@ -587,13 +661,17 @@ pub async fn plugin_activate_vscode_for_state(
     plugin_id: String,
     config_json: String,
 ) -> Result<ActivateResult, VscodeCommandError> {
-    let sidecar = {
-        let sidecars = state.sidecars.read();
-        sidecars
-            .get(&plugin_id)
-            .cloned()
-            .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))?
-    };
+    let generation = current_generation(state, &plugin_id)?;
+    plugin_activate_vscode_generation_for_state(state, plugin_id, generation, config_json).await
+}
+
+pub async fn plugin_activate_vscode_generation_for_state(
+    state: &VscodeExtensionState,
+    plugin_id: String,
+    generation: String,
+    config_json: String,
+) -> Result<ActivateResult, VscodeCommandError> {
+    let sidecar = sidecar_for_generation(state, &plugin_id, &generation)?;
     let pid = sidecar.pid;
     let result = request_sidecar(
         sidecar.as_ref(),
@@ -621,6 +699,7 @@ pub async fn plugin_activate_vscode_for_state(
         plugin_id.clone(),
         super::ExtensionRuntime {
             extension_id: plugin_id,
+            generation,
             sidecar_pid: pid,
             last_activated_at: Some(chrono::Utc::now().timestamp_millis()),
             last_error: None,
@@ -647,45 +726,67 @@ fn extract_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
 #[tauri::command]
 pub async fn plugin_deactivate_vscode(
     plugin_id: String,
+    generation: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<(), VscodeCommandError> {
-    plugin_deactivate_vscode_for_state(state.inner(), plugin_id).await
+    plugin_deactivate_vscode_generation_for_state(state.inner(), plugin_id, generation).await
 }
 
 pub async fn plugin_deactivate_vscode_for_state(
     state: &VscodeExtensionState,
     plugin_id: String,
 ) -> Result<(), VscodeCommandError> {
-    let sidecar = state.sidecars.read().get(&plugin_id).cloned();
-    if let Some(sidecar) = sidecar {
-        request_sidecar(
-            sidecar.as_ref(),
-            "extension:deactivate",
-            serde_json::json!({ "extensionId": plugin_id }),
-        )
-        .await?;
-    }
+    let generation = current_generation(state, &plugin_id)?;
+    plugin_deactivate_vscode_generation_for_state(state, plugin_id, generation).await
+}
+
+pub async fn plugin_deactivate_vscode_generation_for_state(
+    state: &VscodeExtensionState,
+    plugin_id: String,
+    generation: String,
+) -> Result<(), VscodeCommandError> {
+    let sidecar = sidecar_for_generation(state, &plugin_id, &generation)?;
+    request_sidecar(
+        sidecar.as_ref(),
+        "extension:deactivate",
+        serde_json::json!({ "extensionId": plugin_id }),
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn plugin_unload_vscode(
     plugin_id: String,
+    generation: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<(), VscodeCommandError> {
-    plugin_unload_vscode_for_state(state.inner(), plugin_id).await
+    plugin_unload_vscode_generation_for_state(state.inner(), plugin_id, generation).await
 }
 
 pub async fn plugin_unload_vscode_for_state(
     state: &VscodeExtensionState,
     plugin_id: String,
 ) -> Result<(), VscodeCommandError> {
+    let generation = current_generation(state, &plugin_id)?;
+    plugin_unload_vscode_generation_for_state(state, plugin_id, generation).await
+}
+
+pub async fn plugin_unload_vscode_generation_for_state(
+    state: &VscodeExtensionState,
+    plugin_id: String,
+    generation: String,
+) -> Result<(), VscodeCommandError> {
     // Release the write lock before awaiting — tokio::process::Child is
     // not Send so holding the lock across .kill().await trips Tauri's
     // command-future-must-be-Send constraint.
     let sidecar = {
         let mut sidecars = state.sidecars.write();
-        sidecars.remove(&plugin_id)
+        match sidecars.get(&plugin_id) {
+            Some(sidecar) if sidecar.generation == generation => sidecars.remove(&plugin_id),
+            Some(_) => return Err(stale_generation(&plugin_id, &generation)),
+            None => return Ok(()),
+        }
     };
     if let Some(sidecar) = sidecar {
         let result = request_sidecar(
@@ -705,11 +806,25 @@ pub async fn plugin_unload_vscode_for_state(
 #[tauri::command]
 pub async fn plugin_invoke_vscode_rpc(
     plugin_id: String,
+    generation: Option<String>,
     method: String,
     payload_json: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<String, VscodeCommandError> {
-    plugin_invoke_vscode_rpc_for_state(state.inner(), plugin_id, method, payload_json).await
+    if plugin_id == LSP_HOST_KEY && generation.is_none() {
+        return plugin_invoke_vscode_rpc_for_state(state.inner(), plugin_id, method, payload_json)
+            .await;
+    }
+    plugin_invoke_vscode_rpc_generation_for_state(
+        state.inner(),
+        plugin_id,
+        generation.ok_or_else(|| {
+            VscodeCommandError::new("generation_required", "runtime generation is required")
+        })?,
+        method,
+        payload_json,
+    )
+    .await
 }
 
 pub async fn plugin_invoke_vscode_rpc_for_state(
@@ -718,12 +833,25 @@ pub async fn plugin_invoke_vscode_rpc_for_state(
     method: String,
     payload_json: String,
 ) -> Result<String, VscodeCommandError> {
-    let sidecar = state
-        .sidecars
-        .read()
-        .get(&plugin_id)
-        .cloned()
-        .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))?;
+    let generation = current_generation(state, &plugin_id)?;
+    plugin_invoke_vscode_rpc_generation_for_state(
+        state,
+        plugin_id,
+        generation,
+        method,
+        payload_json,
+    )
+    .await
+}
+
+pub async fn plugin_invoke_vscode_rpc_generation_for_state(
+    state: &VscodeExtensionState,
+    plugin_id: String,
+    generation: String,
+    method: String,
+    payload_json: String,
+) -> Result<String, VscodeCommandError> {
+    let sidecar = sidecar_for_generation(state, &plugin_id, &generation)?;
     request_sidecar(
         sidecar.as_ref(),
         &method,
@@ -736,10 +864,16 @@ pub async fn plugin_invoke_vscode_rpc_for_state(
 #[tauri::command]
 pub async fn plugin_vscode_send_response(
     plugin_id: String,
+    generation: String,
     response_json: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<(), VscodeCommandError> {
-    plugin_vscode_send_response_for_state(state.inner(), plugin_id, response_json)
+    plugin_vscode_send_response_generation_for_state(
+        state.inner(),
+        plugin_id,
+        generation,
+        response_json,
+    )
 }
 
 pub fn plugin_vscode_send_response_for_state(
@@ -747,12 +881,17 @@ pub fn plugin_vscode_send_response_for_state(
     plugin_id: String,
     response_json: String,
 ) -> Result<(), VscodeCommandError> {
-    let sidecar = state
-        .sidecars
-        .read()
-        .get(&plugin_id)
-        .cloned()
-        .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))?;
+    let generation = current_generation(state, &plugin_id)?;
+    plugin_vscode_send_response_generation_for_state(state, plugin_id, generation, response_json)
+}
+
+pub fn plugin_vscode_send_response_generation_for_state(
+    state: &VscodeExtensionState,
+    plugin_id: String,
+    generation: String,
+    response_json: String,
+) -> Result<(), VscodeCommandError> {
+    let sidecar = sidecar_for_generation(state, &plugin_id, &generation)?;
     // Sanity-check the frame parses as JSON; the sidecar reads
     // line-delimited JSON so a malformed frame would desync the parser.
     serde_json::from_str::<serde_json::Value>(&response_json)
@@ -966,7 +1105,7 @@ rl.on("line", (line) => {
         })
         .to_string();
 
-        plugin_load_vscode_for_state(
+        let loaded = plugin_load_vscode_for_state(
             &state,
             &runtime,
             plugin_id.to_string(),
@@ -977,15 +1116,31 @@ rl.on("line", (line) => {
         .unwrap();
         assert!(state.sidecars.read().contains_key(plugin_id));
 
-        let activated =
-            plugin_activate_vscode_for_state(&state, plugin_id.to_string(), "{}".to_string())
-                .await
-                .unwrap();
+        let stale = plugin_invoke_vscode_rpc_generation_for_state(
+            &state,
+            plugin_id.to_string(),
+            "stale-generation".to_string(),
+            "test:echo".to_string(),
+            r#"{"value":0}"#.to_string(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(stale.code, "stale_generation");
+
+        let activated = plugin_activate_vscode_generation_for_state(
+            &state,
+            plugin_id.to_string(),
+            loaded.generation.clone(),
+            "{}".to_string(),
+        )
+        .await
+        .unwrap();
         assert_eq!(activated.registered_commands, ["headless.hello"]);
         assert_eq!(
-            plugin_invoke_vscode_rpc_for_state(
+            plugin_invoke_vscode_rpc_generation_for_state(
                 &state,
                 plugin_id.to_string(),
+                loaded.generation.clone(),
                 "test:echo".to_string(),
                 r#"{"value":7}"#.to_string(),
             )
@@ -994,10 +1149,14 @@ rl.on("line", (line) => {
             r#"{"value":7}"#
         );
 
-        plugin_deactivate_vscode_for_state(&state, plugin_id.to_string())
-            .await
-            .unwrap();
-        plugin_unload_vscode_for_state(&state, plugin_id.to_string())
+        plugin_deactivate_vscode_generation_for_state(
+            &state,
+            plugin_id.to_string(),
+            loaded.generation.clone(),
+        )
+        .await
+        .unwrap();
+        plugin_unload_vscode_generation_for_state(&state, plugin_id.to_string(), loaded.generation)
             .await
             .unwrap();
         assert!(state.sidecars.read().is_empty());

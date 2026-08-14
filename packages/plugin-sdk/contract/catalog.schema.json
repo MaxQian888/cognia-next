@@ -11,6 +11,7 @@
     "pluginTypes",
     "permissions",
     "errorCodes",
+    "services",
     "capabilities",
     "manifestContributions",
     "runtimeEntries",
@@ -48,6 +49,18 @@
         "pattern": "^[A-Z][A-Z0-9_]+$"
       },
       "uniqueItems": true
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "realmOverridable"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "realmOverridable": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
     },
     "capabilities": {
       "type": "array",
@@ -320,7 +333,8 @@
                 "consentTier",
                 "risk",
                 "idempotent",
-                "cancellable"
+                "cancellable",
+                "resourceEffect"
               ],
               "properties": {
                 "id": {
@@ -347,6 +361,19 @@
                 },
                 "cancellable": {
                   "type": "boolean"
+                },
+                "resourceEffect": {
+                  "type": "object",
+                  "required": ["kind"],
+                  "properties": {
+                    "kind": {
+                      "enum": ["none", "returned-disposer", "returned-handle", "host-owned"]
+                    },
+                    "disposeMethod": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false

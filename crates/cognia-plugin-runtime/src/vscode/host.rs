@@ -49,6 +49,7 @@ pub enum SidecarError {
 pub struct SpawnRequest {
     pub extension_id: String,
     pub extension_path: String,
+    pub generation: String,
     pub node_binary: Option<String>,
     pub sidecar_script: Option<String>,
 }
@@ -67,6 +68,7 @@ pub struct InboundFrame {
 pub struct Sidecar {
     pub extension_id: String,
     pub extension_path: String,
+    pub generation: String,
     pub pid: u32,
     /// Tx for outgoing frames written to the sidecar's stdin.
     pub stdin_tx: mpsc::UnboundedSender<String>,
@@ -194,6 +196,7 @@ impl Sidecar {
         Ok(Self {
             extension_id: req.extension_id,
             extension_path: req.extension_path,
+            generation: req.generation,
             pid,
             stdin_tx,
             pending,
@@ -258,6 +261,7 @@ mod tests {
         let result = Sidecar::spawn(SpawnRequest {
             extension_id: "x".to_string(),
             extension_path: "/tmp/x".to_string(),
+            generation: "test-generation".to_string(),
             node_binary: Some("node".to_string()),
             sidecar_script: None,
         })

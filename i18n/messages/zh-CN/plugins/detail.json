@@ -58,6 +58,16 @@
     "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
     "streamEnd": "— 流式输出结束 —"
   },
+  "lifecycle": {
+    "activating": "正在激活",
+    "dirty": "需要清理",
+    "error": "运行时错误",
+    "retryCleanup": "重试清理",
+    "retryFailed": "仍无法确认清理完成。请等待原生运行时退出后重试，或重启宿主。",
+    "retrying": "正在重试清理",
+    "stopping": "正在停止",
+    "waiting": "正在等待服务"
+  },
   "metaAuthor": "作者",
   "metaCreatedAt": "安装时间",
   "metaError": "最近错误",

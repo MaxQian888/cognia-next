@@ -128,6 +128,9 @@ function isValidPluginId(id: string): boolean {
 // every manifest plugin-supplied path.
 
 const JS_IDENT_PATTERN = /^[$_a-zA-Z][$_a-zA-Z0-9]*$/
+const SERVICE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/
+const SERVICE_CONSTRAINT_PATTERN =
+  /^(?:\*|latest|(?:\^|~|>=|<=|>|<)?\d+\.\d+\.\d+|\d+\.\d+\.\d+ - \d+\.\d+\.\d+)$/
 
 function nestedContributionValue(value: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((current, segment) => {
@@ -1442,6 +1445,44 @@ export function validatePluginManifest(
         "manifest.minAppVersion.invalid",
         'Invalid "minAppVersion" field. Must be semver format (e.g., 0.1.0)'
       )
+    }
+  }
+
+  for (const field of ["providesServices", "requiresServices", "optionalServices"] as const) {
+    const services = m[field]
+    if (services === undefined) continue
+    if (!isPlainObject(services)) {
+      pushError(field, `manifest.${field}.invalid`, `"${field}" must be an object`)
+      continue
+    }
+    for (const [serviceId, version] of Object.entries(services)) {
+      const entryField = `${field}.${serviceId}`
+      if (!SERVICE_ID_PATTERN.test(serviceId)) {
+        pushError(
+          entryField,
+          `manifest.${field}.service_id.invalid`,
+          `Invalid service id "${serviceId}"`
+        )
+      }
+      if (typeof version !== "string") {
+        pushError(
+          entryField,
+          `manifest.${field}.version.invalid`,
+          `${entryField} must be a semantic version string`
+        )
+      } else if (
+        field === "providesServices"
+          ? !VERSION_PATTERN.test(version)
+          : !SERVICE_CONSTRAINT_PATTERN.test(version)
+      ) {
+        pushError(
+          entryField,
+          `manifest.${field}.version.invalid`,
+          field === "providesServices"
+            ? `${entryField} must be an exact semantic version`
+            : `${entryField} must be a supported semantic version constraint`
+        )
+      }
     }
   }
 

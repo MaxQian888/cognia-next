@@ -569,12 +569,35 @@ fn generation_matches(state: &NodePluginProcessState, generation: uuid::Uuid) ->
     match state {
         NodePluginProcessState::Launching {
             generation: current,
+            ..
         }
         | NodePluginProcessState::Running {
             generation: current,
             ..
         } => *current == generation,
     }
+}
+
+fn assert_current_node_generation(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    generation: &str,
+) -> Result<(uuid::Uuid, std::sync::Arc<tokio::sync::RwLock<()>>)> {
+    let generation = uuid::Uuid::parse_str(generation)
+        .map_err(|_| PluginError::InvalidArgument("invalid Node process generation".into()))?;
+    let processes = state.node_plugin_processes.lock();
+    if let Some(process) = processes.get(plugin_id) {
+        if generation_matches(process, generation) {
+            let gate = match process {
+                NodePluginProcessState::Launching { action_gate, .. }
+                | NodePluginProcessState::Running { action_gate, .. } => action_gate.clone(),
+            };
+            return Ok((generation, gate));
+        }
+    }
+    Err(PluginError::InvalidArgument(format!(
+        "stale Node process generation for {plugin_id}"
+    )))
 }
 
 /// One long-lived Node plugin host as the managed-process registry sees it.
@@ -648,7 +671,7 @@ async fn stop_node_plugin_process(
     generation: Option<uuid::Uuid>,
 ) -> Result<bool> {
     let process = {
-        let mut processes = state.node_plugin_processes.lock();
+        let processes = state.node_plugin_processes.lock();
         if generation.is_some_and(|generation| {
             processes
                 .get(plugin_id)
@@ -657,23 +680,27 @@ async fn stop_node_plugin_process(
             return Ok(false);
         }
         match processes.get(plugin_id) {
-            Some(NodePluginProcessState::Launching { .. }) => {
-                processes.remove(plugin_id);
-                return Ok(true);
-            }
+            Some(NodePluginProcessState::Launching {
+                generation,
+                action_gate,
+            }) => Some((*generation, None, action_gate.clone())),
             Some(NodePluginProcessState::Running {
-                generation, child, ..
-            }) => Some((*generation, child.clone())),
+                generation,
+                child,
+                action_gate,
+            }) => Some((*generation, Some(child.clone()), action_gate.clone())),
             None => None,
         }
     };
     let had_process = process.is_some();
-    if let Some((process_generation, child)) = process {
-        let mut child = child.lock().await;
-        if child.try_wait().map_err(PluginError::Io)?.is_none() {
-            child.kill().await.map_err(PluginError::Io)?;
+    if let Some((process_generation, child, action_gate)) = process {
+        let _action_guard = action_gate.write().await;
+        if let Some(child) = child {
+            let mut child = child.lock().await;
+            if child.try_wait().map_err(PluginError::Io)?.is_none() {
+                child.kill().await.map_err(PluginError::Io)?;
+            }
         }
-        drop(child);
         remove_node_generation(state, plugin_id, process_generation);
     }
     Ok(had_process)
@@ -727,6 +754,14 @@ fn spawn_reserved_node_process(
             "Node plugin launch was cancelled".into(),
         ));
     }
+    let action_gate = match processes.get(plugin_id) {
+        Some(NodePluginProcessState::Launching { action_gate, .. }) => action_gate.clone(),
+        _ => {
+            return Err(PluginError::InvalidArgument(
+                "Node plugin launch was cancelled".into(),
+            ))
+        }
+    };
     let spawned = tokio::process::Command::new(command)
         .args(argv)
         .current_dir(root)
@@ -751,6 +786,7 @@ fn spawn_reserved_node_process(
         NodePluginProcessState::Running {
             generation,
             child: child.clone(),
+            action_gate,
         },
     );
     Ok(child)
@@ -804,7 +840,10 @@ pub async fn plugin_launch_js_for_state(
         }
         processes.insert(
             plugin_id.clone(),
-            NodePluginProcessState::Launching { generation },
+            NodePluginProcessState::Launching {
+                generation,
+                action_gate: std::sync::Arc::new(tokio::sync::RwLock::new(())),
+            },
         );
     }
     let expected_root = state.plugin_dir(&plugin_id);
@@ -951,6 +990,7 @@ pub async fn plugin_invoke_js_callback(
     entry: String,
     callback_id: String,
     args: serde_json::Value,
+    generation: String,
 ) -> Result<serde_json::Value> {
     let resource_dir = app.path().resource_dir().map_err(|error| {
         PluginError::Internal(format!("cannot resolve resource directory: {error}"))
@@ -962,6 +1002,7 @@ pub async fn plugin_invoke_js_callback(
         entry,
         callback_id,
         args,
+        generation,
         Some(resource_dir),
     )
     .await
@@ -974,8 +1015,11 @@ pub async fn plugin_invoke_js_callback_for_state(
     entry: String,
     callback_id: String,
     args: serde_json::Value,
+    generation: String,
     resource_dir: Option<PathBuf>,
 ) -> Result<serde_json::Value> {
+    let (_, action_gate) = assert_current_node_generation(state, &plugin_id, &generation)?;
+    let _action_guard = action_gate.read().await;
     let frame = run_node_plugin_action(
         state,
         &plugin_id,
@@ -1000,6 +1044,7 @@ pub async fn plugin_deactivate_js(
     plugin_id: String,
     plugin_path: String,
     entry: String,
+    generation: String,
 ) -> Result<()> {
     let resource_dir = app.path().resource_dir().map_err(|error| {
         PluginError::Internal(format!("cannot resolve resource directory: {error}"))
@@ -1009,6 +1054,7 @@ pub async fn plugin_deactivate_js(
         plugin_id,
         plugin_path,
         entry,
+        generation,
         Some(resource_dir),
     )
     .await
@@ -1019,8 +1065,11 @@ pub async fn plugin_deactivate_js_for_state(
     plugin_id: String,
     plugin_path: String,
     entry: String,
+    generation: String,
     resource_dir: Option<PathBuf>,
 ) -> Result<()> {
+    let (_, action_gate) = assert_current_node_generation(state, &plugin_id, &generation)?;
+    let _action_guard = action_gate.read().await;
     run_node_plugin_action(
         state,
         &plugin_id,
@@ -1077,9 +1126,11 @@ pub async fn plugin_js_status_for_state(
             Some(NodePluginProcessState::Running {
                 generation: current,
                 child,
+                ..
             }) if *current == generation => child.clone(),
             Some(NodePluginProcessState::Launching {
                 generation: current,
+                ..
             }) if *current == generation => return Ok(true),
             _ => return Ok(false),
         }
@@ -1396,6 +1447,13 @@ mod tests {
         PluginRuntimeState::new(PathBuf::from(tmp.path()))
     }
 
+    fn launching(generation: uuid::Uuid) -> NodePluginProcessState {
+        NodePluginProcessState::Launching {
+            generation,
+            action_gate: std::sync::Arc::new(tokio::sync::RwLock::new(())),
+        }
+    }
+
     #[test]
     fn reads_only_utf8_entries_from_the_registered_symlink_free_tree() {
         let tmp = TempDir::new().unwrap();
@@ -1687,12 +1745,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
         let current = uuid::Uuid::new_v4();
-        state.node_plugin_processes.lock().insert(
-            "demo".into(),
-            NodePluginProcessState::Launching {
-                generation: current,
-            },
-        );
+        state
+            .node_plugin_processes
+            .lock()
+            .insert("demo".into(), launching(current));
 
         assert!(
             !stop_node_plugin_process(&state, "demo", Some(uuid::Uuid::new_v4()))
@@ -1707,17 +1763,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn node_teardown_waits_for_generation_bound_actions() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let generation = uuid::Uuid::new_v4();
+        state
+            .node_plugin_processes
+            .lock()
+            .insert("demo".into(), launching(generation));
+        let (_, gate) =
+            assert_current_node_generation(&state, "demo", &generation.to_string()).unwrap();
+        let action = gate.read().await;
+
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            stop_node_plugin_process(&state, "demo", Some(generation))
+        )
+        .await
+        .is_err());
+        assert!(state.node_plugin_processes.lock().contains_key("demo"));
+
+        drop(action);
+        assert!(stop_node_plugin_process(&state, "demo", Some(generation))
+            .await
+            .unwrap());
+    }
+
+    #[test]
+    fn node_callbacks_reject_stale_generations() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let current = uuid::Uuid::new_v4();
+        state
+            .node_plugin_processes
+            .lock()
+            .insert("demo".into(), launching(current));
+
+        assert!(assert_current_node_generation(&state, "demo", &current.to_string()).is_ok());
+        assert!(
+            assert_current_node_generation(&state, "demo", &uuid::Uuid::new_v4().to_string())
+                .is_err()
+        );
+        assert!(assert_current_node_generation(&state, "missing", &current.to_string()).is_err());
+    }
+
+    #[tokio::test]
     async fn node_plugin_snapshot_reports_launching_hosts_without_a_pid() {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
         assert!(node_plugin_snapshot(&state).is_empty());
 
-        state.node_plugin_processes.lock().insert(
-            "demo".into(),
-            NodePluginProcessState::Launching {
-                generation: uuid::Uuid::new_v4(),
-            },
-        );
+        state
+            .node_plugin_processes
+            .lock()
+            .insert("demo".into(), launching(uuid::Uuid::new_v4()));
         let snapshot = node_plugin_snapshot(&state);
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot[0].plugin_id, "demo");
@@ -1732,12 +1831,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
         for id in ["a", "b", "c"] {
-            state.node_plugin_processes.lock().insert(
-                id.into(),
-                NodePluginProcessState::Launching {
-                    generation: uuid::Uuid::new_v4(),
-                },
-            );
+            state
+                .node_plugin_processes
+                .lock()
+                .insert(id.into(), launching(uuid::Uuid::new_v4()));
         }
         stop_all_node_plugins(&state).await;
         assert!(state.node_plugin_processes.lock().is_empty());
@@ -1749,10 +1846,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
         let first = uuid::Uuid::new_v4();
-        state.node_plugin_processes.lock().insert(
-            "demo".into(),
-            NodePluginProcessState::Launching { generation: first },
-        );
+        state
+            .node_plugin_processes
+            .lock()
+            .insert("demo".into(), launching(first));
 
         assert!(spawn_reserved_node_process(
             &state,
@@ -1766,10 +1863,10 @@ mod tests {
         assert!(!state.node_plugin_processes.lock().contains_key("demo"));
 
         let retry = uuid::Uuid::new_v4();
-        state.node_plugin_processes.lock().insert(
-            "demo".into(),
-            NodePluginProcessState::Launching { generation: retry },
-        );
+        state
+            .node_plugin_processes
+            .lock()
+            .insert("demo".into(), launching(retry));
         assert!(state
             .node_plugin_processes
             .lock()

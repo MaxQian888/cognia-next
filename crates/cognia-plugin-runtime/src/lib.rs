@@ -102,10 +102,12 @@ pub struct PluginRecord {
 pub enum NodePluginProcessState {
     Launching {
         generation: uuid::Uuid,
+        action_gate: Arc<tokio::sync::RwLock<()>>,
     },
     Running {
         generation: uuid::Uuid,
         child: Arc<tokio::sync::Mutex<tokio::process::Child>>,
+        action_gate: Arc<tokio::sync::RwLock<()>>,
     },
 }
 

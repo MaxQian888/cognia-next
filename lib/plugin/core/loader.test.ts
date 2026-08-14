@@ -10,11 +10,13 @@ import type { Plugin, PluginManifest, PluginDefinition } from "@/types/plugin"
 jest.mock("./wasm-loader", () => ({
   __esModule: true,
   loadWasmDefinition: jest.fn(),
+  getWasmRuntimeGeneration: jest.fn(() => "wasm-generation"),
   unloadWasmPlugin: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("./vscode-loader", () => ({
   __esModule: true,
   loadVscodeDefinition: jest.fn(),
+  getVscodeRuntimeGeneration: jest.fn(() => "vscode-generation"),
   unloadVscodeExtension: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("../launcher/launchPluginJs", () => {
@@ -31,11 +33,13 @@ jest.mock("../contracts/diagnostics-store", () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const wasmLoader = require("./wasm-loader") as {
   loadWasmDefinition: jest.Mock
+  getWasmRuntimeGeneration: jest.Mock
   unloadWasmPlugin: jest.Mock
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const vscodeLoader = require("./vscode-loader") as {
   loadVscodeDefinition: jest.Mock
+  getVscodeRuntimeGeneration: jest.Mock
   unloadVscodeExtension: jest.Mock
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -82,6 +86,7 @@ describe("PluginLoader", () => {
     launcherModule.launchPluginJs.mockResolvedValue({
       command: "/opt/node24/bin/node",
       argv: ["--permission", "/plugins/node-plugin/index.js"],
+      generation: "node-generation",
       process: {
         killed: false,
         kill: jest.fn(),
@@ -269,6 +274,7 @@ describe("PluginLoader", () => {
           },
         })
       )
+      expect(loader.getRuntimeGeneration("node-plugin")).toBe("node-generation")
     })
 
     it("forwards the host-neutral invoker to Node-target plugin lifecycle calls", async () => {
@@ -703,10 +709,11 @@ describe("PluginLoader", () => {
           {
             definition: { manifest: { type: "wasm" } },
             exports: {},
+            runtimeGeneration: "wasm-generation",
           }
         )
         await loader.unload(pluginId)
-        expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledWith(pluginId)
+        expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledWith(pluginId, "wasm-generation")
         expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
           pluginId,
           expect.objectContaining({ site: "loader.unloadWasmPlugin", expected: false }),
@@ -734,7 +741,7 @@ describe("PluginLoader", () => {
           }
         )
         await loader.unload(pluginId)
-        expect(vscodeLoader.unloadVscodeExtension).toHaveBeenCalledWith(pluginId)
+        expect(vscodeLoader.unloadVscodeExtension).toHaveBeenCalledWith(pluginId, undefined)
         expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
           pluginId,
           expect.objectContaining({ site: "loader.unloadVscodeExtension", expected: false }),
@@ -747,6 +754,26 @@ describe("PluginLoader", () => {
             message: "vscode boom",
           })
         )
+      })
+
+      it("retries a dirty isolated runtime teardown before clearing its marker", async () => {
+        wasmLoader.unloadWasmPlugin
+          .mockRejectedValueOnce(new Error("wasm busy"))
+          .mockResolvedValueOnce(undefined)
+        const pluginId = "wasm-recover"
+        ;(loader as unknown as { loadedModules: Map<string, unknown> }).loadedModules.set(
+          pluginId,
+          {
+            definition: { manifest: { type: "wasm" } },
+            exports: {},
+            runtimeGeneration: "wasm-generation",
+          }
+        )
+        await loader.unload(pluginId)
+
+        await expect(loader.recoverDirtyTeardown(pluginId)).resolves.toBe(true)
+        expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledTimes(2)
+        expect(loader.getDirtyTeardown(pluginId)).toBeNull()
       })
     })
 
@@ -763,14 +790,18 @@ describe("PluginLoader", () => {
         const pluginId = "wasm-hung"
         ;(fastLoader as unknown as { loadedModules: Map<string, unknown> }).loadedModules.set(
           pluginId,
-          { definition: { manifest: { type: "wasm" } }, exports: {} }
+          {
+            definition: { manifest: { type: "wasm" } },
+            exports: {},
+            runtimeGeneration: "wasm-generation",
+          }
         )
 
         const unloading = fastLoader.unload(pluginId)
         await jest.advanceTimersByTimeAsync(30)
         await unloading
 
-        expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledWith(pluginId)
+        expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledWith(pluginId, "wasm-generation")
         expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
           pluginId,
           expect.objectContaining({
@@ -792,7 +823,11 @@ describe("PluginLoader", () => {
         const pluginId = "wasm-clean"
         ;(loader as unknown as { loadedModules: Map<string, unknown> }).loadedModules.set(
           pluginId,
-          { definition: { manifest: { type: "wasm" } }, exports: {} }
+          {
+            definition: { manifest: { type: "wasm" } },
+            exports: {},
+            runtimeGeneration: "wasm-generation",
+          }
         )
         await loader.unload(pluginId)
         expect(loader.getDirtyTeardown(pluginId)).toBeNull()

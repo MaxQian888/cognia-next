@@ -130,3 +130,1908 @@ export const CANONICAL_PLUGIN_ERROR_CODES = [
   "OUTPUT_TRUNCATED",
 ] as const
 export type CanonicalPluginErrorCode = (typeof CANONICAL_PLUGIN_ERROR_CODES)[number]
+export const PLUGIN_API_RESOURCE_EFFECTS = {
+  "ctx.a2ui.createSurface": {
+    kind: "host-owned",
+  },
+  "ctx.a2ui.deleteSurface": {
+    kind: "none",
+  },
+  "ctx.a2ui.getSurface": {
+    kind: "none",
+  },
+  "ctx.a2ui.registerComponent": {
+    kind: "returned-disposer",
+  },
+  "ctx.a2ui.registerTemplate": {
+    kind: "returned-disposer",
+  },
+  "ctx.a2ui.updateComponents": {
+    kind: "none",
+  },
+  "ctx.a2ui.updateDataModel": {
+    kind: "none",
+  },
+  "ctx.agent.cancelAgent": {
+    kind: "none",
+  },
+  "ctx.agent.context.listProviders": {
+    kind: "none",
+  },
+  "ctx.agent.context.queryTwinMemory": {
+    kind: "none",
+  },
+  "ctx.agent.context.readSharedMemory": {
+    kind: "none",
+  },
+  "ctx.agent.context.registerProvider": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.context.unregisterProvider": {
+    kind: "none",
+  },
+  "ctx.agent.dispatchSubagent": {
+    kind: "none",
+  },
+  "ctx.agent.executeAgent": {
+    kind: "none",
+  },
+  "ctx.agent.guardrails.list": {
+    kind: "none",
+  },
+  "ctx.agent.guardrails.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.guardrails.unregister": {
+    kind: "none",
+  },
+  "ctx.agent.invokeTool": {
+    kind: "none",
+  },
+  "ctx.agent.registerExternalAgentAdapter": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.registerExternalAgentPreset": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.registerMcpServerPreset": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.registerMode": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.registerNativeAnthropicTool": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.registerSkill": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.registerTool": {
+    kind: "returned-disposer",
+  },
+  "ctx.agent.run": {
+    kind: "none",
+  },
+  "ctx.agent.runExternalAgent": {
+    kind: "none",
+  },
+  "ctx.agent.runStreamed": {
+    kind: "none",
+  },
+  "ctx.agent.runTeam": {
+    kind: "none",
+  },
+  "ctx.agent.sessions.create": {
+    kind: "none",
+  },
+  "ctx.agent.sessions.resume": {
+    kind: "none",
+  },
+  "ctx.agent.unregisterMode": {
+    kind: "none",
+  },
+  "ctx.agent.unregisterTool": {
+    kind: "none",
+  },
+  "ctx.ai.chat": {
+    kind: "none",
+  },
+  "ctx.ai.embed": {
+    kind: "none",
+  },
+  "ctx.ai.getAvailableModels": {
+    kind: "none",
+  },
+  "ctx.ai.getDefaultModel": {
+    kind: "none",
+  },
+  "ctx.ai.getDefaultProvider": {
+    kind: "none",
+  },
+  "ctx.ai.getProviderModels": {
+    kind: "none",
+  },
+  "ctx.ai.registerProvider": {
+    kind: "returned-disposer",
+  },
+  "ctx.artifact.closeArtifact": {
+    kind: "none",
+  },
+  "ctx.artifact.createArtifact": {
+    kind: "none",
+  },
+  "ctx.artifact.deleteArtifact": {
+    kind: "none",
+  },
+  "ctx.artifact.getActiveArtifact": {
+    kind: "none",
+  },
+  "ctx.artifact.getArtifact": {
+    kind: "none",
+  },
+  "ctx.artifact.listArtifacts": {
+    kind: "none",
+  },
+  "ctx.artifact.onArtifactChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.artifact.openArtifact": {
+    kind: "none",
+  },
+  "ctx.artifact.registerRenderer": {
+    kind: "returned-disposer",
+  },
+  "ctx.artifact.updateArtifact": {
+    kind: "none",
+  },
+  "ctx.auth.createPkceFlow": {
+    kind: "none",
+  },
+  "ctx.auth.getSession": {
+    kind: "none",
+  },
+  "ctx.auth.getSessions": {
+    kind: "none",
+  },
+  "ctx.auth.onDidChangeSessions": {
+    kind: "returned-disposer",
+  },
+  "ctx.auth.registerProvider": {
+    kind: "returned-disposer",
+  },
+  "ctx.automation.capabilities": {
+    kind: "none",
+  },
+  "ctx.automation.click": {
+    kind: "none",
+  },
+  "ctx.automation.cursorPosition": {
+    kind: "none",
+  },
+  "ctx.automation.drag": {
+    kind: "none",
+  },
+  "ctx.automation.find": {
+    kind: "none",
+  },
+  "ctx.automation.getFocus": {
+    kind: "none",
+  },
+  "ctx.automation.holdKey": {
+    kind: "none",
+  },
+  "ctx.automation.keys": {
+    kind: "none",
+  },
+  "ctx.automation.launchApp": {
+    kind: "none",
+  },
+  "ctx.automation.mouseButton": {
+    kind: "none",
+  },
+  "ctx.automation.mouseMove": {
+    kind: "none",
+  },
+  "ctx.automation.paste": {
+    kind: "none",
+  },
+  "ctx.automation.pickAtPoint": {
+    kind: "none",
+  },
+  "ctx.automation.readTree": {
+    kind: "none",
+  },
+  "ctx.automation.screenshot": {
+    kind: "none",
+  },
+  "ctx.automation.scroll": {
+    kind: "none",
+  },
+  "ctx.automation.type": {
+    kind: "none",
+  },
+  "ctx.automation.windowOp": {
+    kind: "none",
+  },
+  "ctx.backup.create": {
+    kind: "none",
+  },
+  "ctx.backup.getLatestSuccessful": {
+    kind: "none",
+  },
+  "ctx.backup.listHistory": {
+    kind: "none",
+  },
+  "ctx.backup.restore": {
+    kind: "none",
+  },
+  "ctx.backup.serialize": {
+    kind: "none",
+  },
+  "ctx.backup.validate": {
+    kind: "none",
+  },
+  "ctx.canvas.addComment": {
+    kind: "none",
+  },
+  "ctx.canvas.closeCanvas": {
+    kind: "none",
+  },
+  "ctx.canvas.closeCollaborationSession": {
+    kind: "none",
+  },
+  "ctx.canvas.createCollaborationSession": {
+    kind: "none",
+  },
+  "ctx.canvas.createDocument": {
+    kind: "none",
+  },
+  "ctx.canvas.deleteComment": {
+    kind: "none",
+  },
+  "ctx.canvas.deleteDocument": {
+    kind: "none",
+  },
+  "ctx.canvas.executeAction": {
+    kind: "none",
+  },
+  "ctx.canvas.executeActionStreaming": {
+    kind: "none",
+  },
+  "ctx.canvas.executePython": {
+    kind: "none",
+  },
+  "ctx.canvas.getActiveCollaborationSession": {
+    kind: "none",
+  },
+  "ctx.canvas.getCollaborationSession": {
+    kind: "none",
+  },
+  "ctx.canvas.getComments": {
+    kind: "none",
+  },
+  "ctx.canvas.getContent": {
+    kind: "none",
+  },
+  "ctx.canvas.getCurrentDocument": {
+    kind: "none",
+  },
+  "ctx.canvas.getDocument": {
+    kind: "none",
+  },
+  "ctx.canvas.getSelection": {
+    kind: "none",
+  },
+  "ctx.canvas.getVersions": {
+    kind: "none",
+  },
+  "ctx.canvas.insertText": {
+    kind: "none",
+  },
+  "ctx.canvas.listRecentCollaborationSessions": {
+    kind: "none",
+  },
+  "ctx.canvas.onCanvasChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.canvas.onContentChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.canvas.openDocument": {
+    kind: "none",
+  },
+  "ctx.canvas.replaceSelection": {
+    kind: "none",
+  },
+  "ctx.canvas.replyToComment": {
+    kind: "none",
+  },
+  "ctx.canvas.resolveComment": {
+    kind: "none",
+  },
+  "ctx.canvas.restoreVersion": {
+    kind: "none",
+  },
+  "ctx.canvas.saveVersion": {
+    kind: "none",
+  },
+  "ctx.canvas.setContent": {
+    kind: "none",
+  },
+  "ctx.canvas.setSelection": {
+    kind: "none",
+  },
+  "ctx.canvas.updateComment": {
+    kind: "none",
+  },
+  "ctx.canvas.updateDocument": {
+    kind: "none",
+  },
+  "ctx.chat.use": {
+    kind: "none",
+  },
+  "ctx.clipboard.clear": {
+    kind: "none",
+  },
+  "ctx.clipboard.hasImage": {
+    kind: "none",
+  },
+  "ctx.clipboard.hasText": {
+    kind: "none",
+  },
+  "ctx.clipboard.readImage": {
+    kind: "none",
+  },
+  "ctx.clipboard.readText": {
+    kind: "none",
+  },
+  "ctx.clipboard.writeImage": {
+    kind: "none",
+  },
+  "ctx.clipboard.writeText": {
+    kind: "none",
+  },
+  "ctx.companion.getDevice": {
+    kind: "none",
+  },
+  "ctx.companion.listDevices": {
+    kind: "none",
+  },
+  "ctx.companion.listOpenGoals": {
+    kind: "none",
+  },
+  "ctx.companion.pauseGoal": {
+    kind: "none",
+  },
+  "ctx.companion.resumeGoal": {
+    kind: "none",
+  },
+  "ctx.companion.revokeDevice": {
+    kind: "none",
+  },
+  "ctx.companion.serverStatus": {
+    kind: "none",
+  },
+  "ctx.companion.setRemoteControl": {
+    kind: "none",
+  },
+  "ctx.companion.stopGoal": {
+    kind: "none",
+  },
+  "ctx.companion.unrevokeDevice": {
+    kind: "none",
+  },
+  "ctx.configuration.get": {
+    kind: "none",
+  },
+  "ctx.configuration.getAll": {
+    kind: "none",
+  },
+  "ctx.configuration.getOrDefault": {
+    kind: "none",
+  },
+  "ctx.configuration.onChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.configuration.update": {
+    kind: "none",
+  },
+  "ctx.connectors.addChatMembers": {
+    kind: "none",
+  },
+  "ctx.connectors.addReaction": {
+    kind: "none",
+  },
+  "ctx.connectors.bootstrapConversation": {
+    kind: "none",
+  },
+  "ctx.connectors.createChat": {
+    kind: "none",
+  },
+  "ctx.connectors.createInstance": {
+    kind: "none",
+  },
+  "ctx.connectors.deleteInstance": {
+    kind: "none",
+  },
+  "ctx.connectors.deleteMessage": {
+    kind: "none",
+  },
+  "ctx.connectors.editMessage": {
+    kind: "none",
+  },
+  "ctx.connectors.enqueueSend": {
+    kind: "none",
+  },
+  "ctx.connectors.fetchHistory": {
+    kind: "none",
+  },
+  "ctx.connectors.findSessionByConversation": {
+    kind: "none",
+  },
+  "ctx.connectors.forwardMessage": {
+    kind: "none",
+  },
+  "ctx.connectors.getA2UICapabilityMatrix": {
+    kind: "none",
+  },
+  "ctx.connectors.getAdapter": {
+    kind: "none",
+  },
+  "ctx.connectors.getDispatchRules": {
+    kind: "none",
+  },
+  "ctx.connectors.getInstance": {
+    kind: "none",
+  },
+  "ctx.connectors.getOutboundJob": {
+    kind: "none",
+  },
+  "ctx.connectors.getReadReceipt": {
+    kind: "none",
+  },
+  "ctx.connectors.getRuntimeState": {
+    kind: "none",
+  },
+  "ctx.connectors.getSkillCapabilities": {
+    kind: "none",
+  },
+  "ctx.connectors.listAdapters": {
+    kind: "none",
+  },
+  "ctx.connectors.listEnabledInstances": {
+    kind: "none",
+  },
+  "ctx.connectors.listInstances": {
+    kind: "none",
+  },
+  "ctx.connectors.listInstancesByType": {
+    kind: "none",
+  },
+  "ctx.connectors.listRunningAdapters": {
+    kind: "none",
+  },
+  "ctx.connectors.listSessionsByConversation": {
+    kind: "none",
+  },
+  "ctx.connectors.listSiblingConversations": {
+    kind: "none",
+  },
+  "ctx.connectors.newIdempotencyKey": {
+    kind: "none",
+  },
+  "ctx.connectors.onCallback": {
+    kind: "returned-disposer",
+  },
+  "ctx.connectors.onInbound": {
+    kind: "returned-disposer",
+  },
+  "ctx.connectors.pinMessage": {
+    kind: "none",
+  },
+  "ctx.connectors.previewAtGate": {
+    kind: "none",
+  },
+  "ctx.connectors.previewDispatchRules": {
+    kind: "none",
+  },
+  "ctx.connectors.removeChatMembers": {
+    kind: "none",
+  },
+  "ctx.connectors.removeReaction": {
+    kind: "none",
+  },
+  "ctx.connectors.resolveContacts": {
+    kind: "none",
+  },
+  "ctx.connectors.send": {
+    kind: "none",
+  },
+  "ctx.connectors.sendText": {
+    kind: "none",
+  },
+  "ctx.connectors.sendUrgent": {
+    kind: "none",
+  },
+  "ctx.connectors.setDispatchRules": {
+    kind: "none",
+  },
+  "ctx.connectors.setInstanceEnabled": {
+    kind: "none",
+  },
+  "ctx.connectors.setTyping": {
+    kind: "none",
+  },
+  "ctx.connectors.streamReply": {
+    kind: "none",
+  },
+  "ctx.connectors.unpinMessage": {
+    kind: "none",
+  },
+  "ctx.connectors.updateChat": {
+    kind: "none",
+  },
+  "ctx.connectors.updateInstance": {
+    kind: "none",
+  },
+  "ctx.connectors.uploadFile": {
+    kind: "none",
+  },
+  "ctx.connectors.waitForDelivery": {
+    kind: "none",
+  },
+  "ctx.contextMenu.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.contextMenu.registerMany": {
+    kind: "returned-disposer",
+  },
+  "ctx.contextPanels.getActiveContext": {
+    kind: "none",
+  },
+  "ctx.contextPanels.getWorkbenchState": {
+    kind: "none",
+  },
+  "ctx.contextPanels.onDidChangeActiveContext": {
+    kind: "returned-disposer",
+  },
+  "ctx.contextPanels.onDidChangeVisibility": {
+    kind: "returned-disposer",
+  },
+  "ctx.contextPanels.onDidChangeWorkbenchState": {
+    kind: "returned-disposer",
+  },
+  "ctx.contextPanels.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.contextPanels.reveal": {
+    kind: "none",
+  },
+  "ctx.contextPanels.setBadge": {
+    kind: "none",
+  },
+  "ctx.contextPanels.setMode": {
+    kind: "none",
+  },
+  "ctx.contextPanels.setPinned": {
+    kind: "none",
+  },
+  "ctx.db.createTable": {
+    kind: "none",
+  },
+  "ctx.db.dropTable": {
+    kind: "none",
+  },
+  "ctx.db.execute": {
+    kind: "none",
+  },
+  "ctx.db.query": {
+    kind: "none",
+  },
+  "ctx.db.tableExists": {
+    kind: "none",
+  },
+  "ctx.db.transaction": {
+    kind: "none",
+  },
+  "ctx.dexie.rawDb": {
+    kind: "none",
+  },
+  "ctx.dexie.table": {
+    kind: "none",
+  },
+  "ctx.editor.notify": {
+    kind: "none",
+  },
+  "ctx.editor.onDidChangeActiveEditor": {
+    kind: "returned-disposer",
+  },
+  "ctx.editor.openFile": {
+    kind: "none",
+  },
+  "ctx.editor.readActive": {
+    kind: "none",
+  },
+  "ctx.editor.reflectEdit": {
+    kind: "none",
+  },
+  "ctx.editor.revealInExplorer": {
+    kind: "none",
+  },
+  "ctx.editor.runInTerminal": {
+    kind: "none",
+  },
+  "ctx.editor.saveDirty": {
+    kind: "none",
+  },
+  "ctx.editor.showDiff": {
+    kind: "none",
+  },
+  "ctx.events.bus.emit": {
+    kind: "none",
+  },
+  "ctx.events.bus.getHistory": {
+    kind: "none",
+  },
+  "ctx.events.bus.off": {
+    kind: "none",
+  },
+  "ctx.events.bus.offAll": {
+    kind: "none",
+  },
+  "ctx.events.bus.on": {
+    kind: "returned-disposer",
+  },
+  "ctx.events.bus.once": {
+    kind: "returned-disposer",
+  },
+  "ctx.events.emit": {
+    kind: "none",
+  },
+  "ctx.events.ipc.broadcast": {
+    kind: "none",
+  },
+  "ctx.events.ipc.call": {
+    kind: "none",
+  },
+  "ctx.events.ipc.describeExposedMethods": {
+    kind: "none",
+  },
+  "ctx.events.ipc.expose": {
+    kind: "returned-disposer",
+  },
+  "ctx.events.ipc.getExposedMethods": {
+    kind: "none",
+  },
+  "ctx.events.ipc.on": {
+    kind: "returned-disposer",
+  },
+  "ctx.events.ipc.send": {
+    kind: "none",
+  },
+  "ctx.events.off": {
+    kind: "none",
+  },
+  "ctx.events.on": {
+    kind: "returned-disposer",
+  },
+  "ctx.events.once": {
+    kind: "returned-disposer",
+  },
+  "ctx.export.download": {
+    kind: "none",
+  },
+  "ctx.export.exportMessages": {
+    kind: "none",
+  },
+  "ctx.export.exportProject": {
+    kind: "none",
+  },
+  "ctx.export.exportSession": {
+    kind: "none",
+  },
+  "ctx.export.generateFilename": {
+    kind: "none",
+  },
+  "ctx.export.getAvailableFormats": {
+    kind: "none",
+  },
+  "ctx.export.getCustomExporters": {
+    kind: "none",
+  },
+  "ctx.export.registerExporter": {
+    kind: "returned-disposer",
+  },
+  "ctx.extensions.getExtensions": {
+    kind: "none",
+  },
+  "ctx.extensions.hasExtensions": {
+    kind: "none",
+  },
+  "ctx.extensions.registerExtension": {
+    kind: "returned-disposer",
+  },
+  "ctx.fs.appendText": {
+    kind: "none",
+  },
+  "ctx.fs.copy": {
+    kind: "none",
+  },
+  "ctx.fs.exists": {
+    kind: "none",
+  },
+  "ctx.fs.getCacheDir": {
+    kind: "none",
+  },
+  "ctx.fs.getDataDir": {
+    kind: "none",
+  },
+  "ctx.fs.getTempDir": {
+    kind: "none",
+  },
+  "ctx.fs.mkdir": {
+    kind: "none",
+  },
+  "ctx.fs.move": {
+    kind: "none",
+  },
+  "ctx.fs.readBinary": {
+    kind: "none",
+  },
+  "ctx.fs.readDir": {
+    kind: "none",
+  },
+  "ctx.fs.readJson": {
+    kind: "none",
+  },
+  "ctx.fs.readText": {
+    kind: "none",
+  },
+  "ctx.fs.remove": {
+    kind: "none",
+  },
+  "ctx.fs.stat": {
+    kind: "none",
+  },
+  "ctx.fs.watch": {
+    kind: "returned-disposer",
+  },
+  "ctx.fs.writeBinary": {
+    kind: "none",
+  },
+  "ctx.fs.writeJson": {
+    kind: "none",
+  },
+  "ctx.fs.writeText": {
+    kind: "none",
+  },
+  "ctx.git.branches": {
+    kind: "none",
+  },
+  "ctx.git.checkoutBranch": {
+    kind: "none",
+  },
+  "ctx.git.commit": {
+    kind: "none",
+  },
+  "ctx.git.commitFiles": {
+    kind: "none",
+  },
+  "ctx.git.conflicts": {
+    kind: "none",
+  },
+  "ctx.git.createBranch": {
+    kind: "none",
+  },
+  "ctx.git.deleteBranch": {
+    kind: "none",
+  },
+  "ctx.git.diffCommit": {
+    kind: "none",
+  },
+  "ctx.git.diffFile": {
+    kind: "none",
+  },
+  "ctx.git.discard": {
+    kind: "none",
+  },
+  "ctx.git.discardAll": {
+    kind: "none",
+  },
+  "ctx.git.fetch": {
+    kind: "none",
+  },
+  "ctx.git.fileHistory": {
+    kind: "none",
+  },
+  "ctx.git.getRoot": {
+    kind: "none",
+  },
+  "ctx.git.isRepo": {
+    kind: "none",
+  },
+  "ctx.git.log": {
+    kind: "none",
+  },
+  "ctx.git.mergeAbort": {
+    kind: "none",
+  },
+  "ctx.git.onStatusChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.git.pull": {
+    kind: "none",
+  },
+  "ctx.git.push": {
+    kind: "none",
+  },
+  "ctx.git.remotes": {
+    kind: "none",
+  },
+  "ctx.git.renameBranch": {
+    kind: "none",
+  },
+  "ctx.git.repoState": {
+    kind: "none",
+  },
+  "ctx.git.resolveConflict": {
+    kind: "none",
+  },
+  "ctx.git.stage": {
+    kind: "none",
+  },
+  "ctx.git.stashApply": {
+    kind: "none",
+  },
+  "ctx.git.stashDrop": {
+    kind: "none",
+  },
+  "ctx.git.stashList": {
+    kind: "none",
+  },
+  "ctx.git.stashPop": {
+    kind: "none",
+  },
+  "ctx.git.stashPush": {
+    kind: "none",
+  },
+  "ctx.git.status": {
+    kind: "none",
+  },
+  "ctx.git.sync": {
+    kind: "none",
+  },
+  "ctx.git.unstage": {
+    kind: "none",
+  },
+  "ctx.goals.clearSubgoals": {
+    kind: "none",
+  },
+  "ctx.goals.create": {
+    kind: "none",
+  },
+  "ctx.goals.decomposeSubgoals": {
+    kind: "none",
+  },
+  "ctx.goals.delete": {
+    kind: "none",
+  },
+  "ctx.goals.get": {
+    kind: "none",
+  },
+  "ctx.goals.getActiveForSession": {
+    kind: "none",
+  },
+  "ctx.goals.getEvents": {
+    kind: "none",
+  },
+  "ctx.goals.getOpenForSession": {
+    kind: "none",
+  },
+  "ctx.goals.listAll": {
+    kind: "none",
+  },
+  "ctx.goals.listBySession": {
+    kind: "none",
+  },
+  "ctx.goals.pause": {
+    kind: "none",
+  },
+  "ctx.goals.preempt": {
+    kind: "none",
+  },
+  "ctx.goals.resume": {
+    kind: "none",
+  },
+  "ctx.goals.stop": {
+    kind: "none",
+  },
+  "ctx.goals.toggleSubgoal": {
+    kind: "none",
+  },
+  "ctx.goals.updateConfig": {
+    kind: "none",
+  },
+  "ctx.goals.updateObjective": {
+    kind: "none",
+  },
+  "ctx.i18n.formatDate": {
+    kind: "none",
+  },
+  "ctx.i18n.formatNumber": {
+    kind: "none",
+  },
+  "ctx.i18n.formatRelativeTime": {
+    kind: "none",
+  },
+  "ctx.i18n.getAvailableLocales": {
+    kind: "none",
+  },
+  "ctx.i18n.getCurrentLocale": {
+    kind: "none",
+  },
+  "ctx.i18n.getLocaleName": {
+    kind: "none",
+  },
+  "ctx.i18n.hasTranslation": {
+    kind: "none",
+  },
+  "ctx.i18n.onLocaleChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.i18n.registerTranslations": {
+    kind: "returned-disposer",
+  },
+  "ctx.i18n.t": {
+    kind: "none",
+  },
+  "ctx.import.getCustomImporters": {
+    kind: "none",
+  },
+  "ctx.import.importContent": {
+    kind: "none",
+  },
+  "ctx.import.registerChatImporter": {
+    kind: "returned-disposer",
+  },
+  "ctx.import.registerImporter": {
+    kind: "returned-disposer",
+  },
+  "ctx.import.registerSessionSource": {
+    kind: "returned-disposer",
+  },
+  "ctx.integrations.authenticatedRequest": {
+    kind: "none",
+  },
+  "ctx.integrations.cancelAction": {
+    kind: "none",
+  },
+  "ctx.integrations.createAccount": {
+    kind: "none",
+  },
+  "ctx.integrations.createSubscription": {
+    kind: "none",
+  },
+  "ctx.integrations.executeAction": {
+    kind: "none",
+  },
+  "ctx.integrations.getActionJob": {
+    kind: "none",
+  },
+  "ctx.integrations.getIngressPublicUrl": {
+    kind: "none",
+  },
+  "ctx.integrations.listAccounts": {
+    kind: "none",
+  },
+  "ctx.integrations.listDefinitions": {
+    kind: "none",
+  },
+  "ctx.integrations.listSubscriptions": {
+    kind: "none",
+  },
+  "ctx.integrations.migrateLegacy": {
+    kind: "none",
+  },
+  "ctx.integrations.publishEvent": {
+    kind: "none",
+  },
+  "ctx.integrations.removeAccount": {
+    kind: "none",
+  },
+  "ctx.integrations.removeSubscription": {
+    kind: "none",
+  },
+  "ctx.integrations.rollbackMigration": {
+    kind: "none",
+  },
+  "ctx.integrations.updateAccount": {
+    kind: "none",
+  },
+  "ctx.lifecycle.onDispose": {
+    kind: "host-owned",
+  },
+  "ctx.services.getProvider": {
+    kind: "none",
+  },
+  "ctx.services.isAvailable": {
+    kind: "none",
+  },
+  "ctx.services.onOptionalServiceChange": {
+    kind: "host-owned",
+  },
+  "ctx.logger.child": {
+    kind: "none",
+  },
+  "ctx.logger.debug": {
+    kind: "none",
+  },
+  "ctx.logger.error": {
+    kind: "none",
+  },
+  "ctx.logger.fatal": {
+    kind: "none",
+  },
+  "ctx.logger.info": {
+    kind: "none",
+  },
+  "ctx.logger.trace": {
+    kind: "none",
+  },
+  "ctx.logger.warn": {
+    kind: "none",
+  },
+  "ctx.logger.withContext": {
+    kind: "none",
+  },
+  "ctx.media.image.load": {
+    kind: "none",
+  },
+  "ctx.media.image.save": {
+    kind: "none",
+  },
+  "ctx.media.image.toDataUrl": {
+    kind: "none",
+  },
+  "ctx.media.image.fromDataUrl": {
+    kind: "none",
+  },
+  "ctx.media.image.resize": {
+    kind: "none",
+  },
+  "ctx.media.image.transform": {
+    kind: "none",
+  },
+  "ctx.media.image.adjust": {
+    kind: "none",
+  },
+  "ctx.media.image.applyFilter": {
+    kind: "none",
+  },
+  "ctx.media.image.getHistogram": {
+    kind: "none",
+  },
+  "ctx.media.image.compare": {
+    kind: "none",
+  },
+  "ctx.media.video.loadClip": {
+    kind: "none",
+  },
+  "ctx.media.video.getFrame": {
+    kind: "none",
+  },
+  "ctx.media.video.getMetadata": {
+    kind: "none",
+  },
+  "ctx.media.video.analyze": {
+    kind: "none",
+  },
+  "ctx.media.video.cleanupAnalysis": {
+    kind: "none",
+  },
+  "ctx.media.video.trim": {
+    kind: "none",
+  },
+  "ctx.media.video.concatenate": {
+    kind: "none",
+  },
+  "ctx.media.video.applyEffect": {
+    kind: "none",
+  },
+  "ctx.media.video.addTransition": {
+    kind: "none",
+  },
+  "ctx.media.video.export": {
+    kind: "none",
+  },
+  "ctx.media.filters.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.media.filters.unregister": {
+    kind: "none",
+  },
+  "ctx.media.filters.getAll": {
+    kind: "none",
+  },
+  "ctx.media.filters.getById": {
+    kind: "none",
+  },
+  "ctx.media.filters.getByCategory": {
+    kind: "none",
+  },
+  "ctx.media.effects.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.media.effects.unregister": {
+    kind: "none",
+  },
+  "ctx.media.effects.getAll": {
+    kind: "none",
+  },
+  "ctx.media.effects.getById": {
+    kind: "none",
+  },
+  "ctx.media.transitions.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.media.transitions.unregister": {
+    kind: "none",
+  },
+  "ctx.media.transitions.getAll": {
+    kind: "none",
+  },
+  "ctx.media.transitions.getById": {
+    kind: "none",
+  },
+  "ctx.media.ai.generateImage": {
+    kind: "none",
+  },
+  "ctx.media.ai.generateVideo": {
+    kind: "none",
+  },
+  "ctx.media.ai.upscale": {
+    kind: "none",
+  },
+  "ctx.media.ai.removeBackground": {
+    kind: "none",
+  },
+  "ctx.media.ai.enhanceImage": {
+    kind: "none",
+  },
+  "ctx.media.ai.generateVariation": {
+    kind: "none",
+  },
+  "ctx.media.ai.inpaint": {
+    kind: "none",
+  },
+  "ctx.media.utils.createCanvas": {
+    kind: "none",
+  },
+  "ctx.media.utils.getImageDataFromCanvas": {
+    kind: "none",
+  },
+  "ctx.media.utils.putImageDataToCanvas": {
+    kind: "none",
+  },
+  "ctx.media.utils.blobToBase64": {
+    kind: "none",
+  },
+  "ctx.media.utils.base64ToBlob": {
+    kind: "none",
+  },
+  "ctx.media.utils.downloadFile": {
+    kind: "none",
+  },
+  "ctx.media.utils.registerCatalogAsset": {
+    kind: "returned-disposer",
+  },
+  "ctx.memory.count": {
+    kind: "none",
+  },
+  "ctx.memory.forget": {
+    kind: "none",
+  },
+  "ctx.memory.get": {
+    kind: "none",
+  },
+  "ctx.memory.list": {
+    kind: "none",
+  },
+  "ctx.memory.search": {
+    kind: "none",
+  },
+  "ctx.memory.store": {
+    kind: "none",
+  },
+  "ctx.memory.update": {
+    kind: "none",
+  },
+  "ctx.messagePart.registerPartRenderer": {
+    kind: "returned-disposer",
+  },
+  "ctx.modal.closeAll": {
+    kind: "none",
+  },
+  "ctx.modal.openById": {
+    kind: "returned-handle",
+    disposeMethod: "close",
+  },
+  "ctx.modal.openModal": {
+    kind: "returned-handle",
+    disposeMethod: "close",
+  },
+  "ctx.network.delete": {
+    kind: "none",
+  },
+  "ctx.network.download": {
+    kind: "none",
+  },
+  "ctx.network.fetch": {
+    kind: "none",
+  },
+  "ctx.network.get": {
+    kind: "none",
+  },
+  "ctx.network.patch": {
+    kind: "none",
+  },
+  "ctx.network.post": {
+    kind: "none",
+  },
+  "ctx.network.put": {
+    kind: "none",
+  },
+  "ctx.network.upload": {
+    kind: "none",
+  },
+  "ctx.notifications.create": {
+    kind: "none",
+  },
+  "ctx.notifications.createProgress": {
+    kind: "none",
+  },
+  "ctx.notifications.dismiss": {
+    kind: "none",
+  },
+  "ctx.notifications.dismissAll": {
+    kind: "none",
+  },
+  "ctx.notifications.getAll": {
+    kind: "none",
+  },
+  "ctx.notifications.onAction": {
+    kind: "returned-disposer",
+  },
+  "ctx.notifications.update": {
+    kind: "none",
+  },
+  "ctx.ocr.listRegistered": {
+    kind: "none",
+  },
+  "ctx.ocr.registerProvider": {
+    kind: "returned-handle",
+    disposeMethod: "unregister",
+  },
+  "ctx.perf.hotspots": {
+    kind: "none",
+  },
+  "ctx.perf.listTraces": {
+    kind: "none",
+  },
+  "ctx.perf.snapshot": {
+    kind: "none",
+  },
+  "ctx.perf.subscribe": {
+    kind: "returned-disposer",
+  },
+  "ctx.perf.systemDetails": {
+    kind: "none",
+  },
+  "ctx.permissions.getGrantedPermissions": {
+    kind: "none",
+  },
+  "ctx.permissions.hasAllPermissions": {
+    kind: "none",
+  },
+  "ctx.permissions.hasAnyPermission": {
+    kind: "none",
+  },
+  "ctx.permissions.hasPermission": {
+    kind: "none",
+  },
+  "ctx.permissions.requestPermission": {
+    kind: "none",
+  },
+  "ctx.pet.emitEvent": {
+    kind: "none",
+  },
+  "ctx.pet.getRemainingBudget": {
+    kind: "none",
+  },
+  "ctx.pet.getSummary": {
+    kind: "none",
+  },
+  "ctx.pet.getView": {
+    kind: "none",
+  },
+  "ctx.pet.interact": {
+    kind: "none",
+  },
+  "ctx.pet.onEvent": {
+    kind: "returned-disposer",
+  },
+  "ctx.project.addKnowledgeFile": {
+    kind: "none",
+  },
+  "ctx.project.addTag": {
+    kind: "none",
+  },
+  "ctx.project.archiveProject": {
+    kind: "none",
+  },
+  "ctx.project.createProject": {
+    kind: "none",
+  },
+  "ctx.project.deleteProject": {
+    kind: "none",
+  },
+  "ctx.project.getCurrentProject": {
+    kind: "none",
+  },
+  "ctx.project.getCurrentProjectId": {
+    kind: "none",
+  },
+  "ctx.project.getKnowledgeFiles": {
+    kind: "none",
+  },
+  "ctx.project.getProject": {
+    kind: "none",
+  },
+  "ctx.project.getProjectSessions": {
+    kind: "none",
+  },
+  "ctx.project.linkSession": {
+    kind: "none",
+  },
+  "ctx.project.listProjects": {
+    kind: "none",
+  },
+  "ctx.project.onProjectChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.project.removeKnowledgeFile": {
+    kind: "none",
+  },
+  "ctx.project.removeTag": {
+    kind: "none",
+  },
+  "ctx.project.setActiveProject": {
+    kind: "none",
+  },
+  "ctx.project.unarchiveProject": {
+    kind: "none",
+  },
+  "ctx.project.unlinkSession": {
+    kind: "none",
+  },
+  "ctx.project.updateKnowledgeFile": {
+    kind: "none",
+  },
+  "ctx.project.updateProject": {
+    kind: "none",
+  },
+  "ctx.python.call": {
+    kind: "none",
+  },
+  "ctx.python.eval": {
+    kind: "none",
+  },
+  "ctx.python.import": {
+    kind: "none",
+  },
+  "ctx.quickActions.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.quickActions.registerMany": {
+    kind: "returned-disposer",
+  },
+  "ctx.scheduler.cancelExecution": {
+    kind: "none",
+  },
+  "ctx.scheduler.createTask": {
+    kind: "host-owned",
+  },
+  "ctx.scheduler.deleteTask": {
+    kind: "none",
+  },
+  "ctx.scheduler.getExecution": {
+    kind: "none",
+  },
+  "ctx.scheduler.getExecutions": {
+    kind: "none",
+  },
+  "ctx.scheduler.getHandlers": {
+    kind: "none",
+  },
+  "ctx.scheduler.getLatestExecution": {
+    kind: "none",
+  },
+  "ctx.scheduler.getTask": {
+    kind: "none",
+  },
+  "ctx.scheduler.hasHandler": {
+    kind: "none",
+  },
+  "ctx.scheduler.listTasks": {
+    kind: "none",
+  },
+  "ctx.scheduler.pauseTask": {
+    kind: "none",
+  },
+  "ctx.scheduler.registerHandler": {
+    kind: "returned-disposer",
+  },
+  "ctx.scheduler.resumeTask": {
+    kind: "none",
+  },
+  "ctx.scheduler.runTaskNow": {
+    kind: "none",
+  },
+  "ctx.scheduler.unregisterHandler": {
+    kind: "none",
+  },
+  "ctx.scheduler.updateTask": {
+    kind: "none",
+  },
+  "ctx.secrets.delete": {
+    kind: "none",
+  },
+  "ctx.secrets.get": {
+    kind: "none",
+  },
+  "ctx.secrets.has": {
+    kind: "none",
+  },
+  "ctx.secrets.keys": {
+    kind: "none",
+  },
+  "ctx.secrets.onDidChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.secrets.store": {
+    kind: "none",
+  },
+  "ctx.session.addMessage": {
+    kind: "none",
+  },
+  "ctx.session.createSession": {
+    kind: "none",
+  },
+  "ctx.session.deleteMessage": {
+    kind: "none",
+  },
+  "ctx.session.deleteSession": {
+    kind: "none",
+  },
+  "ctx.session.getCurrentSession": {
+    kind: "none",
+  },
+  "ctx.session.getCurrentSessionId": {
+    kind: "none",
+  },
+  "ctx.session.getMessages": {
+    kind: "none",
+  },
+  "ctx.session.getSession": {
+    kind: "none",
+  },
+  "ctx.session.getSessionStats": {
+    kind: "none",
+  },
+  "ctx.session.listSessions": {
+    kind: "none",
+  },
+  "ctx.session.onMessagesChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.session.onSessionChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.session.switchSession": {
+    kind: "none",
+  },
+  "ctx.session.updateMessage": {
+    kind: "none",
+  },
+  "ctx.session.updateSession": {
+    kind: "none",
+  },
+  "ctx.settings.get": {
+    kind: "none",
+  },
+  "ctx.settings.onChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.settings.set": {
+    kind: "none",
+  },
+  "ctx.share.create": {
+    kind: "none",
+  },
+  "ctx.share.delete": {
+    kind: "none",
+  },
+  "ctx.share.getByCode": {
+    kind: "none",
+  },
+  "ctx.share.getStats": {
+    kind: "none",
+  },
+  "ctx.share.list": {
+    kind: "none",
+  },
+  "ctx.share.revoke": {
+    kind: "none",
+  },
+  "ctx.shell.execute": {
+    kind: "none",
+  },
+  "ctx.shell.open": {
+    kind: "none",
+  },
+  "ctx.shell.showInFolder": {
+    kind: "none",
+  },
+  "ctx.shell.spawn": {
+    kind: "returned-handle",
+    disposeMethod: "kill",
+  },
+  "ctx.shortcuts.getRegistered": {
+    kind: "none",
+  },
+  "ctx.shortcuts.isAvailable": {
+    kind: "none",
+  },
+  "ctx.shortcuts.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.shortcuts.registerMany": {
+    kind: "returned-disposer",
+  },
+  "ctx.storage.clear": {
+    kind: "none",
+  },
+  "ctx.storage.delete": {
+    kind: "none",
+  },
+  "ctx.storage.get": {
+    kind: "none",
+  },
+  "ctx.storage.getOrDefault": {
+    kind: "none",
+  },
+  "ctx.storage.getSecure": {
+    kind: "none",
+  },
+  "ctx.storage.getUsage": {
+    kind: "none",
+  },
+  "ctx.storage.has": {
+    kind: "none",
+  },
+  "ctx.storage.isEncrypted": {
+    kind: "none",
+  },
+  "ctx.storage.keys": {
+    kind: "none",
+  },
+  "ctx.storage.remove": {
+    kind: "none",
+  },
+  "ctx.storage.set": {
+    kind: "none",
+  },
+  "ctx.storage.setSecure": {
+    kind: "none",
+  },
+  "ctx.subscription.getActiveAccountId": {
+    kind: "none",
+  },
+  "ctx.subscription.getActiveAccountSummary": {
+    kind: "none",
+  },
+  "ctx.subscription.getLatestUsage": {
+    kind: "none",
+  },
+  "ctx.subscription.getUsage": {
+    kind: "none",
+  },
+  "ctx.subscription.listAccounts": {
+    kind: "none",
+  },
+  "ctx.subscription.onUsageUpdate": {
+    kind: "returned-disposer",
+  },
+  "ctx.subscription.providers": {
+    kind: "none",
+  },
+  "ctx.team.addComment": {
+    kind: "none",
+  },
+  "ctx.team.addTeammate": {
+    kind: "none",
+  },
+  "ctx.team.assignTask": {
+    kind: "none",
+  },
+  "ctx.team.attachTaskFile": {
+    kind: "none",
+  },
+  "ctx.team.createTask": {
+    kind: "none",
+  },
+  "ctx.team.getExecutionReport": {
+    kind: "none",
+  },
+  "ctx.team.getRunStatus": {
+    kind: "none",
+  },
+  "ctx.team.getTeam": {
+    kind: "none",
+  },
+  "ctx.team.getTeammate": {
+    kind: "none",
+  },
+  "ctx.team.listCheckpoints": {
+    kind: "none",
+  },
+  "ctx.team.listEvents": {
+    kind: "none",
+  },
+  "ctx.team.listTasks": {
+    kind: "none",
+  },
+  "ctx.team.listTeammates": {
+    kind: "none",
+  },
+  "ctx.team.listTeams": {
+    kind: "none",
+  },
+  "ctx.team.moveTask": {
+    kind: "none",
+  },
+  "ctx.team.removeTeammate": {
+    kind: "none",
+  },
+  "ctx.team.reorderTask": {
+    kind: "none",
+  },
+  "ctx.team.subscribe": {
+    kind: "returned-disposer",
+  },
+  "ctx.team.updateTask": {
+    kind: "none",
+  },
+  "ctx.team.updateTeamConfig": {
+    kind: "none",
+  },
+  "ctx.team.updateTeammate": {
+    kind: "none",
+  },
+  "ctx.templates.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.templates.registerMany": {
+    kind: "returned-disposer",
+  },
+  "ctx.templates.query": {
+    kind: "none",
+  },
+  "ctx.templates.get": {
+    kind: "none",
+  },
+  "ctx.templates.list": {
+    kind: "none",
+  },
+  "ctx.templates.getRevision": {
+    kind: "none",
+  },
+  "ctx.templates.subscribe": {
+    kind: "returned-disposer",
+  },
+  "ctx.templates.validate": {
+    kind: "none",
+  },
+  "ctx.templates.createDraft": {
+    kind: "none",
+  },
+  "ctx.templates.preflight": {
+    kind: "none",
+  },
+  "ctx.templates.instantiate": {
+    kind: "none",
+  },
+  "ctx.terminal.classifyCommand": {
+    kind: "none",
+  },
+  "ctx.terminal.detectScriptType": {
+    kind: "none",
+  },
+  "ctx.terminal.kill": {
+    kind: "none",
+  },
+  "ctx.terminal.list": {
+    kind: "none",
+  },
+  "ctx.terminal.onData": {
+    kind: "returned-disposer",
+  },
+  "ctx.terminal.readRecent": {
+    kind: "none",
+  },
+  "ctx.terminal.registerCommandSafetyRule": {
+    kind: "returned-disposer",
+  },
+  "ctx.terminal.registerCompletionProvider": {
+    kind: "returned-disposer",
+  },
+  "ctx.terminal.runScript": {
+    kind: "host-owned",
+  },
+  "ctx.terminal.spawn": {
+    kind: "host-owned",
+  },
+  "ctx.terminal.write": {
+    kind: "none",
+  },
+  "ctx.theme.activateCustomTheme": {
+    kind: "none",
+  },
+  "ctx.theme.activateRegisteredTheme": {
+    kind: "none",
+  },
+  "ctx.theme.applyScopedColors": {
+    kind: "none",
+  },
+  "ctx.theme.deleteCustomTheme": {
+    kind: "none",
+  },
+  "ctx.theme.getAvailablePresets": {
+    kind: "none",
+  },
+  "ctx.theme.getColorPreset": {
+    kind: "none",
+  },
+  "ctx.theme.getColors": {
+    kind: "none",
+  },
+  "ctx.theme.getCustomThemes": {
+    kind: "none",
+  },
+  "ctx.theme.getMode": {
+    kind: "none",
+  },
+  "ctx.theme.getResolvedMode": {
+    kind: "none",
+  },
+  "ctx.theme.getTheme": {
+    kind: "none",
+  },
+  "ctx.theme.onThemeChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.theme.registerCustomTheme": {
+    kind: "returned-disposer",
+  },
+  "ctx.theme.setColorPreset": {
+    kind: "none",
+  },
+  "ctx.theme.setMode": {
+    kind: "none",
+  },
+  "ctx.theme.updateCustomTheme": {
+    kind: "none",
+  },
+  "ctx.toolResult.registerToolResultRenderer": {
+    kind: "returned-disposer",
+  },
+  "ctx.tray.register": {
+    kind: "returned-disposer",
+  },
+  "ctx.tray.registerMany": {
+    kind: "returned-disposer",
+  },
+  "ctx.ui.showConfirmDialog": {
+    kind: "none",
+  },
+  "ctx.ui.showDialog": {
+    kind: "none",
+  },
+  "ctx.ui.showInputDialog": {
+    kind: "none",
+  },
+  "ctx.ui.showNotification": {
+    kind: "none",
+  },
+  "ctx.ui.showToast": {
+    kind: "none",
+  },
+  "ctx.uri.registerHandler": {
+    kind: "returned-disposer",
+  },
+  "ctx.vector.addDocuments": {
+    kind: "none",
+  },
+  "ctx.vector.clearCollection": {
+    kind: "none",
+  },
+  "ctx.vector.createCollection": {
+    kind: "none",
+  },
+  "ctx.vector.deleteCollection": {
+    kind: "none",
+  },
+  "ctx.vector.deleteDocuments": {
+    kind: "none",
+  },
+  "ctx.vector.embed": {
+    kind: "none",
+  },
+  "ctx.vector.embedBatch": {
+    kind: "none",
+  },
+  "ctx.vector.getCollectionInfo": {
+    kind: "none",
+  },
+  "ctx.vector.getDocumentCount": {
+    kind: "none",
+  },
+  "ctx.vector.listCollections": {
+    kind: "none",
+  },
+  "ctx.vector.search": {
+    kind: "none",
+  },
+  "ctx.vector.searchByEmbedding": {
+    kind: "none",
+  },
+  "ctx.vector.updateDocuments": {
+    kind: "none",
+  },
+  "ctx.webview.create": {
+    kind: "returned-handle",
+    disposeMethod: "dispose",
+  },
+  "ctx.window.create": {
+    kind: "returned-handle",
+    disposeMethod: "close",
+  },
+  "ctx.window.focus": {
+    kind: "none",
+  },
+  "ctx.window.getAll": {
+    kind: "none",
+  },
+  "ctx.window.getMain": {
+    kind: "none",
+  },
+  "ctx.workflow.emitTriggerEvent": {
+    kind: "none",
+  },
+  "ctx.workflow.registerNode": {
+    kind: "returned-disposer",
+  },
+  "ctx.workflow.registerTrigger": {
+    kind: "returned-disposer",
+  },
+  "ctx.workspace.getBackend": {
+    kind: "none",
+  },
+  "ctx.workspace.listRegistered": {
+    kind: "none",
+  },
+  "ctx.workspace.registerBackend": {
+    kind: "returned-handle",
+    disposeMethod: "unregister",
+  },
+} as const

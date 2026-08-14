@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -13,6 +13,11 @@ jest.mock("next-intl", () => ({
 const togglePluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => ({ ok: true }))
 jest.mock("@/lib/plugin/core/toggle-plugin-enabled", () => ({
   togglePluginEnabled: (id: string, enabled: boolean) => togglePluginEnabledMock(id, enabled),
+}))
+
+const recoverPluginRuntimeMock = jest.fn(async () => true)
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({ recoverPluginRuntime: recoverPluginRuntimeMock }),
 }))
 
 let mockDiagnostics: ReadonlyArray<{
@@ -53,6 +58,7 @@ function makePlugin(overrides: Partial<PluginRow> = {}): PluginRow {
 
 beforeEach(() => {
   togglePluginEnabledMock.mockClear()
+  recoverPluginRuntimeMock.mockClear()
   mockDiagnostics = []
   usePluginsStore.setState({
     deleteTarget: null,
@@ -107,6 +113,24 @@ describe("PluginDetailHeader", () => {
       pluginId: "alpha",
       name: "Alpha",
     })
+  })
+
+  it("surfaces dirty lifecycle state and retries authoritative cleanup", async () => {
+    render(
+      <PluginDetailHeader
+        plugin={makePlugin({
+          lifecycle: {
+            intent: "enabled",
+            actual: "dirty",
+            revision: 3,
+            updatedAt: 1,
+          },
+        })}
+      />
+    )
+    expect(screen.getByText("lifecycle.dirty")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "lifecycle.retryCleanup" }))
+    await waitFor(() => expect(recoverPluginRuntimeMock).toHaveBeenCalledWith("alpha"))
   })
 
   it("hides the diagnostics preview when none are recorded", () => {

@@ -15,6 +15,11 @@ describe("resolvePluginRuntimeBootstrap", () => {
         runtimeProfile: "browser",
         pluginDirectory: "",
         enablePython: false,
+        lifecycleFeatures: {
+          ledgerV2: true,
+          runtimeServices: true,
+          scopedRealms: false,
+        },
       },
     })
   })
@@ -32,6 +37,11 @@ describe("resolvePluginRuntimeBootstrap", () => {
         runtimeProfile: "mobile",
         pluginDirectory: "",
         enablePython: false,
+        lifecycleFeatures: {
+          ledgerV2: true,
+          runtimeServices: true,
+          scopedRealms: false,
+        },
       },
     })
   })
@@ -49,6 +59,11 @@ describe("resolvePluginRuntimeBootstrap", () => {
         runtimeProfile: "tauri",
         pluginDirectory: "/plugins",
         enablePython: true,
+        lifecycleFeatures: {
+          ledgerV2: true,
+          runtimeServices: true,
+          scopedRealms: false,
+        },
       },
     })
   })

@@ -98,6 +98,12 @@ jest.mock("../core/manager", () => ({
   __scanPluginsSpy: jest.fn().mockResolvedValue([]),
   __syncRuntimeStateSpy: jest.fn().mockResolvedValue(undefined),
   __enablePluginSpy: jest.fn().mockResolvedValue(undefined),
+  __reservePluginRuntimeGraphSpy: jest.fn(() => ({
+    managerId: "manager",
+    pluginId: "plugin-a",
+    token: 1,
+  })),
+  __releasePluginRuntimeGraphSpy: jest.fn(() => true),
   getPluginManager() {
     const mockedManager = jest.requireMock("../core/manager") as Record<string, jest.Mock>
     return {
@@ -106,6 +112,8 @@ jest.mock("../core/manager", () => ({
       scanPlugins: mockedManager.__scanPluginsSpy,
       syncRuntimeState: mockedManager.__syncRuntimeStateSpy,
       enablePlugin: mockedManager.__enablePluginSpy,
+      reservePluginRuntimeGraph: mockedManager.__reservePluginRuntimeGraphSpy,
+      releasePluginRuntimeGraph: mockedManager.__releasePluginRuntimeGraphSpy,
     }
   },
 }))
@@ -158,6 +166,8 @@ const managerModule = jest.requireMock("../core/manager") as {
   __scanPluginsSpy: jest.Mock
   __syncRuntimeStateSpy: jest.Mock
   __enablePluginSpy: jest.Mock
+  __reservePluginRuntimeGraphSpy: jest.Mock
+  __releasePluginRuntimeGraphSpy: jest.Mock
 }
 const getOpenVsxClientMock = getOpenVsxClient as jest.Mock
 const getCachedMock = getCached as jest.Mock
@@ -207,8 +217,14 @@ describe("PluginUpdater", () => {
         version: "1.0.0",
       },
     })
-    backupModule.__restoreBackupSpy.mockResolvedValue({ success: true })
-    managerModule.__enablePluginSpy.mockResolvedValue(undefined)
+    backupModule.__restoreBackupSpy.mockReset().mockResolvedValue({ success: true })
+    managerModule.__enablePluginSpy.mockReset().mockResolvedValue(undefined)
+    managerModule.__reservePluginRuntimeGraphSpy.mockImplementation(() => ({
+      managerId: "manager",
+      pluginId: "plugin-a",
+      token: 1,
+    }))
+    managerModule.__releasePluginRuntimeGraphSpy.mockReturnValue(true)
     cogniaInstallPlugin.mockResolvedValue({ success: true })
     stagePluginUpdate.mockResolvedValue({
       transactionId: "123e4567-e89b-42d3-a456-426614174000",
@@ -554,6 +570,8 @@ describe("PluginUpdater", () => {
       )
       expect(managerModule.__unloadPluginSpy).toHaveBeenCalledWith("plugin-a")
       expect(managerModule.__enablePluginSpy).toHaveBeenCalledWith("plugin-a")
+      expect(managerModule.__reservePluginRuntimeGraphSpy).toHaveBeenCalledWith("plugin-a")
+      expect(managerModule.__releasePluginRuntimeGraphSpy).toHaveBeenCalledTimes(1)
       expect(managerModule.__unloadPluginSpy.mock.invocationCallOrder[0]).toBeLessThan(
         commitStagedPluginUpdate.mock.invocationCallOrder[0]
       )
@@ -667,19 +685,17 @@ describe("PluginUpdater", () => {
         state.plugins["plugin-a"].manifest.version = "1.0.0"
         return { success: true }
       })
-      managerModule.__enablePluginSpy
-        .mockRejectedValueOnce(new Error("proxy handshake failed"))
-        .mockResolvedValueOnce(undefined)
+      managerModule.__enablePluginSpy.mockRejectedValueOnce(new Error("proxy handshake failed"))
 
       const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
 
       expect(result).toMatchObject({
         success: false,
         rollback: { attempted: true, succeeded: true },
-        requiresRestart: false,
+        requiresRestart: true,
       })
       expect(backupModule.__restoreBackupSpy).toHaveBeenCalledWith("plugin-a-before-update")
-      expect(managerModule.__enablePluginSpy).toHaveBeenCalledTimes(2)
+      expect(managerModule.__enablePluginSpy).toHaveBeenCalledTimes(1)
       expect(state.plugins["plugin-a"].manifest.version).toBe("1.0.0")
     })
 
@@ -711,7 +727,7 @@ describe("PluginUpdater", () => {
       })
     })
 
-    it("requests a restart only after restoring the old package when reactivation fails", async () => {
+    it("keeps the restored package inactive instead of resurrecting the old runtime", async () => {
       const state = mockGetStoreState() as never as {
         plugins: Record<string, { manifest: { version: string }; status: string }>
       }
@@ -724,9 +740,7 @@ describe("PluginUpdater", () => {
         state.plugins["plugin-a"].manifest.version = "1.0.0"
         return { success: true }
       })
-      managerModule.__enablePluginSpy
-        .mockRejectedValueOnce(new Error("new proxy rejected"))
-        .mockRejectedValueOnce(new Error("extension host unavailable"))
+      managerModule.__enablePluginSpy.mockRejectedValueOnce(new Error("new proxy rejected"))
 
       const result = await updater.update("plugin-a", { force: true, version: "2.0.0" })
 
@@ -735,10 +749,10 @@ describe("PluginUpdater", () => {
         requiresRestart: true,
         rollback: {
           attempted: true,
-          succeeded: false,
-          error: expect.stringContaining("reactivate previous version"),
+          succeeded: true,
         },
       })
+      expect(managerModule.__enablePluginSpy).toHaveBeenCalledTimes(1)
       expect(state.plugins["plugin-a"].manifest.version).toBe("1.0.0")
     })
 

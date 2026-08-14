@@ -33,6 +33,7 @@ use super::WasmPluginState;
 #[serde(rename_all = "camelCase")]
 pub struct WasmLoadResult {
     pub plugin_api_version: String,
+    pub generation: String,
 }
 
 #[tauri::command]
@@ -79,7 +80,16 @@ pub async fn plugin_wasm_load_for_state(
     })
     .await
     .map_err(|error| format!("WASM load task panicked: {error}"))??;
-    Ok(WasmLoadResult { plugin_api_version })
+    let generation = state
+        .loaded
+        .read()
+        .get(&plugin_id)
+        .map(|entry| entry.generation.clone())
+        .ok_or_else(|| format!("plugin disappeared after load: {plugin_id}"))?;
+    Ok(WasmLoadResult {
+        plugin_api_version,
+        generation,
+    })
 }
 
 fn granted_permissions(runtime: &PluginRuntimeState, plugin_id: &str) -> Vec<String> {
@@ -109,8 +119,16 @@ pub async fn plugin_wasm_activate(
     runtime: State<'_, PluginRuntimeState>,
     plugin_id: String,
     config_json: String,
+    generation: String,
 ) -> Result<ActivateOutcome, String> {
-    plugin_wasm_activate_for_state(state.inner(), runtime.inner(), plugin_id, config_json).await
+    plugin_wasm_activate_generation_for_state(
+        state.inner(),
+        runtime.inner(),
+        plugin_id,
+        config_json,
+        generation,
+    )
+    .await
 }
 
 /// Host-neutral activation entry point shared by Tauri and `cognia-server`.
@@ -119,6 +137,23 @@ pub async fn plugin_wasm_activate_for_state(
     runtime: &PluginRuntimeState,
     plugin_id: String,
     config_json: String,
+) -> Result<ActivateOutcome, String> {
+    let generation = state
+        .loaded
+        .read()
+        .get(&plugin_id)
+        .map(|entry| entry.generation.clone())
+        .ok_or_else(|| format!("plugin not loaded: {plugin_id}"))?;
+    plugin_wasm_activate_generation_for_state(state, runtime, plugin_id, config_json, generation)
+        .await
+}
+
+pub async fn plugin_wasm_activate_generation_for_state(
+    state: &WasmPluginState,
+    runtime: &PluginRuntimeState,
+    plugin_id: String,
+    config_json: String,
+    generation: String,
 ) -> Result<ActivateOutcome, String> {
     // Snapshot what we need out of the loaded-plugin maps without holding
     // their locks across the `.await` below. The typed pre-instantiation
@@ -129,6 +164,9 @@ pub async fn plugin_wasm_activate_for_state(
         let entry = map
             .get(&plugin_id)
             .ok_or_else(|| format!("plugin not loaded: {plugin_id}"))?;
+        if entry.generation != generation {
+            return Err(format!("stale WASM generation for {plugin_id}"));
+        }
         let plugin_pre = state
             .pres
             .read()
@@ -171,9 +209,18 @@ pub async fn plugin_wasm_activate_for_state(
     // up in `init` persists) instead of re-instantiating a fresh, un-init'd
     // store. Replaces any prior activation for this id (re-activate = reset).
     let call_timeout_ms = store.data().call_timeout_ms;
+    if state
+        .loaded
+        .read()
+        .get(&plugin_id)
+        .is_none_or(|entry| entry.generation != generation)
+    {
+        return Err(format!("stale WASM generation for {plugin_id}"));
+    }
     state.activated.write().insert(
         plugin_id.clone(),
         Arc::new(tokio::sync::Mutex::new(ActivatedPlugin {
+            generation,
             store,
             bindings,
             call_timeout_ms,
@@ -195,8 +242,9 @@ pub async fn plugin_wasm_activate_for_state(
 pub async fn plugin_wasm_deactivate(
     state: State<'_, WasmPluginState>,
     plugin_id: String,
+    generation: String,
 ) -> Result<bool, String> {
-    plugin_wasm_deactivate_for_state(state.inner(), plugin_id).await
+    plugin_wasm_deactivate_generation_for_state(state.inner(), plugin_id, generation).await
 }
 
 /// Host-neutral deactivation entry point shared by Tauri and `cognia-server`.
@@ -204,6 +252,34 @@ pub async fn plugin_wasm_deactivate_for_state(
     state: &WasmPluginState,
     plugin_id: String,
 ) -> Result<bool, String> {
+    let generation = state
+        .loaded
+        .read()
+        .get(&plugin_id)
+        .map(|entry| entry.generation.clone())
+        .ok_or_else(|| format!("plugin not loaded: {plugin_id}"))?;
+    plugin_wasm_deactivate_generation_for_state(state, plugin_id, generation).await
+}
+
+pub async fn plugin_wasm_deactivate_generation_for_state(
+    state: &WasmPluginState,
+    plugin_id: String,
+    generation: String,
+) -> Result<bool, String> {
+    let activated = state.activated.read().get(&plugin_id).cloned();
+    if let Some(current) = &activated {
+        let guard = current.lock().await;
+        if guard.generation != generation {
+            return Err(format!("stale WASM generation for {plugin_id}"));
+        }
+    }
+    let loaded = state.loaded.read();
+    if loaded
+        .get(&plugin_id)
+        .is_none_or(|entry| entry.generation != generation)
+    {
+        return Err(format!("stale WASM generation for {plugin_id}"));
+    }
     // Cancel first, THEN drop. An in-flight bridge round trip holds the
     // instance's async mutex for up to 30 s; without this the store stays alive
     // (and the guest stays blocked) long after the user disabled the plugin.
@@ -215,8 +291,16 @@ pub async fn plugin_wasm_deactivate_for_state(
     // Drop the live instance (frees the Store / guest memory); the compiled
     // component stays loaded so a later activate is cheap. Returns whether the
     // plugin is still loaded (mirrors the prior contract).
-    WasmPluginHost::deactivate(&state, &plugin_id);
-    Ok(state.loaded.read().contains_key(&plugin_id))
+    if let Some(current) = activated {
+        let mut entries = state.activated.write();
+        if entries
+            .get(&plugin_id)
+            .is_some_and(|entry| Arc::ptr_eq(entry, &current))
+        {
+            entries.remove(&plugin_id);
+        }
+    }
+    Ok(true)
 }
 
 /// Classified dispatch failure. A `Trap` is a host-side wasmtime fault (trap or
@@ -299,13 +383,15 @@ pub async fn plugin_wasm_call(
     plugin_id: String,
     export_name: String,
     payload_json: String,
+    generation: String,
 ) -> Result<String, String> {
-    plugin_wasm_call_for_state(
+    plugin_wasm_call_generation_for_state(
         state.inner(),
         runtime.inner(),
         plugin_id,
         export_name,
         payload_json,
+        generation,
     )
     .await
 }
@@ -317,6 +403,31 @@ pub async fn plugin_wasm_call_for_state(
     plugin_id: String,
     export_name: String,
     payload_json: String,
+) -> Result<String, String> {
+    let generation = state
+        .loaded
+        .read()
+        .get(&plugin_id)
+        .map(|entry| entry.generation.clone())
+        .ok_or_else(|| format!("plugin not loaded: {plugin_id}"))?;
+    plugin_wasm_call_generation_for_state(
+        state,
+        runtime,
+        plugin_id,
+        export_name,
+        payload_json,
+        generation,
+    )
+    .await
+}
+
+pub async fn plugin_wasm_call_generation_for_state(
+    state: &WasmPluginState,
+    runtime: &PluginRuntimeState,
+    plugin_id: String,
+    export_name: String,
+    payload_json: String,
+    generation: String,
 ) -> Result<String, String> {
     if export_name.trim().is_empty() {
         return Err("export_name is empty".into());
@@ -331,6 +442,9 @@ pub async fn plugin_wasm_call_for_state(
         let result = {
             let mut guard = activated.lock().await;
             let ap = &mut *guard;
+            if ap.generation != generation {
+                return Err(format!("stale WASM generation for {plugin_id}"));
+            }
             // The retained store's epoch countdown was consumed by prior calls;
             // reset it so THIS call gets a full timeout window.
             let deadline = deadline_from_timeout_ms(ap.call_timeout_ms);
@@ -347,7 +461,14 @@ pub async fn plugin_wasm_call_for_state(
                     // instead of reusing indeterminate guest memory. A stateful
                     // guest must be re-activated to restore its state (the
                     // poisoned state was unusable anyway).
-                    state.activated.write().remove(&plugin_id);
+                    let should_remove = state
+                        .activated
+                        .read()
+                        .get(&plugin_id)
+                        .is_some_and(|current| Arc::ptr_eq(current, &activated));
+                    if should_remove {
+                        state.activated.write().remove(&plugin_id);
+                    }
                 }
                 Err(err.into_message())
             }
@@ -363,6 +484,9 @@ pub async fn plugin_wasm_call_for_state(
         let entry = map
             .get(&plugin_id)
             .ok_or_else(|| format!("plugin not loaded: {plugin_id}"))?;
+        if entry.generation != generation {
+            return Err(format!("stale WASM generation for {plugin_id}"));
+        }
         let plugin_pre = state
             .pres
             .read()
@@ -412,8 +536,9 @@ fn extract_kind(payload: &[u8]) -> String {
 pub async fn plugin_wasm_unload(
     state: State<'_, WasmPluginState>,
     plugin_id: String,
+    generation: String,
 ) -> Result<bool, String> {
-    plugin_wasm_unload_for_state(state.inner(), plugin_id).await
+    plugin_wasm_unload_generation_for_state(state.inner(), plugin_id, generation).await
 }
 
 /// Host-neutral unload entry point shared by Tauri and `cognia-server`.
@@ -421,12 +546,23 @@ pub async fn plugin_wasm_unload_for_state(
     state: &WasmPluginState,
     plugin_id: String,
 ) -> Result<bool, String> {
-    // Same ordering rationale as deactivate: end in-flight renderer work before
-    // the store goes away, so the guest unwinds promptly with `CANCELLED`.
-    if let Some(bridge) = WasmPluginHost::renderer_bridge(state) {
-        bridge.cancel_plugin(&plugin_id, CancelReason::Unload);
-    }
-    Ok(WasmPluginHost::unload(state, &plugin_id))
+    let generation = state
+        .loaded
+        .read()
+        .get(&plugin_id)
+        .map(|entry| entry.generation.clone());
+    let Some(generation) = generation else {
+        return Ok(false);
+    };
+    plugin_wasm_unload_generation_for_state(state, plugin_id, generation).await
+}
+
+pub async fn plugin_wasm_unload_generation_for_state(
+    state: &WasmPluginState,
+    plugin_id: String,
+    generation: String,
+) -> Result<bool, String> {
+    WasmPluginHost::unload_generation(state, &plugin_id, &generation)
 }
 
 #[tauri::command]

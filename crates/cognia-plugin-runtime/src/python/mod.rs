@@ -88,6 +88,9 @@ pub enum PythonHostSlot {
 pub struct HostEntry {
     pub slot: PythonHostSlot,
     pub spec: RespawnSpec,
+    /// Opaque runtime generation. Every callback/unload must present this
+    /// value so a stale renderer cannot act on a replacement host.
+    pub generation: String,
     pub tool_count: usize,
     pub hook_count: usize,
 }
@@ -155,6 +158,44 @@ impl PythonRuntimeState {
             .map(|entry| (entry.tool_count, entry.hook_count))
     }
 
+    /// Atomically snapshot generation and cached contribution counts.
+    pub fn entry_metadata(&self, plugin_id: &str) -> Option<(String, usize, usize)> {
+        self.hosts
+            .read()
+            .get(plugin_id)
+            .map(|entry| (entry.generation.clone(), entry.tool_count, entry.hook_count))
+    }
+
+    /// Current opaque generation for a loaded plugin.
+    pub fn generation(&self, plugin_id: &str) -> Option<String> {
+        self.hosts
+            .read()
+            .get(plugin_id)
+            .map(|entry| entry.generation.clone())
+    }
+
+    /// Atomically bind an operation to one host generation. `Ok(None)` means
+    /// the matching generation is loaded lazily and has no live process.
+    pub fn host_for_generation(
+        &self,
+        plugin_id: &str,
+        generation: &str,
+    ) -> Result<Option<Arc<PluginHost>>> {
+        let hosts = self.hosts.read();
+        let entry = hosts.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(format!("python plugin not loaded: {plugin_id}"))
+        })?;
+        if entry.generation != generation {
+            return Err(PluginError::InvalidArgument(format!(
+                "stale python plugin generation for {plugin_id}"
+            )));
+        }
+        Ok(match &entry.slot {
+            PythonHostSlot::Spawned(host) => Some(Arc::clone(host)),
+            PythonHostSlot::Lazy => None,
+        })
+    }
+
     /// Number of currently dormant (lazy) entries.
     pub fn lazy_count(&self) -> usize {
         self.hosts
@@ -188,20 +229,46 @@ impl PythonRuntimeState {
     /// one from its [`RespawnSpec`]. Errors with `NotFound` when the plugin
     /// was never loaded.
     pub async fn materialize(&self, plugin_id: &str) -> Result<Arc<PluginHost>> {
-        if let Some(host) = self.host(plugin_id) {
-            return Ok(host);
+        self.materialize_generation(plugin_id, None).await
+    }
+
+    /// Resolve exactly one generation. A stale request can keep talking only
+    /// to the old host it already captured; it can never respawn or attach to
+    /// a replacement generation.
+    pub async fn materialize_generation(
+        &self,
+        plugin_id: &str,
+        expected_generation: Option<&str>,
+    ) -> Result<Arc<PluginHost>> {
+        let assert_generation = |entry: &HostEntry| -> Result<()> {
+            if expected_generation.is_some_and(|expected| entry.generation != expected) {
+                return Err(PluginError::InvalidArgument(format!(
+                    "stale python plugin generation for {plugin_id}"
+                )));
+            }
+            Ok(())
+        };
+        {
+            let hosts = self.hosts.read();
+            if let Some(entry) = hosts.get(plugin_id) {
+                assert_generation(entry)?;
+                if let PythonHostSlot::Spawned(host) = &entry.slot {
+                    return Ok(Arc::clone(host));
+                }
+            }
         }
         // Serialize spawns; double-check after acquiring the lock.
         let _guard = self.materialize_lock.lock().await;
-        if let Some(host) = self.host(plugin_id) {
-            return Ok(host);
-        }
-        let spec = {
+        let (spec, generation) = {
             let hosts = self.hosts.read();
             let entry = hosts.get(plugin_id).ok_or_else(|| {
                 PluginError::NotFound(format!("python plugin not loaded: {plugin_id}"))
             })?;
-            entry.spec.clone()
+            assert_generation(entry)?;
+            if let PythonHostSlot::Spawned(host) = &entry.slot {
+                return Ok(Arc::clone(host));
+            }
+            (entry.spec.clone(), entry.generation.clone())
         };
         let host = PluginHost::spawn(
             plugin_id,
@@ -209,6 +276,7 @@ impl PythonRuntimeState {
             &spec.host_script,
             HostOptions {
                 sink: self.sink(),
+                generation: generation.clone(),
                 max_concurrent_calls: spec.max_concurrent_calls,
                 env: spec.env.clone(),
                 sandboxed: spec.sandboxed,
@@ -227,12 +295,37 @@ impl PythonRuntimeState {
         };
         let tool_count = info.get("tool_count").and_then(Value::as_u64).unwrap_or(0) as usize;
         let hook_count = info.get("hook_count").and_then(Value::as_u64).unwrap_or(0) as usize;
-        {
+        enum PublishOutcome {
+            Published,
+            Missing,
+            Stale,
+        }
+        let publish_outcome = {
             let mut hosts = self.hosts.write();
-            if let Some(entry) = hosts.get_mut(plugin_id) {
-                entry.slot = PythonHostSlot::Spawned(Arc::clone(&host));
-                entry.tool_count = tool_count;
-                entry.hook_count = hook_count;
+            match hosts.get_mut(plugin_id) {
+                None => PublishOutcome::Missing,
+                Some(entry) if entry.generation != generation => PublishOutcome::Stale,
+                Some(entry) => {
+                    entry.slot = PythonHostSlot::Spawned(Arc::clone(&host));
+                    entry.tool_count = tool_count;
+                    entry.hook_count = hook_count;
+                    PublishOutcome::Published
+                }
+            }
+        };
+        match publish_outcome {
+            PublishOutcome::Published => {}
+            PublishOutcome::Missing => {
+                host.kill().await;
+                return Err(PluginError::NotFound(format!(
+                    "python plugin unloaded while respawning: {plugin_id}"
+                )));
+            }
+            PublishOutcome::Stale => {
+                host.kill().await;
+                return Err(PluginError::InvalidArgument(format!(
+                    "stale python plugin generation for {plugin_id}"
+                )));
             }
         }
         log::info!("[python.{plugin_id}] respawned from lazy slot");
@@ -339,6 +432,60 @@ mod tests {
         }
     }
 
+    #[test]
+    fn python_callbacks_reject_stale_generations() {
+        let state = PythonRuntimeState::new(PathBuf::from("/tmp/python"));
+        state.hosts.write().insert("demo".into(), lazy_entry(0));
+
+        assert!(commands::plugin_python_assert_generation_for_state(
+            &state,
+            "demo",
+            "test-generation"
+        )
+        .is_ok());
+        assert!(commands::plugin_python_assert_generation_for_state(
+            &state,
+            "demo",
+            "stale-generation"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn host_lookup_is_atomically_bound_to_generation() {
+        let state = PythonRuntimeState::new(PathBuf::from("/tmp/python"));
+        state.hosts.write().insert("demo".into(), lazy_entry(0));
+
+        assert!(matches!(
+            state.host_for_generation("demo", "test-generation"),
+            Ok(None)
+        ));
+        assert!(matches!(
+            state.host_for_generation("demo", "stale-generation"),
+            Err(PluginError::InvalidArgument(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn stale_unload_cannot_remove_a_replacement_generation() {
+        let state = PythonRuntimeState::new(PathBuf::from("/tmp/python"));
+        state.hosts.write().insert("demo".into(), lazy_entry(0));
+
+        assert!(commands::plugin_python_unload_generation_for_state(
+            &state,
+            "demo",
+            "stale-generation"
+        )
+        .await
+        .is_err());
+        assert_eq!(state.generation("demo").as_deref(), Some("test-generation"));
+
+        commands::plugin_python_unload_generation_for_state(&state, "demo", "test-generation")
+            .await
+            .unwrap();
+        assert!(!state.loaded("demo"));
+    }
+
     fn lazy_entry(idle_min: u64) -> HostEntry {
         HostEntry {
             slot: PythonHostSlot::Lazy,
@@ -355,6 +502,7 @@ mod tests {
                 call_timeout_ms: None,
                 sandboxed: false,
             },
+            generation: "test-generation".into(),
             tool_count: 2,
             hook_count: 1,
         }

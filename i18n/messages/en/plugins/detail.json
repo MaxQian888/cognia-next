@@ -58,6 +58,16 @@
     "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
     "streamEnd": "— stream ended —"
   },
+  "lifecycle": {
+    "activating": "Activating",
+    "dirty": "Cleanup required",
+    "error": "Runtime error",
+    "retryCleanup": "Retry cleanup",
+    "retryFailed": "Cleanup is still unconfirmed. Restart the host or retry after the native runtime exits.",
+    "retrying": "Retrying cleanup",
+    "stopping": "Stopping",
+    "waiting": "Waiting for service"
+  },
   "metaAuthor": "Author",
   "metaCreatedAt": "Installed at",
   "metaError": "Last error",

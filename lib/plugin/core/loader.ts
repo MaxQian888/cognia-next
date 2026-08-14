@@ -14,8 +14,12 @@ import type {
 import { TimeoutError, withTimeout } from "@cognia/primitives"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
-import { loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"
-import { loadVscodeDefinition, unloadVscodeExtension } from "./vscode-loader"
+import { getWasmRuntimeGeneration, loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"
+import {
+  getVscodeRuntimeGeneration,
+  loadVscodeDefinition,
+  unloadVscodeExtension,
+} from "./vscode-loader"
 import {
   deriveScopeFromManifest,
   launchPluginJs,
@@ -64,6 +68,7 @@ export class PluginEvaluationError extends Error {
 interface LoadedModule {
   definition: PluginDefinition
   exports: Record<string, unknown>
+  runtimeGeneration?: string
 }
 
 /**
@@ -81,6 +86,8 @@ export interface DirtyTeardownRecord {
   at: number
   /** Original error message, when one was thrown / produced. */
   message: string
+  /** Opaque isolated-runtime generation that cleanup is allowed to remove. */
+  runtimeGeneration?: string
 }
 
 function isNodeTargetFrontend(manifest: PluginManifest): boolean {
@@ -272,6 +279,7 @@ export class PluginLoader {
     this.loadedModules.set(manifest.id, {
       definition,
       exports: { default: definition },
+      runtimeGeneration: getVscodeRuntimeGeneration(manifest.id),
     })
     return definition
   }
@@ -288,6 +296,7 @@ export class PluginLoader {
     this.loadedModules.set(manifest.id, {
       definition,
       exports: { default: definition },
+      runtimeGeneration: getWasmRuntimeGeneration(manifest.id),
     })
     return definition
   }
@@ -380,6 +389,7 @@ export class PluginLoader {
         this.loadedModules.set(manifest.id, {
           definition,
           exports: { default: definition, ...namedExports },
+          runtimeGeneration: launch.generation,
         })
         return activeHooks as never
       },
@@ -866,12 +876,20 @@ export class PluginLoader {
     const manifestType = entry?.definition?.manifest?.type
 
     if (manifestType === "wasm") {
-      await this.runTeardown(pluginId, manifestType, "loader.unloadWasmPlugin", () =>
-        unloadWasmPlugin(pluginId)
+      await this.runTeardown(
+        pluginId,
+        manifestType,
+        "loader.unloadWasmPlugin",
+        () => unloadWasmPlugin(pluginId, entry?.runtimeGeneration),
+        entry?.runtimeGeneration
       )
     } else if (manifestType === "vscode-extension") {
-      await this.runTeardown(pluginId, manifestType, "loader.unloadVscodeExtension", () =>
-        unloadVscodeExtension(pluginId)
+      await this.runTeardown(
+        pluginId,
+        manifestType,
+        "loader.unloadVscodeExtension",
+        () => unloadVscodeExtension(pluginId, entry?.runtimeGeneration),
+        entry?.runtimeGeneration
       )
     }
 
@@ -883,10 +901,13 @@ export class PluginLoader {
     pluginId: string,
     manifestType: string,
     site: string,
-    runner: () => Promise<void>
-  ): Promise<void> {
+    runner: () => Promise<void>,
+    runtimeGeneration?: string
+  ): Promise<boolean> {
     try {
       await withTimeout(runner(), this.teardownTimeoutMs, site)
+      this.dirtyTeardowns.delete(pluginId)
+      return true
     } catch (error) {
       const reason: DirtyTeardownReason = error instanceof TimeoutError ? "timeout" : "error"
       const message = error instanceof Error ? error.message : String(error)
@@ -895,6 +916,7 @@ export class PluginLoader {
         manifestType,
         at: Date.now(),
         message,
+        runtimeGeneration,
       })
       recordSilentFailure(
         pluginId,
@@ -908,7 +930,28 @@ export class PluginLoader {
         },
         error
       )
+      return false
     }
+  }
+
+  async recoverDirtyTeardown(pluginId: string): Promise<boolean> {
+    const dirty = this.dirtyTeardowns.get(pluginId)
+    if (!dirty) return true
+    if (dirty.manifestType === "wasm") {
+      return this.runTeardown(pluginId, dirty.manifestType, "loader.recoverWasmPlugin", () =>
+        unloadWasmPlugin(pluginId, dirty.runtimeGeneration)
+      )
+    }
+    if (dirty.manifestType === "vscode-extension") {
+      return this.runTeardown(
+        pluginId,
+        dirty.manifestType,
+        "loader.recoverVscodeExtension",
+        () => unloadVscodeExtension(pluginId, dirty.runtimeGeneration),
+        dirty.runtimeGeneration
+      )
+    }
+    return false
   }
 
   /**
@@ -940,6 +983,10 @@ export class PluginLoader {
    */
   getModuleExports(pluginId: string): Record<string, unknown> | undefined {
     return this.loadedModules.get(pluginId)?.exports
+  }
+
+  getRuntimeGeneration(pluginId: string): string | undefined {
+    return this.loadedModules.get(pluginId)?.runtimeGeneration
   }
 
   /**

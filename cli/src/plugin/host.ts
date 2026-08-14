@@ -39,6 +39,7 @@ export interface HostManager {
   loadPlugin: (id: string) => Promise<void>
   enablePlugin: (id: string) => Promise<void>
   disablePlugin: (id: string) => Promise<void>
+  setPluginIntent: (id: string, intent: "enabled" | "disabled") => Promise<void>
   unloadPlugin: (id: string) => Promise<void>
   list: () => Array<{
     id: string

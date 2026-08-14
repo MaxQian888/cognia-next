@@ -21,6 +21,7 @@ describe("makeHostManager", () => {
         loadPlugin: async (id) => void calls.push(`load:${id}`),
         enablePlugin: async (id) => void calls.push(`enable:${id}`),
         disablePlugin: async (id) => void calls.push(`disable:${id}`),
+        setPluginIntent: async (id, intent) => void calls.push(`intent:${id}:${intent}`),
         unloadPlugin: async (id) => void calls.push(`unload:${id}`),
       },
       getPlugins: () => ({}),
@@ -29,8 +30,16 @@ describe("makeHostManager", () => {
     await hm.loadPlugin("x")
     await hm.enablePlugin("x")
     await hm.disablePlugin("x")
+    await hm.setPluginIntent("x", "disabled")
     await hm.unloadPlugin("x")
-    expect(calls).toEqual(["register:x@/d/x", "load:x", "enable:x", "disable:x", "unload:x"])
+    expect(calls).toEqual([
+      "register:x@/d/x",
+      "load:x",
+      "enable:x",
+      "disable:x",
+      "intent:x:disabled",
+      "unload:x",
+    ])
   })
 
   it("projects the store plugin map into list rows (tool count from manifest)", () => {

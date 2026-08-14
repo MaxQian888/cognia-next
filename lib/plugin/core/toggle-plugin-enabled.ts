@@ -20,7 +20,6 @@
  * activation progress observable from the surface the user actually clicks.
  */
 
-import { setPluginEnabled } from "@/lib/db/plugins"
 import { loggers } from "@cognia/logging"
 
 import { getPluginManager } from "./manager"
@@ -46,26 +45,12 @@ export async function togglePluginEnabled(
   reason = "manual"
 ): Promise<TogglePluginResult> {
   const manager = getPluginManager()
-  // Write first so the switch responds immediately; a 10–45 s activation with
-  // an unmoved switch reads as a dead click.
-  await setPluginEnabled(pluginId, next)
-
   try {
-    if (next) {
-      await manager.enablePlugin(pluginId, reason)
-    } else {
-      await manager.disablePlugin(pluginId, reason)
-    }
+    await manager.setPluginIntent(pluginId, next ? "enabled" : "disabled", reason)
     return { ok: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     loggers.plugin.warn(`[plugin:${pluginId}] toggle to ${next} failed`, { error: message })
-    try {
-      await setPluginEnabled(pluginId, !next)
-    } catch {
-      // The revert is best-effort: the manager already recorded the real
-      // failure, and a Dexie write failing here would only mask it.
-    }
     return { ok: false, error: message }
   }
 }

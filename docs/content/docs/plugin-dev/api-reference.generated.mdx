@@ -39,6 +39,8 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.i18n` | 10 | None | frontend, hybrid | internal |
 | `ctx.import` | 5 | None | frontend, hybrid | internal |
 | `ctx.integrations` | 16 | `integrations:execute`, `integrations:manage`, `integrations:read`, `integrations:events` | frontend, hybrid | sensitive |
+| `ctx.lifecycle` | 1 | None | frontend, hybrid | internal |
+| `ctx.services` | 3 | None | frontend, hybrid | internal |
 | `ctx.logger` | 8 | None | frontend, hybrid | internal |
 | `ctx.media` | 47 | `media:video:read`, `media:video:write`, `media:video:export`, `ai:chat` | frontend, hybrid | sensitive |
 | `ctx.memory` | 7 | `memory:read`, `memory:write` | frontend, hybrid | sensitive |
@@ -564,6 +566,20 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `integrations.removeSubscription` | `integrations:manage` | medium | No |
 | `integrations.rollbackMigration` | `integrations:execute` | high | No |
 | `integrations.updateAccount` | `integrations:manage` | medium | No |
+
+## `ctx.lifecycle`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `lifecycle.onDispose` | None | low | No |
+
+## `ctx.services`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `services.getProvider` | None | low | Yes |
+| `services.isAvailable` | None | low | Yes |
+| `services.onOptionalServiceChange` | None | low | No |
 
 ## `ctx.logger`
 

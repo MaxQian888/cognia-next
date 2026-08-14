@@ -41,6 +41,13 @@
   "logs": {
     "empty": "未捕获到日志。"
   },
+  "lifecycle": {
+    "effects": "资源（活动 / 等待 / 失败）",
+    "empty": "尚未观测到插件生命周期 generation。",
+    "plugin": "插件",
+    "services": "服务",
+    "state": "Generation 与状态"
+  },
   "profiler": {
     "avgDuration": "平均耗时",
     "emptyAll": "暂无可分析的已安装插件。",
@@ -58,6 +65,7 @@
     "hotReload": "热重载",
     "inspect": "运行时检查",
     "logs": "日志",
+    "lifecycle": "生命周期",
     "profiler": "性能分析",
     "triggers": "触发记录"
   },

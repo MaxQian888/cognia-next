@@ -13,6 +13,7 @@ import {
   getPlugin,
   upsertPlugin,
   updatePlugin,
+  compareAndSetPluginLifecycle,
   setPluginEnabled,
   setPluginStatus,
   setPluginError,
@@ -88,6 +89,34 @@ describe("plugins CRUD", () => {
     expect(second.createdAt).toBe(first.createdAt)
     expect(second.updatedAt).toBeGreaterThanOrEqual(first.updatedAt)
     expect(second.name).toBe("Renamed")
+  })
+
+  it("persists non-indexed lifecycle control-plane state without a schema migration", async () => {
+    const lifecycle = {
+      intent: "enabled" as const,
+      actual: "active" as const,
+      revision: 2,
+      generation: 4,
+      updatedAt: 123,
+    }
+    await upsertPlugin(makeDraft({ lifecycle }))
+
+    expect(await getPlugin("p1")).toMatchObject({ lifecycle })
+  })
+
+  it("atomically rejects a stale lifecycle revision", async () => {
+    await upsertPlugin(makeDraft())
+    const first = {
+      intent: "enabled" as const,
+      actual: "activating" as const,
+      revision: 1,
+      updatedAt: 123,
+    }
+    const stale = { ...first, actual: "active" as const, revision: 2 }
+
+    await expect(compareAndSetPluginLifecycle("p1", 0, first)).resolves.toBe(true)
+    await expect(compareAndSetPluginLifecycle("p1", 0, stale)).resolves.toBe(false)
+    expect((await getPlugin("p1"))?.lifecycle).toEqual(first)
   })
 
   it("upsertPlugin trims whitespace-only names to a fallback", async () => {

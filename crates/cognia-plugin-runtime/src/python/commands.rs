@@ -82,6 +82,7 @@ pub struct PythonRuntimeInfo {
 #[derive(Debug, Clone, Serialize)]
 pub struct PythonPluginInfo {
     pub plugin_id: String,
+    pub generation: String,
     pub sdk_version: String,
     pub protocol_version: String,
     pub contract_version: String,
@@ -223,14 +224,16 @@ pub async fn plugin_python_call_hook(
     event: String,
     name: String,
     payload: Value,
+    generation: String,
 ) -> Result<Value> {
-    plugin_python_call_hook_for_state(
+    plugin_python_call_hook_generation_for_state(
         state.inner(),
         plugins.inner(),
         plugin_id,
         event,
         name,
         payload,
+        generation,
     )
     .await
 }
@@ -246,6 +249,27 @@ pub async fn plugin_python_call_hook_for_state(
     call_hook_inner(state, plugins, plugin_id, event, name, payload).await
 }
 
+pub async fn plugin_python_call_hook_generation_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    event: String,
+    name: String,
+    payload: Value,
+    generation: String,
+) -> Result<Value> {
+    call_hook_generation_inner(
+        state,
+        plugins,
+        plugin_id,
+        event,
+        name,
+        payload,
+        Some(generation),
+    )
+    .await
+}
+
 /// Push the plugin's persisted config into the host (`on_config_updated`).
 #[tauri::command]
 pub async fn plugin_python_push_config(
@@ -253,8 +277,16 @@ pub async fn plugin_python_push_config(
     plugins: State<'_, PluginRuntimeState>,
     plugin_id: String,
     config: Value,
+    generation: String,
 ) -> Result<()> {
-    plugin_python_push_config_for_state(state.inner(), plugins.inner(), plugin_id, config).await
+    push_config_generation_inner(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        config,
+        Some(generation),
+    )
+    .await
 }
 
 pub async fn plugin_python_push_config_for_state(
@@ -266,12 +298,23 @@ pub async fn plugin_python_push_config_for_state(
     push_config_inner(state, plugins, plugin_id, config).await
 }
 
+pub async fn plugin_python_push_config_generation_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    config: Value,
+    generation: String,
+) -> Result<()> {
+    push_config_generation_inner(state, plugins, plugin_id, config, Some(generation)).await
+}
+
 #[tauri::command]
 pub async fn plugin_python_get_tools(
     state: State<'_, PythonRuntimeState>,
     plugin_id: String,
+    generation: String,
 ) -> Result<Value> {
-    plugin_python_get_tools_for_state(state.inner(), plugin_id).await
+    plugin_python_get_tools_generation_for_state(state.inner(), plugin_id, generation).await
 }
 
 pub async fn plugin_python_get_tools_for_state(
@@ -282,6 +325,17 @@ pub async fn plugin_python_get_tools_for_state(
     host.request("get_tools", json!({}), CONTROL_TIMEOUT).await
 }
 
+pub async fn plugin_python_get_tools_generation_for_state(
+    state: &PythonRuntimeState,
+    plugin_id: String,
+    generation: String,
+) -> Result<Value> {
+    let host = state
+        .materialize_generation(&plugin_id, Some(&generation))
+        .await?;
+    host.request("get_tools", json!({}), CONTROL_TIMEOUT).await
+}
+
 #[tauri::command]
 pub async fn plugin_python_call_tool(
     state: State<'_, PythonRuntimeState>,
@@ -289,9 +343,17 @@ pub async fn plugin_python_call_tool(
     plugin_id: String,
     tool_name: String,
     args: Value,
+    generation: String,
 ) -> Result<Value> {
-    plugin_python_call_tool_for_state(state.inner(), plugins.inner(), plugin_id, tool_name, args)
-        .await
+    call_tool_generation_inner(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        tool_name,
+        args,
+        Some(generation),
+    )
+    .await
 }
 
 pub async fn plugin_python_call_tool_for_state(
@@ -304,6 +366,17 @@ pub async fn plugin_python_call_tool_for_state(
     call_tool_inner(state, plugins, plugin_id, tool_name, args).await
 }
 
+pub async fn plugin_python_call_tool_generation_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    tool_name: String,
+    args: Value,
+    generation: String,
+) -> Result<Value> {
+    call_tool_generation_inner(state, plugins, plugin_id, tool_name, args, Some(generation)).await
+}
+
 #[tauri::command]
 pub async fn plugin_python_call(
     state: State<'_, PythonRuntimeState>,
@@ -311,13 +384,15 @@ pub async fn plugin_python_call(
     plugin_id: String,
     function_name: String,
     args: Vec<Value>,
+    generation: String,
 ) -> Result<Value> {
-    plugin_python_call_for_state(
+    call_generation_inner(
         state.inner(),
         plugins.inner(),
         plugin_id,
         function_name,
         args,
+        Some(generation),
     )
     .await
 }
@@ -332,6 +407,25 @@ pub async fn plugin_python_call_for_state(
     call_inner(state, plugins, plugin_id, function_name, args).await
 }
 
+pub async fn plugin_python_call_generation_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    function_name: String,
+    args: Vec<Value>,
+    generation: String,
+) -> Result<Value> {
+    call_generation_inner(
+        state,
+        plugins,
+        plugin_id,
+        function_name,
+        args,
+        Some(generation),
+    )
+    .await
+}
+
 /// Evaluate a Python expression (or run a statement block) in the plugin host.
 /// Backs `ctx.python.eval(code, locals)`. Gated by `python:execute`.
 #[tauri::command]
@@ -341,8 +435,17 @@ pub async fn plugin_python_eval(
     plugin_id: String,
     code: String,
     locals: Option<Value>,
+    generation: String,
 ) -> Result<Value> {
-    plugin_python_eval_for_state(state.inner(), plugins.inner(), plugin_id, code, locals).await
+    host_request_generation_inner(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        "eval",
+        json!({ "code": code, "locals": locals.unwrap_or(Value::Null) }),
+        Some(generation),
+    )
+    .await
 }
 
 pub async fn plugin_python_eval_for_state(
@@ -362,6 +465,25 @@ pub async fn plugin_python_eval_for_state(
     .await
 }
 
+pub async fn plugin_python_eval_generation_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    code: String,
+    locals: Option<Value>,
+    generation: String,
+) -> Result<Value> {
+    host_request_generation_inner(
+        state,
+        plugins,
+        plugin_id,
+        "eval",
+        json!({ "code": code, "locals": locals.unwrap_or(Value::Null) }),
+        Some(generation),
+    )
+    .await
+}
+
 /// Import a module by name into the plugin host's on-demand module registry.
 /// Backs `ctx.python.import(moduleName)`. Gated by `python:execute`.
 #[tauri::command]
@@ -370,8 +492,17 @@ pub async fn plugin_python_import(
     plugins: State<'_, PluginRuntimeState>,
     plugin_id: String,
     module_name: String,
+    generation: String,
 ) -> Result<Value> {
-    plugin_python_import_for_state(state.inner(), plugins.inner(), plugin_id, module_name).await
+    host_request_generation_inner(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        "import",
+        json!({ "module_name": module_name }),
+        Some(generation),
+    )
+    .await
 }
 
 pub async fn plugin_python_import_for_state(
@@ -390,6 +521,24 @@ pub async fn plugin_python_import_for_state(
     .await
 }
 
+pub async fn plugin_python_import_generation_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    module_name: String,
+    generation: String,
+) -> Result<Value> {
+    host_request_generation_inner(
+        state,
+        plugins,
+        plugin_id,
+        "import",
+        json!({ "module_name": module_name }),
+        Some(generation),
+    )
+    .await
+}
+
 /// Call a function on a previously-imported module. Backs the proxy returned
 /// by `ctx.python.import(...).call(...)`. Gated by `python:execute`.
 #[tauri::command]
@@ -400,14 +549,15 @@ pub async fn plugin_python_module_call(
     module_name: String,
     function_name: String,
     args: Vec<Value>,
+    generation: String,
 ) -> Result<Value> {
-    plugin_python_module_call_for_state(
+    host_request_generation_inner(
         state.inner(),
         plugins.inner(),
         plugin_id,
-        module_name,
-        function_name,
-        args,
+        "module_call",
+        json!({ "module_name": module_name, "function_name": function_name, "args": args }),
+        Some(generation),
     )
     .await
 }
@@ -430,6 +580,26 @@ pub async fn plugin_python_module_call_for_state(
     .await
 }
 
+pub async fn plugin_python_module_call_generation_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    module_name: String,
+    function_name: String,
+    args: Vec<Value>,
+    generation: String,
+) -> Result<Value> {
+    host_request_generation_inner(
+        state,
+        plugins,
+        plugin_id,
+        "module_call",
+        json!({ "module_name": module_name, "function_name": function_name, "args": args }),
+        Some(generation),
+    )
+    .await
+}
+
 /// Read an attribute off a previously-imported module. Backs
 /// `ctx.python.import(...).getattr(...)`. Gated by `python:execute`.
 #[tauri::command]
@@ -439,13 +609,15 @@ pub async fn plugin_python_module_getattr(
     plugin_id: String,
     module_name: String,
     attr_name: String,
+    generation: String,
 ) -> Result<Value> {
-    plugin_python_module_getattr_for_state(
+    host_request_generation_inner(
         state.inner(),
         plugins.inner(),
         plugin_id,
-        module_name,
-        attr_name,
+        "module_getattr",
+        json!({ "module_name": module_name, "attr_name": attr_name }),
+        Some(generation),
     )
     .await
 }
@@ -467,12 +639,32 @@ pub async fn plugin_python_module_getattr_for_state(
     .await
 }
 
+pub async fn plugin_python_module_getattr_generation_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    module_name: String,
+    attr_name: String,
+    generation: String,
+) -> Result<Value> {
+    host_request_generation_inner(
+        state,
+        plugins,
+        plugin_id,
+        "module_getattr",
+        json!({ "module_name": module_name, "attr_name": attr_name }),
+        Some(generation),
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn plugin_python_is_initialized(
     state: State<'_, PythonRuntimeState>,
     plugin_id: String,
+    generation: String,
 ) -> Result<bool> {
-    plugin_python_is_initialized_for_state(state.inner(), plugin_id).await
+    plugin_python_is_initialized_generation_for_state(state.inner(), plugin_id, generation).await
 }
 
 pub async fn plugin_python_is_initialized_for_state(
@@ -487,12 +679,26 @@ pub async fn plugin_python_is_initialized_for_state(
     }
 }
 
+pub async fn plugin_python_is_initialized_generation_for_state(
+    state: &PythonRuntimeState,
+    plugin_id: String,
+    generation: String,
+) -> Result<bool> {
+    match state.host_for_generation(&plugin_id, &generation) {
+        Ok(Some(host)) => Ok(host.ping().await),
+        Ok(None) => Ok(true),
+        Err(PluginError::NotFound(_)) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 #[tauri::command]
 pub async fn plugin_python_get_info(
     state: State<'_, PythonRuntimeState>,
     plugin_id: String,
+    generation: String,
 ) -> Result<Option<PythonPluginInfo>> {
-    Ok(plugin_python_get_info_for_state(state.inner(), &plugin_id))
+    plugin_python_get_info_generation_for_state(state.inner(), &plugin_id, &generation)
 }
 
 pub fn plugin_python_get_info_for_state(
@@ -500,6 +706,20 @@ pub fn plugin_python_get_info_for_state(
     plugin_id: &str,
 ) -> Option<PythonPluginInfo> {
     get_info_inner(state, plugin_id)
+}
+
+pub fn plugin_python_get_info_generation_for_state(
+    state: &PythonRuntimeState,
+    plugin_id: &str,
+    generation: &str,
+) -> Result<Option<PythonPluginInfo>> {
+    let Some(info) = get_info_inner(state, plugin_id) else {
+        return Ok(None);
+    };
+    if info.generation != generation {
+        return Err(stale_generation(plugin_id));
+    }
+    Ok(Some(info))
 }
 
 /// Create the plugin's venv (if missing) and `pip install` its declared
@@ -529,8 +749,9 @@ pub async fn plugin_python_install_deps_for_state(
 pub async fn plugin_python_unload(
     state: State<'_, PythonRuntimeState>,
     plugin_id: String,
+    generation: String,
 ) -> Result<()> {
-    plugin_python_unload_for_state(state.inner(), &plugin_id).await
+    unload_generation_inner(state.inner(), &plugin_id, Some(&generation)).await
 }
 
 pub async fn plugin_python_unload_for_state(
@@ -538,6 +759,14 @@ pub async fn plugin_python_unload_for_state(
     plugin_id: &str,
 ) -> Result<()> {
     unload_inner(state, plugin_id).await
+}
+
+pub async fn plugin_python_unload_generation_for_state(
+    state: &PythonRuntimeState,
+    plugin_id: &str,
+    generation: &str,
+) -> Result<()> {
+    unload_generation_inner(state, plugin_id, Some(generation)).await
 }
 
 #[tauri::command]
@@ -601,6 +830,33 @@ fn check_execute_grant(plugins: &PluginRuntimeState, plugin_id: &str) -> Result<
         plugin_id: plugin_id.to_string(),
         permission: PYTHON_EXECUTE_PERMISSION.to_string(),
     })
+}
+
+fn stale_generation(plugin_id: &str) -> PluginError {
+    PluginError::InvalidArgument(format!("stale python plugin generation for {plugin_id}"))
+}
+
+fn assert_current_generation(
+    state: &PythonRuntimeState,
+    plugin_id: &str,
+    generation: &str,
+) -> Result<()> {
+    let current = state
+        .generation(plugin_id)
+        .ok_or_else(|| PluginError::NotFound(format!("python plugin not loaded: {plugin_id}")))?;
+    if current == generation {
+        Ok(())
+    } else {
+        Err(stale_generation(plugin_id))
+    }
+}
+
+pub fn plugin_python_assert_generation_for_state(
+    state: &PythonRuntimeState,
+    plugin_id: &str,
+    generation: &str,
+) -> Result<()> {
+    assert_current_generation(state, plugin_id, generation)
 }
 
 fn require_interpreter(state: &PythonRuntimeState) -> Result<Interpreter> {
@@ -712,12 +968,14 @@ async fn load_inner(
         sandboxed,
     };
 
+    let generation = uuid::Uuid::now_v7().to_string();
     let host = PluginHost::spawn(
         &plugin_id,
         &interpreter,
         &host_script,
         super::protocol::HostOptions {
             sink: state.sink(),
+            generation: generation.clone(),
             max_concurrent_calls: settings.max_concurrent_calls,
             env: settings.env,
             sandboxed,
@@ -728,7 +986,7 @@ async fn load_inner(
         .call_timeout_ms
         .map(|ms| Duration::from_millis(ms.clamp(1_000, 3_600_000)))
         .unwrap_or(CALL_TIMEOUT);
-    let info = match host
+    let mut info = match host
         .request("import_main", import_params, import_timeout)
         .await
     {
@@ -741,12 +999,16 @@ async fn load_inner(
 
     let tool_count = info.get("tool_count").and_then(Value::as_u64).unwrap_or(0) as usize;
     let hook_count = info.get("hook_count").and_then(Value::as_u64).unwrap_or(0) as usize;
+    if let Some(object) = info.as_object_mut() {
+        object.insert("generation".into(), Value::String(generation.clone()));
+    }
 
     state.hosts.write().insert(
         plugin_id,
         super::HostEntry {
             slot: super::PythonHostSlot::Spawned(host),
             spec,
+            generation,
             tool_count,
             hook_count,
         },
@@ -761,8 +1023,21 @@ async fn call_tool_inner(
     tool_name: String,
     args: Value,
 ) -> Result<Value> {
+    call_tool_generation_inner(state, plugins, plugin_id, tool_name, args, None).await
+}
+
+async fn call_tool_generation_inner(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    tool_name: String,
+    args: Value,
+    generation: Option<String>,
+) -> Result<Value> {
     check_execute_grant(plugins, &plugin_id)?;
-    let host = state.materialize(&plugin_id).await?;
+    let host = state
+        .materialize_generation(&plugin_id, generation.as_deref())
+        .await?;
     let timeout = state.call_timeout(&plugin_id);
     let started = Instant::now();
     let result = host
@@ -785,6 +1060,17 @@ async fn call_inner(
     function_name: String,
     args: Vec<Value>,
 ) -> Result<Value> {
+    call_generation_inner(state, plugins, plugin_id, function_name, args, None).await
+}
+
+async fn call_generation_inner(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    function_name: String,
+    args: Vec<Value>,
+    generation: Option<String>,
+) -> Result<Value> {
     check_execute_grant(plugins, &plugin_id)?;
     if function_name.starts_with('_') && function_name != CONTRIBUTION_DISPATCH {
         // host.py rejects these too — fail fast without a round-trip. The
@@ -794,7 +1080,9 @@ async fn call_inner(
             "private function names are not callable: {function_name}"
         )));
     }
-    let host = state.materialize(&plugin_id).await?;
+    let host = state
+        .materialize_generation(&plugin_id, generation.as_deref())
+        .await?;
     let timeout = state.call_timeout(&plugin_id);
     let started = Instant::now();
     let result = host
@@ -820,8 +1108,21 @@ async fn host_request_inner(
     method: &str,
     params: Value,
 ) -> Result<Value> {
+    host_request_generation_inner(state, plugins, plugin_id, method, params, None).await
+}
+
+async fn host_request_generation_inner(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    method: &str,
+    params: Value,
+    generation: Option<String>,
+) -> Result<Value> {
     check_execute_grant(plugins, &plugin_id)?;
-    let host = state.materialize(&plugin_id).await?;
+    let host = state
+        .materialize_generation(&plugin_id, generation.as_deref())
+        .await?;
     let timeout = state.call_timeout(&plugin_id);
     let started = Instant::now();
     let result = host.request(method, params, timeout).await;
@@ -833,9 +1134,10 @@ async fn host_request_inner(
 
 fn get_info_inner(state: &PythonRuntimeState, plugin_id: &str) -> Option<PythonPluginInfo> {
     state
-        .entry_counts(plugin_id)
-        .map(|(tool_count, hook_count)| PythonPluginInfo {
+        .entry_metadata(plugin_id)
+        .map(|(generation, tool_count, hook_count)| PythonPluginInfo {
             plugin_id: plugin_id.to_string(),
+            generation,
             sdk_version: crate::contract::sdk_version().to_string(),
             protocol_version: crate::contract::protocol_version().to_string(),
             contract_version: crate::contract::contract_version().to_string(),
@@ -865,8 +1167,22 @@ async fn call_hook_inner(
     name: String,
     payload: Value,
 ) -> Result<Value> {
+    call_hook_generation_inner(state, plugins, plugin_id, event, name, payload, None).await
+}
+
+async fn call_hook_generation_inner(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    event: String,
+    name: String,
+    payload: Value,
+    generation: Option<String>,
+) -> Result<Value> {
     check_execute_grant(plugins, &plugin_id)?;
-    let host = state.materialize(&plugin_id).await?;
+    let host = state
+        .materialize_generation(&plugin_id, generation.as_deref())
+        .await?;
     let timeout = state.call_timeout(&plugin_id);
     let started = Instant::now();
     let result = host
@@ -891,20 +1207,40 @@ async fn push_config_inner(
     plugin_id: String,
     config: Value,
 ) -> Result<()> {
+    push_config_generation_inner(state, plugins, plugin_id, config, None).await
+}
+
+async fn push_config_generation_inner(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    config: Value,
+    generation: Option<String>,
+) -> Result<()> {
     check_execute_grant(plugins, &plugin_id)?;
     // Keep respawn params in sync first so a later materialize imports with
     // the new config.
-    {
+    let host = {
         let mut hosts = state.hosts.write();
         if let Some(entry) = hosts.get_mut(&plugin_id) {
+            if generation
+                .as_deref()
+                .is_some_and(|expected| entry.generation != expected)
+            {
+                return Err(stale_generation(&plugin_id));
+            }
             entry.spec.import_params["config"] = config.clone();
+            match &entry.slot {
+                super::PythonHostSlot::Spawned(host) => Some(std::sync::Arc::clone(host)),
+                super::PythonHostSlot::Lazy => None,
+            }
         } else {
             return Err(PluginError::NotFound(format!(
                 "python plugin not loaded: {plugin_id}"
             )));
         }
-    }
-    let Some(host) = state.host(&plugin_id) else {
+    };
+    let Some(host) = host else {
         return Ok(()); // lazy — config lands at next respawn
     };
     host.request("push_config", json!({ "config": config }), CONTROL_TIMEOUT)
@@ -928,8 +1264,27 @@ async fn install_deps_inner(
 }
 
 async fn unload_inner(state: &PythonRuntimeState, plugin_id: &str) -> Result<()> {
+    unload_generation_inner(state, plugin_id, None).await
+}
+
+async fn unload_generation_inner(
+    state: &PythonRuntimeState,
+    plugin_id: &str,
+    generation: Option<&str>,
+) -> Result<()> {
     // Bind before awaiting — see load_inner's reload note.
-    let entry = state.hosts.write().remove(plugin_id);
+    let entry = {
+        let mut hosts = state.hosts.write();
+        if let Some(expected) = generation {
+            let entry = hosts.get(plugin_id).ok_or_else(|| {
+                PluginError::NotFound(format!("python plugin not loaded: {plugin_id}"))
+            })?;
+            if entry.generation != expected {
+                return Err(stale_generation(plugin_id));
+            }
+        }
+        hosts.remove(plugin_id)
+    };
     if let Some(super::HostEntry {
         slot: super::PythonHostSlot::Spawned(host),
         ..
@@ -2157,6 +2512,7 @@ def rewrite(payload):
 
         let info = PythonPluginInfo {
             plugin_id: "demo".into(),
+            generation: "python-gen-1".into(),
             sdk_version: crate::contract::sdk_version().into(),
             protocol_version: crate::contract::protocol_version().into(),
             contract_version: crate::contract::contract_version().into(),
@@ -2168,6 +2524,7 @@ def rewrite(payload):
         };
         let json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["plugin_id"], "demo");
+        assert_eq!(json["generation"], "python-gen-1");
         assert_eq!(json["tool_count"], 5);
         assert_eq!(json["hook_count"], 6);
         assert_eq!(json["protocol_version"], "2.0.0");

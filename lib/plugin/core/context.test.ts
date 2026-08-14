@@ -224,6 +224,15 @@ const createMockPlugin = (overrides?: Partial<Plugin>): Plugin => ({
 
 const mockManager = {
   getPluginPointGovernanceMode: jest.fn(() => "warn"),
+  createPluginServicesAPI: jest.fn(() => ({
+    isAvailable: () => false,
+    getProvider: () => undefined,
+  })),
+  callPythonFunction: jest.fn(),
+  evalPython: jest.fn(),
+  importPythonModule: jest.fn(),
+  callPythonModule: jest.fn(),
+  getPythonModuleAttribute: jest.fn(),
 } as unknown as PluginManager
 
 const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
@@ -848,6 +857,41 @@ describe("createPluginContext", () => {
       expect(context.python).toBeDefined()
     })
 
+    it("routes every python operation through the generation-aware manager", async () => {
+      const plugin = createMockPlugin({
+        manifest: { ...mockManifest, type: "python" as const },
+      })
+      const context = createPluginContext(plugin, mockManager)
+      const manager = mockManager as unknown as {
+        callPythonFunction: jest.Mock
+        evalPython: jest.Mock
+        importPythonModule: jest.Mock
+        callPythonModule: jest.Mock
+        getPythonModuleAttribute: jest.Mock
+      }
+      manager.callPythonFunction.mockResolvedValueOnce(3)
+      manager.evalPython.mockResolvedValueOnce(4)
+      manager.importPythonModule.mockResolvedValueOnce(undefined)
+      manager.callPythonModule.mockResolvedValueOnce(5)
+      manager.getPythonModuleAttribute.mockResolvedValueOnce("value")
+
+      await expect(context.python!.call("sum", 1, 2)).resolves.toBe(3)
+      await expect(context.python!.eval("x + 1", { x: 3 })).resolves.toBe(4)
+      const pythonModule = await context.python!.import("demo")
+      await expect(pythonModule.call("run", 5)).resolves.toBe(5)
+      await expect(pythonModule.getattr("name")).resolves.toBe("value")
+
+      expect(manager.callPythonFunction).toHaveBeenCalledWith(plugin.manifest.id, "sum", [1, 2])
+      expect(manager.evalPython).toHaveBeenCalledWith(plugin.manifest.id, "x + 1", { x: 3 })
+      expect(manager.importPythonModule).toHaveBeenCalledWith(plugin.manifest.id, "demo")
+      expect(manager.callPythonModule).toHaveBeenCalledWith(plugin.manifest.id, "demo", "run", [5])
+      expect(manager.getPythonModuleAttribute).toHaveBeenCalledWith(
+        plugin.manifest.id,
+        "demo",
+        "name"
+      )
+    })
+
     it("routes python.import failures through recordSilentFailure (ADR 0016 T1)", async () => {
       const { recordSilentFailure } = jest.requireMock("../contracts/diagnostics-store") as {
         recordSilentFailure: jest.Mock
@@ -857,8 +901,8 @@ describe("createPluginContext", () => {
       const hybridManifest = { ...mockManifest, type: "hybrid" as const }
       const plugin = createMockPlugin({ manifest: hybridManifest })
       const context = createPluginContext(plugin, mockManager)
-      const invokeMock = invoke as jest.Mock
-      invokeMock.mockRejectedValueOnce(new Error("python runtime missing"))
+      const importPythonModule = mockManager.importPythonModule as jest.Mock
+      importPythonModule.mockRejectedValueOnce(new Error("python runtime missing"))
 
       await expect(context.python!.import("os")).rejects.toThrow("python runtime missing")
 
@@ -1400,6 +1444,26 @@ describe("createFullPluginContext", () => {
     expect(context.webview).toBeDefined()
     expect(context.auth).toBeDefined()
     expect(context.uri).toBeDefined()
+    expect(context.lifecycle.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it("aborts the generation before running ctx.lifecycle cleanup", async () => {
+    const scope = new PluginDisposableScope("test-plugin", 9)
+    const observations: boolean[] = []
+    const manager = {
+      getPluginPointGovernanceMode: jest.fn(() => "warn"),
+      getPluginDisposableScope: jest.fn(() => scope),
+      createPluginServicesAPI: mockManager.createPluginServicesAPI,
+    } as unknown as PluginManager
+    const context = createFullPluginContext(createMockPlugin(), manager)
+    context.lifecycle.onDispose(() => {
+      observations.push(context.lifecycle.signal.aborted)
+    })
+
+    await scope.dispose()
+
+    expect(context.lifecycle.signal.aborted).toBe(true)
+    expect(observations).toEqual([true])
   })
 
   it("enrolls registration disposers in the manager lifecycle scope", async () => {
@@ -1409,6 +1473,7 @@ describe("createFullPluginContext", () => {
     const manager = {
       getPluginPointGovernanceMode: jest.fn(() => "warn"),
       getPluginDisposableScope: jest.fn(() => scope),
+      createPluginServicesAPI: mockManager.createPluginServicesAPI,
     } as unknown as PluginManager
     const context = createFullPluginContext(createMockPlugin(), manager)
 
@@ -1422,6 +1487,24 @@ describe("createFullPluginContext", () => {
     unsubscribeAudit()
   })
 
+  it("keeps the legacy cleanup path available when ledger v2 is explicitly disabled", async () => {
+    const scope = new PluginDisposableScope("test-plugin")
+    const manager = {
+      getPluginPointGovernanceMode: jest.fn(() => "warn"),
+      getPluginDisposableScope: jest.fn(() => scope),
+      createPluginServicesAPI: mockManager.createPluginServicesAPI,
+      isPluginLedgerV2Enabled: jest.fn(() => false),
+    } as unknown as PluginManager
+    const context = createFullPluginContext(createMockPlugin(), manager)
+    const off = context.events.on("test-event", () => undefined)
+
+    const report = await scope.dispose()
+
+    expect(typeof off).toBe("function")
+    expect(report).toEqual({ disposed: 1, failures: [] })
+    expect(scope.getDiagnostics()).toMatchObject({ active: 0, pending: 0, failed: 0 })
+  })
+
   it("stamps and removes runtime tools through the plugin lifecycle scope", async () => {
     const scope = new PluginDisposableScope("test-plugin")
     const registry = new PluginRegistry()
@@ -1429,6 +1512,7 @@ describe("createFullPluginContext", () => {
       getPluginPointGovernanceMode: jest.fn(() => "warn"),
       getPluginDisposableScope: jest.fn(() => scope),
       getRegistry: jest.fn(() => registry),
+      createPluginServicesAPI: mockManager.createPluginServicesAPI,
     } as unknown as PluginManager
     const context = createFullPluginContext(createMockPlugin(), manager)
 
@@ -1456,6 +1540,7 @@ describe("createFullPluginContext", () => {
     const context = createFullPluginContext(createMockPlugin(), {
       getPluginPointGovernanceMode: jest.fn(() => "warn"),
       getRegistry: jest.fn(() => registry),
+      createPluginServicesAPI: mockManager.createPluginServicesAPI,
     } as unknown as PluginManager)
 
     expect(() => context.agent.unregisterTool("dependency_tool")).toThrow("does not own")

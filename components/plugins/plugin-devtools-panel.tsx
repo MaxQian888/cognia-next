@@ -79,28 +79,18 @@ import {
 } from "@/lib/plugin/devtools/console-tap"
 import { CogniaCliStatusCard } from "./devtools/cognia-cli-status-card"
 import { CogniaCliLauncher } from "./devtools/cognia-cli-launcher"
-
-const DEVELOPER_MODE_KEY = "cognia.plugins.developerMode"
-
-function isDeveloperMode(): boolean {
-  if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
-    return true
-  }
-  if (typeof window === "undefined") return false
-  try {
-    return window.localStorage.getItem(DEVELOPER_MODE_KEY) === "true"
-  } catch {
-    return false
-  }
-}
+import { migrateDeveloperMode, setDeveloperModeEnabled } from "@/lib/plugin/devtools/developer-mode"
 
 export function PluginDevtoolsPanel() {
   const t = useTranslations("plugins.devtoolsPanel")
   const [allowed, setAllowed] = useState(false)
 
   useEffect(() => {
+    // Read after mount, not during render: the flag lives in a persisted store
+    // that rehydrates on the client, so reading it during SSR/static export
+    // would render the gate and then contradict itself on hydration.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAllowed(isDeveloperMode())
+    setAllowed(migrateDeveloperMode())
   }, [])
 
   if (!allowed) {
@@ -113,10 +103,8 @@ export function PluginDevtoolsPanel() {
           size="sm"
           variant="outline"
           onClick={() => {
-            if (typeof window !== "undefined") {
-              window.localStorage.setItem(DEVELOPER_MODE_KEY, "true")
-              setAllowed(true)
-            }
+            setDeveloperModeEnabled(true)
+            setAllowed(true)
           }}
         >
           {t("enableDeveloperMode")}
@@ -137,7 +125,7 @@ export function PluginDevtoolsPanel() {
       <Tabs defaultValue="logs" className="min-w-0 gap-0">
         <div className="border-b bg-muted/15 p-2">
           <TabsList
-            className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-4 2xl:grid-cols-8"
+            className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-4 2xl:grid-cols-9"
             data-testid="plugin-devtools-tabs"
           >
             <TabsTrigger value="logs">
@@ -163,6 +151,10 @@ export function PluginDevtoolsPanel() {
             <TabsTrigger value="inspect">
               <ScanSearchIcon aria-hidden="true" />
               <span className="truncate">{t("tabs.inspect")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="lifecycle">
+              <GitBranchIcon aria-hidden="true" />
+              <span className="truncate">{t("tabs.lifecycle")}</span>
             </TabsTrigger>
             <TabsTrigger value="triggers">
               <CodeXmlIcon aria-hidden="true" />
@@ -194,6 +186,9 @@ export function PluginDevtoolsPanel() {
           <TabsContent value="inspect" className="mt-0 min-w-0">
             <InspectPane />
           </TabsContent>
+          <TabsContent value="lifecycle" className="mt-0 min-w-0">
+            <LifecyclePane />
+          </TabsContent>
           <TabsContent value="triggers" className="mt-0 min-w-0">
             <TriggersPane />
           </TabsContent>
@@ -205,6 +200,64 @@ export function PluginDevtoolsPanel() {
           </TabsContent>
         </div>
       </Tabs>
+    </Card>
+  )
+}
+
+export function LifecyclePane() {
+  const t = useTranslations("plugins.devtoolsPanel.lifecycle")
+  const [snapshots, setSnapshots] = useState<
+    import("@/lib/plugin/core/lifecycle-coordinator").PluginLifecycleCoordinatorSnapshot[]
+  >([])
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined
+    void import("@/lib/plugin/core/manager").then(({ getPluginManager }) => {
+      try {
+        const manager = getPluginManager()
+        setSnapshots(manager.getPluginLifecycleSnapshots())
+        unsubscribe = manager.subscribePluginLifecycleSnapshots((next) => setSnapshots([...next]))
+      } catch {
+        setSnapshots([])
+      }
+    })
+    return () => unsubscribe?.()
+  }, [])
+
+  if (snapshots.length === 0) {
+    return <Card className="p-6 text-center text-sm text-muted-foreground">{t("empty")}</Card>
+  }
+
+  return (
+    <Card className="p-0">
+      <ScrollArea className="max-h-[55vh]">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("plugin")}</TableHead>
+              <TableHead>{t("state")}</TableHead>
+              <TableHead>{t("services")}</TableHead>
+              <TableHead>{t("effects")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {snapshots.map((snapshot) => (
+              <TableRow key={snapshot.pluginId}>
+                <TableCell className="font-mono text-xs">{snapshot.pluginId}</TableCell>
+                <TableCell className="text-xs">
+                  {`g${snapshot.generation} · ${snapshot.intent} / ${snapshot.actual}`}
+                </TableCell>
+                <TableCell className="max-w-72 text-xs">
+                  {[...snapshot.providedServices, ...snapshot.currentProviders].join(", ") || "—"}
+                </TableCell>
+                <TableCell className="text-xs tabular-nums">
+                  {`${snapshot.effects.active} / ${snapshot.effects.pending} / ${snapshot.effects.failed}`}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </ScrollArea>
     </Card>
   )
 }

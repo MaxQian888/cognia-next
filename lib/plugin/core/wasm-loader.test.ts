@@ -89,7 +89,7 @@ describe("buildWasmToolDefinitions", () => {
       ],
     }
 
-    const tools = buildWasmToolDefinitions(manifest)
+    const tools = buildWasmToolDefinitions(manifest, "wasm-gen-1")
 
     expect(tools).toHaveLength(1)
     expect(tools[0].name).toBe("demo.wasm:format_rust")
@@ -106,6 +106,7 @@ describe("buildWasmToolDefinitions", () => {
     // the host's extract_kind reads it, so the tool name must ride in the payload.
     expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_call", {
       pluginId: "demo.wasm",
+      generation: "wasm-gen-1",
       exportName: "tool-execute",
       payloadJson: JSON.stringify({ kind: "format_rust", source: "fn main(){}" }),
     })
@@ -114,6 +115,24 @@ describe("buildWasmToolDefinitions", () => {
 
   it("returns an empty list when the manifest declares no tools", () => {
     expect(buildWasmToolDefinitions(baseManifest)).toEqual([])
+  })
+
+  it("keeps an unbound manifest tool fenced from future runtime generations", async () => {
+    const tools = buildWasmToolDefinitions({
+      ...baseManifest,
+      tools: [
+        {
+          name: "unbound",
+          description: "Unbound tool",
+          parametersSchema: { type: "object" },
+        },
+      ],
+    })
+
+    await expect(tools[0].execute({}, {} as PluginToolContext)).rejects.toThrow(
+      "not bound to a runtime generation"
+    )
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 })
 
@@ -141,7 +160,7 @@ describe("buildWasmNodeDefs", () => {
 
   it("projects manifest.workflows.nodes into executors that route through workflow-node-execute", async () => {
     invokeMock.mockResolvedValue(JSON.stringify({ formatted: "ok" }))
-    const defs = buildWasmNodeDefs(nodeManifest)
+    const defs = buildWasmNodeDefs(nodeManifest, "wasm-gen-1")
     expect(defs).toHaveLength(1)
     expect(defs[0].kind).toBe("action.format")
     expect(defs[0].typeVersion).toBe(1)
@@ -156,6 +175,7 @@ describe("buildWasmNodeDefs", () => {
     // The guest dispatches by the UNPREFIXED manifest kind carried in the payload.
     expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_call", {
       pluginId: "demo.wasm",
+      generation: "wasm-gen-1",
       exportName: "workflow-node-execute",
       payloadJson: JSON.stringify({
         kind: "action.format",
@@ -185,7 +205,7 @@ describe("loadWasmDefinition", () => {
   })
 
   it("invokes plugin_wasm_load with the manifest JSON", async () => {
-    invokeMock.mockResolvedValueOnce({ pluginApiVersion: "0.1.0" })
+    invokeMock.mockResolvedValueOnce({ pluginApiVersion: "0.1.0", generation: "wasm-gen-1" })
     const def = await loadWasmDefinition(baseManifest, "/plugins/demo")
     expect(invokeMock).toHaveBeenCalledWith(
       "plugin_wasm_load",
@@ -203,7 +223,10 @@ describe("loadWasmDefinition", () => {
   it("routes a headless load through the installed service transport", async () => {
     setTauri(false)
     ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
-    transportCallMock.mockResolvedValueOnce({ pluginApiVersion: "0.1.0" })
+    transportCallMock.mockResolvedValueOnce({
+      pluginApiVersion: "0.1.0",
+      generation: "wasm-gen-1",
+    })
 
     await loadWasmDefinition(baseManifest, "/plugins/demo")
 
@@ -222,7 +245,7 @@ describe("loadWasmDefinition", () => {
   })
 
   it("activate hook calls plugin_wasm_activate with config JSON", async () => {
-    invokeMock.mockResolvedValueOnce({ pluginApiVersion: "0.1.0" }) // load
+    invokeMock.mockResolvedValueOnce({ pluginApiVersion: "0.1.0", generation: "wasm-gen-1" }) // load
     invokeMock.mockResolvedValueOnce({ exports: ["init"] }) // activate
     const def = await loadWasmDefinition(baseManifest, "/p")
     const fakeCtx = {
@@ -232,7 +255,7 @@ describe("loadWasmDefinition", () => {
     await def.activate(fakeCtx)
     expect(invokeMock).toHaveBeenLastCalledWith(
       "plugin_wasm_activate",
-      expect.objectContaining({ pluginId: "demo.wasm" })
+      expect.objectContaining({ pluginId: "demo.wasm", generation: "wasm-gen-1" })
     )
     const sentCfg = JSON.parse(invokeMock.mock.calls[1][1].configJson)
     expect(sentCfg).toEqual({ foo: "bar" })
@@ -256,13 +279,17 @@ describe("callWasmExport", () => {
 
   it("invokes plugin_wasm_call and parses JSON result", async () => {
     invokeMock.mockResolvedValueOnce(JSON.stringify({ value: 42 }))
-    const out = await callWasmExport<{ value: number }>("demo.wasm", "tool-execute", {
-      x: 1,
-    })
+    const out = await callWasmExport<{ value: number }>(
+      "demo.wasm",
+      "tool-execute",
+      { x: 1 },
+      "wasm-gen-1"
+    )
     expect(invokeMock).toHaveBeenCalledWith(
       "plugin_wasm_call",
       expect.objectContaining({
         pluginId: "demo.wasm",
+        generation: "wasm-gen-1",
         exportName: "tool-execute",
         payloadJson: JSON.stringify({ x: 1 }),
       })
@@ -286,13 +313,16 @@ describe("unloadWasmPlugin", () => {
   it("invokes plugin_wasm_unload otherwise", async () => {
     setTauri(true)
     invokeMock.mockResolvedValueOnce(true)
-    await unloadWasmPlugin("demo.wasm")
-    expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_unload", { pluginId: "demo.wasm" })
+    await unloadWasmPlugin("demo.wasm", "wasm-gen-1")
+    expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_unload", {
+      pluginId: "demo.wasm",
+      generation: "wasm-gen-1",
+    })
   })
 
-  it("swallows errors so unload never throws", async () => {
+  it("propagates unload errors so lifecycle cleanup remains dirty", async () => {
     setTauri(true)
     invokeMock.mockRejectedValueOnce(new Error("boom"))
-    await expect(unloadWasmPlugin("demo.wasm")).resolves.toBeUndefined()
+    await expect(unloadWasmPlugin("demo.wasm", "wasm-gen-1")).rejects.toThrow("boom")
   })
 })

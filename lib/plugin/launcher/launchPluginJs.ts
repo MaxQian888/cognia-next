@@ -58,6 +58,7 @@ export interface LaunchPluginJsOptions {
 export interface LaunchPluginJsResult {
   command: string
   argv: string[]
+  generation: string
   process: HostPluginProcess
   activation: NodePluginActivationSnapshot
   invokeCallback(callbackId: string, args: unknown[]): Promise<unknown>
@@ -216,6 +217,7 @@ export async function launchPluginJs(
   return {
     command: launched.command,
     argv: launched.argv,
+    generation: launched.generation,
     process,
     activation: launched.activation,
     invokeCallback(callbackId, args) {
@@ -225,6 +227,7 @@ export async function launchPluginJs(
         entry: options.entryPath,
         callbackId,
         args,
+        generation: launched.generation,
       })
     },
     async deactivate() {
@@ -232,6 +235,7 @@ export async function launchPluginJs(
         pluginId: options.pluginId,
         pluginPath: options.cwd,
         entry: options.entryPath,
+        generation: launched.generation,
       })
     },
   }

@@ -37,6 +37,7 @@
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { subscribePythonPluginEvents } from "@/lib/plugin/python/event-bus"
 import type { PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
+import { capturePythonRuntimeGeneration } from "@/lib/plugin/python/runtime-generation"
 
 /** Python symbol the SDK registers to route contribution method calls. */
 export const PYTHON_CONTRIBUTION_DISPATCH = "__cognia_dispatch_contribution__"
@@ -76,13 +77,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Default transport, mirroring `PluginManager.invokePluginRuntime`. Imported
  *  lazily so this module stays safe in the web/mobile bundle. */
-const defaultCall: PythonCallTransport = async (pluginId, functionName, args) => {
+const defaultCall = async (
+  pluginId: string,
+  generation: string,
+  functionName: string,
+  args: readonly unknown[]
+): Promise<unknown> => {
   if (!isHeadlessHost()) {
     const { invoke } = await import("@tauri-apps/api/core")
-    return invoke("plugin_python_call", { pluginId, functionName, args })
+    return invoke("plugin_python_call", { pluginId, generation, functionName, args })
   }
   const { transport } = await import("@/lib/tauri/transport-instance")
-  return transport.call("plugin_python_call", { pluginId, functionName, args })
+  return transport.call("plugin_python_call", { pluginId, generation, functionName, args })
 }
 
 let streamCounter = 0
@@ -107,7 +113,10 @@ function wrapFailure(options: PythonBackedProxyOptions, method: string, error: u
  * the final value.
  */
 export function createPythonBackedProxy<T extends object>(options: PythonBackedProxyOptions): T {
-  const call = options.call ?? defaultCall
+  const generation = options.call ? null : capturePythonRuntimeGeneration(options.pluginId)
+  const call =
+    options.call ??
+    ((pluginId, functionName, args) => defaultCall(pluginId, generation!, functionName, args))
   const subscribe = options.subscribe ?? subscribePythonPluginEvents
   const newStreamId = options.newStreamId ?? defaultNewStreamId
   const streaming = new Set(options.streamingMethods ?? [])
@@ -131,7 +140,7 @@ export function createPythonBackedProxy<T extends object>(options: PythonBackedP
     }
 
     proxy[method] = (...args: unknown[]): AsyncGenerator<unknown, unknown, void> =>
-      streamMethod(options, call, subscribe, newStreamId(), method, args)
+      streamMethod(options, call, subscribe, generation, newStreamId(), method, args)
   }
 
   return proxy as T
@@ -141,6 +150,7 @@ async function* streamMethod(
   options: PythonBackedProxyOptions,
   call: PythonCallTransport,
   subscribe: PythonEventSubscribe,
+  generation: string | null,
   streamId: string,
   method: string,
   args: readonly unknown[]
@@ -156,6 +166,7 @@ async function* streamMethod(
 
   const unsubscribe = subscribe((event) => {
     if (event.pluginId !== options.pluginId) return
+    if (generation && event.generation !== generation) return
     const data = isRecord(event.data) ? event.data : null
     if (!data || data.streamId !== streamId) return
     if (event.kind === "chunk") {

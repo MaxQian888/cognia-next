@@ -31,6 +31,24 @@ import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
 const vscodeLoaderLogger = loggers.plugin.child("vscode-loader")
 
 let dispatcherConfigured = false
+const vscodeGenerations = new Map<string, string>()
+
+export interface VscodeLoadResult {
+  generation: string
+}
+
+function requireVscodeGeneration(pluginId: string): string {
+  if (pluginId === "cognia.lsp-service") return "system"
+  const generation = vscodeGenerations.get(pluginId)
+  if (!generation) {
+    throw new Error(`VS Code runtime generation is unavailable for ${pluginId}`)
+  }
+  return generation
+}
+
+export function getVscodeRuntimeGeneration(pluginId: string): string | undefined {
+  return vscodeGenerations.get(pluginId)
+}
 
 /**
  * One-time wiring of the renderer-side RPC dispatcher to its Tauri
@@ -53,9 +71,10 @@ export async function ensureDispatcherConfigured(): Promise<void> {
           return listenTauri<string>(event, cb)
         }
   configureRpcDispatcher({
-    sendResponse: async (pluginId, responseJson) => {
+    sendResponse: async (pluginId, generation, responseJson) => {
       await invoke("plugin_vscode_send_response", {
         pluginId,
+        generation: generation ?? requireVscodeGeneration(pluginId),
         responseJson,
       })
     },
@@ -261,7 +280,11 @@ export async function loadVscodeDefinition(
   }
 
   try {
-    await invoke("plugin_load_vscode", { ...args })
+    const loaded = await invoke<VscodeLoadResult>("plugin_load_vscode", { ...args })
+    if (!loaded?.generation) {
+      throw new Error(`VS Code host did not return a runtime generation for ${manifest.id}`)
+    }
+    vscodeGenerations.set(manifest.id, loaded.generation)
   } catch (error) {
     throw new Error(
       `Failed to load VS Code extension ${manifest.id}: ${error instanceof Error ? error.message : String(error)}`
@@ -270,7 +293,7 @@ export async function loadVscodeDefinition(
 
   let unsubscribe: (() => void) | undefined
   try {
-    unsubscribe = await subscribeToVscodeEvents(manifest.id)
+    unsubscribe = await subscribeToVscodeEvents(manifest.id, requireVscodeGeneration(manifest.id))
   } catch (error) {
     vscodeLoaderLogger.warn("subscribe failed; sidecar→renderer notifications will not arrive", {
       pluginId: manifest.id,
@@ -285,6 +308,7 @@ export async function loadVscodeDefinition(
       try {
         const result = await invoke<VscodeActivateResult>("plugin_activate_vscode", {
           pluginId: manifest.id,
+          generation: requireVscodeGeneration(manifest.id),
           configJson: JSON.stringify(context.config ?? {}),
         })
         context.logger.debug("VS Code extension activated", {
@@ -304,7 +328,10 @@ export async function loadVscodeDefinition(
     },
     deactivate: async () => {
       try {
-        await invoke("plugin_deactivate_vscode", { pluginId: manifest.id })
+        await invoke("plugin_deactivate_vscode", {
+          pluginId: manifest.id,
+          generation: requireVscodeGeneration(manifest.id),
+        })
       } catch (error) {
         vscodeLoaderLogger.warn("VS Code deactivate failed", {
           pluginId: manifest.id,
@@ -332,14 +359,17 @@ export async function loadVscodeDefinition(
 export async function invokeVscodeRpc<T = unknown>(
   pluginId: string,
   method: string,
-  payload: unknown
+  payload: unknown,
+  runtimeGeneration?: string
 ): Promise<T> {
   if (!isVscodeHostAvailable()) {
     throw new Error("VS Code extension host unavailable (browser mode)")
   }
   const invoke = await getInvoke()
+  const generation = runtimeGeneration ?? requireVscodeGeneration(pluginId)
   const result = await invoke<string>("plugin_invoke_vscode_rpc", {
     pluginId,
+    generation,
     method,
     payloadJson: JSON.stringify(payload ?? null),
   })
@@ -353,16 +383,26 @@ export async function invokeVscodeRpc<T = unknown>(
  * Permanently remove a loaded VS Code extension from the host. Called by
  * `PluginManager.uninstall` after lifecycle cleanup. Idempotent.
  */
-export async function unloadVscodeExtension(pluginId: string): Promise<void> {
+export async function unloadVscodeExtension(
+  pluginId: string,
+  generation = getVscodeRuntimeGeneration(pluginId)
+): Promise<void> {
   if (!isVscodeHostAvailable()) return
   const invoke = await getInvoke()
+  if (!generation) {
+    throw new Error(`VS Code runtime generation is unavailable for ${pluginId}`)
+  }
   try {
-    await invoke("plugin_unload_vscode", { pluginId })
+    await invoke("plugin_unload_vscode", { pluginId, generation })
+    if (vscodeGenerations.get(pluginId) === generation) {
+      vscodeGenerations.delete(pluginId)
+    }
   } catch (error) {
     vscodeLoaderLogger.warn("VS Code unload failed", {
       pluginId,
       error: error instanceof Error ? error.message : String(error),
     })
+    throw error
   }
 }
 

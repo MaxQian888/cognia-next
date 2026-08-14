@@ -154,7 +154,7 @@ describe("vscode-loader — Tauri mode", () => {
 
   it("calls plugin_load_vscode + plugin_activate_vscode via Tauri invoke", async () => {
     const invoke = jest.fn(async (cmd: string) => {
-      if (cmd === "plugin_load_vscode") return undefined
+      if (cmd === "plugin_load_vscode") return { generation: "test-generation" }
       if (cmd === "plugin_activate_vscode") {
         return {
           registeredCommands: ["test.hello"],
@@ -190,6 +190,7 @@ describe("vscode-loader — Tauri mode", () => {
     await def.deactivate!(mockContext)
     expect(invoke).toHaveBeenCalledWith("plugin_deactivate_vscode", {
       pluginId: "cognia.test-ext",
+      generation: "test-generation",
     })
   })
 
@@ -207,7 +208,7 @@ describe("vscode-loader — Tauri mode", () => {
 
   it("propagates Tauri activate failures and re-throws", async () => {
     const invoke = jest.fn(async (cmd: string) => {
-      if (cmd === "plugin_load_vscode") return undefined
+      if (cmd === "plugin_load_vscode") return { generation: "test-generation" }
       if (cmd === "plugin_activate_vscode") {
         throw new Error("activate boom")
       }
@@ -222,7 +223,7 @@ describe("vscode-loader — Tauri mode", () => {
 
   it("swallows deactivate failures (warn + continue)", async () => {
     const invoke = jest.fn(async (cmd: string) => {
-      if (cmd === "plugin_load_vscode") return undefined
+      if (cmd === "plugin_load_vscode") return { generation: "test-generation" }
       if (cmd === "plugin_activate_vscode")
         return {
           registeredCommands: [],
@@ -266,7 +267,8 @@ describe("vscode-loader — Tauri mode", () => {
     const result = await invokeVscodeRpc<{ ok: boolean; count: number }>(
       "cognia.test-ext",
       "workspace.fs.readFile",
-      { path: "/foo" }
+      { path: "/foo" },
+      "test-generation"
     )
     expect(invoke).toHaveBeenCalledWith(
       "plugin_invoke_vscode_rpc",
@@ -282,17 +284,19 @@ describe("vscode-loader — Tauri mode", () => {
     const invoke = jest.fn(async () => undefined)
     jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
     const { invokeVscodeRpc } = await import("./vscode-loader")
-    const result = await invokeVscodeRpc("cognia.test-ext", "noop", {})
+    const result = await invokeVscodeRpc("cognia.test-ext", "noop", {}, "test-generation")
     expect(result).toBeUndefined()
   })
 
-  it("unloadVscodeExtension is idempotent on failure", async () => {
+  it("unloadVscodeExtension surfaces cleanup failures", async () => {
     const invoke = jest.fn(async () => {
       throw new Error("already gone")
     })
     jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
     const { unloadVscodeExtension } = await import("./vscode-loader")
-    await expect(unloadVscodeExtension("cognia.test-ext")).resolves.toBeUndefined()
+    await expect(unloadVscodeExtension("cognia.test-ext", "test-generation")).rejects.toThrow(
+      "already gone"
+    )
   })
 
   it("bootstraps configureMonacoBridge with the configured Monaco instance", async () => {
@@ -300,7 +304,7 @@ describe("vscode-loader — Tauri mode", () => {
     // surface the JSON string the rpc dispatch path returns later in the
     // test without re-inferring the activate-response shape.
     const invoke = jest.fn(async (cmd: string): Promise<unknown> => {
-      if (cmd === "plugin_load_vscode") return undefined
+      if (cmd === "plugin_load_vscode") return { generation: "test-generation" }
       if (cmd === "plugin_activate_vscode")
         return {
           registeredCommands: [],
@@ -345,7 +349,7 @@ describe("vscode-loader — Tauri mode", () => {
 
   it("survives configured Monaco failing to load (logs warn + continues activation)", async () => {
     const invoke = jest.fn(async (cmd: string) => {
-      if (cmd === "plugin_load_vscode") return undefined
+      if (cmd === "plugin_load_vscode") return { generation: "test-generation" }
       if (cmd === "plugin_activate_vscode")
         return {
           registeredCommands: [],
@@ -390,6 +394,9 @@ describe("vscode-loader — headless brain mode", () => {
     const unsubscribe = jest.fn()
     let inbound: ((payload: string) => void) | undefined
     const call = jest.fn(async (command: string) => {
+      if (command === "plugin_load_vscode") {
+        return { generation: "test-generation" }
+      }
       if (command === "plugin_activate_vscode") {
         return {
           registeredCommands: ["test.hello"],
@@ -429,10 +436,13 @@ describe("vscode-loader — headless brain mode", () => {
 
     inbound?.(
       JSON.stringify({
-        jsonrpc: "2.0",
-        id: 91,
-        method: "workspace:listFolders",
-        params: {},
+        generation: "test-generation",
+        rawFrame: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 91,
+          method: "workspace:listFolders",
+          params: {},
+        }),
       })
     )
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -440,6 +450,7 @@ describe("vscode-loader — headless brain mode", () => {
       "plugin_vscode_send_response",
       expect.objectContaining({
         pluginId: "cognia.test-ext",
+        generation: "test-generation",
         responseJson: expect.stringContaining('"id":91'),
       })
     )
@@ -447,6 +458,7 @@ describe("vscode-loader — headless brain mode", () => {
     await definition.deactivate!(mockContext)
     expect(call).toHaveBeenCalledWith("plugin_deactivate_vscode", {
       pluginId: "cognia.test-ext",
+      generation: "test-generation",
     })
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })

@@ -8,6 +8,7 @@ export {
   PLUGIN_MINIMUM_GATEWAY_CLIENT_VERSION,
   PLUGIN_MINIMUM_SDK_VERSION,
   PLUGIN_PROTOCOL_VERSION,
+  PLUGIN_API_RESOURCE_EFFECTS,
   PLUGIN_SDK_VERSION,
 } from "./generated"
 export type { CanonicalPluginErrorCode, CanonicalPluginPermission } from "./generated"
@@ -63,8 +64,19 @@ export interface PluginPathFieldContract {
   sentinels?: readonly string[]
 }
 
+export interface PluginServiceContract {
+  id: string
+  realmOverridable: boolean
+}
+
 export type PluginApiDataClassification = "public" | "internal" | "sensitive" | "secret"
 export type PluginApiRisk = "low" | "medium" | "high" | "critical"
+
+export type PluginApiResourceEffect =
+  | { kind: "none" }
+  | { kind: "returned-disposer" }
+  | { kind: "returned-handle"; disposeMethod: string }
+  | { kind: "host-owned" }
 
 export interface PluginApiMethodContract {
   id: string
@@ -74,6 +86,7 @@ export interface PluginApiMethodContract {
   risk: PluginApiRisk
   idempotent: boolean
   cancellable: boolean
+  resourceEffect: PluginApiResourceEffect
 }
 
 export interface PluginApiNamespaceContract {
@@ -121,6 +134,7 @@ export const PLUGIN_POINT_CONTRACT_SCHEMA_VERSION = pluginPointCatalog.schemaVer
 export const PLUGIN_CONTRACT_MINIMUM_HOST_VERSION = catalog.minimumHostVersion
 export const CANONICAL_PLUGIN_TYPES = catalog.pluginTypes as readonly string[]
 export const CANONICAL_PLUGIN_PERMISSIONS = catalog.permissions as readonly string[]
+export const PLUGIN_SERVICE_CONTRACTS = catalog.services as readonly PluginServiceContract[]
 export const PLUGIN_API_NAMESPACE_CONTRACTS =
   catalog.apiNamespaces as readonly PluginApiNamespaceContract[]
 export const AUTHOR_CAPABILITY_CONTRACTS = catalog.capabilities.map((contract) => ({

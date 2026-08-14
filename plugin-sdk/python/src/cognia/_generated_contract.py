@@ -3567,6 +3567,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "host-owned",
+                },
             },
             {
                 "id": "a2ui.deleteSurface",
@@ -3576,6 +3579,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "a2ui.getSurface",
@@ -3585,6 +3591,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "a2ui.registerComponent",
@@ -3594,6 +3603,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "a2ui.registerTemplate",
@@ -3603,6 +3615,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "a2ui.updateComponents",
@@ -3612,6 +3627,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "a2ui.updateDataModel",
@@ -3621,6 +3639,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -3658,6 +3679,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.context.listProviders",
@@ -3667,6 +3691,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.context.queryTwinMemory",
@@ -3678,6 +3705,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.context.readSharedMemory",
@@ -3689,6 +3719,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.context.registerProvider",
@@ -3698,6 +3731,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.context.unregisterProvider",
@@ -3707,6 +3743,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.dispatchSubagent",
@@ -3718,6 +3757,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.executeAgent",
@@ -3729,6 +3771,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.guardrails.list",
@@ -3738,6 +3783,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.guardrails.register",
@@ -3747,6 +3795,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.guardrails.unregister",
@@ -3756,6 +3807,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.invokeTool",
@@ -3767,6 +3821,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.registerExternalAgentAdapter",
@@ -3776,6 +3833,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.registerExternalAgentPreset",
@@ -3785,6 +3845,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.registerMcpServerPreset",
@@ -3794,6 +3857,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.registerMode",
@@ -3803,6 +3869,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.registerNativeAnthropicTool",
@@ -3812,6 +3881,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.registerSkill",
@@ -3821,6 +3893,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.registerTool",
@@ -3830,6 +3905,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "agent.run",
@@ -3841,6 +3919,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.runExternalAgent",
@@ -3852,6 +3933,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.runStreamed",
@@ -3863,6 +3947,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.runTeam",
@@ -3874,6 +3961,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.sessions.create",
@@ -3885,6 +3975,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.sessions.resume",
@@ -3896,6 +3989,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.unregisterMode",
@@ -3905,6 +4001,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "agent.unregisterTool",
@@ -3914,6 +4013,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -3949,6 +4051,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ai.embed",
@@ -3958,6 +4063,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ai.getAvailableModels",
@@ -3967,6 +4075,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ai.getDefaultModel",
@@ -3976,6 +4087,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ai.getDefaultProvider",
@@ -3985,6 +4099,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ai.getProviderModels",
@@ -3994,6 +4111,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ai.registerProvider",
@@ -4003,6 +4123,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -4040,6 +4163,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "artifact.createArtifact",
@@ -4051,6 +4177,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "artifact.deleteArtifact",
@@ -4062,6 +4191,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "artifact.getActiveArtifact",
@@ -4073,6 +4205,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "artifact.getArtifact",
@@ -4084,6 +4219,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "artifact.listArtifacts",
@@ -4095,6 +4233,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "artifact.onArtifactChange",
@@ -4106,6 +4247,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "artifact.openArtifact",
@@ -4117,6 +4261,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "artifact.registerRenderer",
@@ -4128,6 +4275,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "artifact.updateArtifact",
@@ -4139,6 +4289,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -4176,6 +4329,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "auth.getSession",
@@ -4187,6 +4343,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "auth.getSessions",
@@ -4198,6 +4357,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "auth.onDidChangeSessions",
@@ -4207,6 +4369,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "auth.registerProvider",
@@ -4218,6 +4383,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -4255,6 +4423,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.click",
@@ -4266,6 +4437,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.cursorPosition",
@@ -4277,6 +4451,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.drag",
@@ -4288,6 +4465,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.find",
@@ -4299,6 +4479,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.getFocus",
@@ -4310,6 +4493,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.holdKey",
@@ -4321,6 +4507,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.keys",
@@ -4332,6 +4521,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.launchApp",
@@ -4343,6 +4535,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.mouseButton",
@@ -4354,6 +4549,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.mouseMove",
@@ -4365,6 +4563,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.paste",
@@ -4376,6 +4577,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.pickAtPoint",
@@ -4387,6 +4591,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.readTree",
@@ -4398,6 +4605,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.screenshot",
@@ -4409,6 +4619,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.scroll",
@@ -4420,6 +4633,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.type",
@@ -4431,6 +4647,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "automation.windowOp",
@@ -4442,6 +4661,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -4479,6 +4701,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "backup.getLatestSuccessful",
@@ -4490,6 +4715,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "backup.listHistory",
@@ -4501,6 +4729,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "backup.restore",
@@ -4512,6 +4743,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "backup.serialize",
@@ -4523,6 +4757,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "backup.validate",
@@ -4534,6 +4771,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -4571,6 +4811,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.closeCanvas",
@@ -4582,6 +4825,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.closeCollaborationSession",
@@ -4593,6 +4839,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.createCollaborationSession",
@@ -4604,6 +4853,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.createDocument",
@@ -4615,6 +4867,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.deleteComment",
@@ -4626,6 +4881,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.deleteDocument",
@@ -4637,6 +4895,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.executeAction",
@@ -4648,6 +4909,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.executeActionStreaming",
@@ -4659,6 +4923,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.executePython",
@@ -4670,6 +4937,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.getActiveCollaborationSession",
@@ -4681,6 +4951,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.getCollaborationSession",
@@ -4692,6 +4965,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.getComments",
@@ -4703,6 +4979,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.getContent",
@@ -4714,6 +4993,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.getCurrentDocument",
@@ -4725,6 +5007,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.getDocument",
@@ -4736,6 +5021,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.getSelection",
@@ -4747,6 +5035,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.getVersions",
@@ -4758,6 +5049,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.insertText",
@@ -4769,6 +5063,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.listRecentCollaborationSessions",
@@ -4780,6 +5077,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.onCanvasChange",
@@ -4791,6 +5091,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "canvas.onContentChange",
@@ -4802,6 +5105,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "canvas.openDocument",
@@ -4813,6 +5119,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.replaceSelection",
@@ -4824,6 +5133,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.replyToComment",
@@ -4835,6 +5147,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.resolveComment",
@@ -4846,6 +5161,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.restoreVersion",
@@ -4857,6 +5175,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.saveVersion",
@@ -4868,6 +5189,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.setContent",
@@ -4879,6 +5203,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.setSelection",
@@ -4890,6 +5217,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.updateComment",
@@ -4901,6 +5231,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "canvas.updateDocument",
@@ -4912,6 +5245,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -4972,6 +5308,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -5009,6 +5348,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "clipboard.hasImage",
@@ -5020,6 +5362,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "clipboard.hasText",
@@ -5031,6 +5376,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "clipboard.readImage",
@@ -5042,6 +5390,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "clipboard.readText",
@@ -5053,6 +5404,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "clipboard.writeImage",
@@ -5064,6 +5418,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "clipboard.writeText",
@@ -5075,6 +5432,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -5112,6 +5472,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.listDevices",
@@ -5123,6 +5486,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.listOpenGoals",
@@ -5134,6 +5500,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.pauseGoal",
@@ -5145,6 +5514,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.resumeGoal",
@@ -5156,6 +5528,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.revokeDevice",
@@ -5167,6 +5542,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.serverStatus",
@@ -5178,6 +5556,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.setRemoteControl",
@@ -5189,6 +5570,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.stopGoal",
@@ -5200,6 +5584,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "companion.unrevokeDevice",
@@ -5211,6 +5598,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -5248,6 +5638,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "configuration.getAll",
@@ -5259,6 +5652,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "configuration.getOrDefault",
@@ -5270,6 +5666,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "configuration.onChange",
@@ -5281,6 +5680,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "configuration.update",
@@ -5292,6 +5694,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -5329,6 +5734,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.addReaction",
@@ -5340,6 +5748,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.bootstrapConversation",
@@ -5351,6 +5762,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.createChat",
@@ -5362,6 +5776,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.createInstance",
@@ -5373,6 +5790,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.deleteInstance",
@@ -5384,6 +5804,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.deleteMessage",
@@ -5395,6 +5818,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.editMessage",
@@ -5406,6 +5832,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.enqueueSend",
@@ -5417,6 +5846,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.fetchHistory",
@@ -5428,6 +5860,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.findSessionByConversation",
@@ -5439,6 +5874,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.forwardMessage",
@@ -5450,6 +5888,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.getA2UICapabilityMatrix",
@@ -5461,6 +5902,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.getAdapter",
@@ -5472,6 +5916,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.getDispatchRules",
@@ -5483,6 +5930,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.getInstance",
@@ -5494,6 +5944,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.getOutboundJob",
@@ -5505,6 +5958,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.getReadReceipt",
@@ -5516,6 +5972,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.getRuntimeState",
@@ -5527,6 +5986,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.getSkillCapabilities",
@@ -5538,6 +6000,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.listAdapters",
@@ -5549,6 +6014,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.listEnabledInstances",
@@ -5560,6 +6028,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.listInstances",
@@ -5571,6 +6042,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.listInstancesByType",
@@ -5582,6 +6056,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.listRunningAdapters",
@@ -5593,6 +6070,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.listSessionsByConversation",
@@ -5604,6 +6084,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.listSiblingConversations",
@@ -5615,6 +6098,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.newIdempotencyKey",
@@ -5626,6 +6112,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.onCallback",
@@ -5637,6 +6126,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "connectors.onInbound",
@@ -5648,6 +6140,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "connectors.pinMessage",
@@ -5659,6 +6154,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.previewAtGate",
@@ -5670,6 +6168,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.previewDispatchRules",
@@ -5681,6 +6182,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.removeChatMembers",
@@ -5692,6 +6196,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.removeReaction",
@@ -5703,6 +6210,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.resolveContacts",
@@ -5714,6 +6224,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.send",
@@ -5725,6 +6238,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.sendText",
@@ -5736,6 +6252,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.sendUrgent",
@@ -5747,6 +6266,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.setDispatchRules",
@@ -5758,6 +6280,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.setInstanceEnabled",
@@ -5769,6 +6294,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.setTyping",
@@ -5780,6 +6308,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.streamReply",
@@ -5791,6 +6322,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.unpinMessage",
@@ -5802,6 +6336,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.updateChat",
@@ -5813,6 +6350,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.updateInstance",
@@ -5824,6 +6364,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.uploadFile",
@@ -5835,6 +6378,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "connectors.waitForDelivery",
@@ -5846,6 +6392,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -5881,6 +6430,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "contextMenu.registerMany",
@@ -5890,6 +6442,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -5927,6 +6482,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "contextPanels.getWorkbenchState",
@@ -5938,6 +6496,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "contextPanels.onDidChangeActiveContext",
@@ -5949,6 +6510,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "contextPanels.onDidChangeVisibility",
@@ -5960,6 +6524,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "contextPanels.onDidChangeWorkbenchState",
@@ -5971,6 +6538,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "contextPanels.register",
@@ -5982,6 +6552,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "contextPanels.reveal",
@@ -5993,6 +6566,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "contextPanels.setBadge",
@@ -6004,6 +6580,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "contextPanels.setMode",
@@ -6015,6 +6594,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "contextPanels.setPinned",
@@ -6026,6 +6608,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -6063,6 +6648,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "db.dropTable",
@@ -6074,6 +6662,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "db.execute",
@@ -6085,6 +6676,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "db.query",
@@ -6096,6 +6690,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "db.tableExists",
@@ -6107,6 +6704,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "db.transaction",
@@ -6118,6 +6718,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -6153,6 +6756,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "dexie.table",
@@ -6162,6 +6768,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -6199,6 +6808,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "editor.onDidChangeActiveEditor",
@@ -6210,6 +6822,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "editor.openFile",
@@ -6221,6 +6836,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "editor.readActive",
@@ -6232,6 +6850,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "editor.reflectEdit",
@@ -6243,6 +6864,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "editor.revealInExplorer",
@@ -6254,6 +6878,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "editor.runInTerminal",
@@ -6265,6 +6892,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "editor.saveDirty",
@@ -6276,6 +6906,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "editor.showDiff",
@@ -6287,6 +6920,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -6322,6 +6958,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.bus.getHistory",
@@ -6331,6 +6970,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.bus.off",
@@ -6340,6 +6982,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.bus.offAll",
@@ -6349,6 +6994,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.bus.on",
@@ -6358,6 +7006,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "events.bus.once",
@@ -6367,6 +7018,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "events.emit",
@@ -6376,6 +7030,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.ipc.broadcast",
@@ -6385,6 +7042,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.ipc.call",
@@ -6394,6 +7054,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.ipc.describeExposedMethods",
@@ -6403,6 +7066,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.ipc.expose",
@@ -6412,6 +7078,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "events.ipc.getExposedMethods",
@@ -6421,6 +7090,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.ipc.on",
@@ -6430,6 +7102,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "events.ipc.send",
@@ -6439,6 +7114,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.off",
@@ -6448,6 +7126,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "events.on",
@@ -6457,6 +7138,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "events.once",
@@ -6466,6 +7150,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -6503,6 +7190,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "export.exportMessages",
@@ -6514,6 +7204,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "export.exportProject",
@@ -6525,6 +7218,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "export.exportSession",
@@ -6536,6 +7232,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "export.generateFilename",
@@ -6547,6 +7246,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "export.getAvailableFormats",
@@ -6558,6 +7260,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "export.getCustomExporters",
@@ -6569,6 +7274,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "export.registerExporter",
@@ -6580,6 +7288,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -6617,6 +7328,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "extensions.hasExtensions",
@@ -6628,6 +7342,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "extensions.registerExtension",
@@ -6639,6 +7356,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -6676,6 +7396,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.copy",
@@ -6687,6 +7410,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.exists",
@@ -6698,6 +7424,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.getCacheDir",
@@ -6709,6 +7438,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.getDataDir",
@@ -6720,6 +7452,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.getTempDir",
@@ -6731,6 +7466,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.mkdir",
@@ -6742,6 +7480,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.move",
@@ -6753,6 +7494,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.readBinary",
@@ -6764,6 +7508,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.readDir",
@@ -6775,6 +7522,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.readJson",
@@ -6786,6 +7536,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.readText",
@@ -6797,6 +7550,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.remove",
@@ -6808,6 +7564,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.stat",
@@ -6819,6 +7578,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.watch",
@@ -6830,6 +7592,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "fs.writeBinary",
@@ -6841,6 +7606,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.writeJson",
@@ -6852,6 +7620,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "fs.writeText",
@@ -6863,6 +7634,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -6900,6 +7674,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.checkoutBranch",
@@ -6911,6 +7688,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.commit",
@@ -6922,6 +7702,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.commitFiles",
@@ -6933,6 +7716,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.conflicts",
@@ -6944,6 +7730,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.createBranch",
@@ -6955,6 +7744,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.deleteBranch",
@@ -6966,6 +7758,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.diffCommit",
@@ -6977,6 +7772,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.diffFile",
@@ -6988,6 +7786,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.discard",
@@ -6999,6 +7800,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.discardAll",
@@ -7010,6 +7814,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.fetch",
@@ -7021,6 +7828,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.fileHistory",
@@ -7032,6 +7842,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.getRoot",
@@ -7043,6 +7856,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.isRepo",
@@ -7054,6 +7870,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.log",
@@ -7065,6 +7884,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.mergeAbort",
@@ -7076,6 +7898,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.onStatusChange",
@@ -7087,6 +7912,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "git.pull",
@@ -7098,6 +7926,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.push",
@@ -7109,6 +7940,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.remotes",
@@ -7120,6 +7954,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.renameBranch",
@@ -7131,6 +7968,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.repoState",
@@ -7142,6 +7982,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.resolveConflict",
@@ -7153,6 +7996,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.stage",
@@ -7164,6 +8010,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.stashApply",
@@ -7175,6 +8024,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.stashDrop",
@@ -7186,6 +8038,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.stashList",
@@ -7197,6 +8052,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.stashPop",
@@ -7208,6 +8066,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.stashPush",
@@ -7219,6 +8080,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.status",
@@ -7230,6 +8094,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.sync",
@@ -7241,6 +8108,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "git.unstage",
@@ -7252,6 +8122,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -7289,6 +8162,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.create",
@@ -7300,6 +8176,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.decomposeSubgoals",
@@ -7311,6 +8190,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.delete",
@@ -7322,6 +8204,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.get",
@@ -7333,6 +8218,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.getActiveForSession",
@@ -7344,6 +8232,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.getEvents",
@@ -7355,6 +8246,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.getOpenForSession",
@@ -7366,6 +8260,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.listAll",
@@ -7377,6 +8274,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.listBySession",
@@ -7388,6 +8288,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.pause",
@@ -7399,6 +8302,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.preempt",
@@ -7410,6 +8316,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.resume",
@@ -7421,6 +8330,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.stop",
@@ -7432,6 +8344,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.toggleSubgoal",
@@ -7443,6 +8358,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.updateConfig",
@@ -7454,6 +8372,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "goals.updateObjective",
@@ -7465,6 +8386,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -7500,6 +8424,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "i18n.formatNumber",
@@ -7509,6 +8436,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "i18n.formatRelativeTime",
@@ -7518,6 +8448,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "i18n.getAvailableLocales",
@@ -7527,6 +8460,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "i18n.getCurrentLocale",
@@ -7536,6 +8472,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "i18n.getLocaleName",
@@ -7545,6 +8484,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "i18n.hasTranslation",
@@ -7554,6 +8496,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "i18n.onLocaleChange",
@@ -7563,6 +8508,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "i18n.registerTranslations",
@@ -7572,6 +8520,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "i18n.t",
@@ -7581,6 +8532,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -7616,6 +8570,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "import.importContent",
@@ -7625,6 +8582,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "import.registerChatImporter",
@@ -7634,6 +8594,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "import.registerImporter",
@@ -7643,6 +8606,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "import.registerSessionSource",
@@ -7652,6 +8618,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -7689,6 +8658,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.cancelAction",
@@ -7700,6 +8672,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.createAccount",
@@ -7711,6 +8686,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.createSubscription",
@@ -7722,6 +8700,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.executeAction",
@@ -7733,6 +8714,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.getActionJob",
@@ -7744,6 +8728,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.getIngressPublicUrl",
@@ -7755,6 +8742,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.listAccounts",
@@ -7766,6 +8756,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.listDefinitions",
@@ -7777,6 +8770,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.listSubscriptions",
@@ -7788,6 +8784,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.migrateLegacy",
@@ -7799,6 +8798,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.publishEvent",
@@ -7810,6 +8812,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.removeAccount",
@@ -7821,6 +8826,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.removeSubscription",
@@ -7832,6 +8840,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.rollbackMigration",
@@ -7843,6 +8854,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "integrations.updateAccount",
@@ -7854,6 +8868,109 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+        ],
+    },
+    {
+        "id": "lifecycle",
+        "authorPath": "ctx.lifecycle",
+        "type": "PluginLifecycleAPI",
+        "stability": "stable",
+        "introducedIn": "0.4.0",
+        "runtimes": [
+            "frontend",
+            "hybrid",
+        ],
+        "platforms": [
+            "desktop",
+            "web",
+            "mobile",
+        ],
+        "transport": "direct",
+        "factory": "context.lifecycle",
+        "enforcement": "active",
+        "dataClassification": "internal",
+        "timeoutMs": None,
+        "retry": "never",
+        "errorPolicy": "preserve",
+        "lifecycle": "plugin",
+        "methods": [
+            {
+                "id": "lifecycle.onDispose",
+                "name": "onDispose",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "host-owned",
+                },
+            },
+        ],
+    },
+    {
+        "id": "services",
+        "authorPath": "ctx.services",
+        "type": "PluginServicesAPI",
+        "stability": "experimental",
+        "introducedIn": "0.4.0",
+        "runtimes": [
+            "frontend",
+            "hybrid",
+        ],
+        "platforms": [
+            "desktop",
+            "web",
+            "mobile",
+        ],
+        "transport": "direct",
+        "factory": "context.services",
+        "enforcement": "active",
+        "dataClassification": "internal",
+        "timeoutMs": None,
+        "retry": "never",
+        "errorPolicy": "preserve",
+        "lifecycle": "plugin",
+        "methods": [
+            {
+                "id": "services.getProvider",
+                "name": "getProvider",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "services.isAvailable",
+                "name": "isAvailable",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "services.onOptionalServiceChange",
+                "name": "onOptionalServiceChange",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "host-owned",
+                },
             },
         ],
     },
@@ -7889,6 +9006,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "logger.debug",
@@ -7898,6 +9018,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "logger.error",
@@ -7907,6 +9030,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "logger.fatal",
@@ -7916,6 +9042,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "logger.info",
@@ -7925,6 +9054,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "logger.trace",
@@ -7934,6 +9066,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "logger.warn",
@@ -7943,6 +9078,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "logger.withContext",
@@ -7952,6 +9090,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -7987,6 +9128,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.save",
@@ -7996,6 +9140,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.toDataUrl",
@@ -8005,6 +9152,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.fromDataUrl",
@@ -8014,6 +9164,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.resize",
@@ -8023,6 +9176,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.transform",
@@ -8032,6 +9188,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.adjust",
@@ -8041,6 +9200,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.applyFilter",
@@ -8050,6 +9212,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.getHistogram",
@@ -8059,6 +9224,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.image.compare",
@@ -8068,6 +9236,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.loadClip",
@@ -8079,6 +9250,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.getFrame",
@@ -8090,6 +9264,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.getMetadata",
@@ -8101,6 +9278,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.analyze",
@@ -8112,6 +9292,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.cleanupAnalysis",
@@ -8123,6 +9306,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.trim",
@@ -8134,6 +9320,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.concatenate",
@@ -8145,6 +9334,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.applyEffect",
@@ -8156,6 +9348,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.addTransition",
@@ -8167,6 +9362,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.video.export",
@@ -8178,6 +9376,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.filters.register",
@@ -8187,6 +9388,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "media.filters.unregister",
@@ -8196,6 +9400,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.filters.getAll",
@@ -8205,6 +9412,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.filters.getById",
@@ -8214,6 +9424,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.filters.getByCategory",
@@ -8223,6 +9436,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.effects.register",
@@ -8232,6 +9448,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "media.effects.unregister",
@@ -8241,6 +9460,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.effects.getAll",
@@ -8250,6 +9472,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.effects.getById",
@@ -8259,6 +9484,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.transitions.register",
@@ -8268,6 +9496,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "media.transitions.unregister",
@@ -8277,6 +9508,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.transitions.getAll",
@@ -8286,6 +9520,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.transitions.getById",
@@ -8295,6 +9532,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.ai.generateImage",
@@ -8306,6 +9546,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": True,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.ai.generateVideo",
@@ -8317,6 +9560,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": True,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.ai.upscale",
@@ -8328,6 +9574,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": True,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.ai.removeBackground",
@@ -8339,6 +9588,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": True,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.ai.enhanceImage",
@@ -8350,6 +9602,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": True,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.ai.generateVariation",
@@ -8361,6 +9616,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": True,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.ai.inpaint",
@@ -8372,6 +9630,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": True,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.utils.createCanvas",
@@ -8381,6 +9642,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.utils.getImageDataFromCanvas",
@@ -8390,6 +9654,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.utils.putImageDataToCanvas",
@@ -8399,6 +9666,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.utils.blobToBase64",
@@ -8408,6 +9678,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.utils.base64ToBlob",
@@ -8417,6 +9690,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.utils.downloadFile",
@@ -8426,6 +9702,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "media.utils.registerCatalogAsset",
@@ -8435,6 +9714,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -8472,6 +9754,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "memory.forget",
@@ -8483,6 +9768,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "memory.get",
@@ -8494,6 +9782,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "memory.list",
@@ -8505,6 +9796,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "memory.search",
@@ -8516,6 +9810,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "memory.store",
@@ -8527,6 +9824,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "memory.update",
@@ -8538,6 +9838,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -8575,6 +9878,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -8610,6 +9916,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "modal.openById",
@@ -8619,6 +9928,10 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-handle",
+                    "disposeMethod": "close",
+                },
             },
             {
                 "id": "modal.openModal",
@@ -8628,6 +9941,10 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-handle",
+                    "disposeMethod": "close",
+                },
             },
         ],
     },
@@ -8665,6 +9982,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "network.download",
@@ -8676,6 +9996,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "network.fetch",
@@ -8687,6 +10010,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "network.get",
@@ -8698,6 +10024,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "network.patch",
@@ -8709,6 +10038,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "network.post",
@@ -8720,6 +10052,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "network.put",
@@ -8731,6 +10066,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "network.upload",
@@ -8742,6 +10080,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -8777,6 +10118,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "notifications.createProgress",
@@ -8786,6 +10130,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "notifications.dismiss",
@@ -8795,6 +10142,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "notifications.dismissAll",
@@ -8804,6 +10154,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "notifications.getAll",
@@ -8813,6 +10166,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "notifications.onAction",
@@ -8822,6 +10178,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "notifications.update",
@@ -8831,6 +10190,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -8866,6 +10228,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ocr.registerProvider",
@@ -8875,6 +10240,10 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-handle",
+                    "disposeMethod": "unregister",
+                },
             },
         ],
     },
@@ -8912,6 +10281,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "perf.listTraces",
@@ -8923,6 +10295,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "perf.snapshot",
@@ -8934,6 +10309,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "perf.subscribe",
@@ -8945,6 +10323,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "perf.systemDetails",
@@ -8956,6 +10337,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -8991,6 +10375,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "permissions.hasAllPermissions",
@@ -9000,6 +10387,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "permissions.hasAnyPermission",
@@ -9009,6 +10399,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "permissions.hasPermission",
@@ -9018,6 +10411,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "permissions.requestPermission",
@@ -9027,6 +10423,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -9062,6 +10461,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "pet.getRemainingBudget",
@@ -9073,6 +10475,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "pet.getSummary",
@@ -9084,6 +10489,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "pet.getView",
@@ -9095,6 +10503,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "pet.interact",
@@ -9104,6 +10515,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "pet.onEvent",
@@ -9115,6 +10529,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -9152,6 +10569,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.addTag",
@@ -9163,6 +10583,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.archiveProject",
@@ -9174,6 +10597,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.createProject",
@@ -9185,6 +10611,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.deleteProject",
@@ -9196,6 +10625,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.getCurrentProject",
@@ -9207,6 +10639,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.getCurrentProjectId",
@@ -9218,6 +10653,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.getKnowledgeFiles",
@@ -9229,6 +10667,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.getProject",
@@ -9240,6 +10681,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.getProjectSessions",
@@ -9251,6 +10695,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.linkSession",
@@ -9262,6 +10709,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.listProjects",
@@ -9273,6 +10723,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.onProjectChange",
@@ -9284,6 +10737,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "project.removeKnowledgeFile",
@@ -9295,6 +10751,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.removeTag",
@@ -9306,6 +10765,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.setActiveProject",
@@ -9317,6 +10779,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.unarchiveProject",
@@ -9328,6 +10793,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.unlinkSession",
@@ -9339,6 +10807,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.updateKnowledgeFile",
@@ -9350,6 +10821,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "project.updateProject",
@@ -9361,6 +10835,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -9396,6 +10873,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "python.eval",
@@ -9405,6 +10885,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "python.import",
@@ -9414,6 +10897,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -9449,6 +10935,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "quickActions.registerMany",
@@ -9458,6 +10947,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -9493,6 +10985,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.createTask",
@@ -9502,6 +10997,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "host-owned",
+                },
             },
             {
                 "id": "scheduler.deleteTask",
@@ -9511,6 +11009,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.getExecution",
@@ -9520,6 +11021,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.getExecutions",
@@ -9529,6 +11033,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.getHandlers",
@@ -9538,6 +11045,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.getLatestExecution",
@@ -9547,6 +11057,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.getTask",
@@ -9556,6 +11069,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.hasHandler",
@@ -9565,6 +11081,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.listTasks",
@@ -9574,6 +11093,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.pauseTask",
@@ -9583,6 +11105,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.registerHandler",
@@ -9592,6 +11117,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "scheduler.resumeTask",
@@ -9601,6 +11129,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.runTaskNow",
@@ -9610,6 +11141,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.unregisterHandler",
@@ -9619,6 +11153,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "scheduler.updateTask",
@@ -9628,6 +11165,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -9665,6 +11205,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "secrets.get",
@@ -9676,6 +11219,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "secrets.has",
@@ -9687,6 +11233,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "secrets.keys",
@@ -9698,6 +11247,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "secrets.onDidChange",
@@ -9709,6 +11261,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "secrets.store",
@@ -9720,6 +11275,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -9757,6 +11315,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.createSession",
@@ -9768,6 +11329,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.deleteMessage",
@@ -9779,6 +11343,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.deleteSession",
@@ -9790,6 +11357,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.getCurrentSession",
@@ -9801,6 +11371,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.getCurrentSessionId",
@@ -9812,6 +11385,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.getMessages",
@@ -9823,6 +11399,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.getSession",
@@ -9834,6 +11413,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.getSessionStats",
@@ -9845,6 +11427,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.listSessions",
@@ -9856,6 +11441,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.onMessagesChange",
@@ -9867,6 +11455,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "session.onSessionChange",
@@ -9878,6 +11469,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "session.switchSession",
@@ -9889,6 +11483,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.updateMessage",
@@ -9900,6 +11497,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "session.updateSession",
@@ -9911,6 +11511,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -9946,6 +11549,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "settings.onChange",
@@ -9955,6 +11561,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "settings.set",
@@ -9964,6 +11573,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -10001,6 +11613,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "share.delete",
@@ -10012,6 +11627,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "share.getByCode",
@@ -10023,6 +11641,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "share.getStats",
@@ -10034,6 +11655,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "share.list",
@@ -10045,6 +11669,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "share.revoke",
@@ -10056,6 +11683,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -10093,6 +11723,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "shell.open",
@@ -10104,6 +11737,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "shell.showInFolder",
@@ -10115,6 +11751,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "shell.spawn",
@@ -10126,6 +11765,10 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-handle",
+                    "disposeMethod": "kill",
+                },
             },
         ],
     },
@@ -10161,6 +11804,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "shortcuts.isAvailable",
@@ -10170,6 +11816,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "shortcuts.register",
@@ -10179,6 +11828,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "shortcuts.registerMany",
@@ -10188,6 +11840,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -10223,6 +11878,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.delete",
@@ -10232,6 +11890,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.get",
@@ -10241,6 +11902,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.getOrDefault",
@@ -10250,6 +11914,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.getSecure",
@@ -10259,6 +11926,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.getUsage",
@@ -10268,6 +11938,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.has",
@@ -10277,6 +11950,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.isEncrypted",
@@ -10286,6 +11962,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.keys",
@@ -10295,6 +11974,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.remove",
@@ -10304,6 +11986,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.set",
@@ -10313,6 +11998,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "storage.setSecure",
@@ -10322,6 +12010,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -10359,6 +12050,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "subscription.getActiveAccountSummary",
@@ -10370,6 +12064,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "subscription.getLatestUsage",
@@ -10381,6 +12078,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "subscription.getUsage",
@@ -10392,6 +12092,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "subscription.listAccounts",
@@ -10403,6 +12106,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "subscription.onUsageUpdate",
@@ -10414,6 +12120,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "subscription.providers",
@@ -10425,6 +12134,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -10462,6 +12174,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.addTeammate",
@@ -10473,6 +12188,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.assignTask",
@@ -10484,6 +12202,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.attachTaskFile",
@@ -10495,6 +12216,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.createTask",
@@ -10506,6 +12230,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.getExecutionReport",
@@ -10517,6 +12244,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.getRunStatus",
@@ -10528,6 +12258,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.getTeam",
@@ -10539,6 +12272,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.getTeammate",
@@ -10550,6 +12286,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.listCheckpoints",
@@ -10561,6 +12300,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.listEvents",
@@ -10572,6 +12314,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.listTasks",
@@ -10583,6 +12328,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.listTeammates",
@@ -10594,6 +12342,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.listTeams",
@@ -10605,6 +12356,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.moveTask",
@@ -10616,6 +12370,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.removeTeammate",
@@ -10627,6 +12384,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.reorderTask",
@@ -10638,6 +12398,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.subscribe",
@@ -10649,6 +12412,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "team.updateTask",
@@ -10660,6 +12426,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.updateTeamConfig",
@@ -10671,6 +12440,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "team.updateTeammate",
@@ -10682,6 +12454,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -10719,6 +12494,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "templates.registerMany",
@@ -10730,6 +12508,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "templates.query",
@@ -10741,6 +12522,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "templates.get",
@@ -10752,6 +12536,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "templates.list",
@@ -10763,6 +12550,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "templates.getRevision",
@@ -10774,6 +12564,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "templates.subscribe",
@@ -10785,6 +12578,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "templates.validate",
@@ -10796,6 +12592,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "templates.createDraft",
@@ -10807,6 +12606,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "templates.preflight",
@@ -10818,6 +12620,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "templates.instantiate",
@@ -10829,6 +12634,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -10866,6 +12674,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "terminal.detectScriptType",
@@ -10877,6 +12688,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "terminal.kill",
@@ -10888,6 +12702,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "terminal.list",
@@ -10899,6 +12716,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "terminal.onData",
@@ -10910,6 +12730,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "terminal.readRecent",
@@ -10921,6 +12744,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "terminal.registerCommandSafetyRule",
@@ -10932,6 +12758,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "terminal.registerCompletionProvider",
@@ -10943,6 +12772,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "terminal.runScript",
@@ -10954,6 +12786,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "host-owned",
+                },
             },
             {
                 "id": "terminal.spawn",
@@ -10965,6 +12800,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "host-owned",
+                },
             },
             {
                 "id": "terminal.write",
@@ -10976,6 +12814,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -11013,6 +12854,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.activateRegisteredTheme",
@@ -11024,6 +12868,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.applyScopedColors",
@@ -11035,6 +12882,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.deleteCustomTheme",
@@ -11046,6 +12896,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.getAvailablePresets",
@@ -11057,6 +12910,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.getColorPreset",
@@ -11068,6 +12924,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.getColors",
@@ -11079,6 +12938,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.getCustomThemes",
@@ -11090,6 +12952,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.getMode",
@@ -11101,6 +12966,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.getResolvedMode",
@@ -11112,6 +12980,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.getTheme",
@@ -11123,6 +12994,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.onThemeChange",
@@ -11134,6 +13008,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "theme.registerCustomTheme",
@@ -11145,6 +13022,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "theme.setColorPreset",
@@ -11156,6 +13036,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.setMode",
@@ -11167,6 +13050,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "theme.updateCustomTheme",
@@ -11178,6 +13064,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -11215,6 +13104,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -11250,6 +13142,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "tray.registerMany",
@@ -11259,6 +13154,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -11294,6 +13192,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ui.showDialog",
@@ -11303,6 +13204,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ui.showInputDialog",
@@ -11312,6 +13216,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ui.showNotification",
@@ -11321,6 +13228,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "ui.showToast",
@@ -11330,6 +13240,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -11365,6 +13278,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -11402,6 +13318,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.clearCollection",
@@ -11413,6 +13332,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.createCollection",
@@ -11424,6 +13346,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.deleteCollection",
@@ -11435,6 +13360,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.deleteDocuments",
@@ -11446,6 +13374,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.embed",
@@ -11457,6 +13388,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.embedBatch",
@@ -11468,6 +13402,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.getCollectionInfo",
@@ -11479,6 +13416,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.getDocumentCount",
@@ -11490,6 +13430,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.listCollections",
@@ -11501,6 +13444,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.search",
@@ -11512,6 +13458,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.searchByEmbedding",
@@ -11523,6 +13472,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "vector.updateDocuments",
@@ -11534,6 +13486,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "high",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -11569,6 +13524,10 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-handle",
+                    "disposeMethod": "dispose",
+                },
             },
         ],
     },
@@ -11604,6 +13563,10 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-handle",
+                    "disposeMethod": "close",
+                },
             },
             {
                 "id": "window.focus",
@@ -11613,6 +13576,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "window.getAll",
@@ -11622,6 +13588,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "window.getMain",
@@ -11631,6 +13600,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
         ],
     },
@@ -11666,6 +13638,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "workflow.registerNode",
@@ -11675,6 +13650,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
             {
                 "id": "workflow.registerTrigger",
@@ -11684,6 +13662,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
             },
         ],
     },
@@ -11719,6 +13700,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "workspace.listRegistered",
@@ -11728,6 +13712,9 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
             },
             {
                 "id": "workspace.registerBackend",
@@ -11737,6 +13724,10 @@ API_NAMESPACE_CONTRACTS = [
                 "risk": "low",
                 "idempotent": False,
                 "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-handle",
+                    "disposeMethod": "unregister",
+                },
             },
         ],
     },

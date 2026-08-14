@@ -494,6 +494,7 @@ mod tests {
         let services = HeadlessServices::stub_for_tests();
         let sink = services.python_plugins.sink().expect("Python event sink");
         sink(crate::plugin_api::python::events::PythonEvent {
+            generation: "system".to_string(),
             plugin_id: "demo".into(),
             kind: "log".into(),
             call_id: None,

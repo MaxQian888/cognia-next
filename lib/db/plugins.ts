@@ -56,6 +56,7 @@ export type PluginDraft = Pick<
       PluginRow,
       | "status"
       | "enabled"
+      | "lifecycle"
       | "capabilities"
       | "config"
       | "error"
@@ -77,6 +78,7 @@ export async function upsertPlugin(draft: PluginDraft): Promise<PluginRow> {
     source: draft.source,
     type: draft.type,
     enabled: draft.enabled ?? existing?.enabled ?? false,
+    lifecycle: draft.lifecycle ?? existing?.lifecycle,
     capabilities: draft.capabilities ?? existing?.capabilities ?? [],
     path: draft.path,
     manifest: draft.manifest,
@@ -98,6 +100,21 @@ export async function updatePlugin(
   patch: Partial<Omit<PluginRow, "id" | "createdAt">>
 ): Promise<void> {
   await getDb().plugins.update(id, { ...patch, updatedAt: Date.now() })
+}
+
+export async function compareAndSetPluginLifecycle(
+  id: string,
+  expectedRevision: number,
+  lifecycle: NonNullable<PluginRow["lifecycle"]>
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.plugins, async () => {
+    const row = await db.plugins.get(id)
+    const currentRevision = row?.lifecycle?.revision ?? 0
+    if (!row || currentRevision !== expectedRevision) return false
+    await db.plugins.update(id, { lifecycle, updatedAt: Date.now() })
+    return true
+  })
 }
 
 export async function setPluginEnabled(id: string, enabled: boolean): Promise<void> {

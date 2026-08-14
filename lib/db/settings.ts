@@ -226,6 +226,7 @@ export const DEFAULTS: AppSettings = {
   conversationSidebar: {
     density: "comfortable",
     showPreview: false,
+    showCustomIcons: true,
     groupBy: "workspace",
     showUnreadBadges: true,
     searchScope: "title",

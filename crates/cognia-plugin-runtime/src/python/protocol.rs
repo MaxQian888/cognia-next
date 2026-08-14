@@ -42,6 +42,8 @@ pub const DEFAULT_MAX_CONCURRENT_CALLS: usize = 4;
 pub struct HostOptions {
     /// Renderer notification sink; `None` keeps log-only behavior.
     pub sink: Option<EventSink>,
+    /// Opaque lifecycle generation copied onto every renderer event.
+    pub generation: String,
     /// In-flight request cap; `None` → [`DEFAULT_MAX_CONCURRENT_CALLS`].
     pub max_concurrent_calls: Option<usize>,
     /// Extra environment variables forwarded to the host process.
@@ -265,6 +267,7 @@ impl PluginHost {
     ) -> Result<Arc<Self>> {
         let HostOptions {
             sink,
+            generation,
             max_concurrent_calls,
             env,
             sandboxed,
@@ -329,6 +332,7 @@ impl PluginHost {
         {
             let pending = Arc::clone(&host.pending);
             let plugin_id = host.plugin_id.clone();
+            let generation = generation.clone();
             let sink = sink.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
@@ -352,6 +356,7 @@ impl PluginHost {
                                         if let Some(sink) = &sink {
                                             sink(PythonEvent {
                                                 plugin_id: plugin_id.clone(),
+                                                generation: generation.clone(),
                                                 kind: event,
                                                 call_id,
                                                 data,
@@ -380,6 +385,7 @@ impl PluginHost {
                 if let Some(sink) = &sink {
                     sink(PythonEvent {
                         plugin_id: plugin_id.clone(),
+                        generation: generation.clone(),
                         kind: "exit".into(),
                         call_id: None,
                         data: Value::Null,
@@ -396,6 +402,7 @@ impl PluginHost {
         // renderer log surface.
         {
             let plugin_id = host.plugin_id.clone();
+            let generation = generation.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
@@ -403,6 +410,7 @@ impl PluginHost {
                     if let Some(sink) = &sink {
                         sink(PythonEvent {
                             plugin_id: plugin_id.clone(),
+                            generation: generation.clone(),
                             kind: "log".into(),
                             call_id: None,
                             data: serde_json::json!({ "line": line }),

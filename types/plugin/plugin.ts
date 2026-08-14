@@ -609,6 +609,15 @@ export interface PluginManifest {
    */
   optionalDependencies?: Record<string, string>
 
+  /** Runtime services published after activation + contribution commit. */
+  providesServices?: Record<string, string>
+
+  /** Runtime services required before activate() may run. */
+  requiresServices?: Record<string, string>
+
+  /** Runtime services that enable optional features without blocking activation. */
+  optionalServices?: Record<string, string>
+
   /** Built-in skill ids/families this plugin may invoke (for example `lark.sheets.*`). */
   builtInSkills?: string[]
 
@@ -2053,6 +2062,12 @@ export interface PluginBaseContext {
   /** Plugin configuration */
   config: Record<string, unknown>
 
+  /** Abort-aware lifecycle for the current activation generation. */
+  lifecycle?: PluginLifecycleAPI
+
+  /** Read-only runtime service metadata; business calls still use governed domain APIs. */
+  services?: PluginServicesAPI
+
   /** Logger */
   logger: PluginLogger
 
@@ -2181,8 +2196,58 @@ export interface PluginBaseContext {
   pet?: import("@/lib/plugin/api/pet-api").PluginPetAPI
 }
 
+/** Generation-scoped cancellation and teardown registration. */
+export interface PluginLifecycleAPI {
+  /** Aborted before activation-owned resources begin teardown. */
+  readonly signal: AbortSignal
+
+  /** Register activation-owned cleanup in the generation's LIFO ledger. */
+  onDispose(dispose: () => void | Promise<void>, label?: string): void
+}
+
+export interface PluginLifecycleScopeToken {
+  realmId: string
+  pluginId: string
+  generation: number
+  scopeId: string
+}
+
+export interface PluginChildLifecycleAPI extends PluginLifecycleAPI {
+  /** Explicit ownership token for APIs that accept caller-selected scopes. */
+  readonly token: PluginLifecycleScopeToken
+}
+
+export interface PluginServiceProviderMetadata {
+  pluginId: string
+  version: string
+  generation: number
+}
+
+export interface PluginOptionalServiceChange {
+  serviceId: string
+  provider: PluginServiceProviderMetadata | undefined
+  lifecycle: PluginChildLifecycleAPI
+}
+
+export type PluginOptionalServiceListener = (
+  change: PluginOptionalServiceChange
+) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>
+
+export interface PluginServicesAPI {
+  isAvailable(serviceId: string): boolean
+  getProvider(serviceId: string): PluginServiceProviderMetadata | undefined
+  /**
+   * Stage-3 scoped optional feature lifecycle. The listener runs once
+   * immediately and again with a fresh child scope whenever the selected
+   * optional provider changes.
+   */
+  onOptionalServiceChange(serviceId: string, listener: PluginOptionalServiceListener): () => void
+}
+
 /** Host-mounted namespaces present on every activated plugin context. */
 export interface PluginHostContextAPI {
+  lifecycle: PluginLifecycleAPI
+  services: PluginServicesAPI
   ocr: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
   workspace: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
   modal: import("@/lib/plugin/api/modal-api").PluginModalAPI
@@ -3222,6 +3287,7 @@ export interface PythonHookDeclaration {
 export interface PythonLoadResult {
   tool_count: number
   hook_count: number
+  generation: string
   hooks?: PythonHookDeclaration[]
 }
 

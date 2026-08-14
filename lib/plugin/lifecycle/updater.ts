@@ -39,6 +39,7 @@ import { codeServerClient, type CodeServerProxyArtifact } from "@/lib/codeserver
 import { stageManagedIdeProxy } from "../ide/proxy-manager"
 import type { Plugin, PluginManifest } from "@/types/plugin"
 import type { StagedPluginUpdate } from "../package/marketplace"
+import type { PluginGraphReservation } from "../core/lifecycle-coordinator"
 // Type-only: erased at compile time, so the Open VSX modules stay behind the
 // dynamic imports in `checkOpenVsxUpdates` and out of the default bundle.
 import type { OpenVsxClient } from "@/lib/plugin/vscode-shim/openvsx-client"
@@ -438,6 +439,8 @@ export class PluginUpdater {
     let packageMutationStarted = false
     let stagedUpdate: StagedPluginUpdate | undefined
     let stagedProxy: CodeServerProxyArtifact | null = null
+    let lifecycleManager: ReturnType<typeof getPluginManager> | undefined
+    let graphReservation: PluginGraphReservation | undefined
     if (!targetVersion) {
       const latest = await marketplace.getPlugin(pluginId)
       targetVersion = latest?.latestVersion || ""
@@ -497,6 +500,8 @@ export class PluginUpdater {
       // Step 3: Quiesce the old runtime before the host atomically replaces
       // its package tree. This also tears down the old managed proxy providers.
       const manager = getPluginManager()
+      lifecycleManager = manager
+      graphReservation = manager.reservePluginRuntimeGraph(pluginId)
       if (shouldReactivate) {
         if (initialStatus === "enabled" || initialStatus === "suspended") {
           await manager.disablePlugin(pluginId, "transactional-update")
@@ -577,7 +582,7 @@ export class PluginUpdater {
         const failures: string[] = []
         let packageRestored = false
         try {
-          const manager = getPluginManager()
+          const manager = lifecycleManager ?? getPluginManager()
           const liveStatus = usePluginStore.getState().plugins[pluginId]?.status
           if (liveStatus === "enabled" || liveStatus === "suspended") {
             await manager
@@ -597,16 +602,10 @@ export class PluginUpdater {
           } else {
             packageRestored = true
             await this.refreshRuntimePlugins()
-            if (shouldReactivate) {
-              try {
-                await manager.enablePlugin(pluginId)
-              } catch (rollbackError) {
-                failures.push(`reactivate previous version: ${String(rollbackError)}`)
-                // A full workbench restart is offered only after the old
-                // package/state are known to be back in place.
-                requiresRestart = true
-              }
-            }
+            // Once teardown began, never resurrect the old runtime object
+            // graph. The package is restored, while desired intent remains in
+            // the lifecycle record for an explicit retry/restart.
+            requiresRestart = shouldReactivate
           }
         } catch (rollbackError) {
           failures.push(String(rollbackError))
@@ -653,6 +652,10 @@ export class PluginUpdater {
 
       this.updateHistory.push(result)
       return result
+    } finally {
+      if (graphReservation && lifecycleManager) {
+        lifecycleManager.releasePluginRuntimeGraph(graphReservation)
+      }
     }
   }
 

@@ -57,6 +57,25 @@ jest.mock("@/lib/plugin/devtools/hot-reload.client", () => ({
   usePluginHotReload: () => mockHotReload,
 }))
 
+const mockLifecycleSnapshots = [
+  {
+    pluginId: "provider",
+    generation: 4,
+    actual: "active",
+    intent: "enabled",
+    providedServices: ["workspace.backend@1.0.0:available"],
+    requiredServices: [],
+    currentProviders: [],
+    effects: { active: 2, pending: 0, failed: 0, labels: [] },
+  },
+]
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({
+    subscribePluginLifecycleSnapshots: jest.fn(() => () => undefined),
+    getPluginLifecycleSnapshots: jest.fn(() => mockLifecycleSnapshots),
+  }),
+}))
+
 import {
   PluginDevtoolsPanel,
   LogsPane,
@@ -65,8 +84,10 @@ import {
   ProfilerPane,
   HotReloadPane,
   InspectPane,
+  LifecyclePane,
 } from "./plugin-devtools-panel"
 import { isTauri } from "@/lib/tauri"
+import { isDeveloperModeEnabled } from "@/lib/plugin/devtools/developer-mode"
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -94,6 +115,11 @@ beforeEach(() => {
   ;(isTauri as jest.Mock).mockReturnValue(false)
 })
 
+/**
+ * Enables developer mode the *legacy* way, which is also the regression test
+ * for the ADR-0117 migration: the old localStorage key must keep working for
+ * users who set it before the flag moved into the plugin store.
+ */
 function enableDeveloperMode() {
   window.localStorage.setItem("cognia.plugins.developerMode", "true")
 }
@@ -107,7 +133,8 @@ describe("PluginDevtoolsPanel — gate", () => {
   it("clicking the enable button persists the flag and reveals tabs", async () => {
     render(<PluginDevtoolsPanel />)
     fireEvent.click(screen.getByText("plugins.devtoolsPanel.enableDeveloperMode"))
-    expect(window.localStorage.getItem("cognia.plugins.developerMode")).toBe("true")
+    // The flag now lives in the plugin store, not in a panel-local key.
+    expect(isDeveloperModeEnabled()).toBe(true)
     await waitFor(() =>
       expect(
         screen.getByRole("tab", { name: "plugins.devtoolsPanel.tabs.logs" })
@@ -123,11 +150,22 @@ describe("PluginDevtoolsPanel — gate", () => {
         screen.getByRole("tab", { name: "plugins.devtoolsPanel.tabs.logs" })
       ).toBeInTheDocument()
     )
-    for (const key of ["logs", "bus", "hooks", "profiler", "hotReload", "inspect"]) {
+    for (const key of ["logs", "bus", "hooks", "profiler", "hotReload", "inspect", "lifecycle"]) {
       expect(
         screen.getByRole("tab", { name: `plugins.devtoolsPanel.tabs.${key}` })
       ).toBeInTheDocument()
     }
+  })
+})
+
+describe("LifecyclePane", () => {
+  it("renders lifecycle generation, services, and effect counts", async () => {
+    render(<LifecyclePane />)
+
+    expect(await screen.findByText("provider")).toBeInTheDocument()
+    expect(screen.getByText("g4 · enabled / active")).toBeInTheDocument()
+    expect(screen.getByText("workspace.backend@1.0.0:available")).toBeInTheDocument()
+    expect(screen.getByText("2 / 0 / 0")).toBeInTheDocument()
   })
 })
 

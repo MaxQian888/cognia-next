@@ -14,6 +14,7 @@ import {
   ChevronRightIcon,
   SettingsIcon,
   ShieldCheckIcon,
+  RotateCcwIcon,
   Trash2Icon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,7 @@ import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { togglePluginEnabled } from "@/lib/plugin/core/toggle-plugin-enabled"
+import { getPluginManager } from "@/lib/plugin/core/manager"
 import { usePluginDiagnostics } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
@@ -40,6 +42,8 @@ export function PluginDetailHeader({ plugin }: Props) {
   const openPermissionReview = usePluginsStore((s) => s.openPermissionReview)
   const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
   const diagnostics = usePluginDiagnostics(plugin.id)
+  const [recovering, setRecovering] = useState(false)
+  const [recoveryFailed, setRecoveryFailed] = useState(false)
 
   const signatureState: SignatureState = (() => {
     const sig = (plugin.manifest as { signature?: { verified?: boolean; failed?: boolean } })
@@ -54,6 +58,20 @@ export function PluginDetailHeader({ plugin }: Props) {
   const declaredPermissions = (plugin.manifest as { permissions?: unknown[] }).permissions ?? []
   const hasPermissions = declaredPermissions.length > 0
   const description = (plugin.manifest as { description?: string }).description
+  const lifecycleActual = plugin.lifecycle?.actual
+
+  const recoverRuntime = async () => {
+    setRecovering(true)
+    setRecoveryFailed(false)
+    try {
+      const recovered = await getPluginManager().recoverPluginRuntime(plugin.id)
+      setRecoveryFailed(!recovered)
+    } catch {
+      setRecoveryFailed(true)
+    } finally {
+      setRecovering(false)
+    }
+  }
 
   return (
     <header className="shrink-0 border-b px-4 py-3 space-y-3">
@@ -77,6 +95,11 @@ export function PluginDetailHeader({ plugin }: Props) {
           ) : null}
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
             <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
+            {lifecycleActual && lifecycleActual !== "active" && lifecycleActual !== "inactive" && (
+              <Badge variant={lifecycleActual === "dirty" ? "destructive" : "secondary"}>
+                {t(`lifecycle.${lifecycleActual}`)}
+              </Badge>
+            )}
             <PluginActivationProgress
               pluginId={plugin.id}
               pluginName={plugin.name}
@@ -121,6 +144,18 @@ export function PluginDetailHeader({ plugin }: Props) {
             {tCard("reviewPermissions")}
           </Button>
         )}
+        {lifecycleActual === "dirty" && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={recovering}
+            onClick={() => void recoverRuntime()}
+          >
+            <RotateCcwIcon className={cn("size-3.5 mr-1.5", recovering && "animate-spin")} />
+            {recovering ? t("lifecycle.retrying") : t("lifecycle.retryCleanup")}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -131,6 +166,12 @@ export function PluginDetailHeader({ plugin }: Props) {
           {tCard("uninstall")}
         </Button>
       </div>
+
+      {recoveryFailed && (
+        <p className="text-xs text-destructive" role="status">
+          {t("lifecycle.retryFailed")}
+        </p>
+      )}
 
       {diagnostics.length > 0 && <DiagnosticsPreview entries={diagnostics} t={t} />}
     </header>

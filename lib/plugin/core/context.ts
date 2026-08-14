@@ -206,7 +206,8 @@ import type {
   PluginAgentRunResult,
 } from "@/types/plugin/plugin-agent-sdk"
 import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugin-sdk/context"
-import { withPluginDisposableScope } from "./disposable-scope"
+import { PluginDisposableScope, withPluginDisposableScope } from "./disposable-scope"
+import { PLUGIN_RESOURCE_EFFECTS } from "./resource-effects"
 import { withGovernedPluginContext } from "../contracts/governed-context"
 
 /** @deprecated `PluginContext` is now the complete activated context. */
@@ -227,6 +228,7 @@ export function createPluginContext(
     pluginId,
     pluginPath: plugin.path,
     config: plugin.config,
+    services: manager.createPluginServicesAPI(pluginId),
     logger: createLogger(pluginId),
     // The initial context uses the local storage implementation. Manager
     // construction then supplies the public author-context storage API through
@@ -368,6 +370,8 @@ export function createFullPluginContext(
     getLocale: contextAPI.i18n.getCurrentLocale,
     hasKey: contextAPI.i18n.hasTranslation,
   }
+  const scope = manager.getPluginDisposableScope?.(pluginId) ?? new PluginDisposableScope(pluginId)
+  let lifecycleDisposerSequence = 0
 
   // Combine base and feature API contexts with enhanced APIs + ADR-0026
   // v2 namespaces (`ocr`, `workspace`). Both are stateless wrappers; the
@@ -376,6 +380,14 @@ export function createFullPluginContext(
   const fullContext = {
     ...baseContext,
     ...contextAPI,
+    services: baseContext.services ?? manager.createPluginServicesAPI(pluginId),
+    lifecycle: {
+      signal: scope.signal,
+      onDispose: (dispose: () => void | Promise<void>, label?: string) => {
+        lifecycleDisposerSequence += 1
+        scope.track(dispose, label ?? `ctx.lifecycle.onDispose#${lifecycleDisposerSequence}`)
+      },
+    },
     events: enhancedEvents,
     i18n: enhancedI18n,
     ocr: createOcrAPI(pluginId),
@@ -409,10 +421,12 @@ export function createFullPluginContext(
     pluginId,
     hasPermission: (permission) => permissionsAPI.hasPermission(permission),
   })
-  const scope = manager.getPluginDisposableScope?.(pluginId)
-  scope?.track(() => revokePluginFileHandles(pluginId), "ctx.files.handles")
-  return (
-    scope ? withPluginDisposableScope(scope, "ctx", governedContext) : governedContext
+  scope.track(() => revokePluginFileHandles(pluginId), "ctx.files.handles")
+  return withPluginDisposableScope(
+    scope,
+    "ctx",
+    governedContext,
+    manager.isPluginLedgerV2Enabled?.() === false ? {} : PLUGIN_RESOURCE_EFFECTS
   ) as FullPluginContext
 }
 
@@ -1087,34 +1101,23 @@ function createSettingsAPI(pluginId: string): PluginSettingsAPI {
 // Python API
 // =============================================================================
 
-function createPythonAPI(pluginId: string, _manager: PluginManager): PluginPythonAPI {
+function createPythonAPI(pluginId: string, manager: PluginManager): PluginPythonAPI {
   const rateLimiter = getPluginRateLimiter()
   return {
     call: async <T>(functionName: string, ...args: unknown[]): Promise<T> => {
       rateLimiter.check(pluginId, "python:call")
-      return invoke<T>("plugin_python_call", {
-        pluginId,
-        functionName,
-        args,
-      })
+      return manager.callPythonFunction<T>(pluginId, functionName, args)
     },
 
     eval: async <T>(code: string, locals?: Record<string, unknown>): Promise<T> => {
       rateLimiter.check(pluginId, "python:eval")
-      return invoke<T>("plugin_python_eval", {
-        pluginId,
-        code,
-        locals: locals || {},
-      })
+      return manager.evalPython<T>(pluginId, code, locals)
     },
 
     import: async (moduleName: string) => {
       rateLimiter.check(pluginId, "python:import")
       try {
-        await invoke("plugin_python_import", {
-          pluginId,
-          moduleName,
-        })
+        await manager.importPythonModule(pluginId, moduleName)
       } catch (error) {
         recordSilentFailure(
           pluginId,
@@ -1130,20 +1133,11 @@ function createPythonAPI(pluginId: string, _manager: PluginManager): PluginPytho
 
       return {
         call: async <T>(functionName: string, ...args: unknown[]): Promise<T> => {
-          return invoke<T>("plugin_python_module_call", {
-            pluginId,
-            moduleName,
-            functionName,
-            args,
-          })
+          return manager.callPythonModule<T>(pluginId, moduleName, functionName, args)
         },
 
         getattr: async <T>(name: string): Promise<T> => {
-          return invoke<T>("plugin_python_module_getattr", {
-            pluginId,
-            moduleName,
-            attrName: name,
-          })
+          return manager.getPythonModuleAttribute<T>(pluginId, moduleName, name)
         },
       }
     },

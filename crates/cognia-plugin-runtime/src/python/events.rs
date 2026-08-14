@@ -20,6 +20,7 @@ pub const PYTHON_EVENT: &str = "plugin:python";
 #[serde(rename_all = "camelCase")]
 pub struct PythonEvent {
     pub plugin_id: String,
+    pub generation: String,
     pub kind: String,
     /// Correlates `chunk`/`chunk_end` frames to an in-flight request id.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,12 +50,14 @@ mod tests {
     fn event_serializes_camel_case_and_omits_absent_call_id() {
         let event = PythonEvent {
             plugin_id: "demo".into(),
+            generation: "gen-1".into(),
             kind: "log".into(),
             call_id: None,
             data: serde_json::json!({"line": "hi"}),
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["pluginId"], "demo");
+        assert_eq!(json["generation"], "gen-1");
         assert_eq!(json["kind"], "log");
         assert!(json.get("callId").is_none());
         assert_eq!(json["data"]["line"], "hi");
@@ -64,6 +67,7 @@ mod tests {
     fn event_serializes_call_id_when_present() {
         let event = PythonEvent {
             plugin_id: "demo".into(),
+            generation: "gen-1".into(),
             kind: "chunk".into(),
             call_id: Some(7),
             data: Value::String("partial".into()),

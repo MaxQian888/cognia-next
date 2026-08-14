@@ -27,12 +27,20 @@ import { isHeadlessHost } from "@/lib/platform/detect"
 
 import { installFakeIndexedDb } from "../db/bootstrap"
 import { resolveHome } from "../config/load"
-import { readDisabledPlugins } from "./plugin-state"
+import { createCliPluginLifecycleStateAdapter, readDisabledPlugins } from "./plugin-state"
 
 /** Minimal slice of the plugin-runtime store the disabled-set reconciler needs. */
 interface PluginStatusStore {
   plugins: Record<string, { status: string }>
   setPluginStatus: (id: string, status: "enabled" | "disabled") => void
+}
+
+interface PluginIntentManager {
+  setPluginIntent(
+    pluginId: string,
+    intent: "auto" | "enabled" | "disabled",
+    reason?: string
+  ): Promise<void>
 }
 
 /** Plugin ids this process forced off, so a later toggle-back-on can restore
@@ -45,8 +53,9 @@ const forcedDisabled = new Set<string>()
  * is the source `buildPluginToolsManifest` reads (only `status === "enabled"`
  * plugins surface their tools), but it has no notion of the CLI's file-based
  * disabled overlay — so without this, `/plugin disable X` was inert. We only
- * flip the lightweight status flag (no teardown/re-activation): a plugin's tools
- * stay loaded, they just drop out of the manifest until re-enabled.
+ * flip the lightweight status flag. Kept only for compatibility tests and
+ * third-party embedders; the production bootstrap uses the canonical manager
+ * intent path below so activation-owned resources are actually torn down.
  */
 export function applyDisabledPluginsToStore(
   disabledIds: Set<string>,
@@ -65,6 +74,17 @@ export function applyDisabledPluginsToStore(
       store.setPluginStatus(id, "disabled")
       forcedDisabled.add(id)
     }
+  }
+}
+
+export async function applyDisabledPluginsToManager(
+  disabledIds: Set<string>,
+  manager: PluginIntentManager,
+  store: PluginStatusStore
+): Promise<void> {
+  for (const pluginId of [...disabledIds].sort()) {
+    if (!store.plugins[pluginId]) continue
+    await manager.setPluginIntent(pluginId, "disabled", "cli-state-restore")
   }
 }
 
@@ -206,6 +226,7 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       (async () => {
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
         const { makeNodeFrontendImporter } = await import("./node-importer")
+        const home = resolveHome(process.env, os.homedir())
         const headless = isHeadlessHost()
         const nodeHostInvoker = headless
           ? async <T>(command: string, args: Record<string, unknown>): Promise<T> => {
@@ -234,6 +255,12 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
           frontendImporter: makeNodeFrontendImporter(),
           nodeHostInvoker,
           nodeHostSubscriber,
+          lifecycleStateAdapter: createCliPluginLifecycleStateAdapter(home),
+          lifecycleFeatures: {
+            ledgerV2: true,
+            runtimeServices: true,
+            scopedRealms: false,
+          },
         })
       })
     await initManager()
@@ -246,8 +273,13 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       (async () => {
         const home = resolveHome(process.env, os.homedir())
         const disabled = readDisabledPlugins(home)
+        const { getPluginManager } = await import("@/lib/plugin/core/manager")
         const { usePluginStore } = await import("@/stores/plugin-runtime")
-        applyDisabledPluginsToStore(disabled, usePluginStore.getState() as PluginStatusStore)
+        await applyDisabledPluginsToManager(
+          disabled,
+          getPluginManager(),
+          usePluginStore.getState() as PluginStatusStore
+        )
       })
     try {
       await applyDisabled()
