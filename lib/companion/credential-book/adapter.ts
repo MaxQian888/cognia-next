@@ -15,7 +15,7 @@
  * genuinely need multi-host behaviour (Settings, host switching) talk to the
  * book directly.
  */
-import { importV2SigningPrivateKey } from "@/lib/signaling/v2-crypto"
+import { importSigningPrivateKey } from "@/lib/signaling/crypto"
 import type { CompanionConfig, CompanionConfigStorage } from "@/lib/tauri/companion-storage"
 
 import { legacyHostId, legacyLabel } from "./legacy-migration"
@@ -71,9 +71,7 @@ export async function toCompanionConfig(
     config.signalingRoomDescriptor = record.signalingRoomDescriptor
     if (credential.signalingPrivateKeyJwk) {
       config.signalingPrivateKeyJwk = credential.signalingPrivateKeyJwk
-      config.signalingPrivateKey = await importV2SigningPrivateKey(
-        credential.signalingPrivateKeyJwk
-      )
+      config.signalingPrivateKey = await importSigningPrivateKey(credential.signalingPrivateKeyJwk)
     }
   }
   return config

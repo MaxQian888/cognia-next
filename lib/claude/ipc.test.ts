@@ -317,6 +317,17 @@ describe("Claude session commands", () => {
     })
   })
 
+  it("sendPrompt routes an idempotent send through agent_send", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await sendPrompt("sess-1", "hello", { model: "claude-opus-4-7" }, { commandId: "act-1" })
+    expect(callSpy).toHaveBeenCalledWith("agent_send", {
+      sessionId: "sess-1",
+      prompt: "hello",
+      options: { model: "claude-opus-4-7" },
+      commandId: "act-1",
+    })
+  })
+
   it("interruptSession invokes the interrupt command with the id", async () => {
     callSpy.mockResolvedValueOnce(undefined)
     await interruptSession("sess-2")

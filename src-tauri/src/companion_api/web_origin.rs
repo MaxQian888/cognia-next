@@ -150,7 +150,14 @@ pub async fn enforce(
 fn normalize_allowed_origin(raw: &str) -> Option<String> {
     let value = raw.trim().trim_end_matches('/');
     let url = url::Url::parse(value).ok()?;
-    if url.scheme() != "https"
+    let secure_or_loopback = url.scheme() == "https"
+        || (url.scheme() == "http"
+            && match url.host()? {
+                url::Host::Domain(host) => host == "localhost",
+                url::Host::Ipv4(address) => address.is_loopback(),
+                url::Host::Ipv6(address) => address.is_loopback(),
+            });
+    if !secure_or_loopback
         || url.host_str().is_none()
         || url.path() != "/"
         || url.query().is_some()
@@ -321,6 +328,61 @@ mod tests {
             .headers()
             .contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
         assert_eq!(response.headers()[header::VARY], VARY);
+    }
+
+    #[tokio::test]
+    async fn preflight_accepts_explicit_loopback_http_origins() {
+        for origin in [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://[::1]:3000",
+        ] {
+            let response = test_router(WebOriginPolicy::from_values(Some(origin), Some("false")))
+                .oneshot(
+                    Request::builder()
+                        .method(Method::OPTIONS)
+                        .uri("/ws/events")
+                        .header(header::HOST, "127.0.0.1:27890")
+                        .header(header::ORIGIN, origin)
+                        .header("access-control-request-method", "GET")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::NO_CONTENT, "{origin}");
+            assert_eq!(
+                response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                origin,
+                "{origin}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn preflight_rejects_an_explicit_non_loopback_http_origin() {
+        let response = test_router(WebOriginPolicy::from_values(
+            Some("http://web.example"),
+            Some("false"),
+        ))
+        .oneshot(
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/ws/events")
+                .header(header::HOST, "127.0.0.1:27890")
+                .header(header::ORIGIN, "http://web.example")
+                .header("access-control-request-method", "GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(!response
+            .headers()
+            .contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
     }
 
     #[tokio::test]

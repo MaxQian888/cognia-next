@@ -13,10 +13,10 @@ import {
 } from "./companion-storage"
 import { MigratingCompanionStorage } from "@/lib/companion/credential-book"
 import {
-  buildRoomDescriptorV2,
-  generatePersistableV2SigningIdentity,
-  generateV2SigningKeyPair,
-} from "@/lib/signaling/v2-crypto"
+  buildRoomDescriptor,
+  generatePersistableSigningIdentity,
+  generateSigningKeyPair,
+} from "@/lib/signaling/crypto"
 import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
@@ -84,9 +84,9 @@ describe("LocalStorageCompanionStorage", () => {
   })
 
   it("keeps the v2 private key out of localStorage and reloads a non-extractable key", async () => {
-    const mobile = await generatePersistableV2SigningIdentity()
-    const desktop = await generateV2SigningKeyPair()
-    const descriptor = await buildRoomDescriptorV2({
+    const mobile = await generatePersistableSigningIdentity()
+    const desktop = await generateSigningKeyPair()
+    const descriptor = await buildRoomDescriptor({
       roomNonce: "AAECAwQFBgcICQoLDA0ODw",
       desktopSigningKey: desktop.encodedPublicKey,
       mobileSigningKey: mobile.encodedPublicKey,

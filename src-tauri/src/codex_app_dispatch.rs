@@ -904,136 +904,6 @@ fn validate_approval_policy(value: Option<String>) -> Result<Option<String>> {
     Ok(value)
 }
 
-fn validate_sandbox(value: Option<String>) -> Result<Option<String>> {
-    let value = normalize_optional_text(value, "sandbox")?;
-    if value.as_deref().is_some_and(|value| {
-        !matches!(
-            value,
-            "read-only" | "workspace-write" | "danger-full-access"
-        )
-    }) {
-        bail!("unsupported Codex sandbox")
-    }
-    Ok(value)
-}
-
-async fn task_list_with_rpc<R: CodexRpc + Send>(
-    rpc: &mut R,
-    request: CodexAppTaskListRequest,
-) -> Result<Value> {
-    let mut params = serde_json::Map::new();
-    if let Some(cursor) = normalize_optional_text(request.cursor, "cursor")? {
-        params.insert("cursor".into(), json!(cursor));
-    }
-    params.insert(
-        "limit".into(),
-        json!(request.limit.unwrap_or(50).clamp(1, 200)),
-    );
-    if let Some(search_term) = normalize_optional_text(request.search_term, "search term")? {
-        params.insert("searchTerm".into(), json!(search_term));
-    }
-    if let Some(cwd) = request.cwd {
-        params.insert(
-            "cwd".into(),
-            json!(normalize_existing_path(&cwd, "workspace")?),
-        );
-    }
-    if let Some(archived) = request.archived {
-        params.insert("archived".into(), json!(archived));
-    }
-    params.insert("sortKey".into(), json!("recency_at"));
-    params.insert("sortDirection".into(), json!("desc"));
-    rpc.request("thread/list", Value::Object(params), RPC_TIMEOUT)
-        .await
-}
-
-async fn task_read_with_rpc<R: CodexRpc + Send>(
-    rpc: &mut R,
-    request: CodexAppTaskReadRequest,
-) -> Result<Value> {
-    rpc.request(
-        "thread/read",
-        json!({
-            "threadId": validate_thread_id(&request.thread_id)?,
-            "includeTurns": request.include_turns.unwrap_or(true),
-        }),
-        IMPORT_TIMEOUT,
-    )
-    .await
-}
-
-async fn task_send_with_rpc<R: CodexRpc + Send>(
-    rpc: &mut R,
-    request: CodexAppTaskSendRequest,
-) -> Result<Value> {
-    let thread_id = validate_thread_id(&request.thread_id)?;
-    let mut params = serde_json::Map::new();
-    params.insert("threadId".into(), json!(thread_id));
-    params.insert(
-        "input".into(),
-        serde_json::to_value(normalize_turn_input(request.input)?)?,
-    );
-    if let Some(cwd) = request.cwd {
-        params.insert(
-            "cwd".into(),
-            json!(normalize_existing_path(&cwd, "workspace")?),
-        );
-    }
-    if let Some(model) = normalize_optional_text(request.model, "model")? {
-        params.insert("model".into(), json!(model));
-    }
-    if let Some(effort) = normalize_optional_text(request.effort, "effort")? {
-        params.insert("effort".into(), json!(effort));
-    }
-    if let Some(approval_policy) = validate_approval_policy(request.approval_policy)? {
-        params.insert("approvalPolicy".into(), json!(approval_policy));
-    }
-    rpc.request("turn/start", Value::Object(params), RPC_TIMEOUT)
-        .await
-}
-
-async fn inventory_with_rpc<R: CodexRpc + Send>(
-    rpc: &mut R,
-    request: CodexAppInventoryRequest,
-) -> Result<CodexAppInventory> {
-    let cwd = request
-        .cwd
-        .map(|cwd| normalize_existing_path(&cwd, "workspace"))
-        .transpose()?;
-    let cwds = cwd.into_iter().collect::<Vec<_>>();
-    let plugins = rpc
-        .request(
-            "plugin/list",
-            json!({ "cwds": cwds.clone(), "forceRefetch": request.force_reload.unwrap_or(false) }),
-            IMPORT_TIMEOUT,
-        )
-        .await?;
-    let skills = rpc
-        .request(
-            "skills/list",
-            json!({ "cwds": cwds, "forceReload": request.force_reload.unwrap_or(false) }),
-            IMPORT_TIMEOUT,
-        )
-        .await?;
-    let mcp_servers = rpc
-        .request(
-            "mcpServerStatus/list",
-            json!({ "detail": "full" }),
-            IMPORT_TIMEOUT,
-        )
-        .await?;
-    Ok(CodexAppInventory {
-        plugins,
-        skills,
-        mcp_servers,
-    })
-}
-
-async fn app_rpc(app: &AppHandle) -> Result<SocketRpc<local_socket::Stream>> {
-    let socket_path = codex_home()?.join(CONTROL_SOCKET_RELATIVE_PATH);
-    connect_or_launch(app, &socket_path).await
-}
-
 async fn run_cdp_control(app: &AppHandle, operation: &str, payload: Value) -> Result<Value> {
     let sidecar_dir = crate::claude::sidecar::sidecar_dir(app).map_err(anyhow::Error::msg)?;
     let script = sidecar_dir.join("codex-app-control/control-cli.mjs");
@@ -1150,6 +1020,9 @@ pub async fn codex_app_task_send_impl(
         .cwd
         .map(|cwd| normalize_existing_path(&cwd, "workspace"))
         .transpose()?;
+    request.model = normalize_optional_text(request.model, "model")?;
+    request.effort = normalize_optional_text(request.effort, "effort")?;
+    request.approval_policy = validate_approval_policy(request.approval_policy)?;
     request.context_label = normalize_optional_text(request.context_label, "context label")?;
     run_cdp_control(app, "task-send", serde_json::to_value(request)?).await
 }
@@ -1471,87 +1344,6 @@ mod tests {
         assert!(error.to_string().contains("different import"));
     }
 
-    #[tokio::test]
-    async fn task_list_uses_canonical_filters_and_bounds_the_page_size() {
-        let cwd = tempfile::tempdir().unwrap();
-        let mut rpc = FakeRpc {
-            requests: Vec::new(),
-            responses: VecDeque::from([Ok(json!({ "data": [], "nextCursor": null }))]),
-            completion: Err(anyhow!("unused")),
-        };
-
-        let result = task_list_with_rpc(
-            &mut rpc,
-            CodexAppTaskListRequest {
-                cursor: None,
-                limit: Some(900),
-                search_term: Some("browser task".into()),
-                cwd: Some(cwd.path().display().to_string()),
-                archived: Some(false),
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(result["data"], json!([]));
-        assert_eq!(rpc.requests[0].0, "thread/list");
-        assert_eq!(rpc.requests[0].1["limit"], 200);
-        assert_eq!(rpc.requests[0].1["searchTerm"], "browser task");
-        assert_eq!(rpc.requests[0].1["sortKey"], "recency_at");
-    }
-
-    #[tokio::test]
-    async fn task_send_preserves_typed_context_and_canonicalizes_local_inputs() {
-        let file = tempfile::NamedTempFile::new().unwrap();
-        let thread_id = "01989a8f-7b2b-7aa2-a8b8-c859418ac18f";
-        let turn_id = "01989a8f-7b2b-7aa2-a8b8-c859418ac190";
-        let mut rpc = FakeRpc {
-            requests: Vec::new(),
-            responses: VecDeque::from([Ok(json!({ "turn": { "id": turn_id } }))]),
-            completion: Err(anyhow!("unused")),
-        };
-
-        let result = task_send_with_rpc(
-            &mut rpc,
-            CodexAppTaskSendRequest {
-                thread_id: thread_id.into(),
-                input: vec![
-                    CodexAppTurnInput::Text {
-                        text: " Use Browser and inspect this file. ".into(),
-                    },
-                    CodexAppTurnInput::Mention {
-                        name: "Browser".into(),
-                        path: file.path().display().to_string(),
-                    },
-                    CodexAppTurnInput::LocalImage {
-                        path: file.path().display().to_string(),
-                        detail: Some("original".into()),
-                    },
-                ],
-                cwd: None,
-                model: None,
-                effort: Some("high".into()),
-                approval_policy: Some("on-request".into()),
-                context_label: Some("Browser".into()),
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(result["turn"]["id"], turn_id);
-        assert_eq!(rpc.requests[0].0, "turn/start");
-        assert_eq!(rpc.requests[0].1["threadId"], thread_id);
-        assert_eq!(rpc.requests[0].1["input"][0]["type"], "text");
-        assert_eq!(
-            rpc.requests[0].1["input"][0]["text"],
-            "Use Browser and inspect this file."
-        );
-        assert_eq!(rpc.requests[0].1["input"][1]["type"], "mention");
-        assert_eq!(rpc.requests[0].1["input"][2]["type"], "localImage");
-        assert_eq!(rpc.requests[0].1["input"][2]["detail"], "original");
-        assert_eq!(rpc.requests[0].1["effort"], "high");
-    }
-
     #[test]
     fn task_send_rejects_relative_paths_and_unknown_policies() {
         assert!(normalize_turn_input(vec![CodexAppTurnInput::LocalImage {
@@ -1562,6 +1354,5 @@ mod tests {
         .to_string()
         .contains("absolute"));
         assert!(validate_approval_policy(Some("sometimes".into())).is_err());
-        assert!(validate_sandbox(Some("host-root".into())).is_err());
     }
 }

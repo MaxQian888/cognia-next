@@ -598,8 +598,9 @@ fn encrypt_archive(archive: &[u8], key: &[u8; 32], key_version: &str) -> Result<
     let mut nonce = [0_u8; NONCE_LEN];
     rand::fill(&mut nonce);
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| "invalid backup key")?;
+    let nonce_array = Nonce::from(nonce);
     let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce), archive)
+        .encrypt(&nonce_array, archive)
         .map_err(|_| "encrypt backup archive".to_string())?;
     let mut envelope =
         Vec::with_capacity(ENVELOPE_MAGIC.len() + 2 + version.len() + NONCE_LEN + ciphertext.len());
@@ -637,9 +638,11 @@ fn decrypt_archive(envelope: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String> {
         .get(nonce_end..)
         .filter(|bytes| !bytes.is_empty())
         .ok_or_else(|| "backup envelope ciphertext is empty".to_string())?;
+    let nonce = Nonce::try_from(nonce)
+        .map_err(|_| "backup envelope nonce has an invalid length".to_string())?;
     Aes256Gcm::new_from_slice(key)
         .map_err(|_| "invalid backup key")?
-        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|_| "backup authentication failed".to_string())
 }
 

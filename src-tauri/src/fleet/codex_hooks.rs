@@ -528,6 +528,7 @@ fn write_hooks_if_unchanged(
     Ok(true)
 }
 
+#[cfg(test)]
 fn install_at(hooks_path: &Path, script: &Path) -> Result<CodexHooksStatus, String> {
     install_at_for_events(hooks_path, script, CODEX_HOOK_EVENTS)
 }

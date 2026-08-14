@@ -111,7 +111,7 @@ const server = https.createServer(
   },
   (req, res) => {
     const pathname = new URL(req.url ?? "/", "https://cognia.localhost").pathname
-    if (pathname.startsWith("/v2/signaling")) {
+    if (pathname.startsWith("/signaling")) {
       proxyRequest(req, res, new URL("http://signaling:7892"))
       return
     }
@@ -140,7 +140,7 @@ const server = https.createServer(
 
 server.on("upgrade", (req, socket, head) => {
   const pathname = new URL(req.url ?? "/", "https://cognia.localhost").pathname
-  if (pathname.startsWith("/v2/signaling")) {
+  if (pathname.startsWith("/signaling")) {
     proxyUpgrade(req, socket, head, new URL("http://signaling:7892"))
     return
   }

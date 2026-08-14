@@ -75,10 +75,10 @@ This is the contract change that lets the replay buffer remain the single source
 
 ### D6 — WebRTC datachannel transport — **shipped** (was: designed, deferred)
 
-ADR-0021's signaling stack (`src-tauri/src/companion_api/signaling/{mod,client,dispatch,peer}.rs`, ~5000 LOC across signaling + dispatch + envelope) shipped a `cognia.v2` JSON-only data channel for the RPC + event plane. Carrying terminal traffic over the same peer requires either:
+ADR-0021's signaling stack (`src-tauri/src/companion_api/signaling/{mod,client,dispatch,peer}.rs`, ~5000 LOC across signaling + dispatch + envelope) shipped a `cognia.signaling` JSON-only data channel for the RPC + event plane. Carrying terminal traffic over the same peer requires either:
 
 1. Multiplexing PTY bytes into the existing channel (would force RPC envelope schema changes for binary framing + session id prefix), OR
-2. A second binary-capable data channel labeled `cognia.v2.terminal` on the same peer connection (clean separation, but requires `signaling/client.rs` + `dispatch.rs` integration for the new label).
+2. A second binary-capable data channel labeled `cognia.signaling.terminal` on the same peer connection (clean separation, but requires `signaling/client.rs` + `dispatch.rs` integration for the new label).
 
 `lib/terminal/pick-transport.ts:selectTerminalTransportChain` returns `["ws"]` on Capacitor today. Once the Rust desktop peer is wired through (new `rtc_terminal.rs` handler + peer.rs label dispatch + `transport-webrtc.ts` client subclass of `BaseTerminalSession`), the chain extends to `["ws", "webrtc"]` and the orchestrator walks it on connect failure. The `BaseTerminalSession` + reconnect protocol from D4/D5 already factor the bulk of the work — the remaining surface is the signaling routing layer.
 

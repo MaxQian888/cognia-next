@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// 90 days in seconds.
+#[cfg(test)]
 const DEVICE_TTL_SECS: i64 = 90 * 24 * 3600;
 /// 24 hours in seconds — the headless brain's service token (ADR-0059 W4).
 /// Short-lived and re-minted on every brain spawn + on a 12h refresh timer,

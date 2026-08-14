@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { createCipheriv } from "node:crypto"
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
@@ -37,6 +38,24 @@ async function waitForFile(target, timeoutMs = 5_000) {
   throw new Error(`timed out waiting for ${target}`)
 }
 
+async function writeEncryptedSecretStore(
+  dataDir,
+  keyHex,
+  entries = { "service\0account": "secret" }
+) {
+  const nonce = Buffer.alloc(12, 7)
+  const cipher = createCipheriv("aes-256-gcm", Buffer.from(keyHex, "hex"), nonce)
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(entries)),
+    cipher.final(),
+    cipher.getAuthTag(),
+  ])
+  const storePath = path.join(dataDir, "cognia", "secret-store.enc")
+  await mkdir(path.dirname(storePath), { recursive: true })
+  await writeFile(storePath, Buffer.concat([nonce, ciphertext]), { mode: 0o600 })
+  return storePath
+}
+
 test("documents the renderer-free development entry point", async () => {
   const result = await run(["--help"])
 
@@ -47,7 +66,120 @@ test("documents the renderer-free development entry point", async () => {
   assert.match(result.stdout, /--check/)
   assert.match(result.stdout, /--local-debug/)
   assert.match(result.stdout, /pnpm --silent dev:headless token/)
+  assert.match(result.stdout, /pnpm --silent dev:headless pair --device-name browser/)
 })
+
+test("pair action issues a browser invitation from the active headless data directory", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-pair-"))
+  const dataDir = path.join(root, "data")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const server = path.join(root, "cognia-server")
+  await writeFile(
+    server,
+    `#!/usr/bin/env node
+process.stdout.write("cgnp3|fixture-invitation\\n")
+process.stderr.write(JSON.stringify({
+  args: process.argv.slice(2),
+  dataDir: process.env.COGNIA_DATA_DIR,
+  hasMasterKey: Boolean(process.env.COGNIA_MASTER_KEY),
+}) + "\\n")
+`
+  )
+  await chmod(server, 0o755)
+
+  const result = await run(
+    [
+      "pair",
+      "--skip-build",
+      "--data-dir",
+      dataDir,
+      "--device-name",
+      "browser",
+      "--advertise-url",
+      "https://cognia.example.com",
+      "--tenant-id",
+      "tenant-a",
+      "--port",
+      "28902",
+    ],
+    {
+      COGNIA_HEADLESS_SERVER_BIN: server,
+      COGNIA_MASTER_KEY: "a".repeat(64),
+    }
+  )
+
+  assert.equal(result.code, 0, result.stderr)
+  assert.match(result.stdout, /cgnp3\|fixture-invitation/)
+  const capture = JSON.parse(result.stderr)
+  assert.deepEqual(capture.args, [
+    "pair",
+    "--device-name",
+    "browser",
+    "--advertise-url",
+    "https://cognia.example.com",
+    "--port",
+    "28902",
+    "--tenant-id",
+    "tenant-a",
+  ])
+  assert.equal(capture.dataDir, dataDir)
+  assert.equal(capture.hasMasterKey, true)
+})
+
+test("pair action rejects a stale server that emits a cgnp2 invitation", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-pair-v2-"))
+  const server = path.join(root, "cognia-server")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(server, "#!/bin/sh\nprintf 'cgnp2|legacy-invitation\\n'\n")
+  await chmod(server, 0o755)
+
+  const result = await run(["pair", "--skip-build", "--data-dir", path.join(root, "data")], {
+    COGNIA_HEADLESS_SERVER_BIN: server,
+    COGNIA_MASTER_KEY: "a".repeat(64),
+  })
+
+  assert.equal(result.code, 3)
+  assert.equal(result.stdout, "")
+  assert.match(result.stderr, /expected a cgnp3 invitation/i)
+  assert.match(result.stderr, /rebuild or redeploy/i)
+})
+
+test(
+  "pair action rebuilds the native server before issuing an invitation",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-pair-build-"))
+    const buildLog = path.join(root, "build.jsonl")
+    const pnpm = path.join(root, "pnpm")
+    const targetDir = path.join(root, "target")
+    const server = path.join(targetDir, "debug", "cognia-server")
+    t.after(() => rm(root, { recursive: true, force: true }))
+    await mkdir(path.dirname(server), { recursive: true })
+    await writeFile(
+      pnpm,
+      `#!/usr/bin/env node
+import fs from "node:fs"
+fs.appendFileSync(process.env.COGNIA_BUILD_LOG, JSON.stringify(process.argv.slice(2)) + "\\n")
+`
+    )
+    await writeFile(server, "#!/bin/sh\nprintf 'cgnp3|fresh-invitation\\n'\n")
+    await chmod(pnpm, 0o755)
+    await chmod(server, 0o755)
+
+    const result = await run(["pair", "--data-dir", path.join(root, "data")], {
+      COGNIA_BUILD_LOG: buildLog,
+      COGNIA_HEADLESS_PNPM_BIN: pnpm,
+      COGNIA_MASTER_KEY: "a".repeat(64),
+      CARGO_TARGET_DIR: targetDir,
+    })
+
+    assert.equal(result.code, 0, result.stderr)
+    assert.match(result.stdout, /cgnp3\|fresh-invitation/)
+    assert.deepEqual(JSON.parse((await readFile(buildLog, "utf8")).trim()), [
+      "terminal-host:prepare:dev",
+    ])
+  }
+)
 
 test("dry-run prints a redacted launch plan without writing development state", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-plan-"))
@@ -117,6 +249,7 @@ process.stdout.write(JSON.stringify({
   args: process.argv.slice(2),
   env: Object.fromEntries([
     "COGNIA_BRAIN_ENTRY",
+    "COGNIA_ALLOWED_WEB_ORIGINS",
     "COGNIA_CODE_SERVER_AGENT_VSIX",
     "COGNIA_DATA_DIR",
     "COGNIA_EXEC_BACKEND",
@@ -158,6 +291,10 @@ process.stdout.write(JSON.stringify({
   const capture = JSON.parse(result.stdout.trim().split("\n").at(-1))
   assert.deepEqual(capture.args, ["serve", "--port", "28901", "--allow-remote-terminal"])
   assert.equal(capture.env.COGNIA_DATA_DIR, dataDir)
+  assert.equal(
+    capture.env.COGNIA_ALLOWED_WEB_ORIGINS,
+    "http://localhost:3000,http://127.0.0.1:3000"
+  )
   assert.equal(capture.env.COGNIA_EXEC_BACKEND, "local-process")
   assert.equal(capture.env.COGNIA_GATEWAY, "1")
   assert.equal(capture.env.COGNIA_MASTER_KEY_FILE, path.join(dataDir, "master.key"))
@@ -200,6 +337,77 @@ test("refuses to create a new key beside an existing encrypted secret store", as
   assert.match(result.stderr, /refusing to create a new master key/i)
   assert.match(result.stderr, /secret-store\.enc/)
   await assert.rejects(access(path.join(dataDir, "master.key")), { code: "ENOENT" })
+})
+
+test("rejects an existing master key that cannot decrypt the secret store", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-mismatched-key-"))
+  const dataDir = path.join(root, "data")
+  const keyFile = path.join(dataDir, "master.key")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeEncryptedSecretStore(dataDir, "a".repeat(64))
+  await writeFile(keyFile, `${"b".repeat(64)}\n`, { mode: 0o600 })
+
+  const artifact = async (name, executable = false) => {
+    const target = path.join(root, name)
+    await writeFile(target, executable ? "#!/bin/sh\nexit 0\n" : "fixture\n")
+    if (executable) await chmod(target, 0o755)
+    return target
+  }
+  const env = {
+    COGNIA_MASTER_KEY: "",
+    COGNIA_MASTER_KEY_FILE: keyFile,
+    COGNIA_HEADLESS_SERVER_BIN: await artifact("cognia-server", true),
+    COGNIA_BRAIN_ENTRY: await artifact("brain.mjs"),
+    COGNIA_SIDECAR_SCRIPT: await artifact("sidecar.mjs"),
+    COGNIA_MCP_SIDECAR_PATH: await artifact("mcp.mjs"),
+    COGNIA_VSCODE_EXT_HOST_SCRIPT: await artifact("vscode-host.js"),
+    COGNIA_CODE_SERVER_AGENT_VSIX: await artifact("agent.vsix"),
+  }
+
+  const result = await run(["--check", "--skip-build", "--data-dir", dataDir], env)
+
+  assert.equal(result.code, 3)
+  assert.match(result.stderr, /master key cannot decrypt/i)
+  assert.match(result.stderr, /--recover-secret-store/)
+  assert.equal((await readFile(path.join(dataDir, "cognia", "secret-store.enc"))).length > 0, true)
+})
+
+test("recovery preserves a mismatched secret store before starting empty", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-recover-store-"))
+  const dataDir = path.join(root, "data")
+  const keyFile = path.join(dataDir, "master.key")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const storePath = await writeEncryptedSecretStore(dataDir, "a".repeat(64))
+  const originalStore = await readFile(storePath)
+  await writeFile(keyFile, `${"b".repeat(64)}\n`, { mode: 0o600 })
+
+  const artifact = async (name, executable = false) => {
+    const target = path.join(root, name)
+    await writeFile(target, executable ? "#!/bin/sh\nexit 0\n" : "fixture\n")
+    if (executable) await chmod(target, 0o755)
+    return target
+  }
+  const env = {
+    COGNIA_MASTER_KEY: "",
+    COGNIA_MASTER_KEY_FILE: keyFile,
+    COGNIA_HEADLESS_SERVER_BIN: await artifact("cognia-server", true),
+    COGNIA_BRAIN_ENTRY: await artifact("brain.mjs"),
+    COGNIA_SIDECAR_SCRIPT: await artifact("sidecar.mjs"),
+    COGNIA_MCP_SIDECAR_PATH: await artifact("mcp.mjs"),
+    COGNIA_VSCODE_EXT_HOST_SCRIPT: await artifact("vscode-host.js"),
+    COGNIA_CODE_SERVER_AGENT_VSIX: await artifact("agent.vsix"),
+  }
+
+  const result = await run(["--recover-secret-store", "--skip-build", "--data-dir", dataDir], env)
+
+  assert.equal(result.code, 0, result.stderr)
+  await assert.rejects(access(storePath), { code: "ENOENT" })
+  const preservedName = (await readdir(path.dirname(storePath))).find((name) =>
+    name.startsWith("secret-store.enc.unreadable-")
+  )
+  assert.ok(preservedName)
+  assert.deepEqual(await readFile(path.join(path.dirname(storePath), preservedName)), originalStore)
+  assert.match(result.stderr, /preserved unreadable secret store/i)
 })
 
 test("local debug launches loopback-only with an ephemeral Apifox environment", async (t) => {
@@ -388,7 +596,7 @@ fs.appendFileSync(process.env.COGNIA_BUILD_LOG, JSON.stringify(process.argv.slic
       .split("\n")
       .map((line) => JSON.parse(line))
     assert.deepEqual(commands, [
-      ["cli:external-host:build"],
+      ["cli:native-hosts:build"],
       ["support:docs:build"],
       ["exec", "node", "scripts/build/build-cli.mjs"],
       ["exec", "node", "scripts/build/build-mcp-sidecar.mjs"],

@@ -46,7 +46,8 @@ function remoteApprovalKey(sessionId: string, requestId: string): string {
 export async function sendPrompt(
   sessionId: string,
   prompt: SendContent,
-  options?: SendOptions
+  options?: SendOptions,
+  delivery?: { commandId?: string }
 ): Promise<void> {
   const sdk = options?.claudeAgentSdk
   if (
@@ -75,8 +76,13 @@ export async function sendPrompt(
   }
   // Sends carrying a frozen execution spec use the canonical command (same
   // impl body Rust-side; the alias split feeds the Phase 9 telemetry).
-  const command = options?.execution ? "agent_send" : "claude_send"
-  await transport.call(command, { sessionId, prompt, options })
+  const command = options?.execution || delivery?.commandId ? "agent_send" : "claude_send"
+  await transport.call(command, {
+    sessionId,
+    prompt,
+    options,
+    ...(delivery?.commandId ? { commandId: delivery.commandId } : {}),
+  })
 }
 
 /**

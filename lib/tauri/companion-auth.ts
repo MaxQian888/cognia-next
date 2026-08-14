@@ -1,9 +1,6 @@
 import { pinnedFetch, type PinnedFetchInit } from "./pinned-fetch"
 import type { CompanionConfig } from "./companion-storage"
-import {
-  generatePersistableV2SigningIdentity,
-  type RoomDescriptorV2,
-} from "@/lib/signaling/v2-crypto"
+import { generatePersistableSigningIdentity, type RoomDescriptor } from "@/lib/signaling/crypto"
 
 export interface CompanionAuthConfig {
   deploymentMode: "single-user" | "multi-tenant"
@@ -89,7 +86,7 @@ export async function registerCompanionDevice(
   const authConfig = await fetchCompanionAuthConfig(input.baseUrl, input.serverFingerprint, fetcher)
   validateRegistrationContext(input, authConfig)
   const identity = await generateDeviceIdentity()
-  const signalingIdentity = await generatePersistableV2SigningIdentity()
+  const signalingIdentity = await generatePersistableSigningIdentity()
   const challenge = await requestChallenge(
     input.baseUrl,
     input.tenantId,
@@ -278,9 +275,9 @@ function isSignalingConfig(value: unknown): value is CompanionAuthConfig["signal
 function parseSignalingRegistration(
   body: Record<string, unknown>,
   clientPublicKey: string
-): { rendezvousId: string; roomDescriptor: RoomDescriptorV2 } {
+): { rendezvousId: string; roomDescriptor: RoomDescriptor } {
   const signaling = body.signaling as Record<string, unknown> | undefined
-  const descriptor = signaling?.roomDescriptor as RoomDescriptorV2 | undefined
+  const descriptor = signaling?.roomDescriptor as RoomDescriptor | undefined
   if (
     typeof signaling?.rendezvousId !== "string" ||
     !descriptor ||

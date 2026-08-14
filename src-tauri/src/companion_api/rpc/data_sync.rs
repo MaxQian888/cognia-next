@@ -32,6 +32,9 @@ pub(super) const COMMANDS: &[&str] = &[
     "twin_profile_get",
     "host_capabilities",
     "host_feature_manifest",
+    "host_state_snapshot",
+    "host_state_submit",
+    "host_state_status",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
     "provider_diagnostics_start",
@@ -539,6 +542,9 @@ pub(super) async fn dispatch(
         | "twin_profile_get"
         | "host_capabilities"
         | "host_feature_manifest"
+        | "host_state_snapshot"
+        | "host_state_submit"
+        | "host_state_status"
         | "provider_diagnostics_status"
         | "provider_diagnostics_history"
         | "provider_diagnostics_start"
@@ -661,7 +667,12 @@ pub(super) async fn dispatch(
             // caller device. Injected server-side (overwriting any
             // client-sent value) so a device can never spoof another's id.
             let args = inject_caller_device_id(name, args, device_id);
-            let args = inject_caller_device_grants(name, args, device_id, account_id);
+            let args = inject_caller_device_grants(name, args, state, device_id, account_id);
+            let args = if super::host_state::COMMANDS.contains(&name) {
+                super::host_state::bind_authority(args, state, account_id)?
+            } else {
+                args
+            };
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
             let transport = super::super::ws_bridge::resolve_bridge_transport(state)

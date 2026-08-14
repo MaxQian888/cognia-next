@@ -1,4 +1,5 @@
 import { getDb } from "./schema"
+import { enqueueHostStateIntentIfAvailable } from "./mobile-outbound-queue"
 
 /**
  * An attachment that was staged in the composer when a draft was saved.
@@ -47,6 +48,40 @@ export interface ChatDraftRow {
   /** Metadata for attachments staged when the draft was saved. Optional so
    * pre-existing text-only rows keep working unchanged. */
   attachments?: DraftAttachmentMeta[]
+  /** Shared-state revision. Absent on pre-v168 rows and interpreted as zero. */
+  revision?: number
+  /** Last attached client that authored the shared draft projection. */
+  originClientId?: string
+  /** Wire-safe metadata only; attachment bytes remain device-local. */
+  attachmentRefs?: Array<{ name: string; mediaType: string; size: number; hash?: string }>
+}
+
+export interface SetDraftOptions {
+  originClientId?: string
+  /** Authority may provide an exact revision; local writes increment instead. */
+  revision?: number
+}
+
+/**
+ * Serializes the read-modify-write of a session's draft revision. A plain
+ * promise chain rather than a Dexie transaction: draft saves are debounced and
+ * uncontended in practice, and a transaction here would not settle under the
+ * frozen timers the debounce tests run on.
+ */
+const draftRevisionLocks = new Map<string, Promise<void>>()
+
+function withDraftRevisionLock(sessionId: string, run: () => Promise<void>): Promise<void> {
+  const previous = draftRevisionLocks.get(sessionId) ?? Promise.resolve()
+  const next = previous.then(run, run)
+  // Keep the chain alive on failure so one rejected save cannot wedge the rest.
+  draftRevisionLocks.set(
+    sessionId,
+    next.then(
+      () => undefined,
+      () => undefined
+    )
+  )
+  return next
 }
 
 export async function getDraft(sessionId: string): Promise<ChatDraftRow | null> {
@@ -57,19 +92,46 @@ export async function getDraft(sessionId: string): Promise<ChatDraftRow | null> 
 export async function setDraft(
   sessionId: string,
   text: string,
-  attachments: DraftAttachmentMeta[] = []
+  attachments: DraftAttachmentMeta[] = [],
+  options: SetDraftOptions = {}
 ): Promise<void> {
+  let hostStateRow: Awaited<ReturnType<typeof enqueueHostStateIntentIfAvailable>> = null
+  if (options.revision === undefined) {
+    hostStateRow = await enqueueHostStateIntentIfAvailable({
+      sessionId,
+      action: {
+        kind: "draft.replace",
+        text,
+        attachments: attachments.map(({ name, mediaType, size }) => ({ name, mediaType, size })),
+      },
+    })
+  }
   // A draft is empty only when BOTH the text and the attachment list are empty —
   // a staged image with no caption is still worth restoring as a reminder.
   if (text.length === 0 && attachments.length === 0) {
-    await clearDraft(sessionId)
+    await clearDraftLocal(sessionId)
     return
   }
-  await getDb().chatDrafts.put({
-    sessionId,
-    text,
-    updatedAt: Date.now(),
-    ...(attachments.length > 0 ? { attachments } : {}),
+  const db = getDb()
+  // Local and authority writes share one `revision` field, so a local write has
+  // to continue the row's own sequence — deriving it from a wall clock (or from
+  // a module-global that never observes the authority's writes) lets a local
+  // edit land *below* what the Host already published, which regresses the
+  // channel and makes the next broadcast reuse a revision. Serialized per
+  // session so concurrent saves cannot read the same revision and both claim it.
+  await withDraftRevisionLock(sessionId, async () => {
+    const revision = options.revision ?? ((await db.chatDrafts.get(sessionId))?.revision ?? 0) + 1
+    await db.chatDrafts.put({
+      sessionId,
+      text,
+      updatedAt: Date.now(),
+      revision,
+      ...(options.originClientId || hostStateRow?.clientId
+        ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
+        : {}),
+      attachmentRefs: attachments.map(({ name, mediaType, size }) => ({ name, mediaType, size })),
+      ...(attachments.length > 0 ? { attachments } : {}),
+    })
   })
   // Enforce AFTER the write so the row just saved counts toward the total and
   // is the one protected from eviction.
@@ -78,7 +140,20 @@ export async function setDraft(
 
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-export async function clearDraft(sessionId: string): Promise<void> {
+export async function clearDraft(
+  sessionId: string,
+  options: { hostAlreadyCleared?: boolean } = {}
+): Promise<void> {
+  if (!options.hostAlreadyCleared) {
+    await enqueueHostStateIntentIfAvailable({
+      sessionId,
+      action: { kind: "draft.replace", text: "", attachments: [] },
+    })
+  }
+  await clearDraftLocal(sessionId)
+}
+
+async function clearDraftLocal(sessionId: string): Promise<void> {
   // Cancel any pending debounced save first, otherwise an in-flight write
   // re-creates the row right after we delete it (e.g. on optimistic
   // clear-after-send), leaving stale text that reappears next time the
@@ -133,6 +208,12 @@ export async function enforceDraftAttachmentQuota(keepSessionId?: string): Promi
   if (stripped.length > 0) await db.chatDrafts.bulkPut(stripped)
 }
 
+/**
+ * Writes fired by {@link setDraftDebounced}, so callers (and tests) can await
+ * the flush instead of guessing how many microtasks the write takes.
+ */
+const debouncedWrites = new Set<Promise<void>>()
+
 export function setDraftDebounced(
   sessionId: string,
   text: string,
@@ -143,7 +224,16 @@ export function setDraftDebounced(
   if (existing) clearTimeout(existing)
   const timer = setTimeout(() => {
     debounceTimers.delete(sessionId)
-    void setDraft(sessionId, text, attachments)
+    const write = setDraft(sessionId, text, attachments).catch(() => undefined)
+    debouncedWrites.add(write)
+    void write.finally(() => debouncedWrites.delete(write))
   }, delayMs)
   debounceTimers.set(sessionId, timer)
+}
+
+/** Resolves once every already-fired debounced write has hit Dexie. */
+export async function flushDebouncedDraftWrites(): Promise<void> {
+  while (debouncedWrites.size > 0) {
+    await Promise.all([...debouncedWrites])
+  }
 }

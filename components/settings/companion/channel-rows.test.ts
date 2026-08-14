@@ -136,11 +136,11 @@ describe("buildChannelRows", () => {
 
     it("is live when enabled with a rendezvous server", () => {
       const webrtc = row(
-        base({ webrtcEnabled: true, signalingUrl: "wss://sig.example/v2/signaling" }),
+        base({ webrtcEnabled: true, signalingUrl: "wss://sig.example/signaling" }),
         "webrtc"
       )
       expect(webrtc.state).toBe("live")
-      expect(webrtc.address).toBe("wss://sig.example/v2/signaling")
+      expect(webrtc.address).toBe("wss://sig.example/signaling")
     })
 
     it("is blocked when enabled with nowhere to rendezvous", () => {

@@ -75,10 +75,10 @@ Tauri 子类从 161 LOC 缩到 100；WS 子类（含新增 reconnect 机制）�
 
 ### D6 — WebRTC datachannel 传输——设计完成、推后实现
 
-ADR-0021 的 signaling 栈（`src-tauri/src/companion_api/signaling/{mod,client,dispatch,peer}.rs`，加上 dispatch + envelope 合计约 5000 LOC）落地了仅 JSON 的 `cognia.v2` 数据通道供 RPC + 事件面使用。在同一 peer 上承载终端有两条路：
+ADR-0021 的 signaling 栈（`src-tauri/src/companion_api/signaling/{mod,client,dispatch,peer}.rs`，加上 dispatch + envelope 合计约 5000 LOC）落地了仅 JSON 的 `cognia.signaling` 数据通道供 RPC + 事件面使用。在同一 peer 上承载终端有两条路：
 
 1. 在已有通道里多路复用 PTY 字节（需要 RPC envelope schema 支持二进制 + 会话 id 前缀），或
-2. 同一 peer 上再开一个标签为 `cognia.v2.terminal` 的二进制通道（隔离更干净，但需在 `signaling/client.rs` + `dispatch.rs` 里识别新 label）。
+2. 同一 peer 上再开一个标签为 `cognia.signaling.terminal` 的二进制通道（隔离更干净，但需在 `signaling/client.rs` + `dispatch.rs` 里识别新 label）。
 
 `lib/terminal/pick-transport.ts:selectTerminalTransportChain` 今日在 Capacitor 上返回 `["ws"]`。当 Rust 桌面端的 RTC handler（新增 `rtc_terminal.rs`、`peer.rs` 增 label 派发、TS 侧新增 `transport-webrtc.ts` 继承 `BaseTerminalSession`）就绪后，链将扩展为 `["ws", "webrtc"]`，orchestrator 在 WS 连失败时自动 fallback。D4/D5 的 `BaseTerminalSession` + reconnect 协议已经替这块未来工作把底子搭好——剩下的主要是 signaling routing 集成。
 
@@ -171,7 +171,7 @@ github-delivery 的 manifest 加上 `terminal:spawn` + `terminal:write`，整条
 
 ## 明确推后的工作
 
-1. **WebRTC 终端传输** —— `pick-transport.ts` 现在只返回 `["ws"]`；Rust 侧就绪后将扩为 `["ws", "webrtc"]`。TS 侧 `transport-webrtc.ts` 会继承 `BaseTerminalSession`；Rust 侧需要新增 `rtc_terminal.rs` 模块 + 在 `signaling/peer.rs` 中识别 `cognia.v2.terminal` 数据通道标签。估算：Rust + TS 合计约 400 LOC。
+1. **WebRTC 终端传输** —— `pick-transport.ts` 现在只返回 `["ws"]`；Rust 侧就绪后将扩为 `["ws", "webrtc"]`。TS 侧 `transport-webrtc.ts` 会继承 `BaseTerminalSession`；Rust 侧需要新增 `rtc_terminal.rs` 模块 + 在 `signaling/peer.rs` 中识别 `cognia.signaling.terminal` 数据通道标签。估算：Rust + TS 合计约 400 LOC。
 2. **远端 shell-integration 脚本下发** —— 移动 WS 会话当前刻意关闭 OSC 633（脚本是本地路径，远端无法解析）。未来小版本可在 WS 握手时把脚本字节传过去，让移动端也拿到提示符标记 + 命令跟踪。
 3. **服务器侧工作流执行 + 同意 broker 桥** —— `action.system.terminal` 仅渲染端可用。若 headless V2 server 工作流要驱动 dock，要么走 Tauri command 桥同意 broker，要么限制走 headless `terminal_repl_*` 路径。
 4. **更多 shell** —— elvish / tcsh / xonsh 各自需要一个 `shell-integration.<x>` + `ShellKind` 变体。模板已就绪，剩下是逐 shell 实现。

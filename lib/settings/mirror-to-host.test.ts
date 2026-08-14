@@ -120,7 +120,7 @@ describe("mirrorSettingsPatchToHost", () => {
   it("does not mirror transport config, which flows the other way", async () => {
     const keys = await mirrorSettingsPatchToHost(
       {
-        signalingUrl: "wss://example/v2/signaling",
+        signalingUrl: "wss://example/signaling",
         iceServers: [],
         turnServers: [],
         turnProvider: { kind: "none" },

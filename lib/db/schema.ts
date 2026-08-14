@@ -160,6 +160,11 @@ import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
 import type { InboxTelemetryEventRow } from "./inbox-telemetry-types"
 import type { SyncCursorRow, SyncTombstoneRow, SyncableTable } from "@/lib/sync/types"
+import type {
+  HostStateActionRow,
+  HostStateChannelRow,
+  HostStateMetaRow,
+} from "@/lib/sync/host-state-store"
 import type { SharedLinkRow } from "./shared-links"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { PetModelRow, PetModelFileRow } from "./pet-models"
@@ -621,6 +626,13 @@ export class CogniaDB extends Dexie {
   // `lib/queue/outbound-queue.ts` drains pending rows when the network is
   // online; failed rows back off exponentially and deadletter at 5 attempts.
   mobileOutboundQueue!: Table<MobileOutboundJobRow, string>
+  // v168 — AHP-inspired, Host-authoritative shared-session state. Existing
+  // session/message/draft repositories remain the business-data owners; these
+  // rows hold the rebuildable channel projection, semantic action receipts,
+  // and the fencing generation used by every attached client.
+  hostStateChannels!: Table<HostStateChannelRow, string>
+  hostStateActions!: Table<HostStateActionRow, [number, string]>
+  hostStateMeta!: Table<HostStateMetaRow, "singleton">
   // v26 — Per-session unsent composer text (chat drafts). Pure additive, no
   // upgrade hook. Primary key `sessionId` makes upserts trivial; `updatedAt`
   // is indexed so debug surfaces can sort newest-first.
@@ -1653,7 +1665,7 @@ export class CogniaDB extends Dexie {
     this.version(32).stores({})
 
     // v33 — ADR-0021 WebRTC WAN transport originally added rendezvous
-    //   metadata. Current rows carry the public v2 room descriptor and a
+    //   metadata. Current rows carry the public room descriptor and a
     //   native secret reference; private role keys are never stored here.
     //   These are optional non-indexed JSON columns, so no `.stores()` change is
     //   required — IndexedDB stores the extra keys transparently. The
@@ -4023,6 +4035,16 @@ export class CogniaDB extends Dexie {
     this.version(167).stores({
       memories:
         "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, staleness, expiresAt, updatedAt, lastAccessedAt, vectorDocId, sourceSessionId, sourceMessageId, pinned, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status]",
+    })
+
+    // v168 — HostStateProtocolV1 projection, semantic action ledger, and
+    // single-Host fencing metadata. Purely additive: legacy session/message
+    // stores remain intact for fallback and rollback.
+    this.version(168).stores({
+      hostStateChannels: "&channel, hostGeneration, hostSeq, revision, updatedAt",
+      hostStateActions:
+        "&[hostGeneration+actionId], channel, hostSeq, outcome, dispatchState, broadcastState, createdAt, updatedAt",
+      hostStateMeta: "&id, hostGeneration, leaseExpiresAt, migrationStage, updatedAt",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

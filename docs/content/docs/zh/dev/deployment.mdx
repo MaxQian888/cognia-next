@@ -302,7 +302,7 @@ ghcr.io/maxqian888/cognia-runner        # T2 每 agent 一容器的 runner 镜�
 - **冒烟** —— `scripts/smoke/compose-smoke.mjs` 按 tier（`services` / `server` / `tls`）驱动运行中的栈；`compose-e2e.yml` 在每个触及套件的 PR 上跑它。
 - 完整架构与隔离/拓扑阶梯：ADR-0059（英文版：`docs/content/docs/en/adr/0059-cloud-deployment-headless-brain.md`）。
 
-headless host 明确区分两个信令 URL。`COGNIA_SIGNALING_URL` 是宿主内部的会合端点（Compose 与 Kubernetes 均为 `ws://signaling:7892/v2/signaling`）；`COGNIA_PUBLIC_SIGNALING_URL` 是从部署公开 URL 推导出的客户端可见端点（`https` 转为 `wss`，路径固定为 `/v2/signaling`）。Caddy 与 Kubernetes Ingress 将该公开路径路由到 `signaling:7892` Service，其余应用路径仍由 `cognia-server` 处理。
+headless host 明确区分两个信令 URL。`COGNIA_SIGNALING_URL` 是宿主内部的会合端点（Compose 与 Kubernetes 均为 `ws://signaling:7892/signaling`）；`COGNIA_PUBLIC_SIGNALING_URL` 是从部署公开 URL 推导出的客户端可见端点（`https` 转为 `wss`，路径固定为 `/signaling`）。Caddy 与 Kubernetes Ingress 将该公开路径路由到 `signaling:7892` Service，其余应用路径仍由 `cognia-server` 处理。
 
 ### 浏览器 Companion 安全要求
 

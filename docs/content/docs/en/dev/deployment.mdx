@@ -303,9 +303,9 @@ ghcr.io/maxqian888/cognia-runner        # T2 per-agent runner image
 
 The headless host uses two deliberately different signaling URLs.
 `COGNIA_SIGNALING_URL` is the host-internal rendezvous endpoint
-(`ws://signaling:7892/v2/signaling` in Compose and Kubernetes).
+(`ws://signaling:7892/signaling` in Compose and Kubernetes).
 `COGNIA_PUBLIC_SIGNALING_URL` is the client-visible endpoint derived from the
-deployment public URL (`https` becomes `wss`, with `/v2/signaling`). Caddy and
+deployment public URL (`https` becomes `wss`, with `/signaling`). Caddy and
 the Kubernetes Ingress route that public path to the `signaling:7892` service;
 all other application paths remain on `cognia-server`.
 

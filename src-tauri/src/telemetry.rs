@@ -11,6 +11,7 @@ const GRAFANA_API_TOKEN_KEY: &str = "grafana-cloud-api-token";
 const LANGFUSE_SECRET_KEY: &str = "langfuse-secret-key";
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(15);
 
+#[cfg(any(test, feature = "otel-export"))]
 fn resolve_otlp_trace_endpoint(specific: Option<&str>, base: Option<&str>) -> Option<String> {
     specific
         .map(str::trim)
@@ -23,6 +24,7 @@ fn resolve_otlp_trace_endpoint(specific: Option<&str>, base: Option<&str>) -> Op
         })
 }
 
+#[cfg(any(test, feature = "otel-export"))]
 fn parse_otlp_headers(value: &str) -> Result<HashMap<String, String>, String> {
     let mut headers = HashMap::new();
     for entry in value

@@ -488,6 +488,22 @@ describe("getDb", () => {
     expect(indexNames).toContain("updatedAt")
   })
 
+  it("v168 opens the HostState channel, action ledger, and fencing metadata tables", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(168)
+    expect(db.hostStateChannels.schema.primKey.name).toBe("channel")
+    expect(db.hostStateChannels.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["hostGeneration", "hostSeq", "updatedAt"])
+    )
+    expect(db.hostStateActions.schema.primKey.name).toBe("[hostGeneration+actionId]")
+    expect(db.hostStateActions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["channel", "hostSeq", "outcome", "broadcastState"])
+    )
+    expect(db.hostStateMeta.schema.primKey.name).toBe("id")
+  })
+
   it("v123 opens the certification projection table", async () => {
     const db = getDb()
     await db.open()

@@ -29,7 +29,7 @@ import { MigratingCompanionStorage } from "@/lib/companion/credential-book"
 import { isCapacitor } from "@/lib/platform/detect"
 import { getActiveBrowserVault, type EncryptedVaultSecret } from "@/lib/runtime/browser-vault"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
-import { importV2SigningPrivateKey, type RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import { importSigningPrivateKey, type RoomDescriptor } from "@/lib/signaling/crypto"
 
 export interface CompanionConfig {
   /** Stable runtime target id. Added by Web registration after first pair. */
@@ -61,8 +61,8 @@ export interface CompanionConfig {
    * transport tier on this client.
    */
   rendezvousId?: string
-  /** Public, self-certifying signaling v2 room descriptor. */
-  signalingRoomDescriptor?: RoomDescriptorV2
+  /** Public, self-certifying signaling room descriptor. */
+  signalingRoomDescriptor?: RoomDescriptor
   /** Browser-reachable signaling endpoint returned by this target's Host. */
   signalingUrl?: string
   /** Target-specific ICE servers returned by the Host auth configuration. */
@@ -148,7 +148,7 @@ type StoredBrowserCompanionConfig = Omit<CompanionConfig, "serviceToken">
 
 class IndexedDbSignalingKeyStore implements BrowserSignalingKeyStore {
   async save(deviceId: string, jwk: JsonWebKey): Promise<CryptoKey> {
-    const key = await importV2SigningPrivateKey(jwk)
+    const key = await importSigningPrivateKey(jwk)
     const database = await this.open()
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(SIGNALING_KEY_STORE, "readwrite")
@@ -333,7 +333,7 @@ export class LocalStorageCompanionStorage implements CompanionConfigStorage {
     if (config.signalingRoomDescriptor) {
       const serialized = await vault.loadSecret(companionSigningSecretName(targetId))
       if (serialized) {
-        config.signalingPrivateKey = await importV2SigningPrivateKey(
+        config.signalingPrivateKey = await importSigningPrivateKey(
           JSON.parse(serialized) as JsonWebKey
         )
       } else {
@@ -427,7 +427,7 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
         return null
       }
       if (config.signalingPrivateKeyJwk) {
-        config.signalingPrivateKey = await importV2SigningPrivateKey(config.signalingPrivateKeyJwk)
+        config.signalingPrivateKey = await importSigningPrivateKey(config.signalingPrivateKeyJwk)
       }
       return config
     } catch {

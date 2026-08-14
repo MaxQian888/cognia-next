@@ -312,14 +312,10 @@ pub(crate) async fn proxy_terminal_datachannel(
             }
         };
     let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
-    let (mut event_rx, event_pump) = spawn_terminal_dc_event_pump(
-        std::sync::Arc::clone(&channel),
-        TERMINAL_DC_QUEUE_CAPACITY,
-    );
-    let (outbound_tx, mut writer_done_rx, writer_pump) = spawn_terminal_dc_writer(
-        std::sync::Arc::clone(&channel),
-        TERMINAL_DC_SEND_TIMEOUT,
-    );
+    let (mut event_rx, event_pump) =
+        spawn_terminal_dc_event_pump(std::sync::Arc::clone(&channel), TERMINAL_DC_QUEUE_CAPACITY);
+    let (outbound_tx, mut writer_done_rx, writer_pump) =
+        spawn_terminal_dc_writer(std::sync::Arc::clone(&channel), TERMINAL_DC_SEND_TIMEOUT);
     let (host_inbound_tx, mut host_inbound_rx) =
         tokio::sync::mpsc::channel::<TerminalFrame>(TERMINAL_DC_QUEUE_CAPACITY);
     let (host_writer_done_tx, mut host_writer_done_rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -495,9 +491,7 @@ mod tests {
     }
 
     impl BlockedDataChannel {
-        fn with_events(
-            events: tokio::sync::mpsc::UnboundedReceiver<DataChannelEvent>,
-        ) -> Self {
+        fn with_events(events: tokio::sync::mpsc::UnboundedReceiver<DataChannelEvent>) -> Self {
             Self {
                 events: tokio::sync::Mutex::new(Some(events)),
                 ..Self::default()
@@ -582,10 +576,8 @@ mod tests {
     #[tokio::test]
     async fn blocked_terminal_send_times_out_and_closes_attachment() {
         let channel = std::sync::Arc::new(BlockedDataChannel::default());
-        let (tx, mut done_rx, writer) = spawn_terminal_dc_writer(
-            channel.clone(),
-            Duration::from_millis(20),
-        );
+        let (tx, mut done_rx, writer) =
+            spawn_terminal_dc_writer(channel.clone(), Duration::from_millis(20));
         tx.send(vec![1, 2, 3]).await.unwrap();
 
         tokio::time::timeout(Duration::from_secs(1), done_rx.recv())
@@ -600,13 +592,9 @@ mod tests {
     async fn protocol_errors_use_the_nonblocking_send_path() {
         let channel = BlockedDataChannel::default();
 
-        send_datachannel_protocol_error(
-            &channel,
-            TerminalErrorCode::PermissionDenied,
-            "revoked",
-        )
-        .await
-        .unwrap();
+        send_datachannel_protocol_error(&channel, TerminalErrorCode::PermissionDenied, "revoked")
+            .await
+            .unwrap();
 
         let sends = channel.immediate_sends.lock().unwrap();
         assert_eq!(sends.len(), 1);
@@ -618,7 +606,9 @@ mod tests {
     async fn event_queue_overflow_closes_the_attachment() {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         event_tx.send(DataChannelEvent::OnOpen).unwrap();
-        event_tx.send(DataChannelEvent::OnBufferedAmountHigh).unwrap();
+        event_tx
+            .send(DataChannelEvent::OnBufferedAmountHigh)
+            .unwrap();
         drop(event_tx);
         let channel = std::sync::Arc::new(BlockedDataChannel::with_events(event_rx));
         let (_events, pump) = spawn_terminal_dc_event_pump(channel.clone(), 1);

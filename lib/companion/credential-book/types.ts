@@ -22,7 +22,7 @@
  * be paired from two local accounts, and those pairings must never share a
  * device identity, a cursor watermark, or a mirrored row.
  */
-import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import type { RoomDescriptor } from "@/lib/signaling/crypto"
 
 /**
  * Namespace for a pairing that predates — or precedes — any account context.
@@ -114,8 +114,8 @@ export interface CompanionHostRecord {
   serverVersion: string
   /** ADR-0021 signaling room id. Absent disables the WebRTC tier. */
   rendezvousId?: string
-  /** Public, self-certifying signaling v2 room descriptor. */
-  signalingRoomDescriptor?: RoomDescriptorV2
+  /** Public, self-certifying signaling room descriptor. */
+  signalingRoomDescriptor?: RoomDescriptor
   /** Browser-reachable signaling endpoint for this target. */
   signalingUrl?: string
   /** Target-specific ICE configuration; contains no private credentials. */
@@ -129,7 +129,7 @@ export interface CompanionHostRecord {
 export interface CompanionHostCredential {
   /** ES256 device identity. Access tokens are refreshed into memory only. */
   devicePrivateKeyJwk: JsonWebKey
-  /** Mobile-role ECDSA private key for signaling v2. */
+  /** Mobile-role ECDSA private key for signaling. */
   signalingPrivateKeyJwk?: JsonWebKey
 }
 

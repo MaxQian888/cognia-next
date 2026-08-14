@@ -103,7 +103,7 @@ describe("companion auth lifecycle", () => {
           hostId,
           tenantId,
           signaling: {
-            url: "wss://host.test/v2/signaling",
+            url: "wss://host.test/signaling",
             iceServers: [{ urls: ["stun:stun.example:3478"] }],
           },
         })
@@ -164,7 +164,7 @@ describe("companion auth lifecycle", () => {
       tenantId,
       serverVersion: "2.0.0",
       rendezvousId: "room-a",
-      signalingUrl: "wss://host.test/v2/signaling",
+      signalingUrl: "wss://host.test/signaling",
       iceServers: [{ urls: ["stun:stun.example:3478"] }],
       signalingPrivateKeyJwk: expect.objectContaining({ d: expect.any(String) }),
     })
@@ -223,7 +223,7 @@ describe("companion auth lifecycle", () => {
         deploymentMode: "single-user",
         hostId: "other-host",
         tenantId: "tenant-a",
-        signaling: { url: "wss://host.test/v2/signaling", iceServers: [] },
+        signaling: { url: "wss://host.test/signaling", iceServers: [] },
       })
     ) as unknown as AuthFetcher
 
@@ -259,7 +259,7 @@ describe("companion auth lifecycle", () => {
           webClientId: "web-client",
           scopes: ["openid", "brain:rpc"],
         },
-        signaling: { url: "wss://host.test/v2/signaling", iceServers: [] },
+        signaling: { url: "wss://host.test/signaling", iceServers: [] },
       })
     ) as unknown as AuthFetcher
 
@@ -298,7 +298,7 @@ describe("companion auth lifecycle", () => {
           webClientId: "web-client",
           scopes: ["openid", "brain:rpc"],
         },
-        signaling: { url: "wss://host.test/v2/signaling", iceServers: [] },
+        signaling: { url: "wss://host.test/signaling", iceServers: [] },
       })
     ) as unknown as AuthFetcher
 

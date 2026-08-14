@@ -13,7 +13,7 @@ import type {
   PairedDeviceRow,
   TerminalHostDescriptor,
 } from "@/types/mobile/paired-device"
-import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import type { RoomDescriptor } from "@/lib/signaling/crypto"
 import { getDb } from "./schema"
 
 export interface AddPairedDeviceInput {
@@ -35,7 +35,7 @@ export interface AddPairedDeviceInput {
    * WebRTC support landed.
    */
   rendezvousId?: string
-  signalingRoomDescriptor?: RoomDescriptorV2
+  signalingRoomDescriptor?: RoomDescriptor
   signalingKeyRef?: string
   /** Defaults to `Date.now()` — pass an explicit value in tests. */
   nowMs?: number

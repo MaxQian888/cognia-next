@@ -23,7 +23,6 @@ use tracing::{Level, Metadata};
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 
 #[cfg(feature = "otel-export")]
@@ -205,11 +204,10 @@ pub fn init() -> bool {
             .with_writer(writer.clone())
             .with_filter(filter_fn(event_enabled));
         let (otel_layer, otel_handle) = reload::Layer::new(None::<OtelLayer>);
-        let installed = tracing_subscriber::registry()
+        let subscriber = tracing_subscriber::registry()
             .with(otel_layer)
-            .with(file_layer)
-            .try_init()
-            .is_ok();
+            .with(file_layer);
+        let installed = tracing::subscriber::set_global_default(subscriber).is_ok();
         if installed {
             if let Ok(mut handle) = OTEL_RELOAD_HANDLE.lock() {
                 *handle = Some(otel_handle);
@@ -232,10 +230,8 @@ pub fn init() -> bool {
             .with_ansi(false)
             .with_writer(writer)
             .with_filter(filter_fn(event_enabled));
-        tracing_subscriber::registry()
-            .with(file_layer)
-            .try_init()
-            .is_ok()
+        let subscriber = tracing_subscriber::registry().with(file_layer);
+        tracing::subscriber::set_global_default(subscriber).is_ok()
     };
     if !installed {
         return false;

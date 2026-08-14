@@ -141,6 +141,9 @@ export const CORE_TABLE_NAMES = [
   "governanceLineage",
   "governanceProvenance",
   "goalTemplates",
+  "hostStateActions",
+  "hostStateChannels",
+  "hostStateMeta",
   "hostSyncCursors",
   "inboundDrafts",
   "inboundLedger",
@@ -452,6 +455,7 @@ const PROJECTION_TABLES = new Set<CoreTableName>([
   "agentTeamBoard",
   "chatSearchText",
   "chatTurnSummaries",
+  "hostStateChannels",
   "mcpServerSummaries",
   "messageMediaRefs",
   "profileStoreMeta",
@@ -529,6 +533,7 @@ const AUDIT_TABLES = new Set<CoreTableName>([
   "governanceEvidence",
   "governanceLineage",
   "governanceProvenance",
+  "hostStateActions",
 ])
 
 const QUEUE_TABLES = new Set<CoreTableName>(
@@ -552,7 +557,13 @@ const GLOBAL_TABLES = new Set<CoreTableName>([
   "trustedPublishers",
 ])
 
-const RUNTIME_TARGET_TABLES = new Set<CoreTableName>(["hostSyncCursors", "syncTombstones"])
+const RUNTIME_TARGET_TABLES = new Set<CoreTableName>([
+  "hostStateActions",
+  "hostStateChannels",
+  "hostStateMeta",
+  "hostSyncCursors",
+  "syncTombstones",
+])
 
 const VERY_LARGE_TABLES = new Set<CoreTableName>([
   "agentTraces",

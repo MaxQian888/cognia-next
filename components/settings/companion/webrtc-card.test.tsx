@@ -225,7 +225,7 @@ describe("WebRtcCard — form & i18n", () => {
   it("populates the default signaling URL on first paint", async () => {
     renderCard()
     const input = await screen.findByLabelText(/Signaling server/i)
-    await waitFor(() => expect(input).toHaveValue("wss://signaling.cognia.cn/v2/signaling"))
+    await waitFor(() => expect(input).toHaveValue("wss://signaling.cognia.cn/signaling"))
   })
 
   it("places the TURN textarea placeholder via the translation key, not a literal", async () => {
@@ -270,7 +270,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: false,
-          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/signaling",
           registeredDevices: [],
         })
       }
@@ -288,7 +288,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/signaling",
           registeredDevices: [],
         })
       }
@@ -328,7 +328,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/signaling",
           registeredDevices: devices.map((d) => d.rendezvousId),
         })
       }
@@ -377,7 +377,7 @@ describe("WebRtcCard — poll-failure banner", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/signaling",
           registeredDevices: [],
         })
       }
@@ -555,7 +555,7 @@ describe("WebRtcCard — per-device reconnect button", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/signaling",
           registeredDevices: devices.map((d) => d.rendezvousId),
         })
       }
@@ -620,7 +620,7 @@ describe("WebRtcCard — per-device reconnect button", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/signaling",
           registeredDevices: ["r1"],
         })
       }
@@ -667,7 +667,7 @@ class FakeProviderStore {
 
 const BASE_FORM: FormState = {
   enabled: true,
-  signalingUrl: "wss://x/v2/signaling",
+  signalingUrl: "wss://x/signaling",
   iceServersText: "",
   turnServersText: "",
   turnProviderKind: "none",
@@ -754,7 +754,7 @@ describe("persistTurnProvider", () => {
 })
 
 describe("WebRtcCard — TURN provider UI", () => {
-  const MARKER_URL = "wss://hydrated.example/v2/signaling"
+  const MARKER_URL = "wss://hydrated.example/signaling"
   beforeEach(async () => {
     __setProviderSecretStore(new FakeProviderStore() as never)
     // Keep the status poll quiet.

@@ -172,7 +172,7 @@ export function createMockCompanionServer(): MockCompanionServer {
       hostId: MOCK_COMPANION_HOST_ID,
       tenantId: MOCK_COMPANION_TENANT_ID,
       signaling: {
-        url: "wss://signaling.e2e.invalid/v2/signaling",
+        url: "wss://signaling.e2e.invalid/signaling",
         iceServers: [{ urls: ["stun:stun.e2e.invalid:3478"] }],
       },
     })

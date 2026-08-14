@@ -53,7 +53,7 @@ function renderApplicationEnvironment(
     COGNIA_WORKSPACE_RUNTIME_IMAGE: target.spec.images.workspaceRuntime,
     COGNIA_CONFIG_REVISION: configRevision,
     COGNIA_PUBLIC_URL: new URL(target.spec.publicUrl).toString(),
-    COGNIA_SIGNALING_URL: "ws://signaling:7892/v2/signaling",
+    COGNIA_SIGNALING_URL: "ws://signaling:7892/signaling",
     COGNIA_PUBLIC_SIGNALING_URL: publicSignalingUrl(target.spec.publicUrl),
     COGNIA_LOGTO_ISSUER: new URL(target.spec.identity.issuer).toString(),
     COGNIA_LOGTO_AUDIENCE: target.spec.identity.audience,
@@ -159,7 +159,7 @@ function renderKubernetesFiles(
 }
 
 function publicSignalingUrl(publicUrl: string): string {
-  const url = new URL("/v2/signaling", publicUrl)
+  const url = new URL("/signaling", publicUrl)
   if (url.protocol === "https:") url.protocol = "wss:"
   else if (url.protocol === "http:") url.protocol = "ws:"
   else throw new Error("publicUrl must use http or https")

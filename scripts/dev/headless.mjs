@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { constants as fsConstants, rmSync } from "node:fs"
-import { access, chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
-import { randomBytes } from "node:crypto"
+import { access, chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { createDecipheriv, randomBytes } from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { Argument, Command, CommanderError } from "commander"
@@ -14,17 +14,19 @@ const EXIT_PREFLIGHT = 3
 const scriptPath = fileURLToPath(import.meta.url)
 const repoRoot = path.resolve(path.dirname(scriptPath), "../..")
 const executableSuffix = process.platform === "win32" ? ".exe" : ""
+const DEFAULT_DEVELOPMENT_WEB_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 
 class UsageError extends Error {}
 class PreflightError extends Error {}
 
 const cliOptionsSchema = z
   .object({
-    action: z.enum(["serve", "token"]).default("serve"),
+    action: z.enum(["serve", "pair", "token"]).default("serve"),
     allowRemoteTerminal: z.boolean().default(false),
     advertiseUrl: z.url("--advertise-url must be a valid URL").optional(),
     check: z.boolean().default(false),
     dataDir: z.string().min(1, "--data-dir must not be empty").optional(),
+    deviceName: z.string().trim().min(1, "--device-name must not be empty").optional(),
     dryRun: z.boolean().default(false),
     gateway: z.boolean().default(false),
     localDebug: z.boolean().default(false),
@@ -34,15 +36,48 @@ const cliOptionsSchema = z
       .min(1, "--port must be an integer between 1 and 65535")
       .max(65_535, "--port must be an integer between 1 and 65535"),
     skipBuild: z.boolean().default(false),
+    recoverSecretStore: z.boolean().default(false),
+    tenantId: z.string().trim().min(1, "--tenant-id must not be empty").optional(),
   })
   .refine(({ check, dryRun }) => !(check && dryRun), {
     message: "--check and --dry-run cannot be combined",
   })
   .refine(
-    ({ action, advertiseUrl, allowRemoteTerminal, check, dryRun, gateway, localDebug }) =>
-      action === "serve" ||
-      (!advertiseUrl && !allowRemoteTerminal && !check && !dryRun && !gateway && !localDebug),
+    ({
+      action,
+      advertiseUrl,
+      allowRemoteTerminal,
+      check,
+      deviceName,
+      dryRun,
+      gateway,
+      localDebug,
+      tenantId,
+    }) =>
+      action !== "token" ||
+      (!advertiseUrl &&
+        !allowRemoteTerminal &&
+        !check &&
+        !deviceName &&
+        !dryRun &&
+        !gateway &&
+        !localDebug &&
+        !tenantId),
     { message: "token only accepts --data-dir" }
+  )
+  .refine(
+    ({ action, allowRemoteTerminal, check, dryRun, gateway, localDebug, recoverSecretStore }) =>
+      action !== "pair" ||
+      (!allowRemoteTerminal && !check && !dryRun && !gateway && !localDebug && !recoverSecretStore),
+    {
+      message:
+        "pair accepts --data-dir, --device-name, --advertise-url, --port, --tenant-id, and --skip-build",
+    }
+  )
+  .refine(
+    ({ action, check, dryRun, recoverSecretStore }) =>
+      !recoverSecretStore || (action === "serve" && !check && !dryRun),
+    { message: "--recover-secret-store is only valid when starting the server" }
   )
   .refine(
     ({ advertiseUrl, allowRemoteTerminal, localDebug }) =>
@@ -57,8 +92,11 @@ function createProgram() {
       "Starts the Cognia server, Brain, and agent sidecars. It does not start Next.js or a Tauri WebView."
     )
     .addArgument(
-      new Argument("[action]", "serve, or print a loopback-only debug service token")
-        .choices(["serve", "token"])
+      new Argument(
+        "[action]",
+        "serve, issue a browser pairing invitation, or print a loopback-only debug service token"
+      )
+        .choices(["serve", "pair", "token"])
         .default("serve")
     )
     .configureHelp({ helpWidth: 120 })
@@ -68,6 +106,8 @@ function createProgram() {
     .option("-p, --port <port>", "Companion HTTPS port.", "27890")
     .option("--data-dir <path>", "Persistent development data directory.")
     .option("--advertise-url <url>", "Public URL written into pairing payloads.")
+    .option("--device-name <name>", "Human-readable label for a browser pairing invitation.")
+    .option("--tenant-id <id>", "Tenant encoded into a browser pairing invitation.")
     .option("--gateway", "Enable the local LLM gateway.")
     .option(
       "--local-debug",
@@ -75,11 +115,15 @@ function createProgram() {
     )
     .option("--allow-remote-terminal", "Enable remote terminal tickets for granted devices.")
     .option("--skip-build", "Reuse existing headless build artifacts.")
+    .option(
+      "--recover-secret-store",
+      "Preserve an unreadable encrypted development store and start with an empty store."
+    )
     .option("--check", "Validate prerequisites and artifacts, then exit.")
     .option("--dry-run", "Print the redacted build and launch plan without writes.")
     .addHelpText(
       "after",
-      "\nExamples:\n  pnpm dev:headless\n  pnpm dev:headless --local-debug --skip-build\n  pnpm dev:headless --skip-build\n  pnpm --silent dev:headless token\n"
+      "\nExamples:\n  pnpm dev:headless\n  pnpm dev:headless --local-debug --skip-build\n  pnpm dev:headless --skip-build\n  pnpm --silent dev:headless pair --device-name browser\n  pnpm --silent dev:headless token\n"
     )
 }
 
@@ -103,11 +147,12 @@ function pathsFor(options, env) {
       env.COGNIA_DATA_DIR ||
       path.join(repoRoot, ".cache", options.localDebug ? "headless-local-debug" : "headless")
   )
+  const cargoTargetDir = path.resolve(env.CARGO_TARGET_DIR || path.join(repoRoot, "target"))
   return {
     dataDir,
     server: path.resolve(
       env.COGNIA_HEADLESS_SERVER_BIN ||
-        path.join(repoRoot, "target", "debug", `cognia-server${executableSuffix}`)
+        path.join(cargoTargetDir, "debug", `cognia-server${executableSuffix}`)
     ),
     brain: path.resolve(
       env.COGNIA_BRAIN_ENTRY || path.join(repoRoot, "cli", "dist", "cognia-agent.mjs")
@@ -145,7 +190,7 @@ function secretConfig(dataDir, env) {
 
 function buildSteps(pnpmBin) {
   return [
-    { command: pnpmBin, args: ["cli:external-host:build"] },
+    { command: pnpmBin, args: ["cli:native-hosts:build"] },
     { command: pnpmBin, args: ["support:docs:build"] },
     { command: pnpmBin, args: ["exec", "node", "scripts/build/build-cli.mjs"] },
     { command: pnpmBin, args: ["exec", "node", "scripts/build/build-mcp-sidecar.mjs"] },
@@ -166,9 +211,19 @@ function launchArgs(options) {
   return args
 }
 
+function pairArgs(options) {
+  const args = ["pair", "--device-name", options.deviceName || "browser"]
+  if (options.advertiseUrl) args.push("--advertise-url", options.advertiseUrl)
+  args.push("--port", String(options.port))
+  if (options.tenantId) args.push("--tenant-id", options.tenantId)
+  return args
+}
+
 function launchEnvironment(options, paths, secret, env, localDebug) {
   const childEnv = {
     ...env,
+    COGNIA_ALLOWED_WEB_ORIGINS:
+      env.COGNIA_ALLOWED_WEB_ORIGINS?.trim() || DEFAULT_DEVELOPMENT_WEB_ORIGINS,
     COGNIA_BRAIN_ENTRY: paths.brain,
     COGNIA_CODE_SERVER_AGENT_VSIX: paths.codeServerVsix,
     COGNIA_DATA_DIR: paths.dataDir,
@@ -199,6 +254,7 @@ function launchEnvironment(options, paths, secret, env, localDebug) {
 function redactedEnvironment(childEnv) {
   const selected = {}
   for (const key of [
+    "COGNIA_ALLOWED_WEB_ORIGINS",
     "COGNIA_BRAIN_ENTRY",
     "COGNIA_APIFOX_ENV_PATH",
     "COGNIA_CODE_SERVER_AGENT_VSIX",
@@ -333,8 +389,8 @@ function installLocalDebugExitCleanup(environmentPath) {
   }
 }
 
-async function validateSecret(secret) {
-  if (secret.kind === "inline") return
+async function readMasterKey(secret) {
+  if (secret.kind === "inline") return Buffer.from(secret.value, "hex")
   let value
   try {
     value = (await readFile(secret.path, "utf8")).trim()
@@ -344,6 +400,53 @@ async function validateSecret(secret) {
   if (!/^[a-fA-F0-9]{64}$/.test(value)) {
     throw new PreflightError(
       `master key file must contain exactly 64 hexadecimal characters: ${secret.path}`
+    )
+  }
+  return Buffer.from(value, "hex")
+}
+
+async function validateSecret(secret, dataDir, recoverSecretStore = false) {
+  const key = await readMasterKey(secret)
+  const storePath = path.join(dataDir, "cognia", "secret-store.enc")
+  let encrypted
+  try {
+    encrypted = await readFile(storePath)
+  } catch (error) {
+    if (error.code === "ENOENT") return
+    throw new PreflightError(
+      `encrypted secret store is not readable at ${storePath}: ${error.message}`
+    )
+  }
+  if (encrypted.length === 0) return
+  try {
+    if (encrypted.length < 28) throw new Error("encrypted blob is too short")
+    const nonce = encrypted.subarray(0, 12)
+    const authTag = encrypted.subarray(encrypted.length - 16)
+    const ciphertext = encrypted.subarray(12, encrypted.length - 16)
+    const decipher = createDecipheriv("aes-256-gcm", key, nonce)
+    decipher.setAuthTag(authTag)
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+    const entries = JSON.parse(plaintext.toString("utf8"))
+    if (entries === null || Array.isArray(entries) || typeof entries !== "object") {
+      throw new Error("decrypted payload is not a secret map")
+    }
+  } catch {
+    if (recoverSecretStore) {
+      const preservedPath = `${storePath}.unreadable-${Date.now()}`
+      await rename(storePath, preservedPath).catch((error) => {
+        throw new PreflightError(
+          `cannot preserve unreadable secret store at ${storePath}: ${error.message}`
+        )
+      })
+      process.stderr.write(
+        `Preserved unreadable secret store at ${preservedPath}; paired devices and stored ` +
+          `credentials must be configured again.\n`
+      )
+      return
+    }
+    throw new PreflightError(
+      `master key cannot decrypt the encrypted secret store at ${storePath}; restore the original ` +
+        `key or rerun with --recover-secret-store to preserve the unreadable store and start empty`
     )
   }
 }
@@ -376,9 +479,12 @@ async function validateServerArtifact(paths) {
   }
 }
 
-async function prepareSecret(secret, dataDir) {
+async function prepareSecret(secret, dataDir, recoverSecretStore = false) {
   await mkdir(dataDir, { recursive: true, mode: 0o700 })
-  if (secret.kind === "inline") return
+  if (secret.kind === "inline") {
+    await validateSecret(secret, dataDir, recoverSecretStore)
+    return
+  }
   await mkdir(path.dirname(secret.path), { recursive: true, mode: 0o700 })
   try {
     await access(secret.path, fsConstants.R_OK)
@@ -420,7 +526,7 @@ async function prepareSecret(secret, dataDir) {
     }
   }
   if (process.platform !== "win32") await chmod(secret.path, 0o600)
-  await validateSecret(secret)
+  await validateSecret(secret, dataDir, recoverSecretStore)
   if (created) process.stderr.write(`Created persistent development master key: ${secret.path}\n`)
 }
 
@@ -465,6 +571,53 @@ async function buildHeadlessArtifacts(env) {
   }
 }
 
+async function buildPairArtifact(paths, env) {
+  const buildEnv = { ...env }
+  delete buildEnv.COGNIA_MASTER_KEY
+  if (path.basename(path.dirname(paths.server)) === "debug") {
+    buildEnv.CARGO_TARGET_DIR = path.dirname(path.dirname(paths.server))
+  }
+  await runProcess(
+    env.COGNIA_HEADLESS_PNPM_BIN || "pnpm",
+    ["terminal-host:prepare:dev"],
+    "cognia-server pair build",
+    buildEnv
+  )
+}
+
+async function runPairProcess(command, args, env) {
+  let result
+  try {
+    result = await execa(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      reject: false,
+    })
+  } catch (error) {
+    throw new PreflightError(
+      `cognia-server pairing invitation issuer could not start: ${error.message}`
+    )
+  }
+  if (result.exitCode !== 0 || result.signal) {
+    const status = result.signal ? `signal ${result.signal}` : `exit code ${result.exitCode}`
+    throw new PreflightError(`cognia-server pairing invitation issuer failed with ${status}`)
+  }
+  const output = result.stdout || ""
+  if (!/cgnp3\|/.test(output)) {
+    const emittedVersion = /cgnp(\d+)\|/.exec(output)?.[1]
+    throw new PreflightError(
+      `pairing issuer ${
+        emittedVersion ? `returned cgnp${emittedVersion}` : "did not return a Cognia invitation"
+      }; expected a cgnp3 invitation. Rebuild or redeploy cognia-server before pairing.`
+    )
+  }
+  process.stdout.write(output.endsWith("\n") ? output : `${output}\n`)
+  if (result.stderr) {
+    process.stderr.write(result.stderr.endsWith("\n") ? result.stderr : `${result.stderr}\n`)
+  }
+}
+
 async function main() {
   const options = parseCli(process.argv.slice(2))
   if (!options) return
@@ -481,6 +634,17 @@ async function main() {
     )
     return
   }
+  if (options.action === "pair") {
+    await prepareSecret(secret, paths.dataDir)
+    if (!options.skipBuild) await buildPairArtifact(paths, process.env)
+    await validateServerArtifact(paths)
+    await runPairProcess(
+      paths.server,
+      pairArgs(options),
+      tokenEnvironment(paths, secret, process.env)
+    )
+    return
+  }
   if (options.dryRun) {
     process.stdout.write(
       `${JSON.stringify(planFor(options, paths, secret, process.env), null, 2)}\n`
@@ -488,7 +652,7 @@ async function main() {
     return
   }
   if (options.check) {
-    await validateSecret(secret)
+    await validateSecret(secret, paths.dataDir)
     await validateArtifacts(paths)
     process.stdout.write(
       `Headless development artifacts are ready.\n` +
@@ -497,10 +661,10 @@ async function main() {
     )
     return
   }
+  await prepareSecret(secret, paths.dataDir, options.recoverSecretStore)
   if (!options.skipBuild) {
     await buildHeadlessArtifacts(process.env)
   }
-  await prepareSecret(secret, paths.dataDir)
   await validateArtifacts(paths)
   const localDebug = options.localDebug ? createLocalDebugConfig(paths) : undefined
   if (localDebug) await writeLocalDebugEnvironment(options, paths, localDebug)

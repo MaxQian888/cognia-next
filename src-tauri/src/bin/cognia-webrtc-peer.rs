@@ -53,7 +53,7 @@ use app_lib::companion_api::{
     push::PushTokenRegistry, rate_limit::RateLimiter, sync_bridge::SyncBridge,
     sync_registry::SyncTableRegistry, CompanionState, SharedState,
 };
-use cognia_signaling_core::proto::RoomDescriptorV2;
+use cognia_signaling_core::proto::RoomDescriptor;
 use parking_lot::RwLock;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -64,7 +64,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 struct Args {
     signaling_url: String,
     rendezvous_id: String,
-    room_descriptor: RoomDescriptorV2,
+    room_descriptor: RoomDescriptor,
     signing_private_key: String,
     device_id: String,
 }
@@ -251,14 +251,14 @@ async fn main() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{parse_args_from, Args};
-    use cognia_signaling_core::proto::RoomDescriptorV2;
+    use cognia_signaling_core::proto::RoomDescriptor;
 
     #[test]
     fn parses_every_required_harness_argument() {
         assert_eq!(
             parse_args_from([
                 "--signaling",
-                "ws://127.0.0.1:8787/v2/signaling",
+                "ws://127.0.0.1:8787/signaling",
                 "--rid",
                 "room-1",
                 "--room-descriptor",
@@ -269,9 +269,9 @@ mod tests {
                 "device-1",
             ]),
             Ok(Args {
-                signaling_url: "ws://127.0.0.1:8787/v2/signaling".to_string(),
+                signaling_url: "ws://127.0.0.1:8787/signaling".to_string(),
                 rendezvous_id: "room-1".to_string(),
-                room_descriptor: RoomDescriptorV2 {
+                room_descriptor: RoomDescriptor {
                     v: 2,
                     room_id: "room-1".into(),
                     room_nonce: "nonce".into(),

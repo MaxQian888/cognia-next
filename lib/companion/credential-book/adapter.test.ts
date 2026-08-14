@@ -4,10 +4,10 @@
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 
 import {
-  buildRoomDescriptorV2,
-  generatePersistableV2SigningIdentity,
-  generateV2SigningKeyPair,
-} from "@/lib/signaling/v2-crypto"
+  buildRoomDescriptor,
+  generatePersistableSigningIdentity,
+  generateSigningKeyPair,
+} from "@/lib/signaling/crypto"
 
 import { CredentialBookCompanionStorage, toCompanionConfig } from "./adapter"
 import { createCredentialBook } from "./book"
@@ -133,12 +133,12 @@ describe("toCompanionConfig", () => {
   })
 
   async function room(): Promise<{
-    descriptor: Awaited<ReturnType<typeof buildRoomDescriptorV2>>
+    descriptor: Awaited<ReturnType<typeof buildRoomDescriptor>>
     privateKeyJwk: JsonWebKey
   }> {
-    const mobile = await generatePersistableV2SigningIdentity()
-    const desktop = await generateV2SigningKeyPair()
-    const descriptor = await buildRoomDescriptorV2({
+    const mobile = await generatePersistableSigningIdentity()
+    const desktop = await generateSigningKeyPair()
+    const descriptor = await buildRoomDescriptor({
       roomNonce: "AAECAwQFBgcICQoLDA0ODw",
       desktopSigningKey: desktop.encodedPublicKey,
       mobileSigningKey: mobile.encodedPublicKey,

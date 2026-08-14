@@ -2,19 +2,39 @@
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
+import {
+  __resetRuntimeSnapshotForTesting,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
+import {
+  createEmptyHostStateSession,
+  sessionStateChannel,
+} from "@cognia/agent-config-types/host-state"
+import {
   clearDraft,
   DRAFT_ATTACHMENT_QUOTA_BYTES,
   enforceDraftAttachmentQuota,
+  flushDebouncedDraftWrites,
   getDraft,
   setDraft,
   setDraftDebounced,
 } from "./chat-drafts"
 
 beforeEach(async () => {
+  clearActiveRuntimeTargetContext()
+  __resetRuntimeSnapshotForTesting()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+})
+
+afterEach(() => {
+  clearActiveRuntimeTargetContext()
+  __resetRuntimeSnapshotForTesting()
 })
 
 describe("chat-drafts", () => {
@@ -39,6 +59,90 @@ describe("chat-drafts", () => {
     expect(row?.text).toBe("second")
     const all = await getDb().chatDrafts.toArray()
     expect(all).toHaveLength(1)
+  })
+
+  it("increments the shared revision and records safe attachment references", async () => {
+    await setDraft("ses_a", "first", [
+      { name: "notes.md", mediaType: "text/markdown", size: 42, bytes: new Uint8Array([1]) },
+    ])
+    const first = await getDraft("ses_a")
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    await setDraft("ses_a", "second", [], { originClientId: "desktop-client" })
+
+    const second = await getDraft("ses_a")
+    expect(second).toMatchObject({
+      originClientId: "desktop-client",
+      attachmentRefs: [],
+    })
+    expect(second!.revision).toBe(first!.revision! + 1)
+  })
+
+  it("persists an attached draft action before keeping device-local attachment bytes", async () => {
+    const accountId = "acct-draft"
+    const targetId = "desktop-draft"
+    const sessionId = "ses_attached"
+    setActiveRuntimeTargetContext(accountId, targetId)
+    setRuntimeSnapshot({
+      target: { id: targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "offline",
+      host: { compatible: true, operations: ["host_state_submit"], grants: [] },
+    })
+    const channel = sessionStateChannel(targetId, sessionId)
+    await getDb().hostStateChannels.put({
+      channel,
+      hostId: "host-draft",
+      hostGeneration: 3,
+      hostSeq: 4,
+      revision: 5,
+      digest: "digest",
+      state: createEmptyHostStateSession(targetId, sessionId),
+      updatedAt: 1,
+    })
+    const bytes = new Uint8Array([1, 2])
+
+    await setDraft(sessionId, "shared", [
+      { name: "note.txt", mediaType: "text/plain", size: 2, bytes },
+    ])
+
+    const actionRow = (await getDb().mobileOutboundQueue.toArray()).find(
+      (row) => row.protocol === "host-state-v1"
+    )
+    expect(actionRow).toMatchObject({ status: "pending", baseRevision: 5 })
+    expect(actionRow?.payload).toMatchObject({
+      actions: [
+        expect.objectContaining({
+          action: {
+            kind: "draft.replace",
+            text: "shared",
+            attachments: [{ name: "note.txt", mediaType: "text/plain", size: 2 }],
+          },
+        }),
+      ],
+    })
+    expect(Object.values((await getDraft(sessionId))?.attachments?.[0]?.bytes ?? {})).toEqual([
+      1, 2,
+    ])
+
+    await clearDraft(sessionId, { hostAlreadyCleared: true })
+    expect(await getDb().mobileOutboundQueue.count()).toBe(1)
+  })
+
+  it("continues the row's revision instead of regressing below an authority write", async () => {
+    // The HostState authority advances the shared draft revision out of band.
+    await setDraft("ses_a", "from mobile", [], { revision: 41, originClientId: "mobile-a" })
+    expect((await getDraft("ses_a"))?.revision).toBe(41)
+
+    // A purely local composer save must continue that sequence, never restart
+    // from a clock reading that lands underneath it.
+    await setDraft("ses_a", "typed locally")
+    expect((await getDraft("ses_a"))?.revision).toBe(42)
+  })
+
+  it("does not reuse a revision across concurrent local saves", async () => {
+    await setDraft("ses_a", "seed")
+    await Promise.all([setDraft("ses_a", "one"), setDraft("ses_a", "two")])
+    expect((await getDraft("ses_a"))?.revision).toBe(3)
   })
 
   it("setDraft keeps drafts isolated per sessionId", async () => {
@@ -103,8 +207,8 @@ describe("chat-drafts", () => {
       // otherwise the write lands after the delete and the draft reappears.
       await clearDraft("ses_a")
       jest.advanceTimersByTime(500)
-      await Promise.resolve()
-      await Promise.resolve()
+      jest.useRealTimers()
+      await flushDebouncedDraftWrites()
       expect(await getDraft("ses_a")).toBeNull()
     } finally {
       jest.useRealTimers()
@@ -120,9 +224,8 @@ describe("chat-drafts", () => {
       await Promise.resolve()
       expect(await getDraft("ses_a")).toBeNull()
       jest.advanceTimersByTime(1)
-      // flush microtasks queued by the debounced timer callback
-      await Promise.resolve()
-      await Promise.resolve()
+      jest.useRealTimers()
+      await flushDebouncedDraftWrites()
       const row = await getDraft("ses_a")
       expect(row?.text).toBe("typing")
     } finally {
@@ -140,8 +243,8 @@ describe("chat-drafts", () => {
         500
       )
       jest.advanceTimersByTime(500)
-      await Promise.resolve()
-      await Promise.resolve()
+      jest.useRealTimers()
+      await flushDebouncedDraftWrites()
       const row = await getDraft("ses_a")
       expect(row?.attachments).toEqual([{ name: "p.png", mediaType: "image/png", size: 9 }])
     } finally {
@@ -158,8 +261,8 @@ describe("chat-drafts", () => {
       jest.advanceTimersByTime(100)
       setDraftDebounced("ses_a", "v3", [], 500)
       jest.advanceTimersByTime(500)
-      await Promise.resolve()
-      await Promise.resolve()
+      jest.useRealTimers()
+      await flushDebouncedDraftWrites()
       const row = await getDraft("ses_a")
       expect(row?.text).toBe("v3")
     } finally {
@@ -173,8 +276,8 @@ describe("chat-drafts", () => {
       setDraftDebounced("ses_a", "alpha", [], 500)
       setDraftDebounced("ses_b", "beta", [], 500)
       jest.advanceTimersByTime(500)
-      await Promise.resolve()
-      await Promise.resolve()
+      jest.useRealTimers()
+      await flushDebouncedDraftWrites()
       expect((await getDraft("ses_a"))?.text).toBe("alpha")
       expect((await getDraft("ses_b"))?.text).toBe("beta")
     } finally {

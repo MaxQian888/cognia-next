@@ -550,10 +550,7 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             )?;
             if let Some(registrations) = signaling::registration_store::installed() {
                 if let Some(key_ref) = registrations.remove_device(&device_id)? {
-                    cognia_secrets::keyring_secrets::clear(
-                        app_lib::companion_api::signaling::envelope_v2::SIGNALING_KEY_NAMESPACE,
-                        &key_ref,
-                    )?;
+                    app_lib::companion_api::signaling::envelope::clear_signaling_key(&key_ref)?;
                 }
             }
             println!("revoked device {device_id} for tenant {tenant_id}");

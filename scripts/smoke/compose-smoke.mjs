@@ -143,7 +143,7 @@ async function shareRoundtrip() {
   check(gone.status === 404, `GET after delete → 404 (got ${gone.status})`)
 }
 
-function signalingWs(label, url = `${SIGNALING_URL.replace(/^http/, "ws")}/v2/signaling`) {
+function signalingWs(label, url = `${SIGNALING_URL.replace(/^http/, "ws")}/signaling`) {
   const ws = new WebSocket(url)
   const inbox = []
   const waiters = []
@@ -967,7 +967,7 @@ async function tierTls() {
 
   const authConfigResponse = await fetch(`${CADDY_URL}/api/auth/config`)
   const authConfig = await authConfigResponse.json()
-  const expectedSignalingUrl = `${CADDY_URL.replace(/^http/, "ws")}/v2/signaling`
+  const expectedSignalingUrl = `${CADDY_URL.replace(/^http/, "ws")}/signaling`
   check(authConfigResponse.ok, "Caddy exposes /api/auth/config")
   check(
     authConfig?.signaling?.url === expectedSignalingUrl,

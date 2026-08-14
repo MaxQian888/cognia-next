@@ -9,7 +9,7 @@ use axum::{
     Extension, Json, Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use cognia_signaling_core::{proto::RoomDescriptorV2, v2::validate_room_descriptor};
+use cognia_signaling_core::{proto::RoomDescriptor, protocol::validate_room_descriptor};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 
-use super::signaling::envelope_v2::{build_room_descriptor, V2Identity, SIGNALING_KEY_NAMESPACE};
+use super::signaling::envelope::{
+    build_room_descriptor, SignalingIdentity, SIGNALING_KEY_NAMESPACE,
+};
 use super::{
     command_manifest::{CommandApproval, CommandIdempotency, CommandTarget, CommandTransport},
     deployment::{deployment_mode, DeploymentMode},
@@ -160,7 +162,7 @@ fn same_origin_signaling_url(headers: &HeaderMap) -> String {
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.is_empty())
         .unwrap_or("localhost");
-    format!("{scheme}://{host}/v2/signaling")
+    format!("{scheme}://{host}/signaling")
 }
 
 pub async fn require_device_access(
@@ -1115,7 +1117,7 @@ struct WorkerRegisterResponse {
 #[serde(rename_all = "camelCase")]
 struct SignalingRegistrationResponse {
     rendezvous_id: String,
-    room_descriptor: RoomDescriptorV2,
+    room_descriptor: RoomDescriptor,
 }
 
 async fn register_handler(
@@ -1257,7 +1259,7 @@ fn provision_signaling(
     client_public_key: &str,
 ) -> Result<SignalingRegistrationResponse, ApiError> {
     let paired_at_ms = chrono::Utc::now().timestamp_millis();
-    let host_identity = V2Identity::generate();
+    let host_identity = SignalingIdentity::generate();
     let room_nonce = {
         let mut bytes = [0_u8; 16];
         rand::fill(&mut bytes);
@@ -1330,7 +1332,7 @@ fn cleanup_signaling(device_id: &str) -> Result<(), ApiError> {
             .unwrap_or_else(|| device_id.to_string()),
         None => device_id.to_string(),
     };
-    cognia_secrets::keyring_secrets::clear(SIGNALING_KEY_NAMESPACE, &key_ref).map_err(|error| {
+    super::signaling::envelope::clear_signaling_key(&key_ref).map_err(|error| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "signaling_key_cleanup_failed",
@@ -1985,7 +1987,7 @@ mod tests {
         headers.insert("x-forwarded-host", "brain.example".parse().unwrap());
         assert_eq!(
             same_origin_signaling_url(&headers),
-            "wss://brain.example/v2/signaling"
+            "wss://brain.example/signaling"
         );
     }
 

@@ -11,17 +11,24 @@ describe("DeploymentTarget renderer", () => {
   it("keeps self-host signaling on the internal service and public ingress path", () => {
     const compose = parse(readFileSync("deploy/compose/docker-compose.yml", "utf8"))
     expect(compose.services["cognia-server"].environment.COGNIA_SIGNALING_URL).toBe(
-      "${COGNIA_SIGNALING_URL:-ws://signaling:7892/v2/signaling}"
+      "${COGNIA_SIGNALING_URL:-ws://signaling:7892/signaling}"
     )
 
     const ingress = parse(readFileSync("deploy/k8s/base/ingress.yaml", "utf8"))
-    expect(ingress.spec.rules[0].http.paths).toMatchObject([
+    expect(ingress.spec.rules[0].http.paths).toEqual([
+      {
+        path: "/signaling",
+        pathType: "Prefix",
+        backend: { service: { name: "signaling", port: { number: 7892 } } },
+      },
       {
         path: "/v2/signaling",
+        pathType: "Prefix",
         backend: { service: { name: "signaling", port: { number: 7892 } } },
       },
       {
         path: "/",
+        pathType: "Prefix",
         backend: { service: { name: "cognia-server", port: { number: 27890 } } },
       },
     ])
@@ -92,8 +99,8 @@ describe("DeploymentTarget renderer", () => {
     expect(rendered.files["kustomization.yaml"]).toContain("revision-42")
     expect(overlay.configMapGenerator[0].literals).toEqual(
       expect.arrayContaining([
-        "signalingUrl=ws://signaling:7892/v2/signaling",
-        "publicSignalingUrl=wss://server.example.com/v2/signaling",
+        "signalingUrl=ws://signaling:7892/signaling",
+        "publicSignalingUrl=wss://server.example.com/signaling",
       ])
     )
     expect(overlay.resources).toEqual(["namespace.yaml", "../../base"])
@@ -151,8 +158,8 @@ describe("DeploymentTarget renderer", () => {
       environment: {
         COGNIA_CONFIG_REVISION: "revision-8",
         COGNIA_PUBLIC_URL: "https://server.example.com/",
-        COGNIA_SIGNALING_URL: "ws://signaling:7892/v2/signaling",
-        COGNIA_PUBLIC_SIGNALING_URL: "wss://server.example.com/v2/signaling",
+        COGNIA_SIGNALING_URL: "ws://signaling:7892/signaling",
+        COGNIA_PUBLIC_SIGNALING_URL: "wss://server.example.com/signaling",
       },
     })
     if (rendered.topology !== "compose") throw new Error("wrong topology")
