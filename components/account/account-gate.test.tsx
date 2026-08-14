@@ -283,6 +283,68 @@ describe("AccountGate", () => {
     expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
 
+  it("copies the one-time recovery key from the recovery screen", async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    setGateState({
+      accounts: [account("acct_alpha", "Alpha")],
+      activeAccountId: "acct_alpha",
+      unlockedAccountId: "acct_alpha",
+      pendingRecoveryKey: "recovery-key-once",
+    })
+
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "recoveryCopy" }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("recovery-key-once"))
+    expect(screen.getByRole("button", { name: "recoveryCopied" })).toBeInTheDocument()
+  })
+
+  it("downloads the one-time recovery key as a local text file", () => {
+    const createObjectURL = jest.fn(() => "blob:recovery-key")
+    const revokeObjectURL = jest.fn()
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    })
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    })
+    const click = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    setGateState({
+      accounts: [account("acct_alpha", "Alpha")],
+      activeAccountId: "acct_alpha",
+      unlockedAccountId: "acct_alpha",
+      pendingRecoveryKey: "recovery-key-once",
+    })
+
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "recoveryDownload" }))
+
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(click.mock.instances[0]).toMatchObject({
+      download: "cognia-recovery-key.txt",
+      href: "blob:recovery-key",
+    })
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:recovery-key")
+    click.mockRestore()
+  })
+
   it("does not dismiss recovery until first-account runtime activation finishes", async () => {
     let resolveCreate!: (account: LocalAccountRecord) => void
     mockCreateAccount.mockReturnValueOnce(

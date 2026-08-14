@@ -277,6 +277,19 @@ describe("trigger rendering (narrow-container truncation)", () => {
     expect(label).not.toBeNull()
     expect(label.className).toContain("min-w-0")
   })
+
+  it("opens an anchored popover without a modal dialog overlay", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <ModelPicker session={session} />
+      </NextIntlClientProvider>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+
+    expect(document.querySelector('[data-slot="popover-content"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).not.toBeInTheDocument()
+  })
 })
 
 describe("friendly name rendering", () => {

@@ -3,7 +3,7 @@
 import type { FormEvent, ReactNode } from "react"
 import { useId, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { LockKeyholeIcon, UserRoundPlusIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, DownloadIcon, LockKeyholeIcon, UserRoundPlusIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -12,9 +12,11 @@ import { Label } from "@/components/ui/label"
 import { PageLoading } from "@/components/ui/loading-states"
 import { isCapacitor } from "@/lib/tauri"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
+import { downloadFile } from "@/lib/files/download"
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
 import { useAutoLock } from "@/hooks/account/use-auto-lock"
+import { useCopy } from "@/hooks/ui/use-copy"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 
 export interface AccountGateProps {
@@ -41,6 +43,7 @@ export function AccountGate({ children }: AccountGateProps) {
   const [actionError, setActionError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [recoverySaved, setRecoverySaved] = useState(false)
+  const { copied, isCopying, copy } = useCopy({ scope: "account recovery key" })
 
   const targetAccount = useMemo(
     () => activeAccount ?? accounts[0] ?? null,
@@ -79,6 +82,30 @@ export function AccountGate({ children }: AccountGateProps) {
           <code className="select-all break-all rounded-md border bg-muted p-4 font-mono text-sm">
             {pendingRecoveryKey}
           </code>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submitting || isCopying}
+              onClick={() => void copy(pendingRecoveryKey)}
+            >
+              {copied ? (
+                <CheckIcon data-icon="inline-start" />
+              ) : (
+                <CopyIcon data-icon="inline-start" />
+              )}
+              <span aria-live="polite">{t(copied ? "recoveryCopied" : "recoveryCopy")}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submitting}
+              onClick={() => downloadRecoveryKey(pendingRecoveryKey)}
+            >
+              <DownloadIcon data-icon="inline-start" />
+              {t("recoveryDownload")}
+            </Button>
+          </div>
           <div className="flex items-start gap-2">
             <Checkbox
               id={recoverySavedId}
@@ -260,6 +287,10 @@ function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message
   if (typeof error === "string") return error
   return fallback
+}
+
+function downloadRecoveryKey(recoveryKey: string): void {
+  downloadFile("cognia-recovery-key.txt", `${recoveryKey}\n`, "text/plain;charset=utf-8")
 }
 
 export default AccountGate

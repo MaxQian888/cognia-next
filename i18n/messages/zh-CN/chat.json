@@ -451,10 +451,12 @@
         "diagnostics": "诊断",
         "goal": "目标",
         "help": "帮助",
+        "loop": "循环",
         "other": "其他",
         "plugins": "插件",
         "system": "系统",
-        "template": "提示词"
+        "template": "提示词",
+        "workflow": "工作流"
       },
       "comingSoon": "即将上线",
       "fileTitle": "引用文件或文件夹",

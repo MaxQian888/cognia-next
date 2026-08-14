@@ -574,6 +574,23 @@ describe("ComposerPopover — highlight, grouping & pinning", () => {
     expect(screen.getByText("Other")).toBeInTheDocument()
   })
 
+  it("gives section headers consistent separation from the preceding group", () => {
+    setupSlash(slashTrigger(""), {
+      pinnedCommands: ["model"],
+      recentCommands: ["cost"],
+      onTogglePin: jest.fn(),
+    })
+
+    const headers = ["Pinned", "Recent", "Other"].map((label) =>
+      screen.getByText(label).closest("li")
+    )
+    expect(headers.every(Boolean)).toBe(true)
+    for (const header of headers) {
+      expect(header).toHaveClass("mt-2", "py-1.5")
+      expect(header).not.toHaveClass("first:mt-0")
+    }
+  })
+
   it("keyboard nav skips headers — confirm() at index 0 picks the pinned command", () => {
     const { ref, onPick } = setupSlash(slashTrigger(""), {
       pinnedCommands: ["model"],

@@ -3,6 +3,12 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
@@ -48,7 +54,7 @@ import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { listTeams } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
-import { avatarColor } from "@/lib/ui/avatar"
+import { avatarColor, type AvatarSubject } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
 import {
   useUIStore,
@@ -125,6 +131,7 @@ import { useTranslations } from "next-intl"
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -208,15 +215,17 @@ export function ChannelList(props: Props) {
   // shared with the chat-header toggle, the title/status bars, the View menu,
   // and ⌘B, so every surface stays in lockstep. The rail stays mounted and
   // animates its width to 0 — collapsing is smooth and reclaims the WHOLE
-  // column (no leftover strip); the toggle control lives in the active
-  // conversation's header, not here.
+  // column (no leftover strip); the list header exposes the quick-collapse
+  // action while the global shortcut and View menu share the same state.
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
   // Enable the width transition ONLY for the brief collapse/expand animation —
   // never while the user drag-resizes (resize mutates the same `width`, and a
   // live transition would make the drag rubber-band). A short timer clears it.
   const [animatingCollapse, setAnimatingCollapse] = useState(false)
   const prevCollapsedRef = useRef(sidebarCollapsed)
-  useEffect(() => {
+  // This must run before paint: a passive effect lets the browser commit the
+  // new width first, so collapse/expand appears to jump for one frame.
+  useLayoutEffect(() => {
     if (prevCollapsedRef.current === sidebarCollapsed) return
     prevCollapsedRef.current = sidebarCollapsed
     setAnimatingCollapse(true)
@@ -274,6 +283,7 @@ export function ChannelList(props: Props) {
 
   return (
     <aside
+      id="conversation-sidebar"
       className={cn(
         "relative hidden h-full shrink-0 flex-col bg-muted/15 md:flex",
         sidebarCollapsed ? "border-r-0" : "border-r",
@@ -386,6 +396,7 @@ function ChannelListBody({
   const saveSettings = useSettingsStore((s) => s.save)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
+  const showCustomIcons = sidebarSettings?.showCustomIcons ?? true
   const groupBy = resolveConversationGroupBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges ?? true
   const searchScope: ConversationSearchScope = sidebarSettings?.searchScope ?? "title"
@@ -453,7 +464,7 @@ function ChannelListBody({
   }, [sessionStates, showUnreadBadges])
 
   const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
-  const teamById = useMemo(() => new Map(teams.map((item) => [item.id, item])), [teams])
+  const teamById = useMemo(() => new Map((teams ?? []).map((item) => [item.id, item])), [teams])
   const team = chatGuild.kind === "team" ? teamById.get(chatGuild.teamId) : undefined
 
   // Filter the session list by selected guild — but only under `groupBy: "team"`.
@@ -581,6 +592,28 @@ function ChannelListBody({
       return character ? avatarColor(character) : undefined
     },
     [teamById, characterById]
+  )
+
+  const iconFor = useCallback(
+    (s: ChatSession): AvatarSubject | undefined => {
+      if (!showCustomIcons) return undefined
+      const subject =
+        s.kind === "team"
+          ? s.teamId
+            ? teamById.get(s.teamId)
+            : undefined
+          : s.characterId
+            ? characterById.get(s.characterId)
+            : undefined
+      if (!subject) return undefined
+      return {
+        name: subject.name,
+        avatarColor: subject.avatarColor,
+        avatarEmoji: subject.avatarEmoji,
+        avatarImageUrl: "avatarImage" in subject ? subject.avatarImage?.webDataUrl : undefined,
+      }
+    },
+    [characterById, showCustomIcons, teamById]
   )
 
   const metadataBySessionId = useMemo(() => {
@@ -814,6 +847,7 @@ function ChannelListBody({
           view={view}
           density={density}
           showPreview={showPreview}
+          showCustomIcons={showCustomIcons}
           groupBy={groupBy}
           showUnreadBadges={showUnreadBadges}
           searchScope={searchScope}
@@ -888,6 +922,7 @@ function ChannelListBody({
                 isSelected={isSelected}
                 onToggleSelection={handleToggleSelection}
                 accentFor={accentFor}
+                iconFor={iconFor}
                 folders={folders ?? EMPTY_FOLDERS}
                 onSelect={handleSessionSelect}
                 onDelete={onDelete}
@@ -939,9 +974,11 @@ function ChannelListSearch({
 
   return (
     <div className="px-3 pb-2.5">
-      <div className="relative">
-        <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
+      <InputGroup className="h-9 rounded-xl border-transparent bg-muted/60 shadow-none">
+        <InputGroupAddon align="inline-start" className="pr-0 pl-2">
+          <SearchIcon className="size-3.5" aria-hidden />
+        </InputGroupAddon>
+        <InputGroupInput
           ref={inputRef}
           type="search"
           value={value}
@@ -955,23 +992,18 @@ function ChannelListSearch({
           }}
           placeholder={t("searchPlaceholder")}
           aria-label={t("searchAria")}
-          className="h-9 rounded-xl border-transparent bg-muted/60 pr-9 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background"
+          className="h-9 px-2 text-sm [&::-webkit-search-cancel-button]:hidden"
         />
-        {value ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute top-1/2 right-1 size-6 -translate-y-1/2"
-            aria-label={t("clearSearch")}
-            onClick={clear}
-          >
-            <XIcon className="size-3.5" />
-          </Button>
-        ) : (
-          <Kbd className="absolute top-1/2 right-1.5 h-5 -translate-y-1/2">/</Kbd>
-        )}
-      </div>
+        <InputGroupAddon align="inline-end" className="pr-1 pl-0">
+          {value ? (
+            <InputGroupButton size="icon-xs" aria-label={t("clearSearch")} onClick={clear}>
+              <XIcon className="size-3.5" />
+            </InputGroupButton>
+          ) : (
+            <Kbd className="h-5">/</Kbd>
+          )}
+        </InputGroupAddon>
+      </InputGroup>
     </div>
   )
 }
@@ -1018,6 +1050,7 @@ function Header({
   view,
   density,
   showPreview,
+  showCustomIcons,
   groupBy,
   showUnreadBadges,
   searchScope,
@@ -1034,6 +1067,7 @@ function Header({
   view: "active" | "archived"
   density: ConversationSidebarDensity
   showPreview: boolean
+  showCustomIcons: boolean
   groupBy: ConversationGroupBy
   showUnreadBadges: boolean
   searchScope: ConversationSearchScope
@@ -1105,6 +1139,12 @@ function Header({
               onCheckedChange={(checked) => onUpdateDisplay({ showPreview: Boolean(checked) })}
             >
               {t("showPreview")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={showCustomIcons}
+              onCheckedChange={(checked) => onUpdateDisplay({ showCustomIcons: Boolean(checked) })}
+            >
+              {t("showCustomIcons")}
             </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
@@ -1212,6 +1252,7 @@ function ConversationSections({
   isSelected,
   onToggleSelection,
   accentFor,
+  iconFor,
   folders,
   onSelect,
   onDelete,
@@ -1238,6 +1279,7 @@ function ConversationSections({
   isSelected: (id: string) => boolean
   onToggleSelection: (id: string) => void
   accentFor: (session: ChatSession) => string | undefined
+  iconFor: (session: ChatSession) => AvatarSubject | undefined
   folders: SessionFolder[]
   onSelect: (id: string, e: ReactMouseEvent) => void
   onDelete: (id: string) => void | Promise<void>
@@ -1264,6 +1306,7 @@ function ConversationSections({
     metadata: metadataFor(s),
     titleMotion,
     accentColor: accentFor(s),
+    iconSubject: iconFor(s),
     unread: unreadById.get(s.id),
     folders,
     onSelect,

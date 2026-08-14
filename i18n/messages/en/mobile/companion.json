@@ -315,7 +315,7 @@
     "tokenPlaceholder": "eyJ..."
   },
   "webrtc": {
-    "description": "Third transport tier (ADR-0021). Uses signaling v2 role authentication and end-to-end encrypted envelopes, so the rendezvous cannot read SDP or ICE.",
+    "description": "Third transport tier (ADR-0021). Uses role-authenticated signaling and end-to-end encrypted envelopes, so the rendezvous cannot read SDP or ICE.",
     "deviceTier": {
       "awaiting": "Awaiting peer",
       "connected": "Connected",
@@ -338,7 +338,7 @@
     "invalidUrl": "Signaling URL must start with ws:// or wss://",
     "noDevices": "No paired devices with WebRTC enabled yet. Pair a phone running the latest mobile build to populate this list.",
     "pollFailed": "Couldn't read the signaling hub status ({reason}). The device list below may be stale.",
-    "protocolMode": "v2 role-isolated",
+    "protocolMode": "Role-isolated protocol",
     "reconnectButton": "Reconnect",
     "reconnectFailed": "Reconnect failed ({reason}).",
     "reconnectSuccess": "Reconnect requested.",
@@ -349,7 +349,7 @@
     "savingButton": "Saving…",
     "signalingUrlHelp": "WebSocket endpoint for the public rendezvous. Self-hosted deployments swap this for their own URL.",
     "signalingUrlLabel": "Signaling server URL",
-    "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v2/signaling",
+    "signalingUrlPlaceholder": "wss://signaling.cognia.cn/signaling",
     "title": "WebRTC remote access",
     "turnProviderAuthTokenLabel": "Twilio Auth Token",
     "turnProviderCloudflare": "Cloudflare Calls",

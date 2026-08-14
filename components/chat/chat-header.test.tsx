@@ -157,19 +157,37 @@ describe("ChatHeader", () => {
     mockToastError.mockClear()
   })
 
-  // `sidebarCollapsed` used to have four entry points on one screen — this
-  // header, two inside the title bar's layout controls, and the status bar.
-  // The header is not one of them any more; Views / the native View menu / ⌘B
-  // are.
-  it("no longer carries a conversation-list toggle", () => {
+  it("keeps the conversation-list toggle as the first control in the chat header", () => {
     const Wrapper = withAdapter(makeAdapter())
-    render(
+    const { container } = render(
       <Wrapper>
         <ChatHeader session={mkSession()} />
       </Wrapper>
     )
-    expect(screen.queryByTestId("chat-sidebar-toggle")).not.toBeInTheDocument()
-    expect(toggleSidebar).not.toHaveBeenCalled()
+
+    const header = container.querySelector("header")
+    const toggle = screen.getByRole("button", { name: "Collapse conversation list" })
+    expect(header?.firstElementChild).toBe(toggle)
+
+    fireEvent.click(toggle)
+    expect(toggleSidebar).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers the same first-position control to expand a collapsed conversation list", () => {
+    sidebarCollapsed = true
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+
+    const header = container.querySelector("header")
+    const toggle = screen.getByRole("button", { name: "Expand conversation list" })
+    expect(header?.firstElementChild).toBe(toggle)
+
+    fireEvent.click(toggle)
+    expect(toggleSidebar).toHaveBeenCalledTimes(1)
   })
 
   it("keeps the right artifacts-dock toggle", () => {

@@ -34,16 +34,15 @@ import { resolveThinkingLevel } from "@/lib/ai/thinking-level"
 import { EffortSelector } from "./effort-selector"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Command } from "@/components/ui/command"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
-  ModelSelector,
-  ModelSelectorContent,
   ModelSelectorEmpty,
   ModelSelectorGroup,
   ModelSelectorInput,
   ModelSelectorItem,
   ModelSelectorList,
   ModelSelectorSeparator,
-  ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector"
 import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
 
@@ -151,7 +150,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
     optimisticProvider ?? session?.providerOverride ?? defaultProvider ?? "anthropic"
   const autoActive = activeModel === "auto"
 
-  // The dialog content is mounted in a portal after the open state changes, so
+  // The popover content is mounted in a portal after the open state changes, so
   // position from the active item's ref callback instead of an opening effect.
   // The callback stays stable while open and the guard prevents remounts or
   // user interaction from pulling the list back after the initial alignment.
@@ -277,8 +276,8 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   }
 
   return (
-    <ModelSelector open={open} onOpenChange={handleOpenChange}>
-      <ModelSelectorTrigger asChild>
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
         <Button
           variant="ghost"
           size="sm"
@@ -313,106 +312,112 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
           ) : null}
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
-      </ModelSelectorTrigger>
-      <ModelSelectorContent
-        title={t("title")}
+      </PopoverTrigger>
+      <PopoverContent
+        align="center"
+        side="top"
+        sideOffset={8}
+        aria-label={t("title")}
         className="w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0 shadow-xl"
       >
-        <ModelSelectorInput placeholder={t("searchPlaceholder")} />
-        <ModelSelectorList>
-          <ModelSelectorGroup heading={t("routingGroup")}>
-            <ModelSelectorItem
-              ref={autoActive ? positionActiveModelItem : undefined}
-              value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
-              onSelect={handleSelectAuto}
-              className="mx-1 rounded-lg"
-            >
-              <CheckIcon
-                className={cn("mr-2 size-4 shrink-0", autoActive ? "opacity-100" : "opacity-0")}
-              />
-              <BrainIcon className="mr-2 size-4 shrink-0 text-primary" />
-              <span className="flex min-w-0 flex-col">
-                <span className="text-xs">{t("autoModel")}</span>
-                <span className="truncate text-[10px] text-muted-foreground">
-                  {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
+        <Command className="**:data-[slot=command-input-wrapper]:h-auto">
+          <ModelSelectorInput placeholder={t("searchPlaceholder")} />
+          <ModelSelectorList>
+            <ModelSelectorGroup heading={t("routingGroup")}>
+              <ModelSelectorItem
+                ref={autoActive ? positionActiveModelItem : undefined}
+                value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
+                onSelect={handleSelectAuto}
+                className="mx-1 rounded-lg"
+              >
+                <CheckIcon
+                  className={cn("mr-2 size-4 shrink-0", autoActive ? "opacity-100" : "opacity-0")}
+                />
+                <BrainIcon className="mr-2 size-4 shrink-0 text-primary" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-xs">{t("autoModel")}</span>
+                  <span className="truncate text-[10px] text-muted-foreground">
+                    {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
+                  </span>
                 </span>
-              </span>
-            </ModelSelectorItem>
-          </ModelSelectorGroup>
-          <ModelSelectorSeparator />
-          {groups.length === 0 ? (
-            <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
-          ) : (
-            groups.map((group, idx) => (
-              <div key={group.providerId}>
-                {idx > 0 ? <ModelSelectorSeparator /> : null}
-                <ModelSelectorGroup heading={group.providerName}>
-                  {group.models.map((gm) => {
-                    const { id: modelId, name: modelName } = gm
-                    const isActive = modelId === activeModel && group.providerId === activeProvider
-                    const hasMeta =
-                      gm.contextLength !== undefined ||
-                      gm.supportsTools ||
-                      gm.supportsVision ||
-                      gm.supportsReasoning
-                    return (
-                      <ModelSelectorItem
-                        key={`${group.providerId}:${modelId}`}
-                        ref={isActive ? positionActiveModelItem : undefined}
-                        // Include both name and id so the command filter matches
-                        // either the friendly name or the raw id the user types.
-                        value={`${group.providerId} ${modelName} ${modelId}`}
-                        onSelect={() => handleSelect(group.providerId, modelId)}
-                        className="mx-1 rounded-lg"
-                      >
-                        <CheckIcon
-                          className={cn(
-                            "mr-2 size-4 shrink-0",
-                            isActive ? "opacity-100" : "opacity-0"
-                          )}
-                        />
-                        <span className="flex min-w-0 flex-col">
-                          <span className="truncate text-xs">{modelName}</span>
-                          {modelName !== modelId ? (
-                            <span className="truncate font-mono text-[10px] text-muted-foreground">
-                              {modelId}
-                            </span>
-                          ) : null}
-                          {hasMeta ? (
-                            <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                              {gm.contextLength !== undefined ? (
-                                <span title={t("contextWindowLabel")}>
-                                  {formatContextWindow(gm.contextLength)}
-                                </span>
-                              ) : null}
-                              {gm.supportsTools ? (
-                                <WrenchIcon className="size-3" aria-label={t("capTools")} />
-                              ) : null}
-                              {gm.supportsVision ? (
-                                <EyeIcon className="size-3" aria-label={t("capVision")} />
-                              ) : null}
-                              {gm.supportsReasoning ? (
-                                <BrainIcon className="size-3" aria-label={t("capReasoning")} />
-                              ) : null}
-                            </span>
-                          ) : null}
-                        </span>
-                      </ModelSelectorItem>
-                    )
-                  })}
-                </ModelSelectorGroup>
-              </div>
-            ))
-          )}
-        </ModelSelectorList>
-        {/* The thinking level lives here rather than as its own toolbar chip —
+              </ModelSelectorItem>
+            </ModelSelectorGroup>
+            <ModelSelectorSeparator />
+            {groups.length === 0 ? (
+              <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
+            ) : (
+              groups.map((group, idx) => (
+                <div key={group.providerId}>
+                  {idx > 0 ? <ModelSelectorSeparator /> : null}
+                  <ModelSelectorGroup heading={group.providerName}>
+                    {group.models.map((gm) => {
+                      const { id: modelId, name: modelName } = gm
+                      const isActive =
+                        modelId === activeModel && group.providerId === activeProvider
+                      const hasMeta =
+                        gm.contextLength !== undefined ||
+                        gm.supportsTools ||
+                        gm.supportsVision ||
+                        gm.supportsReasoning
+                      return (
+                        <ModelSelectorItem
+                          key={`${group.providerId}:${modelId}`}
+                          ref={isActive ? positionActiveModelItem : undefined}
+                          // Include both name and id so the command filter matches
+                          // either the friendly name or the raw id the user types.
+                          value={`${group.providerId} ${modelName} ${modelId}`}
+                          onSelect={() => handleSelect(group.providerId, modelId)}
+                          className="mx-1 rounded-lg"
+                        >
+                          <CheckIcon
+                            className={cn(
+                              "mr-2 size-4 shrink-0",
+                              isActive ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate text-xs">{modelName}</span>
+                            {modelName !== modelId ? (
+                              <span className="truncate font-mono text-[10px] text-muted-foreground">
+                                {modelId}
+                              </span>
+                            ) : null}
+                            {hasMeta ? (
+                              <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                {gm.contextLength !== undefined ? (
+                                  <span title={t("contextWindowLabel")}>
+                                    {formatContextWindow(gm.contextLength)}
+                                  </span>
+                                ) : null}
+                                {gm.supportsTools ? (
+                                  <WrenchIcon className="size-3" aria-label={t("capTools")} />
+                                ) : null}
+                                {gm.supportsVision ? (
+                                  <EyeIcon className="size-3" aria-label={t("capVision")} />
+                                ) : null}
+                                {gm.supportsReasoning ? (
+                                  <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                                ) : null}
+                              </span>
+                            ) : null}
+                          </span>
+                        </ModelSelectorItem>
+                      )
+                    })}
+                  </ModelSelectorGroup>
+                </div>
+              ))
+            )}
+          </ModelSelectorList>
+          {/* The thinking level lives here rather than as its own toolbar chip —
             it qualifies a model and is meaningless on its own. It self-gates to
             nothing on models that ignore effort, so this block simply does not
             appear for them, and picks its own slider/list presentation from
             `composerBehavior.effortSelectorMode`. */}
-        <EffortSelector session={session} disabled={disabled} />
-      </ModelSelectorContent>
-    </ModelSelector>
+          <EffortSelector session={session} disabled={disabled} />
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }
 

@@ -1021,7 +1021,7 @@ function ComposerInner(props: InnerProps) {
       if (clearAfterSendEnabled) {
         attachments.clear()
         setRestoredAttachments([])
-        if (sessionId) void clearChatDraft(sessionId)
+        if (sessionId) void clearChatDraft(sessionId, { hostAlreadyCleared: true })
       }
       settleFocusAfterSend()
     }

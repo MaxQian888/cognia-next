@@ -64,6 +64,7 @@
     },
     "cancel": "取消",
     "clearSearch": "清空搜索",
+    "collapseSidebar": "折叠会话列表",
     "compactDensity": "紧凑行距",
     "conversationsTitle": "会话",
     "deleteFolder": "删除文件夹",
@@ -76,6 +77,7 @@
     "emptyFolder": "空文件夹——把会话移动到这里。",
     "emptySearch": "没有与「{query}」匹配的会话。",
     "emptyTeam": "还没有会话，从上方开启一个吧。",
+    "expandSidebar": "展开会话列表",
     "folderActions": "文件夹操作",
     "groupBy": {
       "label": "分组方式",
@@ -108,6 +110,7 @@
     "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
     "sectionPinned": "置顶",
     "sectionRecent": "最近",
+    "showCustomIcons": "显示自定义 Agent 和团队图标",
     "showPreview": "显示消息预览",
     "showUnreadBadges": "显示未读角标",
     "teamFallback": "团队",
@@ -651,6 +654,57 @@
     "connOffline": "离线",
     "connOnline": "在线",
     "connReconnecting": "重新连接中…",
+    "connectionCenter": {
+      "actions": {
+        "connectHost": "连接 Host",
+        "reconnect": "立即重连",
+        "recover": "修复连接",
+        "settings": "Companion 设置"
+      },
+      "address": "Host 地址",
+      "auth": {
+        "locked": "已锁定",
+        "unavailable": "不可用",
+        "unlocked": "已解锁"
+      },
+      "authentication": "凭据保险库",
+      "capabilities": "Host 能力",
+      "capabilityCount": "{count, plural, =0 {未发布能力} other {# 项操作}}",
+      "cloudHost": "云端 Host",
+      "desktopHost": "桌面 Host",
+      "hostLink": "Host 链路",
+      "lastConnected": "最近成功连接",
+      "lastError": "最近连接错误",
+      "localRuntime": "本地运行",
+      "network": "设备网络",
+      "networkType": {
+        "cellular": "蜂窝网络",
+        "none": "离线",
+        "unknown": "已连接",
+        "wifi": "Wi-Fi"
+      },
+      "protocol": "协议兼容性",
+      "protocolStatus": {
+        "checking": "检查中",
+        "compatible": "兼容",
+        "incompatible": "不兼容"
+      },
+      "remoteRuntime": "远程 Host",
+      "runtimeTarget": "执行位置",
+      "serverVersion": "Host 版本",
+      "thisBrowser": "当前浏览器",
+      "thisDesktop": "当前桌面",
+      "tier": {
+        "offline": "离线",
+        "rtc-direct": "RTC 直连",
+        "rtc-relay": "RTC 中继",
+        "unknown": "协商中",
+        "ws-lan": "WebSocket · 局域网",
+        "ws-tunnel": "WebSocket · 隧道"
+      },
+      "title": "运行连接",
+      "transport": "传输通道"
+    },
     "error": "错误",
     "idle": "空闲",
     "perf": "性能",

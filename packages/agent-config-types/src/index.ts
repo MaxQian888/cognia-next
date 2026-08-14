@@ -2346,6 +2346,8 @@ export interface ConversationSidebarSettings {
   density?: ConversationSidebarDensity
   /** Show a second line with the last-message preview + relative time. Default off. */
   showPreview?: boolean
+  /** Show each bound Agent/Team's configured image, emoji, and color. Defaults to on. */
+  showCustomIcons?: boolean
   /**
    * @deprecated Superseded by {@link ConversationSidebarSettings.groupBy}. Kept
    * so a settings blob written before the grouping selector landed still means

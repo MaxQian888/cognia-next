@@ -25,6 +25,9 @@ jest.mock("@/hooks/shortcuts/use-app-shortcut", () => ({
 }))
 
 const messages = {
+  browser: {
+    title: "Browser",
+  },
   contextWorkbench: {
     quickSwitch: {
       title: "Switch Panel",
@@ -97,6 +100,17 @@ describe("PanelQuickSwitch", () => {
     expect(screen.getByTestId("panel-quick-switch-item-preview")).toBeInTheDocument()
     expect(screen.getByTestId("panel-quick-switch-item-browser")).toBeInTheDocument()
     expect(screen.getByTestId("panel-quick-switch-item-resource-chat")).toBeInTheDocument()
+  })
+
+  it("resolves native panel labels from their root translation namespace", () => {
+    mockGetActiveWorkbenchPanels.mockReturnValue([
+      { id: "browser", activity: "preview-run", labelKey: "browser.title" },
+    ])
+    renderWithProviders(<PanelQuickSwitch />)
+    const handler = (globalThis as Record<string, unknown>).__quickSwitchHandler as () => void
+    act(() => handler())
+
+    expect(screen.getByText("Browser")).toBeInTheDocument()
   })
 
   it("calls revealActiveWorkbenchPanel and closes on item selection", () => {

@@ -64,6 +64,8 @@ describe("slashGroupLabel", () => {
 
   it("looks up a category by name", () => {
     expect(slashGroupLabel("cat:chat", t, safeLookup)).toBe("categories.chat")
+    expect(slashGroupLabel("cat:loop", t, safeLookup)).toBe("categories.loop")
+    expect(slashGroupLabel("cat:workflow", t, safeLookup)).toBe("categories.workflow")
   })
 
   it("falls back to a capitalized raw category when untranslated", () => {

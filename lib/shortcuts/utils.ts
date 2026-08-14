@@ -41,6 +41,8 @@ export function normalizeKeyCombo(keyCombo: string): Chord {
  * as the platform-canonical "command" modifier.
  */
 export function parseKeyEvent(event: KeyboardEvent): Chord {
+  if (typeof event.key !== "string" || event.key.length === 0) return ""
+
   const parts: string[] = []
 
   if (event.ctrlKey || event.metaKey) parts.push("Ctrl")

@@ -57,17 +57,14 @@ function groupByActivity(
 }
 
 export function PanelQuickSwitch() {
-  const t = useTranslations("contextWorkbench")
+  const t = useTranslations()
+  const tContextWorkbench = useTranslations("contextWorkbench")
   const tQuickSwitch = useTranslations("contextWorkbench.quickSwitch")
   const [open, setOpen] = useState(false)
 
   // Subscribe to the active-context bus so the panel list updates when the
   // user switches workbenches or a plugin registers new panels.
-  useSyncExternalStore(
-    subscribeActiveContext,
-    getActiveContextRevision,
-    getActiveContextRevision
-  )
+  useSyncExternalStore(subscribeActiveContext, getActiveContextRevision, getActiveContextRevision)
 
   const groups = groupByActivity(getActiveWorkbenchPanels())
 
@@ -97,7 +94,7 @@ export function PanelQuickSwitch() {
       <CommandList>
         <CommandEmpty>{tQuickSwitch("empty")}</CommandEmpty>
         {groups.map(({ activity, panels: groupPanels }) => (
-          <CommandGroup key={activity} heading={t(`activities.${activity}`)}>
+          <CommandGroup key={activity} heading={tContextWorkbench(`activities.${activity}`)}>
             {groupPanels.map((panel) => (
               <CommandItem
                 key={panel.id}

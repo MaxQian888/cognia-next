@@ -54,6 +54,16 @@ describe("useAppShortcutDispatcher", () => {
     expect(dispatchShortcut).not.toHaveBeenCalled()
   })
 
+  it("ignores keydown events without a keyboard key", () => {
+    const handler = jest.fn()
+    registerAppShortcut({ id: "app.search.focus", handler })
+
+    window.dispatchEvent(new Event("keydown"))
+
+    expect(handler).not.toHaveBeenCalled()
+    expect(dispatchShortcut).not.toHaveBeenCalled()
+  })
+
   it("does not hijack a keystroke that lands in an editable control", () => {
     const handler = jest.fn()
     registerAppShortcut({ id: "app.search.focus", handler })

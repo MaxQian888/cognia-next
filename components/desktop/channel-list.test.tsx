@@ -3,6 +3,8 @@
  */
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { createRoot } from "react-dom/client"
+import { flushSync } from "react-dom"
 import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 
@@ -84,10 +86,13 @@ jest.mock("@cognia/logging", () => {
   }
 })
 
+const liveQueryUndefined = Symbol("live-query-undefined")
 const callQueue: Array<unknown> = []
 jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: <T,>(_q: () => Promise<T> | T, _d: unknown[], _i: T): T =>
-    (callQueue.shift() ?? _i) as unknown as T,
+  useClientLiveQuery: <T,>(_q: () => Promise<T> | T, _d: unknown[], _i: T): T | undefined => {
+    const value = callQueue.shift()
+    return value === liveQueryUndefined ? undefined : ((value ?? _i) as T)
+  },
 }))
 
 let selectedGuild: SelectedGuild = { kind: "dm" }
@@ -241,6 +246,42 @@ test("DM guild renders only direct sessions, grouped into date buckets", () => {
   expect(screen.queryByText("Squad meeting")).toBeNull()
   // updatedAt: 0 (epoch) → "Older" date-bucket header (no character grouping).
   expect(screen.getByText("bucketOlder")).toBeInTheDocument()
+})
+
+test("renders while team data is loading", () => {
+  callQueue.push(characters, [], liveQueryUndefined)
+
+  expect(() =>
+    render(
+      <ChannelList
+        sessions={[dmSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+  ).not.toThrow()
+})
+
+test("renders a bound character's custom conversation icon", () => {
+  callQueue.push([{ ...characters[0], avatarEmoji: "🐙", avatarColor: "#123456" }], [], undefined)
+
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(screen.getByText("🐙")).toBeInTheDocument()
 })
 
 test("persists a drag-end reorder for the section that contains both conversations", () => {
@@ -536,6 +577,32 @@ describe("collapse (width animation)", () => {
       expect(container.querySelector("aside")).not.toHaveClass("transition-[width]")
     )
   })
+
+  test("commits the width transition before collapsed or expanded widths can paint", () => {
+    callQueue.push(characters, [], undefined)
+    const host = document.createElement("div")
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    flushSync(() => root.render(rail()))
+
+    sidebarCollapsed = true
+    callQueue.push(characters, [], undefined)
+    flushSync(() => root.render(rail()))
+
+    const aside = host.querySelector("aside")
+    expect(aside).toHaveStyle({ width: "0px" })
+    expect(aside).toHaveClass("transition-[width]", "overflow-hidden")
+
+    sidebarCollapsed = false
+    callQueue.push(characters, [], undefined)
+    flushSync(() => root.render(rail()))
+
+    expect(aside).toHaveStyle({ width: "256px" })
+    expect(aside).toHaveClass("transition-[width]", "overflow-hidden")
+
+    act(() => root.unmount())
+    host.remove()
+  })
 })
 
 test("typing in the search box filters to a flat result list", async () => {
@@ -610,6 +677,29 @@ test("the clear button resets the search and restores the list", async () => {
   expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
 })
 
+test("composes search as one input group with one clear action", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  const search = screen.getByLabelText("searchAria")
+  expect(search.closest('[data-slot="input-group"]')).not.toBeNull()
+  expect(search.className).toContain("[&::-webkit-search-cancel-button]:hidden")
+
+  await user.type(search, "max")
+  expect(screen.getAllByLabelText("clearSearch")).toHaveLength(1)
+})
+
 test("Escape clears an active search and restores the grouped list", async () => {
   callQueue.push(characters, [], undefined)
   const user = userEvent.setup()
@@ -652,6 +742,11 @@ test.each([
     label: "showPreview",
     initial: { showPreview: false },
     expected: { showPreview: true },
+  },
+  {
+    label: "showCustomIcons",
+    initial: { showCustomIcons: true },
+    expected: { showCustomIcons: false },
   },
   {
     label: "showUnreadBadges",

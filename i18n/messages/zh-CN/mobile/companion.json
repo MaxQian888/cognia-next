@@ -315,7 +315,7 @@
     "tokenPlaceholder": "eyJ..."
   },
   "webrtc": {
-    "description": "第三层传输通道（ADR-0021）。使用信令 v2 角色认证和端到端加密信封，汇合服务无法读取 SDP 或 ICE。",
+    "description": "第三层传输通道（ADR-0021）。使用角色认证信令和端到端加密信封，汇合服务无法读取 SDP 或 ICE。",
     "deviceTier": {
       "awaiting": "等待对端",
       "connected": "已连接",
@@ -338,7 +338,7 @@
     "invalidUrl": "信令 URL 必须以 ws:// 或 wss:// 开头",
     "noDevices": "暂无启用 WebRTC 的已配对设备。用最新版移动端重新配对一台手机，这里就会出现。",
     "pollFailed": "无法读取信令枢纽状态（{reason}）。下方设备列表可能过期。",
-    "protocolMode": "v2 角色隔离",
+    "protocolMode": "角色隔离协议",
     "reconnectButton": "重连",
     "reconnectFailed": "重连失败（{reason}）。",
     "reconnectSuccess": "已发起重连。",
@@ -349,7 +349,7 @@
     "savingButton": "保存中…",
     "signalingUrlHelp": "公共汇合点的 WebSocket 接入地址。自部署时替换为你自己的 URL。",
     "signalingUrlLabel": "信令服务器 URL",
-    "signalingUrlPlaceholder": "wss://signaling.cognia.cn/v2/signaling",
+    "signalingUrlPlaceholder": "wss://signaling.cognia.cn/signaling",
     "title": "WebRTC 远程访问",
     "turnProviderAuthTokenLabel": "Twilio Auth Token",
     "turnProviderCloudflare": "Cloudflare Calls",

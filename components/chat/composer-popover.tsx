@@ -660,7 +660,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
                   {header ? (
                     <li
                       aria-hidden
-                      className="sticky top-0 bg-popover/95 px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground backdrop-blur-sm"
+                      className="sticky top-0 mt-2 bg-popover/95 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground backdrop-blur-sm"
                     >
                       {header}
                     </li>

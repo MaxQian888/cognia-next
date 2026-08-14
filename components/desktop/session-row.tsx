@@ -5,6 +5,7 @@ import { listSessionBranches } from "@/lib/db/sessions"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { HoverScrollText } from "@/components/chat/ui/hover-scroll-text"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import type { AvatarSubject } from "@/lib/ui/avatar"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import type {
@@ -91,6 +93,8 @@ export interface SessionRowProps {
   active: boolean
   /** Optional dot color (assistant character avatarColor) shown left of title. */
   accentColor?: string
+  /** Resolved Agent/Team identity rendered in preference to the generic icon. */
+  iconSubject?: AvatarSubject
   /** Optional unread count → shows a badge. */
   unread?: number
   /**
@@ -167,6 +171,7 @@ function SessionRowImpl({
   session,
   active,
   accentColor,
+  iconSubject,
   unread,
   selected = false,
   onSelect,
@@ -412,7 +417,9 @@ function SessionRowImpl({
           onDoubleClick={() => setEditing(true)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          {accentColor ? (
+          {iconSubject ? (
+            <AvatarBadge subject={iconSubject} size={18} textClassName="text-[10px]" />
+          ) : accentColor ? (
             <span
               className="size-2 shrink-0 rounded-full"
               style={{ backgroundColor: accentColor }}

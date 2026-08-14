@@ -65,6 +65,11 @@ describe("parseKeyEvent", () => {
     expect(parseKeyEvent(event)).toBe("Ctrl+Shift+Space")
     expect(normalizeKeyCombo(parseKeyEvent(event))).toBe("ctrl+shift+space")
   })
+
+  it("ignores events without a key", () => {
+    const event = { ctrlKey: true, key: undefined } as unknown as KeyboardEvent
+    expect(parseKeyEvent(event)).toBe("")
+  })
 })
 
 describe("formatKeybinding", () => {

@@ -64,6 +64,7 @@
     },
     "cancel": "Cancel",
     "clearSearch": "Clear search",
+    "collapseSidebar": "Collapse conversation list",
     "compactDensity": "Compact rows",
     "conversationsTitle": "Conversations",
     "deleteFolder": "Delete folder",
@@ -76,6 +77,7 @@
     "emptyFolder": "Empty — move conversations here.",
     "emptySearch": "No conversations match “{query}”.",
     "emptyTeam": "No conversations yet. Start one above.",
+    "expandSidebar": "Expand conversation list",
     "folderActions": "Folder actions",
     "groupBy": {
       "label": "Group by",
@@ -108,6 +110,7 @@
     "searchTruncated": "Some results may be hidden — refine your search.",
     "sectionPinned": "Pinned",
     "sectionRecent": "Recent",
+    "showCustomIcons": "Show custom Agent and Team icons",
     "showPreview": "Show message previews",
     "showUnreadBadges": "Show unread badges",
     "teamFallback": "Team",
@@ -651,6 +654,57 @@
     "connOffline": "Offline",
     "connOnline": "Online",
     "connReconnecting": "Reconnecting…",
+    "connectionCenter": {
+      "actions": {
+        "connectHost": "Connect Host",
+        "reconnect": "Reconnect now",
+        "recover": "Repair connection",
+        "settings": "Companion settings"
+      },
+      "address": "Host address",
+      "auth": {
+        "locked": "Locked",
+        "unavailable": "Unavailable",
+        "unlocked": "Unlocked"
+      },
+      "authentication": "Credential vault",
+      "capabilities": "Host capabilities",
+      "capabilityCount": "{count, plural, =0 {None advertised} one {# operation} other {# operations}}",
+      "cloudHost": "Cloud Host",
+      "desktopHost": "Desktop Host",
+      "hostLink": "Host link",
+      "lastConnected": "Last connected",
+      "lastError": "Latest connection error",
+      "localRuntime": "Local runtime",
+      "network": "Device network",
+      "networkType": {
+        "cellular": "Cellular",
+        "none": "Offline",
+        "unknown": "Connected",
+        "wifi": "Wi-Fi"
+      },
+      "protocol": "Protocol compatibility",
+      "protocolStatus": {
+        "checking": "Checking",
+        "compatible": "Compatible",
+        "incompatible": "Incompatible"
+      },
+      "remoteRuntime": "Remote Host",
+      "runtimeTarget": "Execution",
+      "serverVersion": "Host version",
+      "thisBrowser": "This browser",
+      "thisDesktop": "This desktop",
+      "tier": {
+        "offline": "Offline",
+        "rtc-direct": "RTC direct",
+        "rtc-relay": "RTC relay",
+        "unknown": "Negotiating",
+        "ws-lan": "WebSocket · LAN",
+        "ws-tunnel": "WebSocket · tunnel"
+      },
+      "title": "Runtime connection",
+      "transport": "Transport"
+    },
     "error": "Error",
     "idle": "Idle",
     "perf": "Performance",

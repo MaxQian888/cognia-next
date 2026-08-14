@@ -7,6 +7,8 @@ import {
   ExternalLinkIcon,
   KeyRoundIcon,
   Loader2Icon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   Settings2Icon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -25,6 +27,7 @@ import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
 import { isTauri } from "@/lib/tauri"
+import { useUIStore } from "@/stores/ui"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 interface Props {
@@ -39,20 +42,22 @@ interface Props {
  * two controls.
  *
  * It carried six icon buttons and a two-line title. Everything that was not
- * touched per turn moved to where it belongs: the sidebar toggle to Views (it
- * had four entry points driving one field), the browser-dock opener into the
+ * touched per turn moved to where it belongs: the browser-dock opener into the
  * artifact dock's own menu, the agent-flow density switch to the settings sheet
- * that already had a copy of it, and Insights to a row in the same sheet.
+ * that already had a copy of it, and Insights to a row in the same sheet. The
+ * conversation-list toggle stays first so it remains reachable after collapse.
  *
  * What stays is either ambient status that self-hides (live cost, plan-mode
  * tasks, the no-credential badge, the `chat.header` plugin slot) or the single
- * owner of a frequent action: `⚙` for this session's settings, and the toggle
- * for the pane on the right.
+ * owner of a frequent action: session settings and the two pane toggles.
  */
 export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }: Props) {
   const t = useTranslations("chat.header")
   const tConcurrent = useTranslations("chat.concurrent")
+  const tChannelList = useTranslations("desktop.channelList")
   const character = useCharacter(session.characterId)
+  const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
+  const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   // Reactive credential status (api key OR subscription bearer). Re-reads on
   // profile unlock and subscription-changed broadcasts, so the badge never
   // latches a stale "No API key" for a subscription-reuse user whose bearer
@@ -81,6 +86,23 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
 
   return (
     <header className="flex h-9 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="hidden size-7 shrink-0 md:inline-flex"
+        aria-label={tChannelList(sidebarCollapsed ? "expandSidebar" : "collapseSidebar")}
+        aria-controls="conversation-sidebar"
+        aria-expanded={!sidebarCollapsed}
+        data-testid="chat-sidebar-toggle"
+        onClick={toggleSidebar}
+      >
+        {sidebarCollapsed ? (
+          <PanelLeftOpenIcon className="size-4" />
+        ) : (
+          <PanelLeftCloseIcon className="size-4" />
+        )}
+      </Button>
+
       <div className="flex flex-1 items-center gap-2 truncate">
         {character && (
           <Avatar className="size-6 shrink-0" title={characterTooltip}>
@@ -169,7 +191,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
         </Button>
       )}
 
-      {/* Three persistent buttons in Tauri, down from six. The browser-dock opener moved into the
+      {/* Persistent end controls. The browser-dock opener moved into the
           artifact dock's own menu, the agent-flow density switch already had a
           copy in the settings sheet and the appearance settings, and Insights
           became a row inside the sheet — none of the three is touched per turn.

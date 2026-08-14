@@ -76,6 +76,19 @@ test("renders title and clicking the row selects the session", async () => {
   )
 })
 
+test("renders a custom avatar subject in place of the generic session icon", () => {
+  setup({
+    iconSubject: {
+      name: "Octopus",
+      avatarEmoji: "🐙",
+      avatarColor: "#123456",
+    },
+  })
+
+  const avatar = screen.getByText("🐙").closest("span")
+  expect(avatar).toHaveStyle({ backgroundColor: "#123456" })
+})
+
 test("scrolls a truncated conversation title without opening a native hover bubble", () => {
   const title = "A conversation title that is much wider than the sidebar"
   setup({ session: { ...baseSession, title } })
