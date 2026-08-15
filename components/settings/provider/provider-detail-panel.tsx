@@ -108,7 +108,9 @@ export function ProviderDetailPanel({
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b px-4 py-3 shrink-0">
+      {/* `flex-wrap`: on a narrow pane (mobile, or a wide rail) the action
+          cluster drops under the title instead of squeezing it to nothing. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
         {hasBrandIcon(provider.id) || provider.icon == null ? (
           <ProviderIcon providerId={provider.id} label={provider.name} size={40} />
         ) : (
@@ -116,7 +118,7 @@ export function ProviderDetailPanel({
             {provider.icon}
           </div>
         )}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[8rem] flex-1">
           <h3 className="truncate text-base font-semibold">{provider.name}</h3>
           <p className="truncate text-xs text-muted-foreground">
             {t("detailPanel.modelsAvailable", { count: provider.modelCount ?? 0 })}
@@ -125,7 +127,7 @@ export function ProviderDetailPanel({
         {/* Own TooltipProvider so the panel is self-sufficient in stories and
             tests; nesting inside the app-level provider is harmless. */}
         <TooltipProvider>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             {isDefault ? (
               <Badge variant="secondary" data-testid="provider-default-badge" className="gap-1">
                 <Star className="h-3 w-3" />

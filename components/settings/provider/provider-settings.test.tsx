@@ -1303,9 +1303,9 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       selectedProviderId: "openai",
     })
     render(<ProviderSettings />)
-    const advancedTab = screen.getByTestId("provider-detail-advanced-tab")
-    expect(advancedTab).toHaveTextContent(
-      "Configure this provider in the Config tab to enable parameters."
+    // The i18n mock renders "", so assert on the placeholder element itself.
+    expect(screen.getByTestId("provider-detail-advanced-tab")).toContainElement(
+      screen.getByTestId("parameters-placeholder")
     )
   })
 
@@ -1361,8 +1361,8 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       selectedProviderId: "deleted-provider",
     })
     render(<ProviderSettings />)
-    expect(screen.getByTestId("provider-detail-config-tab")).toHaveTextContent(
-      "Unknown provider type."
+    expect(screen.getByTestId("provider-detail-config-tab")).toContainElement(
+      screen.getByTestId("unknown-provider-placeholder")
     )
   })
 

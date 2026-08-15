@@ -126,21 +126,16 @@ describe("ProviderSidebar", () => {
     expect(screen.queryByRole("tab", { name: "Voice" })).not.toBeInTheDocument()
   })
 
-  it("offers a sort menu wired to the persisted preference", () => {
+  it("offers a sort menu wired to the persisted preference", async () => {
     const onSortByChange = jest.fn()
     render(<ProviderSidebar {...defaultProps} sortBy="name" onSortByChange={onSortByChange} />)
-    fireEvent.pointerDown(screen.getByTestId("provider-sort-trigger"))
-    fireEvent.click(screen.getByTestId("provider-sort-trigger"))
-    // Radix opens the menu on pointer/keyboard; either path lands the items.
-    const statusItem = screen.queryByTestId("provider-sort-status")
-    if (statusItem) {
-      fireEvent.click(statusItem)
-      expect(onSortByChange).toHaveBeenCalledWith("status")
-    } else {
-      // Menu content is portaled lazily in jsdom; the trigger itself is enough
-      // to prove the affordance renders when the callback is supplied.
-      expect(screen.getByTestId("provider-sort-trigger")).toBeInTheDocument()
-    }
+    const trigger = screen.getByTestId("provider-sort-trigger")
+    // Radix opens the menu on a primary-button pointerdown; keyboard works too.
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" })
+    fireEvent.keyDown(trigger, { key: "Enter" })
+    const statusItem = await screen.findByTestId("provider-sort-status")
+    fireEvent.click(statusItem)
+    expect(onSortByChange).toHaveBeenCalledWith("status")
   })
 
   it("hides the sort menu when no handler is supplied", () => {
@@ -148,17 +143,20 @@ describe("ProviderSidebar", () => {
     expect(screen.queryByTestId("provider-sort-trigger")).not.toBeInTheDocument()
   })
 
-  it("fits the category tab strip to the rail instead of overflowing it", () => {
+  it("wraps the category tabs inside the rail instead of overflowing or truncating them", () => {
     const { container } = render(<ProviderSidebar {...defaultProps} />)
     const list = container.querySelector('[data-slot="tabs-list"]')
-    // The strip used to be `w-max` inside an `overflow-x-auto` wrapper, so the
-    // last category was clipped by the rail's right edge with no visible
-    // scroll affordance. Triggers now share the width and truncate.
-    expect(list).toHaveClass("w-full", "min-w-0")
+    // The strip used to be `w-max` inside an `overflow-x-auto` wrapper (last
+    // tab clipped), then an equal-share strip (labels truncated to "Flag…").
+    // Pills now wrap onto a second line on a narrow rail; no label is cut.
+    expect(list).toHaveClass("w-full", "min-w-0", "flex-wrap")
     expect(list).not.toHaveClass("w-max")
     const triggers = container.querySelectorAll('[data-slot="tabs-trigger"]')
     expect(triggers.length).toBeGreaterThan(0)
-    triggers.forEach((trigger) => expect(trigger).toHaveClass("min-w-0", "flex-1"))
+    triggers.forEach((trigger) => {
+      expect(trigger).toHaveClass("flex-none")
+      expect(trigger).not.toHaveClass("truncate")
+    })
   })
 
   it("keeps the provider rows inside the rail width", () => {

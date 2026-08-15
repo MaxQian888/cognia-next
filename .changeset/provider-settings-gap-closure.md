@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Provider settings gap closure. Wire the built-but-dormant pieces of the AI Connections page and fix the paths that silently did nothing: the model-level comparison view (rail "Model Compare"), difficulty routing (was selectable but unconfigurable), the readiness setup checklist with next-action hints, "Retry failed" batch verification, a sortable / drag-resizable provider rail with catalog-true categories (Flagship · Specialized · Aggregators · Local · Custom), draft-buffered credential inputs (no settings write per keystroke), persisted verification shown after a reload (incl. "stale" after a key change), Responses/Chat flavor + transport-headers editors for built-in providers, and headers / parameter-tab knobs / usage rollups that now actually reach the runtime and the Cost tab. OpenRouter OAuth completes on desktop, mobile and web; the CLIProxyAPI panel no longer loops its auto-test and uses the proxied fetch; local engines pause polling when hidden and only persist changed discoveries; companion and mobile hosts get a notice explaining what the page controls. Eleven superseded provider components were removed.

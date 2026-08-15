@@ -586,8 +586,10 @@ export function ProviderComparisonView({
               <span className="mr-1 text-emerald-500">
                 <Check className="inline h-4 w-4" />
               </span>
-              {t("comparison.bestValue")}:{" "}
-              <span className="font-semibold">{bestValueModel.modelName}</span>
+              {/* The message carries the model name itself ("Best value: {model}"). */}
+              <span className="font-semibold" data-testid="comparison-best-value">
+                {t("comparison.bestValue", { model: bestValueModel.modelName })}
+              </span>
               {bestValueModel.entry.pricing && (
                 <span className="ml-1 text-xs text-emerald-600 dark:text-emerald-400">
                   {t("comparison.averagePricePerMillion", {

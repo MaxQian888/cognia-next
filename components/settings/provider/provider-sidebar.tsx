@@ -168,36 +168,38 @@ export function ProviderSidebar({
         {addButton}
       </div>
 
-      {/* Category filters. These used to sit in an `overflow-x-auto` strip with
-          a `w-max` list, which meant the last tab ("Custom") was simply cut off
-          by the rail's right edge with no visible affordance — the strip looked
-          like broken layout rather than something scrollable. The tabs now
-          *divide* the rail instead of overflowing it: each trigger flexes to an
-          equal share and truncates, so all six stay reachable at any width. */}
+      {/* Category filters. An equal-share strip truncated every label longer
+          than ~6 characters at the default rail width ("Flag…", "Aggr…"), and
+          an overflow strip hid the last tab entirely. Wrapping pills keep
+          every label legible: they take a second line on a narrow rail instead
+          of eating characters, and stay one line once the rail is widened. */}
       <div className="min-w-0 border-b px-3 py-2">
         <Tabs value={categoryFilter} onValueChange={onCategoryChange} className="min-w-0">
-          <TabsList className="flex h-8 w-full min-w-0">
+          {/* `h-auto!` / `overflow-visible!`: the shared TabsList pins a 36px
+              height for horizontal tabs and the settings panel adds
+              overflow-x-auto — together they clipped the wrapped second row. */}
+          <TabsList className="flex h-auto! w-full min-w-0 flex-wrap justify-start gap-1 overflow-visible! bg-transparent p-0">
             {CATEGORY_KEYS.map((key) => (
               <TabsTrigger
                 key={key}
                 value={key}
                 title={t(`categories.${key}`)}
-                className="min-w-0 flex-1 truncate px-1 text-xs"
+                className="h-7 flex-none rounded-md border border-transparent px-2 text-xs data-[state=active]:border-border data-[state=active]:bg-muted data-[state=active]:shadow-none"
               >
-                <span className="truncate">{t(`categories.${key}`)}</span>
+                {t(`categories.${key}`)}
               </TabsTrigger>
             ))}
           </TabsList>
         </Tabs>
       </div>
 
-      {/* Status filter — same treatment: share the width, never exceed it. */}
+      {/* Status filter — same treatment: wrap, never truncate. */}
       <div
         className="min-w-0 border-b px-3 py-2"
         role="group"
         aria-label={t("sidebar.statusLabel")}
       >
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
           {STATUS_FILTERS.map(({ value, key }) => (
             <Button
               key={value}
@@ -206,10 +208,10 @@ export function ProviderSidebar({
               variant={statusFilter === value ? "secondary" : "ghost"}
               aria-pressed={statusFilter === value}
               title={t(`sidebar.${key}`)}
-              className={cn("h-7 min-w-0 flex-1 px-1 text-xs")}
+              className="h-7 flex-none px-2 text-xs"
               onClick={() => onStatusFilterChange?.(value)}
             >
-              <span className="truncate">{t(`sidebar.${key}`)}</span>
+              {t(`sidebar.${key}`)}
             </Button>
           ))}
         </div>

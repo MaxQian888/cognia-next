@@ -661,6 +661,18 @@
   "local": "本地",
   "localProvider": "本地",
   "localProviderApiKeyHint": "用于受保护本地端点的可选 API Key。",
+  "localProviderDescriptions": {
+    "jan": "开源的 ChatGPT 替代品",
+    "koboldcpp": "易用的 llama.cpp 分支",
+    "llamacpp": "高性能 C++ 推理服务器",
+    "llamafile": "单文件可执行的本地 LLM 服务",
+    "lmstudio": "运行本地大模型的桌面应用",
+    "localai": "自托管的 OpenAI 替代方案",
+    "ollama": "在本机运行开源模型",
+    "tabbyapi": "Exllamav2 API 服务器",
+    "textgenwebui": "带 OpenAI 兼容 API 的 Gradio 界面",
+    "vllm": "高吞吐 GPU 推理引擎"
+  },
   "localProvidersDescription": "在本地运行 AI 模型",
   "localProvidersTitle": "本地提供商",
   "localai": "LocalAI",
@@ -858,6 +870,7 @@
   "protocolOpenAIDesc": "OpenAI 兼容 API（最常用）",
   "protocolPluginDesc": "由插件 {plugin} 提供",
   "provider": "服务商",
+  "providerDocumentation": "{provider} 文档",
   "providerGroups": {
     "advanced": "进阶",
     "advancedDesc": "面向高级用户与服务器运行时",

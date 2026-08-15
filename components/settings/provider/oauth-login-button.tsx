@@ -329,28 +329,38 @@ export function OAuthLoginButton({
   }
 
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant={variant}
-            size={size}
-            onClick={handleLogin}
-            disabled={isLoading}
-            className={className}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-            ) : error ? (
-              <AlertCircle className="h-4 w-4 mr-1 text-destructive" />
-            ) : (
-              <LogIn className="h-4 w-4 mr-1" />
-            )}
-            {t("oauthLogin")}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{error || t("oauthLoginHint", { provider: provider.name })}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <div className="flex flex-col items-start gap-1.5">
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={variant}
+              size={size}
+              onClick={handleLogin}
+              disabled={isLoading}
+              className={className}
+              data-testid="oauth-button"
+            >
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : error ? (
+                <AlertCircle className="h-4 w-4 mr-1 text-destructive" />
+              ) : (
+                <LogIn className="h-4 w-4 mr-1" />
+              )}
+              {t("oauthLogin")}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("oauthLoginHint", { provider: provider.name })}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      {/* Failures used to live only in the hover tooltip, so a denied consent
+          or a failed exchange looked like nothing happened. */}
+      {error ? (
+        <p className="text-xs text-destructive" role="alert" data-testid="oauth-error">
+          {error}
+        </p>
+      ) : null}
+    </div>
   )
 }

@@ -233,7 +233,7 @@ function CustomProviderInlineConfig({
       <div className="space-y-2">
         <Label className="flex items-center gap-1.5 text-sm font-medium">
           <Key className="h-3.5 w-3.5" />
-          {t("configTab.apiKeyLabel") || "API Key"}
+          {t("configTab.apiKeyLabel")}
         </Label>
         <div className="relative">
           <Input
@@ -242,7 +242,7 @@ function CustomProviderInlineConfig({
             onChange={(e) => apiKeyField.onChange(e.target.value)}
             onBlur={apiKeyField.onBlur}
             onKeyDown={apiKeyField.onKeyDown}
-            placeholder={t("configTab.apiKeyPlaceholder") || "Enter your API key"}
+            placeholder={t("configTab.apiKeyPlaceholder")}
             className="pr-10"
             autoComplete="new-password"
             data-lpignore="true"
@@ -268,7 +268,7 @@ function CustomProviderInlineConfig({
       <div className="space-y-2">
         <Label className="flex items-center gap-1.5 text-sm font-medium">
           <Globe className="h-3.5 w-3.5" />
-          {t("baseURL") || "Base URL"}
+          {t("baseURL")}
         </Label>
         <Input
           type="text"
@@ -285,10 +285,10 @@ function CustomProviderInlineConfig({
       {/* Default model */}
       {cp.customModels && cp.customModels.length > 0 && (
         <div className="space-y-2">
-          <Label className="text-sm font-medium">{t("defaultModel") || "Default Model"}</Label>
+          <Label className="text-sm font-medium">{t("defaultModel")}</Label>
           <Select value={cp.defaultModel ?? ""} onValueChange={onDefaultModelChange}>
             <SelectTrigger className="h-9 text-sm">
-              <SelectValue placeholder={t("selectModel") || "Select model"} />
+              <SelectValue placeholder={t("selectModel")} />
             </SelectTrigger>
             <SelectContent>
               {cp.customModels.map((modelId: string) => (
@@ -365,7 +365,7 @@ function CustomProviderInlineConfig({
             data-testid="custom-provider-edit"
           >
             <Settings className="h-3 w-3" />
-            {t("editCustomProvider") || "Edit"}
+            {t("editCustomProvider")}
           </Button>
         </div>
       </div>
@@ -1082,9 +1082,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         <div className="flex items-center gap-1.5">
           <Button size="sm" variant="outline" onClick={() => setShowQuickAdd(true)}>
             <Plus className="mr-1 h-4 w-4" />
-            <span className="sr-only @[420px]/provider-rail:not-sr-only">
-              {t("addProvider" as never) as string}
-            </span>
+            <span className="sr-only @[420px]/provider-rail:not-sr-only">{t("addProvider")}</span>
           </Button>
           <ProviderImportExport compact />
         </div>
@@ -1516,8 +1514,11 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                       {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
                     </div>
                   ) : (
-                    <div className="text-sm text-muted-foreground">
-                      {t("unknownProviderType") || "Unknown provider type."}
+                    <div
+                      className="text-sm text-muted-foreground"
+                      data-testid="unknown-provider-placeholder"
+                    >
+                      {t("unknownProviderType")}
                     </div>
                   )
                 }
@@ -1538,8 +1539,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                     // The Models slot is fill-height (it owns its own scroller),
                     // so these text fallbacks bring their own padding.
                     <div className="p-4 text-sm text-muted-foreground">
-                      {t("customProviderModelsManaged") ||
-                        "Custom-provider models are managed inside the provider editor."}
+                      {t("customProviderModelsManaged")}
                     </div>
                   ) : selectedBuiltIn ? (
                     <ProviderModelsTab
@@ -1558,7 +1558,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                     />
                   ) : (
                     <div className="p-4 text-sm text-muted-foreground">
-                      {t("noModelsAvailable") || "No models available."}
+                      {t("noModelsAvailable")}
                     </div>
                   )
                 }
@@ -1586,7 +1586,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                       <ProviderSection
                         collapsible
                         icon={SlidersHorizontal}
-                        title={t("tabs.parameters" as never) as string}
+                        title={t("tabs.parameters")}
                       >
                         {selectedSettings ? (
                           <ProviderParametersTab
@@ -1594,9 +1594,11 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                             settings={selectedSettings}
                           />
                         ) : (
-                          <div className="py-4 text-center text-xs text-muted-foreground">
-                            {t("configureProviderForParameters") ||
-                              "Configure this provider in the Config tab to enable parameters."}
+                          <div
+                            className="py-4 text-center text-xs text-muted-foreground"
+                            data-testid="parameters-placeholder"
+                          >
+                            {t("configureProviderForParameters")}
                           </div>
                         )}
                       </ProviderSection>
@@ -1604,7 +1606,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                         collapsible
                         defaultOpen={false}
                         icon={Route}
-                        title={t("tabs.routing" as never) as string}
+                        title={t("tabs.routing")}
                       >
                         <RoutingTab />
                       </ProviderSection>

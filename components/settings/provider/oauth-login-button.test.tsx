@@ -52,11 +52,18 @@ jest.mock("@/lib/tauri/deep-link", () => ({
 jest.mock("@/lib/tauri/safe-unlisten", () => ({
   safeUnlisten: (fn: (() => void) | null) => fn?.(),
 }))
+let capacitorRouteHandler: ((route: { raw: string }) => void) | null = null
 jest.mock("@/lib/capacitor/deeplink", () => ({
   getLaunchRoute: async () => null,
-  subscribe: async () => () => {},
+  subscribe: async (handler: (route: { raw: string }) => void) => {
+    capacitorRouteHandler = handler
+    return () => {
+      capacitorRouteHandler = null
+    }
+  },
 }))
-jest.mock("@/lib/capacitor/browser", () => ({ close: async () => undefined }))
+const mockCloseCapacitorBrowser = jest.fn(async () => undefined)
+jest.mock("@/lib/capacitor/browser", () => ({ close: () => mockCloseCapacitorBrowser() }))
 
 // Mock stores
 const mockUpdateProviderSettings = jest.fn()
@@ -251,6 +258,37 @@ describe("OAuthLoginButton", () => {
       expect(mockUpdateProviderSettings).not.toHaveBeenCalled()
     } finally {
       mockIsTauri = false
+    }
+  })
+
+  it("on the mobile shell, opens the in-app browser and finishes from the appUrlOpen deep link", async () => {
+    mockIsCapacitor = true
+    try {
+      mockBuildOAuthUrl.mockResolvedValue({ url: "https://openrouter.ai/auth?m=1", state: {} })
+      mockGetOAuthState.mockReturnValue({ providerId: "openrouter", codeVerifier: "ver" })
+      mockExchangeCodeForApiKey.mockResolvedValue({ apiKey: "sk-or-mobile" })
+      render(<OAuthLoginButton providerId="openrouter" />)
+      await waitFor(() => expect(capacitorRouteHandler).not.toBeNull())
+      fireEvent.click(screen.getByTestId("oauth-button"))
+      await waitFor(() =>
+        expect(mockOpenUrl).toHaveBeenCalledWith("https://openrouter.ai/auth?m=1")
+      )
+      capacitorRouteHandler?.({ raw: "cognia://provider/oauth/openrouter?code=m-code" })
+      await waitFor(() =>
+        expect(mockUpdateProviderSettings).toHaveBeenCalledWith(
+          "openrouter",
+          expect.objectContaining({ apiKey: "sk-or-mobile" })
+        )
+      )
+      // The in-app browser sheet is dismissed so the result is visible.
+      expect(mockCloseCapacitorBrowser).toHaveBeenCalled()
+      // An IdP error surfaces instead of an exchange.
+      mockExchangeCodeForApiKey.mockClear()
+      capacitorRouteHandler?.({ raw: "cognia://provider/oauth/openrouter?error=access_denied" })
+      await waitFor(() => expect(screen.getByText("access_denied")).toBeInTheDocument())
+      expect(mockExchangeCodeForApiKey).not.toHaveBeenCalled()
+    } finally {
+      mockIsCapacitor = false
     }
   })
 

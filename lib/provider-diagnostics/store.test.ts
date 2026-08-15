@@ -15,6 +15,8 @@ import {
   exportProviderDiagnosticHistory,
   listProviderBalanceSnapshots,
   pruneProviderDiagnosticHistory,
+  queryLatestProviderDiagnosticSamples,
+  queryLatestProviderModelDiagnosticSamples,
   queryProviderDiagnosticHistory,
   recordProviderBalanceSnapshot,
   recordProviderDiagnosticJob,
@@ -74,6 +76,40 @@ function balance(id: string, fetchedAt: number): ProviderBalanceSnapshot {
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
+})
+
+describe("latest-sample queries (rail badges)", () => {
+  it("returns the newest sample per provider without scanning every row", async () => {
+    await recordProviderDiagnosticSample(sample("s1", 100))
+    await recordProviderDiagnosticSample(sample("s2", 300))
+    await recordProviderDiagnosticSample({ ...sample("s3", 200), providerId: "anthropic" })
+    await recordProviderDiagnosticSample({
+      ...sample("s4", 250),
+      providerId: "anthropic",
+      status: "failed",
+    })
+    const latest = await queryLatestProviderDiagnosticSamples()
+    expect([...latest.keys()].sort()).toEqual(["anthropic", "openai"])
+    expect(latest.get("openai")?.id).toBe("s2")
+    expect(latest.get("anthropic")?.id).toBe("s4")
+    expect(await queryLatestProviderDiagnosticSamples()).toEqual(latest)
+  })
+
+  it("returns an empty map when nothing was recorded", async () => {
+    expect((await queryLatestProviderDiagnosticSamples()).size).toBe(0)
+    expect((await queryLatestProviderModelDiagnosticSamples("openai")).size).toBe(0)
+  })
+
+  it("returns the newest sample per model for one provider only", async () => {
+    await recordProviderDiagnosticSample(sample("s1", 100))
+    await recordProviderDiagnosticSample({ ...sample("s2", 300), modelId: "gpt-5" })
+    await recordProviderDiagnosticSample({ ...sample("s3", 200), modelId: "gpt-5-mini" })
+    await recordProviderDiagnosticSample({ ...sample("s4", 900), providerId: "anthropic" })
+    const latest = await queryLatestProviderModelDiagnosticSamples("openai")
+    expect([...latest.keys()].sort()).toEqual(["gpt-5", "gpt-5-mini"])
+    expect(latest.get("gpt-5")?.id).toBe("s2")
+    expect(latest.get("gpt-5-mini")?.id).toBe("s3")
+  })
 })
 
 describe("provider diagnostics persistence", () => {

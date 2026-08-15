@@ -19095,6 +19095,18 @@
     "local": "Local",
     "localProvider": "Local",
     "localProviderApiKeyHint": "Optional API key for secured local endpoints.",
+    "localProviderDescriptions": {
+      "jan": "Open-source ChatGPT alternative",
+      "koboldcpp": "Easy-to-use llama.cpp fork",
+      "llamacpp": "High-performance C++ inference server",
+      "llamafile": "Single-file executable local LLM server",
+      "lmstudio": "Desktop app for running local LLMs",
+      "localai": "Self-hosted OpenAI alternative",
+      "ollama": "Run open-source models locally",
+      "tabbyapi": "Exllamav2 API server",
+      "textgenwebui": "Gradio UI with OpenAI-compatible API",
+      "vllm": "High-throughput GPU inference engine"
+    },
     "localProvidersDescription": "Run AI models locally on your machine",
     "localProvidersTitle": "Local Providers",
     "localai": "LocalAI",
@@ -19292,6 +19304,7 @@
     "protocolOpenAIDesc": "OpenAI-compatible API (most common)",
     "protocolPluginDesc": "Provided by plugin {plugin}",
     "provider": "Provider",
+    "providerDocumentation": "{provider} documentation",
     "providerGroups": {
       "advanced": "Advanced",
       "advancedDesc": "Power-user & server runtimes",

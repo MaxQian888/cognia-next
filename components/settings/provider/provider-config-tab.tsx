@@ -149,11 +149,11 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
         <Check className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-green-700 dark:text-green-400">
-            {t("configTab.connectionSuccess") || "Connected"}
+            {t("configTab.connectionSuccess")}
           </p>
           {result.latency !== undefined && (
             <p className="text-xs text-green-600 dark:text-green-500">
-              {t("configTab.latency") || "Latency"}: {result.latency}ms
+              {t("configTab.latency")}: {result.latency}ms
             </p>
           )}
           {result.testedAt && (
@@ -225,9 +225,7 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
     <div className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
       <X className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-destructive">
-          {t("configTab.connectionFailed") || "Connection failed"}
-        </p>
+        <p className="text-sm font-medium text-destructive">{t("configTab.connectionFailed")}</p>
         {result.error && (
           <p className="text-xs text-destructive/80 mt-0.5 break-words">{result.error}</p>
         )}
@@ -301,7 +299,7 @@ function KeyRotationSection({
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <Key className="h-3.5 w-3.5" />
-          <span>{t("configTab.keyRotation") || "Key Rotation"}</span>
+          <span>{t("configTab.keyRotation")}</span>
           {apiKeys.length > 0 && (
             <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px]">
               {apiKeys.length}
@@ -316,9 +314,7 @@ function KeyRotationSection({
           {/* Enable toggle */}
           {onToggleRotation && (
             <div className="flex items-center justify-between">
-              <Label className="text-sm">
-                {t("configTab.keyRotationEnabled") || "Enable rotation"}
-              </Label>
+              <Label className="text-sm">{t("configTab.keyRotationEnabled")}</Label>
               <Switch
                 checked={rotationEnabled}
                 onCheckedChange={onToggleRotation}
@@ -331,7 +327,7 @@ function KeyRotationSection({
           {rotationEnabled && onRotationStrategyChange && (
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">
-                {t("configTab.rotationStrategy") || "Strategy"}
+                {t("configTab.rotationStrategy")}
               </Label>
               <Select
                 value={rotationStrategy}
@@ -341,15 +337,9 @@ function KeyRotationSection({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="round-robin">
-                    {t("configTab.strategyRoundRobin") || "Round Robin"}
-                  </SelectItem>
-                  <SelectItem value="random">
-                    {t("configTab.strategyRandom") || "Random"}
-                  </SelectItem>
-                  <SelectItem value="least-used">
-                    {t("configTab.strategyLeastUsed") || "Least Used"}
-                  </SelectItem>
+                  <SelectItem value="round-robin">{t("configTab.strategyRoundRobin")}</SelectItem>
+                  <SelectItem value="random">{t("configTab.strategyRandom")}</SelectItem>
+                  <SelectItem value="least-used">{t("configTab.strategyLeastUsed")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -378,7 +368,7 @@ function KeyRotationSection({
                           className="h-5 w-5"
                           onClick={() => handleMoveUp(index)}
                           disabled={index === 0}
-                          title={t("configTab.moveUp") || "Move up"}
+                          title={t("configTab.moveUp")}
                         >
                           <ChevronDown className="h-3 w-3 rotate-180" />
                         </Button>
@@ -388,7 +378,7 @@ function KeyRotationSection({
                           className="h-5 w-5"
                           onClick={() => handleMoveDown(index)}
                           disabled={index === apiKeys.length - 1}
-                          title={t("configTab.moveDown") || "Move down"}
+                          title={t("configTab.moveDown")}
                         >
                           <ChevronDown className="h-3 w-3" />
                         </Button>
@@ -400,7 +390,7 @@ function KeyRotationSection({
                         size="icon"
                         className="h-5 w-5 text-destructive hover:text-destructive"
                         onClick={() => onRemoveApiKey(index)}
-                        title={t("configTab.removeKey") || "Remove"}
+                        title={t("configTab.removeKey")}
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
@@ -419,7 +409,7 @@ function KeyRotationSection({
                   <Input
                     value={newKey}
                     onChange={(e) => setNewKey(e.target.value)}
-                    placeholder={t("configTab.newKeyPlaceholder") || "sk-..."}
+                    placeholder={t("configTab.newKeyPlaceholder")}
                     className="h-8 flex-1 text-xs font-mono"
                     autoComplete="new-password"
                     data-lpignore="true"
@@ -461,7 +451,7 @@ function KeyRotationSection({
                   onClick={() => setAddingKey(true)}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  {t("configTab.addKey") || "Add Key"}
+                  {t("configTab.addKey")}
                 </Button>
               )}
             </>
@@ -572,7 +562,7 @@ export function ProviderConfigTab({
         <div className="space-y-2">
           <Label className="flex items-center gap-1.5 text-sm font-medium">
             <Key className="h-3.5 w-3.5" />
-            {t("configTab.apiKeyLabel") || "API Key"}
+            {t("configTab.apiKeyLabel")}
           </Label>
 
           <div className="relative">
@@ -582,7 +572,7 @@ export function ProviderConfigTab({
               onChange={(e) => apiKeyField.onChange(e.target.value)}
               onBlur={apiKeyField.onBlur}
               onKeyDown={apiKeyField.onKeyDown}
-              placeholder={t("configTab.apiKeyPlaceholder") || "Enter your API key"}
+              placeholder={t("configTab.apiKeyPlaceholder")}
               className="pr-10"
               autoComplete="new-password"
               data-lpignore="true"
@@ -593,11 +583,7 @@ export function ProviderConfigTab({
               size="icon"
               className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
               onClick={() => setShowApiKey((prev) => !prev)}
-              title={
-                showApiKey
-                  ? t("configTab.hideKey") || "Hide key"
-                  : t("configTab.showKey") || "Show key"
-              }
+              title={showApiKey ? t("configTab.hideKey") : t("configTab.showKey")}
               type="button"
             >
               {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
@@ -615,7 +601,7 @@ export function ProviderConfigTab({
                   className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
                 >
                   <ExternalLink className="h-3 w-3" />
-                  {t("configTab.getApiKey") || "Get API Key →"}
+                  {t("configTab.getApiKey")}
                 </a>
               )}
               {providerDocsUrl && (
@@ -626,7 +612,7 @@ export function ProviderConfigTab({
                   className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
                 >
                   <ExternalLink className="h-3 w-3" />
-                  {t("configTab.docs") || "Docs"}
+                  {t("configTab.docs")}
                 </a>
               )}
             </div>
@@ -639,9 +625,9 @@ export function ProviderConfigTab({
         <div className="space-y-2">
           <Label className="flex items-center gap-1.5 text-sm font-medium">
             <Globe className="h-3.5 w-3.5" />
-            {t("configTab.baseURLLabel") || "Base URL"}
+            {t("configTab.baseURLLabel")}
             <span className="font-normal text-muted-foreground text-xs">
-              ({t("configTab.baseURLOptional") || "Optional"})
+              ({t("configTab.baseURLOptional")})
             </span>
           </Label>
           <Input
@@ -650,9 +636,7 @@ export function ProviderConfigTab({
             onChange={(e) => baseURLField.onChange(e.target.value)}
             onBlur={baseURLField.onBlur}
             onKeyDown={baseURLField.onKeyDown}
-            placeholder={
-              defaultBaseURL || t("configTab.baseURLPlaceholder") || "https://api.example.com/v1"
-            }
+            placeholder={defaultBaseURL || t("configTab.baseURLPlaceholder")}
           />
           <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
         </div>
@@ -662,14 +646,14 @@ export function ProviderConfigTab({
       {!isBedrock && showProtocolSelector && (
         <div className="space-y-2">
           <Label htmlFor={`api-protocol-${providerId}`} className="text-sm font-medium">
-            {t("apiProtocol") || "API Protocol"}
+            {t("apiProtocol")}
           </Label>
           <Select
             value={settings.apiProtocol ?? catalogProtocol ?? "openai"}
             onValueChange={(v) => onApiProtocolChange?.(v)}
           >
             <SelectTrigger id={`api-protocol-${providerId}`}>
-              <SelectValue placeholder={t("selectProtocol") || "Select protocol"} />
+              <SelectValue placeholder={t("selectProtocol")} />
             </SelectTrigger>
             <ProtocolSelectContent />
           </Select>
@@ -762,12 +746,10 @@ export function ProviderConfigTab({
       {/* ── 3. Default Model ───────────────────────────────────────── */}
       {providerModels.length > 0 && (
         <div className="space-y-2">
-          <Label className="text-sm font-medium">
-            {t("configTab.defaultModelLabel") || "Default Model"}
-          </Label>
+          <Label className="text-sm font-medium">{t("configTab.defaultModelLabel")}</Label>
           <Select value={defaultModel} onValueChange={onDefaultModelChange}>
             <SelectTrigger className="h-9 text-sm">
-              <SelectValue placeholder={t("configTab.selectModel") || "Select model"} />
+              <SelectValue placeholder={t("configTab.selectModel")} />
             </SelectTrigger>
             <SelectContent>
               {providerModels.map((model) => (
@@ -784,9 +766,7 @@ export function ProviderConfigTab({
       {testResult !== null && testResult !== undefined && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label className="text-sm font-medium">
-              {t("configTab.connectionStatus") || "Connection Status"}
-            </Label>
+            <Label className="text-sm font-medium">{t("configTab.connectionStatus")}</Label>
             <Button
               variant="outline"
               size="sm"
@@ -795,7 +775,7 @@ export function ProviderConfigTab({
               disabled={isTesting}
             >
               {isTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {t("detailPanel.testButton") || "Test"}
+              {t("detailPanel.testButton")}
             </Button>
           </div>
           <ConnectionStatusCard result={testResult} />
@@ -818,7 +798,7 @@ export function ProviderConfigTab({
             }
           >
             {isTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {t("detailPanel.testButton") || "Test Connection"}
+            {t("detailPanel.testButton")}
           </Button>
         </div>
       )}

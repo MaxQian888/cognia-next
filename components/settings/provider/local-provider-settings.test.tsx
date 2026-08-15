@@ -49,6 +49,11 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
 }))
 
+let mockHostProfile = "desktop"
+jest.mock("@/hooks/use-host-profile", () => ({
+  useHostProfile: () => mockHostProfile,
+}))
+
 jest.mock("@cognia/provider-core/providers/local-providers", () => ({
   LOCAL_PROVIDER_CONFIGS: {
     ollama: {
@@ -288,5 +293,52 @@ describe("LocalProviderSettings", () => {
   it("renders the transport headers editor for local custom headers", () => {
     render(<LocalProviderSettings providerId="ollama" />)
     expect(screen.getByTestId("headers-editor")).toBeInTheDocument()
+  })
+
+  it("draft-buffers the API key: keystrokes stay local, blur commits, and no probe fires per key", async () => {
+    render(<LocalProviderSettings providerId="ollama" />)
+    await waitFor(() => expect(createLocalProviderService).toHaveBeenCalled())
+    const probesBeforeTyping = createLocalProviderService.mock.calls.length
+    const input = screen.getByTestId("local-provider-api-key-input")
+    fireEvent.change(input, { target: { value: "s" } })
+    fireEvent.change(input, { target: { value: "se" } })
+    fireEvent.change(input, { target: { value: "sec" } })
+    expect(mockState.setProviderConfig).not.toHaveBeenCalledWith(
+      "ollama",
+      expect.objectContaining({ apiKey: expect.any(String) })
+    )
+    fireEvent.blur(input)
+    expect(mockState.setProviderConfig).toHaveBeenCalledWith("ollama", { apiKey: "sec" })
+    // The store mock is inert (no re-render with a new key), so the probe count
+    // must not have moved on the keystrokes themselves.
+    expect(createLocalProviderService.mock.calls.length).toBe(probesBeforeTyping)
+  })
+
+  it("does not auto-probe the default localhost endpoint on the mobile shell", async () => {
+    mockHostProfile = "mobile-companion"
+    const savedBaseURL = mockState.providerSettings.ollama.baseURL
+    // A stored custom base URL still probes (it may point at a LAN machine).
+    try {
+      render(<LocalProviderSettings providerId="ollama" />)
+      await waitFor(() => expect(createLocalProviderService).toHaveBeenCalled())
+      expect(screen.getByTestId("provider-host-notice-mobile-local")).toBeInTheDocument()
+    } finally {
+      mockHostProfile = "desktop"
+      mockState.providerSettings.ollama.baseURL = savedBaseURL
+    }
+  })
+
+  it("skips the auto-probe entirely on the mobile shell without a custom base URL", async () => {
+    mockHostProfile = "mobile-companion"
+    const savedBaseURL = mockState.providerSettings.ollama.baseURL
+    mockState.providerSettings.ollama.baseURL = undefined
+    try {
+      render(<LocalProviderSettings providerId="ollama" />)
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      expect(createLocalProviderService).not.toHaveBeenCalled()
+    } finally {
+      mockHostProfile = "desktop"
+      mockState.providerSettings.ollama.baseURL = savedBaseURL
+    }
   })
 })
