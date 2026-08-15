@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { act, fireEvent, render, screen } from "@testing-library/react"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   ContextWorkbench,
-  ContextWorkbenchMobileSheet,
+  ContextWorkbenchMobileDrawer,
   useContextWorkbench,
 } from "./context-workbench"
 import {
@@ -68,6 +68,10 @@ const messages = {
   },
   contextWorkbench: {
     actions: {
+      close: "Close",
+      splitPlanned: "Split view (not available yet)",
+      layoutMenu: "Layout options",
+      resetLayout: "Reset layout",
       collapse: "Collapse",
       expand: "Expand",
       narrow: "Narrow",
@@ -313,10 +317,17 @@ describe("ContextWorkbench", () => {
     consoleError.mockRestore()
   })
 
-  it("force-mounts the closed mobile sheet off-canvas while disabling focus and interaction", () => {
+  // Replaces "force-mounts the closed mobile sheet off-canvas while disabling
+  // focus and interaction". The Sheet this drawer replaced kept itself mounted
+  // and leaned on `inert` + `aria-hidden` to keep a closed surface out of reach;
+  // vaul owns its own exit animation, so the surface simply goes away — which is
+  // the same guarantee, arrived at without two attributes that have to agree.
+  // The desktop dock already unmounts its body on collapse, so this also stops
+  // mobile being the one platform that kept a closed workbench alive.
+  it("unmounts the mobile drawer while it is closed", () => {
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ContextWorkbenchMobileSheet
+        <ContextWorkbenchMobileDrawer
           open={false}
           onOpenChange={jest.fn()}
           workbenchInstanceId="mobile-a"
@@ -325,12 +336,153 @@ describe("ContextWorkbench", () => {
         />
       </NextIntlClientProvider>
     )
-    const sheet = screen.getByTestId("context-workbench-mobile-sheet")
-    expect(sheet).toHaveClass("data-[state=closed]:translate-y-full")
-    expect(sheet).toHaveAttribute("inert")
-    expect(sheet).toHaveAttribute("aria-hidden", "true")
+    expect(screen.queryByTestId("context-workbench-mobile-sheet")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Wide" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Focus" })).not.toBeInTheDocument()
+  })
+
+  /**
+   * Regression guard for the drawer's one structural hazard.
+   *
+   * `handleCollapse` falls through to `setMode(scopeKey, "collapsed")` when no
+   * host supplies `onCollapse`. In a drawer that hides the *body* while leaving
+   * the 92dvh surface open — an empty modal — and the mode is persisted, so it
+   * reopens empty too. `project-context-workbench.tsx` mounted the mobile
+   * surface without an `onCollapse` and was in exactly that state.
+   *
+   * The fix is that `ContextWorkbenchMobileDrawer` supplies its own and the prop
+   * is `Omit`ted from its public type, so no caller can reintroduce it. This
+   * pins the behaviour that makes that worth doing.
+   */
+  it("closes the mobile drawer instead of collapsing its body", () => {
+    const onOpenChange = jest.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbenchMobileDrawer
+          open
+          onOpenChange={onOpenChange}
+          workbenchInstanceId="mobile-close"
+          resource={resource}
+          panels={[]}
+        />
+      </NextIntlClientProvider>
+    )
+    const toggle = screen.getByTestId("context-workbench-collapse-toggle")
+    // Named and drawn for the surface it is on: a bottom drawer has no right
+    // edge to fold away, so "Collapse workbench" over a right-panel glyph
+    // described something else entirely.
+    expect(toggle).toHaveAccessibleName("Close")
+    fireEvent.click(toggle)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(
+      useContextWorkbenchStore.getState().layouts["mobile-close::canvas-document:doc-1"]?.mode
+    ).not.toBe("collapsed")
+  })
+
+  it("pads the horizontal rail's buttons out to the 44pt touch floor", () => {
+    const panel: ContextPanelDefinition = {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      retention: "stateful",
+      renderer: () => <div>panel</div>,
+    }
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbenchMobileDrawer
+          open
+          onOpenChange={jest.fn()}
+          workbenchInstanceId="mobile-touch"
+          resource={resource}
+          panels={[panel]}
+        />
+      </NextIntlClientProvider>
+    )
+    // `icon-sm` is 32px — under the 44px floor this repo sets for itself in
+    // `globals.css`, and the horizontal rail is the one placement a finger
+    // ever hits.
+    expect(screen.getByTestId("workbench-activity-comments")).toHaveClass("touch-target")
+    expect(screen.getByTestId("context-workbench-collapse-toggle")).toHaveClass("touch-target")
+  })
+
+  /**
+   * The VS Code activity-bar convention (re-click the active activity to shut
+   * the surface) is a pointer idiom. In the drawer "shut" means *dismiss*, so
+   * keeping it would turn a mistimed second tap on the icon already in front
+   * into losing the whole surface. The drawer has three deliberate exits — the
+   * Close button, the handle and the scrim — and does not need a fourth hidden
+   * inside navigation.
+   */
+  it("does not dismiss the mobile drawer when the active activity is tapped again", () => {
+    const onOpenChange = jest.fn()
+    const panel: ContextPanelDefinition = {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      retention: "stateful",
+      renderer: () => <div>panel</div>,
+    }
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbenchMobileDrawer
+          open
+          onOpenChange={onOpenChange}
+          workbenchInstanceId="mobile-retap"
+          resource={resource}
+          panels={[panel]}
+        />
+      </NextIntlClientProvider>
+    )
+    const activity = screen.getByTestId("workbench-activity-comments")
+    fireEvent.click(activity)
+    fireEvent.click(activity)
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  /**
+   * Working Rule 7's third axis for split view. `contextWorkbenchStore` carries
+   * `splitPanelId` / `splitRatio` plus `activateSplit` / `closeSplit` /
+   * `setSplitRatio`, all persisted and clamped, and no renderer reads any of
+   * it. The type says so; this is the half a user can see.
+   */
+  it("names split view as unavailable rather than hiding that it exists", () => {
+    renderWorkbench([
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        appliesTo: () => true,
+        retention: "stateful",
+        renderer: () => <div>panel</div>,
+      },
+    ])
+    // Radix opens a dropdown from the keyboard path too, which is the one that
+    // survives jsdom's missing PointerEvent constructor intact.
+    fireEvent.keyDown(screen.getByTestId("context-workbench-layout-menu"), { key: "Enter" })
+    const item = screen.getByTestId("context-workbench-split-planned")
+    expect(item).toHaveTextContent("Split view (not available yet)")
+    expect(item).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("closes the mobile drawer on Android hardware back", () => {
+    const onOpenChange = jest.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbenchMobileDrawer
+          open
+          onOpenChange={onOpenChange}
+          workbenchInstanceId="mobile-back"
+          resource={resource}
+          panels={[]}
+        />
+      </NextIntlClientProvider>
+    )
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it("lays the mobile activity rail out horizontally and walks it with left/right", () => {
@@ -344,7 +496,7 @@ describe("ContextWorkbench", () => {
     })
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ContextWorkbenchMobileSheet
+        <ContextWorkbenchMobileDrawer
           open
           onOpenChange={jest.fn()}
           workbenchInstanceId="mobile-rail"
@@ -554,7 +706,7 @@ describe("ContextWorkbench", () => {
     )
   })
 
-  it("pauses mobile panel effects while the force-mounted Sheet is closed", () => {
+  it("tears mobile panel effects down when the drawer closes", () => {
     const mounted = jest.fn()
     const cleanedUp = jest.fn()
     const MobilePanel = () => {
@@ -574,7 +726,7 @@ describe("ContextWorkbench", () => {
     }
     const view = render(
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ContextWorkbenchMobileSheet
+        <ContextWorkbenchMobileDrawer
           open
           onOpenChange={jest.fn()}
           workbenchInstanceId="mobile-effects"
@@ -588,7 +740,7 @@ describe("ContextWorkbench", () => {
 
     view.rerender(
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ContextWorkbenchMobileSheet
+        <ContextWorkbenchMobileDrawer
           open={false}
           onOpenChange={jest.fn()}
           workbenchInstanceId="mobile-effects"
@@ -597,7 +749,11 @@ describe("ContextWorkbench", () => {
         />
       </NextIntlClientProvider>
     )
-    expect(screen.getByTestId("context-workbench-mobile-sheet")).toBeInTheDocument()
+    // The `<Activity mode="hidden">` this replaced already destroyed panel
+    // effects on close — the embedded browser's process-wide webview lease was
+    // never held open by a closed sheet. Unmounting keeps that invariant and
+    // drops the surface with it.
+    expect(screen.queryByTestId("context-workbench-mobile-sheet")).not.toBeInTheDocument()
     expect(cleanedUp).toHaveBeenCalledTimes(1)
   })
 
@@ -1158,6 +1314,81 @@ describe("ContextWorkbench — customizable activity rail", () => {
     expect(screen.getByText("ai-panel")).toBeInTheDocument()
   })
 
+  describe("panel-level customization", () => {
+    const GROUPED: ContextPanelDefinition[] = [
+      {
+        id: "review",
+        activity: "review",
+        labelKey: "contextWorkbench.panels.review",
+        order: 10,
+        appliesTo: () => true,
+        renderer: () => <div>review-panel</div>,
+      },
+      {
+        id: "commentsTwo",
+        activity: "review",
+        labelKey: "contextWorkbench.panels.commentsTwo",
+        order: 20,
+        appliesTo: () => true,
+        renderer: () => <div>comments-two-panel</div>,
+      },
+    ]
+
+    const groupTabLabels = () =>
+      Array.from(document.querySelectorAll<HTMLButtonElement>("[data-workbench-group-tab]")).map(
+        (tab) => tab.textContent
+      )
+
+    it("follows the panels' own order numbers when the user has not customized them", () => {
+      renderWorkbench(GROUPED)
+      expect(groupTabLabels()).toEqual([
+        "contextWorkbench.panels.review",
+        "contextWorkbench.panels.commentsTwo",
+      ])
+    })
+
+    it("follows the user's stored tab order", () => {
+      useSettingsStore.setState({
+        settings: { workbenchPanels: { order: ["commentsTwo", "review"], hidden: [] } } as never,
+      })
+      renderWorkbench(GROUPED)
+      expect(groupTabLabels()).toEqual([
+        "contextWorkbench.panels.commentsTwo",
+        "contextWorkbench.panels.review",
+      ])
+    })
+
+    it("drops a hidden panel's tab but keeps the panel resolvable", () => {
+      useSettingsStore.setState({
+        settings: { workbenchPanels: { order: [], hidden: ["commentsTwo"] } } as never,
+      })
+      renderWorkbench(GROUPED)
+      // Only one panel left in the group, so the strip collapses entirely.
+      expect(groupTabLabels()).toEqual([])
+
+      // Still reachable — this is what the command palette and `ctrl+1..7`
+      // use, and it is the whole reason hiding a panel is safe to offer.
+      act(() => {
+        useContextWorkbenchStore
+          .getState()
+          .navigatePanel("window-a::canvas:doc-1", "commentsTwo", "narrow")
+      })
+      expect(screen.getByText("comments-two-panel")).toBeInTheDocument()
+    })
+
+    it("drops the rail button for an activity whose every panel is hidden", () => {
+      useSettingsStore.setState({
+        settings: {
+          workbenchPanels: { order: [], hidden: ["review", "commentsTwo"] },
+        } as never,
+      })
+      renderWorkbench(GROUPED)
+      // An icon that opens an empty body is worse than no icon; the panels
+      // themselves stay reachable by shortcut either way.
+      expect(railLabels()).toEqual([])
+    })
+  })
+
   it("opens the shared Workbench customizer from the activity rail", () => {
     renderWorkbench(PANELS)
 
@@ -1439,5 +1670,175 @@ describe("ContextWorkbench — host-driven rail-only (persistent minibar)", () =
     fireEvent.click(toggle())
     expect(onEnsureVisible).toHaveBeenCalledTimes(1)
     expect(onCollapse).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("ContextWorkbench — vertical split", () => {
+  const SCOPE = "window-a::canvas:doc-1"
+
+  /**
+   * Counts component *instances*, which is the question a remount test is
+   * actually asking.
+   *
+   * Deliberately not a `useEffect(…, [])`: stateful panels live behind
+   * `<Activity>`, which tears effects down when it hides a pane and revives them
+   * when it shows one (pinned by "pauses stateful panel effects while hidden"
+   * above). An effect counter would therefore count *visibility transitions* and
+   * pass while every panel was being destroyed. A lazy state initializer runs
+   * once per instance and survives Activity, so it can only change if React
+   * really did build a new component.
+   */
+  let instanceSeq = 0
+  const instances: Record<string, number> = {}
+  function Counted({ id, active }: { id: string; active: boolean }) {
+    const [token] = useState(() => {
+      instances[id] = (instances[id] ?? 0) + 1
+      return `${id}#${++instanceSeq}`
+    })
+    return (
+      <div data-testid={`panel-${id}`} data-token={token}>
+        {id}:{String(active)}
+      </div>
+    )
+  }
+
+  const PANELS: ContextPanelDefinition[] = [
+    {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      renderer: ({ active }) => <Counted id="comments" active={active} />,
+      retention: "stateful",
+    },
+    {
+      id: "review",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      appliesTo: () => true,
+      renderer: ({ active }) => <Counted id="review" active={active} />,
+      retention: "stateful",
+    },
+  ]
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {} })
+    useSettingsStore.setState({ settings: {} as never })
+    mockResourceSession = null
+    instanceSeq = 0
+    for (const key of Object.keys(instances)) delete instances[key]
+  })
+
+  function renderSplit(panels: ContextPanelDefinition[] = PANELS) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench workbenchInstanceId="window-a" resource={resource} panels={panels} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  /** Drives the store directly — the menu entry point lands in a later change. */
+  function openSplit(secondary = "review") {
+    act(() => {
+      useContextWorkbenchStore.getState().navigatePanel(SCOPE, "comments", "wide")
+      useContextWorkbenchStore.getState().activateSplit(SCOPE, secondary)
+    })
+  }
+
+  it("treats both panes as visible", () => {
+    renderSplit()
+    openSplit()
+
+    // `active` means "in a visible pane", so both renderers see true — a second
+    // pane reporting inactive would be on screen but inert and unfocusable.
+    expect(screen.getByTestId("panel-comments")).toHaveTextContent("comments:true")
+    expect(screen.getByTestId("panel-review")).toHaveTextContent("review:true")
+    for (const id of ["comments", "review"]) {
+      const pane = document.getElementById(`context-workbench-panel-${id}`)
+      expect(pane).not.toHaveAttribute("inert")
+      expect(pane).not.toHaveAttribute("aria-hidden", "true")
+    }
+  })
+
+  it("stacks the panes into complementary lanes driven by one custom property", () => {
+    const { container } = renderSplit()
+    openSplit()
+    act(() => useContextWorkbenchStore.getState().setSplitRatio(SCOPE, 70))
+
+    const body = container.querySelector("[data-split]") as HTMLElement
+    expect(body.style.getPropertyValue("--wb-split")).toBe("70%")
+    const laneOf = (id: string) =>
+      document.getElementById(`context-workbench-panel-${id}`)?.parentElement as HTMLElement
+    expect(laneOf("comments").style.height).toBe("var(--wb-split)")
+    expect(laneOf("review").style.top).toContain("var(--wb-split)")
+  })
+
+  it("keeps both panels mounted across opening, resizing, swapping and closing the split", () => {
+    renderSplit()
+    act(() => useContextWorkbenchStore.getState().navigatePanel(SCOPE, "comments", "wide"))
+    const tokenOf = (id: string) =>
+      screen.getByTestId(`panel-${id}`).getAttribute("data-token") ?? ""
+    const before = { comments: tokenOf("comments") }
+
+    act(() => useContextWorkbenchStore.getState().activateSplit(SCOPE, "review"))
+    const reviewToken = tokenOf("review")
+
+    act(() => useContextWorkbenchStore.getState().setSplitRatio(SCOPE, 65))
+    // Swapping the panes: the panel moves lanes, not parents.
+    act(() => useContextWorkbenchStore.getState().navigatePanel(SCOPE, "review", "wide"))
+    act(() => useContextWorkbenchStore.getState().closeSplit(SCOPE))
+
+    // One instance each, from first mount to last — an embedded webview or a
+    // Monaco buffer in either pane survived the whole sequence.
+    expect(instances).toEqual({ comments: 1, review: 1 })
+    expect(tokenOf("comments")).toBe(before.comments)
+    expect(tokenOf("review")).toBe(reviewToken)
+  })
+
+  it("ignores a desktop split inside the mobile drawer without writing to the store", () => {
+    openSplit()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbenchMobileDrawer
+          open
+          onOpenChange={() => undefined}
+          workbenchInstanceId="window-a"
+          resource={resource}
+          panels={PANELS}
+        />
+      </NextIntlClientProvider>
+    )
+
+    // The drawer projects the split away at render time only. Persisting the
+    // narrowing would let a phone destroy a layout set up on a desktop.
+    expect(screen.getByTestId("panel-comments")).toHaveTextContent("comments:true")
+    expect(screen.getByTestId("panel-review")).toHaveTextContent("review:false")
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.splitPanelId).toBe("review")
+  })
+
+  it("projects the split away in a container too narrow for two panes, and keeps it stored", () => {
+    const widthSpy = jest
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ width: 320, height: 600 } as DOMRect)
+    try {
+      renderSplit()
+      openSplit()
+
+      expect(screen.getByTestId("panel-review")).toHaveTextContent("review:false")
+      expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.splitPanelId).toBe("review")
+    } finally {
+      widthSpy.mockRestore()
+    }
+  })
+
+  it("unmounts an ephemeral second pane on close but keeps a stateful one", () => {
+    renderSplit([PANELS[0]!, { ...PANELS[1]!, retention: "ephemeral" }])
+    openSplit()
+    expect(screen.getByTestId("panel-review")).toBeInTheDocument()
+
+    act(() => useContextWorkbenchStore.getState().closeSplit(SCOPE))
+
+    expect(screen.queryByTestId("panel-review")).not.toBeInTheDocument()
+    expect(screen.getByTestId("panel-comments")).toBeInTheDocument()
   })
 })

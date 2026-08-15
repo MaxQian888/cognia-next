@@ -3,6 +3,7 @@ import {
   createContextWorkbenchStoreForTesting,
   pruneContextWorkbenchLayouts,
   useContextWorkbenchStore,
+  visibleContextPanelIds,
   type ContextWorkbenchLayout,
 } from "./context-workbench-store"
 
@@ -355,5 +356,308 @@ describe("context workbench layout store", () => {
     expect(store.getState().sessionOverrides["project:p:r:new.ts"]).toBe("old-session")
     store.getState().setSessionOverride("project:p:r:new.ts", null)
     expect(store.getState().sessionOverrides["project:p:r:new.ts"]).toBeUndefined()
+  })
+
+  describe("vertical split", () => {
+    /** A scope already showing `comments` in wide mode — the state a split starts from. */
+    function splitReadyStore(key = "window-a::canvas:doc-1") {
+      const store = createContextWorkbenchStoreForTesting()
+      store.getState().navigatePanel(key, "comments", "wide")
+      return { store, key }
+    }
+
+    it("refuses to split onto the panel already in front", () => {
+      const { store, key } = splitReadyStore()
+      expect(store.getState().activateSplit(key, "comments")).toBe(false)
+      expect(store.getState().layouts[key]?.splitPanelId).toBeNull()
+    })
+
+    it("refuses to split a scope that has no panel in front yet", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      expect(store.getState().activateSplit("window-a::canvas:doc-1", "review")).toBe(false)
+    })
+
+    it("refuses to split in narrow, and accepts once the mode has room", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::canvas:doc-1"
+      store.getState().navigatePanel(key, "comments", "narrow")
+
+      expect(store.getState().activateSplit(key, "review")).toBe(false)
+
+      store.getState().setMode(key, "wide")
+      expect(store.getState().activateSplit(key, "review")).toBe(true)
+      expect(store.getState().layouts[key]?.splitPanelId).toBe("review")
+    })
+
+    it("records the split panel as activated so the renderer will mount it", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "review")
+
+      // The renderer's mount gate reads `activatedPanelIds`; without this the
+      // second pane would be present in the layout and empty on screen.
+      expect(store.getState().layouts[key]?.activatedPanelIds).toEqual(["comments", "review"])
+    })
+
+    it("clamps a hand-written ratio on read and replaces a non-finite one", () => {
+      const now = Date.UTC(2026, 6, 18)
+      const base = {
+        mode: "wide" as const,
+        width: 360,
+        panelWidths: {},
+        activePanelId: "comments",
+        userPinned: false,
+        activatedPanelIds: ["comments"],
+        pendingPanelIds: [],
+        lastUsedAt: now,
+        splitPanelId: null,
+      }
+      const pruned = pruneContextWorkbenchLayouts(
+        {
+          low: { ...base, splitRatio: 5 },
+          high: { ...base, splitRatio: 95 },
+          nan: { ...base, splitRatio: Number.NaN },
+          text: { ...base, splitRatio: "wide" as unknown as number },
+        },
+        now
+      )
+
+      expect(pruned.low?.splitRatio).toBe(20)
+      expect(pruned.high?.splitRatio).toBe(80)
+      expect(pruned.nan?.splitRatio).toBe(50)
+      expect(pruned.text?.splitRatio).toBe(50)
+    })
+
+    it("drops a persisted split that names the panel already in front", () => {
+      const now = Date.UTC(2026, 6, 18)
+      const pruned = pruneContextWorkbenchLayouts(
+        {
+          "window-a::canvas:doc-1": {
+            mode: "wide",
+            width: 360,
+            panelWidths: {},
+            activePanelId: "comments",
+            userPinned: false,
+            activatedPanelIds: ["comments"],
+            pendingPanelIds: [],
+            lastUsedAt: now,
+            splitPanelId: "comments",
+            splitRatio: 50,
+          },
+        },
+        now
+      )
+
+      expect(pruned["window-a::canvas:doc-1"]?.splitPanelId).toBeNull()
+    })
+
+    it("closes the split when the mode goes narrow and keeps it while collapsed", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "review")
+
+      // Collapse hides the body; it does not rearrange it. `railOnly` hosts
+      // never write mode at all, so closing here would make one of the two
+      // collapse routes destructive and the other not.
+      store.getState().setMode(key, "collapsed")
+      expect(store.getState().layouts[key]?.splitPanelId).toBe("review")
+
+      store.getState().setMode(key, "narrow")
+      expect(store.getState().layouts[key]?.splitPanelId).toBeNull()
+    })
+
+    it("swaps the panes when navigation lands on the split panel, and mirrors the ratio", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "review")
+      store.getState().setSplitRatio(key, 70)
+
+      store.getState().navigatePanel(key, "review", "wide")
+
+      expect(store.getState().layouts[key]).toMatchObject({
+        activePanelId: "review",
+        splitPanelId: "comments",
+        // Mirrored, so each panel keeps the height it already occupied.
+        splitRatio: 30,
+      })
+    })
+
+    it("replaces only the primary when navigation lands on a third panel", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "review")
+      store.getState().setSplitRatio(key, 70)
+
+      store.getState().navigatePanel(key, "inspect", "wide")
+
+      expect(store.getState().layouts[key]).toMatchObject({
+        activePanelId: "inspect",
+        splitPanelId: "review",
+        splitRatio: 70,
+      })
+    })
+
+    it("keeps a split open against a panel's narrow preference", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "review")
+
+      // Almost every panel reaches `reveal` with a defaulted "narrow"
+      // preference, so honouring it here would close the split on the very next
+      // rail click and the swap above could never be reached.
+      store.getState().navigatePanel(key, "inspect", "narrow")
+
+      expect(store.getState().layouts[key]).toMatchObject({
+        activePanelId: "inspect",
+        splitPanelId: "review",
+        mode: "wide",
+      })
+    })
+
+    it("leaves a still-resolvable split alone on the reconcile that runs every mount", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "review")
+
+      store.getState().reconcilePanels(key, ["comments", "review", "inspect"], "comments")
+
+      expect(store.getState().layouts[key]).toMatchObject({
+        activePanelId: "comments",
+        splitPanelId: "review",
+      })
+    })
+
+    it("does not record the split panel twice when it has been opened before", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().navigatePanel(key, "review", "wide")
+      store.getState().navigatePanel(key, "comments", "wide")
+
+      store.getState().activateSplit(key, "review")
+
+      expect(store.getState().layouts[key]?.activatedPanelIds).toEqual(["comments", "review"])
+    })
+
+    it("closes a split whose panel is no longer resolvable", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "plugin:disabled")
+
+      store.getState().reconcilePanels(key, ["comments", "review"], "comments")
+
+      expect(store.getState().layouts[key]).toMatchObject({
+        activePanelId: "comments",
+        splitPanelId: null,
+      })
+    })
+
+    it("closes a split the fallback promotion would have duplicated", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::canvas:doc-1"
+      store.getState().navigatePanel(key, "plugin:removed", "wide")
+      store.getState().activateSplit(key, "comments")
+
+      // The panel in front disappears and the fallback promotes the one already
+      // sitting in the second pane — without the dedupe both fields would name
+      // `comments` and the body would render it twice.
+      store.getState().reconcilePanels(key, ["comments", "review"], "comments")
+
+      expect(store.getState().layouts[key]).toMatchObject({
+        activePanelId: "comments",
+        splitPanelId: null,
+      })
+    })
+
+    it("does not resurrect a dormant split written before version 3", () => {
+      const options = useContextWorkbenchStore.persist.getOptions()
+      const stored: Record<string, ContextWorkbenchLayout> = {
+        "window-a::canvas:doc-1": {
+          mode: "wide",
+          width: 360,
+          panelWidths: {},
+          activePanelId: "comments",
+          userPinned: false,
+          activatedPanelIds: ["comments"],
+          pendingPanelIds: [],
+          lastUsedAt: Date.now(),
+          splitPanelId: "review",
+          splitRatio: 70,
+        },
+      }
+
+      const fromLegacy = options.migrate?.({ layouts: stored, sessionOverrides: {} }, 2) as {
+        layouts: Record<string, ContextWorkbenchLayout>
+      }
+      expect(fromLegacy.layouts["window-a::canvas:doc-1"]).toMatchObject({
+        splitPanelId: null,
+        // The ratio is a remembered preference, so it survives even though the
+        // split it belonged to does not.
+        splitRatio: 70,
+      })
+
+      const fromCurrent = options.migrate?.({ layouts: stored, sessionOverrides: {} }, 3) as {
+        layouts: Record<string, ContextWorkbenchLayout>
+      }
+      expect(fromCurrent.layouts["window-a::canvas:doc-1"]?.splitPanelId).toBe("review")
+    })
+
+    it("carries a live split through a persist round trip, but not out of focus", () => {
+      const options = useContextWorkbenchStore.persist.getOptions()
+      const layout: ContextWorkbenchLayout = {
+        mode: "wide",
+        width: 360,
+        panelWidths: {},
+        activePanelId: "comments",
+        userPinned: false,
+        activatedPanelIds: ["comments", "review"],
+        pendingPanelIds: [],
+        lastUsedAt: Date.now(),
+        splitPanelId: "review",
+        splitRatio: 65,
+      }
+
+      const written = options.partialize?.({
+        ...useContextWorkbenchStore.getState(),
+        layouts: { wide: layout, focused: { ...layout, mode: "focus" } },
+      }) as { layouts: Record<string, ContextWorkbenchLayout> }
+
+      expect(written.layouts.wide).toMatchObject({ splitPanelId: "review", splitRatio: 65 })
+      // Focus is downgraded to narrow at the persistence boundary, and narrow
+      // has no room for a second pane — so the split goes with it.
+      expect(written.layouts.focused).toMatchObject({ mode: "narrow", splitPanelId: null })
+
+      const merged = options.merge?.(
+        { layouts: written.layouts, sessionOverrides: {} },
+        useContextWorkbenchStore.getState()
+      ) as { layouts: Record<string, ContextWorkbenchLayout> }
+      expect(merged.layouts.wide?.splitPanelId).toBe("review")
+    })
+
+    it("clamps and sanitises the ratio a drag commits", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "review")
+
+      store.getState().setSplitRatio(key, 5)
+      expect(store.getState().layouts[key]?.splitRatio).toBe(20)
+      store.getState().setSplitRatio(key, 95)
+      expect(store.getState().layouts[key]?.splitRatio).toBe(80)
+      // `Math.max(20, Math.min(80, NaN))` is NaN, which would reach the
+      // renderer as an unparseable track size.
+      store.getState().setSplitRatio(key, Number.NaN)
+      expect(store.getState().layouts[key]?.splitRatio).toBe(50)
+    })
+
+    it("keeps the ratio as a preference after the split is closed", () => {
+      const { store, key } = splitReadyStore()
+      store.getState().activateSplit(key, "review")
+      store.getState().setSplitRatio(key, 70)
+
+      store.getState().closeSplit(key)
+
+      expect(store.getState().layouts[key]).toMatchObject({
+        splitPanelId: null,
+        splitRatio: 70,
+      })
+    })
+
+    it("reports the panels a renderer should show", () => {
+      const { store, key } = splitReadyStore()
+      expect(visibleContextPanelIds(store.getState().layouts[key]!)).toEqual(["comments"])
+
+      store.getState().activateSplit(key, "review")
+      expect(visibleContextPanelIds(store.getState().layouts[key]!)).toEqual(["comments", "review"])
+    })
   })
 })

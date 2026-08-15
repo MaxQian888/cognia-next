@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type ErrorInfo,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -29,6 +30,8 @@ import {
   SlidersHorizontalIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  Columns2Icon,
+  XIcon,
 } from "lucide-react"
 import {
   DndContext,
@@ -55,12 +58,15 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHandle,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
+import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { cn } from "@/lib/utils"
 import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal"
 import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
@@ -78,14 +84,24 @@ import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   CONTEXT_WORKBENCH_DEFAULT_WIDTH,
   CONTEXT_WORKBENCH_MIN_WIDTH,
+  CONTEXT_WORKBENCH_SPLIT_MIN_WIDTH,
+  isSplitEligibleMode,
   useContextWorkbenchStore,
   type ContextWorkbenchLayout,
 } from "@/stores/context-workbench/context-workbench-store"
+import { useElementWidth } from "@/hooks/use-element-width"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { workbenchRailLayoutOf } from "@/components/shell/use-workbench-rail-layout"
 import { isWorkbenchActivityHidden, workbenchRailIndex } from "@/lib/shell/workbench-rail"
+import {
+  isWorkbenchPanelHidden,
+  workbenchPanelIndex,
+  workbenchPanelLayoutOf,
+} from "@/lib/shell/workbench-panels"
 import { applyDragReorder } from "@/lib/shell/sidebar-nav"
 import {
+  CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP,
+  CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS,
   getContextResourceKey,
   type ContextActivity,
   type ContextPanelDefinition,
@@ -119,6 +135,14 @@ const FALLBACK_CONTEXT_WORKBENCH_LAYOUT: ContextWorkbenchLayout = {
   splitPanelId: null,
   splitRatio: 50,
 }
+
+/**
+ * Height of the bar between the two panes, as a CSS length.
+ *
+ * Shared by the bar's own class and by the secondary lane's `top` offset, so the
+ * two cannot drift apart and overlap. `1.75rem` is Tailwind's `h-7`.
+ */
+const SPLIT_BAR_HEIGHT = "1.75rem"
 
 const FOCUS_TAKEOVER_DURATION_MS = 200
 /** Outlast the animation slightly so a slower motion preference isn't cut short. */
@@ -288,56 +312,115 @@ export interface ContextWorkbenchProps {
   onResetLayout?: () => void
 }
 
-export interface ContextWorkbenchMobileSheetProps extends Omit<
+export interface ContextWorkbenchMobileDrawerProps extends Omit<
   ContextWorkbenchProps,
-  // `railOnly` too: a Sheet has no container to shrink, and a rail-only Sheet
-  // would be a full-height modal showing nothing but six icons. The state is
-  // meaningless here, so it is a compile error rather than a runtime surprise.
-  "placement" | "className" | "manageOwnWidth" | "railOnly"
+  // `railOnly`: a drawer has no container to shrink, and a rail-only drawer
+  // would be a full-height modal showing nothing but six icons.
+  //
+  // `onCollapse`: the drawer supplies its own (close), and a host that omitted
+  // it fell through to `setMode("collapsed")` — which hides the body *inside*
+  // the open drawer and persists, so it reopened showing nothing but its icon
+  // strip. `project-context-workbench.tsx` was in exactly that state. Taking it
+  // away from callers is what makes that unreachable rather than merely fixed.
+  //
+  // Both are compile errors rather than runtime surprises.
+  "placement" | "className" | "manageOwnWidth" | "railOnly" | "onCollapse"
 > {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * Which snap point the drawer sits at. Hoisted to the host because closing
+   * unmounts the drawer, so local state could not survive a close/reopen.
+   * Omit for uncontrolled — it then opens at the tallest snap every time.
+   */
+  snapPoint?: number | string | null
+  onSnapPointChange?: (snapPoint: number | string | null) => void
 }
 
-export function ContextWorkbenchMobileSheet({
+export function ContextWorkbenchMobileDrawer({
   open,
   onOpenChange,
+  snapPoint,
+  onSnapPointChange,
   ...workbenchProps
-}: ContextWorkbenchMobileSheetProps) {
+}: ContextWorkbenchMobileDrawerProps) {
   const t = useTranslations("contextWorkbench")
+  // Android hardware back / browser back closes the drawer instead of letting
+  // the navigation rip the route out from under it — the same contract the
+  // other twenty-odd mobile sheets in this app already honour.
+  useBackDismiss(open, () => onOpenChange(false))
+  /**
+   * Under Capacitor's shipped `Keyboard.resize: "native"` the OS resizes the
+   * whole WebView frame, so `dvh` has already shrunk and this reads 0 — exactly
+   * as `use-keyboard-insets` documents. It is the mobile-web / PWA path that
+   * needs the lift: the drawer is portalled *outside* the mobile shell's
+   * layout, so `mobile-shell-wrapper`'s own bottom reserve never reaches it and
+   * the composer inside the AI and comments panels sat under the keyboard.
+   */
+  const { keyboardHeight } = useKeyboardInsets()
+
+  const [uncontrolledSnap, setUncontrolledSnap] = useState<number | string | null>(
+    CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP
+  )
+  const activeSnapPoint = snapPoint === undefined ? uncontrolledSnap : snapPoint
+  const setActiveSnapPoint = onSnapPointChange ?? setUncontrolledSnap
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} modal={open}>
-      {/* A bottom drawer, not a right-edge takeover: it keeps the grab-handle
-          affordance and the swipe-to-dismiss gesture users already had on the
-          Workspace sheet this replaced. Decelerate-in / quicker-out, scaled by
-          the user's motion-speed preference. */}
-      <SheetContent
-        forceMount
-        side="bottom"
-        showCloseButton={false}
-        className="h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)] data-[state=closed]:translate-y-full data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
-        inert={!open}
-        aria-hidden={!open}
+    <Drawer
+      open={open}
+      onOpenChange={onOpenChange}
+      snapPoints={[...CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS]}
+      // Only the tallest snap dims the conversation behind it. At the half-open
+      // snap the whole point is to keep reading it.
+      fadeFromIndex={CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS.length - 1}
+      activeSnapPoint={activeSnapPoint}
+      setActiveSnapPoint={setActiveSnapPoint}
+      // The body hosts Monaco, a scrollable file tree and an embedded browser
+      // pane; a drag-anywhere surface would fight all three. The handle is the
+      // only drag target, and vaul gives it a 2.75rem hit area for free.
+      handleOnly
+      // Capacitor already resizes the frame (see `keyboardHeight` above), and
+      // letting vaul reposition on top of that moves an input twice. The
+      // padding below covers the browsers that don't resize.
+      repositionInputs={false}
+      // Radix's Sheet moved focus into the surface on open; vaul defaults the
+      // other way, which would leave focus on the trigger behind a modal.
+      autoFocus
+    >
+      <DrawerContent
+        // The caller draws its own real `DrawerHandle` below — the built-in bar
+        // is decorative markup with no drag behaviour, which is precisely the
+        // affordance this migration exists to stop faking.
+        showHandle={false}
+        // vaul hardcodes `transition: transform .5s` on `[data-vaul-drawer]`,
+        // which ignores the app's motion-speed preference — the Sheet this
+        // replaced carried the same override for the same reason. `!` because
+        // vaul injects its rule from JS at module load, so equal-specificity
+        // source order is not something to leave to chance; the reduce-motion
+        // guards in `globals.css` are more specific still and continue to win.
+        className="gap-0 overflow-hidden p-0 pb-[env(safe-area-inset-bottom)] [transition-duration:calc(300ms*var(--motion-duration-scale,1))]! data-[vaul-drawer-direction=bottom]:max-h-[92dvh] data-[vaul-drawer-direction=bottom]:rounded-t-2xl"
+        style={{
+          height: "92dvh",
+          // Overrides the safe-area class above only while a keyboard is
+          // actually overlapping; `0` falls through to the inset.
+          paddingBottom: keyboardHeight || undefined,
+        }}
         data-testid="context-workbench-mobile-sheet"
       >
-        <SheetHeader className="sr-only">
-          <SheetTitle>{t("mobileTitle")}</SheetTitle>
-          <SheetDescription>{t("mobileDescription")}</SheetDescription>
-        </SheetHeader>
-        <div
-          aria-hidden
-          className="mx-auto mt-2 mb-1 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30"
+        <DrawerHeader className="sr-only">
+          <DrawerTitle>{t("mobileTitle")}</DrawerTitle>
+          <DrawerDescription>{t("mobileDescription")}</DrawerDescription>
+        </DrawerHeader>
+        <DrawerHandle data-testid="context-workbench-drawer-handle" />
+        <ContextWorkbench
+          {...workbenchProps}
+          placement="mobile-sheet"
+          manageOwnWidth={false}
+          className="w-full flex-1"
+          onCollapse={() => onOpenChange(false)}
         />
-        <Activity mode={open ? "visible" : "hidden"}>
-          <ContextWorkbench
-            {...workbenchProps}
-            placement="mobile-sheet"
-            manageOwnWidth={false}
-            className="w-full flex-1"
-          />
-        </Activity>
-      </SheetContent>
-    </Sheet>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -368,6 +451,12 @@ interface SortableActivityButtonProps {
   activeActivity: string | undefined
   attentionActivity: string | undefined
   scopeKey: string
+  /**
+   * Pad the button out to the 44pt iOS HIG floor. The shared `icon-sm` glyph is
+   * 32px, which is below the bar this repo sets for itself in `globals.css`,
+   * and the horizontal rail is the one placement a finger ever hits.
+   */
+  touchTarget?: boolean
   onActivate: (panel: ContextPanelDefinition, source: "rail") => void
   getPanelLabel: (panel: ContextPanelDefinition) => string
 }
@@ -381,6 +470,7 @@ function SortableActivityButton({
   activeActivity,
   attentionActivity,
   scopeKey,
+  touchTarget,
   onActivate,
   getPanelLabel,
 }: SortableActivityButtonProps) {
@@ -417,6 +507,7 @@ function SortableActivityButton({
           onClick={() => onActivate(panel, "rail")}
           className={cn(
             "relative cursor-grab active:cursor-grabbing",
+            touchTarget && "touch-target",
             isActive && "text-foreground"
           )}
           style={style}
@@ -467,6 +558,7 @@ export function ContextWorkbench({
   onResetLayout,
 }: ContextWorkbenchProps) {
   const sectionRef = useRef<HTMLElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const lifecyclePanelsRef = useRef(new Map<string, Set<string>>())
   const lastActivePanelRef = useRef(new Map<string, string | null>())
@@ -477,6 +569,12 @@ export function ContextWorkbench({
     contextPanelRegistry.getRevision,
     contextPanelRegistry.getRevision
   )
+  // The mobile drawer lays the rail out horizontally. That one flag also stands
+  // for "a finger is driving this": it decides the arrow-key axis, the 44pt
+  // touch targets, whether the trailing button reads as Close or Collapse, and
+  // whether re-tapping the active activity dismisses the surface. Declared up
+  // here because handlers defined above the rail markup read it.
+  const railIsHorizontal = placement === "mobile-sheet"
   const scopeKey = `${workbenchInstanceId}::${getContextResourceKey(resource)}`
   const panelHistory = usePanelHistory(scopeKey)
   const persistedLayout = useContextWorkbenchStore((state) => state.layouts[scopeKey])
@@ -498,8 +596,10 @@ export function ContextWorkbench({
   // — that hook reads the whole `settings` object, and this component is
   // mounted in four hosts and re-renders on every panel switch.
   const storedRailLayout = useSettingsStore((state) => state.settings?.workbenchRail)
+  const storedPanelLayout = useSettingsStore((state) => state.settings?.workbenchPanels)
   const saveSettings = useSettingsStore((state) => state.save)
   const railLayout = useMemo(() => workbenchRailLayoutOf(storedRailLayout), [storedRailLayout])
+  const panelLayout = useMemo(() => workbenchPanelLayoutOf(storedPanelLayout), [storedPanelLayout])
 
   // --- Activity rail inline drag-to-reorder (Phase 1.4) ---
   // Distance threshold = 8px to cleanly distinguish click from drag. Higher
@@ -669,6 +769,33 @@ export function ContextWorkbench({
       group.push(panel)
       groups.set(panel.activity, group)
     }
+    // Apply the user's panel-tab customization *inside* each group. Deliberately
+    // not applied to `resolvedPanels` itself: a hidden panel keeps its mount and
+    // stays in the published set, so the command palette, `ctrl+shift+e` and
+    // `ctrl+1..7` still reach it. That fallback is the whole reason hiding a
+    // panel is safe to offer, exactly as it is for hiding an activity.
+    for (const [activity, group] of groups) {
+      groups.set(
+        activity,
+        group
+          .filter((panel) => !isWorkbenchPanelHidden(panel.id, panelLayout))
+          .sort((left, right) => {
+            const stored =
+              workbenchPanelIndex(left.id, panelLayout) - workbenchPanelIndex(right.id, panelLayout)
+            // Ties are every pair the user never reordered, which is all of them
+            // on a default layout — so the shipped `order:` numbers keep
+            // deciding until the user says otherwise.
+            if (stored !== 0) return stored
+            const declared = (left.order ?? 100) - (right.order ?? 100)
+            return declared === 0 ? left.id.localeCompare(right.id) : declared
+          })
+      )
+    }
+    // A group whose every panel the user hid has no tab left to show; dropping
+    // the rail button too keeps the icon from opening an empty body.
+    for (const [activity, group] of groups) {
+      if (group.length === 0) groups.delete(activity)
+    }
     // The rail follows its own declared order (`panel.order` governs the group
     // alone). Deriving rail position from each group's lowest-ordered panel made
     // one number mean two things, so ordering panels within a group silently
@@ -685,7 +812,7 @@ export function ContextWorkbench({
         ([left], [right]) =>
           workbenchRailIndex(left, railLayout) - workbenchRailIndex(right, railLayout)
       )
-  }, [railLayout, resolvedPanels])
+  }, [panelLayout, railLayout, resolvedPanels])
 
   const handleRailDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -708,6 +835,31 @@ export function ContextWorkbench({
   const activeGroup = activePanel
     ? (activityGroups.find(([activity]) => activity === activePanel.activity)?.[1] ?? [])
     : []
+
+  // --- Vertical split ---
+  //
+  // Both narrowings below are *projections*: they change what this render shows
+  // without writing to the store, so a phone — or a drag below the threshold and
+  // back — cannot destroy a desktop layout the user set up deliberately.
+  //
+  // The mode check reads `layout.mode` rather than `widthMode`: `resolvedMode`
+  // speaks for the host's real pixels and exists precisely because `layout.mode`
+  // can lie for `manageOwnWidth={false}` hosts. Mode states the intent; the
+  // measurement below decides whether there is room to honour it.
+  const bodyWidth = useElementWidth(bodyRef)
+  const splitEligible = placement !== "mobile-sheet" && isSplitEligibleMode(layout.mode)
+  const splitPanel = splitEligible
+    ? resolvedPanels.find(
+        (panel) => panel.id === layout.splitPanelId && panel.id !== layout.activePanelId
+      )
+    : undefined
+  // `useElementWidth` returns 0 until the ref is attached, and its own docs ask
+  // callers to read that as "not yet measured". Treating it as eligible keeps the
+  // first paint from showing one pane and snapping to two; the hook measures in
+  // a layout effect, so the correction lands before the browser paints.
+  const splitFitsWidth = bodyWidth === 0 || bodyWidth >= CONTEXT_WORKBENCH_SPLIT_MIN_WIDTH
+  const splitActive = Boolean(splitPanel) && splitFitsWidth
+  const secondaryPanelId = splitActive && splitPanel ? splitPanel.id : null
   const resourceSession = useResourceWorkbenchSession(
     resource,
     Boolean(activePanel?.requiresChatScope),
@@ -846,7 +998,13 @@ export function ContextWorkbench({
       // Activity-bar convention (VS Code): clicking the ALREADY-ACTIVE
       // activity toggles the surface closed. Only for the rail — re-clicking
       // the current header/group tab must stay inert.
-      if (source === "rail") handleCollapse()
+      //
+      // And only on a pointer. In the mobile drawer "collapse" is a *close*, so
+      // this convention turns a mistimed second tap on the icon you are already
+      // looking at into dismissing the whole surface. The drawer has an
+      // explicit Close button, the handle and the scrim; it does not need a
+      // fourth exit hidden inside navigation.
+      if (source === "rail" && !railIsHorizontal) handleCollapse()
       return
     }
     let seen = lifecyclePanelsRef.current.get(scopeKey)
@@ -928,9 +1086,6 @@ export function ContextWorkbench({
     window.addEventListener("pointerup", handleUp)
   }
 
-  // The mobile Sheet lays the rail out horizontally, so the arrow keys that
-  // walk it have to follow the visual axis rather than the vertical default.
-  const railIsHorizontal = placement === "mobile-sheet"
   const handleActivityKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     const [nextKey, previousKey] = railIsHorizontal
       ? ["ArrowRight", "ArrowLeft"]
@@ -1065,7 +1220,9 @@ export function ContextWorkbench({
             className={cn(
               "flex shrink-0 items-center gap-1 bg-muted/30",
               railIsHorizontal
-                ? "h-12 w-full overflow-x-auto border-b px-2"
+                ? // Tall enough to hold a 44px touch target with breathing room;
+                  // `h-12` clipped the padded buttons.
+                  "h-14 w-full overflow-x-auto border-b px-2"
                 : "flex-col border-r py-2"
             )}
             // Inline width rather than `w-12`: the rail is now also what a
@@ -1100,6 +1257,7 @@ export function ContextWorkbench({
                     activeActivity={activePanel?.activity}
                     attentionActivity={attentionActivity}
                     scopeKey={scopeKey}
+                    touchTarget={railIsHorizontal}
                     onActivate={handleActivate}
                     getPanelLabel={getPanelLabel}
                   />
@@ -1122,6 +1280,7 @@ export function ContextWorkbench({
                         : t("contextWorkbench.actions.pin")
                     }
                     aria-pressed={layout.userPinned}
+                    className={cn(railIsHorizontal && "touch-target")}
                     onClick={() => setUserPinned(scopeKey, !layout.userPinned)}
                   >
                     <PinIcon className={cn("size-4", layout.userPinned && "fill-current")} />
@@ -1139,6 +1298,7 @@ export function ContextWorkbench({
                     variant="ghost"
                     aria-label={t("desktop.shellLayout.title")}
                     data-testid="context-workbench-customize-rail"
+                    className={cn(railIsHorizontal && "touch-target")}
                     onClick={() => setCustomizeRailOpen(true)}
                   >
                     <SlidersHorizontalIcon className="size-4" />
@@ -1150,7 +1310,13 @@ export function ContextWorkbench({
               </Tooltip>
               {/* Flips with the surface. On a persistent rail the panel body is
                   already shut, so a second "collapse" would be inert — the one
-                  action left is to put it back. */}
+                  action left is to put it back.
+
+                  In the mobile drawer it is neither: the host's `onCollapse`
+                  closes the whole surface, so this is a plain Close. It used to
+                  claim "Collapse workbench" over a right-edge panel glyph, on a
+                  sheet that has no right edge and does not collapse — the only
+                  exit affordance on the platform, describing something else. */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -1158,14 +1324,19 @@ export function ContextWorkbench({
                     size="icon-sm"
                     variant="ghost"
                     aria-label={t(
-                      bodyHidden
-                        ? "contextWorkbench.actions.expand"
-                        : "contextWorkbench.actions.collapse"
+                      railIsHorizontal
+                        ? "contextWorkbench.actions.close"
+                        : bodyHidden
+                          ? "contextWorkbench.actions.expand"
+                          : "contextWorkbench.actions.collapse"
                     )}
                     data-testid="context-workbench-collapse-toggle"
+                    className={cn(railIsHorizontal && "touch-target")}
                     onClick={bodyHidden ? handleExpand : handleCollapse}
                   >
-                    {bodyHidden ? (
+                    {railIsHorizontal ? (
+                      <XIcon className="size-4" />
+                    ) : bodyHidden ? (
                       <PanelRightOpenIcon className="size-4" />
                     ) : (
                       <PanelRightCloseIcon className="size-4" />
@@ -1174,9 +1345,11 @@ export function ContextWorkbench({
                 </TooltipTrigger>
                 <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
                   {t(
-                    bodyHidden
-                      ? "contextWorkbench.actions.expand"
-                      : "contextWorkbench.actions.collapse"
+                    railIsHorizontal
+                      ? "contextWorkbench.actions.close"
+                      : bodyHidden
+                        ? "contextWorkbench.actions.expand"
+                        : "contextWorkbench.actions.collapse"
                   )}
                 </TooltipContent>
               </Tooltip>
@@ -1343,13 +1516,14 @@ export function ContextWorkbench({
                         variant="ghost"
                         aria-label={t("contextWorkbench.actions.layoutMenu")}
                         data-testid="context-workbench-layout-menu"
-                        className={cn(
-                          "shrink-0",
-                          // Reset alone does not justify a permanent button, so
-                          // above the fold this menu only appears when there is
-                          // something in it beyond the three inline controls.
-                          onResetLayout ? "" : "@[20rem]/wb-header:hidden"
-                        )}
+                        // Reset alone did not justify a permanent button, so this
+                        // used to hide above the fold unless `onResetLayout` was
+                        // supplied. It no longer can: the menu is the only place
+                        // split view is named as unavailable, and a host without
+                        // a reset action would otherwise never show that at all —
+                        // which is the dormancy being silent again, just at one
+                        // breakpoint instead of everywhere.
+                        className="shrink-0"
                       >
                         <SlidersHorizontalIcon className="size-4" />
                       </Button>
@@ -1376,6 +1550,21 @@ export function ContextWorkbench({
                         <FocusIcon className="size-4" />
                         {t("contextWorkbench.actions.focus")}
                       </DropdownMenuItem>
+                      {/* Modelled and persisted in `contextWorkbenchStore`
+                          (`splitPanelId` / `splitRatio` + three actions) with
+                          no renderer behind it. Named here as explicitly
+                          unavailable rather than left invisible: Working Rule 7
+                          asks that dormancy be legible in the UI, not only in
+                          the type. Same shape as the deferred bridge scopes in
+                          `settings/external-bridge/panels/scopes-panel.tsx`. */}
+                      <DropdownMenuItem
+                        disabled
+                        data-testid="context-workbench-split-planned"
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        <Columns2Icon className="size-4" />
+                        {t("contextWorkbench.actions.splitPlanned")}
+                      </DropdownMenuItem>
                       {onResetLayout ? (
                         <DropdownMenuItem
                           data-testid="context-workbench-reset-layout"
@@ -1390,7 +1579,16 @@ export function ContextWorkbench({
                 </>
               ) : null}
             </header>
-            <div className="relative min-h-0 flex-1 overflow-hidden">
+            <div
+              ref={bodyRef}
+              className="relative min-h-0 flex-1 overflow-hidden"
+              data-split={splitActive || undefined}
+              // The live ratio rides a custom property so a drag can move both
+              // lanes and the bar by mutating one node — no React render per
+              // pointermove, which is what keeps a Monaco buffer and an embedded
+              // webview out of the gesture.
+              style={{ "--wb-split": `${layout.splitRatio}%` } as CSSProperties}
+            >
               {resolvedPanels.map((panel) => {
                 // A session-scoped panel keeps its mount for as long as the
                 // conversation lasts, so moving between artifact tabs no longer
@@ -1400,7 +1598,14 @@ export function ContextWorkbench({
                   panel.scope === "session" && sessionActivatedPanelIds
                     ? sessionActivatedPanelIds
                     : layout.activatedPanelIds
-                const active = layout.activePanelId === panel.id
+                const isPrimary = layout.activePanelId === panel.id
+                const isSecondary = secondaryPanelId === panel.id
+                // `active` means "in a visible pane" — true for BOTH panels while
+                // split, not just the one the rail highlights. It drives `inert`,
+                // `aria-hidden`, the `<Activity>` mode and the renderer's own
+                // prop, so a second pane that reported inactive would be mounted
+                // but unfocusable and would tell its plugin it was hidden.
+                const active = isPrimary || isSecondary
                 // The panel on screen always mounts, even before its activation
                 // is recorded: a fresh scope gets its default panel from
                 // `reconcilePanels`, which deliberately leaves `activatedPanelIds`
@@ -1481,15 +1686,38 @@ export function ContextWorkbench({
                     {guardedContent}
                   </div>
                 )
+                // The load-bearing line of the whole split. `absolute inset-0`
+                // used to be a class; it is now an inline box so the split can
+                // move it. In the single-pane case the computed box is identical
+                // to before, and in every case this is the SAME element in the
+                // SAME position with the SAME parent — React updates attributes
+                // rather than reconciling a new subtree, so no panel remounts
+                // when the split opens, closes, swaps or resizes.
+                //
+                // That is also why this is not a `ResizablePanelGroup`: moving a
+                // panel into a `<ResizablePanel>` changes its parent chain, and a
+                // swap changes both panes' chains at once — either one tears down
+                // an embedded webview holding a process-wide lease.
+                const lane: CSSProperties = !splitActive
+                  ? { top: 0, bottom: 0 }
+                  : isSecondary
+                    ? { top: `calc(var(--wb-split) + ${SPLIT_BAR_HEIGHT})`, bottom: 0 }
+                    : isPrimary
+                      ? { top: 0, height: "var(--wb-split)" }
+                      : // Hidden panels park in the primary lane; `<Activity>`
+                        // keeps them out of layout anyway.
+                        { top: 0, bottom: 0 }
                 return panel.retention === "ephemeral" ? (
                   active ? (
-                    <div key={panel.id} className="absolute inset-0">
+                    <div key={panel.id} className="absolute inset-x-0" style={lane}>
                       {content}
                     </div>
                   ) : null
                 ) : (
                   <Activity key={panel.id} mode={active ? "visible" : "hidden"}>
-                    <div className="absolute inset-0">{content}</div>
+                    <div className="absolute inset-x-0" style={lane}>
+                      {content}
+                    </div>
                   </Activity>
                 )
               })}
