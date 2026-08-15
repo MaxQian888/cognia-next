@@ -1,6 +1,7 @@
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import {
   useContextWorkbenchStore,
+  visibleContextPanelIds,
   type ContextWorkbenchLayout,
 } from "@/stores/context-workbench/context-workbench-store"
 import type {
@@ -61,12 +62,25 @@ interface ActiveContextHost {
    * always on screen omit it and are treated as visible.
    */
   isVisible?: () => boolean
+  /**
+   * Which panels the host is actually showing — one normally, two while split.
+   *
+   * The layout alone cannot answer this. It records a split the host may be
+   * projecting away: the mobile drawer and any body too narrow for two panes
+   * render a single pane deliberately without writing back, so that a phone
+   * cannot destroy a desktop layout. Reading `splitPanelId` directly would
+   * report a second pane as visible on a device that is not drawing one —
+   * the same class of lie `isVisible` was added to fix. Hosts that predate
+   * this omit it and fall back to the layout.
+   */
+  visiblePanelIds?: () => string[]
 }
 
 export interface ActiveContextHostOptions {
   ensureVisible?: () => void
   collapse?: () => void
   isVisible?: () => boolean
+  visiblePanelIds?: () => string[]
 }
 
 const hosts = new Map<string, ActiveContextHost>()
@@ -143,6 +157,7 @@ export function setActiveContextForHost(
     ensureVisible: options.ensureVisible,
     collapse: options.collapse,
     isVisible: options.isVisible,
+    visiblePanelIds: options.visiblePanelIds,
   })
   activeScopeKey = scopeKey
   notify()
@@ -356,21 +371,27 @@ export function setActiveWorkbenchMode(pluginId: string, mode: ContextWorkbenchM
 }
 
 /**
- * Whether a plugin's panel is the one in front of the ACTIVE workbench. This
- * is the host-side notion of visibility — coarser than the per-iframe
- * `visibility` event the webview renderer pushes, which knows exactly which
- * frame instance is displayed.
+ * Whether a plugin's panel is on screen in the ACTIVE workbench — in either
+ * pane, since a split shows two at once. This is the host-side notion of
+ * visibility, coarser than the per-iframe `visibility` event the webview
+ * renderer pushes, which knows exactly which frame instance is displayed.
  */
 export function isPluginContextPanelVisible(pluginId: string, requestedPanelId: string): boolean {
   const active = getActiveWorkbench()
   if (!active) return false
+  const host = hosts.get(active.scopeKey)
+  // Ask the host first. It is the only party that knows about the projections
+  // that narrow a split away at render time without touching the layout, so
+  // reading the layout alone would report a second pane as visible on a phone
+  // that is drawing one.
+  const visible = host?.visiblePanelIds?.() ?? visibleContextPanelIds(active.layout)
   return (
-    active.layout.activePanelId === qualifyPluginPanelId(pluginId, requestedPanelId) &&
+    visible.includes(qualifyPluginPanelId(pluginId, requestedPanelId)) &&
     active.layout.mode !== "collapsed" &&
     // …and the container around it is actually open. `mode` is per-scope and
     // three of the four hosts never write `collapsed` to it, so this used to
     // report a panel as visible while the whole right column sat at zero width.
-    (hosts.get(active.scopeKey)?.isVisible?.() ?? true)
+    (host?.isVisible?.() ?? true)
   )
 }
 

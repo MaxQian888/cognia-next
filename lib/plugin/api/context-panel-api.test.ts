@@ -270,6 +270,8 @@ describe("plugin context panel API", () => {
       expect(api.getWorkbenchState()).toMatchObject({
         mode: "narrow",
         activePanelId: "plugin-a:outline",
+        splitPanelId: null,
+        splitRatio: 50,
         ownsActivePanel: true,
         userPinned: false,
         panelIds: ["plugin-a:outline"],
@@ -277,6 +279,25 @@ describe("plugin context panel API", () => {
 
       const blind = createContextPanelAPI("plugin-a", (p) => p === "extension:ui")
       expect(blind.getWorkbenchState()).toBeNull()
+      disposeHost()
+    })
+
+    it("withholds layout control from a plugin that owns only the second pane", () => {
+      const { api, disposeHost } = mountPanel()
+      api.reveal("outline")
+      useContextWorkbenchStore.getState().navigatePanel(scopeKey, "native:review", "wide")
+      useContextWorkbenchStore.getState().activateSplit(scopeKey, "plugin-a:outline")
+
+      const state = api.getWorkbenchState()
+      expect(state).toMatchObject({
+        activePanelId: "native:review",
+        splitPanelId: "plugin-a:outline",
+      })
+      // `setMode` and `setPinned` reshape the whole workbench. Sitting in the
+      // lower half is not the same as having been handed the surface.
+      expect(state?.ownsActivePanel).toBe(false)
+      expect(api.setMode("focus")).toBe(false)
+      expect(api.setPinned(true)).toBe(false)
       disposeHost()
     })
 

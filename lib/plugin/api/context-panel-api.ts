@@ -70,7 +70,25 @@ export interface PluginContextWorkbenchState {
   resource: ContextResource
   mode: ContextWorkbenchMode
   activePanelId: string | null
-  /** True when the visible panel belongs to this plugin — the gate on `setMode`/`setPinned`. */
+  /**
+   * The panel stacked below `activePanelId` while the workbench is split, or
+   * `null`. Namespaced like `activePanelId`.
+   *
+   * Note this is the *stored* layout: a host may be projecting the split away
+   * (the mobile drawer, or a body too narrow for two panes). Use
+   * `onDidChangeVisibility` to learn whether a given panel is actually drawn.
+   */
+  splitPanelId: string | null
+  /** Percentage of the body height the primary pane occupies (20–80). */
+  splitRatio: number
+  /**
+   * True when the panel *in front* belongs to this plugin — the gate on
+   * `setMode`/`setPinned`.
+   *
+   * Deliberately not satisfied by owning only the split pane: those two calls
+   * reshape the whole workbench, and a plugin sitting in the lower half has not
+   * been handed the surface.
+   */
   ownsActivePanel: boolean
   userPinned: boolean
   panelIds: string[]
@@ -136,6 +154,8 @@ export function createContextPanelAPI(
       resource: active.resource,
       mode: active.layout.mode,
       activePanelId: active.layout.activePanelId,
+      splitPanelId: active.layout.splitPanelId,
+      splitRatio: active.layout.splitRatio,
       ownsActivePanel: active.layout.activePanelId?.startsWith(prefix) ?? false,
       userPinned: active.layout.userPinned,
       // Only this plugin's own panels — the full list would leak which other

@@ -154,6 +154,33 @@ describe("isPluginContextPanelVisible", () => {
     expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(false)
   })
 
+  it("reports a plugin panel visible while it sits in the second pane", () => {
+    const disposeHost = setActiveContextForHost("dock", resource)
+    useContextWorkbenchStore.getState().navigatePanel("dock", "native:review", "wide")
+    useContextWorkbenchStore.getState().activateSplit("dock", "plugin-a:inbox")
+
+    // A split shows two panels at once, so "visible" cannot mean "in front".
+    expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(true)
+
+    disposeHost()
+  })
+
+  it("defers to a host that is projecting the split away", () => {
+    // The mobile drawer and any body too narrow for two panes draw a single
+    // pane while deliberately leaving the stored layout alone, so reading
+    // `splitPanelId` would report a pane the device is not drawing.
+    const disposeHost = setActiveContextForHost("dock", resource, {
+      visiblePanelIds: () => ["native:review"],
+    })
+    useContextWorkbenchStore.getState().navigatePanel("dock", "native:review", "wide")
+    useContextWorkbenchStore.getState().activateSplit("dock", "plugin-a:inbox")
+
+    expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(false)
+    expect(useContextWorkbenchStore.getState().layouts.dock?.splitPanelId).toBe("plugin-a:inbox")
+
+    disposeHost()
+  })
+
   it("is false while the host's own container is shut, whatever the mode says", () => {
     // The chat dock, Canvas and the workflow editor all shrink a container they
     // own and never write `collapsed` to the per-scope mode. Reading the mode

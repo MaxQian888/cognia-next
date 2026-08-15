@@ -659,6 +659,11 @@ export function ContextWorkbench({
   // report the *current* value, and re-registering to refresh it would restamp
   // this host as the active one — a collapse is the opposite of claiming focus.
   const bodyHiddenRef = useRef(bodyHidden)
+  // Same reasoning again for the visible set: the plugin layer has to read the
+  // set this host is *drawing*, which the layout cannot supply on its own
+  // because mobile and sub-480px bodies narrow a split away without writing
+  // back. Kept behind a ref so a pane change does not restamp this host active.
+  const visiblePanelIdsRef = useRef<string[]>([])
   useEffect(() => {
     ensureVisibleRef.current = onEnsureVisible
     collapseRef.current = onCollapse
@@ -672,6 +677,7 @@ export function ContextWorkbench({
         // `setActiveWorkbenchMode` fall through to the per-scope mode.
         collapse: onCollapse ? () => collapseRef.current?.() : undefined,
         isVisible: () => !bodyHiddenRef.current,
+        visiblePanelIds: () => visiblePanelIdsRef.current,
       }),
     // `onCollapse` by identity only decides whether the capability exists at
     // all — the call itself goes through the ref, so an inline arrow does not
@@ -909,6 +915,14 @@ export function ContextWorkbench({
     [layout.activePanelId, panelLayout, resolvedPanels]
   )
   const canOfferSplit = splitEligible && splitFitsWidth && splitCandidates.length > 0
+  // Publish the drawn set, then announce it. A store-driven change (opening or
+  // closing a split) already reaches plugins through the store subscription;
+  // the render-time projections do not touch the store, so without this a
+  // plugin panel narrowed away on a phone would keep reporting itself visible.
+  useEffect(() => {
+    visiblePanelIdsRef.current = JSON.parse(visiblePanelsKey) as string[]
+    notifyActiveContextHostVisibility(scopeKey)
+  }, [scopeKey, visiblePanelsKey])
   const resourceSession = useResourceWorkbenchSession(
     resource,
     Boolean(activePanel?.requiresChatScope),

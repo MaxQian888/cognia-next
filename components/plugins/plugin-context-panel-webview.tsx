@@ -60,6 +60,11 @@ function WebviewContextPanel({ pluginId, fullId, title, active }: WebviewPanelPr
     [pushVisibility]
   )
 
+  // `active` means "in a visible pane", so while the workbench is split both
+  // panes report true — a plugin in the lower half is on screen and must not be
+  // told to pause. No code change was needed for that; the prop already carried
+  // the right answer once the workbench started computing it from the visible
+  // set rather than from `activePanelId`.
   useEffect(() => {
     activeRef.current = active
     pushVisibility(active)
