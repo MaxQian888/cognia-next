@@ -173,10 +173,15 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
   // data source: `providerUsageStats` (below) only ever had a writer on the
   // plugin surface, so the tab rendered its empty state for every provider.
   // Thirty days is the widest period the toggle offers.
-  const rangeFrom = useMemo(() => localDayString(Date.now() - 30 * 86_400_000), [])
+  // Anchor "now" once per mount (the toggle only offers 7 / 30 days, so a
+  // stale anchor across a long-open pane costs at most a missing day until
+  // the tab is reopened) — keeps the live-query callback pure.
+  const [rangeNow] = useState(() => Date.now())
+  const rangeFrom = localDayString(rangeNow - 30 * 86_400_000)
+  const rangeTo = localDayString(rangeNow)
   const dailyRows = useLiveQuery(
-    () => getCostRange(rangeFrom, localDayString()).catch((): ProviderCostDailyRow[] => []),
-    [rangeFrom]
+    () => getCostRange(rangeFrom, rangeTo).catch((): ProviderCostDailyRow[] => []),
+    [rangeFrom, rangeTo]
   )
   // Aggregate both sources into the
   // `Record<modelId, { dailyStats: Record<date, { calls, inputTokens, outputTokens, cost }> }>`
