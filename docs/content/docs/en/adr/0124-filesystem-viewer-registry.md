@@ -130,8 +130,11 @@ only durable defence against someone adding `path` later for debugging.
   If the refusal rate proves too high, the answer is to widen the root set, not
   to disable the check — the logs carry source and code and no path, so the
   rate is measurable without recording what was refused.
-- The dialog is still unmounted on mobile, where the desktop shell bypasses its
-  chrome, so chat file links remain a no-op there. That follow-up is not in
-  this change.
+- The dialog is mounted twice, once per platform shell, because neither shell
+  renders on the other's platform: `DesktopAppShell` returns bare children on
+  mobile, and `MobileShellWrapper` does the same off mobile. The mobile mount
+  sits in the wrapper rather than in `AppShellMobile`, which renders only on
+  `/` — the terminal at `/me/terminal` is one of the two places a file link is
+  actually clicked.
 - No plugin-facing viewer API yet. The contract should hold through a minor
   release before it freezes under one.

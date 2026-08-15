@@ -39,6 +39,10 @@ jest.mock("@/lib/capacitor/haptics", () => ({
   selectionFeedback: jest.fn(async () => ({ kind: "ok" })),
 }))
 
+jest.mock("@/components/file-viewer/file-viewer-dialog", () => ({
+  FileViewerDialog: () => <div data-testid="file-viewer-dialog" />,
+}))
+
 jest.mock("@/components/mobile/offline-banner", () => ({
   OfflineBanner: () => <div data-testid="offline-banner-stub" />,
 }))
@@ -110,6 +114,40 @@ describe("<MobileShellWrapper />", () => {
     )
     expect(screen.getByTestId("mobile-tab-bar")).toBeInTheDocument()
     expect(screen.getByText("child")).toBeInTheDocument()
+  })
+
+  it("mounts the file viewer dialog for every mobile route", () => {
+    // `DesktopAppShell` mounts its own copy but returns bare children on this
+    // platform, so without this one a file link in the mobile terminal or in
+    // chat wrote to the store and showed nothing at all.
+    render(
+      <MobileShellWrapper>
+        <div>child</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("file-viewer-dialog")).toBeInTheDocument()
+
+    // Including the routes that render outside `AppShellMobile` — the terminal
+    // is one of the two places a file link is actually clicked.
+    pathnameMock.mockReturnValue("/me/terminal")
+    render(
+      <MobileShellWrapper>
+        <div>terminal</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getAllByTestId("file-viewer-dialog").length).toBeGreaterThan(0)
+  })
+
+  it("leaves the file viewer dialog to the desktop shell off mobile", () => {
+    // Both shells mount one; the platform gate is what keeps exactly one of
+    // them rendering rather than two dialogs fighting over the same store.
+    platformMock.mockReturnValue("desktop")
+    render(
+      <MobileShellWrapper>
+        <div>child</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.queryByTestId("file-viewer-dialog")).not.toBeInTheDocument()
   })
 
   it("hides the tab bar on /pair", () => {

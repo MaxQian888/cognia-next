@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { MobileConsentSheet } from "@/components/mobile/automation/mobile-consent-sheet"
+import { FileViewerDialog } from "@/components/file-viewer/file-viewer-dialog"
 import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { usePlatform } from "@/hooks/use-platform"
@@ -32,7 +33,7 @@ import { cn } from "@/lib/utils"
 import { MobileTabBar, tabHref, type TabId } from "./mobile-tab-bar"
 import { useMobileTabLayout } from "./use-mobile-tab-layout"
 
-const TAB_BAR_HIDDEN_PREFIXES = ["/pair", "/oauth", "/welcome"]
+const TAB_BAR_HIDDEN_PREFIXES = ["/pair", "/oauth", "/onboarding"]
 
 export interface MobileShellWrapperProps {
   children: React.ReactNode
@@ -170,6 +171,13 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         {children}
       </div>
       <MobileConsentSheet />
+      {/* The mobile counterpart of the mount in `DesktopAppShell`, which this
+          platform never reaches — that shell returns bare children here. It
+          belongs at this level rather than in `AppShellMobile`: that component
+          renders only on `/`, while the terminal at `/me/terminal` is one of
+          the two places a file link is clicked. Self-gating on its own store,
+          so an unopened viewer costs nothing. */}
+      <FileViewerDialog />
       {showTabBar ? <MobileTabBar badges={mergedBadges} keyboardHidden={keyboard.isVisible} /> : null}
     </div>
   )
