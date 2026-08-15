@@ -1078,6 +1078,13 @@ struct RegisterRequest {
     public_key_pem: String,
     signaling_public_key: String,
     proof: String,
+    /// ADR-0127: self-reported labels for the `companion://device-paired`
+    /// event (`ios` | `android` | `web` | `unknown`). Optional — older
+    /// clients omit them and the event falls back to `unknown`.
+    #[serde(default)]
+    platform: Option<String>,
+    #[serde(default)]
+    app_version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1120,7 +1127,37 @@ struct SignalingRegistrationResponse {
     room_descriptor: RoomDescriptor,
 }
 
+/// Payload of `companion://device-paired` — mirrors `DevicePairedPayload` in
+/// `lib/companion/event-bridge.ts` (snake_case, `account_id` == tenant id, the
+/// same identity the device JWT carries as `account_id`).
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DevicePairedEvent {
+    pub device_id: String,
+    pub account_id: String,
+    pub label: String,
+    pub platform: String,
+    pub pubkey: String,
+    pub paired_at_ms: i64,
+    pub app_version: String,
+    pub rendezvous_id: String,
+    pub room_descriptor: Value,
+}
+
+/// Emit `companion://device-paired` on the same rail as `device-seen`.
+pub(crate) fn publish_device_paired(state: &SharedState, event: DevicePairedEvent) {
+    let payload = serde_json::to_value(&event).unwrap_or(Value::Null);
+    if let Some(app) = state.app_handle.clone() {
+        use tauri::Emitter as _;
+        let _ = app.emit("companion://device-paired", payload);
+    } else {
+        state
+            .event_bus
+            .publish("companion://device-paired".to_string(), payload);
+    }
+}
+
 async fn register_handler(
+    State(state): State<SharedState>,
     headers: HeaderMap,
     body: Result<Json<RegisterRequest>, JsonRejection>,
 ) -> ApiResult<RegisterResponse> {
@@ -1202,6 +1239,34 @@ async fn register_handler(
             error,
         ));
     }
+    // ADR-0127: the pairing lifecycle event. `lib/companion/event-bridge.ts`
+    // has listened for `companion://device-paired` since ADR-0021 to mirror
+    // new devices into every client's `pairedDevices` table, but nothing ever
+    // emitted it. Same rail as the middleware's `companion://device-seen`:
+    // `app.emit` on desktop (the Tauri→bus forwarder fans it out to remote
+    // subscribers), a direct bus publish on the headless server. Best-effort —
+    // registration has already succeeded.
+    publish_device_paired(
+        &state,
+        DevicePairedEvent {
+            device_id: request.device_id.clone(),
+            account_id: authority.tenant_id.clone(),
+            label: request.display_name.clone(),
+            platform: request
+                .platform
+                .clone()
+                .unwrap_or_else(|| "unknown".to_owned()),
+            pubkey: request.public_key_pem.clone(),
+            paired_at_ms: chrono::Utc::now().timestamp_millis(),
+            app_version: request
+                .app_version
+                .clone()
+                .unwrap_or_else(|| "unknown".to_owned()),
+            rendezvous_id: signaling.rendezvous_id.clone(),
+            room_descriptor: serde_json::to_value(&signaling.room_descriptor)
+                .unwrap_or(Value::Null),
+        },
+    );
     Ok(Json(RegisterResponse {
         device_id: request.device_id,
         tenant_id: authority.tenant_id,
@@ -1892,6 +1957,67 @@ mod tests {
             rate_limiter: super::super::rate_limit::RateLimiter::with_defaults(),
             push_tokens: super::super::push::PushTokenRegistry::new(),
         })
+    }
+
+    /// ADR-0127: with no Tauri app handle (headless server) the pairing event
+    /// goes straight onto the EventBus with the exact snake_case shape
+    /// `lib/companion/event-bridge.ts` parses.
+    #[test]
+    fn device_paired_publishes_the_bridge_payload_on_the_bus() {
+        let state = test_state();
+        let mut receiver = match state.event_bus.subscribe(None, 0) {
+            super::super::event_bus::SubscribeResult::Ok { receiver, .. } => receiver,
+            _ => panic!("subscribe"),
+        };
+        publish_device_paired(
+            &state,
+            DevicePairedEvent {
+                device_id: "dev-1".into(),
+                account_id: "tenant-a".into(),
+                label: "Pixel".into(),
+                platform: "android".into(),
+                pubkey: "-----BEGIN PUBLIC KEY-----".into(),
+                paired_at_ms: 1_700_000_000_000,
+                app_version: "1.2.3".into(),
+                rendezvous_id: "rv-1".into(),
+                room_descriptor: json!({ "roomId": "r1" }),
+            },
+        );
+        let frame = receiver.try_recv().expect("one frame published");
+        assert_eq!(frame.event_type, "companion://device-paired");
+        assert_eq!(frame.payload["device_id"], "dev-1");
+        assert_eq!(frame.payload["account_id"], "tenant-a");
+        assert_eq!(frame.payload["label"], "Pixel");
+        assert_eq!(frame.payload["platform"], "android");
+        assert_eq!(frame.payload["paired_at_ms"], 1_700_000_000_000_i64);
+        assert_eq!(frame.payload["app_version"], "1.2.3");
+        assert_eq!(frame.payload["rendezvous_id"], "rv-1");
+        assert_eq!(frame.payload["room_descriptor"]["roomId"], "r1");
+    }
+
+    /// Older clients omit the self-reported labels; the request still parses.
+    #[test]
+    fn register_request_accepts_missing_platform_and_app_version() {
+        let raw = json!({
+            "challengeId": "c1",
+            "challengeNonce": "n1",
+            "deviceId": "dev-1",
+            "displayName": "Pixel",
+            "publicKeyPem": "pem",
+            "signalingPublicKey": "spk",
+            "proof": "p"
+        });
+        let parsed: RegisterRequest = serde_json::from_value(raw).expect("parses");
+        assert!(parsed.platform.is_none());
+        assert!(parsed.app_version.is_none());
+        let with = json!({
+            "challengeId": "c1", "challengeNonce": "n1", "deviceId": "dev-1",
+            "displayName": "Pixel", "publicKeyPem": "pem", "signalingPublicKey": "spk",
+            "proof": "p", "platform": "ios", "appVersion": "9.9.9"
+        });
+        let parsed: RegisterRequest = serde_json::from_value(with).expect("parses");
+        assert_eq!(parsed.platform.as_deref(), Some("ios"));
+        assert_eq!(parsed.app_version.as_deref(), Some("9.9.9"));
     }
 
     async fn response_json(response: Response) -> Value {

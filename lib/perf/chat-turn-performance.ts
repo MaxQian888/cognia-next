@@ -55,6 +55,19 @@ export class ChatTurnPerformanceRecorder {
     this.write("chat:dispatch-latency", turn.startedAt, turn.dispatchedAt)
   }
 
+  /**
+   * Record that the host dropped a retried command as a duplicate
+   * (`command_ack { duplicate: true }`, ADR-0127). Written as a zero-length
+   * `chat:command-dedupe` range so the PerfHud / renderer collector count how
+   * often at-least-once retries actually collide, without needing an active
+   * turn — an interrupt or approval can be retried after the turn sealed.
+   */
+  markCommandDeduped(sessionId: string): void {
+    if (!sessionId) return
+    const at = this.dependencies.now()
+    this.write("chat:command-dedupe", at, at)
+  }
+
   /** Record the first assistant-visible frame, whether text or a tool call. */
   markFirstResponse(sessionId: string): void {
     const turn = this.activeTurns.get(sessionId)

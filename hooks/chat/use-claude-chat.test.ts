@@ -25,6 +25,7 @@ jest.mock("@/lib/perf/chat-turn-performance", () => ({
     begin: jest.fn(),
     markDispatched: jest.fn(),
     markFirstResponse: jest.fn(),
+    markCommandDeduped: jest.fn(),
     beginFinalPersistence: jest.fn(),
     endFinalPersistence: jest.fn(),
     finish: jest.fn(),
@@ -36,6 +37,7 @@ const chatTurnPerformanceMock = (
       begin: jest.Mock
       markDispatched: jest.Mock
       markFirstResponse: jest.Mock
+      markCommandDeduped: jest.Mock
       beginFinalPersistence: jest.Mock
       endFinalPersistence: jest.Mock
       finish: jest.Mock
@@ -1734,6 +1736,30 @@ describe("useClaudeChat — actions", () => {
       })
     )
     expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private upstream response")
+  })
+
+  // ADR-0127: `command_ack { duplicate: true }` used to fall through the event
+  // switch unhandled. It now records the dedupe and touches nothing else.
+  it("command_ack records a dedupe mark and leaves session state untouched", async () => {
+    chatState.activeSessionId = "sess-1"
+    chatState.openSessionIds = ["sess-1"]
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    chatState.replaceSessionMessages.mockClear()
+    chatState.setSessionStatus.mockClear()
+    await act(async () => {
+      _messageCallback?.({
+        type: "command_ack",
+        sessionId: "sess-1",
+        commandId: "cmd-7",
+        duplicate: true,
+      })
+    })
+    expect(chatTurnPerformanceMock.markCommandDeduped).toHaveBeenCalledWith("sess-1")
+    expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
+    expect(chatState.setSessionStatus).not.toHaveBeenCalled()
+    expect(persistMessagesMock).not.toHaveBeenCalledWith("sess-1", expect.anything())
   })
 
   it("sidecar_exited settles a streaming session with a retryable error", async () => {

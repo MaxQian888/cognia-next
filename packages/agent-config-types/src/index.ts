@@ -1254,6 +1254,20 @@ export const SESSION_CONTROL_CAPABILITIES: Record<SessionControlMethod, AgentCap
  */
 export interface ControlResponseEvent {
   type: "control_response"
+/**
+ * Sidecar → renderer acknowledgement of an idempotent command (ADR-0090
+ * `commandId` dedupe, consumed per ADR-0127). Emitted on `claude://message`
+ * only when a retried command was DROPPED as a duplicate — the first delivery
+ * already produced its normal effects — so the receiver must not re-apply
+ * anything; it records the dedupe for diagnostics.
+ */
+export interface CommandAckEvent {
+  type: "command_ack"
+  sessionId: string
+  commandId: string
+  duplicate: true
+}
+
   sessionId: string
   requestId: string
   ok: boolean
@@ -1498,6 +1512,7 @@ export type ClaudeEvent =
   | ControlResponseEvent
   | SessionApiResponseEvent
   | FeatureCallEvent
+  | CommandAckEvent
   | McpLogEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------

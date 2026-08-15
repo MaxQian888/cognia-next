@@ -225,6 +225,16 @@ export async function handleEvent(
     case "log":
       return
     case "sidecar_exited": {
+    case "command_ack": {
+      // ADR-0127: the host dropped a retried idempotent command (interrupt /
+      // approve / compact / set-model / close) as a duplicate. The first
+      // delivery already had its effect and produced its own events, so the
+      // only correct reaction is to record the collision — never to re-run
+      // the command's optimistic state change. Previously this frame fell
+      // through unhandled.
+      chatTurnPerformance.markCommandDeduped(evt.sessionId)
+      return
+    }
       // The sidecar process died. It will NOT emit the per-session
       // `session_ended` events for the turns it was serving, so every
       // streaming / awaiting-approval session would otherwise freeze forever

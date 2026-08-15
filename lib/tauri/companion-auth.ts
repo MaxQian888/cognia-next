@@ -1,6 +1,7 @@
 import { pinnedFetch, type PinnedFetchInit } from "./pinned-fetch"
 import type { CompanionConfig } from "./companion-storage"
 import { generatePersistableSigningIdentity, type RoomDescriptor } from "@/lib/signaling/crypto"
+import { APP_VERSION } from "@/lib/app-version"
 
 export interface CompanionAuthConfig {
   deploymentMode: "single-user" | "multi-tenant"
@@ -69,6 +70,20 @@ export async function generateDeviceIdentity(): Promise<DeviceIdentity> {
   }
 }
 
+/**
+ * The paired-device platform label this client reports at registration —
+ * the same vocabulary `lib/companion/event-bridge.ts` normalises on receipt
+ * (`ios` | `android` | `web` | `unknown`).
+ */
+export function devicePlatformLabel(): "ios" | "android" | "web" | "unknown" {
+  if (typeof window === "undefined") return "unknown"
+  const cap = (window as unknown as { Capacitor?: { getPlatform?: () => string } }).Capacitor
+  const native = typeof cap?.getPlatform === "function" ? cap.getPlatform() : null
+  if (native === "ios" || native === "android") return native
+  if (native === "web" || !("__TAURI_INTERNALS__" in window)) return "web"
+  return "unknown"
+}
+
 export async function registerCompanionDevice(
   input: {
     baseUrl: string
@@ -116,6 +131,11 @@ export async function registerCompanionDevice(
         publicKeyPem: identity.publicKeyPem,
         signalingPublicKey: signalingIdentity.encodedPublicKey,
         proof,
+        // ADR-0127: self-reported so the host's `companion://device-paired`
+        // event (consumed by every other paired client) can label the device.
+        // Older hosts ignore unknown fields.
+        platform: devicePlatformLabel(),
+        appVersion: APP_VERSION,
       }),
       serverFingerprint: input.serverFingerprint,
     })

@@ -92,7 +92,7 @@ Deterministic count assertions (commits/frame, batches, Dexie writes) run in Jes
 | Hidden markdown/math/code renderer props | **Promoted** to settings (§4) |
 | Plugin tool-result renderer registry (0 production registrations) | **Populated** — `web-tools`, `screenshot`, `clipboard-history` register cards |
 | `command_ack` (emitted, unconsumed) | **Consumed** — duplicate command ⇒ no re-inserted user message, no re-entered streaming state |
-| `session_closed` (AI-SDK rail, dropped by renderer) | **Consumed** — status → idle, coalescing registry released |
+| `session_closed` (AI-SDK rail) | **Correction, no change** — the audit reported it as forwarded-and-dropped; `makeWrappedEmit` in `sidecar/agent-host.mjs` intercepts it before the wire (it only retires the multi-turn session entry) and `sidecar/claude-host.test.mjs` pins that it is never forwarded. A renderer case would be dead code. |
 | `companion://device-paired` (listened, never emitted) | **Emitted** from device registration, mirroring `device-seen` |
 | `browser://console`, `browser://network`, `browser://snapshot` (declared, never emitted) | **Emitted** — push-on-append via the overlay sentinel channel (drain commands kept), consumed by a DevTools drawer (console/network) and an agent-engine snapshot cache keyed by generation; Companion forwarding **off** by default |
 | `gateway://decide` renderer round-trip (flag-off by default) | **Inert, unchanged** — ADR-0090 Phase 9 |

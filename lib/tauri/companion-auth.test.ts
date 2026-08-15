@@ -1,6 +1,7 @@
 import { decodePairPayload, encodePairPayload } from "@/lib/qr/pair-payload"
 import {
   clearCompanionAccessTokens,
+  devicePlatformLabel,
   issueSocketTicket,
   registerCompanionDevice,
   registerCompanionWorker,
@@ -121,6 +122,11 @@ describe("companion auth lifecycle", () => {
         expect(body.publicKeyPem).toContain("BEGIN PUBLIC KEY")
         expect(body.signalingPublicKey).toMatch(/^[A-Za-z0-9_-]{87}$/)
         expect(body.publicKeyPem).not.toContain(body.signalingPublicKey)
+        // ADR-0127: self-reported labels for the host's device-paired event
+        // (this suite runs in the node env — no window ⇒ "unknown").
+        expect(body.platform).toBe("unknown")
+        expect(typeof body.appVersion).toBe("string")
+        expect(body.appVersion.length).toBeGreaterThan(0)
         return Response.json({
           deviceId: body.deviceId,
           tenantId,
@@ -323,5 +329,29 @@ describe("companion auth lifecycle", () => {
       )
     ).rejects.toThrow("OIDC organization does not match pairing tenant")
     expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("devicePlatformLabel (ADR-0127)", () => {
+  const g = globalThis as { window?: unknown }
+  afterEach(() => {
+    delete g.window
+  })
+
+  it("is unknown without a window (node / headless)", () => {
+    expect(devicePlatformLabel()).toBe("unknown")
+  })
+
+  it("reports the Capacitor native platform, web for a browser, unknown for a Tauri desktop", () => {
+    g.window = {}
+    expect(devicePlatformLabel()).toBe("web")
+    g.window = { Capacitor: { getPlatform: () => "ios" } }
+    expect(devicePlatformLabel()).toBe("ios")
+    g.window = { Capacitor: { getPlatform: () => "android" } }
+    expect(devicePlatformLabel()).toBe("android")
+    g.window = { Capacitor: { getPlatform: () => "web" } }
+    expect(devicePlatformLabel()).toBe("web")
+    g.window = { __TAURI_INTERNALS__: {} }
+    expect(devicePlatformLabel()).toBe("unknown")
   })
 })

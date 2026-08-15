@@ -167,6 +167,27 @@ describe("ChatTurnPerformanceRecorder", () => {
     expect(h.measures.filter((measure) => measure.name === "chat:turn")).toHaveLength(1)
   })
 
+  it("records a duplicate-command ack as a zero-length dedupe range, with or without an active turn (ADR-0127)", () => {
+    const { recorder, measures, advanceTo } = createHarness()
+    // No turn is active — a retried interrupt after the seal must still count.
+    advanceTo(40)
+    recorder.markCommandDeduped("s1")
+    expect(measures).toEqual([{ name: "chat:command-dedupe", startTime: 40, endTime: 40 }])
+    // Inside a turn it does not disturb the turn lifecycle measures.
+    recorder.begin("s1")
+    advanceTo(50)
+    recorder.markCommandDeduped("s1")
+    recorder.markCommandDeduped("")
+    advanceTo(60)
+    recorder.finish("s1", "completed")
+    expect(measures.map((m) => m.name)).toEqual([
+      "chat:command-dedupe",
+      "chat:command-dedupe",
+      "chat:turn",
+      "chat:turn:completed",
+    ])
+  })
+
   it("closes an in-flight final persistence measure on terminal failure", () => {
     const h = createHarness()
 

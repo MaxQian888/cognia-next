@@ -90,7 +90,7 @@ bodyFont?: "sans" | "serif";
 | 隐藏的 markdown/数学/代码渲染 prop | **已升格**为设置（§4） |
 | 插件工具结果渲染器注册表（生产 0 注册） | **已填充** — `web-tools`、`screenshot`、`clipboard-history` 注册卡片 |
 | `command_ack`（发出、无人消费） | **已消费** — 重复命令 ⇒ 不重插用户消息、不重进流式态 |
-| `session_closed`（AI-SDK 轨，渲染端丢弃） | **已消费** — status → idle，释放合并注册表 |
+| `session_closed`（AI-SDK 轨） | **更正，无改动** — 审计称其被转发后丢弃；实际上 `sidecar/agent-host.mjs` 的 `makeWrappedEmit` 在上线前拦截它（只用于退休多轮会话条目），`sidecar/claude-host.test.mjs` 钉住其永不转发。渲染端加 case 反而是死代码。 |
 | `companion://device-paired`（有监听、无发射） | **已发射** — 设备注册处，仿 `device-seen` |
 | `browser://console`、`browser://network`、`browser://snapshot`（声明未发） | **已发射** — overlay sentinel 通道 push-on-append（保留 drain 命令），由 DevTools 抽屉（console/network）与 agent-engine 快照缓存（按 generation）消费；Companion 转发默认**关** |
 | `gateway://decide` 渲染端往返（默认 flag 关） | **inert，不变** — ADR-0090 Phase 9 |
