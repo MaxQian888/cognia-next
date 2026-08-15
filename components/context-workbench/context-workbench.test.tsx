@@ -1831,6 +1831,81 @@ describe("ContextWorkbench — vertical split", () => {
     }
   })
 
+  it("fires first activation for a panel opened straight into the second pane", () => {
+    const onFirstActivate = jest.fn()
+    const onRestore = jest.fn()
+    renderSplit([PANELS[0]!, { ...PANELS[1]!, onFirstActivate, onRestore }])
+
+    openSplit()
+
+    expect(onFirstActivate).toHaveBeenCalledTimes(1)
+    expect(onRestore).not.toHaveBeenCalled()
+  })
+
+  it("does not re-run activation when the panes are swapped", () => {
+    const onFirstActivate = jest.fn()
+    const onRestore = jest.fn()
+    renderSplit([PANELS[0]!, { ...PANELS[1]!, onFirstActivate, onRestore }])
+    openSplit()
+
+    // A swap changes which panel is in front, so it is a navigation — but
+    // nothing entered or left the screen, so no lifecycle may fire.
+    act(() => {
+      useContextWorkbenchStore.getState().navigatePanel(SCOPE, "review", "wide")
+    })
+
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]).toMatchObject({
+      activePanelId: "review",
+      splitPanelId: "comments",
+    })
+    expect(onFirstActivate).toHaveBeenCalledTimes(1)
+    expect(onRestore).not.toHaveBeenCalled()
+  })
+
+  it("swaps rather than collapsing when the rail names the panel in the second pane", () => {
+    const onFirstActivate = jest.fn()
+    const onRestore = jest.fn()
+    renderSplit([PANELS[0]!, { ...PANELS[1]!, onFirstActivate, onRestore }])
+    openSplit()
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.review" }))
+
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]).toMatchObject({
+      activePanelId: "review",
+      splitPanelId: "comments",
+    })
+    expect(onFirstActivate).toHaveBeenCalledTimes(1)
+    expect(onRestore).not.toHaveBeenCalled()
+  })
+
+  it("fires nothing when the split is only resized", () => {
+    const onFirstActivate = jest.fn()
+    const onRestore = jest.fn()
+    renderSplit([PANELS[0]!, { ...PANELS[1]!, onFirstActivate, onRestore }])
+    openSplit()
+    onFirstActivate.mockClear()
+
+    act(() => useContextWorkbenchStore.getState().setSplitRatio(SCOPE, 65))
+
+    expect(onFirstActivate).not.toHaveBeenCalled()
+    expect(onRestore).not.toHaveBeenCalled()
+  })
+
+  it("expands a collapsed workbench back to wide when a split is waiting", () => {
+    renderSplit()
+    openSplit()
+    act(() => useContextWorkbenchStore.getState().setMode(SCOPE, "collapsed"))
+
+    fireEvent.click(screen.getByTestId("context-workbench-collapse-toggle"))
+
+    // Expanding into narrow would silently destroy the split the collapse
+    // deliberately preserved.
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]).toMatchObject({
+      mode: "wide",
+      splitPanelId: "review",
+    })
+  })
+
   it("unmounts an ephemeral second pane on close but keeps a stateful one", () => {
     renderSplit([PANELS[0]!, { ...PANELS[1]!, retention: "ephemeral" }])
     openSplit()

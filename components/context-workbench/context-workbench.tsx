@@ -561,7 +561,24 @@ export function ContextWorkbench({
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const lifecyclePanelsRef = useRef(new Map<string, Set<string>>())
+  /**
+   * The panel last in *front*, per scope. Answers "is this a navigation?" — so
+   * it drives the back/forward history and the activation self-heal.
+   */
   const lastActivePanelRef = useRef(new Map<string, string | null>())
+  /**
+   * The *set* of panels last on screen, per scope. Answers the different
+   * question "did anything appear or disappear?" — so it drives
+   * `onFirstActivate` / `onRestore`.
+   *
+   * A set rather than the panel in front is the whole point: swapping the two
+   * panes is a navigation (the front panel changed) but must fire no lifecycle
+   * at all, because nothing entered or left the screen. Dragging the separator
+   * moves neither.
+   */
+  const lastVisiblePanelsRef = useRef(new Map<string, Set<string>>())
+  /** The JSON form of the above, so the lifecycle effect has a primitive dep. */
+  const lastVisibleKeyRef = useRef(new Map<string, string>())
   const t = useTranslations()
   const [customizeRailOpen, setCustomizeRailOpen] = useState(false)
   useSyncExternalStore(
@@ -592,6 +609,9 @@ export function ContextWorkbench({
   const setMode = useContextWorkbenchStore((state) => state.setMode)
   const setWidth = useContextWorkbenchStore((state) => state.setWidth)
   const setUserPinned = useContextWorkbenchStore((state) => state.setUserPinned)
+  const activateSplit = useContextWorkbenchStore((state) => state.activateSplit)
+  const closeSplit = useContextWorkbenchStore((state) => state.closeSplit)
+  const setSplitRatio = useContextWorkbenchStore((state) => state.setSplitRatio)
   // Selected off the single settings field, not through `useWorkbenchRailLayout`
   // — that hook reads the whole `settings` object, and this component is
   // mounted in four hosts and re-renders on every panel switch.
@@ -860,6 +880,18 @@ export function ContextWorkbench({
   const splitFitsWidth = bodyWidth === 0 || bodyWidth >= CONTEXT_WORKBENCH_SPLIT_MIN_WIDTH
   const splitActive = Boolean(splitPanel) && splitFitsWidth
   const secondaryPanelId = splitActive && splitPanel ? splitPanel.id : null
+  const visiblePanels = useMemo(
+    () =>
+      resolvedPanels.filter(
+        (panel) => panel.id === layout.activePanelId || panel.id === secondaryPanelId
+      ),
+    [layout.activePanelId, resolvedPanels, secondaryPanelId]
+  )
+  // Sorted and JSON-encoded, so the key is order-insensitive and unambiguous
+  // whatever a panel id contains. It exists only as the change detector and
+  // effect dep for the lifecycle effect below: swapping the two panes leaves it
+  // untouched, which is exactly what makes a swap fire no lifecycle.
+  const visiblePanelsKey = JSON.stringify(visiblePanels.map((panel) => panel.id).sort())
   const resourceSession = useResourceWorkbenchSession(
     resource,
     Boolean(activePanel?.requiresChatScope),
@@ -910,6 +942,9 @@ export function ContextWorkbench({
     [resource]
   )
 
+  // Navigation: keyed on the panel in *front*, because that is the question a
+  // back/forward stack asks. Swapping the two panes is a navigation even though
+  // it is a no-op for the lifecycle effect below.
   useEffect(() => {
     const activeId = activePanel?.id ?? null
     if (lastActivePanelRef.current.get(scopeKey) === activeId) return
@@ -919,14 +954,6 @@ export function ContextWorkbench({
     // Record this navigation for the back/forward history.
     pushPanelHistory(scopeKey, activePanel.id)
 
-    let seen = lifecyclePanelsRef.current.get(scopeKey)
-    if (!seen) {
-      seen = new Set(persistedLayout?.activatedPanelIds ?? [])
-      lifecyclePanelsRef.current.set(scopeKey, seen)
-    }
-    const phase = seen.has(activePanel.id) ? "restore" : "first"
-    seen.add(activePanel.id)
-    invokePanelLifecycle(activePanel, phase)
     if (!persistedLayout?.activatedPanelIds.includes(activePanel.id)) {
       navigatePanel(scopeKey, activePanel.id, layout.mode === "collapsed" ? "narrow" : layout.mode)
     }
@@ -937,7 +964,6 @@ export function ContextWorkbench({
     }
   }, [
     activePanel,
-    invokePanelLifecycle,
     layout.mode,
     markPanelActivated,
     navigatePanel,
@@ -945,6 +971,40 @@ export function ContextWorkbench({
     scopeKey,
     sessionScopeKey,
   ])
+
+  // Lifecycle: keyed on the *set* of panels on screen, not on the one in front.
+  //
+  // Only a panel that just appeared gets a callback. One that stayed on screen
+  // gets nothing, which is what makes a pane swap silent (the set is unchanged)
+  // and a separator drag silent (neither the set nor the key moves). One that
+  // left gets nothing either — `<Activity>` already tore its effects down.
+  useEffect(() => {
+    const previousKey = lastVisibleKeyRef.current.get(scopeKey)
+    if (previousKey === visiblePanelsKey) return
+    lastVisibleKeyRef.current.set(scopeKey, visiblePanelsKey)
+    const previous = lastVisiblePanelsRef.current.get(scopeKey)
+    lastVisiblePanelsRef.current.set(scopeKey, new Set(visiblePanels.map((p) => p.id)))
+
+    let seen = lifecyclePanelsRef.current.get(scopeKey)
+    if (!seen) {
+      // Seeded from what was persisted, so a panel restored from disk gets a
+      // `restore` rather than a spurious `first`. The imperative routes
+      // (`handleActivate`, `handleSplitBelow`) deliberately seed this *before*
+      // writing to the store, or the write would make every first activation
+      // look like a restore.
+      seen = new Set(persistedLayout?.activatedPanelIds ?? [])
+      lifecyclePanelsRef.current.set(scopeKey, seen)
+    }
+    for (const panel of visiblePanels) {
+      if (previous?.has(panel.id)) continue
+      const phase = seen.has(panel.id) ? "restore" : "first"
+      seen.add(panel.id)
+      invokePanelLifecycle(panel, phase)
+    }
+    // `visiblePanels` is derived from `visiblePanelsKey`; depending on the array
+    // itself would re-run this on every render that re-memoises it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invokePanelLifecycle, persistedLayout?.activatedPanelIds, scopeKey, visiblePanelsKey])
 
   const handleHistoryBack = useCallback(() => {
     const panelId = panelHistory.goBack()
@@ -982,7 +1042,42 @@ export function ContextWorkbench({
    */
   const handleExpand = () => {
     if (onEnsureVisible) onEnsureVisible()
-    if (layout.mode === "collapsed") setMode(scopeKey, "narrow")
+    // Back to wide when a split is waiting: narrow has no room for two panes, so
+    // expanding into it would silently destroy a layout the collapse preserved.
+    if (layout.mode === "collapsed") {
+      setMode(scopeKey, layout.splitPanelId ? "wide" : "narrow")
+    }
+  }
+
+  /** Open `panel` in the second pane, below whatever is in front. */
+  const handleSplitBelow = (panel: ContextPanelDefinition) => {
+    touchActiveContextHost(scopeKey)
+    // Seed the lifecycle bookkeeping *before* the store write, exactly as
+    // `handleActivate` does: `activateSplit` records the panel as activated, and
+    // a `seen` set seeded after that would read the very first activation as a
+    // restore.
+    let seen = lifecyclePanelsRef.current.get(scopeKey)
+    if (!seen) {
+      seen = new Set(persistedLayout?.activatedPanelIds ?? [])
+      lifecyclePanelsRef.current.set(scopeKey, seen)
+    }
+    const phase = seen.has(panel.id) ? "restore" : "first"
+    if (!activateSplit(scopeKey, panel.id)) return
+    seen.add(panel.id)
+    // Claim the new visible set so the lifecycle effect sees no change and does
+    // not fire a second time for the panel we are about to announce here.
+    const nextVisible = [layout.activePanelId, panel.id].filter(Boolean) as string[]
+    lastVisiblePanelsRef.current.set(scopeKey, new Set(nextVisible))
+    lastVisibleKeyRef.current.set(scopeKey, JSON.stringify([...nextVisible].sort()))
+    if (panel.scope === "session" && sessionScopeKey) markPanelActivated(sessionScopeKey, panel.id)
+    invokePanelLifecycle(panel, phase)
+  }
+
+  const handleCloseSplit = () => {
+    closeSplit(scopeKey)
+    const remaining = layout.activePanelId ? [layout.activePanelId] : []
+    lastVisiblePanelsRef.current.set(scopeKey, new Set(remaining))
+    lastVisibleKeyRef.current.set(scopeKey, JSON.stringify(remaining))
   }
 
   const handleActivate = (panel: ContextPanelDefinition, source: "rail" | "tab" = "tab") => {
@@ -1006,6 +1101,13 @@ export function ContextWorkbench({
       // fourth exit hidden inside navigation.
       if (source === "rail" && !railIsHorizontal) handleCollapse()
       return
+    } else if (splitActive && secondaryPanelId === panel.id) {
+      // Already on screen, in the second pane. `reveal` turns this into a swap,
+      // so the visible set is unchanged: no lifecycle, no width hint, no mode
+      // hint — only the navigation, which the history effect records.
+      lastActivePanelRef.current.set(scopeKey, panel.id)
+      navigatePanel(scopeKey, panel.id, panel.preferredMode ?? "narrow")
+      return
     }
     let seen = lifecyclePanelsRef.current.get(scopeKey)
     if (!seen) {
@@ -1015,6 +1117,14 @@ export function ContextWorkbench({
     const phase = seen.has(panel.id) ? "restore" : "first"
     seen.add(panel.id)
     lastActivePanelRef.current.set(scopeKey, panel.id)
+    // Claim the visible set this navigation will produce, for the same reason
+    // `lastActivePanelRef` is claimed above: the callback fires imperatively
+    // here, so the effect must see no change and stay quiet. A second pane that
+    // is not being replaced stays in the set.
+    const nextVisible =
+      secondaryPanelId && secondaryPanelId !== panel.id ? [panel.id, secondaryPanelId] : [panel.id]
+    lastVisiblePanelsRef.current.set(scopeKey, new Set(nextVisible))
+    lastVisibleKeyRef.current.set(scopeKey, JSON.stringify([...nextVisible].sort()))
     const mode = panel.preferredMode ?? "narrow"
     navigatePanel(scopeKey, panel.id, mode)
     // Session-scoped panels record their activation against the conversation as
