@@ -1,5 +1,8 @@
 import type { FileViewerContribution } from "./types"
 
+/** The text fallback, named so the surface can force it without a magic string. */
+export const BUILTIN_TEXT_VIEWER_ID = "builtin.text"
+
 /**
  * Extensions that get a rich (non-text) preview.
  *
@@ -38,7 +41,7 @@ export const BUILTIN_FILE_VIEWERS: readonly FileViewerContribution[] = [
     load: () => import("@/components/file-viewer/json-viewer"),
   },
   {
-    id: "builtin.text",
+    id: BUILTIN_TEXT_VIEWER_ID,
     priority: -100,
     /**
      * Terminal links only, whatever the extension.

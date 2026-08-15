@@ -65,6 +65,11 @@ export function resolveFileViewer(probe: FileViewerProbe): FileViewerContributio
   return best
 }
 
+/** Look one up directly, for a surface that has already decided which it wants. */
+export function getFileViewer(id: string): FileViewerContribution | null {
+  return contributions.get(id) ?? null
+}
+
 export function listFileViewers(): readonly FileViewerContribution[] {
   return [...contributions.values()]
 }
