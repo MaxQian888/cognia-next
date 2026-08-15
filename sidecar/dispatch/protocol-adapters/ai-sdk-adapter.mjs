@@ -299,22 +299,30 @@ async function buildRawModel({
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic")
-      const client = createAnthropic({ apiKey, baseURL })
+      // `headers` = the provider's static customHeaders (settings UI); undefined
+      // for most rows. Same treatment as the openai/azure branches.
+      const client = createAnthropic({ apiKey, baseURL, headers })
       return client(model)
     }
     case "google": {
       const { createGoogle } = await import("@ai-sdk/google")
-      const client = createGoogle({ apiKey, baseURL })
+      // `headers` = the provider's static customHeaders (settings UI); undefined
+      // for most rows. Same treatment as the openai/azure branches.
+      const client = createGoogle({ apiKey, baseURL, headers })
       return client(model)
     }
     case "mistral": {
       const { createMistral } = await import("@ai-sdk/mistral")
-      const client = createMistral({ apiKey, baseURL })
+      // `headers` = the provider's static customHeaders (settings UI); undefined
+      // for most rows. Same treatment as the openai/azure branches.
+      const client = createMistral({ apiKey, baseURL, headers })
       return client(model)
     }
     case "cohere": {
       const { createCohere } = await import("@ai-sdk/cohere")
-      const client = createCohere({ apiKey, baseURL })
+      // `headers` = the provider's static customHeaders (settings UI); undefined
+      // for most rows. Same treatment as the openai/azure branches.
+      const client = createCohere({ apiKey, baseURL, headers })
       return client(model)
     }
     case "azure": {

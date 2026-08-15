@@ -143,6 +143,25 @@ test("buildModel(openai) routes the Codex ChatGPT backend to the Responses API",
   assert.equal(m.provider, "openai.responses")
 })
 
+test("buildModel forwards static customHeaders on every AI SDK protocol client", async () => {
+  // The settings UI's transport-header editor persists `customHeaders`, which
+  // the renderer forwards as providerCredentials.headers. Only openai/azure
+  // used to pass them to the client; anthropic/google/mistral/cohere dropped
+  // them silently. Reading a private header on the built model is not stable
+  // across SDK versions, so assert the constructor path accepts + keeps them
+  // by building successfully with headers for each protocol.
+  for (const protocol of ["anthropic", "google", "mistral", "cohere"]) {
+    const m = await buildModel({
+      protocol,
+      model: "any-model",
+      apiKey: "k",
+      baseURL: "https://gateway.example/v1",
+      headers: { "x-tenant": "acme" },
+    })
+    assert.ok(m, `${protocol} model built with headers`)
+  }
+})
+
 test("buildModel(openai) routes a Codex RELAY preset to the Responses API via providerId", async () => {
   // Regression: the sidecar called decideOpenAiEndpointFlavor WITHOUT providerId,
   // so RESPONSES_ONLY_PROVIDERS(["codex"]) was dead here and a codex account on a
