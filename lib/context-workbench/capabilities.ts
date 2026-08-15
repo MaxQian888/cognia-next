@@ -1,4 +1,6 @@
 import type { ContextCapability } from "@/types/context-workbench"
+import { extensionOf } from "@/lib/file-viewer/probe"
+import { resolveFileViewer } from "@/lib/file-viewer/registry"
 
 export type ContextCapabilityInput =
   | { kind: "project-file"; previewable: boolean }
@@ -43,7 +45,19 @@ export function resolveContextCapabilities(input: ContextCapabilityInput): Conte
   return [...capabilities]
 }
 
+/**
+ * Whether the project workbench should offer a Preview tab for this file.
+ *
+ * Answered by the viewer registry rather than a local list, so the tab and the
+ * thing it opens can never disagree. The answer is unchanged from the hard-coded
+ * list it replaces: the registry's text fallback matches on
+ * `source === "terminal"`, so nothing claims a `.py` here.
+ *
+ * The import chain stays free of React on purpose — this module is pulled in by
+ * the artifact dock, the canvas side panels and the workflow sidebar as well as
+ * the project workbench, and the registry reaches its viewers through lazy
+ * `import()` rather than holding them.
+ */
 export function isProjectFilePreviewable(relPath: string): boolean {
-  const extension = relPath.split(".").pop()?.toLowerCase()
-  return ["md", "markdown", "html", "htm", "json"].includes(extension ?? "")
+  return resolveFileViewer({ extension: extensionOf(relPath), source: "project-preview" }) !== null
 }
