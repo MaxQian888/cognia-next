@@ -161,13 +161,16 @@ export function buildLocalHostFeatureManifest({
       operations: ["automation_consent_pending", "automation_consent_respond"],
     }
   }
-  if (platform === "tauri") {
+  if (platform === "tauri" || platform === "headless") {
+    // The git arms carry no host gate; what used to keep this desktop-only was
+    // the workspace registrar — the desktop resolves `workspaceId` through the
+    // roots its renderer registers, while the headless host resolves it as a
+    // directory under its policy-owned workspaces root (the same boundary as
+    // `workspace.files`). Both hosts now answer every remote git operation.
     features["source-control.git"] = {
       version: 1,
       operations: [...SOURCE_CONTROL_HOST_OPERATIONS, "host_admin_lease_issue"],
     }
-  }
-  if (platform === "tauri" || platform === "headless") {
     features["session.state-sync"] = {
       version: 1,
       operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],

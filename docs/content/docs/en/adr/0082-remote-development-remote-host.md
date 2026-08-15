@@ -187,3 +187,15 @@ exact-command `host_admin_lease_issue` lease with a 120-second TTL. Clients do
 not auto-renew or retry an expired or uncertain mutation. The Source Control
 surface is shown on Tauri and paired clients, hidden on standalone Web, and
 uses five-second polling only while the remote surface is visible.
+
+**Headless workspace source (2026-08-16).** The desktop's opaque workspaces are
+the roots its renderer registers through `fs_set_allowed_roots`; the headless
+brain never runs the renderer, so that registry stayed empty and
+`source-control.git` was withheld from headless hosts (ADR-0059 host-parity
+Class E). The headless host now derives its Git workspaces from the
+policy-owned workspaces root instead: every directory directly under it is a
+workspace whose `workspaceId` is the bare directory name, resolved through
+`SpawnPolicy::validate_workspace_root` — the same trust boundary
+`authorize_workspace_root` applies to `workspace.files`. Both hosts advertise
+the identical `source-control.git` operation set; the desktop registry and the
+headless policy root never see each other's ids.

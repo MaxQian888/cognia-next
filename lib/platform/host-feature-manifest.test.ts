@@ -62,10 +62,32 @@ describe("host feature manifest", () => {
     })
   })
 
-  it("does not advertise Source Control from a headless host without a workspace registrar", () => {
-    const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
+  it("advertises Source Control from a headless host — its workspaces are the policy-root directories", () => {
+    const manifest = buildLocalHostFeatureManifest({
+      platform: "headless",
+      deviceGrants: ["workspace.read", "git.write"],
+    })
 
-    expect(manifest.features["source-control.git"]).toBeUndefined()
+    const operations = manifest.features["source-control.git"]?.operations ?? []
+    expect(operations).toEqual(
+      expect.arrayContaining(["git_workspace_list", "git_status", "git_clone"])
+    )
+    expect(operations).toContain("host_admin_lease_issue")
+    expect(supportsHostFeatureOperation(manifest, "source-control.git", "git_status")).toBe(true)
+    // Same operation set on both hosts: one client, one contract.
+    expect(operations).toEqual(
+      buildLocalHostFeatureManifest({ platform: "tauri" }).features["source-control.git"]
+        ?.operations
+    )
+  })
+
+  it("keeps Source Control off webview-only hosts", () => {
+    expect(
+      buildLocalHostFeatureManifest({ platform: "web" }).features["source-control.git"]
+    ).toBeUndefined()
+    expect(
+      buildLocalHostFeatureManifest({ platform: "mobile" }).features["source-control.git"]
+    ).toBeUndefined()
   })
 
   it("reports the protocol limits that remote clients must obey", () => {

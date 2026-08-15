@@ -164,6 +164,19 @@ pub(crate) fn resolve_remote_git_workspace_path(
         .and_then(|workspaces| workspaces.get(workspace_id))
         .cloned()
         .ok_or_else(|| "Git workspace is not authorized for this account".to_string())?;
+    let target = resolve_git_workspace_relative_path(&workspace, relative_path)?;
+    Ok((workspace, target))
+}
+
+/// Resolve `relative_path` inside an already-authorized Git workspace: the
+/// path must be relative and traversal-free, and the result must stay inside
+/// the workspace root. Shared by the desktop registry lookup above and by the
+/// headless host, whose workspaces are the directories under its
+/// policy-owned workspaces root rather than a renderer-registered list.
+pub(crate) fn resolve_git_workspace_relative_path(
+    workspace: &RemoteGitWorkspace,
+    relative_path: Option<&str>,
+) -> Result<PathBuf, String> {
     let relative = relative_path.unwrap_or("").trim();
     let relative_path = Path::new(relative);
     if relative_path.is_absolute()
@@ -188,7 +201,7 @@ pub(crate) fn resolve_remote_git_workspace_path(
     ) {
         return Err("Git workspace path escapes the authorized root".to_string());
     }
-    Ok((workspace, target))
+    Ok(target)
 }
 
 /// Seed the structurally-trusted directories at startup: appdata, the home

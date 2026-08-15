@@ -134,3 +134,5 @@ generation、request id、签发/过期时间）。传输层现在只把带上�
 远程 Git 不再通过转发 renderer 路径来“免费远程化”。当前账户的项目根目录会注册为不透明工作区；设备客户端仅使用 `workspaceId` 加经过校验的相对路径寻址。只有主机解析绝对路径，并重新授权规范化后的 worktree 与 Git 目录，阻止嵌套仓库或向上发现造成越界。响应会清除主机路径，身份读写仅允许 repository-local。
 
 `source-control.git` 在 `host_feature_manifest` 中逐一广告所有现有 Git 操作。交互式变更必须使用 `host_admin_lease_issue` 签发的设备绑定、精确命令 lease，TTL 为 120 秒；客户端不会自动续期，也不会重试已过期或送达不确定的变更。Source Control 在 Tauri 与已配对客户端显示，在独立 Web 隐藏；远程界面仅在可见时每五秒轮询。
+
+**Headless 工作区来源（2026-08-16）。** 桌面端的不透明工作区来自 renderer 通过 `fs_set_allowed_roots` 注册的根目录；headless brain 从不运行 renderer，因此该注册表始终为空，`source-control.git` 也一直未向 headless 主机公开（ADR-0059 host-parity Class E）。现在 headless 主机改由策略所有的 workspaces 根目录派生 Git 工作区：其下每个直接子目录都是一个工作区，`workspaceId` 即目录名，经 `SpawnPolicy::validate_workspace_root` 解析——与 `authorize_workspace_root` 对 `workspace.files` 施加的信任边界完全相同。两种主机公开完全一致的 `source-control.git` 操作集；桌面注册表与 headless 策略根目录互不认识对方的 id。

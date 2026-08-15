@@ -14,7 +14,127 @@ fn relative_path_from_args(
     optional::<String>(args, key).map(|value| value.unwrap_or_default())
 }
 
+/// Where a host's remote Git workspaces come from.
+///
+/// The desktop's are the account-scoped roots its renderer registers through
+/// `fs_set_allowed_roots` (`lib/files/allowed-roots-sync.ts`). That command is
+/// `target=client` and the brain never runs the renderer, so on the headless
+/// host that registry is empty forever — which is why Source Control used to
+/// be a desktop-only host feature although not one git arm is host-gated.
+/// The headless host instead treats every directory directly under its
+/// policy-owned workspaces root as a Git workspace: the same trust boundary
+/// `authorize_workspace_root` already applies to `workspace.files`, so a
+/// remote client can `git_status` exactly what it can `fs_read_workspace_file`.
+#[derive(Clone)]
+enum GitWorkspaceSource {
+    DesktopRegistry,
+    HeadlessPolicy(crate::external_agent::presets::SpawnPolicy),
+}
+
+impl GitWorkspaceSource {
+    fn for_host(host: &super::super::dispatch_host::DispatchHost) -> Self {
+        match host.headless() {
+            Some(services) => Self::HeadlessPolicy(services.spawn_policy.clone()),
+            None => Self::DesktopRegistry,
+        }
+    }
+
+    fn list(&self, account_id: &str) -> Vec<crate::files::RemoteGitWorkspace> {
+        match self {
+            Self::DesktopRegistry => crate::files::list_remote_git_workspaces(account_id),
+            Self::HeadlessPolicy(policy) => list_headless_git_workspaces(policy),
+        }
+    }
+
+    fn resolve(
+        &self,
+        account_id: &str,
+        workspace_id: &str,
+        relative_path: &str,
+    ) -> Result<(crate::files::RemoteGitWorkspace, std::path::PathBuf), String> {
+        match self {
+            Self::DesktopRegistry => crate::files::resolve_remote_git_workspace_path(
+                account_id,
+                workspace_id,
+                Some(relative_path),
+            ),
+            Self::HeadlessPolicy(policy) => {
+                let workspace = resolve_headless_git_workspace(policy, workspace_id)?;
+                let resolved = crate::files::resolve_git_workspace_relative_path(
+                    &workspace,
+                    Some(relative_path),
+                )?;
+                Ok((workspace, resolved))
+            }
+        }
+    }
+}
+
+/// A headless Git workspace id is the bare name of a directory directly under
+/// the workspaces root — one normal path component, nothing that could climb.
+fn headless_workspace_dir_name(workspace_id: &str) -> Option<&str> {
+    let name = workspace_id.trim();
+    let mut components = std::path::Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(only)), None)
+            if only == name && !name.starts_with('.') && !name.contains(['/', '\\']) =>
+        {
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
+fn resolve_headless_git_workspace(
+    policy: &crate::external_agent::presets::SpawnPolicy,
+    workspace_id: &str,
+) -> Result<crate::files::RemoteGitWorkspace, String> {
+    let name = headless_workspace_dir_name(workspace_id)
+        .ok_or_else(|| "Git workspace is not authorized for this account".to_string())?;
+    // `validate_workspace_root` joins a relative name onto the workspaces root,
+    // canonicalizes it and refuses anything that escapes — the policy owns the
+    // boundary, this arm only names a directory inside it.
+    let path = policy
+        .validate_workspace_root(name)
+        .map_err(|_| "Git workspace is not authorized for this account".to_string())?;
+    if !std::path::Path::new(&path).is_dir() {
+        return Err("Git workspace is not authorized for this account".to_string());
+    }
+    Ok(crate::files::RemoteGitWorkspace {
+        workspace_id: name.to_string(),
+        display_name: name.to_string(),
+        path,
+    })
+}
+
+fn list_headless_git_workspaces(
+    policy: &crate::external_agent::presets::SpawnPolicy,
+) -> Vec<crate::files::RemoteGitWorkspace> {
+    let Ok(root) = policy.validate_workspace_root(".") else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut workspaces = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_string();
+            headless_workspace_dir_name(&name)?;
+            Some(crate::files::RemoteGitWorkspace {
+                workspace_id: name.clone(),
+                display_name: name,
+                path: entry.path().to_string_lossy().into_owned(),
+            })
+        })
+        .collect::<Vec<_>>();
+    workspaces.sort_by(|left, right| left.workspace_id.cmp(&right.workspace_id));
+    workspaces
+}
+
 fn resolve_remote_target(
+    source: &GitWorkspaceSource,
     args: &Value,
     account_id: Option<&str>,
     relative_key: &str,
@@ -23,12 +143,9 @@ fn resolve_remote_target(
         .ok_or_else(|| RpcError::forbidden("remote Git requires an account-bound device token"))?;
     let workspace_id: String = required(args, "workspaceId")?;
     let relative_path = relative_path_from_args(args, relative_key)?;
-    let (workspace, resolved_path) = crate::files::resolve_remote_git_workspace_path(
-        account_id,
-        &workspace_id,
-        Some(&relative_path),
-    )
-    .map_err(RpcError::forbidden)?;
+    let (workspace, resolved_path) = source
+        .resolve(account_id, &workspace_id, &relative_path)
+        .map_err(RpcError::forbidden)?;
     Ok(RemoteGitTarget {
         workspace,
         relative_path,
@@ -54,6 +171,7 @@ fn authorize_discovered_repository(
 }
 
 fn prepare_remote_args(
+    source: &GitWorkspaceSource,
     name: &str,
     mut args: Value,
     account_id: Option<&str>,
@@ -71,7 +189,12 @@ fn prepare_remote_args(
         "git_worktree_add" => "destinationRelativePath",
         _ => "relativePath",
     };
-    let target = resolve_remote_target(&Value::Object(object.clone()), account_id, relative_key)?;
+    let target = resolve_remote_target(
+        source,
+        &Value::Object(object.clone()),
+        account_id,
+        relative_key,
+    )?;
     let resolved = target.resolved_path.to_string_lossy().to_string();
     match name {
         "git_clone" => {
@@ -81,8 +204,12 @@ fn prepare_remote_args(
             object.insert("path".into(), Value::String(resolved));
         }
         "git_worktree_add" | "git_worktree_remove" => {
-            let repository_target =
-                resolve_remote_target(&Value::Object(object.clone()), account_id, "relativePath")?;
+            let repository_target = resolve_remote_target(
+                source,
+                &Value::Object(object.clone()),
+                account_id,
+                "relativePath",
+            )?;
             authorize_discovered_repository(&repository_target)?;
             object.insert(
                 "repoPath".into(),
@@ -287,12 +414,15 @@ pub(super) async fn dispatch(
     account_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let _ = (state, host, device_id);
+    let _ = (state, device_id);
+    let workspace_source = GitWorkspaceSource::for_host(host);
+    let prepare_source = workspace_source.clone();
     let prepare_name = name.to_string();
     let prepare_account_id = account_id.map(str::to_string);
     let prepare_scope = scope.map(str::to_string);
     let (args, remote_target) = tokio::task::spawn_blocking(move || {
         prepare_remote_args(
+            &prepare_source,
             &prepare_name,
             args,
             prepare_account_id.as_deref(),
@@ -852,8 +982,10 @@ pub(super) async fn dispatch(
                     RpcError::forbidden("remote Git requires an account-bound device token")
                 })?
                 .to_string();
+            let list_source = workspace_source.clone();
             let workspaces = tokio::task::spawn_blocking(move || {
-                crate::files::list_remote_git_workspaces(&account_id)
+                list_source
+                    .list(&account_id)
                     .into_iter()
                     .map(|workspace| {
                         let target = RemoteGitTarget {
@@ -901,6 +1033,23 @@ pub(super) async fn dispatch(
 mod tests {
     use super::*;
 
+    /// `fs_set_allowed_roots` REPLACES a process-global root list rather than
+    /// adding to it, so two tests that register a workspace concurrently
+    /// overwrite each other and the loser fails an authorization assertion that
+    /// has nothing to do with what it was testing. That is how
+    /// `upward_repository_discovery_is_rejected_but_nested_repository_is_allowed`
+    /// came to pass alone and fail in the suite.
+    ///
+    /// Poison is absorbed: a panic in one of these tests should fail that test,
+    /// not convert the other two into unrelated poison errors.
+    static ALLOWED_ROOTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_roots() -> std::sync::MutexGuard<'static, ()> {
+        ALLOWED_ROOTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn register_workspace(account_id: &str, workspace_id: &str, root: &std::path::Path) {
         crate::files::fs_set_allowed_roots(
             vec![root.to_string_lossy().to_string()],
@@ -922,12 +1071,19 @@ mod tests {
 
     #[test]
     fn remote_target_uses_account_scoped_workspace_and_rejects_traversal() {
+        let _roots = lock_roots();
         let root = tempfile::TempDir::new().unwrap();
         register_workspace("acct-source-a", "workspace-a", root.path());
         let args = json!({ "workspaceId": "workspace-a", "relativePath": "nested" });
 
-        let (prepared, target) =
-            prepare_remote_args("git_repo_state", args, Some("acct-source-a"), None).unwrap();
+        let (prepared, target) = prepare_remote_args(
+            &GitWorkspaceSource::DesktopRegistry,
+            "git_repo_state",
+            args,
+            Some("acct-source-a"),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             prepared["repoPath"],
@@ -935,6 +1091,7 @@ mod tests {
         );
         assert_eq!(target.unwrap().workspace.workspace_id, "workspace-a");
         assert!(prepare_remote_args(
+            &GitWorkspaceSource::DesktopRegistry,
             "git_repo_state",
             json!({ "workspaceId": "workspace-a", "relativePath": "../escape" }),
             Some("acct-source-a"),
@@ -942,6 +1099,7 @@ mod tests {
         )
         .is_err());
         assert!(prepare_remote_args(
+            &GitWorkspaceSource::DesktopRegistry,
             "git_repo_state",
             json!({ "workspaceId": "workspace-a" }),
             Some("acct-source-b"),
@@ -952,6 +1110,7 @@ mod tests {
 
     #[tokio::test]
     async fn upward_repository_discovery_is_rejected_but_nested_repository_is_allowed() {
+        let _roots = lock_roots();
         let parent = tempfile::TempDir::new().unwrap();
         crate::git::repo::init(&parent.path().to_string_lossy())
             .await
@@ -961,6 +1120,7 @@ mod tests {
         register_workspace("acct-upward", "workspace-upward", &granted_child);
 
         assert!(prepare_remote_args(
+            &GitWorkspaceSource::DesktopRegistry,
             "git_status",
             json!({ "workspaceId": "workspace-upward" }),
             Some("acct-upward"),
@@ -974,6 +1134,7 @@ mod tests {
             .await
             .unwrap();
         assert!(prepare_remote_args(
+            &GitWorkspaceSource::DesktopRegistry,
             "git_status",
             json!({ "workspaceId": "workspace-upward", "relativePath": "nested" }),
             Some("acct-upward"),
@@ -984,6 +1145,7 @@ mod tests {
 
     #[tokio::test]
     async fn remote_worktree_requests_keep_the_authorized_repository_path() {
+        let _roots = lock_roots();
         let root = tempfile::TempDir::new().unwrap();
         crate::git::repo::init(&root.path().to_string_lossy())
             .await
@@ -996,6 +1158,7 @@ mod tests {
         register_workspace("acct-worktree", "workspace-worktree", root.path());
 
         let (add, _) = prepare_remote_args(
+            &GitWorkspaceSource::DesktopRegistry,
             "git_worktree_add",
             json!({
                 "workspaceId": "workspace-worktree",
@@ -1014,6 +1177,7 @@ mod tests {
         );
 
         let (remove, _) = prepare_remote_args(
+            &GitWorkspaceSource::DesktopRegistry,
             "git_worktree_remove",
             json!({
                 "workspaceId": "workspace-worktree",
@@ -1027,6 +1191,108 @@ mod tests {
         .unwrap();
         assert_eq!(remove["repoPath"], root.path().to_string_lossy().as_ref());
         assert_eq!(remove["path"], nested.to_string_lossy().as_ref());
+    }
+
+    fn headless_source(root: &std::path::Path) -> GitWorkspaceSource {
+        GitWorkspaceSource::HeadlessPolicy(crate::external_agent::presets::SpawnPolicy::new(
+            root.to_path_buf(),
+            false,
+        ))
+    }
+
+    #[test]
+    fn headless_workspaces_are_the_directories_under_the_policy_root() {
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("beta")).unwrap();
+        std::fs::create_dir_all(root.path().join("alpha")).unwrap();
+        std::fs::create_dir_all(root.path().join(".hidden")).unwrap();
+        std::fs::write(root.path().join("not-a-dir"), b"x").unwrap();
+        let source = headless_source(root.path());
+
+        let listed = source.list("any-account");
+        assert_eq!(
+            listed
+                .iter()
+                .map(|workspace| workspace.workspace_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
+        );
+        let canonical_root = root.path().canonicalize().unwrap();
+        assert_eq!(
+            std::path::Path::new(&listed[0].path),
+            canonical_root.join("alpha")
+        );
+
+        // The listing is per host, not per account: the policy root is the
+        // single-tenant trust boundary, exactly like `authorize_workspace_root`.
+        assert_eq!(source.list("another-account").len(), 2);
+    }
+
+    #[test]
+    fn headless_workspace_ids_resolve_inside_the_policy_root_and_cannot_climb() {
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("alpha").join("nested")).unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
+        let source = headless_source(root.path());
+        let canonical_root = root.path().canonicalize().unwrap();
+
+        let (workspace, resolved) = source.resolve("acct", "alpha", "nested").unwrap();
+        assert_eq!(workspace.workspace_id, "alpha");
+        assert_eq!(resolved, canonical_root.join("alpha").join("nested"));
+
+        let (_, resolved_root) = source.resolve("acct", "alpha", "").unwrap();
+        assert_eq!(resolved_root, canonical_root.join("alpha"));
+
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../alpha",
+            "alpha/nested",
+            "alpha\\nested",
+            ".hidden",
+            "missing",
+            outside.path().to_str().unwrap(),
+        ] {
+            assert!(
+                source.resolve("acct", bad, "").is_err(),
+                "workspace id {bad:?} must be refused"
+            );
+        }
+        assert!(source.resolve("acct", "alpha", "../escape").is_err());
+        assert!(source.resolve("acct", "alpha", "/etc").is_err());
+    }
+
+    #[test]
+    fn headless_prepare_rewrites_the_opaque_target_onto_the_policy_root() {
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("alpha")).unwrap();
+        let source = headless_source(root.path());
+        let canonical_root = root.path().canonicalize().unwrap();
+
+        let (prepared, target) = prepare_remote_args(
+            &source,
+            "git_repo_state",
+            json!({ "workspaceId": "alpha", "relativePath": "" }),
+            Some("acct"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            prepared["repoPath"],
+            Value::String(canonical_root.join("alpha").to_string_lossy().to_string())
+        );
+        assert_eq!(target.unwrap().workspace.display_name, "alpha");
+
+        // The desktop registry never sees headless ids, and vice versa.
+        assert!(prepare_remote_args(
+            &GitWorkspaceSource::DesktopRegistry,
+            "git_repo_state",
+            json!({ "workspaceId": "alpha", "relativePath": "" }),
+            Some("acct"),
+            None,
+        )
+        .is_err());
     }
 
     #[test]
