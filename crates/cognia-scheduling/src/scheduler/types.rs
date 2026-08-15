@@ -200,6 +200,53 @@ pub enum SystemTaskAction {
         #[serde(default)]
         args: Vec<String>,
     },
+    /// Open a URL with the OS default handler (`open` / `xdg-open` /
+    /// `cmd /c start`). Used by app-level task promotion: the OS timer only
+    /// wakes Cognia through its `cognia://` deep link and the app decides what
+    /// to run, so no per-type CLI subcommand has to exist. Only `http(s)` and
+    /// the `cognia` scheme are accepted (see `validate_open_url`).
+    OpenUrl { url: String },
+}
+
+/// Schemes an `OpenUrl` action may target. Anything else (file:, javascript:,
+/// arbitrary custom schemes) is rejected at validation time so an OS-level
+/// task cannot become a generic "run whatever the handler does" primitive.
+pub const OPEN_URL_ALLOWED_SCHEMES: &[&str] = &["cognia", "https", "http"];
+
+/// Validate an `OpenUrl` target: non-empty, no control chars/whitespace, an
+/// allow-listed scheme, and no shell metacharacters (the backends pass the URL
+/// as ONE argv entry, but a defensive check keeps `Command`-string backends
+/// honest too).
+pub fn validate_open_url(url: &str) -> std::result::Result<(), String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("URL cannot be empty".to_string());
+    }
+    if trimmed.len() > 2048 {
+        return Err("URL is too long (max 2048 bytes)".to_string());
+    }
+    if trimmed.chars().any(|c| {
+        c.is_control()
+            || c.is_whitespace()
+            || matches!(c, '"' | '\'' | '`' | '$' | '&' | '|' | ';' | '<' | '>')
+    }) {
+        return Err("URL contains characters that are not allowed".to_string());
+    }
+    let scheme_end = trimmed
+        .find("://")
+        .ok_or_else(|| "URL must include a scheme (cognia://, https://)".to_string())?;
+    let scheme = &trimmed[..scheme_end];
+    if !OPEN_URL_ALLOWED_SCHEMES
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(scheme))
+    {
+        return Err(format!(
+            "URL scheme \"{}\" is not allowed (allowed: {})",
+            scheme,
+            OPEN_URL_ALLOWED_SCHEMES.join(", ")
+        ));
+    }
+    Ok(())
 }
 
 fn default_timeout() -> u64 {
@@ -439,8 +486,24 @@ pub struct SchedulerCapabilities {
     /// Per-trigger capability descriptors with availability, constraints, and notes
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trigger_capabilities: Vec<TriggerCapability>,
+    /// Action kinds this backend can translate (`execute_script`, `run_command`,
+    /// `launch_app`, `open_url`). Reported explicitly per ADR-0079 §6 so the
+    /// renderer never assumes an action the backend cannot express.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supported_actions: Vec<String>,
     /// Maximum tasks allowed (0 = unlimited)
     pub max_tasks: u32,
+}
+
+/// The action kinds every real backend (launchd / schtasks / systemd) translates.
+pub const ALL_ACTION_KINDS: &[&str] = &["execute_script", "run_command", "launch_app", "open_url"];
+
+/// Owned copy of `ALL_ACTION_KINDS` for capability reports.
+pub fn all_action_kinds() -> Vec<String> {
+    ALL_ACTION_KINDS
+        .iter()
+        .map(|kind| kind.to_string())
+        .collect()
 }
 
 impl SystemTask {
@@ -473,6 +536,8 @@ impl SystemTask {
         match &self.action {
             SystemTaskAction::RunCommand { command, .. } => Self::is_privileged_path(command),
             SystemTaskAction::LaunchApp { path, .. } => Self::is_privileged_path(path),
+            // Opening a URL through the OS handler never needs elevation.
+            SystemTaskAction::OpenUrl { .. } => false,
             SystemTaskAction::ExecuteScript { use_sandbox, .. } => {
                 // Scripts without sandbox need more scrutiny
                 !use_sandbox
@@ -583,6 +648,55 @@ fn path_has_root(path: &str, root: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_url_validation_allows_cognia_and_https_only() {
+        assert!(validate_open_url("cognia://scheduler/task/abc?run=tok").is_ok());
+        assert!(validate_open_url("https://example.com/x").is_ok());
+        assert!(validate_open_url("HTTPS://example.com").is_ok());
+        assert!(validate_open_url("").is_err());
+        assert!(validate_open_url("   ").is_err());
+        assert!(validate_open_url("file:///etc/passwd").is_err());
+        assert!(validate_open_url("javascript://alert(1)").is_err());
+        assert!(validate_open_url("no-scheme").is_err());
+        assert!(validate_open_url("cognia://a b").is_err());
+        assert!(validate_open_url("cognia://a;rm").is_err());
+        assert!(validate_open_url("cognia://a\"b").is_err());
+        assert!(validate_open_url(&format!("cognia://{}", "x".repeat(2100))).is_err());
+    }
+
+    #[test]
+    fn open_url_action_never_requires_admin_and_serializes_as_open_url() {
+        let task = SystemTask {
+            id: "t".to_string(),
+            name: "T".to_string(),
+            description: None,
+            trigger: SystemTaskTrigger::Interval { seconds: 60 },
+            action: SystemTaskAction::OpenUrl {
+                url: "cognia://scheduler/task/1?run=tok".to_string(),
+            },
+            run_level: RunLevel::User,
+            status: SystemTaskStatus::Enabled,
+            requires_admin: false,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            last_run_at: None,
+            next_run_at: None,
+            last_result: None,
+            metadata_state: TaskMetadataState::Full,
+        };
+        assert!(!task.check_requires_admin());
+        let json = serde_json::to_value(&task.action).unwrap();
+        assert_eq!(json["type"], "open_url");
+        assert_eq!(json["url"], "cognia://scheduler/task/1?run=tok");
+        let back: SystemTaskAction = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, SystemTaskAction::OpenUrl { .. }));
+        assert_eq!(
+            all_action_kinds(),
+            vec!["execute_script", "run_command", "launch_app", "open_url"]
+        );
+    }
 
     fn command_task(command: &str) -> SystemTask {
         SystemTask {

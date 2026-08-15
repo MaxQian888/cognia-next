@@ -12,7 +12,17 @@ export type CogniaDeeplinkRoute =
   | { kind: "share_target"; text?: string; url?: string; raw: string }
   | { kind: "open_workflow_run"; workflowId: string; runId: string; raw: string }
   | { kind: "open_im"; conversationKey?: string; raw: string }
-  | { kind: "open_scheduler_task"; taskId?: string; raw: string }
+  | {
+      kind: "open_scheduler_task"
+      taskId?: string
+      /**
+       * Promotion wake-up token (`?run=<token>`), present only on links minted
+       * by the OS-scheduler promotion. The desktop handler runs the task iff it
+       * matches the task's stored token; without it the link only navigates.
+       */
+      runToken?: string
+      raw: string
+    }
   | { kind: "open_settings"; settingsTab?: string; raw: string }
   | { kind: "open_workspace"; workspacePath?: string; raw: string }
   | { kind: "unknown"; raw: string }
@@ -67,9 +77,11 @@ export function parseCogniaDeeplink(raw: string): CogniaDeeplinkRoute {
   }
   if (host === "scheduler") {
     const parts = path.split("/").filter(Boolean)
+    const runToken = params.get("run")
     return {
       kind: "open_scheduler_task",
       taskId: parts[0] === "task" ? parts[1] : (params.get("taskId") ?? undefined),
+      runToken: runToken && runToken.length > 0 ? runToken : undefined,
       raw,
     }
   }

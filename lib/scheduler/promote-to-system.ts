@@ -1,13 +1,27 @@
 /**
- * Promote App-Level Scheduled Task to System Service
+ * Promote an app-level scheduled task to the OS scheduler
+ * (Windows Task Scheduler / launchd / systemd) — "wake + delegate" semantics
+ * (spec `docs/superpowers/specs/2026-08-16-scheduler-host-neutral-design.md`, C).
  *
- * Converts an app-level ScheduledTask to a CreateSystemTaskInput
- * for registration with the OS scheduler (Windows Task Scheduler / launchd / systemd).
+ * The OS timer never runs the task's payload itself. It fires an `open_url`
+ * action for the app's deep link
  *
- * Only certain task types are promotable:
- * - script → execute_script (direct mapping)
- * - workflow/backup/sync → run_command (Cognia CLI invocation)
- * - agent/chat/ai-generation/test/custom/plugin → NOT promotable (require running app)
+ *   cognia://scheduler/task/<taskId>?run=<token>
+ *
+ * which launches (or focuses) the Cognia desktop app; the deep-link handler
+ * verifies `token` against the task's stored promotion record and runs the
+ * task through the normal scheduler execution path. That makes EVERY task
+ * type promotable with one uniform behaviour, instead of the previous
+ * per-type mapping onto CLI subcommands that did not exist.
+ *
+ * Still not promotable:
+ *   - `event` triggers (no OS equivalent) — and deprecated task types;
+ *   - cron grammar the OS backend cannot express (seconds field, macros,
+ *     `L`/`#`, and on launchd steps/ranges/lists) — rejected with a reason,
+ *     never approximated (ADR-0079 §6).
+ *
+ * The token is a per-promotion secret so an arbitrary web page linking to
+ * `cognia://scheduler/task/<id>` can only navigate, never execute.
  */
 
 import type { ScheduledTask } from "@/types/scheduler"
@@ -17,17 +31,58 @@ import type {
   SystemTaskAction,
 } from "@/types/scheduler/system-scheduler"
 import { validateCronExpression } from "./cron-parser"
-
-/** Task types that can be promoted to system services */
-const PROMOTABLE_TYPES = new Set(["script", "workflow", "backup", "sync"])
+import { isDeprecatedTaskType } from "./host-support"
 
 /** Trigger types that can be mapped to system triggers */
-const PROMOTABLE_TRIGGER_TYPES = new Set(["cron", "interval", "once"])
+export const PROMOTABLE_TRIGGER_TYPES: ReadonlySet<string> = new Set(["cron", "interval", "once"])
+
+/** Tag every promoted OS task carries so the unified list can link it back. */
+export const PROMOTED_TASK_TAG = "cognia-promoted"
 
 export interface PromoteResult {
   promotable: boolean
   reason?: string
   input?: CreateSystemTaskInput
+  /** The wake-up token embedded in `input.action.url` (store it on the task). */
+  token?: string
+}
+
+/** Deep link the OS timer opens; the desktop handler runs the task iff `token` matches. */
+export function buildPromotionWakeUrl(taskId: string, token: string): string {
+  return `cognia://scheduler/task/${encodeURIComponent(taskId)}?run=${encodeURIComponent(token)}`
+}
+
+/** 32 random bytes as base64url — URL-safe, no padding. */
+export function generatePromotionToken(rng: (bytes: Uint8Array) => void = fillRandom): string {
+  const bytes = new Uint8Array(32)
+  rng(bytes)
+  let binary = ""
+  for (const b of bytes) binary += String.fromCharCode(b)
+  const base64 = typeof btoa === "function" ? btoa(binary) : Buffer.from(bytes).toString("base64")
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")
+}
+
+function fillRandom(bytes: Uint8Array): void {
+  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto
+  if (c && typeof c.getRandomValues === "function") {
+    c.getRandomValues(bytes)
+    return
+  }
+  throw new Error("secure random source unavailable; cannot mint a promotion token")
+}
+
+/**
+ * Constant-time-ish comparison of the deep-link token against the stored one
+ * (lengths compared first, then every byte XORed) so timing does not leak.
+ */
+export function promotionTokenMatches(
+  stored: string | undefined,
+  presented: string | undefined
+): boolean {
+  if (!stored || !presented || stored.length !== presented.length) return false
+  let diff = 0
+  for (let i = 0; i < stored.length; i += 1) diff |= stored.charCodeAt(i) ^ presented.charCodeAt(i)
+  return diff === 0
 }
 
 export type SystemSchedulerPlatform = "macos" | "windows" | "linux" | "unknown"
@@ -40,13 +95,14 @@ export type SystemSchedulerPlatform = "macos" | "windows" | "linux" | "unknown"
  */
 export function promoteToSystemTask(
   task: ScheduledTask,
-  platform: SystemSchedulerPlatform = detectSystemSchedulerPlatform()
+  platform: SystemSchedulerPlatform = detectSystemSchedulerPlatform(),
+  options: { token?: string } = {}
 ): PromoteResult {
-  // Check task type
-  if (!PROMOTABLE_TYPES.has(task.type)) {
+  // Deprecated types have no executor — waking the app for them is pointless.
+  if (isDeprecatedTaskType(task.type)) {
     return {
       promotable: false,
-      reason: `Task type "${task.type}" cannot be promoted to a system service. Only script, workflow, backup, and sync tasks are supported. Tasks of type "${task.type}" require the Cognia application to be running.`,
+      reason: `Task type "${task.type}" is deprecated and cannot be promoted.`,
     }
   }
 
@@ -80,24 +136,20 @@ export function promoteToSystemTask(
     }
   }
 
-  // Map action
-  const action = mapAction(task)
-  if (!action) {
-    return {
-      promotable: false,
-      reason: `Failed to map task type "${task.type}" to a system action.`,
-    }
-  }
+  // Action: wake the app through its deep link; the app runs the task.
+  const token = options.token ?? generatePromotionToken()
+  const action: SystemTaskAction = { type: "open_url", url: buildPromotionWakeUrl(task.id, token) }
 
   return {
     promotable: true,
+    token,
     input: {
       name: `Cognia: ${task.name}`,
       description: task.description || `Promoted from app task: ${task.name}`,
       trigger,
       action,
-      run_level: task.type === "script" ? "user" : "user",
-      tags: ["cognia-promoted", ...(task.tags || [])],
+      run_level: "user",
+      tags: [PROMOTED_TASK_TAG, `cognia-task:${task.id}`, ...(task.tags || [])],
     },
   }
 }
@@ -212,52 +264,6 @@ function mapTrigger(task: ScheduledTask): SystemTaskTrigger | null {
             : String(task.trigger.runAt)
           : new Date().toISOString(),
       }
-    default:
-      return null
-  }
-}
-
-function mapAction(task: ScheduledTask): SystemTaskAction | null {
-  const payload = task.payload || {}
-
-  switch (task.type) {
-    case "script":
-      return {
-        type: "execute_script",
-        language: (payload.language as string) || "javascript",
-        code: (payload.code as string) || "",
-        working_dir: payload.workingDir as string | undefined,
-        timeout_secs: payload.timeout ? Math.round(Number(payload.timeout) / 1000) : 300,
-        use_sandbox: payload.useSandbox !== false,
-      }
-
-    case "workflow":
-      return {
-        type: "run_command",
-        command: "cognia",
-        args: ["run-workflow", "--id", (payload.workflowId as string) || ""],
-      }
-
-    case "backup":
-      return {
-        type: "run_command",
-        command: "cognia",
-        args: [
-          "backup",
-          "--type",
-          (payload.backupType as string) || "full",
-          "--destination",
-          (payload.destination as string) || "local",
-        ],
-      }
-
-    case "sync":
-      return {
-        type: "run_command",
-        command: "cognia",
-        args: ["sync", "--provider", (payload.provider as string) || "default"],
-      }
-
     default:
       return null
   }

@@ -3076,4 +3076,228 @@ describe("TaskScheduler", () => {
       sched.stop()
     })
   })
+
+  describe("OS promotion (wake + delegate)", () => {
+    function makeMockDriver() {
+      let dueCb: TaskDueCallback | null = null
+      const driver: SchedulerTimingDriver & { fire: TaskDueCallback } = {
+        supportsLeaderElection: false,
+        start: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn(),
+        onDue: jest.fn((cb: TaskDueCallback) => {
+          dueCb = cb
+        }),
+        arm: jest.fn(),
+        disarm: jest.fn(),
+        fire: (taskId, firedAtMs) => dueCb?.(taskId, firedAtMs),
+      }
+      return driver
+    }
+
+    function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+      return {
+        id: "task-p",
+        name: "Promotable",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60000 },
+        config: { maxRetries: 0, retryDelay: 1000, timeout: 30000, runMissedOnStartup: false },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      }
+    }
+
+    type MockPort = {
+      createSystemTask: jest.Mock
+      deleteSystemTask: jest.Mock
+      enableSystemTask: jest.Mock
+      disableSystemTask: jest.Mock
+      getSchedulerCapabilities: jest.Mock
+    }
+    function makePort(overrides: Partial<MockPort> = {}): MockPort {
+      return {
+        createSystemTask: jest.fn(async () => ({
+          status: "success" as const,
+          task: { id: "sys-1" } as never,
+        })),
+        deleteSystemTask: jest.fn(async () => true),
+        enableSystemTask: jest.fn(async () => true),
+        disableSystemTask: jest.fn(async () => true),
+        getSchedulerCapabilities: jest.fn(async () => ({ available: true, backend: "launchd" })),
+        ...overrides,
+      }
+    }
+
+    afterEach(() => {
+      unregisterTaskExecutor("test")
+    })
+
+    it("does not arm a promoted task on the timing driver", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      mockSchedulerDb.getTasksByStatus.mockResolvedValueOnce([
+        makeTask({ promotion: { systemTaskId: "sys", token: "t", promotedAt: new Date() } }),
+      ])
+      await sched.initialize()
+      expect(driver.arm).not.toHaveBeenCalled()
+      sched.stop()
+    })
+
+    it("promotes a task: creates the OS task, records the promotion, disarms the app timer", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      const port = makePort()
+      sched.setSystemSchedulerPort(port)
+      await sched.initialize()
+      const task = makeTask({ nextRunAt: new Date(Date.now() + 60000) })
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+      const result = await sched.promoteTask("task-p", { platform: "linux", token: "tok" })
+      expect(result.status).toBe("promoted")
+      expect(port.createSystemTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: { type: "open_url", url: "cognia://scheduler/task/task-p?run=tok" },
+        }),
+        false
+      )
+      expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "task-p",
+          nextRunAt: undefined,
+          promotion: expect.objectContaining({
+            systemTaskId: "sys-1",
+            token: "tok",
+            backend: "launchd",
+          }),
+        })
+      )
+      expect(driver.disarm).toHaveBeenCalledWith("task-p")
+      sched.stop()
+    })
+
+    it("returns not_promotable / unavailable / confirmation_required / error verdicts", async () => {
+      const sched = createTaskScheduler(makeMockDriver())
+      const port = makePort()
+      sched.setSystemSchedulerPort(port)
+      mockSchedulerDb.getTask.mockResolvedValue(makeTask({ type: "sync" }))
+      expect((await sched.promoteTask("task-p", { platform: "linux" })).status).toBe(
+        "not_promotable"
+      )
+
+      mockSchedulerDb.getTask.mockResolvedValue(makeTask())
+      port.getSchedulerCapabilities.mockResolvedValueOnce({ available: false, backend: "none" })
+      expect((await sched.promoteTask("task-p", { platform: "linux" })).status).toBe("unavailable")
+      port.getSchedulerCapabilities.mockRejectedValueOnce(new Error("ipc down"))
+      expect((await sched.promoteTask("task-p", { platform: "linux" })).status).toBe("unavailable")
+
+      port.createSystemTask.mockResolvedValueOnce({
+        status: "confirmation_required",
+        confirmation: { confirmation_id: "c1", id: "c1" } as never,
+      } as never)
+      const pending = await sched.promoteTask("task-p", { platform: "linux", token: "tok" })
+      expect(pending).toMatchObject({ status: "confirmation_required", token: "tok" })
+
+      port.createSystemTask.mockResolvedValueOnce({ status: "error", message: "denied" } as never)
+      expect(await sched.promoteTask("task-p", { platform: "linux" })).toEqual({
+        status: "error",
+        reason: "denied",
+      })
+      port.createSystemTask.mockRejectedValueOnce(new Error("boom"))
+      expect((await sched.promoteTask("task-p", { platform: "linux" })).status).toBe("error")
+
+      mockSchedulerDb.getTask.mockResolvedValue(null)
+      expect((await sched.promoteTask("nope")).status).toBe("error")
+      mockSchedulerDb.getTask.mockResolvedValue(
+        makeTask({ promotion: { systemTaskId: "already", token: "t", promotedAt: new Date() } })
+      )
+      expect(await sched.promoteTask("task-p")).toMatchObject({
+        status: "promoted",
+        systemTaskId: "already",
+      })
+    })
+
+    it("recordPromotion stores an out-of-band promotion", async () => {
+      const sched = createTaskScheduler(makeMockDriver())
+      mockSchedulerDb.getTask.mockResolvedValue(makeTask())
+      const rec = await sched.recordPromotion("task-p", { systemTaskId: "sys-9", token: "t9" })
+      expect(rec?.promotion).toMatchObject({ systemTaskId: "sys-9", token: "t9" })
+      mockSchedulerDb.getTask.mockResolvedValue(null)
+      expect(await sched.recordPromotion("nope", { systemTaskId: "s", token: "t" })).toBeNull()
+    })
+
+    it("un-promotes: deletes the OS task (tolerating failure) and re-arms the app timer", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      const port = makePort({
+        deleteSystemTask: jest.fn(async () => {
+          throw new Error("gone")
+        }),
+      })
+      sched.setSystemSchedulerPort(port)
+      await sched.initialize()
+      const promoted = makeTask({
+        promotion: { systemTaskId: "sys-1", token: "t", promotedAt: new Date() },
+      })
+      mockSchedulerDb.getTask.mockResolvedValue(promoted)
+      const restored = await sched.unpromoteTask("task-p")
+      expect(port.deleteSystemTask).toHaveBeenCalledWith("sys-1")
+      expect(restored?.promotion).toBeUndefined()
+      expect(restored?.nextRunAt).toBeInstanceOf(Date)
+      expect(driver.arm).toHaveBeenCalledWith("task-p", expect.any(Number))
+      // Not promoted → returned unchanged; unknown → null.
+      mockSchedulerDb.getTask.mockResolvedValue(makeTask())
+      expect((await sched.unpromoteTask("task-p"))?.promotion).toBeUndefined()
+      mockSchedulerDb.getTask.mockResolvedValue(null)
+      expect(await sched.unpromoteTask("nope")).toBeNull()
+      sched.stop()
+    })
+
+    it("runPromotedTask executes only with the matching token on an active promoted task", async () => {
+      const executor = jest.fn().mockResolvedValue({ success: true })
+      registerTaskExecutor("test", executor)
+      const sched = createTaskScheduler(makeMockDriver())
+      const promoted = makeTask({
+        promotion: { systemTaskId: "sys-1", token: "secret", promotedAt: new Date() },
+      })
+      mockSchedulerDb.getTask.mockResolvedValue(promoted)
+      expect(await sched.runPromotedTask("task-p", "wrong")).toBeNull()
+      expect(await sched.runPromotedTask("task-p", undefined)).toBeNull()
+      expect(executor).not.toHaveBeenCalled()
+      const execution = await sched.runPromotedTask("task-p", "secret")
+      expect(execution?.status).toBe("completed")
+      expect(execution?.triggerSource).toBe("schedule")
+      expect(executor).toHaveBeenCalledTimes(1)
+      mockSchedulerDb.getTask.mockResolvedValue({ ...promoted, status: "paused" })
+      expect(await sched.runPromotedTask("task-p", "secret")).toBeNull()
+      mockSchedulerDb.getTask.mockResolvedValue(makeTask())
+      expect(await sched.runPromotedTask("task-p", "secret")).toBeNull()
+    })
+
+    it("pause/resume mirror onto the OS task and delete removes it", async () => {
+      const sched = createTaskScheduler(makeMockDriver())
+      const port = makePort()
+      sched.setSystemSchedulerPort(port)
+      const promoted = makeTask({
+        promotion: { systemTaskId: "sys-1", token: "t", promotedAt: new Date() },
+      })
+      mockSchedulerDb.getTask.mockResolvedValue(promoted)
+      await sched.pauseTask("task-p")
+      expect(port.disableSystemTask).toHaveBeenCalledWith("sys-1")
+      mockSchedulerDb.getTask.mockResolvedValue({ ...promoted, status: "paused" })
+      await sched.resumeTask("task-p")
+      expect(port.enableSystemTask).toHaveBeenCalledWith("sys-1")
+      mockSchedulerDb.getTask.mockResolvedValue(promoted)
+      mockSchedulerDb.deleteTask.mockResolvedValueOnce(true)
+      await sched.deleteTask("task-p")
+      expect(port.deleteSystemTask).toHaveBeenCalledWith("sys-1")
+      // Failures on the port are swallowed.
+      port.disableSystemTask.mockRejectedValueOnce(new Error("x"))
+      mockSchedulerDb.getTask.mockResolvedValue(promoted)
+      await expect(sched.pauseTask("task-p")).resolves.toBe(true)
+    })
+  })
 })

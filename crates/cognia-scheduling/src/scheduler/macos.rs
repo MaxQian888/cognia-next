@@ -15,9 +15,9 @@ use std::process::Command;
 use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, is_cognia_task, now_iso, SystemScheduler, TASK_PREFIX};
 use super::types::{
-    derive_trigger_capabilities, CreateSystemTaskInput, RunLevel, SchedulerCapabilities,
-    SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger, SystemTriggerKind,
-    TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
+    derive_trigger_capabilities, validate_open_url, CreateSystemTaskInput, RunLevel,
+    SchedulerCapabilities, SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger,
+    SystemTriggerKind, TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
 };
 
 /// macOS launchd scheduler implementation
@@ -274,6 +274,12 @@ impl MacOSScheduler {
                 Ok((command.clone(), args.clone()))
             }
             SystemTaskAction::LaunchApp { path, args } => Ok((path.clone(), args.clone())),
+            SystemTaskAction::OpenUrl { url } => {
+                validate_open_url(url).map_err(SchedulerError::InvalidConfig)?;
+                // `/usr/bin/open` routes to the registered handler: the Cognia
+                // bundle for `cognia://`, the default browser for https.
+                Ok(("/usr/bin/open".to_string(), vec![url.clone()]))
+            }
         }
     }
 
@@ -595,6 +601,7 @@ impl SystemScheduler for MacOSScheduler {
             can_elevate: false, // User-level agents only
             supported_triggers,
             trigger_capabilities: trigger_caps,
+            supported_actions: super::types::all_action_kinds(),
             max_tasks: 0,
         }
     }
@@ -869,6 +876,24 @@ use chrono::{Datelike, Timelike};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_url_translates_to_the_open_binary_and_rejects_bad_schemes() {
+        let (program, args) = MacOSScheduler::build_program_args(&SystemTaskAction::OpenUrl {
+            url: "cognia://scheduler/task/abc?run=tok".to_string(),
+        })
+        .unwrap();
+        assert_eq!(program, "/usr/bin/open");
+        assert_eq!(
+            args,
+            vec!["cognia://scheduler/task/abc?run=tok".to_string()]
+        );
+        let err = MacOSScheduler::build_program_args(&SystemTaskAction::OpenUrl {
+            url: "file:///etc/passwd".to_string(),
+        })
+        .unwrap_err();
+        assert!(matches!(err, SchedulerError::InvalidConfig(_)));
+    }
 
     fn cron_task(expression: &str) -> SystemTask {
         SystemTask {

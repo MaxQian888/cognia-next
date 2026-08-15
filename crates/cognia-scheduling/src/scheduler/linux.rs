@@ -15,9 +15,9 @@ use std::process::Command;
 use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, now_iso, SystemScheduler, TASK_PREFIX};
 use super::types::{
-    derive_trigger_capabilities, CreateSystemTaskInput, RunLevel, SchedulerCapabilities,
-    SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger, SystemTriggerKind,
-    TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
+    derive_trigger_capabilities, validate_open_url, CreateSystemTaskInput, RunLevel,
+    SchedulerCapabilities, SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger,
+    SystemTriggerKind, TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
 };
 
 /// Linux systemd scheduler implementation
@@ -361,6 +361,12 @@ Description=Timer for Cognia Task: {}
 
                 Ok((exec_start, None, HashMap::new()))
             }
+            SystemTaskAction::OpenUrl { url } => {
+                validate_open_url(url).map_err(SchedulerError::InvalidConfig)?;
+                // `xdg-open` hands the URL to the registered handler (the
+                // Cognia desktop app for `cognia://`, the browser for https).
+                Ok((format!("xdg-open {}", url), None, HashMap::new()))
+            }
         }
     }
 
@@ -592,6 +598,7 @@ impl SystemScheduler for LinuxScheduler {
             can_elevate: false, // User services only
             supported_triggers,
             trigger_capabilities: trigger_caps,
+            supported_actions: super::types::all_action_kinds(),
             max_tasks: 0,
         }
     }
@@ -924,6 +931,23 @@ impl SystemScheduler for LinuxScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_url_translates_to_xdg_open_and_rejects_bad_schemes() {
+        let (exec_start, working_dir, env) =
+            LinuxScheduler::build_exec_start(&SystemTaskAction::OpenUrl {
+                url: "cognia://scheduler/task/abc?run=tok".to_string(),
+            })
+            .unwrap();
+        assert_eq!(exec_start, "xdg-open cognia://scheduler/task/abc?run=tok");
+        assert!(working_dir.is_none());
+        assert!(env.is_empty());
+        let err = LinuxScheduler::build_exec_start(&SystemTaskAction::OpenUrl {
+            url: "cognia://a b".to_string(),
+        })
+        .unwrap_err();
+        assert!(matches!(err, SchedulerError::InvalidConfig(_)));
+    }
 
     #[test]
     fn resolves_user_systemd_directory_from_linux_environment() {

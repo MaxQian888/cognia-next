@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-const notifyMock = jest.fn(async () => "rec-1")
+const notifyMock = jest.fn(async (..._a: unknown[]) => "rec-1")
 jest.mock("./runtime", () => ({ notify: (...a: unknown[]) => notifyMock(...a) }))
 
 const profileState = { value: "cloud-companion" as string }
@@ -150,7 +150,15 @@ describe("subscribeRemoteNotifications", () => {
     notifyMock.mockRejectedValueOnce(new Error("db"))
     let handler: ((p: unknown) => void) | null = null
     subscribeRemoteNotifications({
-      transport: { subscribe: (_c: string, h: (p: unknown) => void) => ((handler = h), () => {}) },
+      transport: {
+        subscribe: ((_c: string, h: (p: unknown) => void) => {
+          handler = h
+          return () => {}
+        }) as unknown as Pick<
+          import("@/lib/tauri/transport-types").Transport,
+          "subscribe"
+        >["subscribe"],
+      },
     })
     expect(() => handler!({ id: "n", title: "T" })).not.toThrow()
     await Promise.resolve()

@@ -30,15 +30,17 @@ type ArmedEntry = {
   fireAtMs: number
 }
 
+type TimerHandle = ReturnType<typeof setTimeout>
+
 /** Timer primitives — injectable for deterministic tests. */
 export interface NodeTimerHost {
-  setTimeout: typeof globalThis.setTimeout
-  clearTimeout: typeof globalThis.clearTimeout
+  setTimeout: (callback: () => void, ms: number) => TimerHandle
+  clearTimeout: (handle: TimerHandle) => void
   now: () => number
 }
 
 const defaultTimerHost: NodeTimerHost = {
-  setTimeout: (...args) => globalThis.setTimeout(...args),
+  setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
   clearTimeout: (handle) => globalThis.clearTimeout(handle),
   now: () => Date.now(),
 }
@@ -109,7 +111,7 @@ export class NodeTimingDriver implements SchedulerTimingDriver {
 }
 
 /** `unref` exists on Node timer handles only; browsers return a number. */
-function unref(handle: ReturnType<typeof setTimeout>): void {
+function unref(handle: TimerHandle): void {
   const maybe = handle as unknown as { unref?: () => void }
   if (typeof maybe?.unref === "function") maybe.unref()
 }

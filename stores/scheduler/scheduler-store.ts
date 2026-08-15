@@ -84,6 +84,20 @@ interface SchedulerActions {
   // Task Actions
   pauseTask: (taskId: string) => Promise<boolean>
   resumeTask: (taskId: string) => Promise<boolean>
+  /**
+   * OS promotion (desktop, local schedule only). See
+   * `lib/scheduler/promote-to-system.ts` for the wake+delegate contract.
+   */
+  promoteTask: (
+    taskId: string,
+    opts?: { confirmed?: boolean; token?: string }
+  ) => Promise<import("@/lib/scheduler/task-scheduler").PromoteTaskResult>
+  /** Record a promotion after an out-of-band OS confirmation completed. */
+  recordPromotion: (
+    taskId: string,
+    promotion: { systemTaskId: string; token: string; backend?: string }
+  ) => Promise<boolean>
+  unpromoteTask: (taskId: string) => Promise<boolean>
   runTaskNow: (
     taskId: string,
     opts?: { triggerSource?: TaskExecutionTriggerSource }
@@ -294,6 +308,55 @@ export const useSchedulerStore = create<SchedulerStore>()(
           return success
         } catch (error) {
           log.error("SchedulerStore: Resume task failed", error as Error)
+          return false
+        }
+      },
+
+      promoteTask: async (taskId, opts) => {
+        // Promotion binds an OS timer on THIS machine to a task in THIS
+        // machine's schedule; a remote host's schedule cannot be promoted from here.
+        if (isRemoteHostActive()) {
+          return {
+            status: "unavailable",
+            reason: "Promotion is only available for this device's own schedule.",
+          }
+        }
+        try {
+          const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+          const result = await getTaskScheduler().promoteTask(taskId, opts)
+          if (result.status === "promoted") await get().refreshAll()
+          return result
+        } catch (error) {
+          log.error("SchedulerStore: Promote task failed", error as Error)
+          return {
+            status: "error",
+            reason: error instanceof Error ? error.message : String(error),
+          }
+        }
+      },
+
+      recordPromotion: async (taskId, promotion) => {
+        if (isRemoteHostActive()) return false
+        try {
+          const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+          const task = await getTaskScheduler().recordPromotion(taskId, promotion)
+          if (task) await get().refreshAll()
+          return task !== null
+        } catch (error) {
+          log.error("SchedulerStore: Record promotion failed", error as Error)
+          return false
+        }
+      },
+
+      unpromoteTask: async (taskId) => {
+        if (isRemoteHostActive()) return false
+        try {
+          const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+          const task = await getTaskScheduler().unpromoteTask(taskId)
+          if (task) await get().refreshAll()
+          return task !== null
+        } catch (error) {
+          log.error("SchedulerStore: Un-promote task failed", error as Error)
           return false
         }
       },

@@ -119,6 +119,61 @@ describe("TaskDetailView", () => {
     expect(cbs.onDelete).toHaveBeenCalledWith("t1")
   })
 
+  it("offers Promote to system for a promotable trigger and confirms before promoting", () => {
+    const cbs = { ...callbacks(), onPromote: jest.fn(), onUnpromote: jest.fn() }
+    render(<TaskDetailView task={buildTask()} executions={[]} {...cbs} />)
+    expect(screen.queryByTestId("task-promoted-badge")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("promote-task"))
+    expect(cbs.onPromote).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("promote-confirm-accept"))
+    expect(cbs.onPromote).toHaveBeenCalledWith("t1")
+    expect(screen.queryByTestId("unpromote-task")).not.toBeInTheDocument()
+  })
+
+  it("shows the promoted badge and the un-promote entry for a promoted task", () => {
+    const cbs = { ...callbacks(), onPromote: jest.fn(), onUnpromote: jest.fn() }
+    render(
+      <TaskDetailView
+        task={buildTask({
+          promotion: {
+            systemTaskId: "sys-1",
+            token: "t",
+            promotedAt: new Date(),
+            backend: "launchd",
+          },
+        })}
+        executions={[]}
+        {...cbs}
+      />
+    )
+    expect(screen.getByTestId("task-promoted-badge")).toHaveTextContent("promote.badgeWithBackend")
+    expect(screen.queryByTestId("promote-task")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("unpromote-task"))
+    expect(cbs.onUnpromote).toHaveBeenCalledWith("t1")
+  })
+
+  it("hides promotion for event triggers and disables it when unavailable", () => {
+    const cbs = { ...callbacks(), onPromote: jest.fn() }
+    const { rerender } = render(
+      <TaskDetailView
+        task={buildTask({ trigger: { type: "event", eventType: "x" } })}
+        executions={[]}
+        {...cbs}
+      />
+    )
+    expect(screen.queryByTestId("promote-task")).not.toBeInTheDocument()
+    rerender(
+      <TaskDetailView
+        task={buildTask()}
+        executions={[]}
+        {...cbs}
+        promotionAvailable={false}
+        promotionUnavailableReason="nope"
+      />
+    )
+    expect(screen.getByTestId("promote-task")).toHaveAttribute("title", "nope")
+  })
+
   it("renders all six composite sub-components", () => {
     const cbs = callbacks()
     render(<TaskDetailView task={buildTask()} executions={[]} {...cbs} />)

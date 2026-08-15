@@ -185,6 +185,34 @@ describe("SchedulerDatabase", () => {
       expect(pausedTasks.length).toBe(1)
     })
 
+    it("round-trips the OS promotion record", async () => {
+      const promotedAt = new Date("2026-08-16T10:00:00Z")
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "promoted",
+          promotion: { systemTaskId: "sys-1", token: "tok", promotedAt, backend: "launchd" },
+        })
+      )
+      const back = await schedulerDb.getTask("promoted")
+      expect(back?.promotion).toEqual({
+        systemTaskId: "sys-1",
+        token: "tok",
+        promotedAt,
+        backend: "launchd",
+      })
+      // A row without a promotion deserializes to undefined; a corrupt blob is dropped.
+      await schedulerDb.createTask(createMockTask({ id: "plain" }))
+      expect((await schedulerDb.getTask("plain"))?.promotion).toBeUndefined()
+      await schedulerDb.tasks.update("plain", { promotion: "{not json" })
+      expect((await schedulerDb.getTask("plain"))?.promotion).toBeUndefined()
+      await schedulerDb.tasks.update("plain", { promotion: JSON.stringify({ systemTaskId: 1 }) })
+      expect((await schedulerDb.getTask("plain"))?.promotion).toBeUndefined()
+      await schedulerDb.tasks.update("plain", {
+        promotion: JSON.stringify({ systemTaskId: "s", token: "t", promotedAt: "garbage" }),
+      })
+      expect((await schedulerDb.getTask("plain"))?.promotion?.promotedAt).toEqual(new Date(0))
+    })
+
     it("should get tasks by type across statuses", async () => {
       await schedulerDb.createTask(createMockTask({ id: "sync-a", type: "sync", status: "active" }))
       await schedulerDb.createTask(createMockTask({ id: "sync-b", type: "sync", status: "paused" }))

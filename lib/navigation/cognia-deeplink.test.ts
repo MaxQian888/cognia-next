@@ -14,6 +14,21 @@ describe("parseCogniaDeeplink", () => {
     expect(parseCogniaDeeplink("cognia://scheduler/task/task-1")).toMatchObject({
       kind: "open_scheduler_task",
       taskId: "task-1",
+      runToken: undefined,
+    })
+  })
+
+  it("carries the OS-promotion wake token on scheduler task links", () => {
+    expect(parseCogniaDeeplink("cognia://scheduler/task/task-1?run=abc_DEF-9")).toMatchObject({
+      kind: "open_scheduler_task",
+      taskId: "task-1",
+      runToken: "abc_DEF-9",
+    })
+    // Empty token = no token.
+    expect(parseCogniaDeeplink("cognia://scheduler/task/task-1?run=")).toMatchObject({
+      kind: "open_scheduler_task",
+      taskId: "task-1",
+      runToken: undefined,
     })
   })
 

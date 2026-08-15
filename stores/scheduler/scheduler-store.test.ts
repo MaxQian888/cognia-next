@@ -40,6 +40,9 @@ jest.mock("@/lib/scheduler/task-scheduler", () => {
     stop: jest.fn(),
     exportTasks: jest.fn(),
     importTasks: jest.fn(),
+    promoteTask: jest.fn(),
+    recordPromotion: jest.fn(),
+    unpromoteTask: jest.fn(),
   }
   return {
     __mockScheduler: mockScheduler,
@@ -62,6 +65,9 @@ const taskSchedulerMock = jest.requireMock("@/lib/scheduler/task-scheduler") as 
     stop: jest.Mock
     exportTasks: jest.Mock
     importTasks: jest.Mock
+    promoteTask: jest.Mock
+    recordPromotion: jest.Mock
+    unpromoteTask: jest.Mock
   }
   getTaskScheduler: jest.Mock
 }
@@ -757,6 +763,55 @@ describe("useSchedulerStore", () => {
         await result.current.deleteTask("task-1")
       })
       expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("promoteTask / recordPromotion / unpromoteTask", () => {
+    it("delegates promotion to the local scheduler and refreshes on success", async () => {
+      mockScheduler.promoteTask.mockResolvedValueOnce({
+        status: "promoted",
+        task: { id: "task-1" },
+        systemTaskId: "sys-1",
+      })
+      const { result } = renderHook(() => useSchedulerStore())
+      let outcome: unknown
+      await act(async () => {
+        outcome = await result.current.promoteTask("task-1", { token: "t" })
+      })
+      expect(mockScheduler.promoteTask).toHaveBeenCalledWith("task-1", { token: "t" })
+      expect(outcome).toMatchObject({ status: "promoted", systemTaskId: "sys-1" })
+    })
+
+    it("maps thrown errors to an error verdict", async () => {
+      mockScheduler.promoteTask.mockRejectedValueOnce(new Error("ipc"))
+      const { result } = renderHook(() => useSchedulerStore())
+      let outcome: unknown
+      await act(async () => {
+        outcome = await result.current.promoteTask("task-1")
+      })
+      expect(outcome).toEqual({ status: "error", reason: "ipc" })
+    })
+
+    it("records and removes promotions", async () => {
+      mockScheduler.recordPromotion.mockResolvedValueOnce({ id: "task-1" })
+      mockScheduler.unpromoteTask.mockResolvedValueOnce({ id: "task-1" })
+      const { result } = renderHook(() => useSchedulerStore())
+      let recorded = false
+      let removed = false
+      await act(async () => {
+        recorded = await result.current.recordPromotion("task-1", { systemTaskId: "s", token: "t" })
+        removed = await result.current.unpromoteTask("task-1")
+      })
+      expect(recorded).toBe(true)
+      expect(removed).toBe(true)
+      mockScheduler.recordPromotion.mockRejectedValueOnce(new Error("x"))
+      mockScheduler.unpromoteTask.mockRejectedValueOnce(new Error("y"))
+      await act(async () => {
+        recorded = await result.current.recordPromotion("task-1", { systemTaskId: "s", token: "t" })
+        removed = await result.current.unpromoteTask("task-1")
+      })
+      expect(recorded).toBe(false)
+      expect(removed).toBe(false)
     })
   })
 

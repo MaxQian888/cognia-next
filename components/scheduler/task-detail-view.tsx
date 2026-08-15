@@ -5,7 +5,7 @@
  * in a scrollable layout with an inline header.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Play,
@@ -16,7 +16,19 @@ import {
   RefreshCw,
   Network,
   History,
+  ArrowUpFromLine,
+  ArrowDownToLine,
 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -68,6 +80,16 @@ export interface TaskDetailViewProps {
   onOpenDependencyGraph?: () => void
   /** Opens the backfill dialog (recurring triggers only). */
   onBackfill?: () => void
+  /**
+   * OS promotion (desktop, own schedule only). When `onPromote` is supplied the
+   * "Promote to system" entry is offered for cron/interval/once tasks that are
+   * not yet promoted; `onUnpromote` powers the reverse. `promotionAvailable`
+   * false shows the entry disabled with the reason.
+   */
+  onPromote?: (taskId: string) => void
+  onUnpromote?: (taskId: string) => void
+  promotionAvailable?: boolean
+  promotionUnavailableReason?: string
 }
 
 const statusBadgeClass: Record<string, string> = {
@@ -93,10 +115,18 @@ export function TaskDetailView({
   onSelectTask,
   onOpenDependencyGraph,
   onBackfill,
+  onPromote,
+  onUnpromote,
+  promotionAvailable = true,
+  promotionUnavailableReason,
 }: TaskDetailViewProps) {
   const t = useTranslations("scheduler")
 
   const isPaused = task.status === "paused"
+  const isPromoted = Boolean(task.promotion)
+  const promotableTrigger =
+    task.trigger.type === "cron" || task.trigger.type === "interval" || task.trigger.type === "once"
+  const [promoteConfirmOpen, setPromoteConfirmOpen] = useState(false)
 
   const showDependencies = !!allTasks && hasDependencyLinks(task, allTasks)
   const dependencyGraph = useMemo(
@@ -138,6 +168,19 @@ export function TaskDetailView({
                 >
                   {t(`taskTypes.${task.type}`) || task.type}
                 </Badge>
+                {isPromoted && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] px-1.5 py-0 h-5 border-sky-500/30 bg-sky-500/10 text-sky-500"
+                    data-testid="task-promoted-badge"
+                    title={t("promote.badgeHelp")}
+                  >
+                    <ArrowUpFromLine className="mr-1 h-3 w-3" aria-hidden="true" />
+                    {task.promotion?.backend
+                      ? t("promote.badgeWithBackend", { backend: task.promotion.backend })
+                      : t("promote.badge")}
+                  </Badge>
+                )}
               </div>
             </div>
 
@@ -217,6 +260,26 @@ export function TaskDetailView({
                         {t("backfill.open")}
                       </DropdownMenuItem>
                     )}
+                  {onPromote && !isPromoted && promotableTrigger && (
+                    <DropdownMenuItem
+                      onClick={() => setPromoteConfirmOpen(true)}
+                      disabled={!promotionAvailable}
+                      title={!promotionAvailable ? promotionUnavailableReason : undefined}
+                      data-testid="promote-task"
+                    >
+                      <ArrowUpFromLine className="mr-2 h-3.5 w-3.5" />
+                      {t("promote.button")}
+                    </DropdownMenuItem>
+                  )}
+                  {onUnpromote && isPromoted && (
+                    <DropdownMenuItem
+                      onClick={() => onUnpromote(task.id)}
+                      data-testid="unpromote-task"
+                    >
+                      <ArrowDownToLine className="mr-2 h-3.5 w-3.5" />
+                      {t("promote.remove")}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"
@@ -286,6 +349,26 @@ export function TaskDetailView({
           </div>
         </ScrollArea>
       </div>
+      <AlertDialog open={promoteConfirmOpen} onOpenChange={setPromoteConfirmOpen}>
+        <AlertDialogContent data-testid="promote-confirm-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("promote.confirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("promote.confirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setPromoteConfirmOpen(false)
+                onPromote?.(task.id)
+              }}
+              data-testid="promote-confirm-accept"
+            >
+              {t("promote.button")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   )
 }

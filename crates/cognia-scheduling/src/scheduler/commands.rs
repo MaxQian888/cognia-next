@@ -91,6 +91,11 @@ fn scheduler_validate_task_impl(
                 errors.push("Application path cannot be empty".to_string());
             }
         }
+        crate::scheduler::SystemTaskAction::OpenUrl { url } => {
+            if let Err(error) = crate::scheduler::validate_open_url(url) {
+                errors.push(error);
+            }
+        }
     }
 
     let temp_task = crate::scheduler::SystemTask {

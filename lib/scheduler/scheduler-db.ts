@@ -32,6 +32,7 @@ interface DBScheduledTask {
   status: string
   tags?: string // JSON serialized string[]
   endAt?: string // ISO date string
+  promotion?: string // JSON serialized ScheduledTaskPromotion (promotedAt as ISO)
   onSuccessTaskIds?: string // JSON serialized string[]
   onFailureTaskIds?: string // JSON serialized string[]
   consecutiveFailures?: number
@@ -542,6 +543,9 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
     status: task.status,
     tags: task.tags ? JSON.stringify(task.tags) : undefined,
     endAt: task.endAt?.toISOString(),
+    promotion: task.promotion
+      ? JSON.stringify({ ...task.promotion, promotedAt: task.promotion.promotedAt.toISOString() })
+      : undefined,
     onSuccessTaskIds: task.onSuccessTaskIds ? JSON.stringify(task.onSuccessTaskIds) : undefined,
     onFailureTaskIds: task.onFailureTaskIds ? JSON.stringify(task.onFailureTaskIds) : undefined,
     consecutiveFailures: task.consecutiveFailures,
@@ -555,6 +559,27 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
     lastTerminalAt: task.lastTerminalAt?.toISOString(),
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+  }
+}
+
+function deserializePromotion(serialized: string): ScheduledTask["promotion"] | undefined {
+  try {
+    const raw = JSON.parse(serialized) as {
+      systemTaskId?: unknown
+      token?: unknown
+      promotedAt?: unknown
+      backend?: unknown
+    }
+    if (typeof raw.systemTaskId !== "string" || typeof raw.token !== "string") return undefined
+    const promotedAt = typeof raw.promotedAt === "string" ? new Date(raw.promotedAt) : new Date(0)
+    return {
+      systemTaskId: raw.systemTaskId,
+      token: raw.token,
+      promotedAt: Number.isNaN(promotedAt.getTime()) ? new Date(0) : promotedAt,
+      backend: typeof raw.backend === "string" ? raw.backend : undefined,
+    }
+  } catch {
+    return undefined
   }
 }
 
@@ -594,6 +619,7 @@ function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
     status: dbTask.status as ScheduledTask["status"],
     tags: dbTask.tags ? JSON.parse(dbTask.tags) : undefined,
     endAt: dbTask.endAt ? new Date(dbTask.endAt) : undefined,
+    promotion: dbTask.promotion ? deserializePromotion(dbTask.promotion) : undefined,
     onSuccessTaskIds: dbTask.onSuccessTaskIds ? JSON.parse(dbTask.onSuccessTaskIds) : undefined,
     onFailureTaskIds: dbTask.onFailureTaskIds ? JSON.parse(dbTask.onFailureTaskIds) : undefined,
     consecutiveFailures: dbTask.consecutiveFailures,

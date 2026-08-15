@@ -4,7 +4,13 @@
 
 // cognia-next uses the global jest setup, so we import nothing from
 // `@jest/globals` (Cognia ships that as a dev dep; we don't).
-import { promoteToSystemTask } from "./promote-to-system"
+import {
+  buildPromotionWakeUrl,
+  generatePromotionToken,
+  promoteToSystemTask,
+  promotionTokenMatches,
+  PROMOTED_TASK_TAG,
+} from "./promote-to-system"
 import type { ScheduledTask } from "@/types/scheduler"
 
 function createMockTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
@@ -32,64 +38,65 @@ function createMockTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 }
 
 describe("promoteToSystemTask", () => {
-  describe("promotable tasks", () => {
-    it("should promote a script task with cron trigger", () => {
+  describe("promotable tasks (wake + delegate)", () => {
+    it("promotes a script task with cron trigger into an open_url wake action", () => {
       const task = createMockTask({
         type: "script",
         payload: { language: "python", code: 'print("hello")' },
       })
-      const result = promoteToSystemTask(task)
+      const result = promoteToSystemTask(task, "linux", { token: "tok-1" })
 
       expect(result.promotable).toBe(true)
+      expect(result.token).toBe("tok-1")
       expect(result.input).toBeDefined()
-      expect(result.input?.action.type).toBe("execute_script")
+      expect(result.input?.action).toEqual({
+        type: "open_url",
+        url: "cognia://scheduler/task/test-task-1?run=tok-1",
+      })
       expect(result.input?.trigger.type).toBe("cron")
       expect(result.input?.name).toContain("Cognia:")
-      expect(result.input?.tags).toContain("cognia-promoted")
+      expect(result.input?.run_level).toBe("user")
+      expect(result.input?.tags).toContain(PROMOTED_TASK_TAG)
+      expect(result.input?.tags).toContain("cognia-task:test-task-1")
     })
 
-    it("should promote a workflow task", () => {
+    it.each([
+      "workflow",
+      "backup",
+      "agent",
+      "chat",
+      "test",
+      "custom",
+      "plugin",
+      "im-push",
+    ] as const)("promotes %s tasks with the same wake action (no per-type CLI mapping)", (type) => {
       const task = createMockTask({
-        type: "workflow",
-        payload: { workflowId: "wf-123" },
+        type,
+        trigger: { type: "interval", intervalMs: 3600000 },
+        payload: undefined,
       })
-      const result = promoteToSystemTask(task)
-
+      const result = promoteToSystemTask(task, "linux", { token: "t" })
       expect(result.promotable).toBe(true)
-      expect(result.input?.action.type).toBe("run_command")
-      if (result.input?.action.type === "run_command") {
-        expect(result.input.action.command).toBe("cognia")
-        expect(result.input.action.args).toContain("run-workflow")
-      }
+      expect(result.input?.action.type).toBe("open_url")
+      expect(result.input?.trigger).toEqual({ type: "interval", seconds: 3600 })
     })
 
-    it("should promote a backup task", () => {
-      const task = createMockTask({
-        type: "backup",
-        payload: { backupType: "full", destination: "local" },
-      })
-      const result = promoteToSystemTask(task)
-
-      expect(result.promotable).toBe(true)
-      expect(result.input?.action.type).toBe("run_command")
-    })
-
-    it("should promote a sync task", () => {
-      const task = createMockTask({
-        type: "sync",
-        payload: { provider: "webdav" },
-      })
-      const result = promoteToSystemTask(task)
-
-      expect(result.promotable).toBe(true)
-      expect(result.input?.action.type).toBe("run_command")
+    it("mints a fresh token per promotion when none is supplied", () => {
+      const a = promoteToSystemTask(createMockTask(), "linux")
+      const b = promoteToSystemTask(createMockTask(), "linux")
+      expect(a.token).toBeDefined()
+      expect(b.token).toBeDefined()
+      expect(a.token).not.toBe(b.token)
+      expect(a.input?.action.type === "open_url" && a.input.action.url).toBe(
+        buildPromotionWakeUrl("test-task-1", a.token!)
+      )
     })
 
     it("should map interval trigger correctly", () => {
       const task = createMockTask({
         trigger: { type: "interval", intervalMs: 3600000 },
       })
-      const result = promoteToSystemTask(task)
+      const result = promoteToSystemTask(task, "linux", { token: "t" })
 
       expect(result.promotable).toBe(true)
       expect(result.input?.trigger.type).toBe("interval")
@@ -99,59 +106,46 @@ describe("promoteToSystemTask", () => {
     })
 
     it("should map once trigger correctly", () => {
-      const runAt = new Date("2026-12-31T23:59:59Z")
-      const task = createMockTask({
-        trigger: { type: "once", runAt },
-      })
-      const result = promoteToSystemTask(task)
+      const runAt = new Date("2026-08-17T09:00:00Z")
+      const task = createMockTask({ trigger: { type: "once", runAt } })
+      const result = promoteToSystemTask(task, "linux", { token: "t" })
 
       expect(result.promotable).toBe(true)
-      expect(result.input?.trigger.type).toBe("once")
+      expect(result.input?.trigger).toEqual({ type: "once", run_at: runAt.toISOString() })
+    })
+  })
+
+  describe("wake-up token helpers", () => {
+    it("generates a 43-char base64url token from 32 random bytes", () => {
+      const token = generatePromotionToken((bytes) => bytes.fill(255))
+      // 32 × 0xff → 42 "_" plus a final "8" (last sextet is 111100), no padding.
+      expect(token).toBe(`${"_".repeat(42)}8`)
+      expect(token).toHaveLength(43)
+      expect(token).not.toMatch(/[+/=]/)
+      const zero = generatePromotionToken((bytes) => bytes.fill(0))
+      expect(zero).toBe("A".repeat(43))
+    })
+
+    it("compares tokens strictly", () => {
+      expect(promotionTokenMatches("abc", "abc")).toBe(true)
+      expect(promotionTokenMatches("abc", "abd")).toBe(false)
+      expect(promotionTokenMatches("abc", "ab")).toBe(false)
+      expect(promotionTokenMatches(undefined, "abc")).toBe(false)
+      expect(promotionTokenMatches("abc", undefined)).toBe(false)
+    })
+
+    it("URL-encodes ids and tokens in the wake link", () => {
+      expect(buildPromotionWakeUrl("a b", "x/y")).toBe("cognia://scheduler/task/a%20b?run=x%2Fy")
     })
   })
 
   describe("non-promotable tasks", () => {
-    it("should reject agent tasks", () => {
-      const task = createMockTask({ type: "agent" })
-      const result = promoteToSystemTask(task)
-
-      expect(result.promotable).toBe(false)
-      expect(result.reason).toContain("agent")
-    })
-
-    it("should reject chat tasks", () => {
-      const task = createMockTask({ type: "chat" })
-      const result = promoteToSystemTask(task)
-
-      expect(result.promotable).toBe(false)
-    })
-
-    it("should reject ai-generation tasks", () => {
-      const task = createMockTask({ type: "ai-generation" })
-      const result = promoteToSystemTask(task)
-
-      expect(result.promotable).toBe(false)
-    })
-
-    it("should reject test tasks", () => {
-      const task = createMockTask({ type: "test" })
-      const result = promoteToSystemTask(task)
-
-      expect(result.promotable).toBe(false)
-    })
-
-    it("should reject custom tasks", () => {
-      const task = createMockTask({ type: "custom" })
-      const result = promoteToSystemTask(task)
-
-      expect(result.promotable).toBe(false)
-    })
-
-    it("should reject plugin tasks", () => {
-      const task = createMockTask({ type: "plugin" })
-      const result = promoteToSystemTask(task)
-
-      expect(result.promotable).toBe(false)
+    it("rejects deprecated task types", () => {
+      for (const type of ["sync", "ai-generation"] as const) {
+        const result = promoteToSystemTask(createMockTask({ type }), "linux")
+        expect(result.promotable).toBe(false)
+        expect(result.reason).toContain("deprecated")
+      }
     })
 
     it("should reject event trigger type", () => {
@@ -159,7 +153,7 @@ describe("promoteToSystemTask", () => {
         type: "script",
         trigger: { type: "event", eventType: "backup:completed" },
       })
-      const result = promoteToSystemTask(task)
+      const result = promoteToSystemTask(task, "linux")
 
       expect(result.promotable).toBe(false)
       expect(result.reason).toContain("event")
@@ -241,54 +235,18 @@ describe("promoteToSystemTask", () => {
     })
   })
 
-  describe("action payload mapping", () => {
-    it("maps explicit script payload fields", () => {
-      const task = createMockTask({
-        type: "script",
-        payload: {
-          language: "bash",
-          code: "echo hi",
-          workingDir: "/tmp",
-          timeout: 60000,
-          useSandbox: false,
-        },
-      })
-      const result = promoteToSystemTask(task)
-      expect(result.promotable).toBe(true)
-      if (result.input?.action.type === "execute_script") {
-        expect(result.input.action.working_dir).toBe("/tmp")
-        expect(result.input.action.timeout_secs).toBe(60)
-        expect(result.input.action.use_sandbox).toBe(false)
-        expect(result.input.action.language).toBe("bash")
-      }
-    })
-
-    it("falls back to defaults when workflow/backup/sync payloads are empty", () => {
-      for (const type of ["workflow", "backup", "sync"] as const) {
-        const task = createMockTask({
-          type,
-          trigger: { type: "interval", intervalMs: 3600000 },
-          payload: undefined,
-        })
-        const result = promoteToSystemTask(task)
-        expect(result.promotable).toBe(true)
-        expect(result.input?.action.type).toBe("run_command")
-      }
-    })
-  })
-
   describe("edge cases", () => {
     it("should handle missing payload", () => {
       const task = createMockTask({ payload: undefined })
-      const result = promoteToSystemTask(task)
+      const result = promoteToSystemTask(task, "linux")
 
       expect(result.promotable).toBe(true)
-      expect(result.input?.action.type).toBe("execute_script")
+      expect(result.input?.action.type).toBe("open_url")
     })
 
     it("should preserve task tags", () => {
       const task = createMockTask({ tags: ["important", "daily"] })
-      const result = promoteToSystemTask(task)
+      const result = promoteToSystemTask(task, "linux")
 
       expect(result.input?.tags).toContain("important")
       expect(result.input?.tags).toContain("daily")

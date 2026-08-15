@@ -685,6 +685,7 @@ impl SchedulerState {
             SystemTaskAction::LaunchApp { path, .. } => {
                 format!("Launch application: {}", path)
             }
+            SystemTaskAction::OpenUrl { url } => format!("Open URL: {}", url),
         }
     }
 
@@ -770,6 +771,7 @@ impl SystemScheduler for NoopScheduler {
             can_elevate: false,
             supported_triggers: vec![],
             trigger_capabilities: vec![],
+            supported_actions: vec![],
             max_tasks: 0,
         }
     }
@@ -871,6 +873,7 @@ mod tests {
                 can_elevate: true,
                 supported_triggers: vec!["interval".to_string()],
                 trigger_capabilities: vec![],
+                supported_actions: vec![],
                 max_tasks: 0,
             }
         }

@@ -100,8 +100,23 @@ export interface LaunchAppAction {
   args?: string[]
 }
 
+/**
+ * Open a URL with the OS default handler (`open` / `xdg-open` / `cmd /c start`).
+ * The Rust side accepts `cognia://` and `http(s)://` only. Used by app-level
+ * task promotion: the OS timer wakes Cognia through its deep link
+ * (`cognia://scheduler/task/<id>?run=<token>`) and the app runs the task.
+ */
+export interface OpenUrlAction {
+  type: "open_url"
+  url: string
+}
+
 /** Union of all action types */
-export type SystemTaskAction = ExecuteScriptAction | RunCommandAction | LaunchAppAction
+export type SystemTaskAction =
+  ExecuteScriptAction | RunCommandAction | LaunchAppAction | OpenUrlAction
+
+/** Action kinds a backend can report in `SchedulerCapabilities.supported_actions`. */
+export type SystemTaskActionKind = SystemTaskAction["type"]
 
 /** Result of a task execution */
 export interface TaskRunResult {
@@ -191,6 +206,12 @@ export interface SchedulerCapabilities {
   can_elevate: boolean
   /** Flat list of supported trigger type names (backwards compatibility) */
   supported_triggers: string[]
+  /**
+   * Action kinds this backend translates (`execute_script`, `run_command`,
+   * `launch_app`, `open_url`). Absent/empty on the noop backend and on
+   * pre-`open_url` hosts — treat empty as "the three legacy kinds".
+   */
+  supported_actions?: SystemTaskActionKind[]
   /** Per-trigger capability descriptors with availability, constraints, and notes */
   trigger_capabilities: SystemTriggerCapability[]
   max_tasks: number

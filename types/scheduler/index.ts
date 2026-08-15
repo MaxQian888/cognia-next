@@ -574,6 +574,29 @@ export interface TaskExecutionConfig {
 }
 
 /**
+ * OS-level promotion record (desktop only). While present, the app scheduler
+ * does NOT arm this task itself: the OS scheduler (launchd / Task Scheduler /
+ * systemd) fires an `open_url` action for `cognia://scheduler/task/<id>?run=<token>`,
+ * the desktop deep-link handler verifies `token` and runs the task through
+ * the normal execution path (`triggerSource: "run-now"`). Un-promoting deletes
+ * the OS task and re-arms the app trigger. Serialized inside the task row as
+ * JSON, so it needs no SchedulerDB version bump.
+ */
+export interface ScheduledTaskPromotion {
+  /** OS scheduler task id (`SystemTaskId`). */
+  systemTaskId: string
+  /**
+   * Random secret embedded in the wake-up deep link. Only a link carrying this
+   * exact token may run the task; a plain `cognia://scheduler/task/<id>` link
+   * (e.g. from a web page) only navigates. Never shown in the UI.
+   */
+  token: string
+  promotedAt: Date
+  /** OS backend that holds the task (`launchd` / `Task Scheduler` / `systemd`). */
+  backend?: string
+}
+
+/**
  * Scheduled task definition
  */
 export interface ScheduledTask {
@@ -595,6 +618,8 @@ export interface ScheduledTask {
   tags?: string[]
   /** Auto-expire the task once this instant passes (checked lazily at arm/fire). */
   endAt?: Date
+  /** Present while the task is promoted to the OS scheduler (desktop only). */
+  promotion?: ScheduledTaskPromotion
   /** Forward chain: tasks fired (fire-and-forget) after a successful run. */
   onSuccessTaskIds?: string[]
   /** Forward chain: tasks fired (fire-and-forget) after a terminal failure. */

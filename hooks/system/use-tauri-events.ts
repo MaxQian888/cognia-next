@@ -96,10 +96,25 @@ export function useTauriEvents(): void {
           }
           case "open_scheduler_task": {
             if (action.taskId) {
-              void import("@/stores/scheduler/scheduler-store").then(({ useSchedulerStore }) => {
-                useSchedulerStore.getState().selectTask(action.taskId!)
-                router.push("/scheduler")
-              })
+              const taskId = action.taskId
+              const runToken = action.runToken
+              void import("@/stores/scheduler/scheduler-store").then(
+                async ({ useSchedulerStore }) => {
+                  useSchedulerStore.getState().selectTask(taskId)
+                  router.push("/scheduler")
+                  // OS-promoted wake-up: only a link carrying the task's own
+                  // promotion token may execute; a bare link just navigates.
+                  if (runToken) {
+                    try {
+                      await useSchedulerStore.getState().initialize()
+                      const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+                      await getTaskScheduler().runPromotedTask(taskId, runToken)
+                    } catch (err) {
+                      console.warn("promoted task wake-up failed", { taskId, err })
+                    }
+                  }
+                }
+              )
             }
             break
           }

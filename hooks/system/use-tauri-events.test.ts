@@ -126,8 +126,15 @@ jest.mock("@/lib/connectors/session-bindings", () => ({
     findActiveSessionForConversation(...args),
 }))
 const selectScheduledTask = jest.fn()
+const initializeScheduler = jest.fn(async () => undefined)
+const runPromotedTask = jest.fn(async (..._a: unknown[]) => null)
 jest.mock("@/stores/scheduler/scheduler-store", () => ({
-  useSchedulerStore: { getState: () => ({ selectTask: selectScheduledTask }) },
+  useSchedulerStore: {
+    getState: () => ({ selectTask: selectScheduledTask, initialize: initializeScheduler }),
+  },
+}))
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  getTaskScheduler: () => ({ runPromotedTask: (...a: unknown[]) => runPromotedTask(...a) }),
 }))
 const settingsStoreState = {
   save: (...a: unknown[]) => saveSettings(...a),
@@ -374,6 +381,31 @@ describe("useTauriEvents", () => {
 
       expect(selectScheduledTask).toHaveBeenCalledWith("task-42")
       expect(routerPush).toHaveBeenCalledWith("/scheduler")
+      // A bare link (no promotion token) never executes.
+      expect(runPromotedTask).not.toHaveBeenCalled()
+    })
+
+    it("scheduler deep link with a promotion token runs the promoted task after init", async () => {
+      await fireDeepLinks(["cognia://scheduler/task/task-42?run=tok-9"])
+      await flushPromises()
+      await flushPromises()
+
+      expect(selectScheduledTask).toHaveBeenCalledWith("task-42")
+      expect(initializeScheduler).toHaveBeenCalled()
+      expect(runPromotedTask).toHaveBeenCalledWith("task-42", "tok-9")
+    })
+
+    it("scheduler wake-up failures are contained", async () => {
+      runPromotedTask.mockRejectedValueOnce(new Error("boom"))
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+      await fireDeepLinks(["cognia://scheduler/task/task-42?run=tok-9"])
+      await flushPromises()
+      await flushPromises()
+      expect(warn).toHaveBeenCalledWith(
+        "promoted task wake-up failed",
+        expect.objectContaining({ taskId: "task-42" })
+      )
+      warn.mockRestore()
     })
 
     it("workflow run deep link opens the exact run detail", async () => {

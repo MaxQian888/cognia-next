@@ -14,9 +14,9 @@ use std::process::Command;
 use super::error::{Result, SchedulerError};
 use super::service::{generate_task_name, is_cognia_task, now_iso, SystemScheduler, TASK_PREFIX};
 use super::types::{
-    derive_trigger_capabilities, CreateSystemTaskInput, RunLevel, SchedulerCapabilities,
-    SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger, SystemTriggerKind,
-    TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
+    derive_trigger_capabilities, validate_open_url, CreateSystemTaskInput, RunLevel,
+    SchedulerCapabilities, SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger,
+    SystemTriggerKind, TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
 };
 
 /// Windows Task Scheduler implementation
@@ -417,6 +417,20 @@ impl WindowsScheduler {
                 Ok(("cmd.exe".to_string(), vec!["/C".to_string(), cmd_line]))
             }
             SystemTaskAction::LaunchApp { path, args } => Ok((path.clone(), args.clone())),
+            SystemTaskAction::OpenUrl { url } => {
+                validate_open_url(url).map_err(SchedulerError::InvalidConfig)?;
+                // `start` is a cmd.exe builtin; the empty "" is the window
+                // title argument so the URL is not mistaken for it.
+                Ok((
+                    "cmd.exe".to_string(),
+                    vec![
+                        "/C".to_string(),
+                        "start".to_string(),
+                        "\"\"".to_string(),
+                        url.clone(),
+                    ],
+                ))
+            }
         }
     }
 
@@ -750,6 +764,7 @@ impl SystemScheduler for WindowsScheduler {
             can_elevate: true,
             supported_triggers,
             trigger_capabilities: trigger_caps,
+            supported_actions: super::types::all_action_kinds(),
             max_tasks: 0, // Unlimited
         }
     }
@@ -1130,6 +1145,29 @@ impl SystemScheduler for WindowsScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_url_translates_to_cmd_start_and_rejects_bad_schemes() {
+        let (program, args) = WindowsScheduler::build_action_command(&SystemTaskAction::OpenUrl {
+            url: "cognia://scheduler/task/abc?run=tok".to_string(),
+        })
+        .unwrap();
+        assert_eq!(program, "cmd.exe");
+        assert_eq!(
+            args,
+            vec![
+                "/C".to_string(),
+                "start".to_string(),
+                "\"\"".to_string(),
+                "cognia://scheduler/task/abc?run=tok".to_string()
+            ]
+        );
+        let err = WindowsScheduler::build_action_command(&SystemTaskAction::OpenUrl {
+            url: "javascript://x".to_string(),
+        })
+        .unwrap_err();
+        assert!(matches!(err, SchedulerError::InvalidConfig(_)));
+    }
 
     #[test]
     fn test_cron_to_schtasks_every_minute() {

@@ -77,13 +77,8 @@ describe("NodeTimingDriver", () => {
   })
 
   it("chunks delays beyond the 32-bit setTimeout ceiling and re-evaluates on wake", () => {
-    const setTimeoutSpy = jest.fn(
-      (cb: () => void, ms?: number) =>
-        globalThis.setTimeout(cb, ms) as ReturnType<typeof setTimeout>
-    )
-    const driver = new NodeTimingDriver({
-      setTimeout: setTimeoutSpy as unknown as typeof globalThis.setTimeout,
-    })
+    const setTimeoutSpy = jest.fn((cb: () => void, ms: number) => globalThis.setTimeout(cb, ms))
+    const driver = new NodeTimingDriver({ setTimeout: setTimeoutSpy })
     const due = jest.fn()
     driver.onDue(due)
     const fireAt = Date.now() + MAX_TIMEOUT_MS + 60_000
@@ -101,10 +96,10 @@ describe("NodeTimingDriver", () => {
     // after the entry has been re-armed.
     const callbacks: Array<() => void> = []
     const driver = new NodeTimingDriver({
-      setTimeout: ((cb: () => void) => {
+      setTimeout: (cb: () => void) => {
         callbacks.push(cb)
         return callbacks.length as unknown as ReturnType<typeof setTimeout>
-      }) as unknown as typeof globalThis.setTimeout,
+      },
       clearTimeout: jest.fn(),
       now: () => 0,
     })

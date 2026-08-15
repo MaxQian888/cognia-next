@@ -43,6 +43,15 @@ import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { normalizeTaskTrigger } from "./trigger-normalizer"
 import { normalizeConversationalTaskPayload } from "./conversational-task-authoring"
 import { resolveCatchupDefaults } from "./catchup-policy"
+import {
+  promoteToSystemTask,
+  promotionTokenMatches,
+  type SystemSchedulerPlatform,
+} from "./promote-to-system"
+import type {
+  CreateSystemTaskInput,
+  TaskOperationResponse,
+} from "@/types/scheduler/system-scheduler"
 
 // Logger
 const log = loggers.scheduler
@@ -55,6 +64,45 @@ export type TaskExecutor = (
 ) => Promise<TaskExecutorResult>
 
 const executors: Map<string, TaskExecutor> = new Map()
+
+/**
+ * The OS-scheduler operations promotion needs. Defaults to
+ * `lib/native/system-scheduler` (Tauri commands); injectable so tests and
+ * non-desktop hosts never touch IPC.
+ */
+export interface PromotionSystemSchedulerPort {
+  createSystemTask(
+    input: CreateSystemTaskInput,
+    confirmed?: boolean
+  ): Promise<TaskOperationResponse>
+  deleteSystemTask(systemTaskId: string): Promise<boolean>
+  enableSystemTask(systemTaskId: string): Promise<boolean>
+  disableSystemTask(systemTaskId: string): Promise<boolean>
+  getSchedulerCapabilities(): Promise<{ available: boolean; backend: string }>
+}
+
+export type PromoteTaskResult =
+  | { status: "promoted"; task: ScheduledTask; systemTaskId: string }
+  | {
+      status: "confirmation_required"
+      confirmationId: string
+      input: CreateSystemTaskInput
+      token: string
+    }
+  | { status: "not_promotable"; reason: string }
+  | { status: "unavailable"; reason: string }
+  | { status: "error"; reason: string }
+
+async function loadNativeSystemScheduler(): Promise<PromotionSystemSchedulerPort> {
+  const native = await import("@/lib/native/system-scheduler")
+  return {
+    createSystemTask: (input, confirmed) => native.createSystemTask(input, confirmed),
+    deleteSystemTask: (id) => native.deleteSystemTask(id),
+    enableSystemTask: (id) => native.enableSystemTask(id),
+    disableSystemTask: (id) => native.disableSystemTask(id),
+    getSchedulerCapabilities: () => native.getSchedulerCapabilities(),
+  }
+}
 
 /**
  * Listeners resolved when a specific task type gains an executor. Used by the
@@ -1002,11 +1050,172 @@ class TaskSchedulerImpl {
     for (const executionId of running ? Array.from(running.keys()) : []) {
       this.executionControllers.get(executionId)?.abort("task-deleted")
     }
+    const existing = await schedulerDb.getTask(taskId)
     const deleted = await schedulerDb.deleteTask(taskId)
     if (deleted) {
       log.info(`Deleted task: ${taskId}`)
+      if (existing?.promotion) {
+        // Best effort: an orphaned OS timer would keep waking the app for a
+        // task that no longer exists.
+        try {
+          const port = this.systemSchedulerPort ?? (await loadNativeSystemScheduler())
+          await port.deleteSystemTask(existing.promotion.systemTaskId)
+        } catch (err) {
+          log.warn(`Failed to remove the OS task for deleted task ${taskId}`, {
+            err: String(err),
+          })
+        }
+      }
     }
     return deleted
+  }
+
+  // ── OS promotion (desktop only) ─────────────────────────────────────────
+
+  /** Test / host seam for the OS scheduler port. */
+  private systemSchedulerPort: PromotionSystemSchedulerPort | null = null
+
+  setSystemSchedulerPort(port: PromotionSystemSchedulerPort | null): void {
+    this.systemSchedulerPort = port
+  }
+
+  /**
+   * Promote a task to the OS scheduler ("wake + delegate", see
+   * `promote-to-system.ts`). On success the task row records the promotion
+   * and the app-level trigger is disarmed. When the OS backend asks for a
+   * confirmation (elevation / risk), the caller re-invokes with `confirmed`.
+   */
+  async promoteTask(
+    taskId: string,
+    options: { platform?: SystemSchedulerPlatform; confirmed?: boolean; token?: string } = {}
+  ): Promise<PromoteTaskResult> {
+    const task = await schedulerDb.getTask(taskId)
+    if (!task) return { status: "error", reason: `Task not found: ${taskId}` }
+    if (task.promotion) {
+      return { status: "promoted", task, systemTaskId: task.promotion.systemTaskId }
+    }
+    const port = this.systemSchedulerPort ?? (await loadNativeSystemScheduler())
+    let capabilities: { available: boolean; backend: string }
+    try {
+      capabilities = await port.getSchedulerCapabilities()
+    } catch (err) {
+      return { status: "unavailable", reason: err instanceof Error ? err.message : String(err) }
+    }
+    if (!capabilities.available) {
+      return { status: "unavailable", reason: "The OS scheduler is not available on this host." }
+    }
+    const mapped = promoteToSystemTask(task, options.platform, { token: options.token })
+    if (!mapped.promotable || !mapped.input || !mapped.token) {
+      return { status: "not_promotable", reason: mapped.reason ?? "Task cannot be promoted." }
+    }
+    let response: TaskOperationResponse
+    try {
+      response = await port.createSystemTask(mapped.input, options.confirmed === true)
+    } catch (err) {
+      return { status: "error", reason: err instanceof Error ? err.message : String(err) }
+    }
+    if (response.status === "confirmation_required") {
+      return {
+        status: "confirmation_required",
+        confirmationId: response.confirmation.confirmation_id,
+        input: mapped.input,
+        token: mapped.token,
+      }
+    }
+    if (response.status !== "success") {
+      return { status: "error", reason: response.message }
+    }
+    const now = new Date()
+    const promoted: ScheduledTask = {
+      ...task,
+      promotion: {
+        systemTaskId: response.task.id,
+        token: mapped.token,
+        promotedAt: now,
+        backend: capabilities.backend,
+      },
+      nextRunAt: undefined,
+      updatedAt: now,
+    }
+    await schedulerDb.updateTask(promoted)
+    // The OS timer owns the cadence from here on.
+    this.unscheduleTask(taskId)
+    log.info(`Promoted task ${task.name} (${taskId}) to the OS scheduler as ${response.task.id}`)
+    return { status: "promoted", task: promoted, systemTaskId: response.task.id }
+  }
+
+  /**
+   * Record a promotion whose OS task was created out-of-band (after the user
+   * confirmed an elevation prompt via `useSystemScheduler`). Same effect as a
+   * successful `promoteTask`.
+   */
+  async recordPromotion(
+    taskId: string,
+    promotion: { systemTaskId: string; token: string; backend?: string }
+  ): Promise<ScheduledTask | null> {
+    const task = await schedulerDb.getTask(taskId)
+    if (!task) return null
+    const now = new Date()
+    const promoted: ScheduledTask = {
+      ...task,
+      promotion: { ...promotion, promotedAt: now },
+      nextRunAt: undefined,
+      updatedAt: now,
+    }
+    await schedulerDb.updateTask(promoted)
+    this.unscheduleTask(taskId)
+    return promoted
+  }
+
+  /**
+   * Remove the OS task and hand the cadence back to the app scheduler.
+   * Missing OS tasks (already deleted by the user in the OS UI) are tolerated.
+   */
+  async unpromoteTask(taskId: string): Promise<ScheduledTask | null> {
+    const task = await schedulerDb.getTask(taskId)
+    if (!task) return null
+    if (!task.promotion) return task
+    const port = this.systemSchedulerPort ?? (await loadNativeSystemScheduler())
+    try {
+      await port.deleteSystemTask(task.promotion.systemTaskId)
+    } catch (err) {
+      log.warn(`OS task ${task.promotion.systemTaskId} could not be deleted while un-promoting`, {
+        err: String(err),
+      })
+    }
+    const now = new Date()
+    const { promotion: _dropped, ...rest } = task
+    void _dropped
+    const restored: ScheduledTask = {
+      ...rest,
+      nextRunAt:
+        task.status === "active" ? this.calculateNextRunTime(task, { fromDate: now }) : undefined,
+      updatedAt: now,
+    }
+    await schedulerDb.updateTask(restored)
+    if (restored.status === "active") await this.scheduleTask(restored)
+    log.info(`Un-promoted task ${task.name} (${taskId}); app scheduler owns it again`)
+    return restored
+  }
+
+  /**
+   * Entry point for the desktop deep-link handler: run a promoted task iff the
+   * presented token matches the stored promotion token. Returns `null` when the
+   * task is unknown, not promoted, or the token does not match — the caller
+   * then only navigates.
+   */
+  async runPromotedTask(taskId: string, token: string | undefined): Promise<TaskExecution | null> {
+    const task = await schedulerDb.getTask(taskId)
+    if (!task?.promotion) return null
+    if (!promotionTokenMatches(task.promotion.token, token)) {
+      log.warn(`Rejected promoted-task wake for ${taskId}: token mismatch`)
+      return null
+    }
+    if (task.status !== "active") {
+      log.info(`Ignored promoted-task wake for ${taskId}: task is ${task.status}`)
+      return null
+    }
+    return this.executeTask(task, 0, { triggerSource: "schedule", scheduledFor: new Date() })
   }
 
   /**
@@ -1038,7 +1247,23 @@ class TaskSchedulerImpl {
 
     await schedulerDb.updateTask({ ...task, status: "paused", updatedAt: new Date() })
     log.info(`Paused task: ${task.name} (${taskId})`)
+    // Mirror the pause onto the OS timer so a promoted task stops waking the app.
+    if (task.promotion) await this.syncPromotedOsTaskEnabled(task, false)
     return true
+  }
+
+  /** Best-effort enable/disable of the OS task behind a promoted app task. */
+  private async syncPromotedOsTaskEnabled(task: ScheduledTask, enabled: boolean): Promise<void> {
+    if (!task.promotion) return
+    try {
+      const port = this.systemSchedulerPort ?? (await loadNativeSystemScheduler())
+      if (enabled) await port.enableSystemTask(task.promotion.systemTaskId)
+      else await port.disableSystemTask(task.promotion.systemTaskId)
+    } catch (err) {
+      log.warn(`Failed to ${enabled ? "enable" : "disable"} the OS task for ${task.id}`, {
+        err: String(err),
+      })
+    }
   }
 
   /**
@@ -1059,6 +1284,7 @@ class TaskSchedulerImpl {
     }
     await schedulerDb.updateTask(updatedTask)
     await this.scheduleTask(updatedTask)
+    if (task.promotion) await this.syncPromotedOsTaskEnabled(task, true)
     log.info(`Resumed task: ${task.name} (${taskId})`)
     return true
   }
@@ -1129,6 +1355,9 @@ class TaskSchedulerImpl {
     if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
     if (task.status !== "active") return
     if (task.trigger.type === "event") return
+    // Promoted to the OS scheduler: the OS timer wakes the app and the
+    // deep-link handler runs the task — arming it here too would double-fire.
+    if (task.promotion) return
 
     // Lazy lifecycle check: never arm a task that has crossed its bounds.
     if (isPastEndAt(task, new Date()) || isAtMaxRuns(task)) {

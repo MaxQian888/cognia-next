@@ -43,9 +43,12 @@ import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import type { CreateScheduledTaskInput, CreateSystemTaskInput } from "@/types/scheduler"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
+import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 
 export default function SchedulerPage() {
   const router = useRouter()
+  const t = useTranslations("scheduler")
   const schedulerHost = getSchedulerDataSource().host
   const {
     tasks,
@@ -65,6 +68,9 @@ export default function SchedulerPage() {
     deleteTask,
     pauseTask,
     resumeTask,
+    promoteTask,
+    recordPromotion,
+    unpromoteTask,
     runTaskNow,
     backfillTask,
     selectTask,
@@ -99,11 +105,27 @@ export default function SchedulerPage() {
     updateTask: updateSystemTask,
     deleteTask: deleteSystemTask,
     confirmPending,
+    confirmTask: confirmSystemTask,
     cancelPending,
     validateTask,
     requestElevation,
     clearError: clearSystemError,
   } = useSystemScheduler()
+
+  // OS promotion (wake + delegate). A promotion that needs an OS confirmation
+  // (elevation / risk) parks here until the shared confirmation dialog resolves;
+  // the created OS task is then recorded on the app task.
+  const [pendingPromotion, setPendingPromotion] = useState<{
+    taskId: string
+    token: string
+  } | null>(null)
+  const promotionAvailable = schedulerHost === "local" && capabilities?.available === true
+  const promotionUnavailableReason =
+    schedulerHost !== "local"
+      ? t("promote.unavailableRemote")
+      : capabilities?.available
+        ? undefined
+        : t("promote.unavailableHost")
 
   // Bootstrap the source registry exactly once per process. The bootstrap
   // function is idempotent and registers every source against the singleton
@@ -353,6 +375,73 @@ export default function SchedulerPage() {
     [runTaskNow]
   )
 
+  const handlePromote = useCallback(
+    async (taskId: string) => {
+      const result = await promoteTask(taskId)
+      switch (result.status) {
+        case "promoted":
+          toast.success(t("promote.success"))
+          break
+        case "confirmation_required":
+          // The OS backend wants an explicit confirmation; the shared
+          // pending-confirmation dialog takes over and `handleConfirmPending`
+          // records the promotion once the OS task exists.
+          setPendingPromotion({ taskId, token: result.token })
+          await refreshSystem()
+          break
+        case "not_promotable":
+          toast.error(t("promote.notPromotable"), { description: result.reason })
+          break
+        case "unavailable":
+          toast.error(t("promote.unavailableHost"), { description: result.reason })
+          break
+        default:
+          toast.error(t("promote.failed"), { description: result.reason })
+      }
+    },
+    [promoteTask, refreshSystem, t]
+  )
+
+  const handleUnpromote = useCallback(
+    async (taskId: string) => {
+      const ok = await unpromoteTask(taskId)
+      if (ok) toast.success(t("promote.removed"))
+      else toast.error(t("promote.removeFailed"))
+    },
+    [unpromoteTask, t]
+  )
+
+  const handleConfirmPending = useCallback(async () => {
+    if (!pendingPromotion) {
+      await confirmPending()
+      return
+    }
+    const confirmationId = pendingConfirmation?.confirmation_id || pendingConfirmation?.task_id
+    if (!confirmationId) return
+    const created = await confirmSystemTask(confirmationId)
+    const parked = pendingPromotion
+    setPendingPromotion(null)
+    if (created) {
+      const ok = await recordPromotion(parked.taskId, {
+        systemTaskId: created.id,
+        token: parked.token,
+        backend: capabilities?.backend,
+      })
+      if (ok) toast.success(t("promote.success"))
+      else toast.error(t("promote.failed"))
+    } else {
+      toast.error(t("promote.failed"))
+    }
+  }, [
+    pendingPromotion,
+    pendingConfirmation,
+    confirmPending,
+    confirmSystemTask,
+    recordPromotion,
+    capabilities?.backend,
+    t,
+  ])
+
   const handleTemplateSelect = useCallback(
     async (input: CreateScheduledTaskInput) => {
       setIsSubmitting(true)
@@ -601,6 +690,10 @@ export default function SchedulerPage() {
                     onSelectTask={handleSelectTask}
                     onOpenDependencyGraph={() => setShowDependencyDialog(true)}
                     onBackfill={() => setShowBackfillDialog(true)}
+                    onPromote={handlePromote}
+                    onUnpromote={handleUnpromote}
+                    promotionAvailable={promotionAvailable}
+                    promotionUnavailableReason={promotionUnavailableReason}
                   />
                 </SchedulerErrorBoundary>
               ) : selectedUnifiedItem ? (
@@ -678,9 +771,12 @@ export default function SchedulerPage() {
         onSystemDeleteConfirm={handleSystemDeleteConfirm}
         pendingConfirmation={pendingConfirmation}
         onConfirmPending={() => {
-          void confirmPending()
+          void handleConfirmPending()
         }}
-        onCancelPending={cancelPending}
+        onCancelPending={() => {
+          setPendingPromotion(null)
+          cancelPending()
+        }}
         showAdminDialog={showAdminDialog}
         onShowAdminDialogChange={setShowAdminDialog}
         onRequestElevation={handleRequestElevation}
