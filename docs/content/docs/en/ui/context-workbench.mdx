@@ -25,6 +25,16 @@ Each host computes capabilities from the current resource and platform. A native
 - Mobile renders a full-width Sheet and intentionally omits desktop-only width and focus controls.
 - Pinning protects the selected panel from automatic reveals. Diagnostics, proposals, selection changes, and plugin requests update pending indicators until the user navigates explicitly or unpins.
 
+## Split view
+
+In `wide` or `focus` mode the layout menu offers **Split below**, which stacks a second panel under the one in front. Both panes stay live: each keeps focus, its own error boundary, and — for plugin panels — its own visibility signal.
+
+- Drag the divider to change the ratio, or focus it and use the arrow keys (Shift for larger steps, Home/End for the extremes). Double-click resets it. The ratio is remembered per resource, between 20% and 80%.
+- Selecting the panel already in the lower pane swaps the two and keeps each at the height it had, rather than replacing the one in front.
+- Neither pane is rebuilt when the split opens, closes, resizes or swaps, so an embedded editor, browser or terminal keeps its state throughout.
+- The mobile drawer, and any workbench too narrow for two panes, shows a single pane without disturbing the stored desktop layout — it returns when there is room again.
+- `narrow` closes the split, because there is no room for two panes. Collapsing to the rail does not: the split is still there when you expand.
+
 ## Comments and resource sessions
 
 All four resources use the shared comment model. Comments can target the whole resource, a text/line range, or Workflow nodes/edges. Threads retain edit/delete, replies, reactions, resolve/reopen, unresolved badges, revision metadata, and stale-anchor indication.
