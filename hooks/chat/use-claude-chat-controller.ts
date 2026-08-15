@@ -282,7 +282,7 @@ export function useClaudeChat() {
           useChatStore.getState().replaceSessionMessages(sid, msgs)
           // Stamp per-tool start/end times off the freshly-committed parts so the
           // Run Panel can show per-tool elapsed (no-op when nothing transitioned).
-          useChatStore.getState().syncToolTimestamps(sid, msgs)
+          useChatStore.getState().syncToolTimestamps?.(sid, msgs)
         },
         onPersist: (sid, msgs) =>
           void persistStreamingMessages(sid, msgs).catch((err) =>
@@ -1181,6 +1181,16 @@ export function useClaudeChat() {
           if (durationMs !== undefined) {
             void trackEvent("chat.turn.failed", {
               sessionId,
+          // ADR-0127: the external rail streams through the per-session
+          // coalescer, so a failure must drop any pending frame / debounced
+          // write (a late rAF commit would resurrect the partial over the
+          // failure state) and re-pin Dexie to the user turn alone — the
+          // debounced writer may already have stored a partial assistant.
+          const pending = registry.get(sessionId)
+          pending.commit.cancel()
+          pending.persist.cancel()
+          registry.release(sessionId)
+          await persistMessages(sessionId, next).catch(() => undefined)
               provider: "external",
               surface: "chat",
               errorType: error?.name || "ExternalAgentError",
@@ -1234,7 +1244,14 @@ export function useClaudeChat() {
                 },
               },
             }
-            store.getState().replaceSessionMessages(sessionId, [...baseList, assistantMsg])
+            const nextMessages = [...baseList, assistantMsg]
+            coalesce.commit.call(nextMessages)
+            coalesce.persist.call(nextMessages)
+          }
+          /** Seal the coalescer: apply the last frame now, drop the debounced write. */
+          const sealCoalescer = () => {
+            coalesce.commit.flush()
+            coalesce.persist.cancel()
           }
 
           chatTurnPerformance.markDispatched(sessionId)
@@ -1253,6 +1270,12 @@ export function useClaudeChat() {
               },
             },
             onEvent: (event) => {
+          // ADR-0127 §1: the external rail rides the same per-session
+          // coalescer as the sidecar rail — ≤1 React commit per frame and a
+          // debounced mid-stream Dexie write — instead of a synchronous full
+          // `replaceSessionMessages` per delta and a Dexie write only at the
+          // end (which lost the partial on a mid-turn crash).
+          const coalesce = registry.get(sessionId)
               const capture = captureEventFromCanonical(canonicalEventFromExternalEvent(event))
               if (capture) void projectDirectChatCaptureEvent(sessionId, capture)
               const nextParts = applyExternalAgentEventToParts(assistantParts, event)
@@ -1300,6 +1323,8 @@ export function useClaudeChat() {
             parts: assistantParts,
             metadata: {
               ...(delegatedMeta ?? {}),
+          sealCoalescer()
+
               run: { providerId: "external", startedAt: externalStartedAt },
             },
           }
@@ -1325,6 +1350,7 @@ export function useClaudeChat() {
             void trackEvent("chat.turn.completed", {
               sessionId,
               provider: "external",
+            sealCoalescer()
               surface: "chat",
               durationMs,
             })
@@ -1353,6 +1379,7 @@ export function useClaudeChat() {
         // manually renames, which clears the flag).
         await applyInstantTitle(sessionId, displayContent)
         // Open an agent-trace span for this chat turn. The traceId / spanId
+          registry.release(sessionId)
         // are echoed through SendOptions so the sidecar (and later, tool +
         // sub-agent spans) can attach as children. `endSpan` runs in the
         // result / error branches of `handleEvent` keyed off the cached

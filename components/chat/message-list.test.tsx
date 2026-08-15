@@ -405,6 +405,30 @@ describe("MessageList", () => {
     expect(document.querySelector(`[data-test="msg-vm-${count - 1}"]`)).toBeTruthy()
   })
 
+  // ADR-0127 §3: a short transcript made of huge messages must virtualize too.
+  it("virtualizes a short list whose total text crosses the bytes trigger", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    // 3 messages × 100 KB = 300 KB > 256 KB, far under the 40-row count trigger.
+    const heavy = Array.from({ length: 3 }, (_, i) => userMsg(`hv-${i}`, "x".repeat(100 * 1024)))
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={heavy} status="idle" />
+      </Wrapper>
+    )
+    expect(container.querySelectorAll("[data-index]")).toHaveLength(3)
+  })
+
+  it("keeps a short, light list on the document-flow path (no virtual rows)", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={manyMsgs(5)} status="idle" />
+      </Wrapper>
+    )
+    expect(container.querySelectorAll("[data-index]")).toHaveLength(0)
+    expect(document.querySelector(`[data-test="msg-vm-4"]`)).toBeTruthy()
+  })
+
   it("wraps messages in LongPress on mobile and renders MessageActionSheet", () => {
     ;(usePlatform as jest.Mock).mockReturnValue("mobile")
     const Wrapper = withAdapter(makeAdapter())

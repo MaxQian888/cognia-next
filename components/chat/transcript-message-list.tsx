@@ -6,11 +6,11 @@ import type { UIMessage } from "ai"
 
 import { PerfBoundary } from "@/lib/perf"
 import { estimateMessageHeight } from "@/lib/chat/row-height-estimate"
+import { shouldVirtualizeMessages } from "@/lib/chat/virtualization-threshold"
 import { MessageRenderer } from "./message-renderer"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 
-const VIRTUALIZE_THRESHOLD = 40
 const BOTTOM_SLOP_PX = 80
 
 export type TranscriptRenderStatus =
@@ -41,7 +41,8 @@ export function TranscriptMessageList({
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const pinnedToBottomRef = useRef(true)
-  const virtualize = messages.length > VIRTUALIZE_THRESHOLD
+  // ADR-0127 §3: count OR total-text trigger, shared with the live list.
+  const virtualize = shouldVirtualizeMessages(messages)
   const streamingRowIndex =
     status === "streaming" && messages.at(-1)?.role === "assistant" ? messages.length - 1 : -1
 

@@ -24,6 +24,11 @@ import { MessageSearchBar } from "./message-search-bar"
 import type { MessageSearchHit } from "@/lib/chat/message-search"
 import { findMessageAnchor } from "@/lib/chat/message-anchor"
 import { FALLBACK_ROW_PX, estimateMessageHeight } from "@/lib/chat/row-height-estimate"
+import {
+  VIRTUALIZE_THRESHOLD,
+  shouldVirtualize,
+  transcriptTextLength,
+} from "@/lib/chat/virtualization-threshold"
 import { useJumpFlash } from "@/hooks/chat/use-jump-flash"
 import { useJumpHistory } from "@/hooks/chat/use-jump-history"
 import { JumpFlash } from "./jump-flash"
@@ -54,8 +59,10 @@ import type { RewindFilesResult } from "@/lib/claude/ipc"
 // remounting of heavy rows (markdown / Tool cards / mermaid) cost more than
 // windowing saves when there are only a handful of messages. ~40 covers the
 // overwhelming majority of sessions while keeping flow-render cost bounded;
-// longer histories still take the virtualized path.
-export const VIRTUALIZE_THRESHOLD = 40
+// longer histories still take the virtualized path. ADR-0127 §3 adds a second,
+// independent trigger — total part text > 256 KB — so a short session made of
+// huge fences virtualizes too; both live in `lib/chat/virtualization-threshold`.
+export { VIRTUALIZE_THRESHOLD }
 
 // Below this many messages the conversation is short enough to scan by
 // scrolling, so the right-edge timeline minimap stays unmounted. Mounting is
@@ -236,11 +243,14 @@ export function MessageList({
   const thinking = thinkingMode(messages, status)
   const showThinking = thinking !== null
   const totalCount = messages.length + (showThinking ? 1 : 0)
-  // Short lists skip virtualization entirely (see VIRTUALIZE_THRESHOLD). The
-  // virtualizer hook + measure effects below stay unconditional (Rules of
-  // Hooks); the flow branch simply never attaches its measureElement ref, so
-  // no ResizeObservers spin up there.
-  const virtualize = totalCount > VIRTUALIZE_THRESHOLD
+  // Short, light lists skip virtualization entirely (count OR total-text
+  // trigger — see `lib/chat/virtualization-threshold`). The virtualizer hook +
+  // measure effects below stay unconditional (Rules of Hooks); the flow branch
+  // simply never attaches its measureElement ref, so no ResizeObservers spin
+  // up there. Text length is memoized on the array identity: mid-stream the
+  // array is replaced once per coalesced frame, and the sum is O(parts).
+  const textLength = useMemo(() => transcriptTextLength(messages), [messages])
+  const virtualize = shouldVirtualize({ rowCount: totalCount, textLength })
 
   // The currently-streaming row, if any: the last message must be the
   // assistant message we're appending tokens to and the status must be

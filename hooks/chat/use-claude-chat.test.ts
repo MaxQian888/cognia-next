@@ -1032,6 +1032,46 @@ describe("useClaudeChat — actions", () => {
     )
   })
 
+  // ADR-0127 §1: the external rail rides the per-session coalescer — a burst
+  // of deltas inside one frame must not fan out into one store commit each.
+  it("external-agent deltas are rAF-coalesced: a 50-delta burst yields ≤2 store commits", async () => {
+    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: "ext-1" })
+    chatState.activeSessionId = "sess-1"
+    executeOnExternalAgentMock.mockImplementation(
+      async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
+        for (let i = 0; i < 50; i++) opts.onEvent({ type: "text", text: `t${i}` })
+        return { success: true, finalResponse: "done" }
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    chatState.replaceSessionMessages.mockClear()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    const assistantWrites = chatState.replaceSessionMessages.mock.calls.filter(
+      (c) =>
+        c[0] === "sess-1" && (c[1] as Array<{ role: string }>).some((m) => m.role === "assistant")
+    )
+    // One flushed frame + the final canonical replace — never one per delta.
+    expect(assistantWrites.length).toBeGreaterThan(0)
+    expect(assistantWrites.length).toBeLessThanOrEqual(2)
+    // The last visible frame carries the whole burst (the mocked
+    // event-to-parts appends one char per delta).
+    const last = assistantWrites.at(-1)![1] as Array<{
+      role: string
+      parts: Array<{ text?: string }>
+    }>
+    const text = last
+      .find((m) => m.role === "assistant")!
+      .parts.map((p) => p.text ?? "")
+      .join("")
+    expect(text.length).toBeGreaterThanOrEqual(50)
+    // Final persist happened for this session.
+    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
+  })
+
   it("delegates a matching turn to the external agent (Thread B)", async () => {
     chatState.activeSessionId = "sess-1"
     getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
@@ -2585,6 +2625,49 @@ describe("useClaudeChat — concurrent sessions", () => {
     await flush()
     expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
     expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
+  })
+
+  // ADR-0127 §1: a closed pane keeps an in-flight mirror like an open one, so
+  // it reads Dexie once per turn (not per event) and its mid-stream writes go
+  // through the debounced streaming writer; the turn seal writes canonically.
+  it("closed-pane sessions read Dexie once per turn and seal with a canonical persist", async () => {
+    chatState.activeSessionId = "sess-other"
+    chatState.openSessionIds = ["sess-other"]
+    listMessagesMock.mockReset().mockResolvedValue([])
+    renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    const first = [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "b" }] }]
+    const second = [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "bg" }] }]
+    adapterMock.applySdkEvent
+      .mockReturnValueOnce({ messages: first, turnComplete: false })
+      .mockReturnValueOnce({ messages: second, turnComplete: false })
+      .mockReturnValueOnce({ messages: second, turnComplete: true })
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "delta" } })
+    })
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "delta" } })
+    })
+    // Base for the second event came from the mirror, not another Dexie read.
+    expect(listMessagesMock).toHaveBeenCalledTimes(1)
+    expect(adapterMock.applySdkEvent.mock.calls[1]?.[0]).toBe(first)
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "result" } })
+    })
+    await flush()
+    expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
+    // Turn seal: canonical persist for this session (last call carries the final list).
+    const sealWrites = persistMessagesMock.mock.calls.filter((c) => c[0] === "sess-1")
+    expect(sealWrites.length).toBeGreaterThan(0)
+    // (run metadata such as `completedAt` is stamped on the seal.)
+    expect(sealWrites.at(-1)![1]).toMatchObject(second)
+    // Next turn starts from Dexie again (mirror dropped at the seal).
+    adapterMock.applySdkEvent.mockReturnValueOnce({ messages: second, turnComplete: false })
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "delta" } })
+    })
+    expect(listMessagesMock).toHaveBeenCalledTimes(2)
   })
 
   it("feeds every SDK event to the SDK-native subagent bridge", async () => {

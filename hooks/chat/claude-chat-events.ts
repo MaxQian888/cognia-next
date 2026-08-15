@@ -245,12 +245,13 @@ export async function handleEvent(
         for (const approval of slice.pendingApprovals) {
           chat.markApprovalInterrupted(approval.requestId, sid, "sidecar exited")
         }
-        if (isSessionOpen(sid)) {
-          registry.get(sid).commit.flush()
-          registry.get(sid).persist.flush()
-          registry.release(sid)
-          messagesMirrorRef.current.delete(sid)
-        }
+        // Open panes flush their coalesced React commit; closed panes have no
+        // commit pending but (ADR-0127) may hold a debounced Dexie write and an
+        // in-flight mirror — flush + drop those for every streaming session.
+        if (isSessionOpen(sid)) registry.get(sid).commit.flush()
+        registry.get(sid).persist.flush()
+        registry.release(sid)
+        messagesMirrorRef.current.delete(sid)
         chat.setSessionDiagnostic(
           sid,
           createDiagnostic("sidecarExited", { source: "chat", meta: { sessionId: sid } })
@@ -434,6 +435,13 @@ export async function handleEvent(
           evt.error
         )
       }
+        // ADR-0127: a closed pane now debounces its Dexie writes too, so its
+        // end-of-turn must flush whatever is pending and drop the in-flight
+        // mirror — otherwise the last delta of a background turn could sit in
+        // the debouncer past the session's end.
+        registry.get(evt.sessionId).persist.flush()
+        registry.release(evt.sessionId)
+        messagesMirrorRef.current.delete(evt.sessionId)
       return
     }
     case "permission_interrupted": {
@@ -639,7 +647,7 @@ export async function handleEvent(
       // background pane accumulates its own stream.
       const current = isOpen
         ? (messagesMirrorRef.current.get(sessionId) ?? sliceMessages(sessionId))
-        : await listMessages(sessionId)
+        : (messagesMirrorRef.current.get(sessionId) ?? (await listMessages(sessionId)))
 
       // Track assistant tool_use blocks so the post-tool hook can correlate
       // `tool_result_review` events with the call's name + input.
@@ -648,6 +656,11 @@ export async function handleEvent(
       const {
         messages: appliedMessages,
         turnComplete,
+      // A closed pane used to re-read Dexie for every event, which is what
+      // forced it to write Dexie for every event too (ADR-0127 §1). It now
+      // keeps the same in-flight mirror as an open pane, so its writes can
+      // ride the debounced persist path; the mirror is dropped once the turn
+      // has been durably persisted.
         result: sdkResult,
       } = applySdkEvent(current, env.event)
 
@@ -859,10 +872,23 @@ export async function handleEvent(
             coalesce.persist.call(nextMessages)
           }
         } else {
-          // No open pane — persist straight to Dexie (no live slice to feed).
-          if (turnComplete) chatTurnPerformance.beginFinalPersistence(sessionId)
-          await persistMessages(sessionId, nextMessages)
-          if (turnComplete) chatTurnPerformance.endFinalPersistence(sessionId)
+          // No open pane — no live slice to feed, but the Dexie write is still
+          // debounced through the same per-session coalescer as an open pane
+          // (ADR-0127 §1: one write policy for every rail). The mirror is the
+          // base for the next event; the turn seal writes the canonical list
+          // synchronously and drops the in-flight state.
+          messagesMirrorRef.current.set(sessionId, nextMessages)
+          const coalesce = registry.get(sessionId)
+          if (turnComplete) {
+            coalesce.persist.cancel()
+            chatTurnPerformance.beginFinalPersistence(sessionId)
+            await persistMessages(sessionId, nextMessages)
+            chatTurnPerformance.endFinalPersistence(sessionId)
+            messagesMirrorRef.current.delete(sessionId)
+            registry.release(sessionId)
+          } else {
+            coalesce.persist.call(nextMessages)
+          }
         }
         // A reply landing for any *non-focused* session (open background pane
         // or fully-backgrounded) bumps its unread badge.
