@@ -13,7 +13,7 @@ const meta = {
     provider: { id: "openai", name: "OpenAI", modelCount: 12 },
     isEnabled: true,
     connectionStatus: "connected",
-    onTest: fn(),
+    onSetDefault: fn(),
     onToggleEnabled: fn(),
     onDelete: fn(),
     configTab: <p className="text-sm text-muted-foreground">API key, base URL, default model…</p>,

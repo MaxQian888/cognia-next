@@ -5,6 +5,7 @@
 import {
   buildCostDailyId,
   getCostRange,
+  getLastUsedByProvider,
   getTodaysCostByProvider,
   incrementProviderCost,
   localDayString,
@@ -154,6 +155,37 @@ describe("getCostRange", () => {
 
     const rows = await getCostRange(localDayString(NOON - DAY_MS), localDayString(NOON))
     expect(rows.map((r) => r.totalCostUsd).sort()).toEqual([2, 4])
+  })
+})
+
+describe("getLastUsedByProvider", () => {
+  it("returns the newest updatedAt per provider across days and models", async () => {
+    await incrementProviderCost({ providerId: "openai", modelId: "a", costUsd: 1, now: NOON })
+    await incrementProviderCost({
+      providerId: "openai",
+      modelId: "b",
+      costUsd: 1,
+      now: NOON + 3 * DAY_MS,
+    })
+    await incrementProviderCost({
+      providerId: "anthropic",
+      modelId: "c",
+      costUsd: 1,
+      now: NOON + DAY_MS,
+    })
+    const rows = await getDb().providerCostDaily.toArray()
+    const expectedOpenAi = Math.max(
+      ...rows.filter((r) => r.providerId === "openai").map((r) => r.updatedAt)
+    )
+    const expectedAnthropic = rows.find((r) => r.providerId === "anthropic")!.updatedAt
+    expect(await getLastUsedByProvider()).toEqual({
+      openai: expectedOpenAi,
+      anthropic: expectedAnthropic,
+    })
+  })
+
+  it("returns an empty record for an empty table", async () => {
+    expect(await getLastUsedByProvider()).toEqual({})
   })
 })
 

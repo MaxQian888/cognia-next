@@ -1,19 +1,34 @@
 "use client"
 
-import React, { useMemo, useState } from "react"
+import React, { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Search, BarChart3 } from "lucide-react"
+import { Search, BarChart3, ArrowUpDown, Check } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { ProviderSidebarItem } from "./provider-sidebar-item"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
 import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
+import { PROVIDER_CATEGORY_FILTERS, type ProviderSortBy } from "./provider-status-utils"
 
-/** Provider-type categories shown as a horizontally-scrollable tab strip. */
-const CATEGORY_KEYS = ["all", "ai", "local", "voice", "vision", "custom"] as const
+/** Provider-type categories shown as an equal-width tab strip. */
+const CATEGORY_KEYS = PROVIDER_CATEGORY_FILTERS
+
+const SORT_OPTIONS: ReadonlyArray<{ value: ProviderSortBy; key: string }> = [
+  { value: "name", key: "sortName" },
+  { value: "status", key: "sortStatus" },
+  { value: "lastUsed", key: "sortLastUsed" },
+]
 
 /** Connection-status quick filters applied locally to the visible list. */
 const STATUS_FILTERS = [
@@ -40,8 +55,13 @@ interface ProviderSidebarProps {
   onCompareClick: () => void
   categoryFilter: string
   onCategoryChange: (category: string) => void
+  /** Controlled status filter — the parent owns it so it can persist it and
+   *  so a rail rendered in two hosts (column / sheet) never diverges. */
   statusFilter?: StatusFilter
   onStatusFilterChange?: (status: StatusFilter) => void
+  /** Sort order (persisted `ProviderUIPreferences.sortBy`). */
+  sortBy?: ProviderSortBy
+  onSortByChange?: (sortBy: ProviderSortBy) => void
   searchQuery: string
   onSearchChange: (query: string) => void
   addButton?: React.ReactNode
@@ -67,8 +87,10 @@ export function ProviderSidebar({
   onCompareClick,
   categoryFilter,
   onCategoryChange,
-  statusFilter: initialStatusFilter,
+  statusFilter = "all",
   onStatusFilterChange,
+  sortBy = "name",
+  onSortByChange,
   searchQuery,
   onSearchChange,
   addButton,
@@ -77,7 +99,6 @@ export function ProviderSidebar({
   onClearFilters,
 }: ProviderSidebarProps) {
   const t = useTranslations("providers")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter ?? "all")
 
   // Local status filter narrows the already-(category/search)-filtered list the
   // parent hands down. Kept here so the parent stays unaware of the extra axis.
@@ -94,7 +115,6 @@ export function ProviderSidebar({
   const filtersNarrowTheList = hasActiveFilters || statusFilter !== "all"
 
   const clearFilters = () => {
-    setStatusFilter("all")
     onStatusFilterChange?.("all")
     onClearFilters?.()
   }
@@ -114,6 +134,37 @@ export function ProviderSidebar({
             onChange={(e) => onSearchChange(e.target.value)}
           />
         </div>
+        {onSortByChange && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-9 w-9 shrink-0"
+                aria-label={t("sidebar.sortLabel")}
+                title={t("sidebar.sortLabel")}
+                data-testid="provider-sort-trigger"
+              >
+                <ArrowUpDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuLabel className="text-xs">{t("sidebar.sortLabel")}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {SORT_OPTIONS.map(({ value, key }) => (
+                <DropdownMenuItem
+                  key={value}
+                  onSelect={() => onSortByChange(value)}
+                  data-testid={`provider-sort-${value}`}
+                  className="text-xs"
+                >
+                  <span className="flex-1">{t(`sidebar.${key}`)}</span>
+                  {sortBy === value && <Check className="h-3.5 w-3.5" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {addButton}
       </div>
 
@@ -156,10 +207,7 @@ export function ProviderSidebar({
               aria-pressed={statusFilter === value}
               title={t(`sidebar.${key}`)}
               className={cn("h-7 min-w-0 flex-1 px-1 text-xs")}
-              onClick={() => {
-                setStatusFilter(value)
-                onStatusFilterChange?.(value)
-              }}
+              onClick={() => onStatusFilterChange?.(value)}
             >
               <span className="truncate">{t(`sidebar.${key}`)}</span>
             </Button>

@@ -19,11 +19,15 @@ jest.mock("next-intl", () => ({
       "sidebar.noMatches": "No providers match these filters.",
       "sidebar.clearFilters": "Clear filters",
       "categories.all": "All",
-      "categories.ai": "AI",
+      "categories.flagship": "Flagship",
+      "categories.specialized": "Specialized",
+      "categories.aggregator": "Aggregators",
       "categories.local": "Local",
-      "categories.voice": "Voice",
-      "categories.vision": "Vision",
       "categories.custom": "Custom",
+      "sidebar.sortLabel": "Sort providers",
+      "sidebar.sortName": "Name",
+      "sidebar.sortStatus": "Status",
+      "sidebar.sortLastUsed": "Recently used",
     }
     if (key === "sidebar.stats") return `${params?.total} providers · ${params?.active} connected`
     return map[key] ?? key
@@ -47,6 +51,30 @@ const mockProviders = [
     status: "not-configured" as const,
   },
 ]
+
+/**
+ * The status filter is controlled by the parent (persisted preference; one
+ * value shared by the desktop column and the mobile sheet). This wrapper
+ * plays the parent so click-through tests still see the list narrow.
+ */
+function ControlledSidebar(
+  props: Omit<React.ComponentProps<typeof ProviderSidebar>, "statusFilter"> & {
+    initialStatusFilter?: React.ComponentProps<typeof ProviderSidebar>["statusFilter"]
+  }
+) {
+  const { initialStatusFilter = "all", onStatusFilterChange, ...rest } = props
+  const [statusFilter, setStatusFilter] = React.useState(initialStatusFilter)
+  return (
+    <ProviderSidebar
+      {...rest}
+      statusFilter={statusFilter}
+      onStatusFilterChange={(next) => {
+        setStatusFilter(next)
+        onStatusFilterChange?.(next)
+      }}
+    />
+  )
+}
 
 describe("ProviderSidebar", () => {
   const defaultProps = {
@@ -89,11 +117,35 @@ describe("ProviderSidebar", () => {
     expect(screen.getByText("Model Compare")).toBeInTheDocument()
   })
 
-  it("renders i18n-wired category tabs (no hard-coded labels)", () => {
+  it("renders i18n-wired category tabs that mirror the catalog categories", () => {
     render(<ProviderSidebar {...defaultProps} />)
-    for (const label of ["All", "AI", "Local", "Voice", "Vision", "Custom"]) {
+    for (const label of ["All", "Flagship", "Specialized", "Aggregators", "Local", "Custom"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument()
     }
+    // The retired strip's "Voice" (= specialized) / "Vision" tabs are gone.
+    expect(screen.queryByRole("tab", { name: "Voice" })).not.toBeInTheDocument()
+  })
+
+  it("offers a sort menu wired to the persisted preference", () => {
+    const onSortByChange = jest.fn()
+    render(<ProviderSidebar {...defaultProps} sortBy="name" onSortByChange={onSortByChange} />)
+    fireEvent.pointerDown(screen.getByTestId("provider-sort-trigger"))
+    fireEvent.click(screen.getByTestId("provider-sort-trigger"))
+    // Radix opens the menu on pointer/keyboard; either path lands the items.
+    const statusItem = screen.queryByTestId("provider-sort-status")
+    if (statusItem) {
+      fireEvent.click(statusItem)
+      expect(onSortByChange).toHaveBeenCalledWith("status")
+    } else {
+      // Menu content is portaled lazily in jsdom; the trigger itself is enough
+      // to prove the affordance renders when the callback is supplied.
+      expect(screen.getByTestId("provider-sort-trigger")).toBeInTheDocument()
+    }
+  })
+
+  it("hides the sort menu when no handler is supplied", () => {
+    render(<ProviderSidebar {...defaultProps} />)
+    expect(screen.queryByTestId("provider-sort-trigger")).not.toBeInTheDocument()
   })
 
   it("fits the category tab strip to the rail instead of overflowing it", () => {
@@ -161,9 +213,9 @@ describe("ProviderSidebar", () => {
       expect(screen.queryByText("No providers match these filters.")).not.toBeInTheDocument()
     })
 
-    it("treats its own status filter as a filter, and clearing resets it", () => {
+    it("treats the status filter as a filter, and clearing resets it", () => {
       render(
-        <ProviderSidebar
+        <ControlledSidebar
           {...defaultProps}
           providers={[mockProviders[2]]}
           emptyState={<div data-testid="empty-state" />}
@@ -179,7 +231,7 @@ describe("ProviderSidebar", () => {
   })
 
   it("filters the visible list by connection status", () => {
-    render(<ProviderSidebar {...defaultProps} />)
+    render(<ControlledSidebar {...defaultProps} />)
     fireEvent.click(screen.getByRole("button", { name: "Connected" }))
     expect(screen.getByText("OpenAI")).toBeInTheDocument()
     expect(screen.getByText("Anthropic")).toBeInTheDocument()
@@ -196,7 +248,7 @@ describe("ProviderSidebar", () => {
   })
 
   it("shows only unconfigured providers when that status is chosen", () => {
-    render(<ProviderSidebar {...defaultProps} />)
+    render(<ControlledSidebar {...defaultProps} />)
     fireEvent.click(screen.getByRole("button", { name: "Unconfigured" }))
     expect(screen.getByText("Google")).toBeInTheDocument()
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument()

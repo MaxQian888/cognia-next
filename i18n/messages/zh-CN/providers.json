@@ -44,6 +44,10 @@
   "baseURLHint": "使用代理 URL 或自托管端点。留空使用默认值。",
   "baseURLPlaceholder": "https://api.example.com/v1",
   "baseUrl": "服务地址",
+  "batch": {
+    "retryFailed": "重试失败项",
+    "retryFailedNone": "没有需要重试的失败提供商"
+  },
   "batchApiPrice": "批量 API 单价",
   "batchNoEligibleProviders": "当前没有可见且可执行此操作的服务商。",
   "batchOperationRetryFailed": "重试失败项",
@@ -74,10 +78,13 @@
   "capabilityVideo": "视频",
   "capabilityVision": "视觉",
   "categories": {
+    "aggregator": "聚合平台",
     "ai": "AI",
     "all": "全部",
     "custom": "自定义",
+    "flagship": "旗舰",
     "local": "本地",
+    "specialized": "专精",
     "vision": "视觉",
     "voice": "语音"
   },
@@ -310,6 +317,7 @@
     "defaultBadge": "默认",
     "emptyDescription": "选择一个提供商开始配置，或添加新的提供商",
     "emptyTitle": "未选择提供商",
+    "enableSwitchAria": "启用提供商",
     "modelsAvailable": "{count} 个模型可用",
     "modelsPlaceholder": "模型占位",
     "notConfigured": "未配置",
@@ -568,6 +576,12 @@
     "unknown": "未知"
   },
   "host": "主机",
+  "hostNotice": {
+    "companionBody": "此处填写的密钥与端点只保存在当前设备，不会发送到已配对的主机；主机使用它自己的提供商配置。",
+    "companionTitle": "仅保存在本设备的提供商设置",
+    "mobileLocalBody": "在手机上，\"localhost\" 指的是手机本身。请把 Base URL 指向局域网内运行该引擎的机器，或在已配对的桌面端配置本地引擎。",
+    "mobileLocalTitle": "本地引擎运行在本设备上"
+  },
   "hoursAgo": "{count}小时前",
   "import": "导入",
   "importConflictWarning": "检测到 {count} 个与现有设置冲突的项目",
@@ -861,6 +875,7 @@
   "pullStarting": "正在开始…",
   "quickActions": "快捷操作",
   "quickAdd": {
+    "addedToast": "已添加 {name}——请在下方完成配置并测试。",
     "advancedWizard": "高级添加向导 →",
     "customProvider": "添加自定义提供商",
     "title": "快速添加提供商",
@@ -874,6 +889,18 @@
   "quotaUsage": "配额使用",
   "random": "随机",
   "rateLimitRemaining": "剩余速率限制",
+  "readiness": {
+    "enableBlocked": "完成配置清单后才能启用此提供商。",
+    "localReady": "本地引擎无需密钥——启动服务后运行一次连接测试即可。",
+    "nextAction_add_api_key": "填写 API Key",
+    "nextAction_configure_base_url": "配置有效的 Base URL",
+    "nextAction_enable_provider": "启用提供商",
+    "nextAction_select_default_model": "选择默认模型",
+    "nextAction_verify_connection": "运行连接测试",
+    "progress": "已完成 {completed} / {total} 步",
+    "setDefaultBlocked": "先启用该提供商并选择默认模型，才能设为默认。",
+    "title": "配置清单"
+  },
   "ready": "就绪",
   "recommended": "推荐",
   "recommendedDesc": "易于安装和使用",
@@ -1169,7 +1196,12 @@
     "reasonUnconfigured": "添加 API 密钥以开始使用该提供商",
     "reasonUntested": "凭据已保存，但尚未运行连接测试。",
     "reasonWarning": "已配置但未验证 — 打开以测试连接",
+    "resizeHandle": "调整提供商列表宽度",
     "searchPlaceholder": "搜索提供商...",
+    "sortLabel": "提供商排序",
+    "sortLastUsed": "最近使用",
+    "sortName": "名称",
+    "sortStatus": "状态",
     "stats": "{total} 个提供商 · {active} 已连接",
     "statusAll": "全部",
     "statusConnected": "已连接",

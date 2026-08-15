@@ -48,6 +48,11 @@ interface QuickAddProviderDialogProps {
    * cover curated third-party providers.
    */
   onAddCustom?: () => void
+  /**
+   * Fired after a preset was saved as a custom provider, with the new row's id
+   * and display name — so the host can select/reveal it and confirm.
+   */
+  onAdded?: (providerId: string, name: string) => void
 }
 
 function buildQuickAddModelMetadata(preset: QuickAddPreset): Record<string, CustomModelMetadata> {
@@ -88,6 +93,7 @@ export function QuickAddProviderDialog({
   open,
   onOpenChange,
   onAddCustom,
+  onAdded,
 }: QuickAddProviderDialogProps) {
   const t = useTranslations("providers")
   const tc = useTranslations("common")
@@ -154,11 +160,13 @@ export function QuickAddProviderDialog({
     setIsSaving(true)
     setSaveError(null)
     try {
-      await addCustomProvider(providerDraft)
+      const providerId = await addCustomProvider(providerDraft)
+      const addedName = providerDraft.customName
       setSelectedPreset(null)
       setApiKey("")
       resetTestResult()
       onOpenChange(false)
+      onAdded?.(providerId, addedName)
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error))
     } finally {

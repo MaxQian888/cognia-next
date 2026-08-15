@@ -13,9 +13,13 @@ import {
   PlugZap,
   Loader2,
   Route,
+  RotateCcw,
   SlidersHorizontal,
+  Eye,
+  EyeOff,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -47,6 +51,7 @@ import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-cor
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings, ProviderUIPreferences } from "@cognia/provider-types/provider"
 import type { LocalProviderName, LocalModelInfo } from "@cognia/provider-types/local-provider"
+import type { ProviderDiagnosticSample } from "@cognia/provider-types"
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { ProviderDetailPanel } from "./provider-detail-panel"
@@ -56,8 +61,17 @@ import { ProviderCostTab } from "./provider-cost-tab"
 import { ProviderParametersTab } from "./provider-parameters-tab"
 import { RoutingTab } from "./routing-tab"
 import { ProviderDiagnosticsTab } from "./provider-diagnostics-tab"
-import { getDb } from "@/lib/db/schema"
+import {
+  queryLatestProviderDiagnosticSamples,
+  queryLatestProviderModelDiagnosticSamples,
+} from "@/lib/provider-diagnostics/store"
+import { getLastUsedByProvider } from "@/lib/db/provider-cost-daily"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { useEdgeResize } from "@/hooks/ui/use-edge-resize"
+import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
+import { cn } from "@/lib/utils"
 import { ProviderSidebar } from "./provider-sidebar"
+import { ProviderSetupChecklist } from "./provider-setup-checklist"
 import { ProviderEmptyState } from "./provider-empty-state"
 import { ProviderSkeleton } from "./provider-skeleton"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
@@ -66,13 +80,31 @@ import { OAuthLoginButton } from "./oauth-login-button"
 import { useSettingsStore } from "@/stores/settings"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
 import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
-import { deriveStatus, providerMatchesCategory } from "./provider-status-utils"
+import {
+  deriveStatus,
+  isLocalEngineConfigured,
+  normalizeCategoryFilter,
+  pickInitialProviderId,
+  providerMatchesCategory,
+  sortProviderRows,
+  type ProviderSortBy,
+} from "./provider-status-utils"
 import {
   getBuiltInProviderReadiness,
   getCustomProviderReadiness,
   getVisibleEligibleBuiltInProviderIds,
   getVisibleEligibleCustomProviderIds,
+  getVisibleRetryFailedBuiltInProviderIds,
+  getVisibleRetryFailedCustomProviderIds,
 } from "./provider-readiness"
+import { nextActionKey } from "./provider-setup-checklist"
+
+/** Rail width bounds (px). The default matches the previous fixed column. */
+const RAIL_MIN_WIDTH = 240
+const RAIL_MAX_WIDTH = 480
+const RAIL_DEFAULT_WIDTH = 320
+/** A diagnostic sample older than this reads as "stale" in the rail. */
+const DIAGNOSTIC_STALE_MS = 2 * 60 * 60_000
 
 type SidebarProvider = {
   id: string
@@ -82,6 +114,16 @@ type SidebarProvider = {
   isCustom: boolean
   modelCount?: number
   diagnosticStatus?: ProviderDiagnosticBadgeStatus
+  lastUsedAt?: number
+}
+
+function diagnosticBadge(
+  sample: { status: string; startedAt: number; completedAt?: number } | undefined,
+  now: number
+): ProviderDiagnosticBadgeStatus | undefined {
+  if (!sample) return undefined
+  if (now - (sample.completedAt ?? sample.startedAt) > DIAGNOSTIC_STALE_MS) return "stale"
+  return sample.status === "completed" ? "passed" : "failed"
 }
 
 type ProviderStatusFilter = NonNullable<ProviderUIPreferences["statusFilter"]>
@@ -162,6 +204,7 @@ function CustomProviderInlineConfig({
   onEditClick,
   onTestConnection,
   testResult,
+  testMessage,
   isTesting = false,
 }: {
   cp: CustomProviderSettings
@@ -171,6 +214,8 @@ function CustomProviderInlineConfig({
   onEditClick: () => void
   onTestConnection: () => void
   testResult?: "success" | "error" | "limited" | null
+  /** Human-readable detail of the last test (error text / model count). */
+  testMessage?: string | null
   isTesting?: boolean
 }) {
   const t = useTranslations("providers")
@@ -201,8 +246,11 @@ function CustomProviderInlineConfig({
             className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
             onClick={() => setShowKey((prev) => !prev)}
             type="button"
+            aria-label={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
+            title={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
+            data-testid="custom-provider-toggle-key"
           >
-            {showKey ? "H" : "S"}
+            {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </Button>
         </div>
       </div>
@@ -250,6 +298,7 @@ function CustomProviderInlineConfig({
           {testResult && (
             <span
               data-testid="custom-provider-test-result"
+              title={testMessage ?? undefined}
               className={
                 testResult === "success"
                   ? "truncate text-[11px] text-emerald-600 dark:text-emerald-400"
@@ -263,6 +312,17 @@ function CustomProviderInlineConfig({
                 : testResult === "limited"
                   ? t("customTestLimited")
                   : t("customTestError")}
+              {/* The hook has carried the provider's actual error text since
+                  the test path was written; it was never rendered, so a failed
+                  custom test only ever said "failed". */}
+              {testMessage && testResult !== "success" ? (
+                <span
+                  className="ml-1 font-normal opacity-80"
+                  data-testid="custom-provider-test-message"
+                >
+                  · {testMessage}
+                </span>
+              ) : null}
             </span>
           )}
         </div>
@@ -319,47 +379,72 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   // landed. Show the skeleton until we actually know.
   const settingsLoaded = useSettingsStore((store) => store.loaded)
   const { providers: liveProviderHealth } = useProviderManager()
-  const diagnosticSamples = useLiveQuery(
+  const isMobile = useIsMobile()
+
+  // Provider-level diagnostic badges: latest sample per provider, read through
+  // the `[providerId+startedAt]` index (one `last()` per provider) instead of
+  // scanning the whole samples table on every change.
+  const latestDiagnosticByProvider = useLiveQuery(
     () =>
-      getDb()
-        .providerDiagnosticSamples.toArray()
-        .catch(() => []),
-    [],
+      queryLatestProviderDiagnosticSamples().catch(
+        () => new Map<string, ProviderDiagnosticSample>()
+      ),
     []
   )
+  const selectedProviderIdForDiagnostics = s.selectedProviderId
+  // Model-level badges are only shown for the selected provider's Models tab,
+  // so only that provider's rows are read.
+  const latestDiagnosticByModel = useLiveQuery(
+    (): Promise<Map<string, ProviderDiagnosticSample>> =>
+      selectedProviderIdForDiagnostics
+        ? queryLatestProviderModelDiagnosticSamples(selectedProviderIdForDiagnostics).catch(
+            () => new Map<string, ProviderDiagnosticSample>()
+          )
+        : Promise.resolve(new Map<string, ProviderDiagnosticSample>()),
+    [selectedProviderIdForDiagnostics]
+  )
+  // "Stale" is a function of wall-clock time. Re-evaluate only when a fresh
+  // badge could actually cross the 2h line — at that exact moment — rather
+  // than ticking every minute for the life of the page.
   const [diagnosticNow, setDiagnosticNow] = useState(() => Date.now())
   useEffect(() => {
-    const interval = window.setInterval(() => setDiagnosticNow(Date.now()), 60_000)
-    return () => window.clearInterval(interval)
-  }, [])
-  const diagnosticBadges = useMemo(() => {
-    const latest = new Map<string, (typeof diagnosticSamples)[number]>()
-    for (const sample of diagnosticSamples) {
-      const providerKey = sample.providerId
-      const modelKey = `${sample.providerId}:${sample.modelId ?? ""}`
-      for (const key of [providerKey, modelKey]) {
-        const current = latest.get(key)
-        if (!current || sample.startedAt > current.startedAt) latest.set(key, sample)
-      }
+    if (!latestDiagnosticByProvider) return
+    let nextFlip = Number.POSITIVE_INFINITY
+    for (const sample of latestDiagnosticByProvider.values()) {
+      const at = (sample.completedAt ?? sample.startedAt) + DIAGNOSTIC_STALE_MS
+      if (at > diagnosticNow && at < nextFlip) nextFlip = at
     }
-    return new Map(
-      [...latest].map(
-        ([key, sample]) =>
-          [
-            key,
-            diagnosticNow - (sample.completedAt ?? sample.startedAt) > 2 * 60 * 60_000
-              ? "stale"
-              : sample.status === "completed"
-                ? "passed"
-                : "failed",
-          ] as const
-      )
+    if (!Number.isFinite(nextFlip)) return
+    const timer = window.setTimeout(
+      () => setDiagnosticNow(Date.now()),
+      Math.max(1_000, nextFlip - diagnosticNow + 50)
     )
-  }, [diagnosticNow, diagnosticSamples])
+    return () => window.clearTimeout(timer)
+  }, [latestDiagnosticByProvider, diagnosticNow])
+  const providerDiagnosticBadges = useMemo(() => {
+    const out = new Map<string, ProviderDiagnosticBadgeStatus>()
+    for (const [providerId, sample] of latestDiagnosticByProvider ?? []) {
+      const badge = diagnosticBadge(sample, diagnosticNow)
+      if (badge) out.set(providerId, badge)
+    }
+    return out
+  }, [diagnosticNow, latestDiagnosticByProvider])
+  const modelDiagnosticBadges = useMemo(() => {
+    const out: Record<string, ProviderDiagnosticBadgeStatus> = {}
+    for (const [modelId, sample] of latestDiagnosticByModel ?? []) {
+      const badge = diagnosticBadge(sample, diagnosticNow)
+      if (badge && modelId) out[modelId] = badge
+    }
+    return out
+  }, [diagnosticNow, latestDiagnosticByModel])
 
   const [search, setSearch] = useState("")
   const [categoryFilterOverride, setCategoryFilterOverride] = useState<string | null>(null)
-  const categoryFilter = categoryFilterOverride ?? s.uiPreferences.categoryFilter ?? "all"
+  // `normalizeCategoryFilter` maps values persisted by the retired AI / Voice /
+  // Vision strip back to "all" so an old preference can't hide every row.
+  const categoryFilter = normalizeCategoryFilter(
+    categoryFilterOverride ?? s.uiPreferences.categoryFilter
+  )
   const setCategoryFilter = useCallback(
     (category: string) => {
       setCategoryFilterOverride(category)
@@ -367,6 +452,51 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     },
     [setProviderUIPreferences]
   )
+  const [sortByOverride, setSortByOverride] = useState<ProviderSortBy | null>(null)
+  const sortBy: ProviderSortBy = sortByOverride ?? s.uiPreferences.sortBy ?? "name"
+  const setSortBy = useCallback(
+    (next: ProviderSortBy) => {
+      setSortByOverride(next)
+      void setProviderUIPreferences({ sortBy: next })
+    },
+    [setProviderUIPreferences]
+  )
+  // "Recently used" reads the durable cost rollup (one row per provider/model/
+  // day) — only subscribed while that sort is active.
+  const lastUsedByProvider = useLiveQuery(
+    (): Promise<Record<string, number> | undefined> =>
+      sortBy === "lastUsed"
+        ? getLastUsedByProvider().catch((): Record<string, number> => ({}))
+        : Promise.resolve(undefined),
+    [sortBy]
+  )
+  // Rail width: persisted per user, dragged from the column's right edge.
+  const [railWidthOverride, setRailWidthOverride] = useState<number | null>(null)
+  const railWidth = Math.min(
+    RAIL_MAX_WIDTH,
+    Math.max(
+      RAIL_MIN_WIDTH,
+      railWidthOverride ?? s.uiPreferences.sidebarWidth ?? RAIL_DEFAULT_WIDTH
+    )
+  )
+  // The drag emits per pointer move; persist on the trailing edge only.
+  const persistRailWidth = useDebouncedCallback((width: number) => {
+    void setProviderUIPreferences({ sidebarWidth: Math.round(width) })
+  }, 250)
+  const railResize = useEdgeResize({
+    width: railWidth,
+    min: RAIL_MIN_WIDTH,
+    max: RAIL_MAX_WIDTH,
+    onChange: (width) => {
+      setRailWidthOverride(width)
+      persistRailWidth.call(width)
+    },
+    onReset: () => {
+      setRailWidthOverride(RAIL_DEFAULT_WIDTH)
+      persistRailWidth.call(RAIL_DEFAULT_WIDTH)
+    },
+    edge: "right",
+  })
   const [statusFilterOverride, setStatusFilterOverride] = useState<ProviderStatusFilter | null>(
     null
   )
@@ -403,9 +533,9 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
 
   // Build sidebar providers with category filter
   const sidebarProviders = useMemo<SidebarProvider[]>(() => {
+    const q = search.trim().toLowerCase()
     const builtIn = s.filteredProviders
       .filter(([id]) => {
-        const q = search.trim().toLowerCase()
         if (categoryFilter === "custom") return false
         if (categoryFilter !== "all" && !providerMatchesCategory(categoryFilter, id)) return false
         if (!q) return true
@@ -417,6 +547,14 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         const settings = s.providerSettings[id]
         const test = s.testResults[id]
         const effectiveTest = preferLiveHealth(liveProviderHealth[id], test?.success, test?.outcome)
+        // Readiness re-derives the verification status from the persisted
+        // fingerprint, so a key rotated after the last successful test reads
+        // "stale" instead of the frozen persisted "verified".
+        const verificationStatus = getBuiltInProviderReadiness(
+          id,
+          settings,
+          null
+        ).verificationStatus
         return {
           id,
           name: cfg.name,
@@ -426,14 +564,15 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
             settings?.baseURL,
             effectiveTest.ok,
             effectiveTest.outcome,
-            id === "bedrock" && !!settings?.bedrock
+            (id === "bedrock" && !!settings?.bedrock
               ? validateBedrockConnectionSettings(settings.bedrock).valid
-              : false,
-            settings?.verificationStatus ?? null
+              : false) || isLocalEngineConfigured(id, settings),
+            verificationStatus
           ),
           isCustom: false,
           modelCount: cfg.models.length,
-          diagnosticStatus: diagnosticBadges.get(id),
+          diagnosticStatus: providerDiagnosticBadges.get(id),
+          lastUsedAt: lastUsedByProvider?.[id],
         }
       })
 
@@ -442,25 +581,38 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
       const cp = s.customProviders[id]
       if (!cp) continue
       if (categoryFilter !== "all" && categoryFilter !== "custom") continue
-      const q = search.trim().toLowerCase()
       if (q && !cp.customName.toLowerCase().includes(q) && !id.toLowerCase().includes(q)) {
         continue
       }
       const testOutcome = s.customTestResults[id]
       const testOk = testOutcome === "success" ? true : testOutcome === "error" ? false : undefined
       const effectiveTest = preferLiveHealth(liveProviderHealth[id], testOk, testOutcome)
+      const verificationStatus = getCustomProviderReadiness(cp, undefined).verificationStatus
       custom.push({
         id,
         name: cp.customName,
         subtitle: cp.defaultModel ?? cp.baseURL,
-        status: deriveStatus(cp.apiKey, cp.baseURL, effectiveTest.ok, effectiveTest.outcome),
+        status: deriveStatus(
+          cp.apiKey,
+          cp.baseURL,
+          effectiveTest.ok,
+          effectiveTest.outcome,
+          false,
+          verificationStatus
+        ),
         isCustom: true,
         modelCount: cp.customModels?.length ?? 0,
-        diagnosticStatus: diagnosticBadges.get(id),
+        diagnosticStatus: providerDiagnosticBadges.get(id),
+        lastUsedAt: lastUsedByProvider?.[id],
       })
     }
 
-    return [...builtIn, ...custom]
+    // Built-ins keep the catalog order for `name`; custom rows follow. Any
+    // other sort interleaves both groups (a connected custom endpoint belongs
+    // above an unconfigured built-in when sorting by status).
+    return sortBy === "name"
+      ? [...builtIn, ...custom]
+      : sortProviderRows([...builtIn, ...custom], sortBy)
   }, [
     s.filteredProviders,
     s.providerSettings,
@@ -471,16 +623,21 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     liveProviderHealth,
     search,
     categoryFilter,
-    diagnosticBadges,
+    providerDiagnosticBadges,
+    lastUsedByProvider,
+    sortBy,
   ])
 
-  // Auto-select first provider
+  // Auto-select: the app default provider (what chat actually uses), then the
+  // first connected row, then the first row — never whatever sorts first
+  // alphabetically. Runs once the list is non-empty and nothing is selected.
+  const initialProviderId = pickInitialProviderId(sidebarProviders, defaultProvider)
   useEffect(() => {
-    if (!s.selectedProviderId && sidebarProviders.length > 0) {
-      void s.setSelectedProviderId(sidebarProviders[0].id)
+    if (!s.selectedProviderId && initialProviderId) {
+      void s.setSelectedProviderId(initialProviderId)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarProviders.length])
+  }, [initialProviderId])
 
   const selectedId = s.selectedProviderId
   const selectedBuiltIn = selectedId ? PROVIDERS[selectedId] : undefined
@@ -518,6 +675,16 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   }, [selectedCustom, selectedId, selectedSettings, s.customTestResults, s.testResults])
   const canEnable = selectedReadiness?.eligibility.enable.allowed ?? false
   const canSetDefault = isEnabled && (isCustom ? Boolean(selectedCustom?.defaultModel) : true)
+  // Human-readable "why not": the readiness core carries a `nextAction` per
+  // blocked step; map it to an i18n string for the switch / button tooltips.
+  const enableBlockedReason = useMemo(() => {
+    if (canEnable || !selectedReadiness) return undefined
+    const nextAction = selectedReadiness.setupChecklist.nextAction
+    return nextAction
+      ? `${t("readiness.enableBlocked")} ${t(nextActionKey(nextAction) as never)}`
+      : t("readiness.enableBlocked")
+  }, [canEnable, selectedReadiness, t])
+  const setDefaultBlockedReason = canSetDefault ? undefined : t("readiness.setDefaultBlocked")
 
   const selectedName = isCustom ? selectedCustom?.customName : selectedBuiltIn?.name
 
@@ -540,63 +707,99 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     [s.customProviders, s.customTestResults, s.visibleCustomProviderIds]
   )
   const batchEligibleCount = batchEligibleBuiltInIds.length + batchEligibleCustomIds.length
+  // "Retry failed" — the readiness helpers for this existed (and the summary
+  // component knew the operation type) but nothing invoked them.
+  const batchRetryBuiltInIds = useMemo(
+    () =>
+      getVisibleRetryFailedBuiltInProviderIds(
+        s.filteredProviders.map(([providerId]) => providerId),
+        s.providerSettings,
+        s.testResults
+      ),
+    [s.filteredProviders, s.providerSettings, s.testResults]
+  )
+  const batchRetryCustomIds = useMemo(
+    () =>
+      getVisibleRetryFailedCustomProviderIds(
+        s.visibleCustomProviderIds,
+        s.customProviders,
+        s.customTestResults
+      ),
+    [s.customProviders, s.customTestResults, s.visibleCustomProviderIds]
+  )
+  const batchRetryCount = batchRetryBuiltInIds.length + batchRetryCustomIds.length
+  const [batchOperationType, setBatchOperationType] = useState<"verify-enabled" | "retry-failed">(
+    "verify-enabled"
+  )
 
-  const runBatchVerification = useCallback(async () => {
-    if (batchVerification.isRunning || batchEligibleCount === 0) return
-    batchCancelRequested.current = false
-    setBatchVerification({
-      isRunning: true,
-      cancelRequested: false,
-      total: batchEligibleCount,
-      completed: 0,
-      success: 0,
-      failed: 0,
-      canceled: false,
-    })
+  const { testProvider, testCustomProvider } = s
+  const runBatch = useCallback(
+    async (
+      operationType: "verify-enabled" | "retry-failed",
+      builtInIds: readonly string[],
+      customIds: readonly string[]
+    ) => {
+      const total = builtInIds.length + customIds.length
+      if (batchVerification.isRunning || total === 0) return
+      batchCancelRequested.current = false
+      setBatchOperationType(operationType)
+      setBatchVerification({
+        isRunning: true,
+        cancelRequested: false,
+        total,
+        completed: 0,
+        success: 0,
+        failed: 0,
+        canceled: false,
+      })
 
-    const jobs = [
-      ...batchEligibleBuiltInIds.map((providerId) => ({
-        providerId,
-        run: () => s.testProvider(providerId),
-      })),
-      ...batchEligibleCustomIds.map((providerId) => ({
-        providerId,
-        run: () => s.testCustomProvider(providerId),
-      })),
-    ]
+      const jobs = [
+        ...builtInIds.map((providerId) => ({
+          providerId,
+          run: () => testProvider(providerId),
+        })),
+        ...customIds.map((providerId) => ({
+          providerId,
+          run: () => testCustomProvider(providerId),
+        })),
+      ]
 
-    let completed = 0
-    let success = 0
-    let failed = 0
-    for (const job of jobs) {
-      if (batchCancelRequested.current) break
-      const result = await job.run()
-      completed += 1
-      if (result?.success) success += 1
-      else failed += 1
+      let completed = 0
+      let success = 0
+      let failed = 0
+      for (const job of jobs) {
+        if (batchCancelRequested.current) break
+        const result = await job.run()
+        completed += 1
+        if (result?.success) success += 1
+        else failed += 1
+        setBatchVerification((current) => ({
+          ...current,
+          completed,
+          success,
+          failed,
+        }))
+      }
+
       setBatchVerification((current) => ({
         ...current,
+        isRunning: false,
         completed,
         success,
         failed,
+        canceled: batchCancelRequested.current,
       }))
-    }
-
-    setBatchVerification((current) => ({
-      ...current,
-      isRunning: false,
-      completed,
-      success,
-      failed,
-      canceled: batchCancelRequested.current,
-    }))
-  }, [
-    batchEligibleBuiltInIds,
-    batchEligibleCount,
-    batchEligibleCustomIds,
-    batchVerification.isRunning,
-    s,
-  ])
+    },
+    [batchVerification.isRunning, testCustomProvider, testProvider]
+  )
+  const runBatchVerification = useCallback(
+    () => runBatch("verify-enabled", batchEligibleBuiltInIds, batchEligibleCustomIds),
+    [batchEligibleBuiltInIds, batchEligibleCustomIds, runBatch]
+  )
+  const runBatchRetryFailed = useCallback(
+    () => runBatch("retry-failed", batchRetryBuiltInIds, batchRetryCustomIds),
+    [batchRetryBuiltInIds, batchRetryCustomIds, runBatch]
+  )
 
   // models.dev catalog (reactive) → enrich the built-in provider's model list
   // with models.dev-authoritative metadata (pricing/context/capabilities) plus
@@ -606,17 +809,41 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     isLoading: modelsDevLoading,
     sync: syncModelsDevCatalog,
   } = useModelsDevCatalog()
+  // OpenRouter's live `/models` catalog (what "Refresh models" syncs for it).
+  // Only the OpenRouter row is subscribed, and only while OpenRouter is
+  // selected — the hook is cheap but the row is large.
+  const { row: openRouterCatalogRow, sync: syncOpenRouterCatalog } = useOpenRouterCatalog({
+    enabled: selectedId === "openrouter",
+  })
   const enrichedBuiltInModels = useMemo(() => {
     if (!selectedBuiltIn || !selectedId) return []
     const devModels = modelsDevRow?.providers[selectedId]?.models ?? []
+    // For OpenRouter the synced live catalog is the authoritative list; the
+    // static + models.dev entries only seed it. Before this the Models tab
+    // ignored the row that "Refresh models" had just written.
+    const liveCatalogModels =
+      selectedId === "openrouter" ? (openRouterCatalogRow?.models ?? []) : []
+    const settingsWithLiveCatalog =
+      liveCatalogModels.length > 0
+        ? {
+            ...(selectedSettings ?? { providerId: selectedId, enabled: false, defaultModel: "" }),
+            discoveredModels: [
+              ...liveCatalogModels,
+              ...(selectedSettings?.discoveredModels ?? []).filter(
+                (m) => !liveCatalogModels.some((live) => live.id === m.id)
+              ),
+            ],
+          }
+        : selectedSettings
     const snapshot = buildBuiltInProviderModelDiscoverySnapshot({
       providerId: selectedId,
       catalogModels: selectedBuiltIn.models,
       modelsDevModels: devModels,
-      settings: selectedSettings,
+      settings: settingsWithLiveCatalog,
     })
+    const devById = new Map(devModels.map((d) => [d.id, d]))
     return snapshot.models.map((m) => {
-      const meta = devModels.find((d) => d.id === m.id)
+      const meta = devById.get(m.id)
       return {
         id: m.id,
         name: m.name,
@@ -648,7 +875,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         lastUpdated: meta?.lastUpdated,
       }
     })
-  }, [selectedBuiltIn, selectedId, selectedSettings, modelsDevRow])
+  }, [selectedBuiltIn, selectedId, selectedSettings, modelsDevRow, openRouterCatalogRow])
 
   // Default-model options for the Config tab. Static `PROVIDERS[id].models` is a
   // hand-curated subset; aggregators that refresh their list at runtime
@@ -656,7 +883,6 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   // `discoveredModels`) carry far more. Fold those dynamic sources in — deduped
   // by id, static first — so the Default Model dropdown actually lists the models
   // a dynamic provider can serve instead of an empty/stale set.
-  const { row: openRouterCatalogRow, sync: syncOpenRouterCatalog } = useOpenRouterCatalog()
   const configModelOptions = useMemo<Array<{ id: string; name: string }>>(() => {
     if (!selectedBuiltIn || !selectedId) return []
     const byId = new Map<string, string>()
@@ -770,6 +996,8 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
       onCategoryChange={setCategoryFilter}
       statusFilter={statusFilter}
       onStatusFilterChange={setStatusFilter}
+      sortBy={sortBy}
+      onSortByChange={setSortBy}
       searchQuery={search}
       onSearchChange={setSearch}
       emptyState={
@@ -778,10 +1006,11 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
           importButton={<ProviderImportExport />}
         />
       }
-      hasActiveFilters={search.trim() !== "" || categoryFilter !== "all"}
+      hasActiveFilters={search.trim() !== "" || categoryFilter !== "all" || statusFilter !== "all"}
       onClearFilters={() => {
         setSearch("")
         setCategoryFilter("all")
+        setStatusFilter("all")
       }}
       addButton={
         <div className="flex items-center gap-1.5">
@@ -806,20 +1035,42 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   }
 
   const verifyEnabledButton = (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="gap-1.5"
-      data-testid="verify-enabled-providers"
-      disabled={batchVerification.isRunning || batchEligibleCount === 0}
-      title={batchEligibleCount === 0 ? t("batchNoEligibleProviders") : undefined}
-      onClick={() => void runBatchVerification()}
-    >
-      <PlugZap className="h-3.5 w-3.5" />
-      {t("batchOperationVerifyEnabled")}
-    </Button>
+    <div className="flex items-center gap-1.5">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="gap-1.5"
+        data-testid="verify-enabled-providers"
+        disabled={batchVerification.isRunning || batchEligibleCount === 0}
+        title={batchEligibleCount === 0 ? t("batchNoEligibleProviders") : undefined}
+        onClick={() => void runBatchVerification()}
+      >
+        <PlugZap className="h-3.5 w-3.5" />
+        {t("batchOperationVerifyEnabled")}
+      </Button>
+      {/* Only offered once something has actually failed — an always-visible
+          disabled button would just be noise next to Verify. */}
+      {batchRetryCount > 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          data-testid="retry-failed-providers"
+          disabled={batchVerification.isRunning}
+          onClick={() => void runBatchRetryFailed()}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          {t("batch.retryFailed")} ({batchRetryCount})
+        </Button>
+      )}
+    </div>
   )
+  // The progress strip and its summary only take layout space while a batch
+  // is running or has produced a result — otherwise the empty wrapper left a
+  // phantom gap under the header.
+  const showBatchStrip = batchVerification.isRunning || batchVerification.total > 0
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -840,61 +1091,101 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         <div className="flex justify-end">{verifyEnabledButton}</div>
       )}
 
-      <div className="space-y-2">
-        <BatchTestProgress
-          isRunning={batchVerification.isRunning}
-          progress={
-            batchVerification.total === 0
-              ? 0
-              : (batchVerification.completed / batchVerification.total) * 100
-          }
-          cancelRequested={batchVerification.cancelRequested}
-          onCancel={() => {
-            batchCancelRequested.current = true
-            setBatchVerification((current) => ({ ...current, cancelRequested: true }))
-          }}
-        />
-        {!batchVerification.isRunning && (
-          <TestResultsSummary
-            success={batchVerification.success}
-            failed={batchVerification.failed}
-            total={batchVerification.completed}
-            operationType="verify-enabled"
-            completed={batchVerification.completed}
-            expectedTotal={batchVerification.total}
-            canceled={batchVerification.canceled}
+      {showBatchStrip && (
+        <div className="space-y-2" data-testid="batch-strip">
+          <BatchTestProgress
+            isRunning={batchVerification.isRunning}
+            progress={
+              batchVerification.total === 0
+                ? 0
+                : (batchVerification.completed / batchVerification.total) * 100
+            }
+            cancelRequested={batchVerification.cancelRequested}
+            onCancel={() => {
+              batchCancelRequested.current = true
+              setBatchVerification((current) => ({ ...current, cancelRequested: true }))
+            }}
           />
-        )}
-      </div>
-
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
-        {/* ── Desktop sidebar ──────────────────────────────────────────── */}
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {sidebar}
-        </div>
-
-        {/* ── Mobile top bar ───────────────────────────────────────────── */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
-                <Menu className="h-4 w-4" />
-                {t("mobile.openProviders") || "Providers"}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{t("title") || "AI Providers"}</SheetTitle>
-              </SheetHeader>
-              {sidebar}
-            </SheetContent>
-          </Sheet>
-          {selectedId && (
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{selectedName ?? selectedId}</p>
-            </div>
+          {!batchVerification.isRunning && (
+            <TestResultsSummary
+              success={batchVerification.success}
+              failed={batchVerification.failed}
+              total={batchVerification.completed}
+              operationType={batchOperationType}
+              completed={batchVerification.completed}
+              expectedTotal={batchVerification.total}
+              canceled={batchVerification.canceled}
+            />
           )}
         </div>
+      )}
+
+      {/* One rail instance. It used to be rendered twice — a CSS-hidden desktop
+          column AND the mobile sheet — so both stayed mounted on every
+          viewport (duplicate `provider-*` ids, two import/export toolbars).
+          `useIsMobile` picks the host; the column width is user-resizable and
+          persisted (`ProviderUIPreferences.sidebarWidth`). */}
+      <div
+        className="grid min-h-0 flex-1 grid-cols-1 gap-4"
+        style={isMobile ? undefined : { gridTemplateColumns: `${railWidth}px minmax(0, 1fr)` }}
+        data-testid="provider-layout"
+      >
+        {isMobile ? (
+          /* ── Mobile top bar ─────────────────────────────────────────── */
+          <div className="flex items-center gap-2">
+            <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
+                  <Menu className="h-4 w-4" />
+                  {t("mobile.openProviders")}
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-[300px] p-0">
+                <SheetHeader className="px-3 pt-3">
+                  <SheetTitle className="text-sm">{t("title")}</SheetTitle>
+                </SheetHeader>
+                {sidebar}
+              </SheetContent>
+            </Sheet>
+            {selectedId && (
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{selectedName ?? selectedId}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* ── Desktop rail + drag handle ─────────────────────────────── */
+          <div className="relative flex min-h-0 flex-col overflow-hidden rounded-lg border">
+            {sidebar}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("sidebar.resizeHandle")}
+              aria-valuemin={RAIL_MIN_WIDTH}
+              aria-valuemax={RAIL_MAX_WIDTH}
+              aria-valuenow={Math.round(railWidth)}
+              tabIndex={0}
+              data-testid="provider-rail-resize-handle"
+              className={cn(
+                "group absolute -right-1 bottom-0 top-0 z-10 flex w-2.5 cursor-col-resize items-center justify-center focus-visible:outline-none",
+                railResize.dragging && "select-none"
+              )}
+              onPointerDown={railResize.onPointerDown}
+              onPointerMove={railResize.onPointerMove}
+              onPointerUp={railResize.onPointerUp}
+              onKeyDown={railResize.onKeyDown}
+              onDoubleClick={railResize.onDoubleClick}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "h-full w-0.5 bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary",
+                  railResize.dragging && "bg-primary"
+                )}
+              />
+            </div>
+          </div>
+        )}
 
         {/* ── Detail panel ─────────────────────────────────────────────
             `@container/provider-pane`: the pane is pinned beside a fixed 320px
@@ -939,6 +1230,10 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
               </div>
             ) : (
               <ProviderDetailPanel
+                // Explicit key: `PanelTransition` only remounts when motion is
+                // enabled, so under reduced motion the active tab / revealed
+                // key state leaked from one provider to the next.
+                key={selectedId}
                 provider={
                   selectedBuiltIn
                     ? {
@@ -956,11 +1251,13 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                 }
                 isEnabled={isEnabled}
                 canEnable={canEnable}
+                enableBlockedReason={enableBlockedReason}
                 isCustom={isCustom}
                 isDefault={selectedId === defaultProvider}
                 onSetDefault={
                   canSetDefault ? () => void s.setDefaultProvider(selectedId) : undefined
                 }
+                setDefaultBlockedReason={setDefaultBlockedReason}
                 connectionStatus={
                   isCustom
                     ? (() => {
@@ -1015,26 +1312,51 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                   // detail shell so it keeps the header, enable switch, default
                   // badge and status the rest of the list has.
                   isLocalProvider ? (
-                    <LocalProviderSettings providerId={selectedId as LocalProviderName} />
+                    <div className="space-y-6">
+                      {selectedReadiness && (
+                        <ProviderSetupChecklist
+                          checklist={selectedReadiness.setupChecklist}
+                          isLocalEngine
+                        />
+                      )}
+                      <LocalProviderSettings providerId={selectedId as LocalProviderName} />
+                    </div>
                   ) : isCustom && selectedCustom ? (
-                    <CustomProviderInlineConfig
-                      cp={selectedCustom}
-                      onApiKeyChange={(key) =>
-                        void s.updateCustomProvider(selectedId, { apiKey: key })
-                      }
-                      onBaseURLChange={(url) =>
-                        void s.updateCustomProvider(selectedId, { baseURL: url })
-                      }
-                      onDefaultModelChange={(model) =>
-                        void s.updateCustomProvider(selectedId, { defaultModel: model })
-                      }
-                      onEditClick={handleEditCustom}
-                      onTestConnection={() => void s.testCustomProvider(selectedId)}
-                      testResult={s.customTestResults[selectedId] ?? null}
-                      isTesting={!!s.testingCustomProviders[selectedId]}
-                    />
+                    <div className="space-y-6">
+                      {selectedReadiness && (
+                        <ProviderSetupChecklist
+                          checklist={selectedReadiness.setupChecklist}
+                          onVerify={() => void s.testCustomProvider(selectedId)}
+                          isVerifying={!!s.testingCustomProviders[selectedId]}
+                        />
+                      )}
+                      <CustomProviderInlineConfig
+                        cp={selectedCustom}
+                        onApiKeyChange={(key) =>
+                          void s.updateCustomProvider(selectedId, { apiKey: key })
+                        }
+                        onBaseURLChange={(url) =>
+                          void s.updateCustomProvider(selectedId, { baseURL: url })
+                        }
+                        onDefaultModelChange={(model) =>
+                          void s.updateCustomProvider(selectedId, { defaultModel: model })
+                        }
+                        onEditClick={handleEditCustom}
+                        onTestConnection={() => void s.testCustomProvider(selectedId)}
+                        testResult={s.customTestResults[selectedId] ?? null}
+                        testMessage={s.customTestMessages[selectedId] ?? null}
+                        isTesting={!!s.testingCustomProviders[selectedId]}
+                      />
+                    </div>
                   ) : selectedBuiltIn ? (
                     <div className="space-y-6">
+                      {selectedReadiness && (
+                        <ProviderSetupChecklist
+                          checklist={selectedReadiness.setupChecklist}
+                          onVerify={handleTestConnection}
+                          isVerifying={!!s.testingProviders[selectedId]}
+                        />
+                      )}
                       <ProviderConfigTab
                         providerId={selectedId}
                         settings={
@@ -1168,12 +1490,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                       onTestConnection={handleTestConnection}
                       isTesting={!!s.testingProviders[selectedId]}
                       metadataLoading={modelsDevLoading}
-                      diagnosticStatusByModel={Object.fromEntries(
-                        enrichedBuiltInModels.flatMap((model) => {
-                          const status = diagnosticBadges.get(`${selectedId}:${model.id}`)
-                          return status ? [[model.id, status]] : []
-                        })
-                      )}
+                      diagnosticStatusByModel={modelDiagnosticBadges}
                     />
                   ) : (
                     <div className="p-4 text-sm text-muted-foreground">
@@ -1244,6 +1561,17 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
           onAddCustom={() => {
             setEditingCustomId(null)
             setCustomDialogOpen(true)
+          }}
+          onAdded={(providerId, name) => {
+            // Reveal what was just added: clear filters that could hide the
+            // new custom row, select it, and say so — the dialog used to just
+            // close, leaving the row at the bottom of a possibly filtered list.
+            setSearch("")
+            setCategoryFilter("all")
+            setStatusFilter("all")
+            setCompareOpen(false)
+            void s.setSelectedProviderId(providerId)
+            toast.success(t("quickAdd.addedToast", { name }))
           }}
         />
       )}

@@ -43,6 +43,7 @@ function makeHookState(overrides?: {
   customTestResults?: Record<string, "success" | "error" | "limited" | undefined>
   selectedProviderId?: string | null
   uiPreferences?: Record<string, unknown>
+  customTestMessages?: Record<string, string | null>
 }) {
   const filtered = (overrides?.filteredProviders ?? []).map(([id, cfg]) => [
     id,
@@ -63,6 +64,7 @@ function makeHookState(overrides?: {
       "success" | "error" | "limited" | undefined
     >,
     testingCustomProviders: {} as Record<string, boolean>,
+    customTestMessages: (overrides?.customTestMessages ?? {}) as Record<string, string | null>,
     testCustomProvider: jest.fn(),
     updateCustomProvider: jest.fn(),
     removeCustomProvider: jest.fn(),
@@ -115,6 +117,10 @@ jest.mock("@/hooks/settings/use-provider-settings", () => ({
   useProviderSettings: () => mockHookState,
 }))
 
+let mockIsMobile = false
+jest.mock("@/hooks/ui/use-mobile", () => ({
+  useIsMobile: () => mockIsMobile,
+}))
 jest.mock("@/hooks/ai/use-provider-manager", () => ({
   useProviderManager: () => ({ providers: {}, isLoading: false, refresh: jest.fn() }),
 }))
@@ -365,6 +371,7 @@ jest.mock("./provider-sidebar", () => ({
     categoryFilter,
     onCategoryChange,
     onCompareClick,
+    onSortByChange,
     emptyState,
     hasActiveFilters,
     onClearFilters,
@@ -376,6 +383,7 @@ jest.mock("./provider-sidebar", () => ({
     categoryFilter?: string
     onCategoryChange?: (c: string) => void
     onCompareClick?: () => void
+    onSortByChange?: (sortBy: string) => void
     emptyState?: React.ReactNode
     hasActiveFilters?: boolean
     onClearFilters?: () => void
@@ -406,6 +414,11 @@ jest.mock("./provider-sidebar", () => ({
       {onCompareClick && (
         <button data-testid="mock-compare" onClick={onCompareClick}>
           compare
+        </button>
+      )}
+      {onSortByChange && (
+        <button data-testid="mock-sort-status" onClick={() => onSortByChange("status")}>
+          sort-status
         </button>
       )}
       <div data-testid="provider-sidebar-add">{addButton}</div>
@@ -693,6 +706,139 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     })
     render(<ProviderSettings />)
     expect(mockSetSelectedProviderId).toHaveBeenCalledWith("openai")
+  })
+
+  it("auto-selects the app default provider over the alphabetically-first row", () => {
+    // The store mock's defaultProvider is "openai"; "01ai" sorts first.
+    mockHookState = makeHookState({
+      filteredProviders: [
+        ["01ai", { name: "01.AI", defaultModel: "yi-large" }],
+        ["openai", { name: "OpenAI", defaultModel: "gpt-4o" }],
+      ],
+    })
+    render(<ProviderSettings />)
+    expect(mockSetSelectedProviderId).toHaveBeenCalledWith("openai")
+  })
+
+  it("auto-selects the first connected row when the default provider is not listed", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [
+        ["01ai", { name: "01.AI", defaultModel: "yi-large" }],
+        ["deepseek", { name: "DeepSeek", defaultModel: "deepseek-chat" }],
+      ],
+    })
+    mockHookState.providerSettings.deepseek = {
+      providerId: "deepseek",
+      enabled: true,
+      apiKey: "sk-ds",
+      defaultModel: "deepseek-chat",
+      verificationStatus: "verified",
+    }
+    render(<ProviderSettings />)
+    expect(mockSetSelectedProviderId).toHaveBeenCalledWith("deepseek")
+  })
+
+  it("offers a Retry-failed batch action only when a verified-eligible provider has failed", async () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    mockHookState.providerSettings.openai = {
+      providerId: "openai",
+      enabled: true,
+      apiKey: "sk-openai",
+      defaultModel: "gpt-4o",
+    }
+    const headerActionsTarget = document.createElement("div")
+    document.body.append(headerActionsTarget)
+    const { unmount } = render(<ProviderSettings headerActionsTarget={headerActionsTarget} />)
+    expect(within(headerActionsTarget).queryByTestId("retry-failed-providers")).toBeNull()
+    unmount()
+
+    mockHookState.testResults.openai = { success: false, message: "401" }
+    mockHookState.testProvider.mockResolvedValue({ success: true, outcome: "verified" })
+    render(<ProviderSettings headerActionsTarget={headerActionsTarget} />)
+    const retry = within(headerActionsTarget).getByTestId("retry-failed-providers")
+    fireEvent.click(retry)
+    await waitFor(() => expect(mockHookState.testProvider).toHaveBeenCalledWith("openai"))
+    // The batch strip appears while/after a batch ran, and not before.
+    expect(screen.getByTestId("batch-strip")).toBeInTheDocument()
+  })
+
+  it("does not render the batch strip while no batch has run", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    expect(screen.queryByTestId("batch-strip")).toBeNull()
+  })
+
+  it("renders one rail with a resize handle on desktop, and persists the dragged width", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+      uiPreferences: { sidebarWidth: 360 },
+    })
+    render(<ProviderSettings />)
+    expect(screen.getAllByTestId("provider-sidebar")).toHaveLength(1)
+    const handle = screen.getByTestId("provider-rail-resize-handle")
+    expect(handle).toHaveAttribute("aria-valuenow", "360")
+    expect(screen.getByTestId("provider-layout")).toHaveStyle({
+      gridTemplateColumns: "360px minmax(0, 1fr)",
+    })
+    // Keyboard nudge goes through the same persisted preference.
+    fireEvent.keyDown(handle, { key: "ArrowRight" })
+    expect(handle).toHaveAttribute("aria-valuenow", "376")
+  })
+
+  it("renders the rail only inside the sheet on mobile — no hidden desktop copy", async () => {
+    mockIsMobile = true
+    try {
+      mockHookState = makeHookState({
+        filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+        selectedProviderId: "openai",
+      })
+      render(<ProviderSettings />)
+      // Sheet closed: zero rails mounted (the desktop column is not rendered).
+      expect(screen.queryAllByTestId("provider-sidebar")).toHaveLength(0)
+      expect(screen.queryByTestId("provider-rail-resize-handle")).toBeNull()
+      // The mobile top bar names the selection (the detail panel mock also
+      // renders the name, hence "some").
+      expect(screen.getAllByText("OpenAI").length).toBeGreaterThan(0)
+    } finally {
+      mockIsMobile = false
+    }
+  })
+
+  it("routes the sidebar sort menu to the persisted preference", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-sort-status"))
+    expect(mockSetProviderUIPreferences).toHaveBeenCalledWith({ sortBy: "status" })
+  })
+
+  it("shows the setup checklist for an unconfigured built-in and hides it once complete", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    const { unmount } = render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-setup-checklist")).toBeInTheDocument()
+    unmount()
+
+    mockHookState.providerSettings.openai = {
+      providerId: "openai",
+      enabled: true,
+      apiKey: "sk-openai",
+      defaultModel: "gpt-4o",
+      verificationStatus: "verified",
+    }
+    render(<ProviderSettings />)
+    expect(screen.queryByTestId("provider-setup-checklist")).toBeNull()
   })
 
   it("does not auto-select when the user has already chosen a provider", () => {
@@ -1228,7 +1374,10 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     render(<ProviderSettings />)
     const keyInput = screen.getByDisplayValue("sk-custom-123")
     expect(keyInput).toHaveAttribute("type", "password")
-    fireEvent.click(screen.getByRole("button", { name: "S" }))
+    // Eye / EyeOff icons with i18n aria-labels replaced the literal "H"/"S".
+    const toggle = screen.getByTestId("custom-provider-toggle-key")
+    expect(toggle.querySelector("svg")).not.toBeNull()
+    fireEvent.click(toggle)
     expect(keyInput).toHaveAttribute("type", "text")
   })
 

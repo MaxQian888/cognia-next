@@ -1,4 +1,11 @@
-import { deriveStatus, providerMatchesCategory } from "./provider-status-utils"
+import {
+  deriveStatus,
+  isLocalEngineConfigured,
+  normalizeCategoryFilter,
+  pickInitialProviderId,
+  providerMatchesCategory,
+  sortProviderRows,
+} from "./provider-status-utils"
 
 jest.mock("@cognia/provider-types/provider", () => ({
   PROVIDERS: {
@@ -24,6 +31,18 @@ jest.mock("@cognia/provider-types/provider", () => ({
       id: "local",
       name: "Local Provider",
       category: "local",
+      models: [],
+    },
+    aggregator: {
+      id: "aggregator",
+      name: "Aggregator Provider",
+      category: "aggregator",
+      models: [],
+    },
+    enterprise: {
+      id: "enterprise",
+      name: "Enterprise Provider",
+      category: "enterprise",
       models: [],
     },
   },
@@ -86,9 +105,17 @@ describe("providerMatchesCategory", () => {
     expect(providerMatchesCategory("custom", "flagship")).toBe(false)
   })
 
-  it("matches flagship providers under 'ai'", () => {
-    expect(providerMatchesCategory("ai", "flagship")).toBe(true)
-    expect(providerMatchesCategory("ai", "specialized")).toBe(false)
+  it("matches flagship + enterprise providers under 'flagship'", () => {
+    expect(providerMatchesCategory("flagship", "flagship")).toBe(true)
+    expect(providerMatchesCategory("flagship", "enterprise")).toBe(true)
+    expect(providerMatchesCategory("flagship", "specialized")).toBe(false)
+  })
+
+  it("matches specialized providers under 'specialized' and aggregators under 'aggregator'", () => {
+    expect(providerMatchesCategory("specialized", "specialized")).toBe(true)
+    expect(providerMatchesCategory("specialized", "aggregator")).toBe(false)
+    expect(providerMatchesCategory("aggregator", "aggregator")).toBe(true)
+    expect(providerMatchesCategory("aggregator", "flagship")).toBe(false)
   })
 
   it("matches local providers under 'local'", () => {
@@ -96,16 +123,85 @@ describe("providerMatchesCategory", () => {
     expect(providerMatchesCategory("local", "flagship")).toBe(false)
   })
 
-  it("matches vision-capable providers under 'vision'", () => {
-    expect(providerMatchesCategory("vision", "vision")).toBe(true)
-    expect(providerMatchesCategory("vision", "specialized")).toBe(false)
-  })
-
   it("returns true for unknown category keys", () => {
     expect(providerMatchesCategory("unknown-category", "flagship")).toBe(true)
   })
 
   it("returns false for unknown provider ids", () => {
-    expect(providerMatchesCategory("ai", "not-a-provider")).toBe(false)
+    expect(providerMatchesCategory("flagship", "not-a-provider")).toBe(false)
+  })
+})
+
+describe("normalizeCategoryFilter", () => {
+  it("keeps known filters and maps retired / unknown values to 'all'", () => {
+    expect(normalizeCategoryFilter("local")).toBe("local")
+    expect(normalizeCategoryFilter("custom")).toBe("custom")
+    // Values persisted by the retired AI / Voice / Vision strip.
+    expect(normalizeCategoryFilter("ai")).toBe("all")
+    expect(normalizeCategoryFilter("voice")).toBe("all")
+    expect(normalizeCategoryFilter(undefined)).toBe("all")
+  })
+})
+
+describe("isLocalEngineConfigured", () => {
+  it("is true for an enabled or verified local engine and false otherwise", () => {
+    expect(isLocalEngineConfigured("local", { enabled: true })).toBe(true)
+    expect(isLocalEngineConfigured("local", { verificationStatus: "verified" })).toBe(true)
+    expect(isLocalEngineConfigured("local", { enabled: false })).toBe(false)
+    expect(isLocalEngineConfigured("local", undefined)).toBe(false)
+  })
+
+  it("never applies to cloud providers", () => {
+    expect(isLocalEngineConfigured("flagship", { enabled: true })).toBe(false)
+  })
+})
+
+describe("sortProviderRows", () => {
+  const rows = [
+    { id: "b", name: "Bravo", status: "not-configured" as const, lastUsedAt: 10 },
+    { id: "a", name: "Alpha", status: "error" as const },
+    { id: "c", name: "Charlie", status: "connected" as const, lastUsedAt: 30 },
+    { id: "d", name: "Delta", status: "connected" as const, lastUsedAt: 20 },
+  ]
+
+  it("sorts by name", () => {
+    expect(sortProviderRows(rows, "name").map((r) => r.id)).toEqual(["a", "b", "c", "d"])
+  })
+
+  it("sorts healthiest first by status, then by name", () => {
+    expect(sortProviderRows(rows, "status").map((r) => r.id)).toEqual(["c", "d", "a", "b"])
+  })
+
+  it("sorts most recently used first, unused last, ties by name", () => {
+    expect(sortProviderRows(rows, "lastUsed").map((r) => r.id)).toEqual(["c", "d", "b", "a"])
+  })
+
+  it("does not mutate the input", () => {
+    const copy = [...rows]
+    sortProviderRows(rows, "status")
+    expect(rows).toEqual(copy)
+  })
+})
+
+describe("pickInitialProviderId", () => {
+  const rows = [
+    { id: "zeta", status: "not-configured" as const },
+    { id: "openai", status: "connected" as const },
+    { id: "anthropic", status: "connected" as const },
+  ]
+
+  it("prefers the app default provider when it is listed", () => {
+    expect(pickInitialProviderId(rows, "anthropic")).toBe("anthropic")
+  })
+
+  it("falls back to the first connected row, then the first row", () => {
+    expect(pickInitialProviderId(rows, "missing")).toBe("openai")
+    expect(pickInitialProviderId([{ id: "zeta", status: "not-configured" }], undefined)).toBe(
+      "zeta"
+    )
+  })
+
+  it("returns null for an empty list", () => {
+    expect(pickInitialProviderId([], "openai")).toBeNull()
   })
 })

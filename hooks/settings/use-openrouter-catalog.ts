@@ -23,8 +23,24 @@ export interface UseOpenRouterCatalogResult {
   sync: (apiKey?: string) => Promise<void>
 }
 
-export function useOpenRouterCatalog(): UseOpenRouterCatalogResult {
-  const row = useLiveQuery(() => getDb().openrouterCatalog.get("singleton"), [])
+export interface UseOpenRouterCatalogOptions {
+  /**
+   * Subscribe to the catalog row. Defaults to `true`; pass `false` from a
+   * host that only needs OpenRouter data while OpenRouter is the selected
+   * provider — the row is large and the live query otherwise re-runs for
+   * every table change regardless of which provider is on screen.
+   */
+  enabled?: boolean
+}
+
+export function useOpenRouterCatalog(
+  options: UseOpenRouterCatalogOptions = {}
+): UseOpenRouterCatalogResult {
+  const enabled = options.enabled ?? true
+  const row = useLiveQuery(
+    () => (enabled ? getDb().openrouterCatalog.get("singleton") : undefined),
+    [enabled]
+  )
   const [isSyncing, setIsSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

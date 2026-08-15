@@ -106,6 +106,31 @@ export async function getCostRange(
 }
 
 /**
+ * Most recent `updatedAt` per provider — the "recently used" signal for the
+ * provider rail's sort. Walks the `updatedAt` index newest-first and stops
+ * once every provider seen in the table has been visited, so the cost is
+ * proportional to distinct providers rather than to the whole table.
+ */
+export async function getLastUsedByProvider(): Promise<Record<string, number>> {
+  const table = getDb().providerCostDaily
+  const providerIds = (await table.orderBy("providerId").uniqueKeys()) as string[]
+  const remaining = new Set(providerIds)
+  const lastUsed: Record<string, number> = {}
+  if (remaining.size === 0) return lastUsed
+  await table
+    .orderBy("updatedAt")
+    .reverse()
+    .until(() => remaining.size === 0)
+    .each((row) => {
+      if (remaining.has(row.providerId)) {
+        remaining.delete(row.providerId)
+        lastUsed[row.providerId] = row.updatedAt
+      }
+    })
+  return lastUsed
+}
+
+/**
  * Drop rollup rows older than {@param days} days. Returns the number removed.
  * `days <= 0` is treated as "never prune".
  */

@@ -290,6 +290,37 @@ describe("ProviderDetailPanel", () => {
     expect(onToggleEnabled).not.toHaveBeenCalled()
   })
 
+  it("explains a blocked enable switch through a tooltip anchor when a reason is given", () => {
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "openai", name: "OpenAI" }}
+        isEnabled={false}
+        canEnable={false}
+        enableBlockedReason="Add an API key first"
+        onToggleEnabled={jest.fn()}
+      />
+    )
+    // Disabled controls swallow pointer events, so the reason anchors on a
+    // focusable wrapper around the (still disabled) switch.
+    const anchor = screen.getByTestId("provider-enable-blocked")
+    expect(anchor).toHaveAttribute("tabindex", "0")
+    expect(screen.getByRole("switch")).toBeDisabled()
+  })
+
+  it("keeps a disabled Set-default button visible with a reason instead of hiding it", () => {
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "openai", name: "OpenAI" }}
+        isEnabled={false}
+        isDefault={false}
+        setDefaultBlockedReason="Enable the provider first"
+      />
+    )
+    expect(screen.queryByTestId("provider-set-default")).not.toBeInTheDocument()
+    const blocked = screen.getByTestId("provider-set-default-blocked")
+    expect(blocked.querySelector("button")).toBeDisabled()
+  })
+
   it("renders tab content slots when provided", () => {
     render(
       <ProviderDetailPanel

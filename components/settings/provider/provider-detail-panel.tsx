@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { hasBrandIcon } from "@/components/icons/brand-icon"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 import { cn } from "@/lib/utils"
@@ -26,7 +27,6 @@ interface ProviderDetailPanelProvider {
 
 interface ProviderDetailPanelProps {
   provider: ProviderDetailPanelProvider | null
-  onTest?: () => void
   onToggleEnabled?: (enabled: boolean) => void
   onDelete?: () => void
   /** This provider is the app-wide default for new chats. */
@@ -36,10 +36,17 @@ interface ProviderDetailPanelProps {
    * Omit to hide the action (e.g. read-only contexts).
    */
   onSetDefault?: () => void
+  /**
+   * Why "Set default" is unavailable right now. When given (and `onSetDefault`
+   * is not), the button still renders — disabled, with this as its tooltip —
+   * so the user learns what to do instead of the action silently vanishing.
+   */
+  setDefaultBlockedReason?: string
   isEnabled?: boolean
   /** Whether an incomplete disabled provider may be enabled. */
   canEnable?: boolean
-  isTesting?: boolean
+  /** Why the enable switch is disabled (readiness reason) — shown as a tooltip. */
+  enableBlockedReason?: string
   isCustom?: boolean
   connectionStatus?: "connected" | "error" | "not-configured" | "warning" | "limited" | "untested"
   /** Tab content slots — passed by parent to inject actual tab components */
@@ -56,8 +63,10 @@ export function ProviderDetailPanel({
   onDelete,
   isDefault,
   onSetDefault,
+  setDefaultBlockedReason,
   isEnabled,
   canEnable = true,
+  enableBlockedReason,
   isCustom,
   connectionStatus,
   configTab,
@@ -113,90 +122,139 @@ export function ProviderDetailPanel({
             {t("detailPanel.modelsAvailable", { count: provider.modelCount ?? 0 })}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {isDefault ? (
-            <Badge variant="secondary" data-testid="provider-default-badge" className="gap-1">
-              <Star className="h-3 w-3" />
-              {t("detailPanel.defaultBadge")}
-            </Badge>
-          ) : onSetDefault ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 text-xs"
-              data-testid="provider-set-default"
-              aria-label={t("detailPanel.setDefaultAria")}
-              title={t("detailPanel.setDefaultAria")}
-              onClick={onSetDefault}
-            >
-              <Star className="h-3 w-3" />
-              {t("detailPanel.setDefault")}
-            </Button>
-          ) : null}
-          {connectionStatus === "connected" && (
-            <Badge
-              variant="outline"
-              className="border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-400"
-            >
-              {t("detailPanel.connected")}
-            </Badge>
-          )}
-          {connectionStatus === "error" && (
-            <Badge
-              variant="outline"
-              className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400"
-            >
-              {t("detailPanel.connectionFailed")}
-            </Badge>
-          )}
-          {connectionStatus === "limited" && (
-            <Badge
-              variant="outline"
-              className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
-            >
-              {t("verificationLimitedShort")}
-            </Badge>
-          )}
-          {connectionStatus === "untested" && (
-            <Badge variant="outline" className="text-muted-foreground">
-              {t("sidebar.statusUntested")}
-            </Badge>
-          )}
-          {connectionStatus === "warning" && (
-            <Badge
-              variant="outline"
-              title={t("detailPanel.warningHint")}
-              className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
-            >
-              {t("detailPanel.warning")}
-            </Badge>
-          )}
-          {connectionStatus === "not-configured" && (
-            <Badge
-              variant="outline"
-              className="text-muted-foreground"
-              title={t("detailPanel.notConfiguredHint")}
-            >
-              {t("detailPanel.notConfigured")}
-            </Badge>
-          )}
-          {isCustom && onDelete && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-              onClick={onDelete}
-              aria-label={t("delete")}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          )}
-          <Switch
-            checked={isEnabled}
-            disabled={!isEnabled && !canEnable}
-            onCheckedChange={onToggleEnabled}
-          />
-        </div>
+        {/* Own TooltipProvider so the panel is self-sufficient in stories and
+            tests; nesting inside the app-level provider is harmless. */}
+        <TooltipProvider>
+          <div className="flex shrink-0 items-center gap-2">
+            {isDefault ? (
+              <Badge variant="secondary" data-testid="provider-default-badge" className="gap-1">
+                <Star className="h-3 w-3" />
+                {t("detailPanel.defaultBadge")}
+              </Badge>
+            ) : onSetDefault ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+                data-testid="provider-set-default"
+                aria-label={t("detailPanel.setDefaultAria")}
+                title={t("detailPanel.setDefaultAria")}
+                onClick={onSetDefault}
+              >
+                <Star className="h-3 w-3" />
+                {t("detailPanel.setDefault")}
+              </Button>
+            ) : setDefaultBlockedReason ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* A disabled button swallows pointer events, so the tooltip
+                    anchors on a span that still receives hover/focus. */}
+                  <span
+                    tabIndex={0}
+                    className="inline-flex"
+                    data-testid="provider-set-default-blocked"
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="pointer-events-none h-7 gap-1.5 text-xs"
+                      disabled
+                      aria-label={t("detailPanel.setDefaultAria")}
+                    >
+                      <Star className="h-3 w-3" />
+                      {t("detailPanel.setDefault")}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-64 text-xs">
+                  {setDefaultBlockedReason}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+            {connectionStatus === "connected" && (
+              <Badge
+                variant="outline"
+                className="border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-400"
+              >
+                {t("detailPanel.connected")}
+              </Badge>
+            )}
+            {connectionStatus === "error" && (
+              <Badge
+                variant="outline"
+                className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400"
+              >
+                {t("detailPanel.connectionFailed")}
+              </Badge>
+            )}
+            {connectionStatus === "limited" && (
+              <Badge
+                variant="outline"
+                className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
+              >
+                {t("verificationLimitedShort")}
+              </Badge>
+            )}
+            {connectionStatus === "untested" && (
+              <Badge variant="outline" className="text-muted-foreground">
+                {t("sidebar.statusUntested")}
+              </Badge>
+            )}
+            {connectionStatus === "warning" && (
+              <Badge
+                variant="outline"
+                title={t("detailPanel.warningHint")}
+                className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
+              >
+                {t("detailPanel.warning")}
+              </Badge>
+            )}
+            {connectionStatus === "not-configured" && (
+              <Badge
+                variant="outline"
+                className="text-muted-foreground"
+                title={t("detailPanel.notConfiguredHint")}
+              >
+                {t("detailPanel.notConfigured")}
+              </Badge>
+            )}
+            {isCustom && onDelete && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                onClick={onDelete}
+                aria-label={t("delete")}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+            {!isEnabled && !canEnable && enableBlockedReason ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="inline-flex" data-testid="provider-enable-blocked">
+                    <Switch
+                      checked={false}
+                      disabled
+                      className="pointer-events-none"
+                      aria-label={t("detailPanel.enableSwitchAria")}
+                    />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-64 text-xs">
+                  {enableBlockedReason}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Switch
+                checked={isEnabled}
+                disabled={!isEnabled && !canEnable}
+                onCheckedChange={onToggleEnabled}
+                aria-label={t("detailPanel.enableSwitchAria")}
+              />
+            )}
+          </div>
+        </TooltipProvider>
       </div>
 
       {/* Tabs. Controlled, because the Models tab is scroll-owning: the shared

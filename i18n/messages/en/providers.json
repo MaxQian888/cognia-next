@@ -44,6 +44,10 @@
   "baseURLHint": "Use a proxy URL or self-hosted endpoint. Leave empty for default.",
   "baseURLPlaceholder": "https://api.example.com/v1",
   "baseUrl": "Base URL",
+  "batch": {
+    "retryFailed": "Retry failed",
+    "retryFailedNone": "No failed providers to retry"
+  },
   "batchApiPrice": "Batch API price",
   "batchNoEligibleProviders": "No visible and eligible providers are available for this operation.",
   "batchOperationRetryFailed": "Retry failed",
@@ -74,10 +78,13 @@
   "capabilityVideo": "Video",
   "capabilityVision": "Vision",
   "categories": {
+    "aggregator": "Aggregators",
     "ai": "AI",
     "all": "All",
     "custom": "Custom",
+    "flagship": "Flagship",
     "local": "Local",
+    "specialized": "Specialized",
     "vision": "Vision",
     "voice": "Voice"
   },
@@ -310,6 +317,7 @@
     "defaultBadge": "Default",
     "emptyDescription": "Select a provider to configure, or add a new one",
     "emptyTitle": "No Provider Selected",
+    "enableSwitchAria": "Enable provider",
     "modelsAvailable": "{count} models available",
     "modelsPlaceholder": "Models placeholder",
     "notConfigured": "Not configured",
@@ -568,6 +576,12 @@
     "unknown": "Unknown"
   },
   "host": "Host",
+  "hostNotice": {
+    "companionBody": "Keys and endpoints entered here stay on this device and are never sent to the paired host. The host uses its own provider configuration.",
+    "companionTitle": "Device-local provider settings",
+    "mobileLocalBody": "On a phone, \"localhost\" is the phone itself. Point the base URL at a machine on your network that runs the engine, or configure local engines on the paired desktop.",
+    "mobileLocalTitle": "Local engines run on this device"
+  },
   "hoursAgo": "{count}h ago",
   "import": "Import",
   "importConflictWarning": "{count} conflict(s) detected with existing settings",
@@ -861,6 +875,7 @@
   "pullStarting": "Starting…",
   "quickActions": "Quick Actions",
   "quickAdd": {
+    "addedToast": "{name} added — configure and test it below.",
     "advancedWizard": "Advanced Wizard →",
     "customProvider": "Add Custom Provider",
     "title": "Quick Add Provider",
@@ -874,6 +889,18 @@
   "quotaUsage": "Quota Usage",
   "random": "Random",
   "rateLimitRemaining": "Rate Limit",
+  "readiness": {
+    "enableBlocked": "Finish the setup checklist before enabling this provider.",
+    "localReady": "Local engines need no key — start the server and run a connection test.",
+    "nextAction_add_api_key": "Add an API key",
+    "nextAction_configure_base_url": "Configure a valid base URL",
+    "nextAction_enable_provider": "Enable the provider",
+    "nextAction_select_default_model": "Select a default model",
+    "nextAction_verify_connection": "Run a connection test",
+    "progress": "{completed} of {total} steps done",
+    "setDefaultBlocked": "Enable the provider and pick a default model before making it the default.",
+    "title": "Setup checklist"
+  },
   "ready": "Ready",
   "recommended": "Recommended",
   "recommendedDesc": "Easy to install and use",
@@ -1169,7 +1196,12 @@
     "reasonUnconfigured": "Add an API key to start using this provider",
     "reasonUntested": "Credentials saved, but no connection test has run yet.",
     "reasonWarning": "Configured but not verified — open to test the connection",
+    "resizeHandle": "Resize provider list",
     "searchPlaceholder": "Search providers...",
+    "sortLabel": "Sort providers",
+    "sortLastUsed": "Recently used",
+    "sortName": "Name",
+    "sortStatus": "Status",
     "stats": "{total} providers · {active} connected",
     "statusAll": "All",
     "statusConnected": "Connected",

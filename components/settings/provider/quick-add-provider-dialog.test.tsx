@@ -232,6 +232,20 @@ describe("QuickAddProviderDialog", () => {
       })
     })
 
+    it("reports the new provider id and name through onAdded after a successful save", async () => {
+      const onAdded = jest.fn()
+      render(<QuickAddProviderDialog {...defaultProps} onAdded={onAdded} />)
+
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      await userEvent.type(screen.getByLabelText("apiKey"), "siliconflow-key")
+      await userEvent.click(screen.getByText("save"))
+
+      await waitFor(() => {
+        expect(onAdded).toHaveBeenCalledWith("custom-provider", "SiliconFlow (硅基流动)")
+      })
+      expect(defaultProps.onOpenChange).toHaveBeenCalledWith(false)
+    })
+
     it("keeps the dialog open until the provider has been persisted", async () => {
       let resolveSave: ((providerId: string) => void) | undefined
       mockAddCustomProvider.mockImplementationOnce(
