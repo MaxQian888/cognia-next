@@ -112,7 +112,19 @@ function forCompare(normalized: string): string {
   return isWindowsLike(normalized) ? normalized.toLowerCase() : normalized
 }
 
-/** True when `target` resolves to `root` itself or a descendant of it. */
+/**
+ * True when `target` resolves to `root` itself or a descendant of it.
+ *
+ * Exported because the filesystem viewer needs the same containment test when
+ * it picks which workspace root an absolute path belongs to. Two copies of
+ * segment-boundary matching (this and `resolveOpener` in
+ * `lib/files/project-editor-bridge.ts`) is already one too many; a third would
+ * be the one that eventually disagrees about a trailing slash.
+ */
+export function isPathWithinRoot(target: string, root: string): boolean {
+  return isWithinRoot(target, root)
+}
+
 function isWithinRoot(target: string, root: string): boolean {
   const t = forCompare(normalizeFsPath(target))
   const r = forCompare(normalizeFsPath(root))

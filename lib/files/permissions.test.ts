@@ -2,6 +2,7 @@ import {
   checkFileAccess,
   normalizeFsPath,
   isMutatingOperation,
+  isPathWithinRoot,
   defaultFilePolicy,
 } from "@/lib/files/permissions"
 import type { FileAccessPolicy } from "@/types/files"
@@ -218,5 +219,32 @@ describe("defaultFilePolicy", () => {
     const p = defaultFilePolicy(["/a"], { readOnly: true, maxBytes: 99 })
     expect(p.readOnly).toBe(true)
     expect(p.maxBytes).toBe(99)
+  })
+})
+
+describe("isPathWithinRoot", () => {
+  it("accepts the root itself and its descendants", () => {
+    expect(isPathWithinRoot("/work/app", "/work/app")).toBe(true)
+    expect(isPathWithinRoot("/work/app/src/a.ts", "/work/app")).toBe(true)
+  })
+
+  it("matches on segment boundaries, not string prefixes", () => {
+    // `/work/app-2` starts with `/work/app` but is a different tree.
+    expect(isPathWithinRoot("/work/app-2/a.ts", "/work/app")).toBe(false)
+  })
+
+  it("resolves traversal before comparing", () => {
+    expect(isPathWithinRoot("/work/app/../secrets", "/work/app")).toBe(false)
+    expect(isPathWithinRoot("/work/app/src/../a.ts", "/work/app")).toBe(true)
+  })
+
+  it("folds case for Windows-like paths only", () => {
+    expect(isPathWithinRoot("C:\\Work\\App\\a.ts", "c:/work/app")).toBe(true)
+    // POSIX paths are case-sensitive and must stay that way.
+    expect(isPathWithinRoot("/Work/App/a.ts", "/work/app")).toBe(false)
+  })
+
+  it("rejects an unusable root", () => {
+    expect(isPathWithinRoot("/work/app/a.ts", "")).toBe(false)
   })
 })

@@ -9654,6 +9654,22 @@
     "deniedTitle": "File access denied",
     "failed": "File operation failed: {message}"
   },
+  "fileViewer": {
+    "error": {
+      "isDirectory": "That path is a folder, not a file.",
+      "noBackend": "File preview needs the desktop app or a paired device.",
+      "noRoot": "This file is not inside any workspace you have open.",
+      "notFound": "This file no longer exists.",
+      "outsideWorkspace": "This file is outside your open workspaces and cannot be previewed.",
+      "readFailed": "This file could not be read.",
+      "tooLarge": "This file is larger than {limit} and is too big to preview.",
+      "unsupported": "There is no preview for this file type."
+    },
+    "frameTitle": "File preview",
+    "loading": "Loading file…",
+    "openAtLine": "Open at line {line}",
+    "retry": "Try again"
+  },
   "fleet": {
     "agents": {
       "claude-code": "Claude Code",
