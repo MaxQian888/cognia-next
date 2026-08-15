@@ -1126,7 +1126,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
           onClick={() => void runBatchRetryFailed()}
         >
           <RotateCcw className="h-3.5 w-3.5" />
-          {t("batch.retryFailed")} ({batchRetryCount})
+          {t("batchOperationRetryFailed")} ({batchRetryCount})
         </Button>
       )}
     </div>

@@ -18505,10 +18505,6 @@
     "baseURLHint": "Use a proxy URL or self-hosted endpoint. Leave empty for default.",
     "baseURLPlaceholder": "https://api.example.com/v1",
     "baseUrl": "Base URL",
-    "batch": {
-      "retryFailed": "Retry failed",
-      "retryFailedNone": "No failed providers to retry"
-    },
     "batchApiPrice": "Batch API price",
     "batchNoEligibleProviders": "No visible and eligible providers are available for this operation.",
     "batchOperationRetryFailed": "Retry failed",

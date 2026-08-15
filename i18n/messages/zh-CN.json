@@ -18505,10 +18505,6 @@
     "baseURLHint": "使用代理 URL 或自托管端点。留空使用默认值。",
     "baseURLPlaceholder": "https://api.example.com/v1",
     "baseUrl": "服务地址",
-    "batch": {
-      "retryFailed": "重试失败项",
-      "retryFailedNone": "没有需要重试的失败提供商"
-    },
     "batchApiPrice": "批量 API 单价",
     "batchNoEligibleProviders": "当前没有可见且可执行此操作的服务商。",
     "batchOperationRetryFailed": "重试失败项",
