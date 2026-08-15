@@ -16,13 +16,19 @@ jest.mock("next-intl", () => ({
 }))
 
 // One control with keywords, one without — exercises the optional-keywords path.
-// The third targets a desktop-only section, which the finder must hide in web
-// mode (the registry really does contain such controls: tools, security, sandbox).
+// The third targets a section a web-standalone client cannot reach (the
+// `desktop` section is pinned to the desktop profile), which the finder must
+// hide there (the registry really does contain such controls: tools, sandbox).
 jest.mock("./control-registry", () => ({
   SETTING_CONTROLS: [
-    { id: "default-model", sectionId: "general", labelKey: "defaultModel", keywords: ["model"] },
+    {
+      id: "default-model",
+      sectionId: "agent-runtime",
+      labelKey: "defaultModel",
+      keywords: ["model"],
+    },
     { id: "no-keywords", sectionId: "about", labelKey: "autoUpdate" },
-    { id: "desktop-bound", sectionId: "security", labelKey: "secretStore" },
+    { id: "desktop-bound", sectionId: "desktop", labelKey: "secretStore" },
   ],
 }))
 
@@ -75,15 +81,16 @@ describe("SettingsFinder", () => {
 
 // The sidebar has always hidden desktop-only sections in web mode; the finder
 // did not, which made ⌘K the back door into panels whose IPC can only reject.
-describe("SettingsFinder desktop-only filtering", () => {
-  it("hides desktop-only sections in web mode", () => {
+describe("SettingsFinder host-reachability filtering", () => {
+  it("hides sections a web-standalone client cannot reach", () => {
     setDesktop(false)
     render(<SettingsFinder open onOpenChange={jest.fn()} />)
     expect(screen.queryByText("tabs.subscription")).not.toBeInTheDocument()
     expect(screen.queryByText("tabs.ccswitch")).not.toBeInTheDocument()
+    expect(screen.queryByText("tabs.desktop")).not.toBeInTheDocument()
   })
 
-  it("hides controls that deep-link into a desktop-only section", () => {
+  it("hides controls that deep-link into an unreachable section", () => {
     setDesktop(false)
     render(<SettingsFinder open onOpenChange={jest.fn()} />)
     expect(screen.queryByText("finder.controls.secretStore")).not.toBeInTheDocument()

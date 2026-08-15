@@ -26545,8 +26545,6 @@
       "webOnlyHintBefore": "仅在桌面版本中可用。运行 ",
       "webOnlyHintCode": "pnpm tauri dev"
     },
-    "desktopOnlySectionBody": "该设置项需要桌面应用——它要读取浏览器无法访问的凭据和本地文件。请在桌面端打开 Cognia 使用。",
-    "desktopOnlySectionTitle": "仅桌面应用可用",
     "developer": {
       "lsp": {
         "description": "开启后，VS Code 扩展的 LSP 二进制策略会在一次会话内确认后允许未签名服务器启动，而非直接拒绝。仅当你在调试自己开发的 .vsix 时使用。",
@@ -28030,6 +28028,8 @@
       "minOsLevelLabel": "桌面通知的最低级别",
       "minPushLevelLabel": "推送的最低级别",
       "osPermissionDenied": "已拒绝。请在系统设置中为 Cognia 开启通知。",
+    "hostUnavailableSectionBody": "该设置项管理的能力在你当前连接的主机上不可用——它需要桌面应用，或一台已配对且运行该能力的主机。请在那里打开 Cognia 使用。",
+    "hostUnavailableSectionTitle": "当前主机不可用",
       "osPermissionEnable": "启用",
       "osPermissionEnabled": "已启用",
       "osPermissionGranted": "原生通知已启用。",

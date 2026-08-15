@@ -109,11 +109,12 @@ interface NavItem {
   descriptionKey: string // settings.descriptions.<key>
   group: SettingsGroup
   icon: ComponentType<{ className?: string }>
-  desktopOnly?: boolean // Tauri/desktop only
+  requires?: readonly CapabilityId[] // capabilities the section administers
+  profiles?: readonly HostProfile[] // local-shell surfaces only (mirrors CapabilityGate)
 }
 ```
 
-Entries with `desktopOnly: true` (e.g. `subscription`, `ccswitch`, `hooks`, `tools`, `connections`, `webhooks`, `companion`, `desktop`) are automatically filtered out by the sidebar when `usePlatform() === "web" | "mobile"`. This is a single toggle; the section itself does not need to repeat the check.
+Reachability is capability-keyed, not host-keyed (ADR-0059 D7 / F5). An entry declares the capabilities it administers in `requires` (e.g. `terminal` → `pty`, `subscription` → `keyring`, `connections` → `connector-runtime`, `automation` → `uia-automation`); `isSettingsSectionReachable` checks them with `capabilityAvailable` semantics, so a browser paired to a cloud brain sees the sections whose backend runs on that brain, and a web-standalone client sees only what runs in the webview. `profiles` is reserved for surfaces bound to the local desktop shell itself (`desktop`, `sidebar`, `companion`, `remote-hosts`) and, transitionally, for sections whose renderer path still bypasses the transport seam (`ccswitch`, `hooks`, `fleet` — each pin names the host-parity Class A file it waits on). The sidebar, the ⌘K finder and the shell's `?section=` dispatch all consume the same `useSettingsSectionReachability()` answer, so a hidden section cannot be reached through a deep link; `pnpm audit:host-parity` fails on any new `desktopOnly: true`.
 
 ## Group Semantics
 

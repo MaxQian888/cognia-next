@@ -70,9 +70,9 @@ jest.mock("@/hooks/settings/use-setting-focus", () => ({
 
 import { SettingsShell } from "./settings-shell"
 
-// Desktop-only sections are gated on the Tauri marker `isTauri()` reads. jsdom
-// has no marker, so anything asserting a desktop-only section renders has to
-// opt in explicitly.
+// Section reachability keys on the host profile, which `detectPlatform()`
+// derives from the Tauri marker. jsdom has no marker (web-standalone), so
+// anything asserting a host-backed section renders has to opt in explicitly.
 const TAURI_MARKER = "__TAURI_INTERNALS__"
 function setDesktop(on: boolean) {
   if (on) {
@@ -165,18 +165,18 @@ describe("SettingsShell reset button", () => {
   })
 })
 
-describe("SettingsShell desktop-only backstop", () => {
+describe("SettingsShell host-reachability backstop", () => {
   beforeEach(() => {
     replace.mockClear()
   })
 
-  it("refuses a desktop-only section in web mode and explains why", () => {
+  it("refuses a section this host cannot reach and explains why", () => {
     setDesktop(false)
     mockSection = "subscription"
     render(<SettingsShell />)
     expect(screen.queryByTestId("section-body")).not.toBeInTheDocument()
-    expect(screen.getByText("desktopOnlySectionTitle")).toBeInTheDocument()
-    expect(screen.getByText("desktopOnlySectionBody")).toBeInTheDocument()
+    expect(screen.getByText("hostUnavailableSectionTitle")).toBeInTheDocument()
+    expect(screen.getByText("hostUnavailableSectionBody")).toBeInTheDocument()
   })
 
   it("explains rather than silently redirecting — the deep link stays addressable", () => {
@@ -191,7 +191,7 @@ describe("SettingsShell desktop-only backstop", () => {
     mockSection = "subscription"
     render(<SettingsShell />)
     expect(screen.getByTestId("section-body")).toBeInTheDocument()
-    expect(screen.queryByText("desktopOnlySectionTitle")).not.toBeInTheDocument()
+    expect(screen.queryByText("hostUnavailableSectionTitle")).not.toBeInTheDocument()
   })
 
   it("leaves sections that work in the browser alone", () => {
@@ -222,7 +222,7 @@ describe("SettingsShell fill-height layout", () => {
     const { container } = render(<SettingsShell />)
     const panel = container.querySelector("[data-settings-panel]")
     expect(panel).not.toBeNull()
-    expect(panel).toHaveClass("w-full", "max-w-[100vw]", "min-w-0")
+    expect(panel).toHaveClass("w-full", "max-w-[100vw]", "min-w-0", "min-h-0", "overflow-hidden")
     expect(panel!.className).toMatch(/\bflex-1\b/)
     expect(container.innerHTML).not.toMatch(/max-w-5xl/)
   })

@@ -1,6 +1,6 @@
 "use client"
 
-import { useSyncExternalStore } from "react"
+import { useCallback, useSyncExternalStore } from "react"
 
 import {
   detectHostProfile,
@@ -47,12 +47,26 @@ export function capabilityAvailable(
   return hasCapability(cap) || remoteCapabilities.includes(cap)
 }
 
-export function useCapability(cap: CapabilityId): boolean {
+/**
+ * A `capabilityAvailable` closure bound to the current host profile and
+ * remote-transport state — for callers that gate on a *set* of capabilities
+ * (settings-section reachability) rather than one, without a hook per id.
+ * Referentially stable while neither input changes, so it is safe as a memo
+ * dependency.
+ */
+export function useCapabilityChecker(): (cap: CapabilityId) => boolean {
   const profile = useHostProfile()
   const remoteHostActive = useSyncExternalStore(
     (notify) => subscribeActiveRemoteTransport(() => notify()),
     isRemoteHostActive,
     () => false
   )
-  return capabilityAvailable(cap, profile, remoteHostActive)
+  return useCallback(
+    (cap: CapabilityId) => capabilityAvailable(cap, profile, remoteHostActive),
+    [profile, remoteHostActive]
+  )
+}
+
+export function useCapability(cap: CapabilityId): boolean {
+  return useCapabilityChecker()(cap)
 }

@@ -31,7 +31,7 @@ import {
   type SettingsGroup,
   type SettingsSectionId,
 } from "./settings-nav-config"
-import { useDesktopAvailable } from "@/hooks/settings/use-desktop-available"
+import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { useSettingsSidebarCollapse } from "@/hooks/settings/use-settings-sidebar-collapse"
 
 interface Props {
@@ -46,7 +46,7 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
   const { state, setOpenMobile } = useSidebar()
   const isCollapsed = state === "collapsed"
   const { isGroupCollapsed, setGroupCollapsed, expandGroup } = useSettingsSidebarCollapse()
-  const desktopAvailable = useDesktopAvailable()
+  const { navItems } = useSettingsSectionReachability()
 
   // While searching, collapse state is ignored: every group with a hit is
   // forced open (the persisted state is left untouched).
@@ -66,11 +66,6 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
     lastAutoExpandedRef.current = activeSection
     if (activeGroup && isGroupCollapsed(activeGroup)) void expandGroup(activeGroup)
   }, [activeSection, activeGroup, isGroupCollapsed, expandGroup])
-
-  const navItems = useMemo(
-    () => SETTINGS_NAV.filter((item) => !item.desktopOnly || desktopAvailable),
-    [desktopAvailable]
-  )
 
   // Translator that can take a fully-qualified key. next-intl's `useTranslations`
   // requires a namespace, but our keys span `settings.tabs` and

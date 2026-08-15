@@ -22,12 +22,11 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import {
-  DESKTOP_ONLY_SECTIONS,
   SETTINGS_NAV,
   SETTINGS_SEARCH_KEYWORDS,
   type SettingsSectionId,
 } from "@/components/settings/settings-nav-config"
-import { useDesktopAvailable } from "@/hooks/settings/use-desktop-available"
+import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { SETTING_CONTROLS } from "./control-registry"
 
 const SECTION_LABEL_KEY: Record<SettingsSectionId, string> = Object.fromEntries(
@@ -44,14 +43,11 @@ export function SettingsFinder({
   const t = useTranslations("settings")
   const router = useRouter()
   const searchParams = useSearchParams()
-  const desktopAvailable = useDesktopAvailable()
-
-  // The sidebar hides desktop-only sections in web mode; the finder has to make
+  // The sidebar hides sections this host can't reach; the finder has to make
   // the same cut or it becomes the back door into them — including the controls
   // that deep-link into one.
-  const reachable = (id: SettingsSectionId) => desktopAvailable || !DESKTOP_ONLY_SECTIONS.has(id)
-  const navItems = SETTINGS_NAV.filter((n) => reachable(n.id))
-  const controls = SETTING_CONTROLS.filter((c) => reachable(c.sectionId))
+  const { isReachable, navItems } = useSettingsSectionReachability()
+  const controls = SETTING_CONTROLS.filter((c) => isReachable(c.sectionId))
 
   const sectionLabel = (id: SettingsSectionId) => t(`tabs.${SECTION_LABEL_KEY[id]}` as never)
 

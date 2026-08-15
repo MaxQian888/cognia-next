@@ -1452,6 +1452,32 @@ async fn remote_notification_protocol_is_bounded_and_event_bus_backed() {
         "remote_notification_publish",
         json!({ "title": "Open", "body": "Unsafe", "href": "https://evil.example" }),
         &state,
+
+    // `ocr_download_model` is host-neutral through `ocr_progress_emitter()`:
+    // the headless host must reach the download code proper (which rejects a
+    // backend that manages no models before any I/O), never a host gate.
+    let error = dispatch(
+        "ocr_download_model",
+        json!({ "backend": "does-not-exist", "requestId": "ocr-dl-1" }),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect_err("unknown backend must fail before any download");
+    assert!(
+        error
+            .1
+             .0
+            .message
+            .contains("does not manage its own models"),
+        "unexpected error: {}",
+        error.1 .0.message
+    );
+    assert_ne!(error.1 .0.code, "headless_unsupported");
+    assert_ne!(error.1 .0.code, "headless_host_required");
         &host,
         "brain-local",
         Some(ACCOUNT_ID),

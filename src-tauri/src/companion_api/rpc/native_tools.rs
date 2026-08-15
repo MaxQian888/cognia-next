@@ -52,67 +52,48 @@ pub(super) async fn dispatch(
     account_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager as _;
-
     let _ = (state, host, device_id, account_id, scope);
     let result = match name {
         // ── Native OCR service plane ────────────────────────────────────────
+        //
+        // Host-neutral through `DispatchHost::ocr_registry()`: both hosts own a
+        // `NativeOcrRegistry` (the desktop `.manage()`s one at boot, the headless
+        // container installs its compiled backends lazily), and the registry
+        // itself already subtracts the OS-bound `apple-vision` /
+        // `windows-media-ocr` backends where they cannot run. There is nothing
+        // desktop-only about the arms, only about two of the backends.
         "ocr_list_native_backends" => {
-            let ids = if let Some(services) = host.headless() {
-                services
-                    .ocr_registry()
-                    .await
-                    .list_ids()
-                    .await
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            } else {
-                let app = host.tauri_app(name)?;
-                let registry: tauri::State<'_, crate::ocr::NativeOcrRegistry> = app.state();
-                registry
-                    .list_ids()
-                    .await
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect()
-            };
+            let ids = host
+                .ocr_registry()
+                .await
+                .list_ids()
+                .await
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
             to_json(ids)
         }
 
         "ocr_list_available_backends" => {
-            let ids = if let Some(services) = host.headless() {
-                services
-                    .ocr_registry()
-                    .await
-                    .available_ids()
-                    .await
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            } else {
-                let app = host.tauri_app(name)?;
-                let registry: tauri::State<'_, crate::ocr::NativeOcrRegistry> = app.state();
-                registry
-                    .available_ids()
-                    .await
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect()
-            };
+            let ids = host
+                .ocr_registry()
+                .await
+                .available_ids()
+                .await
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
             to_json(ids)
         }
 
         "ocr_extract_native" => {
             let payload: crate::ocr::NativeOcrInvokePayload = required(&args, "payload")?;
-            let result = if let Some(services) = host.headless() {
-                services.ocr_registry().await.dispatch(&payload).await
-            } else {
-                let app = host.tauri_app(name)?;
-                let registry: tauri::State<'_, crate::ocr::NativeOcrRegistry> = app.state();
-                registry.dispatch(&payload).await
-            }
-            .map_err(|error| RpcError::internal(error.to_string()))?;
+            let result = host
+                .ocr_registry()
+                .await
+                .dispatch(&payload)
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?;
             to_json(result)
         }
 
@@ -132,24 +113,16 @@ pub(super) async fn dispatch(
                 Some(value) => Some(value),
                 None => optional(&args, "request_id")?,
             };
-            let result = if let Some(services) = host.headless() {
-                let event_bus = std::sync::Arc::clone(&services.event_bus);
-                crate::ocr::native::ocr_download_model_with_emitter(
-                    backend,
-                    variant,
-                    request_id,
-                    std::sync::Arc::new(move |event| {
-                        if let Ok(payload) = serde_json::to_value(event) {
-                            event_bus.publish("ocr://download-progress".to_string(), payload);
-                        }
-                    }),
-                )
-                .await
-            } else {
-                let app = host.tauri_app(name)?;
-                crate::ocr::native::ocr_download_model(app.clone(), backend, variant, request_id)
-                    .await
-            }
+            // Progress delivery is the only host-specific part, and
+            // `ocr_progress_emitter()` owns that split; the download itself is
+            // the same code on both hosts.
+            let result = crate::ocr::native::ocr_download_model_with_emitter(
+                backend,
+                variant,
+                request_id,
+                host.ocr_progress_emitter(),
+            )
+            .await
             .map_err(RpcError::internal)?;
             to_json(result)
         }

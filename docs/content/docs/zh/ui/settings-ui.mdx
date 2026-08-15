@@ -96,11 +96,12 @@ interface NavItem {
   descriptionKey: string // settings.descriptions.<key>
   group: SettingsGroup
   icon: ComponentType<{ className?: string }>
-  desktopOnly?: boolean // 仅 Tauri/桌面
+  requires?: readonly CapabilityId[] // 该 section 所管理的能力
+  profiles?: readonly HostProfile[] // 仅限本机 shell 表面（与 CapabilityGate 同义）
 }
 ```
 
-`desktopOnly: true` 的条目（如 `subscription`、`ccswitch`、`hooks`、`tools`、`connections`、`webhooks`、`companion`、`desktop`）在 `usePlatform() === "web" | "mobile"` 时被侧栏自动过滤。这是单一开关，section 内部不需要重复判断。
+可达性按能力而非按主机判断（ADR-0059 D7 / F5）。条目在 `requires` 中声明自己管理的能力（如 `terminal` → `pty`、`subscription` → `keyring`、`connections` → `connector-runtime`、`automation` → `uia-automation`）；`isSettingsSectionReachable` 以 `capabilityAvailable` 语义检查，因此配对到云端 brain 的浏览器能看到后端跑在该 brain 上的 section，而 web 独立模式只看到 webview 内能跑的部分。`profiles` 仅用于绑定本机桌面 shell 的表面（`desktop`、`sidebar`、`companion`、`remote-hosts`），以及过渡期内渲染端仍绕过传输接缝的 section（`ccswitch`、`hooks`、`fleet`——每处 pin 都注明其等待的 host-parity Class A 文件）。侧栏、⌘K 查找器和 shell 的 `?section=` 分发共用同一个 `useSettingsSectionReachability()` 结论，深链无法绕过；`pnpm audit:host-parity` 会拦截任何新增的 `desktopOnly: true`。
 
 ## 分组语义
 

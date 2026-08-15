@@ -15,9 +15,9 @@ import { SectionResetButton } from "./common/section-reset-button"
 import { SettingsEmptyState } from "./common/settings-section"
 import { SettingsFinder } from "./finder/settings-finder"
 import { resetKeysForSection } from "@/lib/settings/section-keys"
-import { useDesktopAvailable } from "@/hooks/settings/use-desktop-available"
+import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { useSettingFocus } from "@/hooks/settings/use-setting-focus"
-import { DESKTOP_ONLY_SECTIONS, SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
+import { SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
 
 const SectionLoading = () => {
   const t = useTranslations("settings")
@@ -453,7 +453,7 @@ function SettingsShellInner({ actions }: Props) {
 
         {FILL_HEIGHT_SECTIONS.has(activeSection) ? (
           <div
-            className="flex w-full max-w-[100vw] min-w-0 flex-1 flex-col p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb"
+            className="flex min-h-0 w-full max-w-[100vw] min-w-0 flex-1 flex-col overflow-hidden p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb"
             data-settings-panel
           >
             <div className="mx-auto flex w-full min-h-0 flex-1 flex-col animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -495,20 +495,20 @@ function SectionContent({
   headerActionsTarget: HTMLDivElement | null
 }) {
   const t = useTranslations("settings")
-  const desktopAvailable = useDesktopAvailable()
+  const { isReachable } = useSettingsSectionReachability()
 
-  // Last line of defence for desktop-only sections. The sidebar and the finder
-  // both hide them in web mode, but `?section=` is a public deep-link contract
+  // Last line of defence for sections this host can't reach. The sidebar and
+  // the finder both hide them, but `?section=` is a public deep-link contract
   // (bookmarks, docs, finder anchors), so the dispatch itself has to refuse —
   // otherwise the panel renders and the user only discovers it can't work when
-  // a Tauri IPC call rejects at the end of a multi-step flow. An explicit
+  // an IPC call rejects at the end of a multi-step flow. An explicit
   // explanation beats a silent redirect: the user asked for this section.
-  if (!desktopAvailable && DESKTOP_ONLY_SECTIONS.has(section)) {
+  if (!isReachable(section)) {
     return (
       <SettingsEmptyState
         icon={<MonitorIcon />}
-        title={t("desktopOnlySectionTitle")}
-        description={t("desktopOnlySectionBody")}
+        title={t("hostUnavailableSectionTitle")}
+        description={t("hostUnavailableSectionBody")}
       />
     )
   }

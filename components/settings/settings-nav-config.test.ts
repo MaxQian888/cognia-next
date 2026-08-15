@@ -1,9 +1,13 @@
+import { CORE_CAPABILITY_IDS, type CapabilityId } from "@/lib/platform/capabilities"
 import {
   SETTINGS_GROUP_ORDER,
   SETTINGS_NAV,
   SETTINGS_SEARCH_KEYWORDS,
   isSearchMatch,
+  isSettingsSectionReachable,
+  reachableSettingsSections,
   type NavItem,
+  type SettingsReachabilityContext,
   type SettingsSectionId,
 } from "./settings-nav-config"
 
@@ -55,21 +59,21 @@ describe("settings-nav-config", () => {
       expect(item?.labelKey).toBe("plugins")
     })
 
-    it("webhooks sits in the System group and is desktopOnly", () => {
+    it("webhooks sits in the System group and requires an always-on host", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "webhooks")
       expect(item).toBeDefined()
       expect(item?.group).toBe("system")
-      expect(item?.desktopOnly).toBe(true)
+      expect(item?.requires).toEqual(["always-on"])
       expect(item?.labelKey).toBe("webhooks")
     })
 
-    it("Pro IDE is a searchable desktop-only interface section", () => {
+    it("Pro IDE is a searchable interface section that requires a shell host", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "pro-ide")
       expect(item).toMatchObject({
         group: "interface",
         labelKey: "proIde",
         descriptionKey: "proIde",
-        desktopOnly: true,
+        requires: ["shell"],
       })
       expect(SETTINGS_SEARCH_KEYWORDS["pro-ide"]).toEqual(
         expect.arrayContaining(["code-server", "vscode", "内嵌编辑器"])
@@ -119,6 +123,11 @@ describe("settings-nav-config", () => {
       expect(isSearchMatch(item, "marketplace", t)).toBe(true)
     })
 
+    it("finds the SSH host editor under the terminal section", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "terminal")!
+      expect(isSearchMatch(item, "ssh", t)).toBe(true)
+    })
+
     it("matches webhook keywords without advertising the deleted inbound listener", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "webhooks")!
       expect(isSearchMatch(item, "webhook", t)).toBe(true)
@@ -133,6 +142,118 @@ describe("settings-nav-config", () => {
     it("uses description key on label miss", () => {
       const item = navItem({ labelKey: "x", descriptionKey: "long-description-token" })
       expect(isSearchMatch(item, "long-description-token", t)).toBe(true)
+    })
+  })
+
+  describe("section reachability (ADR-0059 D7 / F5)", () => {
+    const withCaps = (
+      profile: SettingsReachabilityContext["profile"],
+      caps: readonly CapabilityId[]
+    ): SettingsReachabilityContext => ({
+      profile,
+      hasCapability: (cap) => caps.includes(cap),
+    })
+    const DESKTOP_CAPS: readonly CapabilityId[] = [
+      "webview",
+      "shell",
+      "pty",
+      "sidecar",
+      "keyring",
+      "uia-automation",
+      "ocr",
+      "always-on",
+      "connector-runtime",
+      "mcp-runtime",
+      "push-display",
+      "browser",
+    ]
+    // What a companion client reaches: its own webview plus the server-backed set.
+    const COMPANION_CAPS: readonly CapabilityId[] = [
+      "webview",
+      "shell",
+      "pty",
+      "sidecar",
+      "keyring",
+      "always-on",
+      "connector-runtime",
+      "mcp-runtime",
+      "headless",
+    ]
+    const desktop = withCaps("desktop", DESKTOP_CAPS)
+    const cloudCompanion = withCaps("cloud-companion", COMPANION_CAPS)
+    const webStandalone = withCaps("web-standalone", ["webview"])
+
+    it("no nav item still keys itself on the host with a `desktopOnly` flag", () => {
+      for (const item of SETTINGS_NAV) {
+        expect(item).not.toHaveProperty("desktopOnly")
+      }
+    })
+
+    it("every declared requirement is a core capability id and every profile pin is meaningful", () => {
+      const core = new Set<string>(CORE_CAPABILITY_IDS)
+      for (const item of SETTINGS_NAV) {
+        for (const cap of item.requires ?? []) expect(core.has(cap)).toBe(true)
+        if (item.profiles) expect(item.profiles.length).toBeGreaterThan(0)
+      }
+    })
+
+    it("a section with no requirements is reachable everywhere", () => {
+      expect(isSettingsSectionReachable({}, webStandalone)).toBe(true)
+      expect(isSettingsSectionReachable({}, cloudCompanion)).toBe(true)
+      expect(isSettingsSectionReachable({}, desktop)).toBe(true)
+    })
+
+    it("requires ALL listed capabilities and honours the profile pin", () => {
+      expect(isSettingsSectionReachable({ requires: ["shell", "ocr"] }, cloudCompanion)).toBe(false)
+      expect(isSettingsSectionReachable({ requires: ["shell", "ocr"] }, desktop)).toBe(true)
+      expect(
+        isSettingsSectionReachable({ requires: ["shell"], profiles: ["desktop"] }, cloudCompanion)
+      ).toBe(false)
+      expect(isSettingsSectionReachable({ profiles: ["desktop"] }, desktop)).toBe(true)
+    })
+
+    it("the desktop reaches every section", () => {
+      expect(reachableSettingsSections(desktop).size).toBe(SETTINGS_NAV.length)
+    })
+
+    it("a cloud companion reaches the sections its brain executes, not local-shell surfaces", () => {
+      const reachable = reachableSettingsSections(cloudCompanion)
+      // Backend runs on the paired brain — follows the capability, not the host.
+      for (const id of [
+        "subscription",
+        "connections",
+        "terminal",
+        "source-control",
+        "sandbox",
+        "lsp",
+        "tools",
+        "webhooks",
+        "gateway",
+        "pro-ide",
+        "workspace-trust",
+        "discover",
+        "security",
+      ] as const) {
+        expect(reachable.has(id)).toBe(true)
+      }
+      // Recorded physical boundaries and local-shell surfaces stay desktop-only.
+      for (const id of ["automation", "desktop", "companion", "remote-hosts", "sidebar"] as const) {
+        expect(reachable.has(id)).toBe(false)
+      }
+      // Transitional pins: renderer path still bypasses the transport seam.
+      for (const id of ["ccswitch", "hooks", "fleet"] as const) {
+        expect(reachable.has(id)).toBe(false)
+      }
+    })
+
+    it("a web-standalone client reaches only what runs in the webview", () => {
+      const reachable = reachableSettingsSections(webStandalone)
+      for (const id of ["terminal", "source-control", "subscription", "desktop"] as const) {
+        expect(reachable.has(id)).toBe(false)
+      }
+      for (const id of ["ai-connections", "appearance", "discover", "security"] as const) {
+        expect(reachable.has(id)).toBe(true)
+      }
     })
   })
 })

@@ -26545,8 +26545,6 @@
       "webOnlyHintBefore": "Available in the desktop build only. Run ",
       "webOnlyHintCode": "pnpm tauri dev"
     },
-    "desktopOnlySectionBody": "This section needs the desktop app — it reads credentials and local files the browser can't reach. Open Cognia on your desktop to use it.",
-    "desktopOnlySectionTitle": "Available in the desktop app only",
     "developer": {
       "lsp": {
         "description": "When enabled, the VS Code extension LSP binary policy lets unsigned servers spawn after one in-session consent prompt instead of refusing them outright. Useful when developing your own .vsix.",
@@ -28030,6 +28028,8 @@
       "minOsLevelLabel": "Minimum level for desktop",
       "minPushLevelLabel": "Minimum level for push",
       "osPermissionDenied": "Denied. Enable notifications for Cognia in your OS settings.",
+    "hostUnavailableSectionBody": "This section administers a capability the host you are connected to doesn't provide — it needs the desktop app, or a paired host that runs it. Open Cognia there to use it.",
+    "hostUnavailableSectionTitle": "Not available on this host",
       "osPermissionEnable": "Enable",
       "osPermissionEnabled": "Enabled",
       "osPermissionGranted": "Native notifications are enabled.",

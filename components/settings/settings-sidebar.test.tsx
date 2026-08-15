@@ -9,9 +9,10 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,
 }))
 
-// Desktop detection reads the `__TAURI_INTERNALS__` marker directly (via
-// `useDesktopAvailable`), so jsdom is already "web mode" with no mock needed.
-// Tests that need the desktop-only entries call `setDesktop(true)`.
+// Section reachability keys on the host profile, which `detectPlatform()`
+// derives from the `__TAURI_INTERNALS__` marker, so jsdom is already
+// "web-standalone" with no mock needed. Tests that need the host-backed
+// entries call `setDesktop(true)`.
 const TAURI_MARKER = "__TAURI_INTERNALS__"
 function setDesktop(on: boolean) {
   if (on) {

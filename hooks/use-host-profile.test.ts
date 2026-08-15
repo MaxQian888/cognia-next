@@ -6,7 +6,12 @@ import { act, renderHook } from "@testing-library/react"
 import type { Transport } from "@/lib/tauri/transport-types"
 import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
-import { capabilityAvailable, useCapability, useHostProfile } from "./use-host-profile"
+import {
+  capabilityAvailable,
+  useCapability,
+  useCapabilityChecker,
+  useHostProfile,
+} from "./use-host-profile"
 
 let platformMock: "tauri" | "mobile" | "web" = "web"
 jest.mock("@/lib/platform/detect", () => ({
@@ -92,5 +97,31 @@ describe("capabilityAvailable", () => {
   it("adds server-backed capabilities for a desktop with an active remote", () => {
     expect(capabilityAvailable("headless", "desktop", true)).toBe(true)
     expect(capabilityAvailable("uia-automation", "desktop", true)).toBe(false)
+  })
+})
+
+describe("useCapabilityChecker", () => {
+  it("returns a checker bound to the profile that answers like useCapability", () => {
+    process.env.NEXT_PUBLIC_COGNIA_SERVER_URL = "https://cloud.example.com"
+    const { result } = renderHook(() => useCapabilityChecker())
+    expect(result.current("sidecar")).toBe(true)
+    expect(result.current("ocr")).toBe(false)
+  })
+
+  it("is referentially stable until the remote-transport state changes", () => {
+    platformMock = "tauri"
+    const { result, rerender } = renderHook(() => useCapabilityChecker())
+    const first = result.current
+    rerender()
+    expect(result.current).toBe(first)
+    expect(first("headless")).toBe(false)
+
+    const remote: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn(() => () => undefined),
+    }
+    act(() => setActiveRemoteTransport(remote))
+    expect(result.current).not.toBe(first)
+    expect(result.current("headless")).toBe(true)
   })
 })

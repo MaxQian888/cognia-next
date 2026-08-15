@@ -54,6 +54,8 @@ import {
   RadarIcon,
 } from "lucide-react"
 
+import type { CapabilityId, HostProfile } from "@/lib/platform/capabilities"
+
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
 
 export type SettingsSectionId =
@@ -128,8 +130,57 @@ export interface NavItem {
   descriptionKey: string
   group: SettingsGroup
   icon: ComponentType<{ className?: string }>
-  /** True if the section requires desktop / Tauri. */
-  desktopOnly?: boolean
+  /**
+   * Capabilities the section administers (ADR-0059 D7 / F5). Every one must be
+   * available — locally, or server-backed on a companion profile
+   * (`capabilityAvailable` semantics, the same rule `CapabilityGate` applies)
+   * — for the section to be reachable. A section keyed on capabilities follows
+   * its backend to every host that reaches parity, instead of staying hidden
+   * behind a host check after the backend already works there.
+   */
+  requires?: readonly CapabilityId[]
+  /**
+   * Host profiles the section is bound to. Mirrors `CapabilityGateProps.profiles`:
+   * only for surfaces that administer the LOCAL shell process itself (window
+   * chrome, tray, this device's pairing endpoints), where a server-backed
+   * capability cannot stand in — or, transitionally, where the section's own
+   * renderer path still bypasses the transport seam and would throw on any
+   * other host (each such pin names the host-parity Class A file it waits on).
+   * Combined with `requires`, BOTH must pass.
+   */
+  profiles?: readonly HostProfile[]
+}
+
+/**
+ * What a client can reach: its host profile plus a capability check that
+ * already folds in server-backed capabilities (`capabilityAvailable`).
+ */
+export interface SettingsReachabilityContext {
+  profile: HostProfile
+  hasCapability: (cap: CapabilityId) => boolean
+}
+
+/**
+ * Whether `item` is reachable from a client described by `ctx`. Pure — the
+ * sidebar, the ⌘K finder and the shell's section dispatch all ask this one
+ * question so they cannot drift (a section hidden in the sidebar but reachable
+ * through a `?section=` deep link only fails at its last IPC call).
+ */
+export function isSettingsSectionReachable(
+  item: Pick<NavItem, "requires" | "profiles">,
+  ctx: SettingsReachabilityContext
+): boolean {
+  if (item.profiles && !item.profiles.includes(ctx.profile)) return false
+  return (item.requires ?? []).every((cap) => ctx.hasCapability(cap))
+}
+
+/** Every reachable section id for `ctx`, derived from the nav so the two can't drift. */
+export function reachableSettingsSections(
+  ctx: SettingsReachabilityContext
+): ReadonlySet<SettingsSectionId> {
+  return new Set(
+    SETTINGS_NAV.filter((item) => isSettingsSectionReachable(item, ctx)).map((item) => item.id)
+  )
 }
 
 export const SETTINGS_NAV: NavItem[] = [
@@ -176,7 +227,9 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "subscription",
     group: "ai",
     icon: ZapIcon,
-    desktopOnly: true,
+    // The subscription vault lives on the execution host's secret store; a
+    // companion client administers the host it is paired to.
+    requires: ["keyring"],
   },
   {
     id: "ccswitch",
@@ -184,7 +237,12 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "ccswitch",
     group: "ai",
     icon: ArrowLeftRightIcon,
-    desktopOnly: true,
+    // Claude Code CLI config on the execution host. Pinned to the desktop for
+    // now: `lib/ccswitch/client.ts` and `lib/claude/settings.ts` still import
+    // `invoke` from `@tauri-apps/api/core` (host-parity Class A) and would
+    // throw on any other host — lift the pin when they move onto the seam.
+    requires: ["shell"],
+    profiles: ["desktop"],
   },
   {
     id: "agents",
@@ -227,7 +285,11 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "hooks",
     group: "ai",
     icon: WebhookIcon,
-    desktopOnly: true,
+    // Agent lifecycle hooks run in the sidecar on the execution host. Pinned
+    // to the desktop until `lib/claude/settings.ts` (raw `invoke`, host-parity
+    // Class A) moves onto the transport seam.
+    requires: ["sidecar"],
+    profiles: ["desktop"],
   },
   {
     id: "fleet",
@@ -235,7 +297,11 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "fleet",
     group: "ai",
     icon: RadarIcon,
-    desktopOnly: true,
+    // Pinned to the desktop until `lib/tauri/fleet.ts` and
+    // `lib/claude/hooks/fleet-hooks.ts` (raw `invoke`, host-parity Class A)
+    // move onto the transport seam.
+    requires: ["shell"],
+    profiles: ["desktop"],
   },
   {
     id: "workspace-trust",
@@ -243,7 +309,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "workspaceTrust",
     group: "ai",
     icon: ShieldCheckIcon,
-    desktopOnly: true,
+    // Trust decisions about workspaces on the execution host's filesystem.
+    requires: ["shell"],
   },
   {
     id: "slash-commands",
@@ -258,7 +325,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "tools",
     group: "ai",
     icon: WrenchIcon,
-    desktopOnly: true,
+    // Tool policy for the agent runtime on the execution host.
+    requires: ["sidecar"],
   },
   {
     id: "search",
@@ -273,7 +341,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "lsp",
     group: "ai",
     icon: BracesIcon,
-    desktopOnly: true,
+    // Language servers are spawned on the execution host.
+    requires: ["shell"],
   },
   {
     id: "sandbox",
@@ -281,7 +350,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "sandbox",
     group: "ai",
     icon: BoxIcon,
-    desktopOnly: true,
+    // Sandbox confinement for processes the execution host spawns.
+    requires: ["shell"],
   },
 
   // === Extensions ===
@@ -340,7 +410,9 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "connections",
     group: "extensions",
     icon: LinkIcon,
-    desktopOnly: true,
+    // IM connector adapters run wherever the connector runtime does — the
+    // desktop, or the cloud brain a companion is paired to (ADR-0059 F4).
+    requires: ["connector-runtime"],
   },
   // === Interface ===
   {
@@ -358,7 +430,9 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "shellLayout",
     group: "interface",
     icon: PanelsTopLeftIcon,
-    desktopOnly: true,
+    // Customises the local desktop shell chrome (nav rail, top and bottom
+    // bars) — a local-shell surface, not a capability question.
+    profiles: ["desktop"],
   },
   {
     id: "discover",
@@ -366,7 +440,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "discover",
     group: "interface",
     icon: CompassIcon,
-    desktopOnly: true,
+    // Pure preferences for the Discover surface, which every shell renders;
+    // the old desktop pin was an unmigrated UI assumption.
   },
   {
     id: "speech",
@@ -381,7 +456,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "terminal",
     group: "interface",
     icon: TerminalSquareIcon,
-    desktopOnly: true,
+    // Terminal sessions run against the execution host's PTYs.
+    requires: ["pty"],
   },
   {
     id: "presets",
@@ -417,7 +493,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "sourceControl",
     group: "interface",
     icon: GitBranchIcon,
-    desktopOnly: true,
+    // Git runs on the execution host (source-control.git host feature).
+    requires: ["shell"],
   },
   {
     id: "pro-ide",
@@ -425,7 +502,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "proIde",
     group: "interface",
     icon: SquareCodeIcon,
-    desktopOnly: true,
+    // code-server is brokered on the execution host (ADR-0088).
+    requires: ["shell"],
   },
   {
     id: "conversation",
@@ -509,7 +587,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "webhooks",
     group: "system",
     icon: WebhookIcon,
-    desktopOnly: true,
+    // Webhook delivery needs a process that outlives the page.
+    requires: ["always-on"],
   },
   {
     id: "gateway",
@@ -517,7 +596,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "gateway",
     group: "system",
     icon: NetworkIcon,
-    desktopOnly: true,
+    // The inbound LLM gateway is a long-lived listener on the execution host.
+    requires: ["always-on"],
   },
   {
     id: "external-bridge",
@@ -532,7 +612,9 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "automation",
     group: "system",
     icon: MousePointerClickIcon,
-    desktopOnly: true,
+    // Desktop UI automation is a recorded physical boundary — the capability
+    // is never server-backed, so companion profiles do not see this section.
+    requires: ["uia-automation"],
   },
   {
     id: "companion",
@@ -540,7 +622,10 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "companion",
     group: "system",
     icon: SmartphoneIcon,
-    desktopOnly: true,
+    // Administers THIS device's companion server (mDNS, tunnel, TLS
+    // fingerprint, push credentials) — a local-shell surface. Remote hosts are
+    // administered from Remote hosts / Connections instead.
+    profiles: ["desktop"],
   },
   {
     id: "remote-hosts",
@@ -548,7 +633,9 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "remoteHosts",
     group: "system",
     icon: ServerIcon,
-    desktopOnly: true,
+    // The desktop's registry of remote hosts that may drive the app
+    // (ADR-0082 R0); web clients pair through `/pair` instead.
+    profiles: ["desktop"],
   },
   {
     id: "network",
@@ -563,7 +650,9 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "desktop",
     group: "system",
     icon: MonitorIcon,
-    desktopOnly: true,
+    // Window chrome, close behaviour, tray and global hotkeys — recorded
+    // physical boundaries of the desktop shell.
+    profiles: ["desktop"],
   },
   {
     id: "security",
@@ -571,7 +660,8 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "security",
     group: "system",
     icon: ShieldCheckIcon,
-    desktopOnly: true,
+    // Biometric guard policy toggles; the guard itself degrades per device,
+    // and the mobile sign-out toggle only means anything off the desktop.
   },
   {
     id: "about",
@@ -590,19 +680,6 @@ export const SETTINGS_GROUP_ORDER: SettingsGroup[] = [
   "observability",
   "system",
 ]
-
-/**
- * Sections that only work inside the Tauri desktop shell, derived from the nav
- * so the two can't drift.
- *
- * The sidebar filters on `item.desktopOnly` directly, but the ⌘K finder and the
- * shell's section dispatch both need the same answer keyed by id — without it a
- * web user can still reach these panels via the finder or a `?section=` deep
- * link and walk a flow that can only fail at the last IPC call.
- */
-export const DESKTOP_ONLY_SECTIONS: ReadonlySet<SettingsSectionId> = new Set(
-  SETTINGS_NAV.filter((item) => item.desktopOnly).map((item) => item.id)
-)
 
 /**
  * Lightweight keyword index for the sidebar search. Each entry can attach
@@ -906,6 +983,7 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "shell integration",
     "OSC 633",
     "vscode terminal",
+    "ssh",
     "集成终端",
     "命令行",
     "终端",
