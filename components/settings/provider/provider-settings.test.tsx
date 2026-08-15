@@ -1033,16 +1033,18 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(configTab.querySelector('input[type="text"]')).toHaveValue(
       "https://proxy.example.com/v1"
     )
-    // Edits persist to the same source the values are read from.
-    fireEvent.change(configTab.querySelector('input[type="text"]') as HTMLInputElement, {
-      target: { value: "https://proxy.example.com/v2" },
-    })
+    // Edits persist to the same source the values are read from — on the
+    // trailing edge (blur / Enter / idle), not per keystroke.
+    const urlInput = configTab.querySelector('input[type="text"]') as HTMLInputElement
+    fireEvent.change(urlInput, { target: { value: "https://proxy.example.com/v2" } })
+    expect(mockHookState.updateCustomProvider).not.toHaveBeenCalled()
+    fireEvent.blur(urlInput)
     expect(mockHookState.updateCustomProvider).toHaveBeenCalledWith("my-custom", {
       baseURL: "https://proxy.example.com/v2",
     })
-    fireEvent.change(configTab.querySelector('input[type="password"]') as HTMLInputElement, {
-      target: { value: "new-key" },
-    })
+    const keyInput = configTab.querySelector('input[type="password"]') as HTMLInputElement
+    fireEvent.change(keyInput, { target: { value: "new-key" } })
+    fireEvent.keyDown(keyInput, { key: "Enter" })
     expect(mockHookState.updateCustomProvider).toHaveBeenCalledWith("my-custom", {
       apiKey: "new-key",
     })
@@ -1530,6 +1532,36 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(screen.getByTestId("mock-test-result")).toHaveTextContent("false")
     fireEvent.click(screen.getByTestId("mock-test-connection"))
     await waitFor(() => expect(mockHookState.testProvider).toHaveBeenCalledWith("openai"))
+  })
+
+  it("falls back to the persisted verification for the Config tab card after a reload", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    // Verified earlier with a matching fingerprint → persisted success.
+    mockHookState.providerSettings.openai = {
+      providerId: "openai",
+      enabled: true,
+      apiKey: "sk-openai",
+      defaultModel: "gpt-4o",
+      verificationStatus: "verified",
+      lastVerifiedAt: 1_700_000_000_000,
+    }
+    const { unmount } = render(<ProviderSettings />)
+    const shown = JSON.parse(screen.getByTestId("mock-test-result").textContent ?? "{}")
+    expect(shown).toMatchObject({ success: true, persisted: true, testedAt: 1_700_000_000_000 })
+    unmount()
+
+    // A key rotated after that pass: readiness flags the fingerprint mismatch
+    // as stale, and the card asks for a re-test instead of claiming "verified".
+    mockHookState.providerSettings.openai = {
+      ...mockHookState.providerSettings.openai,
+      verificationFingerprint: "fingerprint-of-the-old-key",
+    }
+    render(<ProviderSettings />)
+    const stale = JSON.parse(screen.getByTestId("mock-test-result").textContent ?? "{}")
+    expect(stale).toMatchObject({ success: false, outcome: "stale", persisted: true })
   })
 
   it("does not route legacy Health actions after Diagnostics promotion", () => {

@@ -223,6 +223,7 @@
     "keyRotation": "Key Rotation",
     "keyRotationEnabled": "Enable rotation",
     "lastTested": "Last tested",
+    "lastVerified": "Last verified",
     "latency": "Latency",
     "leastUsed": "Least Used",
     "moveDown": "Move down",

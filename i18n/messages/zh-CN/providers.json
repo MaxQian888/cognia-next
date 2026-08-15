@@ -223,6 +223,7 @@
     "keyRotation": "密钥轮换",
     "keyRotationEnabled": "启用轮换",
     "lastTested": "上次测试",
+    "lastVerified": "上次验证",
     "latency": "延迟",
     "leastUsed": "最少使用",
     "moveDown": "下移",

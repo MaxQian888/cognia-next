@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings"
+import { useDraftField } from "@/hooks/settings/use-draft-field"
 import { LocalProviderCard } from "./local-provider-card"
 import { LocalProviderSetupWizard } from "./local-provider-setup-wizard"
 import { TransportHeadersEditor } from "./transport-headers-editor"
@@ -92,13 +93,23 @@ export function LocalProviderSettings({ providerId }: LocalProviderSettingsProps
     }
   }, [providerId, serviceOptions])
 
+  // Probe on mount and whenever the COMMITTED endpoint / key / headers change.
+  // The inputs below are draft-buffered, so a keystroke no longer reaches the
+  // store (and this effect) until the user pauses; the short delay here also
+  // coalesces the two writes a base-URL + key edit can produce.
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       void refreshStatus()
-    }, 0)
+    }, 150)
 
     return () => clearTimeout(timeoutId)
   }, [refreshStatus])
+
+  const setApiKey = useCallback(
+    (apiKey: string) => void setProviderConfig(providerId, { apiKey }),
+    [providerId, setProviderConfig]
+  )
+  const apiKeyField = useDraftField(settings?.apiKey ?? "", setApiKey, { identity: providerId })
 
   const persistDiscoveredModels = useCallback(
     async (models: LocalModelInfo[]) => {
@@ -213,14 +224,15 @@ export function LocalProviderSettings({ providerId }: LocalProviderSettingsProps
             </Label>
             <Input
               type="password"
-              value={settings?.apiKey ?? ""}
-              onChange={(event) =>
-                void setProviderConfig(providerId, { apiKey: event.target.value })
-              }
+              value={apiKeyField.value}
+              onChange={(event) => apiKeyField.onChange(event.target.value)}
+              onBlur={apiKeyField.onBlur}
+              onKeyDown={apiKeyField.onKeyDown}
               placeholder={t("apiKeyPlaceholder")}
               autoComplete="new-password"
               data-lpignore="true"
               data-form-type="other"
+              data-testid="local-provider-api-key-input"
             />
             <p className="text-xs text-muted-foreground">{t("localProviderApiKeyHint")}</p>
           </div>

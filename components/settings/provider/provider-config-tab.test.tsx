@@ -235,7 +235,52 @@ describe("ProviderConfigTab", () => {
     const apiKeyInput = inputs.find((el) => el.getAttribute("type") === "password")
     expect(apiKeyInput).toBeTruthy()
     fireEvent.change(apiKeyInput!, { target: { value: "sk-new-key" } })
+    // Draft-buffered: the keystroke is local; blur (or idle / Enter) commits.
+    expect(onApiKeyChange).not.toHaveBeenCalled()
+    fireEvent.blur(apiKeyInput!)
     expect(onApiKeyChange).toHaveBeenCalledWith("sk-new-key")
+  })
+
+  it("commits a base URL edit on Enter and lets the user clear it without a snap-back", () => {
+    const onBaseURLChange = jest.fn()
+    const { rerender } = render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="moonshot"
+        settings={{
+          providerId: "moonshot",
+          enabled: true,
+          apiKey: "sk-x",
+          baseURL: "https://my-proxy.example/v1",
+          defaultModel: "",
+        }}
+        onBaseURLChange={onBaseURLChange}
+      />
+    )
+    const urlInput = screen
+      .getAllByTestId("input")
+      .find((el) => el.getAttribute("value") === "https://my-proxy.example/v1")!
+    fireEvent.change(urlInput, { target: { value: "" } })
+    fireEvent.keyDown(urlInput, { key: "Enter" })
+    expect(onBaseURLChange).toHaveBeenLastCalledWith("")
+    onBaseURLChange.mockClear()
+    // The store now holds an explicit "" — the seeding effect must NOT rewrite
+    // the catalog default over the user's clear.
+    rerender(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="moonshot"
+        settings={{
+          providerId: "moonshot",
+          enabled: true,
+          apiKey: "sk-x",
+          baseURL: "",
+          defaultModel: "",
+        }}
+        onBaseURLChange={onBaseURLChange}
+      />
+    )
+    expect(onBaseURLChange).not.toHaveBeenCalled()
   })
 
   // 7. Key rotation section is collapsed by default
@@ -361,6 +406,66 @@ describe("ProviderConfigTab", () => {
     )
     expect(baseURLInputValue()).toBe("")
     expect(onBaseURLChange).not.toHaveBeenCalled()
+  })
+
+  // ── Persisted verification card states ──────────────────────────────────
+  it("renders the stale-verification card with the last-verified timestamp", () => {
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        testResult={{
+          success: false,
+          outcome: "stale",
+          testedAt: 1_700_000_000_000,
+          persisted: true,
+        }}
+      />
+    )
+    expect(screen.getByTestId("connection-status-stale")).toBeInTheDocument()
+    expect(screen.getByText(/configTab\.lastVerified|Last verified/)).toBeInTheDocument()
+  })
+
+  it("labels a persisted success as 'last verified' rather than a fresh test", () => {
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        testResult={{ success: true, testedAt: 1_700_000_000_000, persisted: true }}
+      />
+    )
+    expect(screen.getByText(/configTab\.lastVerified|Last verified/)).toBeInTheDocument()
+  })
+
+  // ── OpenAI endpoint flavor + transport headers ──────────────────────────
+  it("offers the Responses/Chat flavor selector for OpenAI-protocol built-ins only", () => {
+    const onApiFlavorChange = jest.fn()
+    const { rerender } = render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="azure"
+        onApiFlavorChange={onApiFlavorChange}
+      />
+    )
+    expect(screen.getByTestId("select-item-responses")).toBeInTheDocument()
+    // Anthropic always dispatches through the native SDK — no selector.
+    rerender(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="anthropic"
+        settings={{ ...mockSettings, providerId: "anthropic" }}
+        onApiFlavorChange={onApiFlavorChange}
+      />
+    )
+    expect(screen.queryByTestId("select-item-responses")).not.toBeInTheDocument()
+    // Without a handler nothing renders either.
+    rerender(<ProviderConfigTab {...defaultProps} providerId="azure" />)
+    expect(screen.queryByTestId("select-item-responses")).not.toBeInTheDocument()
+  })
+
+  it("mounts the transport-headers editor for built-ins when a handler is supplied", () => {
+    const { rerender } = render(<ProviderConfigTab {...defaultProps} />)
+    expect(screen.queryByTestId("config-headers-toggle")).not.toBeInTheDocument()
+    rerender(<ProviderConfigTab {...defaultProps} onCustomHeadersChange={jest.fn()} />)
+    expect(screen.getByTestId("config-headers-toggle")).toBeInTheDocument()
   })
 
   // ── API Protocol override selector ──────────────────────────────────────

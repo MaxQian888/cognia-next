@@ -51,9 +51,12 @@ import {
   validateBedrockConnectionSettings,
   type UserProviderSettings,
   type ApiKeyRotationStrategy,
+  type ApiFlavor,
 } from "@cognia/provider-types"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
+import { useDraftField } from "@/hooks/settings/use-draft-field"
 import { BedrockSettingsFields } from "./bedrock-settings-fields"
+import { TransportHeadersEditor } from "./transport-headers-editor"
 import { DeploymentProfileCard } from "./deployment-profile-card"
 import { DeploymentCertificationPanel } from "./deployment-certification-panel"
 import type { ApiTestResult } from "@/lib/ai/infrastructure/api-test"
@@ -67,7 +70,15 @@ export interface TestResult {
   latency?: number
   error?: string
   testedAt?: number
-  outcome?: "verified" | "failed" | "limited"
+  /**
+   * `stale` = a previous verification exists but the credentials / endpoint
+   * changed since (readiness fingerprint mismatch) — shown as a warning that
+   * asks for a re-test rather than as a pass or a failure.
+   */
+  outcome?: "verified" | "failed" | "limited" | "stale"
+  /** True when this card reflects the persisted verification, not a test run
+   *  in this session — the "last tested" line then says so. */
+  persisted?: boolean
 }
 
 export interface ProviderConfigTabProps {
@@ -86,6 +97,14 @@ export interface ProviderConfigTabProps {
    * would be silently ignored; the selector is hidden in that case.
    */
   onApiProtocolChange?: (protocol: string) => void
+  /**
+   * OpenAI endpoint-family override (Responses vs Chat Completions) for
+   * OpenAI-protocol built-ins (Azure OpenAI, gateways, custom URLs). Omit to
+   * hide the selector. Ignored for `anthropic`.
+   */
+  onApiFlavorChange?: (flavor: ApiFlavor) => void
+  /** Static transport headers (`UserProviderSettings.customHeaders`). Omit to hide the editor. */
+  onCustomHeadersChange?: (headers: Record<string, string> | undefined) => void
   onDefaultModelChange: (model: string) => void
   onTestConnection: () => Promise<TestResult>
   testResult?: TestResult | null
@@ -139,8 +158,10 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
           )}
           {result.testedAt && (
             <p className="text-xs text-muted-foreground">
-              {t("configTab.lastTested") || "Last tested"}:{" "}
-              {new Date(result.testedAt).toLocaleTimeString()}
+              {result.persisted ? t("configTab.lastVerified") : t("configTab.lastTested")}:{" "}
+              {result.persisted
+                ? new Date(result.testedAt).toLocaleString()
+                : new Date(result.testedAt).toLocaleTimeString()}
             </p>
           )}
         </div>
@@ -176,6 +197,30 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
     )
   }
 
+  if (result.outcome === "stale") {
+    return (
+      <div
+        className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/30"
+        data-testid="connection-status-stale"
+      >
+        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+            {t("verificationStale")}
+          </p>
+          <p className="text-xs text-amber-600 dark:text-amber-500 mt-0.5">
+            {t("verificationStaleHint")}
+          </p>
+          {result.testedAt && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {t("configTab.lastVerified")}: {new Date(result.testedAt).toLocaleString()}
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
       <X className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
@@ -185,6 +230,11 @@ export function ConnectionStatusCard({ result }: ConnectionStatusCardProps) {
         </p>
         {result.error && (
           <p className="text-xs text-destructive/80 mt-0.5 break-words">{result.error}</p>
+        )}
+        {result.persisted && result.testedAt && (
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {t("configTab.lastVerified")}: {new Date(result.testedAt).toLocaleString()}
+          </p>
         )}
       </div>
     </div>
@@ -434,6 +484,8 @@ export function ProviderConfigTab({
   onBaseURLChange,
   onBedrockSettingsChange,
   onApiProtocolChange,
+  onApiFlavorChange,
+  onCustomHeadersChange,
   onDefaultModelChange,
   onTestConnection,
   testResult,
@@ -460,7 +512,6 @@ export function ProviderConfigTab({
   // whose SDKs hard-code the endpoint). Drives both the pre-filled field value
   // and the persist-on-configure effect below.
   const defaultBaseURL = getBuiltInProviderSettingsBaseURL(providerId)
-  const hasStoredBaseURL = !!settings.baseURL
   const isConfiguringProvider = !!settings.enabled || !!settings.apiKey
 
   // Protocol override: offered for every built-in EXCEPT the literal
@@ -469,18 +520,40 @@ export function ProviderConfigTab({
   // — showing a selector there would be misleading since it wouldn't apply.
   const showProtocolSelector = providerId !== "anthropic" && !!onApiProtocolChange
   const catalogProtocol = getBuiltInProviderProtocol(providerId)
+  const effectiveProtocol = settings.apiProtocol ?? catalogProtocol ?? "openai"
+  // The Responses/Chat override only means something on the OpenAI wire
+  // protocol (Azure OpenAI, gateways, custom URLs); `anthropic` always
+  // dispatches through the native SDK.
+  const showFlavorSelector =
+    providerId !== "anthropic" && effectiveProtocol === "openai" && !!onApiFlavorChange
 
   // Once the user actually starts configuring this provider (enables it or
   // enters an API key), persist its default base URL so the saved settings
   // carry the real endpoint — not just a placeholder. Gating on
   // `isConfiguringProvider` keeps merely-browsed providers "not-configured"
-  // (their status badge stays accurate). No-op when no default exists or the
-  // user already supplied a base URL.
+  // (their status badge stays accurate). No-op when no default exists, and —
+  // this is the difference from before — only when the field has NEVER been
+  // stored (`undefined`): an explicit empty string is the user clearing it,
+  // which used to snap straight back to the catalog default.
+  const baseURLNeverStored = settings.baseURL === undefined
   useEffect(() => {
-    if (defaultBaseURL && !hasStoredBaseURL && isConfiguringProvider) {
+    if (defaultBaseURL && baseURLNeverStored && isConfiguringProvider) {
       onBaseURLChange(defaultBaseURL)
     }
-  }, [defaultBaseURL, hasStoredBaseURL, isConfiguringProvider, onBaseURLChange])
+  }, [defaultBaseURL, baseURLNeverStored, isConfiguringProvider, onBaseURLChange])
+
+  // Draft-buffered credential inputs: keystrokes stay local and commit on the
+  // trailing edge (idle / blur / Enter) instead of one settings-singleton
+  // write per character. Keyed on the provider id so switching providers never
+  // carries a half-typed key across.
+  const apiKeyField = useDraftField(settings.apiKey ?? "", onApiKeyChange, {
+    identity: providerId,
+  })
+  // Shows the catalog default while nothing is stored (browsing), exactly as
+  // before; an explicit stored "" (user cleared it) stays empty.
+  const baseURLField = useDraftField(settings.baseURL ?? defaultBaseURL ?? "", onBaseURLChange, {
+    identity: providerId,
+  })
 
   return (
     <div className="space-y-5">
@@ -505,8 +578,10 @@ export function ProviderConfigTab({
           <div className="relative">
             <Input
               type={showApiKey ? "text" : "password"}
-              value={settings.apiKey ?? ""}
-              onChange={(e) => onApiKeyChange(e.target.value)}
+              value={apiKeyField.value}
+              onChange={(e) => apiKeyField.onChange(e.target.value)}
+              onBlur={apiKeyField.onBlur}
+              onKeyDown={apiKeyField.onKeyDown}
               placeholder={t("configTab.apiKeyPlaceholder") || "Enter your API key"}
               className="pr-10"
               autoComplete="new-password"
@@ -571,8 +646,10 @@ export function ProviderConfigTab({
           </Label>
           <Input
             type="text"
-            value={settings.baseURL ?? defaultBaseURL ?? ""}
-            onChange={(e) => onBaseURLChange(e.target.value)}
+            value={baseURLField.value}
+            onChange={(e) => baseURLField.onChange(e.target.value)}
+            onBlur={baseURLField.onBlur}
+            onKeyDown={baseURLField.onKeyDown}
             placeholder={
               defaultBaseURL || t("configTab.baseURLPlaceholder") || "https://api.example.com/v1"
             }
@@ -598,6 +675,88 @@ export function ProviderConfigTab({
           </Select>
           <p className="text-xs text-muted-foreground">{t("apiProtocolHint")}</p>
         </div>
+      )}
+
+      {/* ── 2c. OpenAI endpoint flavor (Responses / Chat) ────────────────
+          `UserProviderSettings.apiFlavor` has been honoured by the resolver
+          for built-ins all along, but only the custom-provider dialog could
+          set it — Azure OpenAI / gateway users had no way to opt into the
+          Responses API from here. */}
+      {!isBedrock && showFlavorSelector && (
+        <div className="space-y-2">
+          <Label htmlFor={`api-flavor-${providerId}`} className="text-sm font-medium">
+            {t("apiFlavor")}
+          </Label>
+          <Select
+            value={settings.apiFlavor ?? "auto"}
+            onValueChange={(v) => onApiFlavorChange?.(v as ApiFlavor)}
+          >
+            <SelectTrigger id={`api-flavor-${providerId}`} data-testid="config-api-flavor">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">
+                <div className="flex flex-col">
+                  <span>{t("apiFlavorAuto")}</span>
+                  <span className="text-xs text-muted-foreground">{t("apiFlavorAutoDesc")}</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="responses">
+                <div className="flex flex-col">
+                  <span>{t("apiFlavorResponses")}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("apiFlavorResponsesDesc")}
+                  </span>
+                </div>
+              </SelectItem>
+              <SelectItem value="chat">
+                <div className="flex flex-col">
+                  <span>{t("apiFlavorChat")}</span>
+                  <span className="text-xs text-muted-foreground">{t("apiFlavorChatDesc")}</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{t("apiFlavorHint")}</p>
+        </div>
+      )}
+
+      {/* ── 2d. Static transport headers ─────────────────────────────────
+          Same policy-validated editor the custom and local providers get;
+          built-in cloud providers had no way to add e.g. a gateway auth
+          header even though the connection test and the runtime read
+          `customHeaders`. Folded so it stays out of the way until needed. */}
+      {!isBedrock && onCustomHeadersChange && (
+        <Collapsible
+          defaultOpen={Boolean(
+            settings.customHeaders && Object.keys(settings.customHeaders).length > 0
+          )}
+        >
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              data-testid="config-headers-toggle"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+              {t("transportHeadersLabel")}
+              {settings.customHeaders && Object.keys(settings.customHeaders).length > 0 ? (
+                <span className="text-muted-foreground">
+                  ({Object.keys(settings.customHeaders).length})
+                </span>
+              ) : null}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            <TransportHeadersEditor
+              idPrefix={`provider-${providerId}-headers`}
+              value={settings.customHeaders}
+              onChange={onCustomHeadersChange}
+            />
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {/* ── 3. Default Model ───────────────────────────────────────── */}

@@ -55,7 +55,7 @@ import type { ProviderDiagnosticSample } from "@cognia/provider-types"
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { ProviderDetailPanel } from "./provider-detail-panel"
-import { ProviderConfigTab } from "./provider-config-tab"
+import { ProviderConfigTab, type TestResult } from "./provider-config-tab"
 import { ProviderModelsTab } from "./provider-models-tab"
 import { ProviderCostTab } from "./provider-cost-tab"
 import { ProviderParametersTab } from "./provider-parameters-tab"
@@ -69,6 +69,7 @@ import { getLastUsedByProvider } from "@/lib/db/provider-cost-daily"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useEdgeResize } from "@/hooks/ui/use-edge-resize"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
+import { useDraftField } from "@/hooks/settings/use-draft-field"
 import { cn } from "@/lib/utils"
 import { ProviderSidebar } from "./provider-sidebar"
 import { ProviderSetupChecklist } from "./provider-setup-checklist"
@@ -220,6 +221,10 @@ function CustomProviderInlineConfig({
 }) {
   const t = useTranslations("providers")
   const [showKey, setShowKey] = useState(false)
+  // Draft-buffered like the built-in tab: no `customProviders` row rewrite per
+  // keystroke, and no character drops while the async write is in flight.
+  const apiKeyField = useDraftField(cp.apiKey ?? "", onApiKeyChange, { identity: cp.id })
+  const baseURLField = useDraftField(cp.baseURL ?? "", onBaseURLChange, { identity: cp.id })
 
   return (
     <div className="space-y-5">
@@ -232,13 +237,16 @@ function CustomProviderInlineConfig({
         <div className="relative">
           <Input
             type={showKey ? "text" : "password"}
-            value={cp.apiKey ?? ""}
-            onChange={(e) => onApiKeyChange(e.target.value)}
+            value={apiKeyField.value}
+            onChange={(e) => apiKeyField.onChange(e.target.value)}
+            onBlur={apiKeyField.onBlur}
+            onKeyDown={apiKeyField.onKeyDown}
             placeholder={t("configTab.apiKeyPlaceholder") || "Enter your API key"}
             className="pr-10"
             autoComplete="new-password"
             data-lpignore="true"
             data-form-type="other"
+            data-testid="custom-provider-api-key-input"
           />
           <Button
             variant="ghost"
@@ -263,9 +271,12 @@ function CustomProviderInlineConfig({
         </Label>
         <Input
           type="text"
-          value={cp.baseURL ?? ""}
-          onChange={(e) => onBaseURLChange(e.target.value)}
+          value={baseURLField.value}
+          onChange={(e) => baseURLField.onChange(e.target.value)}
+          onBlur={baseURLField.onBlur}
+          onKeyDown={baseURLField.onKeyDown}
           placeholder={cp.baseURL}
+          data-testid="custom-provider-base-url-input"
         />
         <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
       </div>
@@ -673,6 +684,45 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         : undefined
     )
   }, [selectedCustom, selectedId, selectedSettings, s.customTestResults, s.testResults])
+  // What the Config tab's status card shows: this session's test result when
+  // there is one, otherwise the PERSISTED verification (status, timestamp,
+  // message) — which readiness re-derives, so a key changed since the last
+  // pass reads "stale". Before, a reload left the card empty even though the
+  // row carried the last outcome.
+  const configTestResult = useMemo<TestResult | null>(() => {
+    if (!selectedId || isCustom) return null
+    const live = s.testResults[selectedId]
+    if (live) {
+      return {
+        success: !!live.success,
+        latency: live.latency_ms,
+        error: live.success ? undefined : live.message,
+        outcome: live.outcome,
+      }
+    }
+    if (!selectedSettings?.lastVerifiedAt) return null
+    const status = selectedReadiness?.verificationStatus ?? selectedSettings.verificationStatus
+    if (status === "verified") {
+      return { success: true, testedAt: selectedSettings.lastVerifiedAt, persisted: true }
+    }
+    if (status === "stale") {
+      return {
+        success: false,
+        outcome: "stale",
+        testedAt: selectedSettings.lastVerifiedAt,
+        persisted: true,
+      }
+    }
+    if (selectedSettings.verificationMessage) {
+      return {
+        success: false,
+        error: selectedSettings.verificationMessage,
+        testedAt: selectedSettings.lastVerifiedAt,
+        persisted: true,
+      }
+    }
+    return null
+  }, [isCustom, s.testResults, selectedId, selectedReadiness, selectedSettings])
   const canEnable = selectedReadiness?.eligibility.enable.allowed ?? false
   const canSetDefault = isEnabled && (isCustom ? Boolean(selectedCustom?.defaultModel) : true)
   // Human-readable "why not": the readiness core carries a `nextAction` per
@@ -1385,6 +1435,12 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                         onApiProtocolChange={(protocol) =>
                           void setProviderConfig(selectedId, { apiProtocol: protocol })
                         }
+                        onApiFlavorChange={(apiFlavor) =>
+                          void setProviderConfig(selectedId, { apiFlavor })
+                        }
+                        onCustomHeadersChange={(customHeaders) =>
+                          void setProviderConfig(selectedId, { customHeaders })
+                        }
                         onDefaultModelChange={(model) =>
                           void setProviderConfig(selectedId, { defaultModel: model })
                         }
@@ -1397,17 +1453,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                             outcome: result?.outcome,
                           }
                         }}
-                        testResult={
-                          s.testResults[selectedId]
-                            ? {
-                                success: !!s.testResults[selectedId]?.success,
-                                latency: s.testResults[selectedId]?.latency_ms,
-                                error: s.testResults[selectedId]?.success
-                                  ? undefined
-                                  : s.testResults[selectedId]?.message,
-                              }
-                            : null
-                        }
+                        testResult={configTestResult}
                         isTesting={!!s.testingProviders[selectedId]}
                         onAddApiKey={(key) => {
                           const pool = selectedSettings?.apiKeys ?? []
