@@ -6184,6 +6184,33 @@
       "titleFallback": "Allow {tool}?",
       "toolLabel": "Tool"
     },
+    "toolCards": {
+      "clipboardHistory": {
+        "copy": "Copy entry",
+        "count": "{count, plural, =1 {1 entry} other {# entries}}",
+        "empty": "No clipboard entries yet.",
+        "showAll": "Show all {count}",
+        "showLess": "Show less",
+        "title": "Clipboard history"
+      },
+      "screenshot": {
+        "alt": "Captured screen",
+        "title": "Screenshot"
+      },
+      "webFetch": {
+        "failed": "Fetch failed.",
+        "showLess": "Show less",
+        "showMore": "Show all ({chars} characters)",
+        "status": "HTTP {status}",
+        "title": "Web fetch"
+      },
+      "webSearch": {
+        "failed": "Search failed.",
+        "noResults": "No results.",
+        "title": "Web search",
+        "via": "via {provider}"
+      }
+    },
     "transcript": {
       "collapseTurn": "Collapse turn",
       "expandTurn": "Expand full turn",
@@ -6206,34 +6233,7 @@
       "openWorkbench": "Open twin workbench",
       "ragOff": "RAG off",
       "ragOn": "RAG on (top-{topK})",
-      "statSummary": "{sources} sources · {chunks} chunks",
-      "toolCards": {
-        "clipboardHistory": {
-          "copy": "Copy entry",
-          "count": "{count, plural, =1 {1 entry} other {# entries}}",
-          "empty": "No clipboard entries yet.",
-          "showAll": "Show all {count}",
-          "showLess": "Show less",
-          "title": "Clipboard history"
-        },
-        "screenshot": {
-          "alt": "Captured screen",
-          "title": "Screenshot"
-        },
-        "webFetch": {
-          "failed": "Fetch failed.",
-          "showLess": "Show less",
-          "showMore": "Show all ({chars} characters)",
-          "status": "HTTP {status}",
-          "title": "Web fetch"
-        },
-        "webSearch": {
-          "failed": "Search failed.",
-          "noResults": "No results.",
-          "title": "Web search",
-          "via": "via {provider}"
-        }
-      }
+      "statSummary": "{sources} sources · {chunks} chunks"
     },
     "welcomeDemo": {
       "analyze": "Analyze",
@@ -22949,18 +22949,56 @@
           "simplified": "Simplified",
           "standard": "Standard"
         },
+        "bodyFont": {
+          "label": "Body font",
+          "sans": "Sans-serif",
+          "serif": "Serif"
+        },
         "layout": {
           "bubbles": "Bubbles",
           "cards": "Cards",
           "hybrid": "Hybrid",
           "label": "Layout"
         },
-        "metadata": {
-          "bodyFont": {
-            "label": "Body font",
-            "sans": "Sans-serif",
-            "serif": "Serif"
+        "markdown": {
+          "codeLineNumbers": {
+            "hint": "Default for the line-number gutter; each block can still toggle it.",
+            "label": "Code line numbers"
           },
+          "codeWrap": {
+            "hint": "Default for soft wrapping; each block can still toggle it.",
+            "label": "Wrap long code lines"
+          },
+          "diff": {
+            "hint": "Render ```diff fences with the diff viewer; off shows a plain code block.",
+            "label": "Diff viewer"
+          },
+          "label": "Content rendering",
+          "math": {
+            "hint": "Render $…$ and $$…$$ as typeset math; off shows the source.",
+            "label": "Math (KaTeX)"
+          },
+          "mathAlign": {
+            "center": "Centered",
+            "label": "Display math alignment",
+            "left": "Left"
+          },
+          "mathCopy": {
+            "hint": "Show a copy affordance when hovering inline math.",
+            "label": "Copy button on inline math"
+          },
+          "mathFontScale": {
+            "1": "Normal",
+            "0_8": "Small",
+            "1_2": "Large",
+            "label": "Math size"
+          },
+          "mermaid": {
+            "hint": "Render ```mermaid fences as diagrams; off shows the code.",
+            "label": "Mermaid diagrams"
+          }
+        },
+        "metadata": {
           "cost": "Cost",
           "duration": "Duration",
           "finishState": "Finish state",
@@ -22974,44 +23012,6 @@
         "motion": {
           "expressive": "Expressive",
           "label": "Message motion",
-          "markdown": {
-            "codeLineNumbers": {
-              "hint": "Default for the line-number gutter; each block can still toggle it.",
-              "label": "Code line numbers"
-            },
-            "codeWrap": {
-              "hint": "Default for soft wrapping; each block can still toggle it.",
-              "label": "Wrap long code lines"
-            },
-            "diff": {
-              "hint": "Render ```diff fences with the diff viewer; off shows a plain code block.",
-              "label": "Diff viewer"
-            },
-            "label": "Content rendering",
-            "math": {
-              "hint": "Render $…$ and $$…$$ as typeset math; off shows the source.",
-              "label": "Math (KaTeX)"
-            },
-            "mathAlign": {
-              "center": "Centered",
-              "label": "Display math alignment",
-              "left": "Left"
-            },
-            "mathCopy": {
-              "hint": "Show a copy affordance when hovering inline math.",
-              "label": "Copy button on inline math"
-            },
-            "mathFontScale": {
-              "1": "Normal",
-              "0_8": "Small",
-              "1_2": "Large",
-              "label": "Math size"
-            },
-            "mermaid": {
-              "hint": "Render ```mermaid fences as diagrams; off shows the code.",
-              "label": "Mermaid diagrams"
-            }
-          },
           "off": "Off",
           "restrained": "Restrained"
         },

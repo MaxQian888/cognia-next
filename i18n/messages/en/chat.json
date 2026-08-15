@@ -149,10 +149,6 @@
     "searchPlaceholder": "Search characters…",
     "title": "Pick a character"
   },
-  "grounding": {
-    "supported": "Retrieved evidence supports the answer's claims.",
-    "unsupported": "{count, plural, =1 {1 claim lacks retrieval support} other {# claims lack retrieval support}}"
-  },
   "checkpoint": {
     "action": "Restore files to this checkpoint",
     "affectedFiles": "Affected files",
@@ -171,12 +167,12 @@
     "title": "Restore file checkpoint"
   },
   "compactBoundary": {
+    "auto": "automatic",
     "checkpoint": {
       "failed": "checkpoint failed",
       "locked": "Vault locked",
       "stored": "checkpoint saved"
     },
-    "auto": "automatic",
     "detail": "{from} → {to} tokens",
     "effectiveness": "reclaimed {pct}%",
     "label": "Context compacted",
@@ -759,6 +755,10 @@
     "pdfFallback": "PDF preview is unavailable.",
     "preview": "Preview",
     "source": "Source"
+  },
+  "grounding": {
+    "supported": "Retrieved evidence supports the answer's claims.",
+    "unsupported": "{count, plural, =1 {1 claim lacks retrieval support} other {# claims lack retrieval support}}"
   },
   "header": {
     "accountSwitcher": {
@@ -1600,8 +1600,8 @@
       "twinRag": "Twin",
       "twinStyle": "Style"
     },
-    "recalledMemoriesHeader": "Recalled memories ({count})",
     "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
+    "recalledMemoriesHeader": "Recalled memories ({count})",
     "retrievedChunksHeader": "Retrieved chunks ({count})",
     "styleSamplesHeader": "Style samples ({count})",
     "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
@@ -1681,6 +1681,33 @@
     "titleFallback": "Allow {tool}?",
     "toolLabel": "Tool"
   },
+  "toolCards": {
+    "clipboardHistory": {
+      "copy": "Copy entry",
+      "count": "{count, plural, =1 {1 entry} other {# entries}}",
+      "empty": "No clipboard entries yet.",
+      "showAll": "Show all {count}",
+      "showLess": "Show less",
+      "title": "Clipboard history"
+    },
+    "screenshot": {
+      "alt": "Captured screen",
+      "title": "Screenshot"
+    },
+    "webFetch": {
+      "failed": "Fetch failed.",
+      "showLess": "Show less",
+      "showMore": "Show all ({chars} characters)",
+      "status": "HTTP {status}",
+      "title": "Web fetch"
+    },
+    "webSearch": {
+      "failed": "Search failed.",
+      "noResults": "No results.",
+      "title": "Web search",
+      "via": "via {provider}"
+    }
+  },
   "transcript": {
     "collapseTurn": "Collapse turn",
     "expandTurn": "Expand full turn",
@@ -1697,33 +1724,6 @@
     "title": "Delete from this message on?"
   },
   "twinBadge": {
-  "toolCards": {
-    "webSearch": {
-      "title": "Web search",
-      "via": "via {provider}",
-      "failed": "Search failed.",
-      "noResults": "No results."
-    },
-    "webFetch": {
-      "title": "Web fetch",
-      "status": "HTTP {status}",
-      "failed": "Fetch failed.",
-      "showMore": "Show all ({chars} characters)",
-      "showLess": "Show less"
-    },
-    "screenshot": {
-      "title": "Screenshot",
-      "alt": "Captured screen"
-    },
-    "clipboardHistory": {
-      "title": "Clipboard history",
-      "count": "{count, plural, =1 {1 entry} other {# entries}}",
-      "empty": "No clipboard entries yet.",
-      "copy": "Copy entry",
-      "showAll": "Show all {count}",
-      "showLess": "Show less"
-    }
-  },
     "fewShotOff": "Style few-shot off",
     "fewShotOn": "Style few-shot on ({k} samples)",
     "label": "twin · {chunks}",

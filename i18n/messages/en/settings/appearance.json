@@ -436,11 +436,54 @@
       "simplified": "Simplified",
       "standard": "Standard"
     },
+    "bodyFont": {
+      "label": "Body font",
+      "sans": "Sans-serif",
+      "serif": "Serif"
+    },
     "layout": {
       "bubbles": "Bubbles",
       "cards": "Cards",
       "hybrid": "Hybrid",
       "label": "Layout"
+    },
+    "markdown": {
+      "codeLineNumbers": {
+        "hint": "Default for the line-number gutter; each block can still toggle it.",
+        "label": "Code line numbers"
+      },
+      "codeWrap": {
+        "hint": "Default for soft wrapping; each block can still toggle it.",
+        "label": "Wrap long code lines"
+      },
+      "diff": {
+        "hint": "Render ```diff fences with the diff viewer; off shows a plain code block.",
+        "label": "Diff viewer"
+      },
+      "label": "Content rendering",
+      "math": {
+        "hint": "Render $…$ and $$…$$ as typeset math; off shows the source.",
+        "label": "Math (KaTeX)"
+      },
+      "mathAlign": {
+        "center": "Centered",
+        "label": "Display math alignment",
+        "left": "Left"
+      },
+      "mathCopy": {
+        "hint": "Show a copy affordance when hovering inline math.",
+        "label": "Copy button on inline math"
+      },
+      "mathFontScale": {
+        "1": "Normal",
+        "0_8": "Small",
+        "1_2": "Large",
+        "label": "Math size"
+      },
+      "mermaid": {
+        "hint": "Render ```mermaid fences as diagrams; off shows the code.",
+        "label": "Mermaid diagrams"
+      }
     },
     "metadata": {
       "cost": "Cost",
@@ -451,55 +494,12 @@
       "model": "Model",
       "provider": "Provider",
       "timestamp": "Timestamp",
-    "bodyFont": {
-      "label": "Body font",
-      "sans": "Sans-serif",
-      "serif": "Serif"
-    },
       "usage": "Usage"
     },
     "motion": {
       "expressive": "Expressive",
       "label": "Message motion",
       "off": "Off",
-    "markdown": {
-      "label": "Content rendering",
-      "math": {
-        "label": "Math (KaTeX)",
-        "hint": "Render $…$ and $$…$$ as typeset math; off shows the source."
-      },
-      "mermaid": {
-        "label": "Mermaid diagrams",
-        "hint": "Render ```mermaid fences as diagrams; off shows the code."
-      },
-      "diff": {
-        "label": "Diff viewer",
-        "hint": "Render ```diff fences with the diff viewer; off shows a plain code block."
-      },
-      "codeLineNumbers": {
-        "label": "Code line numbers",
-        "hint": "Default for the line-number gutter; each block can still toggle it."
-      },
-      "codeWrap": {
-        "label": "Wrap long code lines",
-        "hint": "Default for soft wrapping; each block can still toggle it."
-      },
-      "mathCopy": {
-        "label": "Copy button on inline math",
-        "hint": "Show a copy affordance when hovering inline math."
-      },
-      "mathFontScale": {
-        "label": "Math size",
-        "0_8": "Small",
-        "1": "Normal",
-        "1_2": "Large"
-      },
-      "mathAlign": {
-        "label": "Display math alignment",
-        "center": "Centered",
-        "left": "Left"
-      }
-    },
       "restrained": "Restrained"
     },
     "placement": {

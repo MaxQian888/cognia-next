@@ -436,11 +436,54 @@
       "simplified": "精简",
       "standard": "标准"
     },
+    "bodyFont": {
+      "label": "正文字体",
+      "sans": "无衬线",
+      "serif": "衬线"
+    },
     "layout": {
       "bubbles": "气泡",
       "cards": "卡片",
       "hybrid": "混合",
       "label": "布局"
+    },
+    "markdown": {
+      "codeLineNumbers": {
+        "hint": "行号栏的默认值；每个代码块仍可单独切换。",
+        "label": "代码行号"
+      },
+      "codeWrap": {
+        "hint": "软换行的默认值；每个代码块仍可单独切换。",
+        "label": "长代码行自动换行"
+      },
+      "diff": {
+        "hint": "用 diff 查看器渲染 ```diff 代码块；关闭则显示普通代码块。",
+        "label": "Diff 视图"
+      },
+      "label": "内容渲染",
+      "math": {
+        "hint": "将 $…$ 与 $$…$$ 渲染为排版公式；关闭则显示源码。",
+        "label": "数学公式（KaTeX）"
+      },
+      "mathAlign": {
+        "center": "居中",
+        "label": "块级公式对齐",
+        "left": "左对齐"
+      },
+      "mathCopy": {
+        "hint": "悬停行内公式时显示复制按钮。",
+        "label": "行内公式复制按钮"
+      },
+      "mathFontScale": {
+        "1": "标准",
+        "0_8": "小",
+        "1_2": "大",
+        "label": "公式字号"
+      },
+      "mermaid": {
+        "hint": "将 ```mermaid 代码块渲染为图表；关闭则显示代码。",
+        "label": "Mermaid 图表"
+      }
     },
     "metadata": {
       "cost": "费用",
@@ -451,55 +494,12 @@
       "model": "模型",
       "provider": "提供商",
       "timestamp": "时间",
-    "bodyFont": {
-      "label": "正文字体",
-      "sans": "无衬线",
-      "serif": "衬线"
-    },
       "usage": "用量"
     },
     "motion": {
       "expressive": "丰富",
       "label": "消息动效",
       "off": "关闭",
-    "markdown": {
-      "label": "内容渲染",
-      "math": {
-        "label": "数学公式（KaTeX）",
-        "hint": "将 $…$ 与 $$…$$ 渲染为排版公式；关闭则显示源码。"
-      },
-      "mermaid": {
-        "label": "Mermaid 图表",
-        "hint": "将 ```mermaid 代码块渲染为图表；关闭则显示代码。"
-      },
-      "diff": {
-        "label": "Diff 视图",
-        "hint": "用 diff 查看器渲染 ```diff 代码块；关闭则显示普通代码块。"
-      },
-      "codeLineNumbers": {
-        "label": "代码行号",
-        "hint": "行号栏的默认值；每个代码块仍可单独切换。"
-      },
-      "codeWrap": {
-        "label": "长代码行自动换行",
-        "hint": "软换行的默认值；每个代码块仍可单独切换。"
-      },
-      "mathCopy": {
-        "label": "行内公式复制按钮",
-        "hint": "悬停行内公式时显示复制按钮。"
-      },
-      "mathFontScale": {
-        "label": "公式字号",
-        "0_8": "小",
-        "1": "标准",
-        "1_2": "大"
-      },
-      "mathAlign": {
-        "label": "块级公式对齐",
-        "center": "居中",
-        "left": "左对齐"
-      }
-    },
       "restrained": "克制"
     },
     "placement": {

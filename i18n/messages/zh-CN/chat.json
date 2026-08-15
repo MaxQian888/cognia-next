@@ -149,10 +149,6 @@
     "searchPlaceholder": "搜索角色…",
     "title": "选择一个角色"
   },
-  "grounding": {
-    "supported": "检索证据支持本次回答中的陈述。",
-    "unsupported": "{count, plural, other {# 条陈述缺少检索证据支持}}"
-  },
   "checkpoint": {
     "action": "恢复到此文件检查点",
     "affectedFiles": "受影响的文件",
@@ -171,12 +167,12 @@
     "title": "恢复文件检查点"
   },
   "compactBoundary": {
+    "auto": "自动",
     "checkpoint": {
       "failed": "检查点保存失败",
       "locked": "保险库已锁定",
       "stored": "检查点已保存"
     },
-    "auto": "自动",
     "detail": "{from} → {to} tokens",
     "effectiveness": "已回收 {pct}%",
     "label": "上下文已压缩",
@@ -759,6 +755,10 @@
     "pdfFallback": "无法预览此 PDF。",
     "preview": "预览",
     "source": "源码"
+  },
+  "grounding": {
+    "supported": "检索证据支持本次回答中的陈述。",
+    "unsupported": "{count, plural, other {# 条陈述缺少检索证据支持}}"
   },
   "header": {
     "accountSwitcher": {
@@ -1600,8 +1600,8 @@
       "twinRag": "数字分身",
       "twinStyle": "风格"
     },
-    "recalledMemoriesHeader": "召回的记忆（{count}）",
     "projectKnowledgeHeader": "项目知识片段（{count}）",
+    "recalledMemoriesHeader": "召回的记忆（{count}）",
     "retrievedChunksHeader": "检索片段（{count}）",
     "styleSamplesHeader": "风格样本（{count}）",
     "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
@@ -1681,6 +1681,33 @@
     "titleFallback": "允许执行 {tool}？",
     "toolLabel": "工具"
   },
+  "toolCards": {
+    "clipboardHistory": {
+      "copy": "复制该条",
+      "count": "{count} 条",
+      "empty": "暂无剪贴板记录。",
+      "showAll": "显示全部 {count} 条",
+      "showLess": "收起",
+      "title": "剪贴板历史"
+    },
+    "screenshot": {
+      "alt": "屏幕截图",
+      "title": "截图"
+    },
+    "webFetch": {
+      "failed": "抓取失败。",
+      "showLess": "收起",
+      "showMore": "展开全部（{chars} 字符）",
+      "status": "HTTP {status}",
+      "title": "网页抓取"
+    },
+    "webSearch": {
+      "failed": "搜索失败。",
+      "noResults": "没有结果。",
+      "title": "网页搜索",
+      "via": "来自 {provider}"
+    }
+  },
   "transcript": {
     "collapseTurn": "收起轮次",
     "expandTurn": "展开完整轮次",
@@ -1697,33 +1724,6 @@
     "title": "从这条消息起全部删除？"
   },
   "twinBadge": {
-  "toolCards": {
-    "webSearch": {
-      "title": "网页搜索",
-      "via": "来自 {provider}",
-      "failed": "搜索失败。",
-      "noResults": "没有结果。"
-    },
-    "webFetch": {
-      "title": "网页抓取",
-      "status": "HTTP {status}",
-      "failed": "抓取失败。",
-      "showMore": "展开全部（{chars} 字符）",
-      "showLess": "收起"
-    },
-    "screenshot": {
-      "title": "截图",
-      "alt": "屏幕截图"
-    },
-    "clipboardHistory": {
-      "title": "剪贴板历史",
-      "count": "{count} 条",
-      "empty": "暂无剪贴板记录。",
-      "copy": "复制该条",
-      "showAll": "显示全部 {count} 条",
-      "showLess": "收起"
-    }
-  },
     "fewShotOff": "风格少样本已关闭",
     "fewShotOn": "风格少样本已启用（{k} 条）",
     "label": "孪生 · {chunks}",
