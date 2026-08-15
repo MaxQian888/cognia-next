@@ -200,7 +200,11 @@ export function createStreamingComponents(
     a({ href, children, node: _node, ...props }) {
       const target = href ? parseProjectFileReference(href, projectRoot) : null
       if (target) {
-        return <ProjectFileLink target={target}>{children}</ProjectFileLink>
+        return (
+          <ProjectFileLink target={target} projectRoot={projectRoot}>
+            {children}
+          </ProjectFileLink>
+        )
       }
       return (
         <ExternalLink href={href ?? ""} className="text-primary hover:underline" {...props}>

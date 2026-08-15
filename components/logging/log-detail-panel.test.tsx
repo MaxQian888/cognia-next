@@ -10,9 +10,8 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 const mockOpenFile = jest.fn()
 const mockWriteText = jest.fn()
 
-jest.mock("@/stores/terminal/file-viewer-store", () => ({
-  useFileViewerStore: (selector: (state: { openFile: typeof mockOpenFile }) => unknown): unknown =>
-    selector({ openFile: mockOpenFile }),
+jest.mock("@/lib/file-viewer/open", () => ({
+  openFileViewer: (...args: unknown[]) => mockOpenFile(...args),
 }))
 
 jest.mock("@cognia/agent-trace/log-adapter", () => ({
@@ -222,7 +221,7 @@ describe("LogDetailPanel — stack trace", () => {
 
     await user.click(screen.getByRole("button", { name: "/src/main.ts:10:5" }))
 
-    expect(mockOpenFile).toHaveBeenCalledWith("/src/main.ts", 10, 5)
+    expect(mockOpenFile).toHaveBeenCalledWith("/src/main.ts", { line: 10, column: 5 })
   })
 
   it("parses Firefox-style stack frames", () => {

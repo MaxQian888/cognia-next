@@ -411,7 +411,11 @@ function buildComponents(
         const target = parseProjectFileReference(codeContent, projectRoot)
         if (target) {
           return (
-            <ProjectFileLink target={target} onOpenFile={onOpenProjectFile}>
+            <ProjectFileLink
+              target={target}
+              onOpenFile={onOpenProjectFile}
+              projectRoot={projectRoot}
+            >
               <code className="rounded bg-muted px-1.5 py-0.5 font-mono" {...props}>
                 {children}
               </code>
@@ -484,7 +488,7 @@ function buildComponents(
       const target = href ? parseProjectFileReference(href, projectRoot) : null
       if (target) {
         return (
-          <ProjectFileLink target={target} onOpenFile={onOpenProjectFile}>
+          <ProjectFileLink target={target} onOpenFile={onOpenProjectFile} projectRoot={projectRoot}>
             {children}
           </ProjectFileLink>
         )

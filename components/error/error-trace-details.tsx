@@ -19,7 +19,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
+import { openFileViewer } from "@/lib/file-viewer/open"
 
 export interface ErrorTraceDetailsProps {
   error: Error | { message: string; stack?: string } | null
@@ -47,7 +47,6 @@ export function ErrorTraceDetails({
   body,
 }: ErrorTraceDetailsProps) {
   const t = useTranslations("errorPage")
-  const openFile = useFileViewerStore((state) => state.openFile)
   if (!error) return null
 
   const message = "message" in error ? error.message : String(error)
@@ -71,7 +70,7 @@ export function ErrorTraceDetails({
         {(stack || componentStack) && (
           <StackTrace
             trace={trace}
-            onFilePathClick={(path, line, column) => openFile(path, line ?? null, column ?? null)}
+            onFilePathClick={(path, line, column) => openFileViewer(path, { line, column })}
           >
             <StackTraceHeader aria-label={t("showStack")}>
               <StackTraceError>

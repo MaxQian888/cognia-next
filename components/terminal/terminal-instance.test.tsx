@@ -223,7 +223,7 @@ jest.mock("@/hooks/terminal/use-terminal-autocomplete", () => ({
 
 import { Terminal as MockTerminal } from "@xterm/xterm"
 import { TerminalInstance } from "./terminal-instance"
-import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
+import { useFileViewerStore } from "@/stores/file-viewer/file-viewer-store"
 
 function makeFakeSession(): NonNullable<(typeof sessionRegistry)["current"]> {
   return {
@@ -269,7 +269,7 @@ beforeEach(() => {
   mockTermInstance.clearTextureAtlas = jest.fn()
   mockTermInstance.buffer = { active: { viewportY: 0 } }
   mockTermInstance.dispose = jest.fn()
-  useFileViewerStore.setState({ open: false, path: null, line: null, column: null })
+  useFileViewerStore.setState({ open: false, request: null, failure: null })
   mockTermInstance.options = { fontFamily: "Menlo", fontSize: 13, scrollback: 10000 }
   mockTermInstance.rows = 24
   mockTermInstance.cols = 80

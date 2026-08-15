@@ -81,7 +81,7 @@ import type {
   TerminalControlState,
   TerminalReplayGap,
 } from "@/lib/terminal/types"
-import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
+import { openFileViewer, projectRootsOf } from "@/lib/file-viewer/open"
 import { openInProjectEditor } from "@/lib/files/project-editor-bridge"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -1317,12 +1317,22 @@ function TerminalInstanceImpl(
               end: { x: mm.start + mm.length, y: bufferLineNumber },
             },
             activate: () => {
-              const cwd = useTerminalStore.getState().sessions[sessionId]?.cwd ?? null
-              const abs = resolveLinkPath(cwd, mm.path)
+              const session = useTerminalStore.getState().sessions[sessionId]
+              // `cwd` absolutizes a relative match and nothing more. It is not a
+              // confinement boundary: the shell rewrites it on every `cd`, so a
+              // root derived from it would widen to `/` the moment the user
+              // typed one and narrow enough to break sibling links the next.
+              const abs = resolveLinkPath(session?.cwd ?? null, mm.path)
               // Prefer a live project editor rooted at this path (editable +
               // LSP); fall back to the read-only viewer when none is open.
               if (!openInProjectEditor(abs, mm.line ?? undefined, mm.column ?? undefined)) {
-                useFileViewerStore.getState().openFile(abs, mm.line, mm.column)
+                openFileViewer(abs, {
+                  line: mm.line,
+                  column: mm.column,
+                  // Break a depth tie in favour of the workspace this terminal
+                  // belongs to.
+                  preferredRoots: projectRootsOf(session?.projectId ?? null),
+                })
               }
             },
           }))

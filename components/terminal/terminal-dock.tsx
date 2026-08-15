@@ -71,7 +71,6 @@ import {
   type TerminalSessionRow,
 } from "@/stores/terminal/terminal-store"
 
-import { FileViewerDialog } from "./file-viewer-dialog"
 import { TerminalDockGrip } from "./terminal-dock-grip"
 import { TerminalEmptyState } from "./terminal-empty-state"
 import { TerminalHistoryPanel } from "./terminal-history-panel"
@@ -670,7 +669,6 @@ export function TerminalDock() {
         )}
       </div>
       {/* Read-only viewer for clicked terminal file links (1D). */}
-      <FileViewerDialog />
       {/* Live sessions default to detach; termination is always explicit. */}
       <AlertDialog
         open={closeConfirmTarget !== null}

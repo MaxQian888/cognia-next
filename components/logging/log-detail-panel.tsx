@@ -51,7 +51,7 @@ import {
   StackTraceHeader,
 } from "@/components/ai-elements/stack-trace"
 import { cn } from "@/lib/utils"
-import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
+import { openFileViewer } from "@/lib/file-viewer/open"
 import {
   AGENT_TRACE_MODULE,
   getAgentTraceLogData,
@@ -398,7 +398,6 @@ export function LogDetailPanel({
 }: LogDetailPanelProps) {
   const t = useTranslations("logging")
   const locale = useLocale()
-  const openFile = useFileViewerStore((state) => state.openFile)
 
   const timestamp = new Date(log.timestamp)
   const timeStr = timestamp.toLocaleString(locale, {
@@ -644,9 +643,7 @@ export function LogDetailPanel({
                 <StackTrace
                   trace={log.stack}
                   defaultOpen
-                  onFilePathClick={(path, line, column) =>
-                    openFile(path, line ?? null, column ?? null)
-                  }
+                  onFilePathClick={(path, line, column) => openFileViewer(path, { line, column })}
                 >
                   <StackTraceHeader aria-label={t("panel.stackTrace")}>
                     <StackTraceError>

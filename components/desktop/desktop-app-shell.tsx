@@ -29,6 +29,7 @@ import { GuildRail } from "@/components/shell/guild-rail"
 import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
 import { FindBar } from "@/components/desktop/find-bar"
+import { FileViewerDialog } from "@/components/file-viewer/file-viewer-dialog"
 import { ShellLayoutNotice } from "@/components/desktop/shell-layout-notice"
 import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
 import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
@@ -193,6 +194,11 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
       {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
       {mounted && <AgentThreadBrowser />}
       <FindBar />
+      {/* Global, like the palette beside it. It used to live inside the terminal
+          dock, which renders only while that panel is open — so clicking a file
+          reference in chat with the terminal closed wrote to the store and showed
+          nothing at all. */}
+      <FileViewerDialog />
       <ShellLayoutNotice />
       {!statusBarCollapsed && <StatusBar />}
     </div>

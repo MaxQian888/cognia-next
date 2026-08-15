@@ -4,7 +4,8 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import { ErrorParsedView } from "./error-parsed-view"
-import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
+import { useFileViewerStore } from "@/stores/file-viewer/file-viewer-store"
+import { useProjectStore } from "@/stores/project/project-store"
 
 describe("ErrorParsedView", () => {
   it("renders text nodes", () => {
@@ -176,7 +177,10 @@ describe("ErrorParsedView", () => {
   })
 
   it("preserves unknown stack-frame coordinates when opening a file", () => {
-    useFileViewerStore.setState({ open: false, path: null, line: null, column: null })
+    useFileViewerStore.setState({ open: false, request: null, failure: null })
+    useProjectStore.setState({
+      projects: [{ id: "p1", name: "app", roots: [{ id: "r1", path: "/app", primary: true }] }],
+    } as never)
     render(
       <ErrorParsedView
         parsed={{
@@ -195,10 +199,12 @@ describe("ErrorParsedView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /\/app\/x\.ts/ }))
 
+    // A stack frame with no coordinates still opens the file; the path is
+    // resolved against the open workspace first, so the viewer gets a confined
+    // `{ root, relPath }` rather than a bare absolute path.
     expect(useFileViewerStore.getState()).toMatchObject({
-      path: "/app/x.ts",
-      line: null,
-      column: null,
+      open: true,
+      request: { root: "/app", relPath: "x.ts", line: null, column: null },
     })
   })
 

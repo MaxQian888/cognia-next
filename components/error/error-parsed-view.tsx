@@ -25,7 +25,7 @@ import type { DiagnosticIcon } from "@cognia/diagnostics"
 import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import { ExternalLink } from "@/components/shared/external-link"
 import { JsonTree } from "@/components/shared/json-tree"
-import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
+import { openFileViewer } from "@/lib/file-viewer/open"
 import { Badge } from "@/components/ui/badge"
 import {
   StackTrace,
@@ -208,14 +208,9 @@ function JsonNodeView({ node }: { node: ParsedNode }) {
 
 function StackNodeView({ node }: { node: ParsedNode }) {
   const t = useTranslations("errorPage")
-  const openFile = useFileViewerStore((s) => s.openFile)
-
-  const handlePathClick = useCallback(
-    (path: string, line: number | null, col: number | null) => {
-      openFile(path, line, col)
-    },
-    [openFile]
-  )
+  const handlePathClick = useCallback((path: string, line: number | null, col: number | null) => {
+    openFileViewer(path, { line, column: col })
+  }, [])
 
   if (!node.frames || node.frames.length === 0) {
     return <span className="text-sm">{node.content}</span>
@@ -298,13 +293,11 @@ function UrlNodeView({ node }: { node: ParsedNode }) {
 }
 
 function PathNodeView({ node }: { node: ParsedNode }) {
-  const openFile = useFileViewerStore((s) => s.openFile)
-
   const handleClick = useCallback(() => {
     if (node.href) {
-      openFile(node.href, node.line ?? null, node.column ?? null)
+      openFileViewer(node.href, { line: node.line ?? null, column: node.column ?? null })
     }
-  }, [node.href, node.line, node.column, openFile])
+  }, [node.href, node.line, node.column])
 
   return (
     <button

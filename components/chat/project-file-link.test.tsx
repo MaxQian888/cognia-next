@@ -3,12 +3,18 @@ import {
   __resetProjectEditorBridgeForTesting,
   registerProjectEditorOpener,
 } from "@/lib/files/project-editor-bridge"
-import { useFileViewerStore } from "@/stores/terminal/file-viewer-store"
+import { useFileViewerStore } from "@/stores/file-viewer/file-viewer-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import { ProjectFileLink } from "./project-file-link"
 
 beforeEach(() => {
   __resetProjectEditorBridgeForTesting()
-  useFileViewerStore.setState({ open: false, path: null, line: null, column: null })
+  useFileViewerStore.setState({ open: false, request: null, failure: null })
+  useProjectStore.setState({
+    projects: [
+      { id: "p1", name: "repo", roots: [{ id: "r1", path: "/repo", primary: true }] },
+    ] as never,
+  })
 })
 
 it("opens a conversation file link in the active project editor", () => {
@@ -33,11 +39,30 @@ it("falls back to the read-only viewer when no project editor is mounted", () =>
 
   fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }))
 
+  // The absolute path is resolved against the open workspace before anything is
+  // read, so the viewer receives a confined `{ root, relPath }` pair.
   expect(useFileViewerStore.getState()).toMatchObject({
     open: true,
-    path: "/repo/src/a.ts",
-    line: 7,
-    column: null,
+    failure: null,
+    request: { root: "/repo", relPath: "src/a.ts", line: 7, column: null },
+  })
+})
+
+it("refuses a path outside every open workspace, visibly", () => {
+  render(
+    <ProjectFileLink target={{ absolutePath: "/usr/lib/node_modules/x/index.js" }}>
+      index.js
+    </ProjectFileLink>
+  )
+
+  fireEvent.click(screen.getByRole("button", { name: "index.js" }))
+
+  // Opening on the refusal rather than doing nothing: a click that silently
+  // fails is indistinguishable from a broken link.
+  expect(useFileViewerStore.getState()).toMatchObject({
+    open: true,
+    request: null,
+    failure: { code: "outside-workspace", displayName: "index.js" },
   })
 })
 
