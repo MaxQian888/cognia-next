@@ -473,9 +473,18 @@ export interface ProviderUIPreferences {
   categoryFilter?: string
   /** Sort order for the sidebar list. */
   sortBy?: "name" | "status" | "lastUsed"
-  /** Comparison view selection (multi-select). */
+  /**
+   * @deprecated Selection of the retired provider-level compare dialog. Kept
+   * only so persisted rows keep parsing; nothing reads or writes it. Use
+   * {@link ProviderUIPreferences.comparisonModelKeys}.
+   */
   comparisonProviderIds?: string[]
-  /** Sidebar width in px (resizable handle). */
+  /**
+   * Model comparison selection, as `${providerId}:${modelId}` keys (max 4).
+   * Restored when the compare pane reopens.
+   */
+  comparisonModelKeys?: string[]
+  /** Sidebar (provider rail) width in px, set by the drag handle. */
   sidebarWidth?: number
 }
 

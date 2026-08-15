@@ -61,7 +61,6 @@ import { ProviderSidebar } from "./provider-sidebar"
 import { ProviderEmptyState } from "./provider-empty-state"
 import { ProviderSkeleton } from "./provider-skeleton"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
-import { ProviderCompareDialog } from "./provider-compare-dialog"
 import { BatchTestProgress, TestResultsSummary } from "./batch-test-progress"
 import { OAuthLoginButton } from "./oauth-login-button"
 import { useSettingsStore } from "@/stores/settings"
@@ -132,6 +131,13 @@ const OpenRouterKeyManagement = dynamic(
 )
 const CLIProxyAPISettings = dynamic(
   () => import("./cliproxyapi-settings").then((m) => m.CLIProxyAPISettings),
+  { ssr: false }
+)
+// Model comparison pane (side-by-side capabilities + pricing, max 4 models).
+// Swaps into the detail column instead of a dialog so the table gets the full
+// pane width; lazy because it is 20+ KB and most sessions never open it.
+const ProviderComparisonView = dynamic(
+  () => import("./provider-comparison-view").then((m) => m.ProviderComparisonView),
   { ssr: false }
 )
 // Export/import of the whole provider configuration. Renders as a two-button
@@ -375,6 +381,9 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [customDialogOpen, setCustomDialogOpen] = useState(false)
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null)
+  // Detail column mode: the provider detail panel, or the model comparison
+  // pane. Comparison is a peer of the detail view (it spans providers), so it
+  // takes the column over instead of stacking a dialog on top of it.
   const [compareOpen, setCompareOpen] = useState(false)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [testingConnection, setTestingConnection] = useState<Record<string, boolean>>({})
@@ -750,9 +759,13 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
       selectedId={selectedId}
       onSelect={(id) => {
         void s.setSelectedProviderId(id)
+        setCompareOpen(false)
         setMobileSheetOpen(false)
       }}
-      onCompareClick={() => setCompareOpen(true)}
+      onCompareClick={() => {
+        setCompareOpen(true)
+        setMobileSheetOpen(false)
+      }}
       categoryFilter={categoryFilter}
       onCategoryChange={setCategoryFilter}
       statusFilter={statusFilter}
@@ -897,10 +910,18 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
               fades out before the incoming one settles. It collapses to a plain
               wrapper under reduced motion. */}
           <PanelTransition
-            activeKey={selectedId ?? "__empty__"}
+            activeKey={compareOpen ? "__compare__" : (selectedId ?? "__empty__")}
             className="flex min-h-0 flex-1 flex-col"
           >
-            {selectedId === null ? (
+            {compareOpen ? (
+              <ProviderComparisonView
+                onBack={() => setCompareOpen(false)}
+                initialSelectedModelKeys={s.uiPreferences.comparisonModelKeys}
+                onSelectedModelKeysChange={(comparisonModelKeys) => {
+                  void setProviderUIPreferences({ comparisonModelKeys })
+                }}
+              />
+            ) : selectedId === null ? (
               <div className="flex h-full items-center justify-center">
                 <div className="flex flex-col items-center gap-4 py-12 text-center">
                   <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
@@ -1231,21 +1252,6 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
           open={customDialogOpen}
           onOpenChange={setCustomDialogOpen}
           editingProviderId={editingCustomId}
-        />
-      )}
-      {compareOpen && (
-        <ProviderCompareDialog
-          open={compareOpen}
-          onOpenChange={setCompareOpen}
-          availableProviders={sidebarProviders
-            .filter((provider) => PROVIDERS[provider.id] !== undefined)
-            .map((provider) => ({ id: provider.id, name: provider.name }))}
-          initialSelectedProviderIds={(s.uiPreferences.comparisonProviderIds ?? []).filter(
-            (providerId) => PROVIDERS[providerId] !== undefined
-          )}
-          onSelectedProviderIdsChange={(comparisonProviderIds) => {
-            void setProviderUIPreferences({ comparisonProviderIds })
-          }}
         />
       )}
       <AlertDialog

@@ -17,6 +17,7 @@ import {
   DEFAULT_DIFFICULTY_ROUTING,
   type DifficultyRoutingSettings,
 } from "@/types/routing/tool-route"
+import { ProviderModelCombobox } from "./provider-model-combobox"
 
 function ModelPairField({
   idPrefix,
@@ -41,8 +42,16 @@ function ModelPairField({
     }
   }
   return (
-    <fieldset className="space-y-1.5">
+    <fieldset className="space-y-1.5" disabled={disabled}>
       <legend className="text-xs font-medium">{label}</legend>
+      {/* Pick from the configured provider/model universe (same source as the
+          alias editor); the raw inputs below stay for models the picker does
+          not list yet (e.g. a freshly pulled local model). */}
+      <ProviderModelCombobox
+        providerId={value?.providerId || undefined}
+        modelId={value?.modelId || undefined}
+        onSelect={(providerId, modelId) => onChange({ providerId, modelId })}
+      />
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
           <Label className="text-[11px] text-muted-foreground" htmlFor={`${idPrefix}-provider`}>

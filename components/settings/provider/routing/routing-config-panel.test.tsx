@@ -38,4 +38,10 @@ describe("RoutingConfigPanel", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("Routing Workbench")).toBeInTheDocument()
   })
+
+  it("mounts the difficulty-routing section so the picker's difficulty strategy is configurable", () => {
+    render(<RoutingConfigPanel />)
+    // The strategy picker lists "difficulty"; its model pair used to have no UI.
+    expect(screen.getByText("Difficulty Routing")).toBeInTheDocument()
+  })
 })

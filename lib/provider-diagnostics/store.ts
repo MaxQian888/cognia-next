@@ -4,6 +4,8 @@ import type {
   ProviderDiagnosticSample,
 } from "@cognia/provider-types"
 
+import Dexie from "dexie"
+
 import { getDb } from "@/lib/db/schema"
 
 export interface ProviderDiagnosticHistoryQuery {
@@ -57,6 +59,52 @@ export async function queryProviderDiagnosticHistory(
   )
   rows.sort((a, b) => b.startedAt - a.startedAt)
   return rows.slice(0, query.limit ?? rows.length)
+}
+
+/**
+ * Latest sample per provider — one indexed `last()` per distinct provider id
+ * over `[providerId+startedAt]` instead of a full-table scan. The provider rail
+ * re-derives its diagnostic badges from this on every table change; with the
+ * scan that was every sample ever recorded (pruning keeps it bounded, but a
+ * busy install still carries thousands of rows).
+ */
+export async function queryLatestProviderDiagnosticSamples(): Promise<
+  Map<string, ProviderDiagnosticSample>
+> {
+  const table = getDb().providerDiagnosticSamples
+  const providerIds = (await table.orderBy("providerId").uniqueKeys()) as string[]
+  const latest = new Map<string, ProviderDiagnosticSample>()
+  await Promise.all(
+    providerIds.map(async (providerId) => {
+      const sample = await table
+        .where("[providerId+startedAt]")
+        .between([providerId, Dexie.minKey], [providerId, Dexie.maxKey])
+        .last()
+      if (sample) latest.set(providerId, sample)
+    })
+  )
+  return latest
+}
+
+/**
+ * Latest sample per model for ONE provider (`Map<modelId, sample>`), read from
+ * the `providerId` index. Only the selected provider's models need badges, so
+ * this replaces scanning every provider's samples for model-level rows.
+ */
+export async function queryLatestProviderModelDiagnosticSamples(
+  providerId: string
+): Promise<Map<string, ProviderDiagnosticSample>> {
+  const rows = await getDb()
+    .providerDiagnosticSamples.where("providerId")
+    .equals(providerId)
+    .toArray()
+  const latest = new Map<string, ProviderDiagnosticSample>()
+  for (const row of rows) {
+    const key = row.modelId ?? ""
+    const current = latest.get(key)
+    if (!current || row.startedAt > current.startedAt) latest.set(key, row)
+  }
+  return latest
 }
 
 export async function listProviderBalanceSnapshots(

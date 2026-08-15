@@ -25,6 +25,7 @@ import {
   type ApiTestResult,
 } from "@cognia/provider-core/providers/api-test"
 import { discoverLocalProviderModels } from "@cognia/provider-core/providers/model-discovery"
+import { buildProviderVerificationFingerprint } from "@cognia/provider-core/providers/completeness"
 import { testAndDiscoverBedrock } from "@/lib/ai/providers/bedrock-connection"
 
 export interface UseProviderSettingsResult {
@@ -192,9 +193,15 @@ export function useProviderSettings(): UseProviderSettingsResult {
           }
         }
 
+        // The fingerprint pins the verification to the credentials/endpoint it
+        // was made with, so `evaluate*Completeness` can flip the status to
+        // "stale" when the key or base URL changes afterwards. Without it the
+        // stale branch was unreachable and a rotated key kept showing
+        // "verified" forever.
         const verificationPatch: Partial<UserProviderSettings> = result.success
           ? {
               verificationStatus: "verified",
+              verificationFingerprint: buildProviderVerificationFingerprint(cfg),
               lastVerifiedAt: Date.now(),
               verificationMessage: result.message,
               healthStatus: "healthy",
@@ -246,6 +253,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
         const verificationPatch: Partial<CustomProviderSettings> = result.success
           ? {
               verificationStatus: "verified",
+              verificationFingerprint: buildProviderVerificationFingerprint(cp),
               lastVerifiedAt: Date.now(),
               verificationMessage: result.message,
               healthStatus: "healthy",
@@ -278,27 +286,53 @@ export function useProviderSettings(): UseProviderSettingsResult {
     [customProviders, updateCustomProvider]
   )
 
-  return {
-    providerSettings,
-    customProviders,
-    defaultProvider,
-    uiPreferences,
-    testResults,
-    customTestResults,
-    customTestMessages,
-    testingProviders,
-    testingCustomProviders,
-    selectedProviderId,
-    setSelectedProviderId,
-    updateProviderSettings,
-    updateCustomProvider,
-    removeCustomProvider,
-    setDefaultProvider,
-    testProvider,
-    testCustomProvider,
-    filteredProviders,
-    visibleCustomProviderIds,
-  }
+  // Referentially stable while nothing changed. Consumers memoise callbacks on
+  // the whole result (`useCallback(..., [s])`), and a fresh literal on every
+  // render made every one of them a new function each time.
+  return useMemo<UseProviderSettingsResult>(
+    () => ({
+      providerSettings,
+      customProviders,
+      defaultProvider,
+      uiPreferences,
+      testResults,
+      customTestResults,
+      customTestMessages,
+      testingProviders,
+      testingCustomProviders,
+      selectedProviderId,
+      setSelectedProviderId,
+      updateProviderSettings,
+      updateCustomProvider,
+      removeCustomProvider,
+      setDefaultProvider,
+      testProvider,
+      testCustomProvider,
+      filteredProviders,
+      visibleCustomProviderIds,
+    }),
+    [
+      providerSettings,
+      customProviders,
+      defaultProvider,
+      uiPreferences,
+      testResults,
+      customTestResults,
+      customTestMessages,
+      testingProviders,
+      testingCustomProviders,
+      selectedProviderId,
+      setSelectedProviderId,
+      updateProviderSettings,
+      updateCustomProvider,
+      removeCustomProvider,
+      setDefaultProvider,
+      testProvider,
+      testCustomProvider,
+      filteredProviders,
+      visibleCustomProviderIds,
+    ]
+  )
 }
 
 /** Re-export the model-metadata type for components that import it from here. */

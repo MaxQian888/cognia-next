@@ -125,7 +125,6 @@
     "hooks/a2ui/index.ts",
     "hooks/agent-trace/index.ts",
     "hooks/agent/index.ts",
-    "hooks/ai/index.ts",
     "hooks/canvas/index.ts",
     "hooks/chat/index.ts",
     "hooks/chat/use-follow-up-suggestions.mock.ts",

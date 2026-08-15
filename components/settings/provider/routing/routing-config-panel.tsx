@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl"
 import {
   Activity,
   FlaskConical,
+  Gauge,
   GitMerge,
   Globe,
   Layers,
@@ -31,6 +32,7 @@ import { RoutingTestPanel } from "./routing-test-panel"
 import { ReliabilitySection } from "./reliability-section"
 import { SemanticRoutingSection } from "./semantic-routing-section"
 import { AutoRoutingSection } from "./auto-routing-section"
+import { DifficultyRoutingSection } from "./difficulty-routing-section"
 
 export function RoutingConfigPanel() {
   const t = useTranslations("providers.routingView")
@@ -101,6 +103,23 @@ export function RoutingConfigPanel() {
         defaultOpen={false}
       >
         <SemanticRoutingSection />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      {/* The "difficulty" strategy is offered by the picker above and only
+          takes effect once a strong/weak model pair is configured here; the
+          section was built with the strategy but never mounted, so the
+          strategy could be selected and silently fell back to the first
+          candidate. */}
+      <SettingsCard
+        icon={<Gauge className="h-4 w-4" />}
+        title={t("difficulty.title")}
+        description={t("difficulty.desc")}
+        collapsible
+        defaultOpen={false}
+      >
+        <DifficultyRoutingSection />
       </SettingsCard>
 
       <SettingsDivider />

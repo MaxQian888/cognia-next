@@ -42,6 +42,7 @@ function makeHookState(overrides?: {
   customProviders?: Record<string, Record<string, unknown>>
   customTestResults?: Record<string, "success" | "error" | "limited" | undefined>
   selectedProviderId?: string | null
+  uiPreferences?: Record<string, unknown>
 }) {
   const filtered = (overrides?.filteredProviders ?? []).map(([id, cfg]) => [
     id,
@@ -73,7 +74,7 @@ function makeHookState(overrides?: {
     selectedProviderId: overrides?.selectedProviderId ?? null,
     setSelectedProviderId: mockSetSelectedProviderId,
     setDefaultProvider: mockSetDefaultProvider,
-    uiPreferences: {},
+    uiPreferences: overrides?.uiPreferences ?? {},
   }
 }
 
@@ -451,9 +452,31 @@ jest.mock("./provider-onboarding-banner", () => ({
     />
   ),
 }))
-jest.mock("./provider-compare-dialog", () => ({
-  ProviderCompareDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="provider-compare-dialog" /> : null,
+jest.mock("./provider-comparison-view", () => ({
+  ProviderComparisonView: ({
+    onBack,
+    initialSelectedModelKeys,
+    onSelectedModelKeysChange,
+  }: {
+    onBack: () => void
+    initialSelectedModelKeys?: readonly string[]
+    onSelectedModelKeysChange?: (keys: string[]) => void
+  }) => (
+    <div
+      data-testid="provider-comparison-view"
+      data-initial-keys={(initialSelectedModelKeys ?? []).join(",")}
+    >
+      <button data-testid="mock-compare-back" onClick={onBack}>
+        back
+      </button>
+      <button
+        data-testid="mock-compare-select"
+        onClick={() => onSelectedModelKeysChange?.(["openai:gpt-4o"])}
+      >
+        select
+      </button>
+    </div>
+  ),
 }))
 jest.mock("./provider-config-tab", () => ({
   ProviderConfigTab: (props: Record<string, unknown>) => (
@@ -1147,16 +1170,31 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(await findByTestId("quick-add-provider-dialog")).toBeInTheDocument()
   })
 
-  it("routes the onboarding banner scroll action and sidebar compare click", () => {
+  it("routes the onboarding banner scroll action and swaps the detail column into the compare pane", async () => {
     mockHookState = makeHookState({
       filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
       selectedProviderId: "deepseek",
+      uiPreferences: { comparisonModelKeys: ["anthropic:claude-4-7-sonnet"] },
     })
     render(<ProviderSettings />)
     fireEvent.click(screen.getByTestId("provider-onboarding-banner"))
     expect(mockSetSelectedProviderId).toHaveBeenCalledWith("openai")
     fireEvent.click(screen.getByTestId("mock-compare"))
-    expect(screen.getByTestId("provider-compare-dialog")).toBeInTheDocument()
+    // The comparison view is `next/dynamic`; the loader shim resolves it async.
+    const pane = await screen.findByTestId("provider-comparison-view")
+    // Persisted selection is restored …
+    expect(pane).toHaveAttribute("data-initial-keys", "anthropic:claude-4-7-sonnet")
+    // … the detail panel is gone while comparing …
+    expect(screen.queryByTestId("provider-detail-panel")).not.toBeInTheDocument()
+    // … a new selection is persisted to the UI preferences …
+    fireEvent.click(screen.getByTestId("mock-compare-select"))
+    expect(mockSetProviderUIPreferences).toHaveBeenCalledWith({
+      comparisonModelKeys: ["openai:gpt-4o"],
+    })
+    // … and Back (or picking a provider) restores the detail panel.
+    fireEvent.click(screen.getByTestId("mock-compare-back"))
+    expect(screen.queryByTestId("provider-comparison-view")).not.toBeInTheDocument()
+    expect(screen.getByTestId("provider-detail-panel")).toBeInTheDocument()
   })
 
   it("selects a provider from the sidebar", () => {

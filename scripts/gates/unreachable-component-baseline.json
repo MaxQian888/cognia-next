@@ -13,17 +13,6 @@
     "components/settings/connections/forms/adapter-form.tsx",
     "components/settings/connections/tabs/tunnel-tab.tsx",
     "components/settings/developer/lsp-dev-toggle.tsx",
-    "components/settings/provider/add-provider-popover.tsx",
-    "components/settings/provider/add-provider-wizard.tsx",
-    "components/settings/provider/custom-providers-list.tsx",
-    "components/settings/provider/model-list-dialog.tsx",
-    "components/settings/provider/model-manager.tsx",
-    "components/settings/provider/model-settings-dialog.tsx",
-    "components/settings/provider/ollama-model-manager.tsx",
-    "components/settings/provider/provider-advanced-tab.tsx",
-    "components/settings/provider/provider-comparison-view.tsx",
-    "components/settings/provider/provider-health-status.tsx",
-    "components/settings/provider/provider-status-badge.tsx",
     "components/workflow/editor/chat/sticky-proposal-banner.tsx"
   ]
 }

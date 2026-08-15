@@ -42,9 +42,24 @@ import type {
 
 export interface ProviderComparisonViewProps {
   onBack: () => void
+  /**
+   * Selection to restore on mount, as `${providerId}:${modelId}` keys
+   * (`ProviderUIPreferences.comparisonModelKeys`). Unknown keys are dropped.
+   */
+  initialSelectedModelKeys?: readonly string[]
+  /** Fired with the new key list whenever the selection changes. */
+  onSelectedModelKeysChange?: (keys: string[]) => void
+}
+
+/** Stable selection key — model ids collide across providers (`gpt-4o` on
+ *  OpenAI, Azure and OpenRouter), so the provider must be part of the key. */
+export function comparisonModelKey(providerId: string, modelId: string): string {
+  return `${providerId}:${modelId}`
 }
 
 interface ModelOption {
+  /** `${providerId}:${modelId}` — see {@link comparisonModelKey}. */
+  key: string
   modelId: string
   modelName: string
   providerId: string
@@ -55,16 +70,11 @@ interface ModelOption {
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
-function formatContext(tokens: number): string {
-  if (tokens === 0) return "N/A"
+function formatContext(tokens: number, notAvailable = "—"): string {
+  if (tokens === 0) return notAvailable
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M`
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`
   return String(tokens)
-}
-
-function formatPrice(pricePerMillion: number): string {
-  if (pricePerMillion === 0) return "Free"
-  return `$${pricePerMillion.toFixed(2)} / 1M`
 }
 
 /** Numeric per-1M pricing fields (everything on ModelPricing except `currency`). */
@@ -82,12 +92,6 @@ function estimateCostPer1K(entry: BuiltInProviderModelEntry): number | null {
   const inputCost = (500 / 1_000_000) * entry.pricing.promptPer1M
   const outputCost = (200 / 1_000_000) * entry.pricing.completionPer1M
   return (inputCost + outputCost) * 1000
-}
-
-function formatEstCost(entry: BuiltInProviderModelEntry): string {
-  const cost = estimateCostPer1K(entry)
-  if (cost === null) return "N/A"
-  return `$${cost.toFixed(3)}`
 }
 
 /**
@@ -143,15 +147,31 @@ function CapabilityCell({ supported }: { supported: boolean }) {
 
 const MAX_MODELS = 4
 
-export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) {
+export function ProviderComparisonView({
+  onBack,
+  initialSelectedModelKeys,
+  onSelectedModelKeysChange,
+}: ProviderComparisonViewProps) {
   const t = useTranslations("providers")
 
-  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([])
+  const [selectedModelKeys, setSelectedModelKeys] = useState<string[]>(() =>
+    (initialSelectedModelKeys ?? []).slice(0, MAX_MODELS)
+  )
   const [popoverOpen, setPopoverOpen] = useState(false)
 
   const providerSettings = useSettingsStore((s) => s.providerSettings)
   const providerUsageStats = useSettingsStore((s) => s.providerUsageStats)
   const { row: modelsDevRow } = useModelsDevCatalog()
+
+  /* Money / "not available" formatting lives here so the strings are i18n'd. */
+  const formatPrice = (pricePerMillion: number): string =>
+    pricePerMillion === 0
+      ? t("comparison.free")
+      : t("comparison.pricePerMillion", { price: `$${pricePerMillion.toFixed(2)}` })
+  const formatEstCost = (entry: BuiltInProviderModelEntry): string => {
+    const cost = estimateCostPer1K(entry)
+    return cost === null ? t("comparison.notAvailable") : `$${cost.toFixed(3)}`
+  }
 
   /* Build the list of available model options from all enabled providers */
   const availableModels = useMemo<ModelOption[]>(() => {
@@ -168,6 +188,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
       for (const model of catalogEntry.models) {
         const dev = devModels.find((d) => d.id === model.id)
         options.push({
+          key: comparisonModelKey(catalogEntry.id, model.id),
           modelId: model.id,
           modelName: model.name,
           providerId: catalogEntry.id,
@@ -195,10 +216,10 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
 
   /* Resolve selected model details */
   const selectedModels = useMemo<ModelOption[]>(() => {
-    return selectedModelIds
-      .map((id) => availableModels.find((m) => m.modelId === id))
+    return selectedModelKeys
+      .map((key) => availableModels.find((m) => m.key === key))
       .filter(Boolean) as ModelOption[]
-  }, [selectedModelIds, availableModels])
+  }, [selectedModelKeys, availableModels])
 
   /* Recommendation: lowest average cost per 1M tokens */
   const bestValueModel = useMemo(() => {
@@ -217,13 +238,18 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
   }, [selectedModels])
 
   /* Toggle model selection */
-  const toggleModel = (modelId: string) => {
-    setSelectedModelIds((prev) => {
-      if (prev.includes(modelId)) {
-        return prev.filter((id) => id !== modelId)
+  const toggleModel = (key: string) => {
+    setSelectedModelKeys((prev) => {
+      let next: string[]
+      if (prev.includes(key)) {
+        next = prev.filter((k) => k !== key)
+      } else if (prev.length >= MAX_MODELS) {
+        return prev
+      } else {
+        next = [...prev, key]
       }
-      if (prev.length >= MAX_MODELS) return prev
-      return [...prev, modelId]
+      onSelectedModelKeysChange?.(next)
+      return next
     })
   }
 
@@ -238,7 +264,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
         {selectedModels.map((model) => {
           const v = model.entry.pricing?.[field]
           return (
-            <TableCell key={model.modelId} className="px-3 py-2 text-center text-sm font-mono">
+            <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
               {typeof v === "number" ? formatPrice(v) : "—"}
             </TableCell>
           )
@@ -271,7 +297,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
             <Button
               variant="outline"
               size="sm"
-              disabled={selectedModelIds.length >= MAX_MODELS}
+              disabled={selectedModelKeys.length >= MAX_MODELS}
               className="gap-1"
             >
               {t("comparison.addModel")}
@@ -286,19 +312,19 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                     {models[0]?.providerName ?? providerId}
                   </p>
                   {models.map((model) => {
-                    const isChecked = selectedModelIds.includes(model.modelId)
-                    const isDisabled = !isChecked && selectedModelIds.length >= MAX_MODELS
+                    const isChecked = selectedModelKeys.includes(model.key)
+                    const isDisabled = !isChecked && selectedModelKeys.length >= MAX_MODELS
                     return (
                       <label
-                        key={model.modelId}
-                        htmlFor={`model-${model.modelId}`}
+                        key={model.key}
+                        htmlFor={`compare-model-${model.key}`}
                         className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted"
                         style={isDisabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
                       >
                         <Checkbox
-                          id={`model-${model.modelId}`}
+                          id={`compare-model-${model.key}`}
                           checked={isChecked}
-                          onCheckedChange={() => toggleModel(model.modelId)}
+                          onCheckedChange={() => toggleModel(model.key)}
                         />
                         <span className="flex-1 truncate">{model.modelName}</span>
                         {model.entry.pricing && (
@@ -318,7 +344,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
         {/* Selected model chips */}
         {selectedModels.map((model) => (
           <Badge
-            key={model.modelId}
+            key={model.key}
             variant="secondary"
             className="flex items-center gap-1 pr-1 text-xs"
           >
@@ -328,8 +354,8 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
               variant="ghost"
               size="icon-xs"
               className="ml-1 size-5 rounded-full"
-              onClick={() => toggleModel(model.modelId)}
-              aria-label={`Remove ${model.modelName}`}
+              onClick={() => toggleModel(model.key)}
+              aria-label={t("comparison.removeModel", { name: model.modelName })}
             >
               <X className="h-2.5 w-2.5" />
             </Button>
@@ -363,7 +389,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                   </TableHead>
                   {selectedModels.map((model) => (
                     <TableHead
-                      key={model.modelId}
+                      key={model.key}
                       className="min-w-[140px] px-3 py-2 text-center text-sm font-semibold"
                     >
                       <div>{model.modelName}</div>
@@ -378,7 +404,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Provider */}
                 <ComparisonRow label={t("comparison.provider")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center text-sm">
+                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm">
                       {model.providerName}
                     </TableCell>
                   ))}
@@ -387,11 +413,8 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Context Window */}
                 <ComparisonRow label={t("comparison.contextWindow")}>
                   {selectedModels.map((model) => (
-                    <TableCell
-                      key={model.modelId}
-                      className="px-3 py-2 text-center text-sm font-mono"
-                    >
-                      {formatContext(model.entry.contextLength)}
+                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
+                      {formatContext(model.entry.contextLength, t("comparison.notAvailable"))}
                     </TableCell>
                   ))}
                 </ComparisonRow>
@@ -399,10 +422,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Max Output */}
                 <ComparisonRow label={t("comparison.maxOutput")}>
                   {selectedModels.map((model) => (
-                    <TableCell
-                      key={model.modelId}
-                      className="px-3 py-2 text-center text-sm font-mono"
-                    >
+                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
                       {model.entry.maxOutputTokens
                         ? formatContext(model.entry.maxOutputTokens)
                         : "—"}
@@ -413,7 +433,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Text Generation (always true for chat models) */}
                 <ComparisonRow label={t("comparison.textGeneration")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={true} />
                     </TableCell>
                   ))}
@@ -422,7 +442,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Vision */}
                 <ComparisonRow label={t("comparison.vision")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={model.entry.supportsVision} />
                     </TableCell>
                   ))}
@@ -431,7 +451,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Code Generation (proxy: supportsTools as commonly both go together) */}
                 <ComparisonRow label={t("comparison.codeGeneration")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={model.entry.supportsTools} />
                     </TableCell>
                   ))}
@@ -440,7 +460,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Function Calling */}
                 <ComparisonRow label={t("comparison.functionCalling")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={model.entry.supportsTools} />
                     </TableCell>
                   ))}
@@ -449,7 +469,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Streaming */}
                 <ComparisonRow label={t("comparison.streaming")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={model.entry.supportsStreaming} />
                     </TableCell>
                   ))}
@@ -458,7 +478,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Reasoning */}
                 <ComparisonRow label={t("comparison.reasoning")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={Boolean(model.entry.supportsReasoning)} />
                     </TableCell>
                   ))}
@@ -467,7 +487,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Audio */}
                 <ComparisonRow label={t("comparison.audio")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={Boolean(model.entry.supportsAudio)} />
                     </TableCell>
                   ))}
@@ -476,7 +496,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Video */}
                 <ComparisonRow label={t("comparison.video")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={Boolean(model.entry.supportsVideo)} />
                     </TableCell>
                   ))}
@@ -485,7 +505,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Image generation */}
                 <ComparisonRow label={t("comparison.imageGeneration")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={Boolean(model.entry.supportsImageGeneration)} />
                     </TableCell>
                   ))}
@@ -494,7 +514,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Embedding */}
                 <ComparisonRow label={t("comparison.embedding")}>
                   {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center">
+                    <TableCell key={model.key} className="px-3 py-2 text-center">
                       <CapabilityCell supported={Boolean(model.entry.supportsEmbedding)} />
                     </TableCell>
                   ))}
@@ -508,32 +528,17 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                     const latency = (modelStats as { avgLatencyMs?: number }[] | undefined)?.[0]
                       ?.avgLatencyMs
                     return (
-                      <TableCell key={model.modelId} className="px-3 py-2 text-center text-sm">
+                      <TableCell key={model.key} className="px-3 py-2 text-center text-sm">
                         {formatLatency(latency)}
                       </TableCell>
                     )
                   })}
                 </ComparisonRow>
 
-                {/* Availability */}
-                <ComparisonRow label={t("comparison.availability")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.modelId} className="px-3 py-2 text-center text-sm">
-                      <span className="inline-flex items-center gap-1">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        {t("comparison.online")}
-                      </span>
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
                 {/* Input Price */}
                 <ComparisonRow label={t("comparison.inputPrice")}>
                   {selectedModels.map((model) => (
-                    <TableCell
-                      key={model.modelId}
-                      className="px-3 py-2 text-center text-sm font-mono"
-                    >
+                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
                       {model.entry.pricing
                         ? formatPrice(model.entry.pricing.promptPer1M)
                         : t("comparison.noPrice")}
@@ -544,10 +549,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Output Price */}
                 <ComparisonRow label={t("comparison.outputPrice")}>
                   {selectedModels.map((model) => (
-                    <TableCell
-                      key={model.modelId}
-                      className="px-3 py-2 text-center text-sm font-mono"
-                    >
+                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
                       {model.entry.pricing
                         ? formatPrice(model.entry.pricing.completionPer1M)
                         : t("comparison.noPrice")}
@@ -567,10 +569,7 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                 {/* Est. Cost/1K calls */}
                 <ComparisonRow label={t("comparison.estCostPer1K")}>
                   {selectedModels.map((model) => (
-                    <TableCell
-                      key={model.modelId}
-                      className="px-3 py-2 text-center text-sm font-mono"
-                    >
+                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
                       {formatEstCost(model.entry)}
                     </TableCell>
                   ))}
