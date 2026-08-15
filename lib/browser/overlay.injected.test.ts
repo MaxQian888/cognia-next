@@ -1241,3 +1241,108 @@ describe("overlay.injected info panel", () => {
     expect(received).toHaveLength(1)
   })
 })
+
+// ADR-0127 push channels: console / network batches and the DOM-changed marker
+// travel over the same cancelled-navigation sentinel as selection / nav /
+// loaded. Tests capture the sentinel URL through `window.__cogniaSignalPush`.
+describe("push channels (ADR-0127)", () => {
+  type PushApi = OverlayApi & {
+    flushPush: (kind: "console" | "network") => void
+    flushSnapshotDirty: () => void
+    onDomMutations: (records: Array<{ target: Node }>) => void
+    setPushEnabled: (json: string) => string
+    pushSentinels: { console: string; network: string; snapshot: string }
+  }
+  const decode = (url: string, prefix: string) => {
+    expect(url.startsWith(prefix)).toBe(true)
+    return JSON.parse(decodeURIComponent(url.slice(prefix.length))) as Record<string, unknown>
+  }
+  let pushes: string[]
+
+  beforeEach(() => {
+    document.body.innerHTML = ""
+    pushes = []
+    ;(window as unknown as Record<string, unknown>).__cogniaSignalPush = (url: string) => {
+      pushes.push(url)
+    }
+  })
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__cogniaSignalPush
+    jest.useRealTimers()
+  })
+
+  it("pushes a batched console copy without emptying the drain buffer", () => {
+    jest.useFakeTimers()
+    const api = install() as PushApi
+    console.warn("first")
+    console.error("second")
+    expect(pushes).toHaveLength(0)
+    jest.advanceTimersByTime(250)
+    jest.advanceTimersByTime(1)
+    expect(pushes).toHaveLength(1)
+    const payload = decode(pushes[0], api.pushSentinels.console)
+    const entries = payload.entries as Array<{ level: string; text: string }>
+    expect(entries.map((e) => [e.level, e.text])).toEqual([
+      ["warn", "first"],
+      ["error", "second"],
+    ])
+    // Pull-mode drain still returns everything (push is a copy).
+    const drained = JSON.parse(
+      (window as unknown as { __cogniaDrainConsole: () => string }).__cogniaDrainConsole()
+    ) as Array<{ text: string }>
+    expect(drained.map((e) => e.text)).toEqual(["first", "second"])
+  })
+
+  it("serializes sentinels one per macrotask so a burst never overwrites itself", () => {
+    jest.useFakeTimers()
+    const api = install() as PushApi
+    // Console + network in the same window → two sentinels, spaced out.
+    console.log("c")
+    api.onDomMutations([{ target: document.body }])
+    jest.advanceTimersByTime(250)
+    jest.advanceTimersByTime(1)
+    expect(pushes).toHaveLength(1)
+    jest.advanceTimersByTime(300)
+    expect(pushes.length).toBeGreaterThanOrEqual(2)
+    expect(pushes.some((u) => u.startsWith(api.pushSentinels.snapshot))).toBe(true)
+  })
+
+  it("emits a DOM-changed marker with a monotonic seq and ignores the overlay's own nodes", () => {
+    jest.useFakeTimers()
+    const api = install() as PushApi
+    const overlayNode = document.createElement("div")
+    overlayNode.id = "__cognia-hover-box"
+    document.body.appendChild(overlayNode)
+    api.onDomMutations([{ target: overlayNode }])
+    jest.advanceTimersByTime(600)
+    expect(pushes).toHaveLength(0)
+    api.onDomMutations([{ target: document.body }, { target: document.body }])
+    api.onDomMutations([{ target: document.body }])
+    jest.advanceTimersByTime(499)
+    expect(pushes).toHaveLength(0)
+    jest.advanceTimersByTime(2)
+    expect(pushes).toHaveLength(1)
+    const first = decode(pushes[0], api.pushSentinels.snapshot)
+    expect(first).toMatchObject({ url: window.location.href, seq: 1, mutations: 3 })
+    api.onDomMutations([{ target: document.body }])
+    jest.advanceTimersByTime(600)
+    const second = decode(pushes[1], api.pushSentinels.snapshot)
+    expect(second).toMatchObject({ seq: 2, mutations: 1 })
+  })
+
+  it("caps a batch by count and honours per-channel disable", () => {
+    jest.useFakeTimers()
+    const api = install() as PushApi
+    for (let i = 0; i < 30; i++) console.log(`line ${i}`)
+    jest.advanceTimersByTime(260)
+    const payload = decode(pushes[0], api.pushSentinels.console)
+    expect((payload.entries as unknown[]).length).toBe(20)
+    expect(api.setPushEnabled(JSON.stringify({ console: false }))).toBe(
+      JSON.stringify({ console: false, network: true, snapshot: true })
+    )
+    console.log("silenced")
+    jest.advanceTimersByTime(600)
+    expect(pushes).toHaveLength(1)
+    expect(api.setPushEnabled("not json")).toContain('"console":false')
+  })
+})

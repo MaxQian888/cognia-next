@@ -27,6 +27,8 @@ import {
   configureRemoteBrowserEngine,
   routeEngine,
   EmbeddedEngine,
+  embeddedSnapshotCacheStats,
+  resetEmbeddedSnapshotCache,
 } from "@/lib/browser/agent-engine"
 import { setActivePaneRect } from "@/lib/browser/pane-rect"
 
@@ -35,6 +37,7 @@ const mockClient = browserClient as unknown as Record<string, jest.Mock>
 beforeEach(() => {
   Object.values(mockClient).forEach((m) => m.mockClear())
   configureRemoteBrowserEngine(null)
+  resetEmbeddedSnapshotCache()
 })
 
 describe("routeEngine", () => {
@@ -76,6 +79,58 @@ describe("routeEngine", () => {
     expect(() =>
       routeEngine("http://localhost:3000", { backendPreference: "remote-chromium" })
     ).toThrow(expect.objectContaining({ code: "browser_feature_unsupported" }))
+  })
+})
+
+describe("EmbeddedEngine snapshot cache (ADR-0127)", () => {
+  it("serves repeated snapshots from the cache until a mutating call invalidates it", async () => {
+    const engine = new EmbeddedEngine()
+    const first = await engine.snapshot()
+    const second = await engine.snapshot()
+    expect(second).toBe(first)
+    expect(mockClient.embedSnapshot).toHaveBeenCalledTimes(1)
+    // A scroll does not change the DOM → still cached.
+    await engine.scroll({ direction: "down" })
+    await engine.snapshot()
+    expect(mockClient.embedSnapshot).toHaveBeenCalledTimes(1)
+    // A click can → the next snapshot walks again.
+    await engine.act("ref-1", "click", {})
+    await engine.snapshot()
+    expect(mockClient.embedSnapshot).toHaveBeenCalledTimes(2)
+    expect(embeddedSnapshotCacheStats()).toMatchObject({ hits: 2, misses: 2 })
+  })
+
+  it("keys the cache on includeText, and `fresh` always re-walks without forwarding the flag", async () => {
+    const engine = new EmbeddedEngine()
+    await engine.snapshot({ includeText: true })
+    await engine.snapshot()
+    expect(mockClient.embedSnapshot).toHaveBeenCalledTimes(2)
+    await engine.snapshot({ fresh: true })
+    expect(mockClient.embedSnapshot).toHaveBeenCalledTimes(3)
+    expect(mockClient.embedSnapshot).toHaveBeenLastCalledWith({})
+  })
+
+  it("navigate / back / forward / reload / evaluate all invalidate; readConsole does not", async () => {
+    const engine = new EmbeddedEngine()
+    for (const [name, call] of [
+      ["navigate", () => engine.navigate("http://x/")],
+      ["back", () => engine.back()],
+      ["forward", () => engine.forward()],
+      ["reload", () => engine.reload()],
+      ["evaluate", () => engine.evaluate("1")],
+    ] as const) {
+      await engine.snapshot()
+      const before = mockClient.embedSnapshot.mock.calls.length
+      await call()
+      await engine.snapshot()
+      expect(mockClient.embedSnapshot.mock.calls.length).toBe(before + 1)
+      void name
+    }
+    await engine.snapshot()
+    const before = mockClient.embedSnapshot.mock.calls.length
+    await engine.readConsole()
+    await engine.snapshot()
+    expect(mockClient.embedSnapshot.mock.calls.length).toBe(before)
   })
 })
 

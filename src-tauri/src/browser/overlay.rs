@@ -25,6 +25,14 @@ pub const NAV_SENTINEL_PATH: &str = "/__cognia_nav";
 /// the page reports it here — letting the preview pane swap its loading
 /// placeholder for the painted page.
 pub const LOADED_SENTINEL_PATH: &str = "/__cognia_loaded";
+/// ADR-0127 push channels (`overlay.injected.js` `enqueueSentinel`): a batch
+/// of new console entries / completed requests, and a "DOM changed" marker
+/// carrying a per-document sequence + mutation count. Cancelled like the
+/// other sentinels; re-emitted as `browser://console` / `browser://network` /
+/// `browser://snapshot`.
+pub const CONSOLE_SENTINEL_PATH: &str = "/__cognia_console";
+pub const NETWORK_SENTINEL_PATH: &str = "/__cognia_network";
+pub const SNAPSHOT_SENTINEL_PATH: &str = "/__cognia_snapshot";
 
 /// Parse a sentinel navigation (`https://cognia.invalid/<path>?data=<json>`)
 /// into its JSON payload, or `None` if `raw` is not that sentinel. The `url`
@@ -57,6 +65,21 @@ pub fn parse_spa_navigation(raw: &str) -> Option<serde_json::Value> {
 /// `None` if it is not the load-complete sentinel.
 pub fn parse_loaded(raw: &str) -> Option<serde_json::Value> {
     parse_sentinel(raw, LOADED_SENTINEL_PATH)
+}
+
+/// Parse a console-push sentinel (`{"entries": [...]}`), or `None`.
+pub fn parse_console_push(raw: &str) -> Option<serde_json::Value> {
+    parse_sentinel(raw, CONSOLE_SENTINEL_PATH)
+}
+
+/// Parse a network-push sentinel (`{"entries": [...]}`), or `None`.
+pub fn parse_network_push(raw: &str) -> Option<serde_json::Value> {
+    parse_sentinel(raw, NETWORK_SENTINEL_PATH)
+}
+
+/// Parse a snapshot-dirty sentinel (`{"url","seq","mutations"}`), or `None`.
+pub fn parse_snapshot_dirty(raw: &str) -> Option<serde_json::Value> {
+    parse_sentinel(raw, SNAPSHOT_SENTINEL_PATH)
 }
 
 #[cfg(test)]

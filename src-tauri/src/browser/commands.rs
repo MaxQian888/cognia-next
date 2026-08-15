@@ -32,6 +32,13 @@ pub(crate) enum NavDisposition {
     SpaNavigated(String),
     /// Load-complete sentinel: emit `browser://loaded` for the reported URL, cancel.
     Loaded(String),
+    /// ADR-0127 push sentinels: emit `browser://console` / `browser://network`
+    /// with the batched entries, cancel. `entries` must be an array.
+    ConsolePush(serde_json::Value),
+    NetworkPush(serde_json::Value),
+    /// ADR-0127: the page's DOM changed since the last marker — emit
+    /// `browser://snapshot` (an invalidation, not a snapshot), cancel.
+    SnapshotDirty(serde_json::Value),
     /// Real http(s) navigation: emit `browser://navigated`, proceed.
     AllowAndReport,
     /// Webview-internal document (`about:blank`/`about:srcdoc`): proceed silently.
@@ -61,6 +68,28 @@ pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
         // Malformed / non-http payload: still cancel the sentinel navigation.
         return NavDisposition::Block;
     }
+    if let Some(payload) = overlay::parse_console_push(url_str) {
+        return if payload.get("entries").is_some_and(|e| e.is_array()) {
+            NavDisposition::ConsolePush(payload)
+        } else {
+            NavDisposition::Block
+        };
+    }
+    if let Some(payload) = overlay::parse_network_push(url_str) {
+        return if payload.get("entries").is_some_and(|e| e.is_array()) {
+            NavDisposition::NetworkPush(payload)
+        } else {
+            NavDisposition::Block
+        };
+    }
+    if let Some(payload) = overlay::parse_snapshot_dirty(url_str) {
+        let reported = payload.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        return if reported.starts_with("http://") || reported.starts_with("https://") {
+            NavDisposition::SnapshotDirty(payload)
+        } else {
+            NavDisposition::Block
+        };
+    }
     if url_str.starts_with("http://") || url_str.starts_with("https://") {
         return NavDisposition::AllowAndReport;
     }
@@ -81,6 +110,41 @@ fn emit_loaded(app: &AppHandle, pane_label: &str, url_str: &str) {
     let _ = app.emit(
         "browser://loaded",
         serde_json::json!({ "paneId": pane_label, "url": url_str }),
+    );
+}
+
+/// ADR-0127: `browser://snapshot` is an *invalidation* marker, not a snapshot.
+/// `seq` is the overlay's per-document counter (`null` when the marker comes
+/// from a navigation / load rather than a DOM mutation batch); `reason` says
+/// which. Consumers (the agent engine's snapshot cache) only need "changed".
+fn emit_snapshot_dirty(
+    app: &AppHandle,
+    pane_label: &str,
+    url_str: &str,
+    seq: Option<u64>,
+    mutations: Option<u64>,
+    reason: &str,
+) {
+    let _ = app.emit(
+        "browser://snapshot",
+        serde_json::json!({
+            "paneId": pane_label,
+            "url": url_str,
+            "seq": seq,
+            "mutations": mutations,
+            "reason": reason,
+        }),
+    );
+}
+
+fn emit_push(app: &AppHandle, channel: &str, pane_label: &str, payload: serde_json::Value) {
+    let entries = payload
+        .get("entries")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let _ = app.emit(
+        channel,
+        serde_json::json!({ "paneId": pane_label, "entries": entries }),
     );
 }
 
@@ -105,10 +169,33 @@ pub(crate) fn handle_navigation(app: &AppHandle, pane_label: &str, url_str: &str
         }
         NavDisposition::SpaNavigated(url) => {
             emit_navigated(app, pane_label, &url);
+            // A route change replaces the DOM the last snapshot described.
+            emit_snapshot_dirty(app, pane_label, &url, None, None, "navigated");
             false
         }
         NavDisposition::Loaded(url) => {
             emit_loaded(app, pane_label, &url);
+            emit_snapshot_dirty(app, pane_label, &url, None, None, "loaded");
+            false
+        }
+        NavDisposition::ConsolePush(payload) => {
+            emit_push(app, "browser://console", pane_label, payload);
+            false
+        }
+        NavDisposition::NetworkPush(payload) => {
+            emit_push(app, "browser://network", pane_label, payload);
+            false
+        }
+        NavDisposition::SnapshotDirty(payload) => {
+            let url = payload.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            emit_snapshot_dirty(
+                app,
+                pane_label,
+                url,
+                payload.get("seq").and_then(|v| v.as_u64()),
+                payload.get("mutations").and_then(|v| v.as_u64()),
+                "mutation",
+            );
             false
         }
         NavDisposition::AllowAndReport => {
@@ -123,6 +210,50 @@ pub(crate) fn handle_navigation(app: &AppHandle, pane_label: &str, url_str: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0127 push sentinels classify to their own dispositions and are
+    /// cancelled; a malformed body (no `entries` array / non-http url) blocks.
+    #[test]
+    fn classifies_push_sentinels() {
+        let mk = |path: &str, json: &str| {
+            let mut u = url::Url::parse(&format!("https://cognia.invalid{path}")).unwrap();
+            u.query_pairs_mut().append_pair("data", json);
+            u.to_string()
+        };
+        match classify_navigation(&mk(
+            "/__cognia_console",
+            r#"{"entries":[{"level":"warn","text":"x","ts":1}]}"#,
+        )) {
+            NavDisposition::ConsolePush(payload) => {
+                assert_eq!(payload["entries"][0]["level"], "warn")
+            }
+            other => panic!("expected ConsolePush, got {other:?}"),
+        }
+        match classify_navigation(&mk(
+            "/__cognia_network",
+            r#"{"entries":[{"url":"https://a/b","method":"GET","status":200,"ok":true,"durationMs":3}]}"#,
+        )) {
+            NavDisposition::NetworkPush(payload) => {
+                assert_eq!(payload["entries"][0]["status"], 200)
+            }
+            other => panic!("expected NetworkPush, got {other:?}"),
+        }
+        match classify_navigation(&mk(
+            "/__cognia_snapshot",
+            r#"{"url":"https://a/b","seq":4,"mutations":12}"#,
+        )) {
+            NavDisposition::SnapshotDirty(payload) => assert_eq!(payload["seq"], 4),
+            other => panic!("expected SnapshotDirty, got {other:?}"),
+        }
+        assert_eq!(
+            classify_navigation(&mk("/__cognia_console", r#"{"entries":"nope"}"#)),
+            NavDisposition::Block
+        );
+        assert_eq!(
+            classify_navigation(&mk("/__cognia_snapshot", r#"{"url":"file:///x","seq":1}"#)),
+            NavDisposition::Block
+        );
+    }
 
     #[test]
     fn accepts_http_and_https() {

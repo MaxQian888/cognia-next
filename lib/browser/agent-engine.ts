@@ -8,6 +8,9 @@ import type { Screenshot } from "@/lib/automation/types"
 import { emitAgentActivity } from "@/lib/browser/agent-activity"
 import { browserClient } from "@/lib/browser/client"
 import { getActivePaneRect } from "@/lib/browser/pane-rect"
+import { SnapshotCache } from "@/lib/browser/snapshot-cache"
+import { isTauri } from "@/lib/tauri"
+import { onTauriEvent } from "@/lib/tauri/events"
 import {
   BrowserSessionError,
   type BrowserPageSummary,
@@ -15,10 +18,12 @@ import {
 } from "@/lib/browser/session-types"
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
 import {
+  BROWSER_EVENTS,
   resolveTrustTier,
   type BrowserActionResult,
   type BrowserDialogState,
   type BrowserSnapshot,
+  type BrowserSnapshotDirty,
   type ConsoleEntry,
   type EvaluateResult,
   type NetworkEntry,
@@ -164,32 +169,81 @@ async function pollUntil(
   }
 }
 
+/**
+ * Process-wide snapshot cache for the single embedded pane (ADR-0127), fed by
+ * the overlay's `browser://snapshot` invalidation marker. Module-scoped so
+ * every `EmbeddedEngine` instance (the router creates them per call) shares
+ * one cache and one listener; `resetEmbeddedSnapshotCache()` is the test seam.
+ */
+const embeddedSnapshotCache = new SnapshotCache()
+let snapshotInvalidationInstalled = false
+
+function installSnapshotInvalidation(): void {
+  if (snapshotInvalidationInstalled || !isTauri()) return
+  snapshotInvalidationInstalled = true
+  void onTauriEvent<BrowserSnapshotDirty>(BROWSER_EVENTS.snapshot, () => {
+    embeddedSnapshotCache.markDirty()
+  }).catch(() => {
+    // No event plane (headless / web): the cache stays conservative — every
+    // engine mutation still invalidates it, and `fresh` bypasses it.
+    snapshotInvalidationInstalled = false
+  })
+}
+
+/** Test seam: forget the cached snapshot and its listener registration. */
+export function resetEmbeddedSnapshotCache(): void {
+  embeddedSnapshotCache.clear()
+  snapshotInvalidationInstalled = false
+}
+
+/** Diagnostics for the PerfHud / tests. */
+export function embeddedSnapshotCacheStats() {
+  return embeddedSnapshotCache.getStats()
+}
+
 /** Drives the in-app embedded webview via the Tauri `browser_embed_*` commands. */
 export class EmbeddedEngine implements BrowserEngine {
+  constructor() {
+    installSnapshotInvalidation()
+  }
   navigate(url: string) {
     emitAgentActivity(`navigate ${url}`)
+    embeddedSnapshotCache.markDirty()
     return browserClient.embedNavigate(url)
   }
-  snapshot(opts?: SnapshotOptions) {
-    return browserClient.embedSnapshot(opts)
+  async snapshot(opts?: SnapshotOptions) {
+    // ADR-0127: serve the last walk while nothing invalidated it. Every
+    // mutating engine call and every `browser://snapshot` marker marks the
+    // cache dirty, so a hit is exactly the tree a fresh walk would produce.
+    const cached = embeddedSnapshotCache.get(opts)
+    if (cached) return cached
+    const { fresh: _fresh, ...walkOpts } = opts ?? {}
+    const snapshot = await browserClient.embedSnapshot(walkOpts)
+    embeddedSnapshotCache.set(snapshot, opts)
+    return snapshot
   }
   act(reference: string, action: string, args: Record<string, unknown>) {
     emitAgentActivity(`${action} ${reference}`)
+    embeddedSnapshotCache.markDirty()
     return browserClient.embedAct(reference, action, args)
   }
   pressKey(key: string, reference = "") {
     emitAgentActivity(`key ${key}`)
+    embeddedSnapshotCache.markDirty()
     return browserClient.embedAct(reference, "key", { key })
   }
   scroll(args: ScrollArgs) {
     emitAgentActivity(
       args.reference ? `scroll ${args.reference}` : `scroll ${args.direction ?? "down"}`
     )
+    // Scrolling changes no DOM (virtualized lists aside — their mutations
+    // reach us through the observer marker), so the cache survives it.
     const { reference = "", ...rest } = args
     return browserClient.embedAct(reference, "scroll", rest as Record<string, unknown>)
   }
   evaluate(expr: string) {
     emitAgentActivity("evaluate")
+    embeddedSnapshotCache.markDirty()
     return browserClient.embedEvaluate(expr)
   }
   readConsole() {
@@ -200,14 +254,17 @@ export class EmbeddedEngine implements BrowserEngine {
   }
   back() {
     emitAgentActivity("back")
+    embeddedSnapshotCache.markDirty()
     return browserClient.embedBack()
   }
   forward() {
     emitAgentActivity("forward")
+    embeddedSnapshotCache.markDirty()
     return browserClient.embedForward()
   }
   reload() {
     emitAgentActivity("reload")
+    embeddedSnapshotCache.markDirty()
     return browserClient.embedReload()
   }
   stop() {

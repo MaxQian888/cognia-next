@@ -31,6 +31,8 @@ import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/brow
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
+import { BrowserDevtoolsDrawer } from "@/components/browser/browser-devtools-drawer"
+import { useBrowserDevtools } from "@/hooks/browser/use-browser-devtools"
 import { BrowserWebFallback } from "@/components/browser/browser-web-fallback"
 import { BrowserZoomControl, MAX_ZOOM, MIN_ZOOM } from "@/components/browser/browser-zoom-control"
 import { RemoteBrowserPreview } from "@/components/browser/remote-browser-preview"
@@ -186,6 +188,8 @@ export function BrowserPreviewPane({
   })
   const [webviewReady, setWebviewReady] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
+  // ADR-0127: console / network rings for the DevTools drawer (single pane).
+  const devtools = useBrowserDevtools()
   const [developerOpen, setDeveloperOpen] = useState(false)
   const { recent: recentHistory, push: pushHistory, clear: clearHistory } = useBrowserHistory()
   const annotationQueue =
@@ -1042,6 +1046,16 @@ export function BrowserPreviewPane({
         pageUrl={currentUrl ?? null}
         onLayoutChange={refreshBounds}
         onSendToChat={(markdown) => void sendText(markdown, { sessionId })}
+      />
+      {/* ADR-0127: live console + network from the overlay's push channels. */}
+      <BrowserDevtoolsDrawer
+        console={devtools.console}
+        network={devtools.network}
+        problemCount={devtools.problemCount}
+        failedRequests={devtools.failedRequests}
+        onClearConsole={devtools.clearConsole}
+        onClearNetwork={devtools.clearNetwork}
+        onLayoutChange={refreshBounds}
       />
     </div>
   )

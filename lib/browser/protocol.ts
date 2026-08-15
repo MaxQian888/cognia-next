@@ -134,6 +134,34 @@ export interface BrowserLoaded {
   url: string
 }
 
+/**
+ * ADR-0127 push channels. `browser://console` / `browser://network` carry a
+ * *batch* of new entries the overlay observed since its last push (a copy —
+ * the pull-mode drain commands still return everything); `browser://snapshot`
+ * is an *invalidation marker*, not a snapshot: the page's DOM changed (a
+ * debounced mutation batch, or a load / route change), so any cached
+ * `BrowserSnapshot` for that pane is stale.
+ */
+export interface BrowserConsolePush {
+  paneId: string
+  entries: ConsoleEntry[]
+}
+
+export interface BrowserNetworkPush {
+  paneId: string
+  entries: NetworkEntry[]
+}
+
+export interface BrowserSnapshotDirty {
+  paneId: string
+  url: string
+  /** Overlay per-document counter; `null` for load / navigation markers. */
+  seq: number | null
+  /** Mutation records folded into this marker; `null` for load / navigation. */
+  mutations: number | null
+  reason: "mutation" | "loaded" | "navigated"
+}
+
 /** Render a shallow props map as `key=value` pairs for the prompt. */
 function formatProps(props: Record<string, string>): string {
   return Object.entries(props)
@@ -369,6 +397,14 @@ export interface SnapshotNode {
 export interface SnapshotOptions {
   /** Also surface salient non-interactive text (headings, list items, …). */
   includeText?: boolean
+  /**
+   * ADR-0127: bypass the embedded engine's snapshot cache and re-walk the DOM
+   * even when no `browser://snapshot` invalidation arrived since the last
+   * walk. The cache is safe by construction (every engine mutation and every
+   * DOM-change marker invalidates it); this is the escape hatch for a caller
+   * that knows better (e.g. a canvas-heavy page the observer cannot see).
+   */
+  fresh?: boolean
 }
 
 /** Result of `browser_evaluate` — the page helper's value/error envelope. */
