@@ -30,7 +30,7 @@ description: "所有聊天轨统一一套合并策略、Companion 帧批量化�
 
 批帧位于 `companion_api/ws.rs` 与 `companion_api/signaling/dispatch.rs` 的每订阅者发送环，**不**在 `EventBus`（进程内 A2A 消费者保持逐帧语义）。规则：
 
-- 窗口 **33 ms** 固定。空闲订阅者的首帧立即发出（首 token 时延不变），其后帧在窗口内累积。
+- 窗口 **50 ms** 固定。空闲订阅者的首帧立即发出（首 token 时延不变），其后帧在窗口内累积。（评审时定为 33 ms；实现时改为 50 ms——33 ms 在 100 tok/s 下约 31 次/秒发送（−69%），无法满足 §5 的 −80% 标准；50 ms 稳态 ≤ 20 次/秒。）
 - 只合并**同一 channel 的连续帧**。channel 变化、控制帧（`stream_ready`、`resync_required`、`ping`）或窗口到期均触发 flush。
 - 回放突发同样批量化。
 - 封套 — WS：`{ "type": "event_batch", "channel", "seq_from", "seq_to", "frames": [EventFrame…] }`（安全，因真实 channel 名总含 `://`）；RTC：`{ "kind": "event-batch", "event", "seq_from", "seq_to", "frames": [...] }`。

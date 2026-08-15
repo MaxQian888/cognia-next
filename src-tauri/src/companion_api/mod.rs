@@ -36,6 +36,7 @@ pub mod desktop_messages_bridge;
 pub mod desktop_writes_bridge;
 pub mod device_grants;
 pub mod dispatch_host;
+pub mod event_batcher;
 pub mod dispatchers;
 pub mod event_bus;
 pub mod external_bridge;

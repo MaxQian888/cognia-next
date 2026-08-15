@@ -1227,6 +1227,45 @@ describe("subscribe() — WebSocket frame dispatch", () => {
     expect(handler).toHaveBeenCalledWith({ text: "hi" })
   })
 
+  // ADR-0127 §2: the server may pack consecutive same-channel frames into one
+  // `event_batch` envelope; each inner frame runs through the same per-channel
+  // seq cursor and handler dispatch as a lone frame.
+  it("expands an event_batch envelope in order and honours the seq cursor", () => {
+    transport = new CompanionTransport()
+    const handler = jest.fn()
+    transport.subscribe("claude://message", handler)
+
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    ws.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 3, payload: { t: "a" }, ts_ms: 0 })
+    )
+    ws.triggerMessage(
+      JSON.stringify({
+        type: "event_batch",
+        channel: "claude://message",
+        seq_from: 3,
+        seq_to: 6,
+        frames: [
+          // duplicate of the lone frame above → skipped by the cursor
+          { type: "claude://message", seq: 3, payload: { t: "dup" }, ts_ms: 0 },
+          { type: "claude://message", seq: 4, payload: { t: "b" }, ts_ms: 0 },
+          { type: "claude://message", seq: 5, payload: { t: "c" }, ts_ms: 0 },
+          { type: "claude://message", seq: 6, payload: { t: "d" }, ts_ms: 0 },
+        ],
+      })
+    )
+    expect(handler.mock.calls.map((c) => (c[0] as { t: string }).t)).toEqual(["a", "b", "c", "d"])
+    // A later lone frame below the batch's seq_to is stale.
+    ws.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 5, payload: { t: "stale" }, ts_ms: 0 })
+    )
+    expect(handler).toHaveBeenCalledTimes(4)
+    // Malformed batch (no frames array) is ignored, not thrown.
+    ws.triggerMessage(JSON.stringify({ type: "event_batch", channel: "claude://message" }))
+    expect(handler).toHaveBeenCalledTimes(4)
+  })
+
   it("does not dispatch to a handler for a different channel", () => {
     transport = new CompanionTransport()
     const handler = jest.fn()

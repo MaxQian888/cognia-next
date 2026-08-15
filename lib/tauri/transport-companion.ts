@@ -1449,7 +1449,30 @@ export class CompanionTransport implements Transport {
     }
     this.setConnectionState("reconnecting")
     this.setPlaneHealth({ events: "connecting" })
+    // ADR-0127 §2: several consecutive same-channel frames in one WS message
+    // — `{ type: "event_batch", channel, seq_from, seq_to, frames: [...] }`.
+    // Each inner frame keeps the plain shape, so it goes through the same
+    // per-channel seq cursor + dispatch as a lone frame. `event_batch` cannot
+    // collide with a channel name (real channels always contain `://`).
+    if (type === "event_batch") {
+      const frames = frame["frames"]
+      if (!Array.isArray(frames)) return
+      for (const inner of frames) {
+        if (inner && typeof inner === "object") {
+          this.dispatchEventFrame(inner as Record<string, unknown>)
+        }
+      }
+      return
+    }
 
+
+    this.dispatchEventFrame(frame)
+  }
+
+  /** Apply one plain event frame to the per-channel cursor and its handlers. */
+  private dispatchEventFrame(frame: Record<string, unknown>): void {
+    const type = frame["type"] as string | undefined
+    if (!type) return
     const idx = Math.min(this.wsReconnectAttempt, WS_BACKOFF_MS.length - 1)
     const delay = withJitter(WS_BACKOFF_MS[idx])
     this.wsReconnectAttempt++

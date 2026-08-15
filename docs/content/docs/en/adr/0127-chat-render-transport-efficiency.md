@@ -32,7 +32,7 @@ An audit of the chat rendering path, the message-customization surface, and the 
 
 Frame batching lives in the per-subscriber send loops of `companion_api/ws.rs` and `companion_api/signaling/dispatch.rs`, **not** in `EventBus` (the in-process A2A consumer keeps per-frame semantics). Rules:
 
-- Window: **33 ms**, fixed. An idle subscriber's first frame is sent immediately (first-token latency unchanged); subsequent frames accumulate for the window.
+- Window: **50 ms**, fixed. An idle subscriber's first frame is sent immediately (first-token latency unchanged); subsequent frames accumulate for the window. (Decided at 33 ms during the grill; raised to 50 ms during implementation because 33 ms yields ~31 sends/s at 100 tok/s, −69 %, and cannot meet the §5 −80 % bar — 50 ms gives ≤ 20 sends/s in steady state.)
 - Only **consecutive frames of the same channel** are batched. A channel change, a control frame (`stream_ready`, `resync_required`, `ping`), or the window expiring flushes.
 - Replay bursts are batched too.
 - Envelope — WS: `{ "type": "event_batch", "channel", "seq_from", "seq_to", "frames": [EventFrame…] }` (safe because real channel names always contain `://`); RTC: `{ "kind": "event-batch", "event", "seq_from", "seq_to", "frames": [...] }`.

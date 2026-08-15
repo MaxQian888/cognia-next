@@ -555,6 +555,39 @@ describe("TransportRtc", () => {
     expect(rtc.getSeqCursor()).toEqual({ topic: 5 })
   })
 
+  // ADR-0127 §2: `event-batch` frames expand into the single-event path
+  // (seq cursor, dedupe) exactly like lone `event` frames.
+  it("expands an event-batch envelope through the same cursor and dedupe path", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((r) => setTimeout(r, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+
+    const received: unknown[] = []
+    rtc.subscribe("topic", (payload) => received.push(payload))
+    const dc = pcs[0].channels[0]
+    dc.push({ kind: "event", event: "topic", seq: 2, payload: "lone" })
+    dc.push({
+      kind: "event-batch",
+      event: "topic",
+      seq_from: 2,
+      seq_to: 5,
+      frames: [
+        { kind: "event", event: "topic", seq: 2, payload: "dup" },
+        { kind: "event", event: "topic", seq: 3, payload: "b3" },
+        { kind: "event", event: "topic", seq: 4, payload: "b4" },
+        { kind: "event", event: "topic", seq: 5, payload: "b5" },
+      ],
+    })
+    dc.push({ kind: "event", event: "topic", seq: 4, payload: "stale" })
+
+    expect(received).toEqual(["lone", "b3", "b4", "b5"])
+    expect(rtc.getSeqCursor()).toEqual({ topic: 5 })
+    rtc.close()
+  })
+
   it("queues remote ICE until the answer has been applied", async () => {
     const { rtc, sig, pcs } = makeRtc()
     void rtc.connect()

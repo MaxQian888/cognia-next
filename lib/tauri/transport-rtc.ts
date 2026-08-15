@@ -129,6 +129,19 @@ export interface RtcEvent {
   payload: unknown
 }
 
+/**
+ * ADR-0127 §2: several consecutive same-channel events in one DataChannel
+ * message. Every inner frame keeps the {@link RtcEvent} shape so it can go
+ * through the single-frame path (resync queue + per-channel seq cursor).
+ */
+export interface RtcEventBatch {
+  kind: "event-batch"
+  event: string
+  seq_from: number
+  seq_to: number
+  frames: RtcEvent[]
+}
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -1296,15 +1309,17 @@ export class TransportRtc {
     }
 
     if ("kind" in frame && (frame as { kind: string }).kind === "event") {
-      const ev = frame as RtcEvent
-      if (this.resyncInFlight) {
-        if (this.pendingEventsDuringResync.length >= 128) {
-          this.fail(new Error("TransportRtc: event queue overflow during resync"))
-          return
+      this.acceptRtcEvent(frame as RtcEvent)
+      return
+    }
+
+    if ("kind" in frame && (frame as { kind: string }).kind === "event-batch") {
+      const batch = frame as RtcEventBatch
+      if (!Array.isArray(batch.frames)) return
+      for (const inner of batch.frames) {
+        if (inner && typeof inner === "object" && inner.kind === "event") {
+          this.acceptRtcEvent(inner)
         }
-        this.pendingEventsDuringResync.push(ev)
-      } else {
-        this.deliverRtcEvent(ev)
       }
       return
     }
@@ -1424,6 +1439,19 @@ export class TransportRtc {
       .finally(() => {
         this.resyncInFlight = null
       })
+  }
+
+  /** One plain event: queued while an authoritative resync is in flight, else delivered. */
+  private acceptRtcEvent(ev: RtcEvent): void {
+    if (this.resyncInFlight) {
+      if (this.pendingEventsDuringResync.length >= 128) {
+        this.fail(new Error("TransportRtc: event queue overflow during resync"))
+        return
+      }
+      this.pendingEventsDuringResync.push(ev)
+    } else {
+      this.deliverRtcEvent(ev)
+    }
   }
 
   private deliverRtcEvent(ev: RtcEvent): void {
