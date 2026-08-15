@@ -104,6 +104,32 @@ describe("web-tools (built-in)", () => {
     ])
   })
 
+  // ADR-0127: the plugin's own tools ship rich chat cards through the
+  // host's tool-result renderer registry (previously zero first-party
+  // registrations); deactivate disposes them.
+  it("registers web_search + web_fetch result cards on activate and disposes them on deactivate", async () => {
+    const { ctx } = makeCtx()
+    const dispose = jest.fn()
+    const registerToolResultRenderer = jest.fn(() => dispose)
+    ;(ctx as { toolResult?: unknown }).toolResult = { registerToolResultRenderer }
+    await webTools.activate?.(ctx)
+    expect(registerToolResultRenderer.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "web_fetch",
+      "web_search",
+    ])
+    for (const call of registerToolResultRenderer.mock.calls) {
+      expect(typeof call[1]).toBe("function")
+    }
+    await webTools.deactivate?.(ctx)
+    expect(dispose).toHaveBeenCalledTimes(2)
+  })
+
+  it("activates without a toolResult API (older hosts)", async () => {
+    const { ctx, tools } = makeCtx()
+    await expect(webTools.activate?.(ctx)).resolves.not.toThrow()
+    expect(Object.keys(tools)).toContain("web_search")
+  })
+
   it("web_fetch requires a url", async () => {
     const { ctx, tools } = makeCtx()
     await webTools.activate?.(ctx)

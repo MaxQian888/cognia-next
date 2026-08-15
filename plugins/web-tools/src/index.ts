@@ -13,6 +13,7 @@
  * `web_download` when running on the desktop).
  */
 
+import { WebFetchResultCard, WebSearchResultCard } from "./result-cards"
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 // `isTauri` retained as fallback when host doesn't expose
 // `ctx.capabilities` (ADR-0026 §5 §C migration path).
@@ -255,6 +256,9 @@ async function webResearch(args: ResearchArgs, ctx: PluginContext): Promise<unkn
   }
 }
 
+/** Disposers for the ADR-0127 result cards; module-scoped like the tools. */
+const disposeResultCards: Array<() => void> = []
+
 const definition: PluginDefinition = {
   manifest: {
     id: "cognia-web-tools",
@@ -266,6 +270,19 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("web-tools activated")
+
+    // ADR-0127: rich chat cards for this plugin's own tools. Registered
+    // before the tools so the first result already has its renderer; the host
+    // purges the registry on disable, the returned disposers are belt-and-braces.
+    disposeResultCards.forEach((dispose) => dispose())
+    disposeResultCards.length = 0
+    const toolResult = ctx.toolResult
+    if (toolResult?.registerToolResultRenderer) {
+      disposeResultCards.push(
+        toolResult.registerToolResultRenderer("web_search", WebSearchResultCard),
+        toolResult.registerToolResultRenderer("web_fetch", WebFetchResultCard)
+      )
+    }
 
     // Package E — register an ambient context provider so every agent run this
     // plugin starts knows the web tools are available without re-stating it.
@@ -360,7 +377,10 @@ const definition: PluginDefinition = {
     })
   },
   deactivate: async () => {
-    // Tools are unregistered automatically by the runtime.
+    // Tools are unregistered automatically by the runtime; the result cards
+    // are purged by the host too, this just keeps a hot-reload tidy.
+    disposeResultCards.forEach((dispose) => dispose())
+    disposeResultCards.length = 0
   },
 }
 

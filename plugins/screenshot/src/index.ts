@@ -12,6 +12,7 @@
  * tool diagnostics rather than fatal exceptions.
  */
 
+import { ScreenshotResultCard } from "./screenshot-result-card"
 import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
 
 import manifestJson from "../plugin.json"
@@ -165,6 +166,9 @@ const definition: PluginDefinition = {
   manifest: manifestJson as unknown as PluginManifest,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("screenshot plugin activated")
+
+    // ADR-0127: rich chat card for `take_screenshot` (thumbnail + caption).
+    ctx.toolResult?.registerToolResultRenderer?.("take_screenshot", ScreenshotResultCard)
 
     ctx.agent?.registerTool?.({
       name: "take_screenshot",

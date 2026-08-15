@@ -1697,6 +1697,33 @@
     "title": "Delete from this message on?"
   },
   "twinBadge": {
+  "toolCards": {
+    "webSearch": {
+      "title": "Web search",
+      "via": "via {provider}",
+      "failed": "Search failed.",
+      "noResults": "No results."
+    },
+    "webFetch": {
+      "title": "Web fetch",
+      "status": "HTTP {status}",
+      "failed": "Fetch failed.",
+      "showMore": "Show all ({chars} characters)",
+      "showLess": "Show less"
+    },
+    "screenshot": {
+      "title": "Screenshot",
+      "alt": "Captured screen"
+    },
+    "clipboardHistory": {
+      "title": "Clipboard history",
+      "count": "{count, plural, =1 {1 entry} other {# entries}}",
+      "empty": "No clipboard entries yet.",
+      "copy": "Copy entry",
+      "showAll": "Show all {count}",
+      "showLess": "Show less"
+    }
+  },
     "fewShotOff": "Style few-shot off",
     "fewShotOn": "Style few-shot on ({k} samples)",
     "label": "twin · {chunks}",

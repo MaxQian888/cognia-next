@@ -6206,7 +6206,34 @@
       "openWorkbench": "Open twin workbench",
       "ragOff": "RAG off",
       "ragOn": "RAG on (top-{topK})",
-      "statSummary": "{sources} sources · {chunks} chunks"
+      "statSummary": "{sources} sources · {chunks} chunks",
+      "toolCards": {
+        "clipboardHistory": {
+          "copy": "Copy entry",
+          "count": "{count, plural, =1 {1 entry} other {# entries}}",
+          "empty": "No clipboard entries yet.",
+          "showAll": "Show all {count}",
+          "showLess": "Show less",
+          "title": "Clipboard history"
+        },
+        "screenshot": {
+          "alt": "Captured screen",
+          "title": "Screenshot"
+        },
+        "webFetch": {
+          "failed": "Fetch failed.",
+          "showLess": "Show less",
+          "showMore": "Show all ({chars} characters)",
+          "status": "HTTP {status}",
+          "title": "Web fetch"
+        },
+        "webSearch": {
+          "failed": "Search failed.",
+          "noResults": "No results.",
+          "title": "Web search",
+          "via": "via {provider}"
+        }
+      }
     },
     "welcomeDemo": {
       "analyze": "Analyze",

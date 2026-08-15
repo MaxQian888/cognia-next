@@ -82,6 +82,17 @@ describe("clipboard-history (built-in)", () => {
     expect(registerMock).not.toHaveBeenCalled()
   })
 
+  it("registers the clipboard_history_list result card when the host offers the API (ADR-0127)", async () => {
+    const { ctx } = makeCtx()
+    const registerToolResultRenderer = jest.fn(() => () => {})
+    ;(ctx as { toolResult?: unknown }).toolResult = { registerToolResultRenderer }
+    await clipboardHistory.activate?.(ctx)
+    expect(registerToolResultRenderer).toHaveBeenCalledTimes(1)
+    expect(registerToolResultRenderer.mock.calls[0][0]).toBe("clipboard_history_list")
+    expect(typeof registerToolResultRenderer.mock.calls[0][1]).toBe("function")
+    await clipboardHistory.deactivate?.(ctx)
+  })
+
   it("clipboard_history_add stores entries in the secure buffer", async () => {
     const { ctx, tools, secureStore } = makeCtx()
     await clipboardHistory.activate?.(ctx)

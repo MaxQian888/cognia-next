@@ -66,6 +66,16 @@ describe("screenshot (built-in)", () => {
     expect(commands?.map((c) => c.id)).toEqual(["screenshot"])
   })
 
+  it("registers the take_screenshot result card when the host offers the API (ADR-0127)", async () => {
+    const { ctx } = makeCtx()
+    const registerToolResultRenderer = jest.fn(() => () => {})
+    ;(ctx as { toolResult?: unknown }).toolResult = { registerToolResultRenderer }
+    await screenshotPlugin.activate?.(ctx)
+    expect(registerToolResultRenderer).toHaveBeenCalledTimes(1)
+    expect(registerToolResultRenderer.mock.calls[0][0]).toBe("take_screenshot")
+    expect(typeof registerToolResultRenderer.mock.calls[0][1]).toBe("function")
+  })
+
   it("handles its declared command and ignores everyone else's", async () => {
     const { ctx } = makeCtx()
     captureMock.mockResolvedValue(null)

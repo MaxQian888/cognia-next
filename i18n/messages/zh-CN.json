@@ -6206,7 +6206,34 @@
       "openWorkbench": "打开孪生工作台",
       "ragOff": "RAG 已关闭",
       "ragOn": "RAG 已开启（top-{topK}）",
-      "statSummary": "{sources} 个数据源 · {chunks} 个切片"
+      "statSummary": "{sources} 个数据源 · {chunks} 个切片",
+      "toolCards": {
+        "clipboardHistory": {
+          "copy": "复制该条",
+          "count": "{count} 条",
+          "empty": "暂无剪贴板记录。",
+          "showAll": "显示全部 {count} 条",
+          "showLess": "收起",
+          "title": "剪贴板历史"
+        },
+        "screenshot": {
+          "alt": "屏幕截图",
+          "title": "截图"
+        },
+        "webFetch": {
+          "failed": "抓取失败。",
+          "showLess": "收起",
+          "showMore": "展开全部（{chars} 字符）",
+          "status": "HTTP {status}",
+          "title": "网页抓取"
+        },
+        "webSearch": {
+          "failed": "搜索失败。",
+          "noResults": "没有结果。",
+          "title": "网页搜索",
+          "via": "来自 {provider}"
+        }
+      }
     },
     "welcomeDemo": {
       "analyze": "分析",

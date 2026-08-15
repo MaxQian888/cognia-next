@@ -13,6 +13,7 @@
  *   * slash command /clipboard-history             — show the buffer in chat
  */
 
+import { ClipboardHistoryCard } from "./clipboard-history-card"
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import manifestJson from "../plugin.json"
 // `isTauri` retained as a fallback for hosts that don't expose
@@ -114,6 +115,10 @@ const definition: PluginDefinition = {
       }, interval)
     }
     startPolling()
+
+    // ADR-0127: rich chat card for `clipboard_history_list` (entries with
+    // relative time + per-entry copy) instead of raw JSON.
+    ctx.toolResult?.registerToolResultRenderer?.("clipboard_history_list", ClipboardHistoryCard)
 
     ctx.agent?.registerTool?.({
       name: "clipboard_history_list",
