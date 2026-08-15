@@ -227,6 +227,22 @@ pub(super) async fn dispatch(
                     "remote_notification_publish.id must be 1..128 printable bytes".into(),
                 ));
             }
+            // Optional originating subsystem (`NotificationSource` on the TS
+            // side: scheduler / workflow / connector / …) so a companion files
+            // the record under the right source preference. Free-form but
+            // bounded; the client falls back to `system` when absent/unknown.
+            let source: Option<String> = optional(&args, "source")?;
+            if source.as_deref().is_some_and(|value| {
+                value.trim().is_empty()
+                    || value.len() > 64
+                    || !value
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ':')
+            }) {
+                return Err(RpcError::malformed(
+                    "remote_notification_publish.source must be 1..64 [A-Za-z0-9_:-] bytes".into(),
+                ));
+            }
             state.event_bus.publish(
                 "notification://remote".to_string(),
                 json!({
@@ -235,6 +251,7 @@ pub(super) async fn dispatch(
                     "body": body,
                     "level": level,
                     "href": href,
+                    "source": source,
                     "createdAt": chrono::Utc::now().timestamp_millis(),
                 }),
             );

@@ -107,6 +107,43 @@ async function pushToCompanions(record: NotificationRecord): Promise<void> {
   }
 }
 
+const recentlyPublished = new Set<string>()
+
+/**
+ * Headless push channel: cognia-server has no Tauri push fan-out
+ * (`companion_push_notification` is desktop-only), but it exposes
+ * `remote_notification_publish`, which broadcasts a `notification://remote`
+ * frame on the events plane. Every connected companion (phone, browser, a
+ * desktop driving this host) ingests it into its own Notification Center —
+ * see `lib/notifications/remote-subscription.ts`. The `critical` level is
+ * mapped down to `error` because the wire contract only knows four levels;
+ * the client re-derives urgency from its own preferences.
+ */
+export async function publishRemoteNotification(record: NotificationRecord): Promise<void> {
+  // A record can resolve to both `toast` and `push` on headless (both map
+  // here); publish once per record so companions do not see it twice.
+  if (recentlyPublished.has(record.id)) return
+  recentlyPublished.add(record.id)
+  if (recentlyPublished.size > 256) {
+    const first = recentlyPublished.values().next().value
+    if (first !== undefined) recentlyPublished.delete(first)
+  }
+  await transport.call("remote_notification_publish", {
+    id: record.id,
+    title: record.title.slice(0, 160),
+    body: (record.body && record.body.trim().length > 0 ? record.body : record.title).slice(
+      0,
+      2_000
+    ),
+    level: record.level === "critical" ? "error" : record.level,
+    href:
+      record.href && record.href.startsWith("/") && !record.href.startsWith("//")
+        ? record.href
+        : undefined,
+    source: record.source,
+  })
+}
+
 /** Map a record to a sonner toast, wiring its first action button. */
 function showToast(rec: NotificationRecord): void {
   const fn =
@@ -136,6 +173,10 @@ function showToast(rec: NotificationRecord): void {
 
 function buildDeps(): NotifyDeps {
   const platform = detectPlatform()
+  // The headless brain has no webview: no toast to draw, no OS notification
+  // permission (checkHostNotificationPermission → false), and its "push" is
+  // the events-plane broadcast that connected companions ingest.
+  const headless = platform === "headless"
   return {
     now: () => Date.now(),
     loadPrefs: () =>
@@ -145,10 +186,14 @@ function buildDeps(): NotifyDeps {
     // phone in another timezone. Resolve from the (cross-device synced) profile.
     tz: resolveUserTimeZone(useSettingsStore.getState().settings?.profile),
     db: dbPort,
-    toast: showToast,
+    // Headless: a task that asked for a toast wants a human to notice; the
+    // only human is on a companion device, so the toast becomes the remote
+    // broadcast (published once per record even if `push` is also resolved).
+    toast: headless ? publishRemoteNotification : showToast,
     osNotify: hostNotify,
     isOsPermitted: osPermitted,
-    push: platform === "tauri" ? pushToCompanions : undefined,
+    push:
+      platform === "tauri" ? pushToCompanions : headless ? publishRemoteNotification : undefined,
     imDeliver: imDeliverFn,
     onRecord: (rec) => useNotificationStore.getState().ingest(rec),
   }

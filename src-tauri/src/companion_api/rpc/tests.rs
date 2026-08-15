@@ -1486,6 +1486,49 @@ async fn remote_notification_protocol_is_bounded_and_event_bus_backed() {
     .await
     .expect_err("external href must fail");
     assert!(error.1 .0.message.contains("app-relative"));
+
+    // Optional `source` (the TS NotificationSource) rides along so a companion
+    // files the record under the right source preference; bounded charset.
+    let result = dispatch(
+        "remote_notification_publish",
+        json!({
+            "id": "notification-2",
+            "title": "Nightly report done",
+            "body": "3 rows",
+            "level": "info",
+            "source": "scheduler"
+        }),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect("publish with source");
+    assert_eq!(result["id"], "notification-2");
+    match state.event_bus.subscribe(Some(0), 0) {
+        crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
+            let event = replay
+                .iter()
+                .find(|event| event.payload["id"] == "notification-2")
+                .expect("notification-2 event");
+            assert_eq!(event.payload["source"], "scheduler");
+        }
+        _ => panic!("subscribe failed"),
+    }
+    let error = dispatch(
+        "remote_notification_publish",
+        json!({ "title": "x", "body": "y", "source": "bad source!" }),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect_err("invalid source must fail");
+    assert!(error.1 .0.message.contains("source"));
 }
 
 #[tokio::test]

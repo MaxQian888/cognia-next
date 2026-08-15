@@ -4,7 +4,7 @@ import { DEFAULT_NOTIFICATION_PREFERENCES } from "@/types/notifications"
 // `mock`-prefixed names are exempt from jest's factory hoisting guard.
 const mockRows = new Map<string, NotificationRecord>()
 let mockStoredPrefs: Partial<NotificationPreferences> | undefined
-const mockPlatform = jest.fn<"tauri" | "mobile" | "web", []>(() => "tauri")
+const mockPlatform = jest.fn<"tauri" | "mobile" | "web" | "headless", []>(() => "tauri")
 let mockPermissionGrantedHandler: (() => void) | null = null
 const mockTransportCall = jest.fn()
 
@@ -202,6 +202,58 @@ it("does not mark push delivered when no offline companion accepted it", async (
   const id = await notify({ source: "system", level: "warning", title: "T" })
 
   expect(rows.get(id)?.deliveredVia).not.toContain("push")
+})
+
+it("collapses toast + push into one remote_notification_publish on the headless brain", async () => {
+  mockPlatform.mockReturnValue("headless")
+  mockStoredPrefs = { globalDefaultChannels: ["center", "toast", "os", "push"] }
+  mockTransportCall.mockResolvedValue({ id: "n" })
+
+  const id = await notify({
+    source: "scheduler",
+    level: "critical",
+    title: "Nightly report failed",
+    body: "step 3 blew up",
+    href: "/scheduler",
+  })
+
+  const publishes = mockTransportCall.mock.calls.filter(
+    (c) => c[0] === "remote_notification_publish"
+  )
+  expect(publishes).toHaveLength(1)
+  expect(publishes[0][1]).toEqual({
+    id,
+    title: "Nightly report failed",
+    body: "step 3 blew up",
+    level: "error",
+    href: "/scheduler",
+    source: "scheduler",
+  })
+  expect(mockTransportCall).not.toHaveBeenCalledWith(
+    "companion_push_notification",
+    expect.anything()
+  )
+  // No webview toast, no OS notification on the brain; the toast channel is
+  // reported as delivered because it became the remote broadcast.
+  expect(toastFns.error).not.toHaveBeenCalled()
+  expect(tauri.notify).not.toHaveBeenCalled()
+  const delivered = rows.get(id)?.deliveredVia ?? []
+  expect(delivered).toContain("toast")
+  expect(delivered).toContain("push")
+  expect(delivered).not.toContain("os")
+})
+
+it("headless publish falls back to the title as body and drops external hrefs", async () => {
+  mockPlatform.mockReturnValue("headless")
+  // `toast` is not level-gated (push is), so an info-level toast still reaches
+  // the remote broadcast on the brain.
+  mockStoredPrefs = { globalDefaultChannels: ["center", "toast"] }
+  mockTransportCall.mockResolvedValue({ id: "n" })
+  await notify({ source: "system", level: "info", title: "Only title", href: "https://x" })
+  expect(mockTransportCall).toHaveBeenLastCalledWith(
+    "remote_notification_publish",
+    expect.objectContaining({ body: "Only title", href: undefined, level: "info" })
+  )
 })
 
 it("records a failed mobile native delivery without marking the OS channel delivered", async () => {

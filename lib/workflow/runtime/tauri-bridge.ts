@@ -150,19 +150,46 @@ export async function getWebhookUrl(workflowId: string, triggerId: string): Prom
 
 /**
  * Subscribe to Rust-side trigger events. Returns an unsubscribe function.
- * In web mode, returns a no-op unsubscribe immediately.
  *
- * The unsubscribe is wrapped in `safeUnlisten` — Tauri's injected
+ * Host neutrality: on the Tauri desktop this is a Tauri event listener; on
+ * every other host it subscribes through the active `Transport` — the
+ * headless brain's `CompanionTransport` (`/internal/events`) subscribes to the
+ * `workflow:trigger` channel that cognia-server's Rust cron daemon and webhook
+ * router publish (`HeadlessWorkflowEmitter`), and a companion device on
+ * `/ws/events` likewise. Hosts whose transport has no event plane (the web
+ * stub) return a no-op unsubscribe.
+ *
+ * The Tauri unsubscribe is wrapped in `safeUnlisten` — Tauri's injected
  * `unregisterListener` throws (as an unhandled rejection) when the
  * registration eval hasn't landed yet, which React StrictMode's
  * mount→unmount→mount cycle reliably triggers.
  */
 export async function listenTriggerEvents(handler: (event: unknown) => void): Promise<() => void> {
-  if (!isTauri()) return () => undefined
+  if (!isTauri()) return subscribeViaTransport("workflow:trigger", handler)
   try {
     const mod = await import("@tauri-apps/api/event")
     const stop = await mod.listen("workflow:trigger", (e) => handler(e.payload))
     return () => safeUnlisten(stop)
+  } catch {
+    return () => undefined
+  }
+}
+
+/**
+ * Subscribe to a host event channel through the process-wide transport
+ * (`lib/tauri` live binding, so a headless/CLI host that swapped the transport
+ * is honoured). Returns a no-op unsubscribe when the transport cannot deliver
+ * events (web stub) or the subscription throws.
+ */
+async function subscribeViaTransport(
+  channel: string,
+  handler: (event: unknown) => void
+): Promise<() => void> {
+  try {
+    const { transport } = await import("@/lib/tauri")
+    if (typeof transport.subscribe !== "function") return () => undefined
+    const unsubscribe = transport.subscribe<unknown>(channel, (payload) => handler(payload))
+    return typeof unsubscribe === "function" ? unsubscribe : () => undefined
   } catch {
     return () => undefined
   }
@@ -188,7 +215,7 @@ export async function respondToWebhook(
 }
 
 export async function listenResumeEvents(handler: (event: unknown) => void): Promise<() => void> {
-  if (!isTauri()) return () => undefined
+  if (!isTauri()) return subscribeViaTransport("workflow:resume", handler)
   try {
     const mod = await import("@tauri-apps/api/event")
     const stop = await mod.listen("workflow:resume", (e) => handler(e.payload))

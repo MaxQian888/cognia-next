@@ -5,9 +5,9 @@
  * components keep their own effects (thin, unchanged); the brain starts the
  * same lib calls here. Deliberately NOT included:
  *
- * - `installTriggerBridge` / `initDesktopEventTrigger` (workflow runtime) —
- *   Tauri-event sources; the Rust cron daemon / desktop UIA watcher do not
- *   exist in cognia-server yet (follow-up rides the events WS).
+ * - `initDesktopEventTrigger` (workflow runtime) — the desktop UIA watcher
+ *   does not exist in cognia-server. (`installTriggerBridge` now rides the
+ *   events WS — see ./workflow-trigger-bridge.ts.)
  * - `subscription-initializer` — keyed to the interactive account unlock and
  *   uses toast i18n; the brain's provider creds arrive via the `claude_set_*`
  *   arms instead (R7).

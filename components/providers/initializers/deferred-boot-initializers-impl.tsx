@@ -4,9 +4,11 @@ import { useEffect } from "react"
 
 import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initializer"
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
+import { RemoteNotificationInitializer } from "./remote-notification-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
 import { recoverStaleDirectChatExecutionRuns } from "@/lib/execution/direct-chat-run"
+import { startRendererWorkOutbox } from "@/lib/work-submission/bootstrap"
 
 /**
  * The core-chat capability chunk (ADR-0068 C3). Its initializers mount in
@@ -24,12 +26,16 @@ export function DeferredBootInitializersImpl() {
   useEffect(() => {
     markBootCapabilityReady("core-chat")
     void recoverStaleDirectChatExecutionRuns()
+    // Work stranded by a crash is picked up here (ADR-0123). A no-op while the
+    // feature flag is off, so mounting it is safe ahead of the rollout.
+    return startRendererWorkOutbox()
   }, [])
 
   return (
     <>
       <ProviderCoreRuntimeInitializer />
       <RoutingRuntimeInitializer />
+      <RemoteNotificationInitializer />
       <GatewayProvider />
     </>
   )

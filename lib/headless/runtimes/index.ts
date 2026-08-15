@@ -30,6 +30,9 @@
  * - `plugin-runtime` — boots the canonical Node PluginManager and serially
  *   reconciles native install/restore/uninstall events from cognia-server.
  * - `twin-job-worker` — drains enabled Twin ingest/distill jobs in a headless brain.
+ * - `workflow-trigger-bridge` — subscribes to `workflow:trigger` on the brain's
+ *   events plane so the Rust cron daemon / webhook router in cognia-server
+ *   actually start workflow runs (host-neutral `installTriggerBridge`).
  * - The bridge-owned `BridgeWorkerRpcPool` is the one sanctioned bootstrap
  *   exception: `serveCommand` creates it only after the authenticated bridge
  *   connects, injects that transport into the existing AgentTeam runtime, and
@@ -77,5 +80,6 @@ import "./memory-job-worker"
 import "./twin-job-worker"
 import "./integration-runtime"
 import "./performance-runtime"
+import "./workflow-trigger-bridge"
 
 export {}

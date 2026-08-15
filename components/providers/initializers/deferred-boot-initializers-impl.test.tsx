@@ -8,6 +8,9 @@ jest.mock("./provider-core-runtime-initializer", () => ({
 jest.mock("./routing-runtime-initializer", () => ({
   RoutingRuntimeInitializer: () => <span data-boot="routing" />,
 }))
+jest.mock("./remote-notification-initializer", () => ({
+  RemoteNotificationInitializer: () => <span data-boot="remote-notifications" />,
+}))
 jest.mock("@/components/providers/gateway-provider", () => ({
   GatewayProvider: () => <span data-boot="gateway" />,
 }))
@@ -34,7 +37,7 @@ describe("DeferredBootInitializersImpl", () => {
     // read; without it they degrade to a bare `fetch` the packaged shell's CSP
     // blocks). The rest preserves the pre-deferral layout order so a dropped
     // child is caught here.
-    expect(order).toEqual(["provider-core", "routing", "gateway"])
+    expect(order).toEqual(["provider-core", "routing", "remote-notifications", "gateway"])
     expect(mockMarkReady).toHaveBeenCalledWith("core-chat")
     expect(recoverDirectRuns).toHaveBeenCalledTimes(1)
   })

@@ -90,7 +90,7 @@ describe("tauri-bridge (web mode, no Tauri globals)", () => {
     await expect(pruneNativeWorkflowWaitEvents(2)).resolves.toBeNull()
   })
 
-  it("listenTriggerEvents returns a no-op unsubscribe in web mode", async () => {
+  it("listenTriggerEvents returns a no-op unsubscribe in web mode (stub transport)", async () => {
     const { listenTriggerEvents } = await import("./tauri-bridge")
     const stop = await listenTriggerEvents(() => {})
     expect(stop()).toBeUndefined()
@@ -100,6 +100,51 @@ describe("tauri-bridge (web mode, no Tauri globals)", () => {
     const { listenResumeEvents } = await import("./tauri-bridge")
     const stop = await listenResumeEvents(() => {})
     expect(stop()).toBeUndefined()
+  })
+})
+
+describe("tauri-bridge listeners (non-Tauri host with an events plane)", () => {
+  afterEach(() => {
+    jest.resetModules()
+    jest.dontMock("@/lib/tauri")
+  })
+
+  it("listenTriggerEvents subscribes to workflow:trigger through the active transport", async () => {
+    const unsubscribe = jest.fn()
+    const subscribe = jest.fn(
+      (_channel: string, _handler: (payload: unknown) => void) => unsubscribe
+    )
+    jest.doMock("@/lib/tauri", () => ({ transport: { subscribe } }))
+    const { listenTriggerEvents, listenResumeEvents } = await import("./tauri-bridge")
+    const handler = jest.fn()
+    const stop = await listenTriggerEvents(handler)
+    expect(subscribe).toHaveBeenCalledWith("workflow:trigger", expect.any(Function))
+    // Frames are handed to the handler as-is (already the payload).
+    subscribe.mock.calls[0][1]({ workflowId: "wf", kind: "trigger.cron" })
+    expect(handler).toHaveBeenCalledWith({ workflowId: "wf", kind: "trigger.cron" })
+    stop()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+
+    await listenResumeEvents(() => {})
+    expect(subscribe).toHaveBeenLastCalledWith("workflow:resume", expect.any(Function))
+  })
+
+  it("degrades to a no-op when the transport cannot subscribe", async () => {
+    jest.doMock("@/lib/tauri", () => ({
+      transport: {
+        subscribe: () => {
+          throw new Error("no events plane")
+        },
+      },
+    }))
+    const { listenTriggerEvents } = await import("./tauri-bridge")
+    const stop = await listenTriggerEvents(() => {})
+    expect(stop()).toBeUndefined()
+    jest.resetModules()
+    jest.doMock("@/lib/tauri", () => ({ transport: {} }))
+    const mod = await import("./tauri-bridge")
+    const stop2 = await mod.listenTriggerEvents(() => {})
+    expect(stop2()).toBeUndefined()
   })
 })
 
