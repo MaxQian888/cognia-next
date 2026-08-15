@@ -11,6 +11,7 @@
  */
 
 import React, { useMemo, useState } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,6 +26,11 @@ import { useSettingsStore } from "@/stores"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-provider-catalog"
 import type { ModelPricing } from "@cognia/provider-types/provider"
+import {
+  getCostRange,
+  localDayString,
+  type ProviderCostDailyRow,
+} from "@/lib/db/provider-cost-daily"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -161,36 +167,49 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
 
   const providerUsageStatsRaw = useSettingsStore((s) => s.providerUsageStats)
   const providerUsageStats = useMemo(() => providerUsageStatsRaw ?? {}, [providerUsageStatsRaw])
-  // cognia-next stores usage as a flat `ProviderModelUsageEntry[]` keyed by
-  // `${providerId}:${modelId}`. Aggregate it here into the
-  // `Record<modelId, { dailyStats: Record<date, { calls, inputTokens, outputTokens }> }>`
-  // shape Cognia's tab expects.
+  const customProviders = useSettingsStore((s) => s.settings?.customProviders)
+  // The durable per-day rollup every successful turn writes
+  // (`recordProviderOutcome` → `providerCostDaily`). This is the tab's real
+  // data source: `providerUsageStats` (below) only ever had a writer on the
+  // plugin surface, so the tab rendered its empty state for every provider.
+  // Thirty days is the widest period the toggle offers.
+  const rangeFrom = useMemo(() => localDayString(Date.now() - 30 * 86_400_000), [])
+  const dailyRows = useLiveQuery(
+    () => getCostRange(rangeFrom, localDayString()).catch((): ProviderCostDailyRow[] => []),
+    [rangeFrom]
+  )
+  // Aggregate both sources into the
+  // `Record<modelId, { dailyStats: Record<date, { calls, inputTokens, outputTokens, cost }> }>`
+  // shape the table renders from.
   const providerStats = useMemo(() => {
-    const out: Record<
-      string,
-      {
-        dailyStats: Record<string, { calls: number; inputTokens: number; outputTokens: number }>
-      }
-    > = {}
+    type Daily = { calls: number; inputTokens: number; outputTokens: number; cost: number }
+    const out: Record<string, { dailyStats: Record<string, Daily> }> = {}
+    const bucket = (modelId: string, date: string): Daily => {
+      const model = (out[modelId] ??= { dailyStats: {} })
+      return (model.dailyStats[date] ??= { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 })
+    }
+    for (const row of dailyRows ?? []) {
+      if (row.providerId !== providerId) continue
+      const cur = bucket(row.modelId, row.day)
+      cur.calls += row.requestCount
+      cur.inputTokens += row.inputTokens ?? 0
+      cur.outputTokens += row.outputTokens ?? 0
+      cur.cost += row.totalCostUsd
+    }
+    // Legacy per-call entries (`${providerId}:${modelId}` → ProviderModelUsageEntry[]).
     for (const [key, entries] of Object.entries(providerUsageStats)) {
       if (!key.startsWith(`${providerId}:`)) continue
       const modelId = key.slice(providerId.length + 1)
-      const dailyStats: Record<
-        string,
-        { calls: number; inputTokens: number; outputTokens: number }
-      > = {}
       for (const e of entries) {
-        const date = e.at.slice(0, 10) // YYYY-MM-DD
-        const cur = dailyStats[date] ?? { calls: 0, inputTokens: 0, outputTokens: 0 }
+        const cur = bucket(modelId, e.at.slice(0, 10))
         cur.calls += 1
         cur.inputTokens += e.promptTokens
         cur.outputTokens += e.completionTokens
-        dailyStats[date] = cur
+        cur.cost += Number.isFinite(e.estimatedCost) ? e.estimatedCost : 0
       }
-      out[modelId] = { dailyStats }
     }
     return Object.keys(out).length > 0 ? out : null
-  }, [providerUsageStats, providerId])
+  }, [dailyRows, providerUsageStats, providerId])
 
   // Look up catalog entry for pricing
   const catalogEntry = useMemo(() => getBuiltInProviderCatalogEntry(providerId), [providerId])
@@ -216,8 +235,18 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
         map.set(dev.id, dev.pricing)
       }
     }
+    // Custom providers: the per-model pricing the user entered in the
+    // provider editor (`customModelMetadata[*].pricing`) — previously ignored
+    // here, so a custom endpoint's spend always read "—".
+    const custom = customProviders?.find((provider) => provider.id === providerId)
+    for (const [modelId, meta] of Object.entries(custom?.customModelMetadata ?? {})) {
+      if (map.has(modelId)) continue
+      if (meta.pricing?.promptPer1M !== undefined && meta.pricing.completionPer1M !== undefined) {
+        map.set(modelId, meta.pricing)
+      }
+    }
     return map
-  }, [catalogEntry, modelsDevRow, providerId])
+  }, [catalogEntry, modelsDevRow, providerId, customProviders])
 
   // Compute per-model rows filtered by the selected period
   const rows: ModelRow[] = useMemo(() => {
@@ -230,21 +259,28 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
       let callCount = 0
       let inputTokens = 0
       let outputTokens = 0
+      let recordedCost = 0
 
       for (const [date, daily] of Object.entries(entry.dailyStats)) {
         if (pastDays.has(date)) {
           callCount += daily.calls
           inputTokens += daily.inputTokens
           outputTokens += daily.outputTokens
+          recordedCost += daily.cost
         }
       }
 
       const pricing = pricingMap.get(modelId)
+      // Recorded cost (SDK-reported or telemetry-estimated) wins; when a
+      // bucket has calls but no recorded cost, fall back to a rate-card
+      // estimate over its tokens.
       const estimatedCost =
-        pricing && pricing.promptPer1M !== undefined && pricing.completionPer1M !== undefined
-          ? (inputTokens * pricing.promptPer1M) / 1_000_000 +
-            (outputTokens * pricing.completionPer1M) / 1_000_000
-          : null
+        recordedCost > 0
+          ? recordedCost
+          : pricing && pricing.promptPer1M !== undefined && pricing.completionPer1M !== undefined
+            ? (inputTokens * pricing.promptPer1M) / 1_000_000 +
+              (outputTokens * pricing.completionPer1M) / 1_000_000
+            : null
 
       return { modelId, callCount, inputTokens, outputTokens, estimatedCost, pricing }
     })

@@ -22,8 +22,12 @@ export interface DeploymentCertificationPanelProps {
 
 export function DeploymentCertificationPanel({
   deploymentRef,
-  claudeCodeVersion = "unknown",
-  suiteVersion = "1",
+  // Default to the pinned runtime versions the certification records are
+  // keyed with. The previous defaults ("unknown" / "1") never matched a real
+  // record, so every legitimately certified bundle rendered as stale on the
+  // Claude Code and suite axes.
+  claudeCodeVersion = PINNED_RUNTIME_VERSIONS.claudeCodeVersion,
+  suiteVersion = PINNED_RUNTIME_VERSIONS.certificationSuiteVersion,
 }: DeploymentCertificationPanelProps) {
   const t = useTranslations("providers")
   const records = useLiveQuery(

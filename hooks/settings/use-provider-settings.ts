@@ -247,7 +247,9 @@ export function useProviderSettings(): UseProviderSettingsResult {
         const result = await testCustomProviderConnectionByProtocol(
           cp.baseURL,
           cp.apiKey ?? "",
-          cp.apiProtocol ?? "openai"
+          cp.apiProtocol ?? "openai",
+          cp.defaultModel,
+          cp.customHeaders
         )
         const outcome = result.success ? "success" : "error"
         const verificationPatch: Partial<CustomProviderSettings> = result.success

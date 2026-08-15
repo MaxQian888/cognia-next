@@ -162,13 +162,25 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
       }
     }
 
-    // Durable daily cost rollup (only successful turns carry real cost).
-    // Mirror update is synchronous so the routing engine's budget check sees
-    // it immediately; the Dexie write is fire-and-forget off the send path.
-    if (ok && effectiveCostUsd > 0 && modelId) {
-      useProviderCostMirrorStore.getState().addCost(providerId, effectiveCostUsd)
+    // Durable daily rollup (successful turns only). Mirror update is
+    // synchronous so the routing engine's budget check sees spend immediately;
+    // the Dexie write is fire-and-forget off the send path. Zero-cost turns
+    // (local / free-tier models) still roll up their token volume so the
+    // settings Cost tab — which reads this table — is not blank for them.
+    if (ok && modelId && (effectiveCostUsd > 0 || (inputTokens ?? 0) + (outputTokens ?? 0) > 0)) {
+      if (effectiveCostUsd > 0) {
+        useProviderCostMirrorStore.getState().addCost(providerId, effectiveCostUsd)
+      }
       void import("@/lib/db/provider-cost-daily")
-        .then((m) => m.incrementProviderCost({ providerId, modelId, costUsd: effectiveCostUsd }))
+        .then((m) =>
+          m.incrementProviderCost({
+            providerId,
+            modelId,
+            costUsd: effectiveCostUsd,
+            inputTokens,
+            outputTokens,
+          })
+        )
         .catch(() => {})
     }
   } catch {

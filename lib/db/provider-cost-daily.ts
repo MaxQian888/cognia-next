@@ -21,6 +21,13 @@ export interface ProviderCostDailyRow {
   totalCostUsd: number
   /** Number of successful turns that contributed cost. */
   requestCount: number
+  /**
+   * Summed fresh input / output tokens for the bucket (optional — rows written
+   * before the Cost tab read this table carry cost only). Lets the settings
+   * Cost tab show volume for zero-cost (local / free-tier) models too.
+   */
+  inputTokens?: number
+  outputTokens?: number
   /** Epoch ms of the last increment. */
   updatedAt: number
 }
@@ -47,11 +54,21 @@ export async function incrementProviderCost(input: {
   providerId: string
   modelId: string
   costUsd: number
+  /** Fresh input / output tokens of the turn — summed into the bucket. */
+  inputTokens?: number
+  outputTokens?: number
   now?: number
 }): Promise<void> {
   const { providerId, modelId, costUsd } = input
   if (!providerId || !modelId) return
-  if (!Number.isFinite(costUsd) || costUsd <= 0) return
+  if (!Number.isFinite(costUsd) || costUsd < 0) return
+  const inputTokens = Number.isFinite(input.inputTokens) ? Math.max(0, input.inputTokens ?? 0) : 0
+  const outputTokens = Number.isFinite(input.outputTokens)
+    ? Math.max(0, input.outputTokens ?? 0)
+    : 0
+  // A zero-cost turn only counts when it carried tokens (a local / free-tier
+  // model); a bare `costUsd: 0` with nothing else stays the legacy no-op.
+  if (costUsd === 0 && inputTokens === 0 && outputTokens === 0) return
 
   const now = input.now ?? Date.now()
   const day = localDayString(now)
@@ -65,6 +82,8 @@ export async function incrementProviderCost(input: {
         ...existing,
         totalCostUsd: existing.totalCostUsd + costUsd,
         requestCount: existing.requestCount + 1,
+        inputTokens: (existing.inputTokens ?? 0) + inputTokens,
+        outputTokens: (existing.outputTokens ?? 0) + outputTokens,
         updatedAt: now,
       })
     } else {
@@ -75,6 +94,8 @@ export async function incrementProviderCost(input: {
         modelId,
         totalCostUsd: costUsd,
         requestCount: 1,
+        inputTokens,
+        outputTokens,
         updatedAt: now,
       })
     }

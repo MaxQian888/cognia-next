@@ -81,6 +81,27 @@ describe("DeploymentCertificationPanel", () => {
     expect(screen.getByText("bundle-a")).toBeInTheDocument()
   })
 
+  it("defaults the Claude Code / suite axes to the pinned runtime versions", () => {
+    // A record keyed with the real pins must read fresh with NO version props —
+    // the previous defaults ("unknown" / "1") never matched and every certified
+    // bundle rendered as stale.
+    liveQueryResults.push([
+      {
+        ...record,
+        manifest: {
+          ...record.manifest,
+          key: {
+            ...record.manifest.key,
+            claudeCodeVersion: PINNED_RUNTIME_VERSIONS.claudeCodeVersion,
+            suiteVersion: PINNED_RUNTIME_VERSIONS.certificationSuiteVersion,
+          },
+        },
+      },
+    ])
+    render(<DeploymentCertificationPanel deploymentRef="dep-1" />)
+    expect(screen.getByText("certificationFresh")).toBeInTheDocument()
+  })
+
   it("marks a version-drifted record stale with reasons and the rollback hint", () => {
     liveQueryResults.push([record])
     render(

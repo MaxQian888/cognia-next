@@ -4,6 +4,7 @@ import {
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
 import { buildModelInferenceParams } from "@cognia/provider-core/providers/inference-params"
+import { getSchemaForProvider } from "@cognia/provider-core/providers/provider-parameter-schemas"
 import { recordKeyUse, selectApiKey } from "@cognia/provider-core/providers/api-key-rotation"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
@@ -117,7 +118,24 @@ export async function resolveProviderAttemptOptions(
     const providerConfig =
       appSettings.providerSettings?.[providerId] ??
       appSettings.customProviders?.find((provider) => provider.id === providerId)
-    const modelParams = buildModelInferenceParams(providerConfig)
+    // Parameters tab → AI SDK call options, including the provider-specific
+    // knobs projected through the provider's parameter schema (`providerOptions`).
+    const modelParams = buildModelInferenceParams(providerConfig, {
+      providerId,
+      schema: getSchemaForProvider(
+        providerId,
+        Object.fromEntries(
+          (appSettings.customProviders ?? []).map((provider) => [
+            provider.id,
+            { apiProtocol: provider.apiProtocol, name: provider.customName },
+          ])
+        )
+      ),
+    })
+    // Static transport headers from the settings UI (`customHeaders`) — the
+    // resolver already folded them into `resolution.headers`. Vault-issued
+    // relay headers (Codex) are merged on top below and win on collision.
+    if (resolution.headers) providerCredentials.headers = { ...resolution.headers }
 
     if (providerConfig?.apiKeyRotationEnabled) {
       const selection = selectApiKey(providerConfig)
@@ -139,7 +157,12 @@ export async function resolveProviderAttemptOptions(
       if (vaultCredential) {
         providerCredentials.apiKey = vaultCredential.apiKey
         providerCredentials.baseURL = vaultCredential.baseURL
-        if (vaultCredential.headers) providerCredentials.headers = vaultCredential.headers
+        if (vaultCredential.headers) {
+          providerCredentials.headers = {
+            ...(providerCredentials.headers ?? {}),
+            ...vaultCredential.headers,
+          }
+        }
       }
     }
 

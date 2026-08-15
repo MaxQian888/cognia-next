@@ -128,6 +128,41 @@ describe("resolveProviderAttemptOptions", () => {
     expect(result.protocolAdapterSpec).toMatchObject({ kind: "declarative" })
   })
 
+  it("forwards the provider's static customHeaders and lets vault relay headers win", async () => {
+    mockResolveFeatureProvider.mockReturnValue(
+      resolved({ headers: { "x-tenant": "acme", "x-shared": "from-settings" } })
+    )
+    const result = await resolveProviderAttemptOptions("openai", settings())
+    expect(result.providerCredentials?.headers).toEqual({
+      "x-tenant": "acme",
+      "x-shared": "from-settings",
+    })
+
+    // Codex vault headers merge on top of the settings headers.
+    mockResolveFeatureProvider.mockReturnValue(
+      resolved({ apiKey: undefined, headers: { "x-tenant": "acme", "x-shared": "from-settings" } })
+    )
+    mockResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "codex-key",
+      baseURL: "https://codex.test",
+      headers: { "x-shared": "from-vault", "chatgpt-account-id": "acct" },
+    })
+    const codex = await resolveProviderAttemptOptions("codex", settings("codex", { apiKey: "" }))
+    expect(codex.providerCredentials?.headers).toEqual({
+      "x-tenant": "acme",
+      "x-shared": "from-vault",
+      "chatgpt-account-id": "acct",
+    })
+  })
+
+  it("passes the provider id and parameter schema to the inference-param builder", async () => {
+    await resolveProviderAttemptOptions("openai", settings())
+    expect(mockBuildModelInferenceParams).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: "sk-attempt" }),
+      expect.objectContaining({ providerId: "openai", schema: expect.any(Object) })
+    )
+  })
+
   it("preserves Bedrock auth, API flavor, and the resolved default model", async () => {
     mockResolveFeatureProvider.mockReturnValue(
       resolved({

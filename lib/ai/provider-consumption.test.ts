@@ -79,6 +79,70 @@ jest.mock("@ai-sdk/deepinfra", () => ({
   createDeepInfra: makeEndpointFamilyFactory("deepinfra"),
 }))
 
+describe("customHeaders → ResolvedProvider.headers", () => {
+  it("carries a built-in provider's static headers into the resolution", () => {
+    const snap = createProviderSettingsSnapshot({
+      defaultProvider: "openai",
+      providerSettings: {
+        openai: { enabled: true, apiKey: "sk", customHeaders: { "x-tenant": "acme" } },
+      },
+      customProviders: undefined,
+    })
+    const res = resolveFeatureProvider(
+      {
+        featureId: "t",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "openai",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    expect(res.kind).toBe("resolved")
+    if (res.kind === "resolved") expect(res.headers).toEqual({ "x-tenant": "acme" })
+  })
+
+  it("carries a custom provider's headers and omits the field when empty", () => {
+    const snap = createProviderSettingsSnapshot({
+      defaultProvider: "c1",
+      providerSettings: undefined,
+      customProviders: [
+        {
+          id: "c1",
+          apiProtocol: "openai",
+          baseURL: "https://gw.example/v1",
+          apiKey: "k",
+          defaultModel: "m",
+          customHeaders: { "x-gw": "1" },
+        },
+        { id: "c2", apiProtocol: "openai", baseURL: "https://x", apiKey: "k", customHeaders: {} },
+      ],
+    })
+    const withHeaders = resolveFeatureProvider(
+      {
+        featureId: "t",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "c1",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    expect(withHeaders.kind === "resolved" && withHeaders.headers).toEqual({ "x-gw": "1" })
+    const without = resolveFeatureProvider(
+      {
+        featureId: "t",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "c2",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    expect(without.kind === "resolved" && "headers" in without).toBe(false)
+  })
+})
+
 describe("createProviderSettingsSnapshot", () => {
   it("defaults missing inputs to empty collections", () => {
     const snap = createProviderSettingsSnapshot({

@@ -1,4 +1,5 @@
 import { buildModelInferenceParams } from "./inference-params"
+import { getSchemaForProvider } from "./provider-parameter-schemas"
 
 describe("buildModelInferenceParams", () => {
   it("returns undefined when nothing is configured", () => {
@@ -36,6 +37,36 @@ describe("buildModelInferenceParams", () => {
         advancedParams: { topK: 40, seed: 7, stopSequences: ["\n\n", "END"] },
       })
     ).toEqual({ maxRetries: 5, topK: 40, seed: 7, stopSequences: ["\n\n", "END"] })
+  })
+
+  it("reads the schema-namespaced keys the Parameters tab writes", () => {
+    // The tab persists under the schema key ("connection.maxRetries",
+    // "openai.seed", "togetherAi.topK"); older rows use bare leaves. Both work.
+    expect(
+      buildModelInferenceParams({
+        connectionParams: { "connection.maxRetries": 3 } as never,
+        advancedParams: { "openai.seed": 11, "togetherAi.topK": 20 },
+      })
+    ).toEqual({ maxRetries: 3, seed: 11, topK: 20 })
+  })
+
+  it("projects providerSpecificParams into providerOptions through the schema", () => {
+    const schema = getSchemaForProvider("openai")
+    const params = buildModelInferenceParams(
+      {
+        providerSpecificParams: { "openai.reasoningEffort": "high", "openai.store": false },
+      },
+      {
+        providerId: "openai",
+        schema,
+        modelConfig: { id: "o3", name: "o3", supportsReasoning: true } as never,
+      }
+    )
+    expect(params?.providerOptions?.openai).toMatchObject({ reasoning_effort: "high" })
+    // Without a schema nothing is projected (and no empty block is attached).
+    expect(
+      buildModelInferenceParams({ providerSpecificParams: { "openai.reasoningEffort": "high" } })
+    ).toBeUndefined()
   })
 
   it("drops non-finite numbers and malformed advanced values", () => {

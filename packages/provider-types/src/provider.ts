@@ -197,6 +197,13 @@ export interface ModelInferenceParams {
   seed?: number
   stopSequences?: string[]
   maxRetries?: number
+  /**
+   * AI SDK `providerOptions` block (`{ openai: { reasoning_effort } }`, …)
+   * derived from the provider's `providerSpecificParams` through the
+   * provider parameter schema. Spread into `streamText` by the sidecar's
+   * ai-sdk adapter (reasoning options deep-merge on top).
+   */
+  providerOptions?: Record<string, Record<string, unknown>>
 }
 
 export interface UserProviderSettings {

@@ -77,9 +77,37 @@ const mockUsageStats: Record<string, ReturnType<typeof makeUsageEntries>> = {
   "openai:gpt-4o": makeUsageEntries(),
 }
 
+const mockCustomProviders: Array<Record<string, unknown>> = [
+  {
+    id: "my-gateway",
+    customName: "My Gateway",
+    customModelMetadata: {
+      "gw-model": { id: "gw-model", name: "GW", pricing: { promptPer1M: 1, completionPer1M: 2 } },
+    },
+  },
+]
+
 jest.mock("@/stores", () => ({
-  useSettingsStore: (selector: (state: { providerUsageStats: typeof mockUsageStats }) => unknown) =>
-    selector({ providerUsageStats: mockUsageStats }),
+  useSettingsStore: (
+    selector: (state: {
+      providerUsageStats: typeof mockUsageStats
+      settings: { customProviders: typeof mockCustomProviders }
+    }) => unknown
+  ) =>
+    selector({
+      providerUsageStats: mockUsageStats,
+      settings: { customProviders: mockCustomProviders },
+    }),
+}))
+
+// The durable per-day rollup (`providerCostDaily`) — the tab's primary source.
+const mockDailyRows: Array<Record<string, unknown>> = []
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => mockDailyRows,
+}))
+jest.mock("@/lib/db/provider-cost-daily", () => ({
+  getCostRange: jest.fn(),
+  localDayString: (now: number = Date.now()) => new Date(now).toISOString().slice(0, 10),
 }))
 
 // ── Catalog mock ──────────────────────────────────────────────────────────────
@@ -159,6 +187,65 @@ describe("ProviderCostTab", () => {
     expect(
       screen.getByText("Usage will appear here once you start making requests")
     ).toBeInTheDocument()
+  })
+
+  // ── 1b. Durable rollup source ─────────────────────────────────────────────
+
+  it("renders rows from the providerCostDaily rollup, including zero-cost token volume", () => {
+    mockDailyRows.length = 0
+    mockDailyRows.push(
+      {
+        id: "2026-04-14|ollama|llama3",
+        day: "2026-04-14",
+        providerId: "ollama",
+        modelId: "llama3",
+        totalCostUsd: 0,
+        requestCount: 3,
+        inputTokens: 3000,
+        outputTokens: 600,
+        updatedAt: 1,
+      },
+      // A different provider's row must not leak in.
+      {
+        id: "2026-04-14|openai|gpt-4o",
+        day: "2026-04-14",
+        providerId: "openai",
+        modelId: "gpt-4o",
+        totalCostUsd: 1,
+        requestCount: 1,
+        updatedAt: 1,
+      }
+    )
+    try {
+      render(<ProviderCostTab providerId="ollama" />)
+      expect(screen.queryByText("No usage data yet")).not.toBeInTheDocument()
+      expect(screen.getByText("llama3")).toBeInTheDocument()
+      expect(screen.queryByText("gpt-4o")).not.toBeInTheDocument()
+    } finally {
+      mockDailyRows.length = 0
+    }
+  })
+
+  it("prices a custom provider's models from its customModelMetadata", () => {
+    mockDailyRows.length = 0
+    mockDailyRows.push({
+      id: "2026-04-14|my-gateway|gw-model",
+      day: "2026-04-14",
+      providerId: "my-gateway",
+      modelId: "gw-model",
+      totalCostUsd: 0,
+      requestCount: 2,
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      updatedAt: 1,
+    })
+    try {
+      render(<ProviderCostTab providerId="my-gateway" />)
+      // 1M × $1 + 1M × $2 = $3.00 estimated from the user-entered rate card.
+      expect(screen.getAllByText("$3.00").length).toBeGreaterThan(0)
+    } finally {
+      mockDailyRows.length = 0
+    }
   })
 
   // ── 2. Overview cards ─────────────────────────────────────────────────────

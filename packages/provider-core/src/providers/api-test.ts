@@ -100,10 +100,14 @@ export async function testCustomProviderConnectionByProtocol(
   baseUrl: string,
   apiKey: string,
   apiProtocol: ApiProtocol = "openai",
-  model?: string
+  model?: string,
+  /** Static transport headers (`customHeaders`) — the probe must send what the
+   *  chat path sends, or a gateway that requires them fails the test only. */
+  customHeaders?: Record<string, string>
 ): Promise<ApiTestResult> {
   const normalizedBaseUrl = baseUrl?.trim().replace(/\/+$/, "")
   const start = Date.now()
+  const extraHeaders = customHeaders ?? {}
 
   if (!normalizedBaseUrl) {
     return {
@@ -121,6 +125,7 @@ export async function testCustomProviderConnectionByProtocol(
       response = await proxyFetch(buildAnthropicMessagesURL(normalizedBaseUrl), {
         method: "POST",
         headers: {
+          ...extraHeaders,
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
           "Content-Type": "application/json",
@@ -142,7 +147,9 @@ export async function testCustomProviderConnectionByProtocol(
     }
 
     if (apiProtocol === "gemini") {
-      response = await proxyFetch(`${normalizedBaseUrl}/models?key=${apiKey}`)
+      response = await proxyFetch(`${normalizedBaseUrl}/models?key=${apiKey}`, {
+        headers: extraHeaders,
+      })
 
       const latency = Date.now() - start
       if (response.ok) {
@@ -157,6 +164,7 @@ export async function testCustomProviderConnectionByProtocol(
 
     response = await proxyFetch(`${normalizedBaseUrl}/models`, {
       headers: {
+        ...extraHeaders,
         Authorization: `Bearer ${apiKey}`,
       },
     })

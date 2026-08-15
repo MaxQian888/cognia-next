@@ -80,6 +80,12 @@ export interface ProviderSettingsEntry {
    */
   apiProtocol?: ApiProtocol
   defaultModel?: string
+  /**
+   * Static transport headers (`UserProviderSettings.customHeaders`, ADR-0090
+   * Phase 1). Stamped on every request to the provider — gateway auth
+   * headers, tenant ids, etc.
+   */
+  customHeaders?: Record<string, string>
   /** Free-form per-provider config consumed by the AI SDK constructors. */
   options?: Record<string, unknown>
 }
@@ -111,6 +117,8 @@ export interface CustomProviderDefinition {
   baseURL?: string
   apiKey?: string
   defaultModel?: string
+  /** Static transport headers (`CustomProviderSettings.customHeaders`). */
+  customHeaders?: Record<string, string>
   models?: Array<{ id: string; name?: string; contextLength?: number }>
 }
 
@@ -137,6 +145,7 @@ function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefiniti
     baseURL: rich.baseURL,
     apiKey: rich.apiKey,
     defaultModel: rich.defaultModel,
+    customHeaders: rich.customHeaders,
   }
 }
 
@@ -159,6 +168,8 @@ export interface RichCustomProviderEntry {
   baseURL?: string
   apiKey?: string
   defaultModel?: string
+  /** Static transport headers (`CustomProviderSettings.customHeaders`). */
+  customHeaders?: Record<string, string>
 }
 
 export interface ProviderSettingsSnapshotInput {
@@ -209,6 +220,12 @@ export interface ResolvedProvider {
   baseURL: string | undefined
   bedrock?: BedrockConnectionSettings
   model: string | undefined
+  /**
+   * Static request headers from the provider's `customHeaders`. Consumers
+   * merge them under any transport-level headers (browser-direct opt-in,
+   * vault-issued relay headers), which take precedence.
+   */
+  headers?: Record<string, string>
   isCustomProvider: boolean
   useProxy: boolean
   /** Free-form feature id forwarded from the resolution arguments. */
@@ -352,6 +369,14 @@ function resolveOne(
   // sidecar so the user can opt a gateway / Azure / custom URL into /responses.
   const apiFlavor = custom ? (custom.apiFlavor ?? builtin?.apiFlavor) : builtin?.apiFlavor
   const bedrock = !custom ? builtin?.bedrock : undefined
+  // The policy-validated static headers the settings UI persists
+  // (`customHeaders`). Editable for built-in, custom and local providers, read
+  // by the connection test — and, from here on, by the chat path too.
+  const headersSource = custom
+    ? (custom.customHeaders ?? builtin?.customHeaders)
+    : builtin?.customHeaders
+  const headers =
+    headersSource && Object.keys(headersSource).length > 0 ? { ...headersSource } : undefined
 
   // Local inference engines (Ollama, LM Studio, llama.cpp, vLLM, …) listen on
   // a well-known localhost port and need no API key. When the user enabled a
@@ -394,6 +419,7 @@ function resolveOne(
     baseURL,
     bedrock,
     model,
+    ...(headers ? { headers } : {}),
     isCustomProvider: Boolean(custom),
     useProxy: false,
   }
@@ -574,7 +600,12 @@ export function createFeatureProviderModel(
     isCustomProvider: resolved.isCustomProvider,
     useProxy: resolved.useProxy,
     fetch: transport?.fetch,
-    headers: transport?.headers,
+    // Provider `customHeaders` first, transport-level headers (browser-direct
+    // opt-in, relay auth) win on collision.
+    headers:
+      resolved.headers || transport?.headers
+        ? { ...(resolved.headers ?? {}), ...(transport?.headers ?? {}) }
+        : undefined,
   })
 
   const modelId = resolved.model ?? catalogDefaultModel(resolved.protocol, resolved.providerId)

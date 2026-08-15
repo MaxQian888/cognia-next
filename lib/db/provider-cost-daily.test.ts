@@ -88,6 +88,39 @@ describe("incrementProviderCost", () => {
     expect(rows).toHaveLength(3)
   })
 
+  it("sums token volume into the bucket and accepts zero-cost turns that carry tokens", async () => {
+    await incrementProviderCost({
+      providerId: "ollama",
+      modelId: "llama3",
+      costUsd: 0,
+      inputTokens: 100,
+      outputTokens: 20,
+      now: NOON,
+    })
+    await incrementProviderCost({
+      providerId: "ollama",
+      modelId: "llama3",
+      costUsd: 0,
+      inputTokens: 50,
+      outputTokens: 5,
+      now: NOON,
+    })
+    const row = await getDb().providerCostDaily.get(
+      buildCostDailyId("2026-06-05", "ollama", "llama3")
+    )
+    expect(row).toMatchObject({
+      requestCount: 2,
+      totalCostUsd: 0,
+      inputTokens: 150,
+      outputTokens: 25,
+    })
+    // A bare zero-cost turn with no tokens is still the legacy no-op.
+    await incrementProviderCost({ providerId: "ollama", modelId: "empty", costUsd: 0, now: NOON })
+    expect(
+      await getDb().providerCostDaily.get(buildCostDailyId("2026-06-05", "ollama", "empty"))
+    ).toBeUndefined()
+  })
+
   it("ignores invalid input (missing ids, non-positive or non-finite cost)", async () => {
     await incrementProviderCost({ providerId: "", modelId: "m", costUsd: 1, now: NOON })
     await incrementProviderCost({ providerId: "p", modelId: "", costUsd: 1, now: NOON })

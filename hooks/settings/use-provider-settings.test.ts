@@ -13,6 +13,8 @@ interface SettingsLike {
       baseURL: string
       apiKey?: string
       apiProtocol?: "openai" | "anthropic"
+      defaultModel?: string
+      customHeaders?: Record<string, string>
     }>
     defaultProvider: string
   } | null
@@ -55,14 +57,16 @@ jest.mock("@/stores/settings", () => ({
 const testProviderConnection = jest.fn<Promise<ApiTestResult>, [string, string, string?]>()
 const testCustomProviderConnectionByProtocol = jest.fn<
   Promise<ApiTestResult>,
-  [string, string, string]
+  [string, string, string, string?, Record<string, string>?]
 >()
 
 jest.mock("@cognia/provider-core/providers/api-test", () => ({
   testProviderConnection: (...args: unknown[]) =>
     testProviderConnection(...(args as [string, string, string?])),
   testCustomProviderConnectionByProtocol: (...args: unknown[]) =>
-    testCustomProviderConnectionByProtocol(...(args as [string, string, string])),
+    testCustomProviderConnectionByProtocol(
+      ...(args as [string, string, string, string?, Record<string, string>?])
+    ),
 }))
 
 const testAndDiscoverBedrock = jest.fn()
@@ -417,6 +421,45 @@ describe("useProviderSettings — testCustomProvider", () => {
     await act(async () => {
       await result.current.testCustomProvider("bare")
     })
-    expect(testCustomProviderConnectionByProtocol).toHaveBeenCalledWith("https://b", "", "openai")
+    expect(testCustomProviderConnectionByProtocol).toHaveBeenCalledWith(
+      "https://b",
+      "",
+      "openai",
+      undefined,
+      undefined
+    )
+  })
+
+  it("forwards the custom provider's default model and static headers to the probe", async () => {
+    settingsState.settings = {
+      providerSettings: {},
+      customProviders: [
+        {
+          id: "gw",
+          baseURL: "https://gw.example/v1",
+          apiKey: "k",
+          apiProtocol: "openai",
+          defaultModel: "gpt-x",
+          customHeaders: { "x-tenant": "acme" },
+        },
+      ],
+      defaultProvider: "",
+    }
+    testCustomProviderConnectionByProtocol.mockResolvedValue({
+      success: true,
+      message: "ok",
+      outcome: "verified",
+    } as ApiTestResult)
+    const { result } = renderHook(() => useProviderSettings())
+    await act(async () => {
+      await result.current.testCustomProvider("gw")
+    })
+    expect(testCustomProviderConnectionByProtocol).toHaveBeenCalledWith(
+      "https://gw.example/v1",
+      "k",
+      "openai",
+      "gpt-x",
+      { "x-tenant": "acme" }
+    )
   })
 })

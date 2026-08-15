@@ -252,7 +252,34 @@ describe("recordProviderOutcome", () => {
         providerId: "openai",
         modelId: "gpt-4o",
         costUsd: 0.05,
+        inputTokens: undefined,
+        outputTokens: undefined,
       })
+    })
+
+    it("rolls up token volume for a zero-cost turn without touching the budget mirror", async () => {
+      // A local / free-tier model: no SDK cost, no priced estimate, but real
+      // tokens. The daily rollup (read by the settings Cost tab) still records
+      // the volume; the routing budget mirror stays untouched.
+      recordProviderOutcome({
+        providerId: "ollama",
+        ok: true,
+        latencyMs: 40,
+        modelId: "llama3",
+        inputTokens: 1_200,
+        outputTokens: 300,
+      })
+      expect(useProviderCostMirrorStore.getState().getTodaySpend("ollama")).toBe(0)
+      await flushAsync()
+      expect(incrementProviderCost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerId: "ollama",
+          modelId: "llama3",
+          costUsd: 0,
+          inputTokens: 1_200,
+          outputTokens: 300,
+        })
+      )
     })
 
     it("does not write cost on failure", async () => {
@@ -323,7 +350,7 @@ describe("recordProviderOutcome", () => {
       expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBeCloseTo(0.5)
     })
 
-    it("stays unknown for a priced-less model even with tokens", async () => {
+    it("stays unknown for a priced-less model even with tokens (volume still rolls up)", async () => {
       recordProviderOutcome({
         providerId: "openai",
         ok: true,
@@ -333,8 +360,12 @@ describe("recordProviderOutcome", () => {
         outputTokens: 5_000,
       })
       await flushAsync()
+      // Cost is unknown → the budget mirror is untouched …
       expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
-      expect(incrementProviderCost).not.toHaveBeenCalled()
+      // … but the daily rollup still records the token volume at zero cost.
+      expect(incrementProviderCost).toHaveBeenCalledWith(
+        expect.objectContaining({ modelId: "mystery-model-xyz", costUsd: 0, inputTokens: 10_000 })
+      )
     })
   })
 })
