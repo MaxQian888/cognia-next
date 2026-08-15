@@ -28,6 +28,8 @@ describe("MessageShell", () => {
     )
 
     expect(screen.getByTestId("message-shell")).toHaveAttribute("data-preset", "balanced")
+    // ADR-0127: body font travels as a data attribute the typeset CSS reads.
+    expect(screen.getByTestId("message-shell")).toHaveAttribute("data-body-font", "sans")
     expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument()
     expect(screen.getByRole("time")).toHaveAttribute("dateTime", "2023-11-14T22:13:20.000Z")
 
@@ -67,6 +69,7 @@ describe("MessageShell", () => {
       </MessageShell>
     )
     expect(screen.getByTestId("message-shell")).toHaveAttribute("data-layout", "cards")
+    expect(screen.getByTestId("message-shell")).toHaveAttribute("data-body-font", "sans")
     expect(screen.getByRole("status")).toHaveTextContent("Failed")
 
     rerender(

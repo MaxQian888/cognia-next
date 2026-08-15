@@ -7,6 +7,7 @@ import {
   MessageContent,
 } from "@/components/ai-elements/message"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
+import { selectStreamdownPlugins } from "@/components/ai-elements/streamdown-plugins"
 import { Tool, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { MessageShell } from "@/components/chat/message-shell"
@@ -496,7 +497,9 @@ function MessageRendererInner({
       <Message
         from={message.role}
         className={cn(
-          "py-2 sm:py-3",
+          // ADR-0127: the vertical rhythm between turns follows the chat
+          // density surface (`--density-gap`: 0.5 / 0.75 / 1rem).
+          "py-[calc(var(--density-gap,0.75rem)*0.667)] sm:py-[var(--density-gap,0.75rem)]",
           display.layout === "cards"
             ? "max-w-full"
             : display.layout === "bubbles"
@@ -709,11 +712,15 @@ function MessageRendererInner({
           {/* ADR-0026 §5 §A — revived hover-action slot. Distinct from the */}
           {/* footer below: this slot is visible above the message body on hover, */}
           {/* the footer holds host copy/regenerate controls. */}
+          {/* User-side rows sit inside the shell body (a block), so `ml-auto`
+              only right-aligns them when the row is `w-fit` — a block-level
+              flex row with auto width ignores auto margins and pins to the
+              left under the right-aligned bubble. */}
           <PluginExtensionSlot
             point="chat.message.actions"
             className={cn(
               "mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
-              message.role === "user" ? "ml-auto" : ""
+              message.role === "user" ? "ml-auto w-fit" : ""
             )}
           />
 
@@ -723,7 +730,7 @@ function MessageRendererInner({
           <div
             className={cn(
               "opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
-              message.role === "user" ? "ml-auto" : ""
+              message.role === "user" ? "ml-auto w-fit" : ""
             )}
           >
             <MessagePluginMenu
@@ -743,7 +750,7 @@ function MessageRendererInner({
               className={cn(
                 "text-xs text-muted-foreground transition-opacity",
                 display.actions === "hover" && "opacity-0 group-hover:opacity-100",
-                message.role === "user" ? "ml-auto" : ""
+                message.role === "user" ? "ml-auto w-fit" : ""
               )}
             >
               <MessageAction
@@ -863,7 +870,7 @@ function MessageRendererInner({
             <MessageActions
               className={cn(
                 "text-xs text-muted-foreground",
-                message.role === "user" ? "ml-auto" : ""
+                message.role === "user" ? "ml-auto w-fit" : ""
               )}
             >
               {usage && message.role === "assistant" && (
@@ -1442,6 +1449,7 @@ function renderPart(
           isStreaming={isStreaming}
           projectRoot={projectRoot}
           richControls={display.richControls}
+          markdown={display.markdown}
         />
       )
     }
@@ -1453,6 +1461,7 @@ function renderPart(
           text={text}
           messageId={messageId}
           projectRoot={projectRoot}
+          markdown={display.markdown}
         />
       )
     }
@@ -1464,6 +1473,7 @@ function renderPart(
         messageId={messageId}
         isStreaming={isStreaming}
         projectRoot={projectRoot}
+        markdown={display.markdown}
         className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       />
     )
@@ -1503,11 +1513,17 @@ function renderPart(
         />
         <ReasoningContent
           streamdownProps={{
-            className: "typeset typeset-chat",
+            className: cn(
+              "typeset typeset-chat",
+              display.markdown.codeWrap && "[&_pre]:whitespace-pre-wrap"
+            ),
             components: createStreamingComponents(projectRoot, stillStreaming),
             controls: { table: false },
             isAnimating: stillStreaming,
+            // ADR-0127: reasoning bodies honour the same markdown knobs.
+            lineNumbers: display.markdown.codeLineNumbers,
             mode: stillStreaming ? "streaming" : "static",
+            plugins: selectStreamdownPlugins(display.markdown),
             rehypePlugins: chatStreamdownRehypePlugins,
             urlTransform: chatMarkdownUrlTransform,
           }}
@@ -1534,6 +1550,7 @@ function renderPart(
           messageId={messageId}
           isStreaming={isStreaming}
           projectRoot={projectRoot}
+          markdown={display.markdown}
           className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
         />
       </div>

@@ -247,4 +247,44 @@ describe("CodeBlock", () => {
       expect(writeText.mock.calls[0][0].split("\n")).toHaveLength(CODE_AUTO_RENDER_MAX_LINES + 500)
     })
   })
+
+  // ADR-0127: `wrapLines` / `showLineNumbers` are settings-driven defaults;
+  // the toolbar toggles are per-block overrides layered on top, so a settings
+  // change after mount still reaches an untouched block.
+  describe("settings-driven defaults with per-block override", () => {
+    /** Wrap is expressed on the `<pre>` (fallback path) or as a `[&>pre]:` rule
+     *  on the highlighted wrapper — either way the class string carries it. */
+    const isWrapped = (container: HTMLElement) =>
+      /whitespace-pre-wrap/.test(
+        (container.querySelector('[role="code"]')?.className ?? "") +
+          (container.querySelector("pre")?.className ?? "")
+      )
+
+    it("wraps by default when wrapLines is set and follows a later prop change", async () => {
+      const { container, rerender } = renderInProvider(
+        <CodeBlock code="const a = 1" language="ts" wrapLines />
+      )
+      await waitFor(() => expect(isWrapped(container)).toBe(true))
+      rerender(
+        <TooltipProvider>
+          <CodeBlock code="const a = 1" language="ts" wrapLines={false} />
+        </TooltipProvider>
+      )
+      await waitFor(() => expect(isWrapped(container)).toBe(false))
+    })
+
+    it("a toolbar toggle overrides the default until the block remounts", async () => {
+      const { container, getByRole } = renderInProvider(
+        <CodeBlock code="const a = 1" language="ts" />
+      )
+      await waitFor(() => expect(isWrapped(container)).toBe(false))
+      fireEvent.click(getByRole("button", { name: "Enable word wrap" }))
+      await waitFor(() => expect(isWrapped(container)).toBe(true))
+      // The override sticks even when the default flips underneath it.
+      expect(getByRole("button", { name: "Disable word wrap" })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+    })
+  })
 })

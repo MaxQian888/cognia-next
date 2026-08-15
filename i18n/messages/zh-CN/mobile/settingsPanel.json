@@ -5,6 +5,8 @@
   "fontScaleMd": "中",
   "fontScaleSm": "小",
   "language": "语言",
+  "messageDisplayHelp": "聊天消息的预设、内容渲染（公式、图表、代码）与元数据。",
+  "messageDisplayTitle": "消息展示",
   "privacyTitle": "无障碍与隐私",
   "reconnectButton": "重连 WebRTC",
   "reconnectFailed": "重连失败（{reason}）。",

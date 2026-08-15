@@ -209,6 +209,25 @@ describe("<MobileSettingsPanel />", () => {
   })
 })
 
+describe("<MobileSettingsPanel /> — message display (ADR-0127)", () => {
+  it("mounts the shared MessageDisplayControls and writes messageDisplay through the store", async () => {
+    render(<MobileSettingsPanel />)
+    const section = screen.getByTestId("mobile-settings-message-display")
+    expect(section).toBeInTheDocument()
+    expect(screen.getByTestId("message-display-controls")).toBeInTheDocument()
+    // The markdown knob group is present (math / mermaid / code toggles).
+    fireEvent.click(screen.getByRole("button", { name: /advanced/i }))
+    const mathSwitch = document.getElementById("message-display-markdown-math") as HTMLElement
+    expect(mathSwitch).not.toBeNull()
+    fireEvent.click(mathSwitch)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(saveMock).toHaveBeenCalledWith({
+      messageDisplay: { preset: "balanced", overrides: { markdown: { math: false } } },
+    })
+  })
+})
+
 describe("<MobileSettingsPanel /> — transport tier indicator", () => {
   it("hides the indicator outside of Capacitor", () => {
     transportMock.isCapacitor.mockReturnValue(false)

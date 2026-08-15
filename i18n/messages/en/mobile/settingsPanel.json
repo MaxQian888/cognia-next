@@ -5,6 +5,8 @@
   "fontScaleMd": "M",
   "fontScaleSm": "S",
   "language": "Language",
+  "messageDisplayHelp": "Presets, content rendering (math, diagrams, code) and metadata for chat messages.",
+  "messageDisplayTitle": "Message display",
   "privacyTitle": "Accessibility & privacy",
   "reconnectButton": "Reconnect WebRTC",
   "reconnectFailed": "Reconnect failed ({reason}).",

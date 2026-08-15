@@ -30,6 +30,7 @@ import type { A2UIComponent, A2UISurfaceType } from "@/types/a2ui/schema"
 import type { SharePayload } from "@/lib/share/types"
 import type { SharedDiscoverDefinition } from "@/lib/share/discover-item"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 
 export function PayloadView({ payload, className }: { payload: SharePayload; className?: string }) {
   switch (payload.kind) {
@@ -73,12 +74,20 @@ function MarkdownText({
   title?: string
   className?: string
 }) {
+  // ADR-0127: the share view reads the *global* message-display preference
+  // only (there is no session to override it); a visitor without settings
+  // simply gets the balanced preset defaults.
+  const display = useMessageDisplay()
   return (
-    <article className={cn("mx-auto w-full max-w-3xl", className)}>
+    <article
+      className={cn("mx-auto w-full max-w-3xl", className)}
+      data-body-font={display.bodyFont}
+    >
       {title ? <h1 className="mb-4 text-xl font-semibold text-foreground">{title}</h1> : null}
       <MarkdownRenderer
         content={text}
         enableEnhancedImages={false}
+        markdown={display.markdown}
         className="rounded-lg border border-border bg-muted/20 p-4"
       />
     </article>

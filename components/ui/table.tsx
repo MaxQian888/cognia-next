@@ -2,11 +2,21 @@
 
 import * as React from "react"
 
+import { densitySurfaceProps } from "@/lib/appearance/density-applier"
 import { cn } from "@/lib/utils"
+import { useSettingsStore } from "@/stores/settings"
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
+  // ADR-0127: every data table is the `table` density surface, so the
+  // Appearance → Density "tables" override (previously a dead knob) reaches
+  // it; cells below read `--density-row-padding` for their vertical padding.
+  const density = useSettingsStore((s) => s.settings?.density)
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      className="relative w-full overflow-x-auto"
+      {...densitySurfaceProps("table", density)}
+    >
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}
@@ -58,7 +68,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "h-[calc(var(--density-row-padding,0.5rem)*2+1.5rem)] px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}
@@ -71,7 +81,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "px-2 py-[var(--density-row-padding,0.5rem)] align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}

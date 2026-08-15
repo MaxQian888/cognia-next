@@ -21,6 +21,7 @@
 import { useTranslations } from "next-intl"
 
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
+import { MessageDisplayControls } from "@/components/settings/appearance/components/message-display-controls"
 import { NotificationsSection } from "@/components/mobile/me/notifications-section"
 import { TransportTierIndicator } from "@/components/mobile/me/transport-tier-indicator"
 import { Label } from "@/components/ui/label"
@@ -109,6 +110,22 @@ export function MobileSettingsPanel() {
           data-testid="settings-default-model"
         />
       </Row>
+
+      {/* ADR-0127: the full message-display contract (preset + markdown /
+          math / mermaid / code knobs) is reachable from the phone — the
+          rendering toggles matter most on a low-power device. `messageDisplay`
+          is on the mobile-writable allowlist, so the mirror-to-host path
+          accepts it. */}
+      <section className="space-y-3 pt-2" data-testid="mobile-settings-message-display">
+        <div className="space-y-0.5">
+          <h3 className="text-xs font-semibold">{t("messageDisplayTitle")}</h3>
+          <p className="text-[11px] text-muted-foreground">{t("messageDisplayHelp")}</p>
+        </div>
+        <MessageDisplayControls
+          value={settings?.messageDisplay}
+          onChange={(next) => void update({ messageDisplay: next })}
+        />
+      </section>
 
       <NotificationsSection />
 

@@ -404,6 +404,35 @@ export interface MessageDisplayPreferences {
 // Controls the information density of the usage & consumption surfaces (the
 // Subscription → Usage dashboard, the composer context read-out, the agent-team
 // runtime tile, and the mobile today-stats card). Progressive density, mirroring
+/** Body-copy font family for message prose (ADR-0127). `serif` reads `--font-serif`. */
+export type MessageBodyFont = "sans" | "serif"
+export type MessageMathFontScale = 0.8 | 1 | 1.2
+export type MessageMathAlign = "center" | "left"
+
+/**
+ * Markdown / code / math rendering knobs (ADR-0127). These used to be renderer
+ * props with hard defaults and no setting; every field is optional at the
+ * preference layer and fully resolved by `resolveMessageDisplayOptions`.
+ * Both the streaming (Streamdown) and finalized (react-markdown) branches
+ * consume the same resolved object.
+ */
+export interface MessageMarkdownOptions {
+  /** Render `$…$` / `$$…$$` math with KaTeX; off ⇒ shown as plain code. */
+  math: boolean
+  /** Render ```mermaid fences as diagrams; off ⇒ shown as a code block. */
+  mermaid: boolean
+  /** Render ```diff fences with the diff viewer; off ⇒ plain code block. */
+  diff: boolean
+  /** Default for the code-block line-number gutter (per-block toolbar can still toggle). */
+  codeLineNumbers: boolean
+  /** Default for code-block soft wrapping (per-block toolbar can still toggle). */
+  codeWrap: boolean
+  mathFontScale: MessageMathFontScale
+  mathAlign: MessageMathAlign
+  /** Show the copy affordance on inline math. */
+  mathCopy: boolean
+}
+
 // {@link AgentFlowMode}:
 //   - simplified — headline stat tiles + current-window gauges only; charts and
 //                  tables collapse to a summary.
@@ -414,6 +443,20 @@ export interface MessageDisplayPreferences {
 
 export type UsageDisplayMode = "simplified" | "standard" | "detailed"
 
+  markdown?: Partial<MessageMarkdownOptions>
+  bodyFont?: MessageBodyFont
+}
+
+export const MESSAGE_MATH_FONT_SCALES: readonly MessageMathFontScale[] = [0.8, 1, 1.2]
+
+export function isMessageBodyFont(value: unknown): value is MessageBodyFont {
+  return value === "sans" || value === "serif"
+}
+export function isMessageMathFontScale(value: unknown): value is MessageMathFontScale {
+  return value === 0.8 || value === 1 || value === 1.2
+}
+export function isMessageMathAlign(value: unknown): value is MessageMathAlign {
+  return value === "center" || value === "left"
 export interface UsageDisplaySettings {
   mode: UsageDisplayMode
 }

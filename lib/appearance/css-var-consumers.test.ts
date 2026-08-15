@@ -100,25 +100,38 @@ describe("appearance custom properties have a consumer", () => {
     expect(STYLESHEETS).toMatch(/letter-spacing:\s*var\(--letter-spacing-em\)/)
   })
 
-  // Honest baseline rather than a passing test that implies more than is true.
-  // These are still written on every density change and still read by nothing;
-  // consuming them means giving the three surfaces the density card names
-  // (chat / tables / sidebar) real `data-surface` containers, which
-  // `densitySurfaceProps` was built for and which nothing calls yet.
-  it("records the density knobs that are still inert", () => {
-    const stillDead = [
-      "--density-spacing",
-      "--density-input-height",
-      "--density-row-padding",
-      "--density-gap",
-    ].filter((property) => !isRead(property))
+  // ADR-0127 gave the three surfaces the density card names (chat / tables /
+  // sidebar) real `data-surface` containers via `densitySurfaceProps`, and the
+  // surface components read the tokens through Tailwind arbitrary values
+  // (`py-(--density-gap)` etc.), which live in TSX rather than in a
+  // stylesheet — so the consumer scan for these includes the surface files.
+  const SURFACE_SOURCES = css(
+    "components/chat/message-list.tsx",
+    "components/chat/message-renderer.tsx",
+    "components/desktop/channel-list.tsx",
+    "components/ui/table.tsx"
+  )
+  const isReadAnywhere = (property: string) =>
+    isRead(property) ||
+    SURFACE_SOURCES.includes(`var(${property}`) ||
+    SURFACE_SOURCES.includes(`(${property}`)
 
-    // This list may only shrink. If you wired one up, delete it from here.
-    expect(stillDead).toEqual([
-      "--density-spacing",
-      "--density-input-height",
-      "--density-row-padding",
-      "--density-gap",
-    ])
+  it.each(["--density-spacing", "--density-row-padding", "--density-gap"])(
+    "%s is read by a density surface (ADR-0127)",
+    (property) => {
+      expect(isReadAnywhere(property)).toBe(true)
+    }
+  )
+
+  it("mounts every density surface the settings card names", () => {
+    expect(SURFACE_SOURCES).toContain('densitySurfaceProps("chat"')
+    expect(SURFACE_SOURCES).toContain('densitySurfaceProps("sidebar"')
+    expect(SURFACE_SOURCES).toContain('densitySurfaceProps("table"')
+  })
+
+  // Honest baseline for what is still inert. This list may only shrink.
+  it("records the density knobs that are still inert", () => {
+    const stillDead = ["--density-input-height"].filter((property) => !isReadAnywhere(property))
+    expect(stillDead).toEqual(["--density-input-height"])
   })
 })

@@ -21,6 +21,7 @@ import rehypeSanitize from "rehype-sanitize"
 import { cjk } from "@streamdown/cjk"
 import { cn } from "@/lib/utils"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
+import type { MessageMarkdownOptions } from "@/types/appearance"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
 import {
@@ -196,6 +197,14 @@ function preprocessLatex(content: string): string {
 export interface MarkdownRendererProps {
   content: string
   className?: string
+  /**
+   * ADR-0127 — the resolved `messageDisplay.markdown` knobs. Seeds
+   * `enableMath` / `enableMermaid` / `enableDiff` / `showLineNumbers` /
+   * `wrapLines` / `mathFontScale` / `mathDisplayAlignment` /
+   * `mathShowCopyButton`; an explicitly passed individual prop still wins, so
+   * non-chat callers (plugin READMEs, skill docs) keep their overrides.
+   */
+  markdown?: MessageMarkdownOptions
   enableMermaid?: boolean
   enableMath?: boolean
   enableDiff?: boolean
@@ -204,6 +213,8 @@ export interface MarkdownRendererProps {
   enableVideoEmbed?: boolean
   enableAudioEmbed?: boolean
   showLineNumbers?: boolean
+  /** Default soft-wrap for code blocks (per-block toolbar can still toggle). */
+  wrapLines?: boolean
   mathFontScale?: number
   mathDisplayAlignment?: "center" | "left"
   mathShowCopyButton?: boolean
@@ -240,17 +251,19 @@ export interface MarkdownRendererProps {
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   className,
-  enableMermaid = true,
-  enableMath = true,
-  enableDiff = true,
+  markdown,
+  enableMermaid = markdown?.mermaid ?? true,
+  enableMath = markdown?.math ?? true,
+  enableDiff = markdown?.diff ?? true,
   enableAlerts = true,
   enableEnhancedImages = true,
   enableVideoEmbed = true,
   enableAudioEmbed = true,
-  showLineNumbers = true,
-  mathFontScale = 1,
-  mathDisplayAlignment = "center",
-  mathShowCopyButton = true,
+  showLineNumbers = markdown?.codeLineNumbers ?? true,
+  wrapLines = markdown?.codeWrap ?? false,
+  mathFontScale = markdown?.mathFontScale ?? 1,
+  mathDisplayAlignment = markdown?.mathAlign ?? "center",
+  mathShowCopyButton = markdown?.mathCopy ?? true,
   messageId,
   isStreaming = false,
   rhythm = "chat",
@@ -274,6 +287,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         enableVideoEmbed,
         enableAudioEmbed,
         showLineNumbers,
+        wrapLines,
         mathFontScale,
         mathDisplayAlignment,
         mathShowCopyButton,
@@ -291,6 +305,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       enableVideoEmbed,
       enableAudioEmbed,
       showLineNumbers,
+      wrapLines,
       mathFontScale,
       mathDisplayAlignment,
       mathShowCopyButton,
@@ -328,6 +343,7 @@ interface BuildComponentsOptions {
   enableVideoEmbed: boolean
   enableAudioEmbed: boolean
   showLineNumbers: boolean
+  wrapLines: boolean
   mathFontScale: number
   mathDisplayAlignment: "center" | "left"
   mathShowCopyButton: boolean
@@ -349,6 +365,7 @@ function buildComponents(
     enableVideoEmbed,
     enableAudioEmbed,
     showLineNumbers,
+    wrapLines,
     mathFontScale,
     mathDisplayAlignment,
     mathShowCopyButton,
@@ -463,6 +480,7 @@ function buildComponents(
             code={codeContent}
             language={language}
             showLineNumbers={showLineNumbers}
+            wrapLines={wrapLines}
             isStreaming={isStreaming}
           />
           {showArtifactButton && (

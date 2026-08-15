@@ -22,6 +22,13 @@ export interface CodeBlockProps {
   language?: string
   className?: string
   showLineNumbers?: boolean
+  /**
+   * Default soft-wrap (ADR-0127: from `messageDisplay.markdown.codeWrap`). The
+   * toolbar toggle is an ephemeral per-block override on top of this default,
+   * so a later settings change still reaches every block the user has not
+   * touched.
+   */
+  wrapLines?: boolean
   highlightLines?: number[]
   filename?: string
   /**
@@ -51,14 +58,23 @@ export const CodeBlock = memo(function CodeBlock({
   language,
   className,
   showLineNumbers = true,
+  wrapLines = false,
   highlightLines = [],
   filename,
   isStreaming = false,
 }: CodeBlockProps) {
   const t = useTranslations("chat.renderers.code")
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [wordWrap, setWordWrap] = useState(false)
-  const [localShowLineNumbers, setLocalShowLineNumbers] = useState(showLineNumbers)
+  // Per-block overrides: `null` = follow the prop default. Deriving the
+  // effective value during render (instead of seeding `useState` from the
+  // prop) means a settings change after mount still applies to untouched
+  // blocks, without a set-state-in-effect.
+  const [wordWrapOverride, setWordWrapOverride] = useState<boolean | null>(null)
+  const [lineNumbersOverride, setLineNumbersOverride] = useState<boolean | null>(null)
+  const wordWrap = wordWrapOverride ?? wrapLines
+  const localShowLineNumbers = lineNumbersOverride ?? showLineNumbers
+  const setWordWrap = (next: boolean) => setWordWrapOverride(next)
+  const setLocalShowLineNumbers = (next: boolean) => setLineNumbersOverride(next)
   const [showAllLines, setShowAllLines] = useState(false)
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
   const codeRef = useRef<HTMLPreElement>(null)

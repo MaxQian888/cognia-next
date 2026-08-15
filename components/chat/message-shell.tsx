@@ -110,6 +110,7 @@ export function MessageShell({
         data-layout={display.layout}
         data-preset={display.preset}
         data-rich-controls={display.richControls}
+        data-body-font={display.bodyFont}
         className={cn(
           "min-w-0",
           (isAssistant || display.layout === "cards") && "w-full",

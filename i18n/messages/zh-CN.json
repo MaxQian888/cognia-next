@@ -14651,6 +14651,8 @@
       "verified": "已验证"
     },
     "title": "模型目录"
+      "messageDisplayHelp": "聊天消息的预设、内容渲染（公式、图表、代码）与元数据。",
+      "messageDisplayTitle": "消息展示",
   },
   "notFound": {
     "description": "我们找不到你要访问的页面。它可能已被移动、重命名或删除。",
@@ -23537,12 +23539,55 @@
           "large": "头像图片偏大——使用更小的图片可让角色数据更轻量。",
           "upload": "上传图片"
         },
+        "bodyFont": {
+          "label": "正文字体",
+          "sans": "无衬线",
+          "serif": "衬线"
+        },
         "browserToolsToggle": {
           "aria": "切换智能体浏览器工具",
           "description": "允许该角色操作应用内预览浏览器（导航、快照、点击、输入、读取控制台/网络）。仅桌面端可用。",
           "label": "智能体浏览器工具"
         },
         "computerUseSubSettings": {
+        "markdown": {
+          "codeLineNumbers": {
+            "hint": "行号栏的默认值；每个代码块仍可单独切换。",
+            "label": "代码行号"
+          },
+          "codeWrap": {
+            "hint": "软换行的默认值；每个代码块仍可单独切换。",
+            "label": "长代码行自动换行"
+          },
+          "diff": {
+            "hint": "用 diff 查看器渲染 ```diff 代码块；关闭则显示普通代码块。",
+            "label": "Diff 视图"
+          },
+          "label": "内容渲染",
+          "math": {
+            "hint": "将 $…$ 与 $$…$$ 渲染为排版公式；关闭则显示源码。",
+            "label": "数学公式（KaTeX）"
+          },
+          "mathAlign": {
+            "center": "居中",
+            "label": "块级公式对齐",
+            "left": "左对齐"
+          },
+          "mathCopy": {
+            "hint": "悬停行内公式时显示复制按钮。",
+            "label": "行内公式复制按钮"
+          },
+          "mathFontScale": {
+            "1": "标准",
+            "0_8": "小",
+            "1_2": "大",
+            "label": "公式字号"
+          },
+          "mermaid": {
+            "hint": "将 ```mermaid 代码块渲染为图表；关闭则显示代码。",
+            "label": "Mermaid 图表"
+          }
+        },
           "allowedToolIds": {
             "description": "限制该角色可使用的已注册原生 Anthropic 工具。全部取消勾选 = 不限制。",
             "empty": "尚未注册任何原生 Anthropic 工具 —— 安装 Computer Use 插件即可暴露 computer / bash / text_editor。",

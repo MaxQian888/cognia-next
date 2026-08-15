@@ -1,6 +1,10 @@
 import { DEFAULT_APPEARANCE_SLICE } from "@/types/appearance"
 import { DEFAULTS } from "@/lib/db/settings"
-import { DEFAULT_MESSAGE_DISPLAY_OPTIONS, resolveMessageDisplayOptions } from "./message-display"
+import {
+  DEFAULT_MESSAGE_DISPLAY_OPTIONS,
+  DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
+  resolveMessageDisplayOptions,
+} from "./message-display"
 
 describe("resolveMessageDisplayOptions", () => {
   it("uses the balanced preset by default", () => {
@@ -106,5 +110,72 @@ describe("resolveMessageDisplayOptions", () => {
         "simplified"
       )
     ).toMatchObject({ preset: "balanced", agentFlowMode: "detailed" })
+  })
+
+  describe("markdown / bodyFont knobs (ADR-0127)", () => {
+    it("every preset resolves to the pre-ADR renderer behaviour by default", () => {
+      for (const preset of ["focused", "balanced", "inspector"] as const) {
+        const resolved = resolveMessageDisplayOptions({ preset })
+        expect(resolved.markdown).toEqual(DEFAULT_MESSAGE_MARKDOWN_OPTIONS)
+        expect(resolved.bodyFont).toBe("sans")
+      }
+      expect(DEFAULT_MESSAGE_MARKDOWN_OPTIONS).toEqual({
+        math: true,
+        mermaid: true,
+        diff: true,
+        codeLineNumbers: true,
+        codeWrap: false,
+        mathFontScale: 1,
+        mathAlign: "center",
+        mathCopy: true,
+      })
+    })
+
+    it("applies partial markdown overrides field-by-field and validates enum values", () => {
+      const resolved = resolveMessageDisplayOptions({
+        preset: "balanced",
+        overrides: {
+          markdown: {
+            math: false,
+            codeWrap: true,
+            mathFontScale: 1.2,
+            mathAlign: "left",
+            // invalid values are ignored, not propagated
+            mermaid: "no" as unknown as boolean,
+            mathCopy: undefined,
+          },
+          bodyFont: "serif",
+        },
+      })
+      expect(resolved.markdown).toEqual({
+        ...DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
+        math: false,
+        codeWrap: true,
+        mathFontScale: 1.2,
+        mathAlign: "left",
+      })
+      expect(resolved.bodyFont).toBe("serif")
+      expect(
+        resolveMessageDisplayOptions({
+          preset: "balanced",
+          overrides: {
+            markdown: { mathFontScale: 3 as unknown as 1, mathAlign: "right" as unknown as "left" },
+            bodyFont: "mono" as unknown as "sans",
+          },
+        })
+      ).toMatchObject({ markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS, bodyFont: "sans" })
+    })
+
+    it("session overrides win over global overrides for the new knobs too", () => {
+      const resolved = resolveMessageDisplayOptions(
+        { preset: "balanced", overrides: { markdown: { mermaid: false }, bodyFont: "serif" } },
+        { preset: "balanced", overrides: { markdown: { math: false } } }
+      )
+      // Session preferences restart from the session preset (existing precedence
+      // model), so the global mermaid override does not leak through.
+      expect(resolved.markdown.mermaid).toBe(true)
+      expect(resolved.markdown.math).toBe(false)
+      expect(resolved.bodyFont).toBe("sans")
+    })
   })
 })

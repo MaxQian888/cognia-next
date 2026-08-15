@@ -42,6 +42,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Serif body-copy stack (ADR-0127). Declared as a real theme token so
+ * `font-serif` exists as a utility and `--font-serif` is a resolvable variable;
+ * `lib/appearance/typography-applier.tsx` overrides it inline on <html> when
+ * the user picks a serif family in Settings → Appearance → Typography. */
+@theme {
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -2178,3 +2186,10 @@ select {
 [data-rich-controls="always"] [data-message-rich-control] {
   opacity: 1 !important;
 }
+/* ADR-0127 — `messageDisplay.bodyFont: "serif"` switches the message prose
+ * (and typeset headings) to the serif stack; code keeps `--font-mono`. */
+[data-body-font="serif"] .typeset {
+  font-family: var(--font-serif);
+  --typeset-font-heading: var(--font-serif);
+}
+

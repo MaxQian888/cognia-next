@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -15,16 +16,21 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
-import type {
-  AgentFlowMode,
-  MessageActionVisibility,
-  MessageDisplayLayout,
-  MessageDisplayMetadataOptions,
-  MessageDisplayPreferences,
-  MessageDisplayPreset,
-  MessageMotion,
-  MessagePartVisibility,
-  MessageRichControls,
+import {
+  MESSAGE_MATH_FONT_SCALES,
+  type AgentFlowMode,
+  type MessageActionVisibility,
+  type MessageBodyFont,
+  type MessageDisplayLayout,
+  type MessageDisplayMetadataOptions,
+  type MessageDisplayPreferences,
+  type MessageDisplayPreset,
+  type MessageMarkdownOptions,
+  type MessageMathAlign,
+  type MessageMathFontScale,
+  type MessageMotion,
+  type MessagePartVisibility,
+  type MessageRichControls,
 } from "@/types/appearance"
 
 export interface MessageDisplayControlsProps {
@@ -47,6 +53,17 @@ const PLACEMENTS: MessageDisplayMetadataOptions[keyof MessageDisplayMetadataOpti
   "header",
   "details",
 ]
+const BODY_FONTS: MessageBodyFont[] = ["sans", "serif"]
+const MATH_ALIGNS: MessageMathAlign[] = ["center", "left"]
+/** ADR-0127 boolean markdown knobs rendered as switches, in display order. */
+const MARKDOWN_TOGGLES = [
+  "math",
+  "mermaid",
+  "diff",
+  "codeLineNumbers",
+  "codeWrap",
+  "mathCopy",
+] as const satisfies readonly (keyof MessageMarkdownOptions)[]
 const METADATA_FIELDS: Array<keyof MessageDisplayMetadataOptions> = [
   "identity",
   "timestamp",
@@ -85,6 +102,13 @@ export function MessageDisplayControls({
     placement: MessageDisplayMetadataOptions[keyof MessageDisplayMetadataOptions]
   ) => {
     updateOverride("metadata", { ...(ownOverrides?.metadata ?? {}), [key]: placement })
+  }
+
+  const updateMarkdown = <K extends keyof MessageMarkdownOptions>(
+    key: K,
+    next: MessageMarkdownOptions[K]
+  ) => {
+    updateOverride("markdown", { ...(ownOverrides?.markdown ?? {}), [key]: next })
   }
 
   return (
@@ -181,6 +205,56 @@ export function MessageDisplayControls({
             />
           </div>
 
+          {/* ADR-0127: markdown / code / math knobs — both renderer branches read
+              the resolved values, the per-block toolbar can still override. */}
+          <div className="space-y-2" data-testid="message-display-markdown">
+            <Label className="text-xs">{t("markdown.label")}</Label>
+            <div className="grid gap-3 @md/appearance-pane:grid-cols-2">
+              <PreferenceSelect
+                label={t("bodyFont.label")}
+                value={ownOverrides?.bodyFont}
+                fallback={resolved.bodyFont}
+                options={BODY_FONTS}
+                getLabel={(option) => t(`bodyFont.${option}`)}
+                onChange={(next) => updateOverride("bodyFont", next as MessageBodyFont)}
+              />
+              <PreferenceSelect
+                label={t("markdown.mathFontScale.label")}
+                value={
+                  ownOverrides?.markdown?.mathFontScale === undefined
+                    ? undefined
+                    : String(ownOverrides.markdown.mathFontScale)
+                }
+                fallback={String(resolved.markdown.mathFontScale)}
+                options={MESSAGE_MATH_FONT_SCALES.map(String)}
+                getLabel={(option) => t(`markdown.mathFontScale.${option.replace(".", "_")}`)}
+                onChange={(next) =>
+                  updateMarkdown("mathFontScale", Number(next) as MessageMathFontScale)
+                }
+              />
+              <PreferenceSelect
+                label={t("markdown.mathAlign.label")}
+                value={ownOverrides?.markdown?.mathAlign}
+                fallback={resolved.markdown.mathAlign}
+                options={MATH_ALIGNS}
+                getLabel={(option) => t(`markdown.mathAlign.${option}`)}
+                onChange={(next) => updateMarkdown("mathAlign", next as MessageMathAlign)}
+              />
+            </div>
+            <div className="grid gap-2 @md/appearance-pane:grid-cols-2">
+              {MARKDOWN_TOGGLES.map((key) => (
+                <PreferenceSwitch
+                  key={key}
+                  id={`message-display-markdown-${key}`}
+                  label={t(`markdown.${key}.label`)}
+                  description={t(`markdown.${key}.hint`)}
+                  checked={ownOverrides?.markdown?.[key] ?? resolved.markdown[key]}
+                  onCheckedChange={(next) => updateMarkdown(key, next)}
+                />
+              ))}
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label className="text-xs">{t("metadata.label")}</Label>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -249,6 +323,32 @@ function PreferenceSelect({
           ))}
         </SelectContent>
       </Select>
+    </div>
+  )
+}
+
+function PreferenceSwitch({
+  id,
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: {
+  id: string
+  label: string
+  description: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-md border px-3 py-2">
+      <div className="min-w-0 space-y-0.5">
+        <Label htmlFor={id} className="text-xs">
+          {label}
+        </Label>
+        <p className="text-[11px] leading-snug text-muted-foreground">{description}</p>
+      </div>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
     </div>
   )
 }

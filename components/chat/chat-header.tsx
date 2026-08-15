@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Columns2Icon,
@@ -16,7 +16,16 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { Badge } from "@/components/ui/badge"
-import { useCharacter } from "@/lib/data-hooks/context"
+import {
+  useCharacter,
+  usePresets,
+  useRecordPresetUsage,
+  useUpdateSession,
+} from "@/lib/data-hooks/context"
+import { ChatHeaderPresetPill } from "@/components/chat/chat-header-preset-pill"
+import { buildPresetApplicationPlan, detectPresetConflicts } from "@/lib/presets/apply-to-session"
+import { loggers } from "@cognia/logging"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
@@ -64,6 +73,36 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
   // lands after boot.
   const { keyOk } = useCredentialStatus()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // ADR-0127: the system-prompt preset pill was built for this header and
+  // never mounted. It self-hides without presets. A conflict-free pick applies
+  // in place (fill-empty); a pick that would overwrite session values opens
+  // the settings sheet, which owns the conflict-resolution dialog.
+  const presetsRaw = usePresets()
+  const presets = useMemo(() => presetsRaw ?? [], [presetsRaw])
+  const updateSession = useUpdateSession()
+  const recordPresetUsage = useRecordPresetUsage()
+  const handleSelectPreset = (preset: SystemPromptPreset) => {
+    const conflicts = detectPresetConflicts(preset, session)
+    if (conflicts.length > 0) {
+      setSettingsOpen(true)
+      return
+    }
+    const plan = buildPresetApplicationPlan(preset, session, "fill-empty")
+    void updateSession(session.id, { ...plan.sessionPatch, activePresetId: preset.id }).catch(
+      (err: unknown) => {
+        loggers.chat.error("preset pill apply failed", err, {
+          sessionId: session.id,
+          presetId: preset.id,
+        })
+      }
+    )
+    void recordPresetUsage(preset.id).catch((err: unknown) => {
+      loggers.chat.warn("recordPresetUsage failed", {
+        presetId: preset.id,
+        err: err instanceof Error ? err.message : String(err),
+      })
+    })
+  }
   const [codexDispatching, setCodexDispatching] = useState(false)
 
   const handleOpenInCodexApp = async () => {
@@ -139,6 +178,13 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
 
       <SessionCostBadgeLive
         sessionId={session.id}
+        {presets.length > 0 && (
+          <ChatHeaderPresetPill
+            session={session}
+            presets={presets}
+            onSelectPreset={handleSelectPreset}
+          />
+        )}
         tokensLabel={(input, output) => t("tokensLabel", { input, output })}
       />
 

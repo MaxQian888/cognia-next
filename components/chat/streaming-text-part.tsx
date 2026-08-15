@@ -29,7 +29,8 @@ import { parseProjectFileReference } from "@/lib/files/project-file-reference"
 import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "./markdown-renderer"
 import { chatMarkdownUrlTransform, chatStreamdownRehypePlugins } from "./markdown/rendering-policy"
-import type { MessageRichControls } from "@/types/appearance"
+import type { MessageMarkdownOptions, MessageRichControls } from "@/types/appearance"
+import { selectStreamdownPlugins } from "@/components/ai-elements/streamdown-plugins"
 import {
   createIncrementalMarkdownBlockParser,
   type MarkdownBlockParser,
@@ -40,12 +41,15 @@ interface Props {
   isStreaming: boolean
   projectRoot?: string | null
   richControls?: MessageRichControls
+  /** ADR-0127 — resolved `messageDisplay.markdown` knobs (both renderers read them). */
+  markdown?: MessageMarkdownOptions
 }
 
 interface FinalizedProps {
   text: string
   messageId?: string
   projectRoot?: string | null
+  markdown?: MessageMarkdownOptions
 }
 
 export const FINALIZED_MARKDOWN_LAZY_THRESHOLD = 64 * 1024
@@ -105,11 +109,13 @@ function FinalizedMarkdownSection({
   eager,
   messageId,
   projectRoot,
+  markdown,
 }: {
   content: string
   eager: boolean
   messageId?: string
   projectRoot?: string | null
+  markdown?: MessageMarkdownOptions
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(eager)
@@ -145,6 +151,7 @@ function FinalizedMarkdownSection({
           content={content}
           messageId={messageId}
           projectRoot={projectRoot}
+          markdown={markdown}
           className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
         />
       ) : null}
@@ -160,6 +167,7 @@ export const FinalizedLongTextPart = memo(function FinalizedLongTextPart({
   text,
   messageId,
   projectRoot,
+  markdown,
 }: FinalizedProps) {
   const sections = useMemo(() => {
     const blocks = parseMarkdownIntoBlocks(text)
@@ -177,6 +185,7 @@ export const FinalizedLongTextPart = memo(function FinalizedLongTextPart({
       eager={index < FINALIZED_EAGER_SECTIONS}
       messageId={messageId}
       projectRoot={projectRoot}
+      markdown={markdown}
     />
   ))
 })
@@ -217,7 +226,13 @@ export function createStreamingComponents(
   }
 }
 
-function StreamingTextPartInner({ text, isStreaming, projectRoot, richControls = "hover" }: Props) {
+function StreamingTextPartInner({
+  text,
+  isStreaming,
+  projectRoot,
+  richControls = "hover",
+  markdown,
+}: Props) {
   const [parser] = useState<MarkdownBlockParser>(() =>
     createIncrementalMarkdownBlockParser(parseMarkdownIntoBlocks)
   )
@@ -225,6 +240,13 @@ function StreamingTextPartInner({ text, isStreaming, projectRoot, richControls =
     () => createStreamingComponents(projectRoot, isStreaming),
     [isStreaming, projectRoot]
   )
+  // ADR-0127: the same resolved knobs the finalized branch reads. Plugin
+  // variants are prebuilt (stable identity); `lineNumbers` is a Streamdown
+  // prop; soft-wrap has no Streamdown prop, so it is applied to the fenced
+  // `<pre>` through the wrapper class the code plugin renders into.
+  const plugins = selectStreamdownPlugins(markdown)
+  const lineNumbers = markdown?.codeLineNumbers ?? true
+  const codeWrap = markdown?.codeWrap ?? false
   // Reduced motion: a static (non-blinking) caret so we still signal "more is
   // coming" without an animation. `animate-pulse` is a guaranteed Tailwind
   // utility (no dependency on `animate-caret-blink`).
@@ -233,13 +255,15 @@ function StreamingTextPartInner({ text, isStreaming, projectRoot, richControls =
     <>
       <MessageResponse
         BlockComponent={ContainedStreamdownBlock}
-        className="typeset typeset-chat"
+        className={cn("typeset typeset-chat", codeWrap && "[&_pre]:whitespace-pre-wrap")}
         components={components}
         controls={richControls === "hidden" ? false : { table: false }}
         data-rich-controls={richControls}
         isAnimating={isStreaming}
+        lineNumbers={lineNumbers}
         mode="streaming"
         parseMarkdownIntoBlocksFn={parser}
+        plugins={plugins}
         rehypePlugins={chatStreamdownRehypePlugins}
         urlTransform={chatMarkdownUrlTransform}
       >
@@ -267,6 +291,7 @@ export const StreamingTextPart = memo(
     prev.text === next.text &&
     prev.isStreaming === next.isStreaming &&
     prev.projectRoot === next.projectRoot &&
-    prev.richControls === next.richControls
+    prev.richControls === next.richControls &&
+    prev.markdown === next.markdown
 )
 StreamingTextPart.displayName = "StreamingTextPart"

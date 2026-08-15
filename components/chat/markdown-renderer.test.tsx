@@ -31,8 +31,23 @@ jest.mock("next/dynamic", () => {
 })
 
 jest.mock("@/components/chat/renderers/code-block", () => ({
-  CodeBlock: ({ code, language }: { code: string; language?: string }) => (
-    <div data-test="code-block" data-lang={language}>
+  CodeBlock: ({
+    code,
+    language,
+    showLineNumbers,
+    wrapLines,
+  }: {
+    code: string
+    language?: string
+    showLineNumbers?: boolean
+    wrapLines?: boolean
+  }) => (
+    <div
+      data-test="code-block"
+      data-lang={language}
+      data-line-numbers={String(showLineNumbers)}
+      data-wrap={String(wrapLines)}
+    >
       {code}
     </div>
   ),
@@ -709,5 +724,48 @@ describe("parseTaskListItem", () => {
   it("ignores non-checkbox inputs", () => {
     const textInput = React.createElement("input", { type: "text" })
     expect(parseTaskListItem([textInput, " label"])).toBeNull()
+  })
+
+  // ── ADR-0127: resolved `messageDisplay.markdown` knobs ─────────────────────
+
+  describe("markdown prop (ADR-0127)", () => {
+    const knobs = {
+      math: false,
+      mermaid: false,
+      diff: false,
+      codeLineNumbers: false,
+      codeWrap: true,
+      mathFontScale: 1.2 as const,
+      mathAlign: "left" as const,
+      mathCopy: false,
+    }
+
+    it("seeds the renderer toggles from the resolved knobs", () => {
+      render(
+        <MarkdownRenderer
+          content={"```mermaid\ngraph TD; A-->B\n```\n\n```js\nx\n```"}
+          markdown={knobs}
+        />
+      )
+      // mermaid off ⇒ falls back to a plain code block, and the code block
+      // carries the line-number / wrap defaults from the knobs.
+      const blocks = document.querySelectorAll("[data-test='code-block']")
+      expect(blocks).toHaveLength(2)
+      expect(blocks[0]).toHaveAttribute("data-lang", "mermaid")
+      expect(blocks[1]).toHaveAttribute("data-line-numbers", "false")
+      expect(blocks[1]).toHaveAttribute("data-wrap", "true")
+    })
+
+    it("keeps math as source when the knob is off", () => {
+      render(<MarkdownRenderer content={"$$x^2$$"} markdown={knobs} />)
+      expect(document.querySelector("[data-test='math-block']")).toBeNull()
+    })
+
+    it("lets an explicit individual prop win over the knobs", () => {
+      render(<MarkdownRenderer content={"```js\nx\n```"} markdown={knobs} showLineNumbers />)
+      const block = document.querySelector("[data-test='code-block']")
+      expect(block).toHaveAttribute("data-line-numbers", "true")
+      expect(block).toHaveAttribute("data-wrap", "true")
+    })
   })
 })

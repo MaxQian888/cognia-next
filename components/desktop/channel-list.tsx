@@ -64,6 +64,7 @@ import {
   type ChannelListView,
 } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings"
+import { densitySurfaceProps } from "@/lib/appearance/density-applier"
 import { useProjectStore } from "@/stores/project/project-store"
 import { PerfBoundary } from "@/lib/perf"
 import {
@@ -391,6 +392,10 @@ function ChannelListBody({
   // Behavior preferences (Settings → Conversation). Absent settings fall back
   // to today's defaults so the sidebar renders identically before load.
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  // ADR-0127: appearance-level density (Settings → Appearance → Density →
+  // "sidebar"), distinct from the conversation-sidebar row density below. The
+  // list root is the `sidebar` density surface so `--density-*` resolve here.
+  const appearanceDensity = useSettingsStore((s) => s.settings?.density)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const saveSettings = useSettingsStore((s) => s.save)
@@ -840,6 +845,7 @@ function ChannelListBody({
         data-tonality="translucent"
         tabIndex={0}
         onKeyDown={handleContainerKeyDown}
+        {...densitySurfaceProps("sidebar", appearanceDensity)}
       >
         <Header
           selectedGuild={chatGuild}

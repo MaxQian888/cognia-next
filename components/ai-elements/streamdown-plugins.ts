@@ -29,3 +29,30 @@ export const streamdownPlugins = {
   math,
   mermaid,
 } satisfies PluginConfig
+
+/**
+ * ADR-0127 — plugin set honouring the resolved `messageDisplay.markdown`
+ * toggles. Streamdown treats an absent `math` / `mermaid` plugin as "render as
+ * code", which is exactly the finalized renderer's behaviour when
+ * `enableMath` / `enableMermaid` are off, so both branches stay in lockstep.
+ * The four variants are built once so `plugins` keeps a stable identity and
+ * `<Streamdown>`'s memo does not re-parse every block on each token.
+ */
+const PLUGIN_VARIANTS: Record<string, PluginConfig> = {
+  "math+mermaid": streamdownPlugins,
+  math: { cjk, code, math },
+  mermaid: { cjk, code, mermaid },
+  none: { cjk, code },
+}
+
+export function selectStreamdownPlugins(options?: {
+  math?: boolean
+  mermaid?: boolean
+}): PluginConfig {
+  const mathOn = options?.math ?? true
+  const mermaidOn = options?.mermaid ?? true
+  if (mathOn && mermaidOn) return PLUGIN_VARIANTS["math+mermaid"]
+  if (mathOn) return PLUGIN_VARIANTS.math
+  if (mermaidOn) return PLUGIN_VARIANTS.mermaid
+  return PLUGIN_VARIANTS.none
+}

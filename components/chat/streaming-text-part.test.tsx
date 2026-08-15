@@ -30,10 +30,12 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
 }))
 
+const mockMarkdownRenderer = jest.fn()
 jest.mock("./markdown-renderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => (
-    <div data-testid="finalized-markdown-content">{content}</div>
-  ),
+  MarkdownRenderer: (props: { content: string }) => {
+    mockMarkdownRenderer(props)
+    return <div data-testid="finalized-markdown-content">{props.content}</div>
+  },
 }))
 jest.mock("./markdown/rendering-policy", () => ({
   chatMarkdownUrlTransform: (url: string) => url,
@@ -41,6 +43,22 @@ jest.mock("./markdown/rendering-policy", () => ({
 }))
 
 import { FinalizedLongTextPart, StreamingTextPart, blockRendersCode } from "./streaming-text-part"
+import {
+  selectStreamdownPlugins,
+  streamdownPlugins,
+} from "@/components/ai-elements/streamdown-plugins"
+import type { MessageMarkdownOptions } from "@/types/appearance"
+
+const MARKDOWN_DEFAULTS: MessageMarkdownOptions = {
+  math: true,
+  mermaid: true,
+  diff: true,
+  codeLineNumbers: true,
+  codeWrap: false,
+  mathFontScale: 1,
+  mathAlign: "center",
+  mathCopy: true,
+}
 
 describe("StreamingTextPart", () => {
   beforeEach(() => {
@@ -257,6 +275,88 @@ describe("FinalizedLongTextPart", () => {
       expect(screen.getAllByTestId("finalized-markdown-section")).toHaveLength(4)
     } finally {
       global.IntersectionObserver = OriginalObserver
+    }
+  })
+})
+
+describe("markdown knobs (ADR-0127)", () => {
+  beforeEach(() => {
+    mockMessageResponse.mockClear()
+    mockMarkdownRenderer.mockClear()
+  })
+
+  it("selectStreamdownPlugins returns stable, toggle-honouring plugin sets", () => {
+    expect(selectStreamdownPlugins()).toBe(streamdownPlugins)
+    expect(selectStreamdownPlugins({ math: true, mermaid: true })).toBe(streamdownPlugins)
+    const noMath = selectStreamdownPlugins({ math: false, mermaid: true })
+    expect(noMath).not.toHaveProperty("math")
+    expect(noMath).toHaveProperty("mermaid")
+    expect(noMath).toHaveProperty("code")
+    const noMermaid = selectStreamdownPlugins({ math: true, mermaid: false })
+    expect(noMermaid).toHaveProperty("math")
+    expect(noMermaid).not.toHaveProperty("mermaid")
+    const none = selectStreamdownPlugins({ math: false, mermaid: false })
+    expect(Object.keys(none).sort()).toEqual(["cjk", "code"])
+    // Stable identity across calls — `<Streamdown>` memoises on `plugins`.
+    expect(selectStreamdownPlugins({ math: false, mermaid: false })).toBe(none)
+  })
+
+  it("forwards plugins, lineNumbers and the wrap class to Streamdown from the resolved knobs", () => {
+    render(
+      <StreamingTextPart
+        text="x"
+        isStreaming
+        markdown={{ ...MARKDOWN_DEFAULTS, mermaid: false, codeLineNumbers: false, codeWrap: true }}
+      />
+    )
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
+      plugins: Record<string, unknown>
+      lineNumbers: boolean
+      className: string
+    }
+    expect(props.plugins).not.toHaveProperty("mermaid")
+    expect(props.plugins).toHaveProperty("math")
+    expect(props.lineNumbers).toBe(false)
+    expect(props.className).toContain("[&_pre]:whitespace-pre-wrap")
+  })
+
+  it("defaults to the full plugin set with line numbers and no wrap when no knobs are given", () => {
+    render(<StreamingTextPart text="x" isStreaming />)
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
+      plugins: Record<string, unknown>
+      lineNumbers: boolean
+      className: string
+    }
+    expect(props.plugins).toBe(streamdownPlugins)
+    expect(props.lineNumbers).toBe(true)
+    expect(props.className).not.toContain("whitespace-pre-wrap")
+  })
+
+  it("re-renders when only the markdown knobs change (memo comparator)", () => {
+    const { rerender } = render(
+      <StreamingTextPart text="same" isStreaming markdown={MARKDOWN_DEFAULTS} />
+    )
+    const calls = mockMessageResponse.mock.calls.length
+    rerender(
+      <StreamingTextPart
+        text="same"
+        isStreaming
+        markdown={{ ...MARKDOWN_DEFAULTS, codeLineNumbers: false }}
+      />
+    )
+    expect(mockMessageResponse.mock.calls.length).toBeGreaterThan(calls)
+    expect(
+      (mockMessageResponse.mock.calls.at(-1)?.[0] as { lineNumbers: boolean }).lineNumbers
+    ).toBe(false)
+  })
+
+  it("threads the knobs into every finalized long-text section", () => {
+    const text = Array.from({ length: 12 }, (_, i) => `para ${i}`).join("\n\n")
+    const markdown = { ...MARKDOWN_DEFAULTS, math: false }
+    render(<FinalizedLongTextPart text={text} markdown={markdown} />)
+    expect(mockMarkdownRenderer).toHaveBeenCalled()
+    for (const call of mockMarkdownRenderer.mock.calls) {
+      expect((call[0] as { markdown?: unknown }).markdown).toBe(markdown)
     }
   })
 })

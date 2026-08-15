@@ -1,11 +1,16 @@
 import {
   isAgentFlowMode,
+  isMessageBodyFont,
+  isMessageMathAlign,
+  isMessageMathFontScale,
   type AgentFlowMode,
   type MessageActionVisibility,
+  type MessageBodyFont,
   type MessageDisplayLayout,
   type MessageDisplayMetadataOptions,
   type MessageDisplayPreferences,
   type MessageDisplayPreset,
+  type MessageMarkdownOptions,
   type MessageMotion,
   type MessagePartVisibility,
   type MessageRichControls,
@@ -22,6 +27,26 @@ export interface ResolvedMessageDisplayOptions {
   sources: MessagePartVisibility
   richControls: MessageRichControls
   motion: MessageMotion
+  /** ADR-0127 — fully resolved markdown / code / math knobs (both renderers read this). */
+  markdown: MessageMarkdownOptions
+  /** ADR-0127 — body-copy font for message prose. */
+  bodyFont: MessageBodyFont
+}
+
+/**
+ * The renderer behaviour every preset shipped with before ADR-0127 made these
+ * user-configurable — identical across presets on purpose so upgrading does
+ * not change what anyone sees until they touch a knob.
+ */
+export const DEFAULT_MESSAGE_MARKDOWN_OPTIONS: MessageMarkdownOptions = {
+  math: true,
+  mermaid: true,
+  diff: true,
+  codeLineNumbers: true,
+  codeWrap: false,
+  mathFontScale: 1,
+  mathAlign: "center",
+  mathCopy: true,
 }
 
 const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
@@ -45,6 +70,8 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     sources: "collapsed",
     richControls: "hover",
     motion: "restrained",
+    markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
+    bodyFont: "sans",
   },
   balanced: {
     preset: "balanced",
@@ -66,6 +93,8 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     sources: "collapsed",
     richControls: "hover",
     motion: "restrained",
+    markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
+    bodyFont: "sans",
   },
   inspector: {
     preset: "inspector",
@@ -87,6 +116,8 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     sources: "expanded",
     richControls: "always",
     motion: "restrained",
+    markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
+    bodyFont: "sans",
   },
 }
 
@@ -139,6 +170,31 @@ function applyPreferences(
       ? overrides.richControls
       : base.richControls,
     motion: isMotion(overrides.motion) ? overrides.motion : base.motion,
+    markdown: resolveMarkdownOverrides(base.markdown, overrides.markdown),
+    bodyFont: isMessageBodyFont(overrides.bodyFont) ? overrides.bodyFont : base.bodyFont,
+  }
+}
+
+const isBool = (value: unknown): value is boolean => typeof value === "boolean"
+
+function resolveMarkdownOverrides(
+  base: MessageMarkdownOptions,
+  overrides: Partial<MessageMarkdownOptions> | undefined
+): MessageMarkdownOptions {
+  if (!overrides) return base
+  return {
+    math: isBool(overrides.math) ? overrides.math : base.math,
+    mermaid: isBool(overrides.mermaid) ? overrides.mermaid : base.mermaid,
+    diff: isBool(overrides.diff) ? overrides.diff : base.diff,
+    codeLineNumbers: isBool(overrides.codeLineNumbers)
+      ? overrides.codeLineNumbers
+      : base.codeLineNumbers,
+    codeWrap: isBool(overrides.codeWrap) ? overrides.codeWrap : base.codeWrap,
+    mathFontScale: isMessageMathFontScale(overrides.mathFontScale)
+      ? overrides.mathFontScale
+      : base.mathFontScale,
+    mathAlign: isMessageMathAlign(overrides.mathAlign) ? overrides.mathAlign : base.mathAlign,
+    mathCopy: isBool(overrides.mathCopy) ? overrides.mathCopy : base.mathCopy,
   }
 }
 

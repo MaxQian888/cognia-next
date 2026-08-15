@@ -504,6 +504,97 @@ describe("ChatHeader", () => {
     })
   })
 
+  describe("system-prompt preset pill (ADR-0127)", () => {
+    const presets: SystemPromptPreset[] = [
+      {
+        id: "p1",
+        name: "pill-preset-one",
+        content: "You are terse.",
+        model: "claude-sonnet-5",
+        isBuiltIn: false,
+        isDefault: false,
+        isFavorite: false,
+        sortOrder: 0,
+        usageCount: 0,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ]
+
+    it("self-hides when there are no presets", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <ChatHeader session={mkSession()} />
+        </Wrapper>
+      )
+      expect(screen.queryByTestId("chat-header-preset-pill")).toBeNull()
+    })
+
+    it("mounts in the header and applies a conflict-free preset in place", async () => {
+      const updateSession = jest.fn(async () => undefined)
+      const recordPresetUsage = jest.fn(async () => undefined)
+      const adapter = makeAdapter({ usePresets: () => presets, updateSession, recordPresetUsage })
+      const Wrapper = withAdapter(adapter)
+      render(
+        <Wrapper>
+          <ChatHeader session={mkSession({ systemPrompt: undefined, model: undefined })} />
+        </Wrapper>
+      )
+      const pill = screen.getByTestId("chat-header-preset-pill")
+      expect(pill).toBeInTheDocument()
+      fireEvent.click(pill)
+      fireEvent.click(await screen.findByText("pill-preset-one"))
+      await waitFor(() => expect(updateSession).toHaveBeenCalledTimes(1))
+      const [id, patch] = updateSession.mock.calls[0] as unknown as [
+        string,
+        Record<string, unknown>,
+      ]
+      expect(id).toBe("ses_1")
+      expect(patch).toMatchObject({
+        activePresetId: "p1",
+        systemPrompt: "You are terse.",
+        model: "claude-sonnet-5",
+      })
+      expect(recordPresetUsage).toHaveBeenCalledWith("p1")
+    })
+
+    it("routes a conflicting pick to the settings sheet instead of overwriting", async () => {
+      const updateSession = jest.fn(async () => undefined)
+      const adapter = makeAdapter({ usePresets: () => presets, updateSession })
+      const Wrapper = withAdapter(adapter)
+      render(
+        <Wrapper>
+          <ChatHeader session={mkSession({ systemPrompt: "Existing prompt", model: "other" })} />
+        </Wrapper>
+      )
+      fireEvent.click(screen.getByTestId("chat-header-preset-pill"))
+      fireEvent.click(await screen.findByText("pill-preset-one"))
+      // The sheet (with its conflict dialog) opens; nothing is written blindly.
+      await waitFor(() => {
+        expect(document.getElementById("session-preset")).not.toBeNull()
+      })
+      expect(updateSession).not.toHaveBeenCalled()
+    })
+  })
+
+  // Regression: the bar hardcoded `bg-background/80` and never opted into the
+  // tonality system, so it stayed an opaque slab over an active wallpaper while
+  // the message area directly below it showed the image.
+  it("opts the bar into the wallpaper-aware translucent tonality", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    const header = container.querySelector("header")
+    expect(header).toHaveAttribute("data-tonality", "translucent")
+    // The Tailwind class stays as the no-wallpaper fallback — the tonality
+    // rules only fire under `body[data-bg-enabled="true"]`.
+    expect(header).toHaveClass("bg-background/80")
+  })
+
   it("stays within the chat-header chrome control budget", () => {
     // Plain direct session, no character, credentials fine — the header a user
     // sees for most of the day. Ratchet, not a target (lib/ui/chrome-budget.ts).

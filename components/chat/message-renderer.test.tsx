@@ -284,6 +284,17 @@ jest.mock("@/hooks/chat/use-message-display", () => ({
     sources: "collapsed",
     richControls: "hover",
     motion: "off",
+    markdown: {
+      math: true,
+      mermaid: true,
+      diff: true,
+      codeLineNumbers: true,
+      codeWrap: false,
+      mathFontScale: 1,
+      mathAlign: "center",
+      mathCopy: true,
+    },
+    bodyFont: "sans",
   }),
 }))
 jest.mock("@/components/chat/motion/motion-reveal", () => ({

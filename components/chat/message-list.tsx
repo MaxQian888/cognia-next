@@ -40,6 +40,7 @@ import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
 import { useCompactionToast } from "@/hooks/chat/use-compaction-toast"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
+import { densitySurfaceProps } from "@/lib/appearance/density-applier"
 import type { MessageDisplayPreferences } from "@/types/appearance"
 import type { Character } from "@cognia/agent-config-types"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -143,6 +144,10 @@ export function MessageList({
   const [actionMessage, setActionMessage] = useState<UIMessage | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const messageDisplay = useMessageDisplay(messageDisplayOverride)
+  // ADR-0127: the message list is the `chat` density surface (see
+  // `densitySurfaceProps`); the reading column and row rhythm read the
+  // `--density-*` tokens the surface resolves.
+  const density = useSettingsStore((s) => s.settings?.density)
   const scrollParentRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -597,6 +602,7 @@ export function MessageList({
       <div
         ref={paneRef}
         className="@container/message-list relative flex flex-1 flex-col overflow-hidden"
+        {...densitySurfaceProps("chat", density)}
       >
         {searchOpen ? (
           <div data-computer-use-pip-obstacle>
@@ -630,7 +636,7 @@ export function MessageList({
             >
               <div
                 ref={contentRef}
-                className="mx-auto w-full max-w-[52rem] py-5 sm:py-7"
+                className="mx-auto w-full max-w-[52rem] py-[calc(1.25rem*var(--density-spacing,1))] sm:py-[calc(1.75rem*var(--density-spacing,1))]"
                 data-slot="conversation-reading-column"
               >
                 {virtualize ? (
