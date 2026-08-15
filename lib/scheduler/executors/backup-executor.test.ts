@@ -5,11 +5,20 @@ import { listBackupHistory } from "@/lib/db/backup-history"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { executeBackupTask, __TESTING__ } from "./backup-executor"
 
-let isTauriValue = true
-
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriValue,
-}))
+// The host gate (`lib/scheduler/host-support`) reads `detectPlatform()`.
+// State lives inside the factory: `detectPlatform()` runs during module
+// import (transport selection), before a top-level `let` would be initialised.
+jest.mock("@/lib/platform/detect", () => {
+  const hostState = { tauri: true }
+  return {
+    ...jest.requireActual("@/lib/platform/detect"),
+    __hostState: hostState,
+    detectPlatform: () => (hostState.tauri ? "tauri" : "web"),
+    isTauri: () => hostState.tauri,
+  }
+})
+import * as platformDetect from "@/lib/platform/detect"
+const hostState = (platformDetect as unknown as { __hostState: { tauri: boolean } }).__hostState
 
 const writeTextFileMock = jest.fn(async (_path: string, _body: string) => {})
 const mkdirMock = jest.fn(async (_path: string, _opts?: unknown) => {})
@@ -90,12 +99,16 @@ function makeExecution(): TaskExecution {
   }
 }
 
+// The first `getDb()` open seeds the full Dexie schema (v140+), which can take
+// longer than Jest's default 5s hook budget on a loaded machine.
+jest.setTimeout(30_000)
+
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-  isTauriValue = true
+  hostState.tauri = true
   syncPassphrase = null
   writeTextFileMock.mockClear()
   mkdirMock.mockClear()
@@ -133,12 +146,13 @@ describe("executeBackupTask", () => {
     expect(history[0].success).toBe(false)
   })
 
-  it("returns an actionable error when not running under Tauri", async () => {
-    isTauriValue = false
+  it("returns a structured unsupported-on-host result on a host without a filesystem", async () => {
+    hostState.tauri = false
     const task = makeTask({ destination: "local" })
     const result = await executeBackupTask(task, makeExecution(), new AbortController().signal)
     expect(result.success).toBe(false)
-    expect(result.error).toMatch(/Tauri/i)
+    expect(result.error).toMatch(/host filesystem/i)
+    expect(result.terminalReason).toBe("unsupported-on-host")
     const history = await listBackupHistory()
     expect(history[0].success).toBe(false)
   })

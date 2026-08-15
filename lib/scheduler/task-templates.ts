@@ -1,12 +1,11 @@
 /**
  * Task templates surfaced in the gallery dialog.
  *
- * Cognia ships templates for workflow / sync / backup / im-push / ai-generation
- * task types; cognia-next has no backing systems for those, so we curate a
- * smaller set that maps cleanly onto the four executors we actually run:
- * chat / agent / skill / script. Each template returns a fully-formed
+ * The gallery curates a small set of templates over the chat / agent / skill /
+ * script executors. Each template returns a fully-formed
  * `CreateScheduledTaskInput` whose `payload` shape matches the executor it
- * targets (see `lib/scheduler/executors/index.ts`).
+ * targets (see `lib/scheduler/executors/index.ts`); `sync` / `ai-generation`
+ * are deprecated and must never appear here.
  */
 
 import type {

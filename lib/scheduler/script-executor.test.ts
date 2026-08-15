@@ -5,8 +5,24 @@
 import { invoke } from "@tauri-apps/api/core"
 
 let isTauriValue = true
-jest.mock("@/lib/tauri", () => ({
+// `executeScript` picks its runner from `lib/platform/detect` + the capability
+// baseline: "tauri" → shell_exec, "headless" → jobs supervisor, "web" → refused.
+let platformValue: "tauri" | "headless" | "web" = "tauri"
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: () => platformValue,
   isTauri: () => isTauriValue,
+}))
+
+const spawnScheduledBackgroundJobMock = jest.fn()
+const readBackgroundJobOutputMock = jest.fn()
+const killBackgroundJobMock = jest.fn()
+const listBackgroundJobsMock = jest.fn(async () => [] as unknown[])
+jest.mock("@/lib/jobs/background-jobs", () => ({
+  spawnScheduledBackgroundJob: (...a: unknown[]) => spawnScheduledBackgroundJobMock(...a),
+  readBackgroundJobOutput: (...a: unknown[]) => readBackgroundJobOutputMock(...a),
+  killBackgroundJob: (...a: unknown[]) => killBackgroundJobMock(...a),
+  listBackgroundJobs: () => listBackgroundJobsMock(),
 }))
 
 import {
@@ -20,19 +36,161 @@ const mockedInvoke = invoke as unknown as jest.Mock
 
 beforeEach(() => {
   isTauriValue = true
+  platformValue = "tauri"
   mockedInvoke.mockReset()
+  spawnScheduledBackgroundJobMock.mockReset()
+  readBackgroundJobOutputMock.mockReset()
+  killBackgroundJobMock.mockReset()
+  listBackgroundJobsMock.mockReset().mockResolvedValue([])
 })
 
 describe("executeScript", () => {
-  it("refuses to run on web", async () => {
+  it("refuses to run on a host without the shell capability", async () => {
     isTauriValue = false
+    platformValue = "web"
     const r = await executeScript({
       type: "execute_script",
       language: "python",
       code: "print(1)",
     })
     expect(r.success).toBe(false)
-    expect(r.error).toMatch(/Tauri/i)
+    expect(r.error).toMatch(/shell capability/i)
+    expect(mockedInvoke).not.toHaveBeenCalled()
+    expect(spawnScheduledBackgroundJobMock).not.toHaveBeenCalled()
+  })
+
+  it("routes through the jobs supervisor on the headless host and captures output", async () => {
+    isTauriValue = false
+    platformValue = "headless"
+    spawnScheduledBackgroundJobMock.mockResolvedValue({ id: "job-1", status: "running" })
+    readBackgroundJobOutputMock
+      .mockResolvedValueOnce({
+        fromOffset: 0,
+        nextOffset: 5,
+        data: "hello",
+        status: "running",
+        hasMore: false,
+      })
+      .mockResolvedValueOnce({
+        fromOffset: 5,
+        nextOffset: 6,
+        data: "\n",
+        status: "exited",
+        exitCode: 0,
+        hasMore: false,
+      })
+      .mockResolvedValue({
+        fromOffset: 6,
+        nextOffset: 6,
+        data: "",
+        status: "exited",
+        exitCode: 0,
+        hasMore: false,
+      })
+    listBackgroundJobsMock.mockResolvedValue([
+      { id: "job-1", status: "exited", exitCode: 0, droppedOutputBytes: 0 },
+    ])
+    const r = await executeScript(
+      { type: "execute_script", language: "bash", code: "echo hello" },
+      { taskId: "task-9" }
+    )
+    expect(spawnScheduledBackgroundJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-9", command: expect.stringContaining("bash") })
+    )
+    expect(r.success).toBe(true)
+    expect(r.exit_code).toBe(0)
+    expect(r.stdout).toBe("hello\n")
+    expect(mockedInvoke).not.toHaveBeenCalled()
+  })
+
+  it("kills the supervisor job when the abort signal fires", async () => {
+    isTauriValue = false
+    platformValue = "headless"
+    const controller = new AbortController()
+    spawnScheduledBackgroundJobMock.mockResolvedValue({ id: "job-2", status: "running" })
+    readBackgroundJobOutputMock.mockImplementation(async () => {
+      controller.abort()
+      return { fromOffset: 0, nextOffset: 0, data: "", status: "running", hasMore: false }
+    })
+    killBackgroundJobMock.mockResolvedValue({ id: "job-2", status: "killed", exitCode: undefined })
+    const r = await executeScript(
+      { type: "execute_script", language: "bash", code: "sleep 30" },
+      { signal: controller.signal, taskId: "task-10" }
+    )
+    expect(killBackgroundJobMock).toHaveBeenCalledWith("job-2")
+    expect(r.success).toBe(false)
+  })
+
+  it("treats a failing kill as a killed job and still fails the run", async () => {
+    isTauriValue = false
+    platformValue = "headless"
+    const controller = new AbortController()
+    spawnScheduledBackgroundJobMock.mockResolvedValue({ id: "job-3", status: "running" })
+    readBackgroundJobOutputMock.mockImplementation(async () => {
+      controller.abort()
+      return { fromOffset: 0, nextOffset: 0, data: "", status: "running", hasMore: false }
+    })
+    killBackgroundJobMock.mockRejectedValue(new Error("gone"))
+    listBackgroundJobsMock.mockResolvedValue([
+      { id: "job-3", status: "killed", droppedOutputBytes: 3 },
+    ])
+    const r = await executeScript(
+      { type: "execute_script", language: "bash", code: "sleep 30" },
+      { signal: controller.signal }
+    )
+    expect(r.success).toBe(false)
+    expect(r.error).toMatch(/cancelled/)
+  })
+
+  it("times out a supervisor job that outlives its budget", async () => {
+    isTauriValue = false
+    platformValue = "headless"
+    const nowSpy = jest.spyOn(Date, "now")
+    let t = 1_000_000
+    nowSpy.mockImplementation(() => t)
+    spawnScheduledBackgroundJobMock.mockResolvedValue({ id: "job-4", status: "running" })
+    readBackgroundJobOutputMock.mockImplementation(async () => {
+      t += 10 * 60 * 1000 // jump past the deadline on the first drain
+      return { fromOffset: 0, nextOffset: 0, data: "", status: "running", hasMore: false }
+    })
+    killBackgroundJobMock.mockResolvedValue({ id: "job-4", status: "killed" })
+    const r = await executeScript(
+      { type: "execute_script", language: "bash", code: "sleep 999", timeout_secs: 1 },
+      {}
+    )
+    nowSpy.mockRestore()
+    expect(killBackgroundJobMock).toHaveBeenCalledWith("job-4")
+    expect(r.success).toBe(false)
+    expect(r.error).toMatch(/timed out/)
+  })
+
+  it("resolveDefaultScriptRunner refuses hosts without shell", async () => {
+    isTauriValue = false
+    platformValue = "web"
+    const { resolveDefaultScriptRunner } = await import("./script-executor")
+    await expect(
+      resolveDefaultScriptRunner()({ command: "x", cwd: ".", timeoutSecs: 1 })
+    ).rejects.toThrow(/shell capability/)
+  })
+
+  it("uses an injected runner when provided", async () => {
+    const runner = jest.fn(async () => ({
+      stdout: "ok",
+      stderr: "",
+      exit_code: 0,
+      timed_out: false,
+      stdout_truncated: false,
+      stderr_truncated: false,
+    }))
+    const r = await executeScript(
+      { type: "execute_script", language: "python", code: "print(1)" },
+      { runner }
+    )
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({ command: expect.stringContaining("python"), timeoutSecs: 300 })
+    )
+    expect(r.success).toBe(true)
+    expect(mockedInvoke).not.toHaveBeenCalled()
   })
 
   it("rejects unsupported languages", async () => {

@@ -13,8 +13,8 @@
  * call the helpers synchronously.
  */
 
-import { isTauri } from "@/lib/tauri"
 import * as native from "@/lib/native/system-scheduler"
+import { describeLocalSchedulerHost, hostSatisfies } from "../host-support"
 import type {
   CreateSystemTaskInput,
   SystemTask,
@@ -49,7 +49,13 @@ interface SystemSourceNative {
 export interface SystemSourceDeps {
   native?: SystemSourceNative
   pollIntervalMs?: number
-  /** Override the Tauri-detection so web tests can opt in. */
+  /**
+   * Override the host detection so web tests can opt in. Defaults to the
+   * `desktop-shell` requirement from `lib/scheduler/host-support.ts`: the OS
+   * scheduler commands are Tauri-only (`scheduler_*` are `client.local` in the
+   * companion manifest) and a headless host is always-on, so promotion has no
+   * meaning there.
+   */
   isAvailable?: () => boolean
 }
 
@@ -58,7 +64,8 @@ export function createSystemSource(
 ): ScheduledItemSource<CreateSystemTaskInput, CreateSystemTaskInput> {
   const nativeAdapter = deps.native ?? (native as unknown as SystemSourceNative)
   const pollMs = deps.pollIntervalMs ?? POLL_INTERVAL_MS
-  const available = deps.isAvailable ?? isTauri
+  const available =
+    deps.isAvailable ?? (() => hostSatisfies("desktop-shell", describeLocalSchedulerHost()))
 
   return {
     kind: "system",

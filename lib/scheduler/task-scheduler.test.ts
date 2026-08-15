@@ -9,6 +9,8 @@ import {
   registerTaskExecutor,
   unregisterTaskExecutor,
   createTaskScheduler,
+  waitForTaskExecutor,
+  EXECUTOR_REGISTRATION_GRACE_MS,
   TaskSchedulerImpl,
 } from "./task-scheduler"
 import type {
@@ -45,6 +47,7 @@ jest.mock("./scheduler-db", () => ({
     createExecution: jest.fn().mockResolvedValue(undefined),
     updateExecution: jest.fn().mockResolvedValue(undefined),
     getTaskExecutions: jest.fn().mockResolvedValue([]),
+    getTasksByType: jest.fn().mockResolvedValue([]),
     cleanupOldExecutions: jest.fn().mockResolvedValue(0),
     interruptStaleExecutions: jest.fn().mockResolvedValue(0),
   },
@@ -2866,6 +2869,172 @@ describe("TaskScheduler", () => {
 
         expect(driver.arm).toHaveBeenCalledWith(task.id, task.nextRunAt!.getTime())
         sched.stop()
+      })
+    })
+  })
+
+  describe("host-neutral executor lifecycle (spec 2026-08-16)", () => {
+    function makeMockDriver() {
+      let dueCb: TaskDueCallback | null = null
+      const driver: SchedulerTimingDriver & { fire: TaskDueCallback } = {
+        supportsLeaderElection: false,
+        start: jest.fn().mockResolvedValue(undefined),
+        stop: jest.fn(),
+        onDue: jest.fn((cb: TaskDueCallback) => {
+          dueCb = cb
+        }),
+        arm: jest.fn(),
+        disarm: jest.fn(),
+        fire: (taskId, firedAtMs) => dueCb?.(taskId, firedAtMs),
+      }
+      return driver
+    }
+
+    function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+      return {
+        id: "task-hn",
+        name: "Host neutral",
+        type: "connection:presence:refresh",
+        trigger: { type: "interval", intervalMs: 60000 },
+        config: { maxRetries: 0, retryDelay: 1000, timeout: 30000, runMissedOnStartup: false },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...overrides,
+      }
+    }
+
+    afterEach(() => {
+      unregisterTaskExecutor("connection:presence:refresh")
+      unregisterTaskExecutor("late-type")
+    })
+
+    it("waitForTaskExecutor resolves true as soon as the executor registers", async () => {
+      const pending = waitForTaskExecutor("late-type", 10_000)
+      registerTaskExecutor("late-type", jest.fn().mockResolvedValue({ success: true }))
+      await expect(pending).resolves.toBe(true)
+    })
+
+    it("waitForTaskExecutor resolves false after the timeout or an abort", async () => {
+      const timedOut = waitForTaskExecutor("late-type", 1_000)
+      jest.advanceTimersByTime(1_000)
+      await expect(timedOut).resolves.toBe(false)
+      const controller = new AbortController()
+      const aborted = waitForTaskExecutor("late-type", 10_000, controller.signal)
+      controller.abort()
+      await expect(aborted).resolves.toBe(false)
+      expect(await waitForTaskExecutor("late-type", 0)).toBe(false)
+    })
+
+    it("waits for a late-registered executor inside the boot grace window instead of failing", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task = makeTask()
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+
+      const executor = jest.fn().mockResolvedValue({ success: true, output: { ok: 1 } })
+      const run = sched.runTaskNow(task.id)
+      // Let the run reach the wait; then register within the grace window.
+      await Promise.resolve()
+      await Promise.resolve()
+      registerTaskExecutor("connection:presence:refresh", executor)
+      const execution = await run
+      expect(executor).toHaveBeenCalled()
+      expect(execution?.status).toBe("completed")
+      expect(execution?.logs.some((l) => /waiting up to/.test(l.message))).toBe(true)
+      sched.stop()
+    })
+
+    it("fails with executor-not-found once the grace window has elapsed", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      jest.advanceTimersByTime(EXECUTOR_REGISTRATION_GRACE_MS + 1)
+      const task = makeTask()
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+      const execution = await sched.runTaskNow(task.id)
+      expect(execution?.status).toBe("failed")
+      expect(execution?.terminalReason).toBe("executor-not-found")
+      sched.stop()
+    })
+
+    it("does not wait for deprecated types even inside the grace window", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      const task = makeTask({ type: "sync" })
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+      const execution = await sched.runTaskNow(task.id)
+      expect(execution?.status).toBe("failed")
+      expect(execution?.terminalReason).toBe("executor-not-found")
+      sched.stop()
+    })
+
+    it("propagates an executor-supplied terminalReason", async () => {
+      registerTaskExecutor(
+        "connection:presence:refresh",
+        jest.fn().mockResolvedValue({
+          success: false,
+          error: "no sidecar here",
+          terminalReason: "unsupported-on-host",
+        })
+      )
+      const sched = createTaskScheduler(makeMockDriver())
+      const task = makeTask()
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+      const execution = await sched.runTaskNow(task.id)
+      expect(execution?.status).toBe("failed")
+      expect(execution?.terminalReason).toBe("unsupported-on-host")
+      expect(execution?.error).toBe("no sidecar here")
+    })
+
+    it("pauses still-active deprecated tasks at init and records a deprecated-type row", async () => {
+      const deprecated = makeTask({ id: "old-sync", type: "sync" })
+      const alreadyPaused = makeTask({ id: "old-ai", type: "ai-generation", status: "paused" })
+      mockSchedulerDb.getTasksByType.mockImplementation(async (type: string) =>
+        type === "sync" ? [deprecated] : type === "ai-generation" ? [alreadyPaused] : []
+      )
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+      expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "old-sync",
+          status: "paused",
+          lastTerminalReason: "deprecated-type",
+        })
+      )
+      expect(mockSchedulerDb.updateTask).not.toHaveBeenCalledWith(
+        expect.objectContaining({ id: "old-ai" })
+      )
+      expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+        expect.objectContaining({
+          taskId: "old-sync",
+          status: "skipped",
+          terminalReason: "deprecated-type",
+        })
+      )
+      sched.stop()
+      mockSchedulerDb.getTasksByType.mockResolvedValue([])
+    })
+
+    it("refuses to create or resume deprecated task types", async () => {
+      const sched = createTaskScheduler(makeMockDriver())
+      await expect(
+        sched.createTask({
+          name: "x",
+          type: "ai-generation",
+          trigger: { type: "interval", intervalMs: 60000 },
+        })
+      ).rejects.toMatchObject({ code: "DEPRECATED_TASK_TYPE" })
+      mockSchedulerDb.getTask.mockResolvedValue(makeTask({ type: "sync", status: "paused" }))
+      await expect(sched.resumeTask("task-hn")).rejects.toMatchObject({
+        code: "DEPRECATED_TASK_TYPE",
       })
     })
   })

@@ -1,10 +1,9 @@
 /**
  * Scheduler module barrel — public surface used by hooks/UI/store.
  *
- * Note: cognia-next ships only the executor types it has backing systems
- * for (chat / agent / skill / script / plugin / custom). The Cognia barrel
- * additionally re-exports workflow / sync / backup helpers; those are not
- * present here.
+ * Executor coverage and per-host support are declared in
+ * `./host-support.ts` (`TASK_TYPE_HOST_REQUIREMENTS`, `DEPRECATED_TASK_TYPES`);
+ * `./executors/index.ts` registers the built-in executors and lists them.
  */
 
 import { loggers } from "@cognia/logging"

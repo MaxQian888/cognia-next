@@ -4,42 +4,45 @@
 // `components/settings/external-bridge/wiki-rebuild-card.tsx`: the UI creates
 // one `wiki-rebuild` task with `payload.force?: boolean`; this executor runs
 // `runWikiRebuild({ force })` on each fire, surfaces the result via the
-// scheduler's `output` / `error` channel, and lets `WebModeError` /
+// scheduler's `output` / `error` channel, and lets `HostFilesystemError` /
 // `NoApiKeyError` propagate as terminal failures with a clear message so the
 // next Run-now retry has actionable context.
 //
-// Tauri-only: web-mode runs return a clear error rather than spinning the
-// CPU on a no-op orchestrator.
+// Host gate: the rebuild walks the host filesystem, so it needs the
+// `host-filesystem` requirement (desktop or headless brain) — decided by
+// `lib/scheduler/host-support.ts`, not by an `isTauri()` branch.
 
-import type { ScheduledTask, TaskExecution, WikiRebuildTaskPayload } from "@/types/scheduler"
-import { runWikiRebuild, WebModeError, NoApiKeyError } from "@/lib/wiki/rebuild-runner"
-import { isTauri } from "@/lib/tauri"
+import type {
+  ScheduledTask,
+  TaskExecution,
+  TaskExecutorResult,
+  WikiRebuildTaskPayload,
+} from "@/types/scheduler"
+import { runWikiRebuild, HostFilesystemError, NoApiKeyError } from "@/lib/wiki/rebuild-runner"
+import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 
-interface ExecutorResult {
-  success: boolean
-  output?: Record<string, unknown>
-  error?: string
-}
+type ExecutorResult = TaskExecutorResult
 
 export async function executeWikiRebuildTask(
   task: ScheduledTask,
   execution: TaskExecution,
   _signal: AbortSignal
 ): Promise<ExecutorResult> {
-  if (!isTauri()) {
-    const error =
-      "Scheduled wiki rebuild requires the Tauri runtime — open the desktop app to enable."
-    return { success: false, error }
-  }
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
 
   const payload = (task.payload ?? {}) as Partial<WikiRebuildTaskPayload>
   const force = payload.force === true
+  const rootDir =
+    typeof payload.rootDir === "string" && payload.rootDir.trim().length > 0
+      ? payload.rootDir.trim()
+      : undefined
 
   try {
-    const result = await runWikiRebuild({ force })
+    const result = await runWikiRebuild({ force, rootDir })
     log.info("Scheduler wiki-rebuild task complete", {
       taskId: task.id,
       executionId: execution.id,
@@ -62,8 +65,8 @@ export async function executeWikiRebuildTask(
     }
   } catch (err) {
     let error: string
-    if (err instanceof WebModeError) {
-      error = "Wiki rebuild requires the Tauri desktop app."
+    if (err instanceof HostFilesystemError) {
+      error = "Wiki rebuild requires a host with filesystem access (desktop app or cloud host)."
     } else if (err instanceof NoApiKeyError) {
       error = "No LLM API key configured — add one in Settings → Providers."
     } else {

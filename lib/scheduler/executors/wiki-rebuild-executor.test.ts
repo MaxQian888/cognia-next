@@ -6,10 +6,10 @@ const mockRunWikiRebuild = jest.fn()
 const mockIsTauri = jest.fn()
 
 jest.mock("@/lib/wiki/rebuild-runner", () => {
-  class WebModeError extends Error {
+  class HostFilesystemError extends Error {
     constructor() {
-      super("WebMode")
-      this.name = "WebModeError"
+      super("HostFilesystem")
+      this.name = "HostFilesystemError"
     }
   }
   class NoApiKeyError extends Error {
@@ -20,17 +20,22 @@ jest.mock("@/lib/wiki/rebuild-runner", () => {
   }
   return {
     runWikiRebuild: (...args: unknown[]) => mockRunWikiRebuild(...args),
-    WebModeError,
+    HostFilesystemError,
+    WebModeError: HostFilesystemError,
     NoApiKeyError,
   }
 })
 
-jest.mock("@/lib/tauri", () => ({
+// The executor's host gate reads `detectPlatform()`; "tauri" and "headless"
+// both satisfy the `host-filesystem` requirement, "web" does not.
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: () => (mockIsTauri() ? "tauri" : "web"),
   isTauri: () => mockIsTauri(),
 }))
 
 import { executeWikiRebuildTask } from "./wiki-rebuild-executor"
-import { WebModeError, NoApiKeyError } from "@/lib/wiki/rebuild-runner"
+import { HostFilesystemError, NoApiKeyError } from "@/lib/wiki/rebuild-runner"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 function makeTask(payload: Record<string, unknown> = {}): ScheduledTask {
@@ -89,7 +94,7 @@ describe("executeWikiRebuildTask", () => {
       errors: 0,
       durationMs: 1234,
     })
-    expect(mockRunWikiRebuild).toHaveBeenCalledWith({ force: false })
+    expect(mockRunWikiRebuild).toHaveBeenCalledWith({ force: false, rootDir: undefined })
   })
 
   it("passes force=true through to runWikiRebuild", async () => {
@@ -106,10 +111,22 @@ describe("executeWikiRebuildTask", () => {
       makeExecution(),
       new AbortController().signal
     )
-    expect(mockRunWikiRebuild).toHaveBeenCalledWith({ force: true })
+    expect(mockRunWikiRebuild).toHaveBeenCalledWith({ force: true, rootDir: undefined })
   })
 
-  it("returns failure with a clear message in web mode", async () => {
+  it("forwards a trimmed payload.rootDir to the runner", async () => {
+    await executeWikiRebuildTask(
+      makeTask({ rootDir: "  /srv/workspaces/notes  " }),
+      makeExecution(),
+      new AbortController().signal
+    )
+    expect(mockRunWikiRebuild).toHaveBeenCalledWith({
+      force: false,
+      rootDir: "/srv/workspaces/notes",
+    })
+  })
+
+  it("returns a structured unsupported-on-host result on a host without a filesystem", async () => {
     mockIsTauri.mockReturnValue(false)
     const r = await executeWikiRebuildTask(
       makeTask(),
@@ -117,19 +134,20 @@ describe("executeWikiRebuildTask", () => {
       new AbortController().signal
     )
     expect(r.success).toBe(false)
-    expect(r.error).toMatch(/Tauri/i)
+    expect(r.error).toMatch(/host filesystem/i)
+    expect(r.terminalReason).toBe("unsupported-on-host")
     expect(mockRunWikiRebuild).not.toHaveBeenCalled()
   })
 
-  it("maps WebModeError to a friendly message", async () => {
-    mockRunWikiRebuild.mockRejectedValue(new WebModeError())
+  it("maps HostFilesystemError to a friendly message", async () => {
+    mockRunWikiRebuild.mockRejectedValue(new HostFilesystemError())
     const r = await executeWikiRebuildTask(
       makeTask(),
       makeExecution(),
       new AbortController().signal
     )
     expect(r.success).toBe(false)
-    expect(r.error).toMatch(/Tauri/i)
+    expect(r.error).toMatch(/filesystem access/i)
   })
 
   it("maps NoApiKeyError to a configuration hint", async () => {

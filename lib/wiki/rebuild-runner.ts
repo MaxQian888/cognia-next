@@ -1,13 +1,21 @@
 /**
- * Wiki rebuild runner — wires the orchestrator to the Tauri host.
+ * Wiki rebuild runner — wires the orchestrator to the host filesystem.
  *
- * Creates a `FileSystem` adapter backed by `@tauri-apps/plugin-fs` and an
- * `LlmClient` from the user's configured provider. Only available in Tauri
- * desktop mode; web callers get a clear error.
+ * Creates a `FileSystem` adapter and an `LlmClient` from the user's configured
+ * provider. Two filesystem adapters share one contract:
+ *
+ *   - Tauri desktop → `@tauri-apps/plugin-fs` (renderer-local, unchanged);
+ *   - any other host with filesystem access (the headless brain) → the
+ *     host-neutral `fs_*_workspace` transport arms (`lib/files/workspace-fs`),
+ *     which cognia-server implements natively and gates on its workspace-root
+ *     policy, so `rootDir` must be an absolute path the host allows.
+ *
+ * Hosts without filesystem access (a plain browser, the mobile webview) get a
+ * clear `HostFilesystemError`.
  */
 
 import { readDir, readTextFile } from "@tauri-apps/plugin-fs"
-import { isTauri } from "@/lib/tauri"
+import { detectPlatform, isTauri } from "@/lib/platform/detect"
 import { getSettings } from "@/lib/db/settings"
 import { createLlmClient, type LlmClient, type LlmConfig } from "@/lib/twin/distill/llm"
 import {
@@ -17,15 +25,18 @@ import {
   type RebuildResult,
 } from "./orchestrator"
 
-/** Thrown when called outside Tauri — the wiki rebuild needs real filesystem access. */
-export class WebModeError extends Error {
+/** Thrown on hosts without filesystem access — the wiki rebuild needs to walk real files. */
+export class HostFilesystemError extends Error {
   constructor() {
     super(
-      "Wiki rebuild requires the Tauri desktop app. File system access is not available in web mode."
+      "Wiki rebuild requires a host with filesystem access (the desktop app or a cloud host). It is not available in a plain browser."
     )
-    this.name = "WebModeError"
+    this.name = "HostFilesystemError"
   }
 }
+
+/** @deprecated Renamed to {@link HostFilesystemError}; kept for existing callers. */
+export const WebModeError = HostFilesystemError
 
 /** Thrown when no LLM API key is configured. */
 export class NoApiKeyError extends Error {
@@ -34,6 +45,42 @@ export class NoApiKeyError extends Error {
       "No LLM API key configured. Add an API key in Settings → Providers before rebuilding the wiki."
     )
     this.name = "NoApiKeyError"
+  }
+}
+
+/** Platforms whose process can reach its own filesystem (directly or via the host RPC arms). */
+const HOST_FILESYSTEM_PLATFORMS = new Set(["tauri", "headless"])
+
+/** True when this host can run a wiki rebuild at all. */
+export function canRunWikiRebuildOnHost(): boolean {
+  return HOST_FILESYSTEM_PLATFORMS.has(detectPlatform())
+}
+
+/**
+ * Host-neutral filesystem over the `fs_*_workspace` transport arms. Walks the
+ * tree lazily through `listWorkspaceDir` (non-recursive per call) and reads
+ * files relative to `rootDir`. Used off-desktop.
+ */
+async function buildTransportFileSystem(rootDir: string): Promise<FileSystem> {
+  const { listWorkspaceDir, readWorkspaceFile } = await import("@/lib/files/workspace-fs")
+
+  async function walk(relDir: string | undefined): Promise<string[]> {
+    const entries = await listWorkspaceDir(rootDir, relDir, false)
+    const results: string[] = []
+    for (const entry of entries) {
+      if (entry.isDir) {
+        results.push(...(await walk(entry.relPath)))
+      } else {
+        results.push(entry.relPath)
+      }
+    }
+    return results
+  }
+
+  const relativePaths = await walk(undefined)
+  return {
+    walk: async () => relativePaths,
+    readFile: async (relPath: string) => readWorkspaceFile(rootDir, relPath),
   }
 }
 
@@ -111,12 +158,14 @@ export interface RunRebuildOptions {
 }
 
 export async function runWikiRebuild(opts: RunRebuildOptions = {}): Promise<RebuildResult> {
-  if (!isTauri()) throw new WebModeError()
+  if (!canRunWikiRebuildOnHost()) throw new HostFilesystemError()
 
   const scope = opts.scope ?? "cognia-self"
   const rootDir = opts.rootDir ?? "."
 
-  const fs = await buildTauriFileSystem(rootDir)
+  const fs = isTauri()
+    ? await buildTauriFileSystem(rootDir)
+    : await buildTransportFileSystem(rootDir)
   const llm = await buildLlmClient()
 
   const rebuildOpts: RebuildOptions = {

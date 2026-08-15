@@ -3,31 +3,32 @@
  *
  * Creates a self-driving `/goal` (ADR-0019) in a fresh background session (or
  * a supplied one) and drives its turn loop to terminal headlessly via
- * `runGoalLoopHeadless`. Requires the Tauri runtime — the loop drives real
- * model turns through the sidecar.
+ * `runGoalLoopHeadless`. Requires a host with the `sidecar` capability (the
+ * desktop or the headless brain) — the loop drives real model turns through
+ * the sidecar; the gate lives in `lib/scheduler/host-support.ts`.
  */
 
 import type { AppSettings } from "@cognia/agent-config-types"
-import type { GoalTaskPayload, ScheduledTask, TaskExecution } from "@/types/scheduler"
-import { isTauri } from "@/lib/tauri"
+import type {
+  GoalTaskPayload,
+  ScheduledTask,
+  TaskExecution,
+  TaskExecutorResult,
+} from "@/types/scheduler"
+import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 
-interface GoalExecutionResult {
-  success: boolean
-  output?: Record<string, unknown>
-  error?: string
-}
+type GoalExecutionResult = TaskExecutorResult
 
 export async function executeGoalTask(
   task: ScheduledTask,
   execution: TaskExecution,
   signal: AbortSignal
 ): Promise<GoalExecutionResult> {
-  if (!isTauri()) {
-    return { success: false, error: "Goal scheduled tasks require the Tauri runtime" }
-  }
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
 
   const payload = (task.payload ?? {}) as Partial<GoalTaskPayload>
   if (!payload.objective || !payload.objective.trim()) {

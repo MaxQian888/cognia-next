@@ -1,9 +1,12 @@
 /**
  * Task executor registry for the app scheduler.
  *
- * Cognia ships a much wider executor set (workflow / sync / im-push /
- * ai-generation / test). cognia-next has no backing systems for those, so we
- * only register the executors that map to existing infrastructure here:
+ * `registerBuiltInExecutors()` registers every executor that lives in this
+ * directory. Which of them may run on the current host is decided by
+ * `lib/scheduler/host-support.ts` (capability-based; executors do NOT branch
+ * on `isTauri()`), so the same registry runs on the Tauri desktop, the
+ * headless brain, the mobile shell and a plain browser and fails with a
+ * structured `unsupported-on-host` reason where the host lacks a capability.
  *
  *   - chat            → drives a Claude session via lib/claude/ipc.sendPrompt,
  *                       feeding the SAME `resolveSendOptions` pipeline the
@@ -13,14 +16,22 @@
  *   - skill           → chat + one ad-hoc skill on top of the character set.
  *   - external-agent  → drives an ACP agent (Claude Desktop, Cursor, …) via
  *                       lib/ai/agent/external/manager:executeOnExternalAgent.
- *   - script          → shells out via the existing shell_exec Tauri command.
- *   - backup          → builds & writes an encrypted backup to appDataDir()/backups/.
+ *   - script          → runs an inline script through the host shell.
+ *   - background-command / monitor → jobs supervisor (host-neutral RPC).
+ *   - backup          → builds & writes an encrypted backup (local / WebDAV /
+ *                       GitHub / Google Drive).
+ *   - workflow        → runs a published visual workflow (`workflow-executor.ts`).
+ *   - im-push         → pushes a message into a bound IM conversation.
+ *   - test            → diagnostic echo executor (`test-executor.ts`).
+ *   - plugin          → routes to the registered plugin handler.
+ *   - custom          → user/plugin-supplied executor registered at runtime
+ *                       under the "custom" type; fails with EXECUTOR_NOT_FOUND
+ *                       when nothing is registered (never a silent no-op).
+ *   - twin / wiki-rebuild / wiki-lint / radar-report / agent-team / goal / plan
+ *                     → subsystem executors registered here as well.
  *
- * Plus the two Cognia executors that don't depend on external systems:
- *
- *   - plugin          → routes to the registered plugin handler (no-op until
- *                       plugin runtime exists).
- *   - custom          → user-supplied executor registered at runtime.
+ * Connector task types (`connection:*`) and `provider-diagnostics-refresh`
+ * are registered by their own subsystems at boot.
  */
 
 import type {
@@ -30,6 +41,7 @@ import type {
   ScheduledTask,
   SkillTaskPayload,
   TaskExecution,
+  TaskExecutorResult,
 } from "@/types/scheduler"
 import { openTaskWorkspaceRunLease } from "@/lib/task-workspace/run-lease"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
@@ -69,7 +81,8 @@ import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { listEnabledSkillsByIds, renderSkillsSection } from "@/lib/db/skills"
 import { executeOnExternalAgent } from "@/lib/ai/agent/external/manager"
 import { loggers } from "@cognia/logging"
-import { isTauri } from "@/lib/tauri"
+import { assertTaskTypeSupportedOnHost } from "../host-support"
+import { executeTestTask } from "./test-executor"
 
 const log = loggers.scheduler
 
@@ -90,11 +103,7 @@ export type { AgentTaskPayload, SkillTaskPayload, ExternalAgentTaskPayload }
 // Common types
 // =============================================================================
 
-interface ChatExecutionResult {
-  success: boolean
-  output?: Record<string, unknown>
-  error?: string
-}
+type ChatExecutionResult = TaskExecutorResult
 
 // =============================================================================
 // Legacy payload field migration
@@ -357,9 +366,10 @@ async function runChatPrompt(
   payload: ChatLikeTaskPayload,
   options: RunChatPromptOptions = {}
 ): Promise<ChatExecutionResult> {
-  if (!isTauri()) {
-    return { success: false, error: "Chat-style scheduled tasks require the Tauri runtime" }
-  }
+  // Host gate: chat-style tasks drive a Claude turn through the sidecar. The
+  // desktop and the headless brain both provide it; a plain browser does not.
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
 
   if (!payload.prompt || !payload.prompt.trim()) {
     return { success: false, error: "Empty prompt" }
@@ -674,6 +684,9 @@ async function executeScriptTask(
       }
     | undefined
 
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
+
   if (!payload?.language || !payload.code) {
     return { success: false, error: "script task requires `language` and `code` in payload" }
   }
@@ -682,17 +695,20 @@ async function executeScriptTask(
     return { success: false, error: "Script execution aborted before start" }
   }
 
-  const result = await executeScript({
-    type: "execute_script",
-    language: payload.language,
-    code: payload.code,
-    working_dir: payload.working_dir,
-    args: payload.args,
-    env: payload.env,
-    timeout_secs: payload.timeout_secs ?? Math.floor((task.config.timeout || 300_000) / 1000),
-    memory_mb: payload.memory_mb,
-    use_sandbox: payload.use_sandbox,
-  })
+  const result = await executeScript(
+    {
+      type: "execute_script",
+      language: payload.language,
+      code: payload.code,
+      working_dir: payload.working_dir,
+      args: payload.args,
+      env: payload.env,
+      timeout_secs: payload.timeout_secs ?? Math.floor((task.config.timeout || 300_000) / 1000),
+      memory_mb: payload.memory_mb,
+      use_sandbox: payload.use_sandbox,
+    },
+    { signal, taskId: task.id }
+  )
 
   if (signal?.aborted) {
     return { success: false, error: "Script execution was cancelled" }
@@ -721,6 +737,9 @@ async function executeExternalAgentTask(
   execution: TaskExecution,
   signal: AbortSignal
 ): Promise<ChatExecutionResult> {
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
+
   const payload = (task.payload ?? {}) as Partial<ExternalAgentTaskPayload>
   if (!payload.prompt || !payload.prompt.trim()) {
     return { success: false, error: "external-agent task requires `prompt` in payload" }
@@ -772,17 +791,28 @@ async function executeExternalAgentTask(
   }
 }
 
+/**
+ * The "custom" type is a hook for a user- or plugin-supplied executor
+ * registered at runtime via `registerTaskExecutor("custom", fn)` — which
+ * REPLACES this placeholder in the registry. If a custom task fires and
+ * nothing has replaced it, the handler is genuinely missing (a plugin was
+ * removed, or the task was imported from another install), so the run fails
+ * with `EXECUTOR_NOT_FOUND` instead of reporting a silent green no-op.
+ */
 async function executeCustomTask(
   task: ScheduledTask,
   _execution: TaskExecution,
   _signal: AbortSignal
 ): Promise<ChatExecutionResult> {
-  // The "custom" type lets users write their own executor and register it via
-  // `registerTaskExecutor("custom-<name>", fn)`. The default fall-through is
-  // a friendly no-op so the scheduler doesn't blow up if a stale custom task
-  // survives a deploy that removed its handler.
-  log.warn("Custom scheduled task ran with the default no-op executor", { taskId: task.id })
-  return { success: true, output: { note: "Custom executor not registered; ran as no-op." } }
+  log.warn("Custom scheduled task fired without a registered custom executor", {
+    taskId: task.id,
+  })
+  return {
+    success: false,
+    error:
+      'No custom executor is registered for task type "custom" (a plugin or the app must call registerTaskExecutor("custom", …) before this task can run).',
+    terminalReason: "executor-not-found",
+  }
 }
 
 // =============================================================================
@@ -816,9 +846,10 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("agent-team", executeAgentTeamTask)
   registerTaskExecutor("goal", executeGoalTask)
   registerTaskExecutor("plan", executePlanTask)
+  registerTaskExecutor("test", executeTestTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan"
+    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan, test"
   )
 }
 

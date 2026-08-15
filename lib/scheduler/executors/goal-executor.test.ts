@@ -6,7 +6,11 @@ const getSessionMock = jest.fn()
 const createGoalMock = jest.fn()
 const runGoalLoopMock = jest.fn()
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: () => (isTauriMock() ? "tauri" : "web"),
+  isTauri: () => isTauriMock(),
+}))
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(async () => null) }))
 jest.mock("@/lib/db/sessions", () => ({
   createSession: (...a: unknown[]) => createSessionMock(...a),
@@ -42,7 +46,7 @@ beforeEach(() => {
 })
 
 describe("executeGoalTask", () => {
-  it("requires the Tauri runtime", async () => {
+  it("requires a host with the sidecar capability", async () => {
     isTauriMock.mockReturnValue(false)
     const r = await executeGoalTask(
       makeTask({ objective: "x" }),
@@ -50,13 +54,33 @@ describe("executeGoalTask", () => {
       new AbortController().signal
     )
     expect(r.success).toBe(false)
-    expect(r.error).toMatch(/Tauri/)
+    expect(r.error).toMatch(/sidecar capability/)
+    expect(r.terminalReason).toBe("unsupported-on-host")
   })
 
   it("rejects payloads missing objective", async () => {
     const r = await executeGoalTask(makeTask({}), execution, new AbortController().signal)
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/objective/)
+  })
+
+  it("returns early when the signal is already aborted", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const r = await executeGoalTask(makeTask({ objective: "x" }), execution, controller.signal)
+    expect(r).toEqual({ success: false, error: "Goal task aborted before start" })
+    expect(createSessionMock).not.toHaveBeenCalled()
+  })
+
+  it("continues with no app defaults when getSettings throws", async () => {
+    const settings = jest.requireMock("@/lib/db/settings") as { getSettings: jest.Mock }
+    settings.getSettings.mockRejectedValueOnce(new Error("db locked"))
+    const r = await executeGoalTask(
+      makeTask({ objective: "ship it", characterId: "c1" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(r.success).toBe(true)
   })
 
   it("creates a fresh session + goal and drives the loop to completion", async () => {

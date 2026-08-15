@@ -73,6 +73,23 @@ export async function readBackgroundJobTail(
   })
 }
 
+/**
+ * Read a job's merged output from an absolute byte offset. Callers that need
+ * the whole stream loop while `hasMore` is true, advancing `fromOffset` to
+ * `nextOffset` (the scheduler script runner does this to capture stdout).
+ */
+export function readBackgroundJobOutput(
+  jobId: string,
+  fromOffset: number,
+  maxBytes = 8192
+): Promise<BackgroundJobOutput> {
+  return transport.call<BackgroundJobOutput>("background_job_read", {
+    jobId,
+    fromOffset: Math.max(0, fromOffset),
+    maxBytes,
+  })
+}
+
 export function killBackgroundJob(jobId: string): Promise<BackgroundJobRecord> {
   return transport.call<BackgroundJobRecord>("background_job_kill", { jobId })
 }

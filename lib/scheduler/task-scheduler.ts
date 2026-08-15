@@ -15,9 +15,11 @@ import {
   type UpdateScheduledTaskInput,
   type ScheduledTaskStatus,
   type TaskExecutionTriggerSource,
+  type TaskExecutorResult,
   DEFAULT_EXECUTION_CONFIG,
   DEFAULT_NOTIFICATION_CONFIG,
 } from "@/types/scheduler"
+import { DEPRECATED_TASK_TYPES, isDeprecatedTaskType } from "./host-support"
 import { getNextCronTime } from "./cron-parser"
 import { enumerateBackfillSlots } from "./backfill"
 import { schedulerDb } from "./scheduler-db"
@@ -45,13 +47,30 @@ import { resolveCatchupDefaults } from "./catchup-policy"
 const log = loggers.scheduler
 
 // Task executor registry
-type TaskExecutor = (
+export type TaskExecutor = (
   task: ScheduledTask,
   execution: TaskExecution,
   signal: AbortSignal
-) => Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }>
+) => Promise<TaskExecutorResult>
 
 const executors: Map<string, TaskExecutor> = new Map()
+
+/**
+ * Listeners resolved when a specific task type gains an executor. Used by the
+ * boot registration grace: subsystems register their executors from their
+ * own boot chunk (connectors → `integrations`, scheduler → `workflow-automation`),
+ * so a persisted `connection:*` task can come due before its executor exists.
+ * Instead of failing immediately the scheduler waits (bounded) for this event.
+ */
+const executorRegistrationListeners: Map<string, Set<() => void>> = new Map()
+
+/**
+ * How long after scheduler start a due task may wait for its executor to be
+ * registered before failing with `EXECUTOR_NOT_FOUND`. Sized for the slowest
+ * deferred boot chunk on a cold desktop start; after the window the failure
+ * is real (an unregistered custom/plugin handler) and must surface.
+ */
+export const EXECUTOR_REGISTRATION_GRACE_MS = 60_000
 
 /**
  * Register a task executor for a specific task type
@@ -59,6 +78,11 @@ const executors: Map<string, TaskExecutor> = new Map()
 export function registerTaskExecutor(taskType: string, executor: TaskExecutor): void {
   executors.set(taskType, executor)
   log.info(`Registered executor for task type: ${taskType}`)
+  const waiters = executorRegistrationListeners.get(taskType)
+  if (waiters) {
+    executorRegistrationListeners.delete(taskType)
+    for (const resolve of waiters) resolve()
+  }
 }
 
 /**
@@ -74,6 +98,41 @@ export function unregisterTaskExecutor(taskType: string): void {
  */
 export function hasTaskExecutor(taskType: string): boolean {
   return executors.has(taskType)
+}
+
+/**
+ * Resolve when an executor for `taskType` is registered, or after `timeoutMs`
+ * (whichever first). Aborting `signal` also resolves early. Returns whether an
+ * executor is present afterwards.
+ */
+export function waitForTaskExecutor(
+  taskType: string,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<boolean> {
+  if (executors.has(taskType)) return Promise.resolve(true)
+  if (timeoutMs <= 0 || signal?.aborted) return Promise.resolve(false)
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", settle)
+      const waiters = executorRegistrationListeners.get(taskType)
+      waiters?.delete(settle)
+      if (waiters && waiters.size === 0) executorRegistrationListeners.delete(taskType)
+      resolve(executors.has(taskType))
+    }
+    const timer = setTimeout(settle, timeoutMs)
+    let waiters = executorRegistrationListeners.get(taskType)
+    if (!waiters) {
+      waiters = new Set()
+      executorRegistrationListeners.set(taskType, waiters)
+    }
+    waiters.add(settle)
+    signal?.addEventListener("abort", settle, { once: true })
+  })
 }
 
 /**
@@ -129,6 +188,10 @@ class TaskSchedulerImpl {
   private lifecycleVersion = 0
   /** Becomes true immediately after driver.start(), before boot tasks are armed. */
   private driverReady = false
+  /** Epoch-ms when the driver started; anchors the executor-registration grace. */
+  private startedAtMs = 0
+  /** Guards the one-shot deprecated-type sweep per process (see `pauseDeprecatedTasks`). */
+  private deprecatedTasksSwept = false
   /** Guards the one-shot boot reconcile so multiple authority transitions in a
    * single process don't re-cancel executions repeatedly. */
   private staleExecutionsReconciled = false
@@ -219,6 +282,7 @@ class TaskSchedulerImpl {
         return
       }
       this.driverReady = true
+      this.startedAtMs = Date.now()
 
       if (driver.supportsLeaderElection) {
         // Renderer: only the leader tab arms/executes. Subscribe to leadership
@@ -317,6 +381,19 @@ class TaskSchedulerImpl {
       }
     }
 
+    // Deprecated task types (`sync`, `ai-generation`) have no executor: park
+    // them instead of letting them fire into EXECUTOR_NOT_FOUND every slot.
+    if (!this.deprecatedTasksSwept) {
+      this.deprecatedTasksSwept = true
+      try {
+        const paused = await this.pauseDeprecatedTasks()
+        if (paused > 0) log.warn(`Paused ${paused} scheduled task(s) with a deprecated type`)
+      } catch (err) {
+        log.error("Failed to sweep deprecated-type tasks on boot:", err)
+      }
+      if (version !== this.lifecycleVersion) return
+    }
+
     const tasks = await schedulerDb.getTasksByStatus("active")
     if (version !== this.lifecycleVersion) return
     log.info(`Found ${tasks.length} active tasks to schedule`)
@@ -324,6 +401,39 @@ class TaskSchedulerImpl {
       if (version !== this.lifecycleVersion) return
       await this.scheduleTask(task, version)
     }
+  }
+
+  /**
+   * Pause every still-active task whose type is in `DEPRECATED_TASK_TYPES`
+   * and record one `deprecated-type` execution row per task so the detail
+   * view can explain what happened. Idempotent: paused rows are left alone.
+   * Returns the number of tasks paused.
+   */
+  private async pauseDeprecatedTasks(): Promise<number> {
+    let paused = 0
+    for (const type of DEPRECATED_TASK_TYPES) {
+      const rows = await schedulerDb.getTasksByType(type)
+      for (const task of rows) {
+        if (task.status !== "active") continue
+        const now = new Date()
+        await schedulerDb.updateTask({
+          ...task,
+          status: "paused",
+          nextRunAt: undefined,
+          lastTerminalReason: "deprecated-type",
+          lastTerminalAt: now,
+          updatedAt: now,
+        })
+        this.unscheduleTask(task.id)
+        await this.createSkippedExecution(task, {
+          triggerSource: "schedule",
+          terminalReason: "deprecated-type",
+          message: `Task type "${task.type}" is deprecated and has no executor; the task was paused. Recreate it as a "chat" task or delete it.`,
+        })
+        paused += 1
+      }
+    }
+    return paused
   }
 
   /**
@@ -721,6 +831,9 @@ class TaskSchedulerImpl {
    * Create a new scheduled task
    */
   async createTask(input: CreateScheduledTaskInput): Promise<ScheduledTask> {
+    if (isDeprecatedTaskType(input.type)) {
+      throw SchedulerError.deprecatedTaskType(input.type)
+    }
     const now = new Date()
     const normalizedTrigger = normalizeTaskTrigger(input.trigger, { now })
 
@@ -912,6 +1025,9 @@ class TaskSchedulerImpl {
   async resumeTask(taskId: string): Promise<boolean> {
     const task = await schedulerDb.getTask(taskId)
     if (!task || task.status !== "paused") return false
+    if (isDeprecatedTaskType(task.type)) {
+      throw SchedulerError.deprecatedTaskType(task.type)
+    }
 
     const updatedTask = {
       ...task,
@@ -1209,8 +1325,23 @@ class TaskSchedulerImpl {
     log.info(`Executing task: ${task.name} (execution: ${executionId})`)
 
     try {
-      // Get executor
-      const executor = executors.get(task.type)
+      // Get executor. Subsystems register their executors from their own boot
+      // chunk, so shortly after scheduler start a persisted task can come due
+      // before its executor exists — wait (bounded) instead of failing.
+      let executor = executors.get(task.type)
+      if (!executor) {
+        const graceRemaining = this.startedAtMs + EXECUTOR_REGISTRATION_GRACE_MS - Date.now()
+        if (graceRemaining > 0 && !isDeprecatedTaskType(task.type)) {
+          execution.logs.push(
+            this.createLog(
+              "info",
+              `No executor registered for "${task.type}" yet — waiting up to ${Math.ceil(graceRemaining / 1000)}s for boot registration`
+            )
+          )
+          await waitForTaskExecutor(task.type, graceRemaining, controller.signal)
+          executor = executors.get(task.type)
+        }
+      }
       if (!executor) {
         throw SchedulerError.executorNotFound(task.type)
       }
@@ -1230,7 +1361,8 @@ class TaskSchedulerImpl {
         : result.error || "Executor returned unsuccessful result"
       execution.completedAt = new Date()
       execution.duration = execution.completedAt.getTime() - startTime.getTime()
-      execution.terminalReason = result.success ? "completed" : "executor-failure"
+      execution.terminalReason =
+        result.terminalReason ?? (result.success ? "completed" : "executor-failure")
       execution.logs.push(
         this.createLog(
           result.success ? "info" : "error",
@@ -1830,6 +1962,9 @@ class TaskSchedulerImpl {
       if (error.details?.reason === "scheduler-stopped") return "scheduler-stopped"
       if (error.details?.reason === "task-deleted") return "task-deleted"
       return "overlap-cancelled"
+    }
+    if (error instanceof SchedulerError && error.code === "EXECUTOR_NOT_FOUND") {
+      return "executor-not-found"
     }
     return "execution-error"
   }

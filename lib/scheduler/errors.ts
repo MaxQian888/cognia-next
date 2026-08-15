@@ -19,6 +19,7 @@ export type SchedulerErrorCode =
   | "WEBHOOK_FAILED"
   | "SCRIPT_VALIDATION_FAILED"
   | "PLUGIN_HANDLER_NOT_FOUND"
+  | "DEPRECATED_TASK_TYPE"
   | "UNKNOWN"
 
 export class SchedulerError extends Error {
@@ -66,6 +67,14 @@ export class SchedulerError extends Error {
     return new SchedulerError(
       "EXECUTOR_NOT_FOUND",
       `No executor registered for task type: ${taskType}`,
+      { taskType }
+    )
+  }
+
+  static deprecatedTaskType(taskType: string): SchedulerError {
+    return new SchedulerError(
+      "DEPRECATED_TASK_TYPE",
+      `Task type "${taskType}" is deprecated and cannot be created; use "chat" instead`,
       { taskType }
     )
   }

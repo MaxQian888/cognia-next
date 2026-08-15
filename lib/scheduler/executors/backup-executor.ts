@@ -10,12 +10,13 @@
 //     `BackupScheduleDialog` and runs through the standard scheduler tab-lock
 //     so only the leader tab fires it.
 //
-// Tauri-only: web-mode runs return a clear error rather than silently writing
-// to nowhere. Destinations: `local` writes the auto-key-encrypted package to
-// disk; `webdav` uploads a sync-passphrase-encrypted snapshot; `all` does both.
-// Other cloud targets (github/googledrive/convex) remain unsupported.
+// Host gate: needs the host filesystem (`lib/scheduler/host-support.ts`), so it
+// runs on the desktop and the headless brain and is refused with a structured
+// reason elsewhere. Destinations: `local` writes the auto-key-encrypted package
+// to disk; `webdav` uploads a sync-passphrase-encrypted snapshot; `all` does
+// both. Other cloud targets (github/googledrive/convex) remain unsupported.
 
-import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
+import type { ScheduledTask, TaskExecution, TaskExecutorResult } from "@/types/scheduler"
 import type {
   BackupDestination,
   BackupSelectionOptions,
@@ -32,7 +33,7 @@ import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { appendBackupHistory, type BackupHistoryEncryption } from "@/lib/db/backup-history"
 import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@cognia/agent-config-types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
-import { isTauri } from "@/lib/tauri"
+import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { loggers } from "@cognia/logging"
 import { dispatchBackupDestination } from "@/lib/data/destinations"
 import { encryptSnapshotBody, webdavSnapshotName } from "@/lib/data/destinations/webdav"
@@ -41,11 +42,7 @@ import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
 
 const log = loggers.scheduler
 
-interface ExecutorResult {
-  success: boolean
-  output?: Record<string, unknown>
-  error?: string
-}
+type ExecutorResult = TaskExecutorResult
 
 /**
  * Map the schedule's user-facing selection to an exact payload contract.
@@ -154,10 +151,10 @@ export async function executeBackupTask(
     return { success: false, error }
   }
 
-  if (!isTauri()) {
-    const error = "Scheduled backups require the Tauri runtime — open the desktop app to enable."
-    await safelyAppendFailure(error)
-    return { success: false, error }
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) {
+    await safelyAppendFailure(refused.error)
+    return refused
   }
 
   try {

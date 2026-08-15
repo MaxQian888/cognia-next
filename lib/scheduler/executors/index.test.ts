@@ -9,9 +9,26 @@
  * before handing off to `lib/claude/ipc.sendPrompt`.
  */
 
-let isTauriValue = true
+// Host gating goes through `lib/scheduler/host-support` → `lib/platform/detect`
+// (`detectPlatform()` + the capability baseline); flip the platform between
+// "tauri" and "web" to exercise the supported / unsupported branches.
+// State lives inside the factory: `detectPlatform()` runs during module
+// import (transport selection), before a top-level `let` would be initialised.
+jest.mock("@/lib/platform/detect", () => {
+  const hostState = { tauri: true }
+  return {
+    ...jest.requireActual("@/lib/platform/detect"),
+    __hostState: hostState,
+    detectPlatform: () => (hostState.tauri ? "tauri" : "web"),
+    isTauri: () => hostState.tauri,
+  }
+})
+import * as platformDetect from "@/lib/platform/detect"
+const hostState = (platformDetect as unknown as { __hostState: { tauri: boolean } }).__hostState
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriValue,
+  // Delegate to the detect mock's state so both modules agree at import time.
+  isTauri: () =>
+    (jest.requireMock("@/lib/platform/detect") as { isTauri: () => boolean }).isTauri(),
 }))
 
 const sendPromptMock = jest.fn(async (..._args: unknown[]) => undefined)
@@ -132,7 +149,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
 
 const executeScriptMock = jest.fn()
 jest.mock("../script-executor", () => ({
-  executeScript: (action: unknown) => executeScriptMock(action),
+  executeScript: (action: unknown, options?: unknown) => executeScriptMock(action, options),
 }))
 
 const executePluginTaskMock = jest.fn(async (..._args: unknown[]) => ({
@@ -209,7 +226,7 @@ import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { SendOptions } from "@cognia/agent-config-types"
 
 beforeEach(() => {
-  isTauriValue = true
+  hostState.tauri = true
   sendPromptMock.mockClear()
   onClaudeMessageMock.mockReset()
   interruptSessionMock.mockClear()
@@ -499,15 +516,19 @@ describe("executeChatTask", () => {
     const r = await executeChatTask(makeTask({ payload: undefined }), makeExecution(), makeSignal())
     expect(r.success).toBe(false)
   })
-  it("returns runtime error when not running under Tauri", async () => {
-    isTauriValue = false
+  it("returns a structured unsupported-on-host result on a host without the sidecar", async () => {
+    hostState.tauri = false
     const r = await executeChatTask(
       makeTask({ payload: { prompt: "hi" } }),
       makeExecution(),
       makeSignal()
     )
     expect(r.success).toBe(false)
-    expect(r.error).toMatch(/Tauri runtime/)
+    expect(r.error).toMatch(/sidecar capability/)
+    expect(r.terminalReason).toBe("unsupported-on-host")
+    expect(r.output).toMatchObject({
+      hostSupport: { reason: "missing-capability", missing: ["sidecar"], platform: "web" },
+    })
   })
   it("rejects whitespace-only prompt", async () => {
     const r = await executeChatTask(
@@ -1138,10 +1159,11 @@ describe("executeScriptTask", () => {
 })
 
 describe("executeCustomTask", () => {
-  it("returns a friendly no-op success result", async () => {
+  it("fails with executor-not-found instead of a silent no-op success", async () => {
     const r = await executeCustomTask(makeTask({}), makeExecution(), makeSignal())
-    expect(r.success).toBe(true)
-    expect(r.output).toMatchObject({ note: expect.stringMatching(/Custom executor/) })
+    expect(r.success).toBe(false)
+    expect(r.terminalReason).toBe("executor-not-found")
+    expect(r.error).toMatch(/registerTaskExecutor\("custom"/)
   })
 })
 

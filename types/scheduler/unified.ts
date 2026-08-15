@@ -1,13 +1,15 @@
 /**
  * Unified scheduled-item types for the cross-source scheduler page.
  *
- * cognia-next persists timed work across five independent backends:
+ * cognia-next persists timed work across six independent backends (the
+ * closed `SCHEDULED_ITEM_KINDS` tuple below, ADR-0079 §3):
  *
- *   1. App scheduler   — Dexie `tasks` table  (lib/scheduler/scheduler-db.ts)
+ *   1. App scheduler    — Dexie `tasks` table  (lib/scheduler/scheduler-db.ts)
  *   2. Workflow runtime — Dexie `workflowTriggers` + Rust cron_daemon
  *   3. Backup scheduler — `appSettings.backupSchedule`
  *   4. Plugin scheduler — `type: "plugin"` rows in SchedulerDB `tasks`
  *   5. System scheduler — OS-level (Windows Task Scheduler / launchd / cron)
+ *   6. Connector queue  — `connection:*` rows collapsed into one rollup item
  *
  * Each source keeps its own storage and CRUD path; the scheduler page renders
  * them through this normalized shape. `ScheduledItemSource` is the adapter

@@ -185,6 +185,16 @@ describe("SchedulerDatabase", () => {
       expect(pausedTasks.length).toBe(1)
     })
 
+    it("should get tasks by type across statuses", async () => {
+      await schedulerDb.createTask(createMockTask({ id: "sync-a", type: "sync", status: "active" }))
+      await schedulerDb.createTask(createMockTask({ id: "sync-b", type: "sync", status: "paused" }))
+      await schedulerDb.createTask(createMockTask({ id: "chat-a", type: "chat", status: "active" }))
+
+      const syncTasks = await schedulerDb.getTasksByType("sync")
+      expect(syncTasks.map((t) => t.id).sort()).toEqual(["sync-a", "sync-b"])
+      expect(await schedulerDb.getTasksByType("ai-generation")).toEqual([])
+    })
+
     it("queries active event tasks through the persisted compound index", async () => {
       await Promise.all([
         schedulerDb.createTask(

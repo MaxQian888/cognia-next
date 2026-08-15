@@ -1,13 +1,25 @@
 /**
  * Script executor for scheduled tasks. Cognia originally routed scripts
  * through a Pyodide/Docker sandbox; cognia-next has no sandbox runtime, so
- * we shell out to the host interpreter via the existing `shell_exec` Tauri
- * command. The validator and language list mirror Cognia so the existing UI
- * (script-task-editor, system-task-form) keeps working unchanged.
+ * we shell out to the host interpreter. The validator and language list
+ * mirror Cognia so the existing UI (script-task-editor, system-task-form)
+ * keeps working unchanged.
+ *
+ * Host neutrality: two runners share one contract ({@link ScriptRunner}).
+ *
+ *   - Tauri desktop → the synchronous `shell_exec` command (renderer-local,
+ *     bounded output, unchanged behaviour).
+ *   - Every other host with the `shell` capability (the headless brain today)
+ *     → the jobs supervisor (`background_job_spawn_scheduled` +
+ *     `background_job_read`), which cognia-server implements natively; the
+ *     runner polls the job to completion and assembles the same result shape.
+ *   - Hosts without `shell` are refused up-front by the caller through
+ *     `lib/scheduler/host-support.ts`; the runner itself throws if reached.
  */
 
 import { invoke } from "@tauri-apps/api/core"
-import { isTauri } from "@/lib/tauri"
+import { isTauri } from "@/lib/platform/detect"
+import { hasCapability } from "@/lib/platform/capabilities"
 import type { ExecuteScriptAction, TaskRunResult } from "@/types/scheduler"
 
 interface ShellResult {
@@ -17,6 +29,118 @@ interface ShellResult {
   timed_out: boolean
   stdout_truncated: boolean
   stderr_truncated: boolean
+}
+
+export interface ScriptRunRequest {
+  command: string
+  cwd: string
+  timeoutSecs: number
+  signal?: AbortSignal
+  /** Owning scheduled task id (the jobs supervisor scopes jobs by owner). */
+  taskId?: string
+}
+
+/** Runs one shell command to completion and returns the captured result. */
+export type ScriptRunner = (request: ScriptRunRequest) => Promise<ShellResult>
+
+export interface ExecuteScriptOptions {
+  signal?: AbortSignal
+  taskId?: string
+  /** Test seam / host override; defaults to {@link resolveDefaultScriptRunner}. */
+  runner?: ScriptRunner
+}
+
+/** Desktop runner: the renderer-local `shell_exec` Tauri command. */
+export const shellExecScriptRunner: ScriptRunner = async ({ command, cwd, timeoutSecs }) =>
+  invoke<ShellResult>("shell_exec", { cmd: command, cwd, timeoutSecs })
+
+/** Poll cadence for the jobs-supervisor runner. */
+const JOB_POLL_INTERVAL_MS = 500
+const JOB_READ_CHUNK_BYTES = 64 * 1024
+
+/**
+ * Host-neutral runner over the jobs supervisor. Spawns the command as a
+ * scheduled background job, streams its output until the job settles, and
+ * kills it when the timeout or the abort signal fires.
+ */
+export const jobsSupervisorScriptRunner: ScriptRunner = async ({
+  command,
+  cwd,
+  timeoutSecs,
+  signal,
+  taskId,
+}) => {
+  const jobs = await import("@/lib/jobs/background-jobs")
+  const job = await jobs.spawnScheduledBackgroundJob({
+    taskId: taskId ?? "scheduler:script",
+    command,
+    cwd,
+    label: "scheduled script",
+  })
+  const deadline = Date.now() + timeoutSecs * 1000
+  let offset = 0
+  let output = ""
+  let status = job.status
+  let exitCode: number | undefined = job.exitCode
+  let timedOut = false
+  let truncated = false
+
+  const drain = async () => {
+    // Read every available chunk; `hasMore` tells us when we caught up.
+    for (;;) {
+      const chunk = await jobs.readBackgroundJobOutput(job.id, offset, JOB_READ_CHUNK_BYTES)
+      offset = chunk.nextOffset
+      output += chunk.data
+      status = chunk.status
+      exitCode = chunk.exitCode ?? exitCode
+      if (!chunk.hasMore) break
+    }
+  }
+
+  while (status === "running") {
+    if (signal?.aborted || Date.now() >= deadline) {
+      timedOut = !signal?.aborted
+      try {
+        const killed = await jobs.killBackgroundJob(job.id)
+        status = killed.status
+        exitCode = killed.exitCode
+      } catch {
+        status = "killed"
+      }
+      break
+    }
+    await drain()
+    if (status !== "running") break
+    await new Promise<void>((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS))
+  }
+  await drain()
+  const record = await jobs.listBackgroundJobs().then((all) => all.find((j) => j.id === job.id))
+  if (record) {
+    exitCode = record.exitCode ?? exitCode
+    truncated = record.droppedOutputBytes > 0
+    if (status === "running") status = record.status
+  }
+  // The supervisor merges stdout/stderr into one stream; report it as stdout.
+  // A job that never reached `exited` (killed / interrupted / failed) has no
+  // exit code; report -1 so the caller treats it as a failure rather than the
+  // "signal-terminated but fine" `null` that `shell_exec` uses.
+  return {
+    stdout: output,
+    stderr: "",
+    exit_code: typeof exitCode === "number" ? exitCode : status === "exited" ? 0 : -1,
+    timed_out: timedOut,
+    stdout_truncated: truncated,
+    stderr_truncated: false,
+  }
+}
+
+/** Pick the runner for the local host. */
+export function resolveDefaultScriptRunner(): ScriptRunner {
+  if (isTauri()) return shellExecScriptRunner
+  if (hasCapability("shell")) return jobsSupervisorScriptRunner
+  return async () => {
+    throw new Error("Script execution requires a host with the shell capability")
+  }
 }
 
 /**
@@ -77,9 +201,15 @@ function buildScriptCommand(action: ExecuteScriptAction): string | null {
   }
 }
 
-export async function executeScript(action: ExecuteScriptAction): Promise<TaskRunResult> {
-  if (!isTauri()) {
-    return { success: false, error: "Script execution requires Tauri (desktop) runtime" }
+export async function executeScript(
+  action: ExecuteScriptAction,
+  options: ExecuteScriptOptions = {}
+): Promise<TaskRunResult> {
+  if (!isTauri() && !hasCapability("shell")) {
+    return {
+      success: false,
+      error: "Script execution requires a host with the shell capability (desktop or cloud host)",
+    }
   }
 
   const command = buildScriptCommand(action)
@@ -93,16 +223,29 @@ export async function executeScript(action: ExecuteScriptAction): Promise<TaskRu
   const cwd =
     action.working_dir || (typeof process !== "undefined" ? (process.cwd?.() ?? ".") : ".")
   const timeout_secs = Math.max(1, Math.min(action.timeout_secs ?? 300, 300))
+  const runner = options.runner ?? resolveDefaultScriptRunner()
 
   const start = Date.now()
   try {
-    const result = await invoke<ShellResult>("shell_exec", {
-      cmd: command,
+    const result = await runner({
+      command,
       cwd,
       timeoutSecs: timeout_secs,
+      signal: options.signal,
+      taskId: options.taskId,
     })
 
     const duration = Date.now() - start
+    if (options.signal?.aborted) {
+      return {
+        success: false,
+        exit_code: result.exit_code ?? undefined,
+        stdout: result.stdout || undefined,
+        stderr: result.stderr || undefined,
+        error: "Script execution was cancelled",
+        duration_ms: duration,
+      }
+    }
     const success = !result.timed_out && (result.exit_code === 0 || result.exit_code === null)
 
     return {

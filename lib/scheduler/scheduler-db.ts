@@ -6,6 +6,7 @@
 import Dexie, { type EntityTable } from "dexie"
 import type {
   ScheduledTask,
+  ScheduledTaskType,
   TaskExecution,
   ScheduledTaskStatus,
   TaskFilter,
@@ -239,6 +240,14 @@ class SchedulerDatabase extends Dexie {
    */
   async getTasksByStatus(status: ScheduledTaskStatus): Promise<ScheduledTask[]> {
     const dbTasks = await this.tasks.where("status").equals(status).toArray()
+    return dbTasks.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
+  }
+
+  /**
+   * Get tasks by type (any status). Backed by the `type` index.
+   */
+  async getTasksByType(type: ScheduledTaskType): Promise<ScheduledTask[]> {
+    const dbTasks = await this.tasks.where("type").equals(type).toArray()
     return dbTasks.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
   }
 

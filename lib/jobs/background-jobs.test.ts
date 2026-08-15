@@ -4,6 +4,7 @@ import {
   killBackgroundJob,
   listBackgroundJobs,
   listBackgroundMonitors,
+  readBackgroundJobOutput,
   readBackgroundJobTail,
   registerScheduledBackgroundMonitor,
   spawnScheduledBackgroundJob,
@@ -43,6 +44,24 @@ it("reads a bounded tail and clamps short logs to offset zero", async () => {
     jobId: "job-2",
     fromOffset: 0,
     maxBytes: 2048,
+  })
+})
+
+it("reads output from an absolute offset and clamps negative offsets to zero", async () => {
+  invoke.mockResolvedValue({ data: "chunk", nextOffset: 10, hasMore: false, status: "running" })
+
+  await expect(readBackgroundJobOutput("job-1", 5, 4096)).resolves.toMatchObject({ data: "chunk" })
+  expect(invoke).toHaveBeenLastCalledWith("background_job_read", {
+    jobId: "job-1",
+    fromOffset: 5,
+    maxBytes: 4096,
+  })
+
+  await readBackgroundJobOutput("job-1", -3)
+  expect(invoke).toHaveBeenLastCalledWith("background_job_read", {
+    jobId: "job-1",
+    fromOffset: 0,
+    maxBytes: 8192,
   })
 })
 

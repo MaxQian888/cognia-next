@@ -10,16 +10,22 @@ import type { GoalConfig } from "@/types/goal"
 // Task trigger types
 export type TaskTriggerType = "cron" | "interval" | "once" | "event"
 
-// Task types that can be scheduled. `skill` and `external-agent` are
-// cognia-next-specific additions:
-//   - `skill`          → routes a Claude turn with one extra skill enabled
-//   - `external-agent` → drives an ACP agent (Claude Desktop, Cursor, …)
-// The other variants are kept for source-fidelity with Cognia even though
-// only chat / agent / skill / external-agent / script / custom / plugin /
-// backup have backing executors here.
+// Task types that can be scheduled. Every variant listed here either has a
+// registered executor (see `lib/scheduler/executors/index.ts` and the
+// subsystem executors it names) or is one of the two DEPRECATED variants that
+// stay in the enum only so persisted rows keep type-checking:
+//   - `sync`          → deprecated: never had a backing system in cognia-next
+//   - `ai-generation` → deprecated: fully overlapped by `chat`
+// Deprecated rows are auto-paused at scheduler init and cannot be created
+// (`lib/scheduler/host-support.ts:DEPRECATED_TASK_TYPES`). Which types can run
+// on which host is declared in `TASK_TYPE_HOST_REQUIREMENTS` in the same
+// module — executors no longer branch on `isTauri()`.
 export type ScheduledTaskType =
+  // Runs a published visual workflow via `executeDeployedWorkflow`
+  // (`lib/scheduler/executors/workflow-executor.ts`).
   | "workflow"
   | "agent"
+  /** @deprecated no executor; kept for persisted rows only. */
   | "sync"
   | "backup"
   | "custom"
@@ -27,9 +33,14 @@ export type ScheduledTaskType =
   | "script"
   | "background-command"
   | "monitor"
+  // Diagnostic executor that echoes its payload — validates the trigger chain
+  // end-to-end (`lib/scheduler/executors/test-executor.ts`).
   | "test"
+  /** @deprecated no executor; use `chat`. Kept for persisted rows only. */
   | "ai-generation"
   | "chat"
+  // Pushes a message into a bound IM conversation through the governed
+  // outbound queue (`lib/scheduler/executors/im-push-executor.ts`).
   | "im-push"
   | "skill"
   | "external-agent"
@@ -101,6 +112,16 @@ export type TaskExecutionTerminalReason =
   // orphaned row instead of leaving it "running" forever (see
   // `SchedulerDatabase.interruptStaleExecutions`).
   | "interrupted-on-restart"
+  // The executor refused to run because the host lacks a capability the task
+  // type needs (`lib/scheduler/host-support.ts`); the execution `output`
+  // carries the structured `hostSupport` reason.
+  | "unsupported-on-host"
+  // The task type is deprecated (`DEPRECATED_TASK_TYPES`); the scheduler
+  // paused the task at init and wrote this row to explain why.
+  | "deprecated-type"
+  // No executor was registered for the task type when the run was due — even
+  // after the boot registration grace period.
+  | "executor-not-found"
 
 /**
  * How a due fire interacts with an already-running execution of the same task.
@@ -169,12 +190,45 @@ export interface BackupTaskPayload extends Record<string, unknown> {
 export interface WikiRebuildTaskPayload extends Record<string, unknown> {
   /** When true, ignore cached hashes and re-process every file. */
   force?: boolean
+  /**
+   * Root directory to walk. Defaults to `.` (the process cwd) on the desktop.
+   * On the headless brain the host's workspace-root policy applies, so this
+   * must be an absolute path under the configured workspaces root.
+   */
+  rootDir?: string
+}
+
+/**
+ * Payload for `test` tasks — a diagnostic executor that proves the trigger →
+ * execution → notification chain without side effects. `echo` is copied into
+ * the execution output, `delayMs` sleeps (abortable) before completing, and
+ * `failWith` makes the run fail with that message so error notifications and
+ * retry policies can be exercised deliberately.
+ */
+export interface TestTaskPayload extends Record<string, unknown> {
+  echo?: unknown
+  delayMs?: number
+  failWith?: string
+}
+
+/**
+ * Result contract every task executor returns. `terminalReason` is optional
+ * and lets an executor override the scheduler's default mapping
+ * (`completed` / `executor-failure`) with a structured reason — used by the
+ * host gate (`unsupported-on-host`).
+ */
+export interface TaskExecutorResult {
+  success: boolean
+  output?: Record<string, unknown>
+  error?: string
+  terminalReason?: TaskExecutionTerminalReason
 }
 
 export type ScheduledTaskPayload =
   | Record<string, unknown>
   | BackupTaskPayload
   | WikiRebuildTaskPayload
+  | TestTaskPayload
   | BackgroundCommandTaskPayload
   | MonitorTaskPayload
   | ChatLikeTaskPayload
