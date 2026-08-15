@@ -35,6 +35,10 @@ jest.mock("@/components/share/share-link-dialog", () => ({
   ShareLinkDialog: ({ trigger }: { trigger: React.ReactNode }) => trigger,
 }))
 jest.mock("@/components/settings/data/webdav-sync-card", () => ({ WebDavSyncCard: () => null }))
+jest.mock("@/components/settings/data/github-backup-card", () => ({ GithubBackupCard: () => null }))
+jest.mock("@/components/settings/data/google-drive-backup-card", () => ({
+  GoogleDriveBackupCard: () => null,
+}))
 
 beforeEach(() => {
   mockRun.mockReset().mockResolvedValue({ ok: true, canceled: false })

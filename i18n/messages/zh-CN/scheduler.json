@@ -45,8 +45,12 @@
   },
   "backup": {
     "destination": "备份位置",
+    "destinationAllHint": "本地文件加上每个已配置的远端目标。",
+    "destinationGithubHint": "提交到已配置的私有 GitHub 仓库（用同步口令加密）。",
+    "destinationGoogleDriveHint": "上传到已配置的 Google Drive 文件夹（用同步口令加密）。",
     "destinationHint": "选择该定时备份的上传目标。",
     "destinationLocalHint": "保存到应用数据目录下的 /backups/。",
+    "destinationNotConfigured": "未配置（设置 → 数据）",
     "destinationWebdavHint": "上传到「数据与隐私 → 备份」中配置的 WebDAV 服务器。需要本次会话已解锁同步口令。",
     "destinations": {
       "all": "所有已配置目标",

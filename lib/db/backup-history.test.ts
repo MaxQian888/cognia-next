@@ -34,6 +34,19 @@ describe("appendBackupHistory", () => {
     expect(fetched?.filename).toBe("f.cbk")
   })
 
+  it("persists the destination column when supplied", async () => {
+    const row = await appendBackupHistory({
+      completedAt: 5,
+      type: "scheduled",
+      success: true,
+      encryption: "passphrase",
+      destination: "github",
+    })
+    expect(row.destination).toBe("github")
+    const stored = await getDb().backupHistory.get(row.id)
+    expect(stored?.destination).toBe("github")
+  })
+
   it("respects an explicit id when provided", async () => {
     const row = await appendBackupHistory({
       id: "explicit-1",

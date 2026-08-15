@@ -2,12 +2,12 @@
 
 // Cron-driven scheduled backup dialog. Creates a `ScheduledTask` with type
 // `backup` so it routes through the regular scheduler (tab-locked, retried,
-// surfaced under Settings → Scheduled Tasks). Adapted from
-// D:\Project\Cognia\components\scheduler\backup-schedule-dialog.tsx — cloud
-// destinations dropped because cognia-next doesn't have backing systems for
-// WebDAV/GitHub/GoogleDrive/Convex.
+// surfaced under Settings → Scheduled Tasks). Remote destinations (WebDAV,
+// GitHub, Google Drive) are offered as configured in Settings → Data; a
+// destination that is not configured yet is shown disabled with a hint
+// (Working Rule 7 — inert, never hidden). `convex` is deprecated and gone.
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   CalendarIcon,
@@ -40,6 +40,10 @@ import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useScheduler } from "@/hooks/scheduler"
+import {
+  describeBackupDestinationReadiness,
+  type BackupDestinationReadiness,
+} from "@/lib/data/destinations/config"
 import {
   type BackupDestination,
   type BackupTaskPayload,
@@ -76,6 +80,25 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
   const [backupType, setBackupType] = useState<BackupType>("full")
   const [destination, setDestination] = useState<BackupDestination>("local")
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [readiness, setReadiness] = useState<BackupDestinationReadiness[] | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void describeBackupDestinationReadiness()
+      .then((rows) => {
+        if (!cancelled) setReadiness(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setReadiness(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
+  const readinessOf = (target: BackupDestination): BackupDestinationReadiness["state"] =>
+    readiness?.find((row) => row.destination === target)?.state ?? "not-configured"
 
   const [maxRetries, setMaxRetries] = useState(DEFAULT_EXECUTION_CONFIG.maxRetries)
   const [retryDelay, setRetryDelay] = useState(DEFAULT_EXECUTION_CONFIG.retryDelay)
@@ -245,13 +268,39 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
               <SelectContent>
                 <SelectItem value="local">{t("backup.destinations.local")}</SelectItem>
                 <SelectItem value="webdav">{t("backup.destinations.webdav")}</SelectItem>
+                <SelectItem
+                  value="github"
+                  disabled={readinessOf("github") !== "ready"}
+                  data-testid="backup-destination-github"
+                >
+                  {t("backup.destinations.github")}
+                  {readinessOf("github") !== "ready"
+                    ? ` — ${t("backup.destinationNotConfigured")}`
+                    : ""}
+                </SelectItem>
+                <SelectItem
+                  value="googledrive"
+                  disabled={readinessOf("googledrive") !== "ready"}
+                  data-testid="backup-destination-googledrive"
+                >
+                  {t("backup.destinations.googledrive")}
+                  {readinessOf("googledrive") !== "ready"
+                    ? ` — ${t("backup.destinationNotConfigured")}`
+                    : ""}
+                </SelectItem>
                 <SelectItem value="all">{t("backup.destinations.all")}</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
               {destination === "local"
                 ? t("backup.destinationLocalHint")
-                : t("backup.destinationWebdavHint")}
+                : destination === "webdav"
+                  ? t("backup.destinationWebdavHint")
+                  : destination === "github"
+                    ? t("backup.destinationGithubHint")
+                    : destination === "googledrive"
+                      ? t("backup.destinationGoogleDriveHint")
+                      : t("backup.destinationAllHint")}
             </p>
           </div>
 

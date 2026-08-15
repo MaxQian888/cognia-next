@@ -45,8 +45,12 @@
   },
   "backup": {
     "destination": "Backup Destination",
+    "destinationAllHint": "Local file plus every configured remote destination.",
+    "destinationGithubHint": "Committed to the configured private GitHub repository (encrypted with the sync passphrase).",
+    "destinationGoogleDriveHint": "Uploaded to the configured Google Drive folder (encrypted with the sync passphrase).",
     "destinationHint": "Choose where this scheduled backup should be uploaded.",
     "destinationLocalHint": "Saved to the app data directory under /backups/.",
+    "destinationNotConfigured": "not configured (Settings → Data)",
     "destinationWebdavHint": "Uploaded to the WebDAV server configured in Data & Privacy → Backup. Requires the sync passphrase to be unlocked this session.",
     "destinations": {
       "all": "All Configured Targets",

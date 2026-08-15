@@ -165,6 +165,12 @@ export type NotificationChannel = "desktop" | "toast" | "webhook" | "im" | "none
 
 export type BackupTaskType = "full" | "sessions" | "settings" | "plugins" | "all"
 
+/**
+ * Backup targets. `local` / `webdav` / `github` / `googledrive` have wired
+ * uploaders (`lib/data/destinations/`); `all` = local + every remote.
+ * `convex` is DEPRECATED — kept only so persisted rows keep type-checking;
+ * the executor refuses it with a clear message and the UI never offers it.
+ */
 export type BackupDestination = "local" | "webdav" | "github" | "googledrive" | "convex" | "all"
 
 export interface BackupSelectionOptions {

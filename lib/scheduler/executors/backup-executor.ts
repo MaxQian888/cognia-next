@@ -12,9 +12,12 @@
 //
 // Host gate: needs the host filesystem (`lib/scheduler/host-support.ts`), so it
 // runs on the desktop and the headless brain and is refused with a structured
-// reason elsewhere. Destinations: `local` writes the auto-key-encrypted package
-// to disk; `webdav` uploads a sync-passphrase-encrypted snapshot; `all` does
-// both. Other cloud targets (github/googledrive/convex) remain unsupported.
+// reason elsewhere. The local leg writes through `lib/data/backup-host-filesystem`
+// (Tauri plugin-fs on the desktop, the injected Node adapter on the brain).
+// Destinations: `local` writes the auto-key-encrypted package to disk;
+// `webdav` / `github` / `googledrive` upload a sync-passphrase-encrypted
+// snapshot through `lib/data/destinations`; `all` does local + every remote.
+// `convex` is deprecated.
 
 import type { ScheduledTask, TaskExecution, TaskExecutorResult } from "@/types/scheduler"
 import type {
@@ -35,8 +38,10 @@ import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@cognia/a
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { loggers } from "@cognia/logging"
-import { dispatchBackupDestination } from "@/lib/data/destinations"
+import { dispatchBackupDestination, remoteLegsFor } from "@/lib/data/destinations"
+import { isDeprecatedBackupDestination } from "@/lib/data/destinations/config"
 import { encryptSnapshotBody, webdavSnapshotName } from "@/lib/data/destinations/webdav"
+import { resolveBackupHostFilesystem } from "@/lib/data/backup-host-filesystem"
 import { getSyncPassphrase } from "@/lib/webdav/passphrase-cache"
 import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
 
@@ -107,34 +112,29 @@ function payloadToBuildOptions(
   }
 }
 
-// Destinations the executor actually fires. `local`/`undefined` → disk;
-// `webdav` → upload; `all` → both. A destination is supported iff it targets at
-// least one wired backend — derived from the two `wants*` predicates so the
-// enum literals live in exactly one place each.
+// Destinations the executor fires. `local`/`undefined` → host filesystem;
+// `webdav` / `github` / `googledrive` → the matching remote uploader; `all` →
+// local + every remote. A destination is supported iff it targets at least one
+// wired backend — `convex` is deprecated (see `lib/data/destinations/config.ts`).
 function wantsLocal(destination: BackupDestination | undefined): boolean {
   return destination === undefined || destination === "local" || destination === "all"
 }
 
+/** @deprecated kept for `__TESTING__` compatibility; use `remoteLegsFor`. */
 function wantsWebdav(destination: BackupDestination | undefined): boolean {
-  return destination === "webdav" || destination === "all"
+  return remoteLegsFor(destination).includes("webdav")
 }
 
 function isSupportedDestination(destination: BackupDestination | undefined): boolean {
-  return wantsLocal(destination) || wantsWebdav(destination)
+  if (isDeprecatedBackupDestination(destination)) return false
+  return wantsLocal(destination) || remoteLegsFor(destination).length > 0
 }
 
-async function resolveBackupPath(filename: string): Promise<string> {
-  const { appDataDir, join } = await import("@tauri-apps/api/path")
-  const { mkdir } = await import("@tauri-apps/plugin-fs")
-  const root = await appDataDir()
-  const dir = await join(root, "backups")
-  try {
-    await mkdir(dir, { recursive: true })
-  } catch {
-    // Directory already exists or can't be created — `writeTextFile` will surface a
-    // useful error if the path is genuinely unwritable.
-  }
-  return join(dir, filename)
+/** Human-readable name of a remote leg for messages/history rows. */
+const REMOTE_LEG_LABEL: Record<"webdav" | "github" | "googledrive", string> = {
+  webdav: "WebDAV",
+  github: "GitHub",
+  googledrive: "Google Drive",
 }
 
 export async function executeBackupTask(
@@ -146,14 +146,16 @@ export async function executeBackupTask(
   const destination = payload.destination
 
   if (!isSupportedDestination(destination)) {
-    const error = `Backup destination "${destination}" is not supported in cognia-next; only "local"/"webdav"/"all" are wired up.`
-    await safelyAppendFailure(error)
+    const error = isDeprecatedBackupDestination(destination)
+      ? `Backup destination "${destination}" is deprecated and no longer supported; edit the task to pick local / webdav / github / googledrive.`
+      : `Backup destination "${destination}" is not supported in cognia-next; only "local"/"webdav"/"github"/"googledrive"/"all" are wired up.`
+    await safelyAppendFailure(error, "auto-key", destination)
     return { success: false, error }
   }
 
   const refused = assertTaskTypeSupportedOnHost(task.type)
   if (refused) {
-    await safelyAppendFailure(refused.error)
+    await safelyAppendFailure(refused.error, "auto-key", destination)
     return refused
   }
 
@@ -161,66 +163,101 @@ export async function executeBackupTask(
     const buildOpts = payloadToBuildOptions(payload.backupType, payload.options)
     const basePackage = await buildBackupPackage(buildOpts)
     const output: Record<string, unknown> = {}
+    const remoteLegs = remoteLegsFor(destination)
+    const localOnly = destination === undefined || destination === "local"
 
     if (wantsLocal(destination)) {
-      const passphrase = await getDefaultBackupPassphrase()
-      if (!passphrase) throw new Error("Auto-key not available on this runtime.")
-      const pkg = await attachPortableRetrievalKeys(basePackage, passphrase)
-      const plaintext = serializePackage(pkg)
-      const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
-      const filename = defaultExportFileName(new Date(), "encrypted")
-      const target = await resolveBackupPath(filename)
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs")
-      await writeTextFile(target, body)
-      await appendBackupHistory({
-        completedAt: Date.now(),
-        type: "scheduled",
-        success: true,
-        encryption: "auto-key",
-        sizeBytes: body.length,
-        filename,
-      })
-      output.local = { target, sizeBytes: body.length, filename }
+      const host = await resolveBackupHostFilesystem()
+      const dir = host ? await host.resolveBackupDir() : null
+      if (!host || !dir) {
+        const error = host
+          ? "Local backup skipped — no backup directory is configured on this host (Settings → Data → Auto backup directory)."
+          : "Local backup skipped — this host has no filesystem for backups."
+        await safelyAppendFailure(error, "auto-key", "local")
+        // Local-only tasks fail hard; `all` keeps going and reports the leg.
+        if (localOnly) return { success: false, error }
+        output.local = { skipped: true, error }
+      } else {
+        const passphrase = await getDefaultBackupPassphrase()
+        if (!passphrase) throw new Error("Auto-key not available on this runtime.")
+        const pkg = await attachPortableRetrievalKeys(basePackage, passphrase)
+        const plaintext = serializePackage(pkg)
+        const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
+        const filename = defaultExportFileName(new Date(), "encrypted")
+        const target = host.join(dir, filename)
+        await host.filesystem.writeTextFile(target, body)
+        await appendBackupHistory({
+          completedAt: Date.now(),
+          type: "scheduled",
+          success: true,
+          encryption: "auto-key",
+          sizeBytes: body.length,
+          filename,
+          destination: "local",
+        })
+        output.local = { target, sizeBytes: body.length, filename }
+      }
     }
 
-    if (wantsWebdav(destination)) {
+    if (remoteLegs.length > 0) {
       const syncPass = getSyncPassphrase()
       if (!syncPass) {
         const error =
-          "WebDAV upload skipped — unlock the sync passphrase this session to enable it."
-        await safelyAppendFailure(error, "passphrase")
-        // For a webdav-only task this is a hard failure; for `all` the local
+          "Remote upload skipped — unlock the sync passphrase this session to enable it."
+        await safelyAppendFailure(error, "passphrase", destination)
+        // For a remote-only task this is a hard failure; for `all` the local
         // backup already succeeded, so keep going and report partial success —
-        // but surface the skipped leg in `output` so it isn't silent at the
+        // but surface the skipped legs in `output` so they aren't silent at the
         // result level (and the next scheduled tick retries the upload).
-        if (destination === "webdav") return { success: false, error }
-        output.webdav = { skipped: true, error }
+        if (!wantsLocal(destination)) return { success: false, error }
+        for (const leg of remoteLegs) output[leg] = { skipped: true, error }
       } else {
         const pkg = await attachPortableRetrievalKeys(basePackage, syncPass)
         const plaintext = serializePackage(pkg)
         const body = await encryptSnapshotBody(plaintext, pkg, syncPass)
         const filename = webdavSnapshotName(pkg.manifest.exportedAt)
-        const result = await dispatchBackupDestination("webdav", body, {
-          filename,
-          exportedAt: pkg.manifest.exportedAt,
-          sizeBytes: body.length,
-        })
-        if (result.ok) {
-          await appendBackupHistory({
-            completedAt: Date.now(),
-            type: "scheduled",
-            success: true,
-            encryption: "passphrase",
-            sizeBytes: body.length,
-            filename,
-          })
-          output.webdav = { target: result.target, sizeBytes: body.length, filename }
-          await stampWebdavLastSync()
-        } else {
-          const error = result.error ?? "WebDAV upload failed."
-          await safelyAppendFailure(error, "passphrase")
-          if (destination === "webdav") return { success: false, error }
-          output.webdav = { failed: true, error }
+        const meta = { filename, exportedAt: pkg.manifest.exportedAt, sizeBytes: body.length }
+        let anyRemoteSucceeded = false
+        for (const leg of remoteLegs) {
+          const result = await dispatchBackupDestination(leg, body, meta)
+          if (result.ok) {
+            anyRemoteSucceeded = true
+            await appendBackupHistory({
+              completedAt: Date.now(),
+              type: "scheduled",
+              success: true,
+              encryption: "passphrase",
+              sizeBytes: body.length,
+              filename,
+              destination: leg,
+            })
+            output[leg] = { target: result.target, sizeBytes: body.length, filename }
+            if (leg === "webdav") await stampWebdavLastSync()
+          } else {
+            const error =
+              result.error ??
+              `${REMOTE_LEG_LABEL[leg as keyof typeof REMOTE_LEG_LABEL] ?? leg} upload failed.`
+            await safelyAppendFailure(error, "passphrase", leg)
+            output[leg] = { failed: true, error }
+          }
+        }
+        // A single-remote task fails when its one leg failed; `all` (or a
+        // remote-only fan-out) fails only when every remote leg failed and
+        // there was no local success to report.
+        const remoteFailures = remoteLegs.filter(
+          (leg) => (output[leg] as { failed?: boolean } | undefined)?.failed
+        )
+        if (remoteFailures.length > 0 && !wantsLocal(destination) && !anyRemoteSucceeded) {
+          const first = output[remoteFailures[0]] as { error?: string }
+          return { success: false, output, error: first.error ?? "Remote upload failed." }
+        }
+        if (
+          remoteFailures.length === remoteLegs.length &&
+          remoteLegs.length === 1 &&
+          !wantsLocal(destination)
+        ) {
+          const first = output[remoteFailures[0]] as { error?: string }
+          return { success: false, output, error: first.error ?? "Remote upload failed." }
         }
       }
     }
@@ -237,7 +274,7 @@ export async function executeBackupTask(
     return { success: true, output }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
-    await safelyAppendFailure(error)
+    await safelyAppendFailure(error, "auto-key", destination)
     log.error("Scheduler backup task failed", { taskId: task.id, error })
     return { success: false, error }
   }
@@ -276,7 +313,8 @@ async function stampWebdavLastSync(): Promise<void> {
 
 async function safelyAppendFailure(
   errorMessage: string,
-  encryption: BackupHistoryEncryption = "auto-key"
+  encryption: BackupHistoryEncryption = "auto-key",
+  destination?: BackupDestination
 ): Promise<void> {
   try {
     await appendBackupHistory({
@@ -285,6 +323,7 @@ async function safelyAppendFailure(
       success: false,
       encryption,
       errorMessage,
+      destination,
     })
   } catch {
     // Don't let history failures mask the real error in the result.

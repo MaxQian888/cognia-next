@@ -22,7 +22,7 @@ const hostState = (platformDetect as unknown as { __hostState: { tauri: boolean 
 
 const writeTextFileMock = jest.fn(async (_path: string, _body: string) => {})
 const mkdirMock = jest.fn(async (_path: string, _opts?: unknown) => {})
-const attachPortableRetrievalKeysMock = jest.fn(async (pkg: unknown) => pkg)
+const attachPortableRetrievalKeysMock = jest.fn(async (pkg: unknown, _passphrase?: string) => pkg)
 
 jest.mock(
   "@tauri-apps/plugin-fs",
@@ -54,6 +54,7 @@ const dispatchMock = jest.fn(
   })
 )
 jest.mock("@/lib/data/destinations", () => ({
+  ...jest.requireActual("@/lib/data/destinations"),
   dispatchBackupDestination: (...args: unknown[]) => dispatchMock(...args),
 }))
 jest.mock("@/lib/data/retrieval-key-backup", () => ({
@@ -204,17 +205,60 @@ describe("executeBackupTask", () => {
     expect(history[0]).toMatchObject({ success: false, encryption: "passphrase" })
   })
 
-  it("`all` writes to disk AND uploads to webdav", async () => {
+  it("`all` writes to disk AND fans out to every remote leg (webdav, github, googledrive)", async () => {
     syncPassphrase = "sync-pass"
     const task = makeTask({ destination: "all" })
     const result = await executeBackupTask(task, makeExecution(), new AbortController().signal)
     expect(result.success).toBe(true)
     expect(writeTextFileMock).toHaveBeenCalledTimes(1)
-    expect(dispatchMock).toHaveBeenCalledTimes(1)
+    expect(dispatchMock.mock.calls.map((call) => call[0])).toEqual([
+      "webdav",
+      "github",
+      "googledrive",
+    ])
     expect(attachPortableRetrievalKeysMock.mock.calls.map((call) => call[1])).toEqual([
       expect.any(String),
       "sync-pass",
     ])
+    const history = await listBackupHistory()
+    expect(
+      history
+        .filter((row) => row.success)
+        .map((row) => row.destination)
+        .sort()
+    ).toEqual(["github", "googledrive", "local", "webdav"])
+  })
+
+  it("a single remote destination (github) fails hard when its upload fails", async () => {
+    syncPassphrase = "sync-pass"
+    dispatchMock.mockResolvedValueOnce({ ok: false, error: "public repo" })
+    const task = makeTask({ destination: "github" })
+    const result = await executeBackupTask(task, makeExecution(), new AbortController().signal)
+    expect(result.success).toBe(false)
+    expect(result.error).toBe("public repo")
+    expect(writeTextFileMock).not.toHaveBeenCalled()
+    dispatchMock.mockResolvedValueOnce({ ok: true, target: "o/r:cognia-backups/x" })
+    const ok = await executeBackupTask(
+      makeTask({ destination: "googledrive" }),
+      makeExecution(),
+      new AbortController().signal
+    )
+    expect(ok.success).toBe(true)
+    expect((ok.output as { googledrive: { target: string } }).googledrive.target).toBe(
+      "o/r:cognia-backups/x"
+    )
+  })
+
+  it("refuses the deprecated convex destination with an actionable error", async () => {
+    const result = await executeBackupTask(
+      makeTask({ destination: "convex" }),
+      makeExecution(),
+      new AbortController().signal
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/deprecated/)
+    const history = await listBackupHistory()
+    expect(history[0]).toMatchObject({ success: false, destination: "convex" })
   })
 
   it("`all` keeps partial success but surfaces a locked webdav leg in output", async () => {
@@ -300,6 +344,71 @@ describe("payloadToBuildOptions", () => {
   })
 })
 
+describe("payload → build options", () => {
+  it("maps every backup type to an exact ExportOptions contract", () => {
+    const { payloadToBuildOptions } = __TESTING__
+    expect(payloadToBuildOptions("sessions", undefined)).toMatchObject({
+      includeApiKey: false,
+      includeSessions: true,
+      includeSettings: false,
+      includePlugins: false,
+    })
+    expect(payloadToBuildOptions("settings", undefined)).toMatchObject({
+      includeSettings: true,
+      includeLocalStorage: true,
+      includeArtifacts: false,
+    })
+    expect(payloadToBuildOptions("plugins", undefined)).toMatchObject({ includePlugins: true })
+    expect(payloadToBuildOptions("all", undefined)).toMatchObject({
+      includeSessions: true,
+      includePlugins: true,
+      includeArtifacts: true,
+    })
+    expect(
+      payloadToBuildOptions("full", {
+        includeSessions: false,
+        includeIndexedDB: false,
+        includeArtifacts: false,
+      })
+    ).toMatchObject({ includeSessions: false, includeCoreData: false, includeArtifacts: false })
+  })
+})
+
+describe("local leg without a writable host directory", () => {
+  it("fails a local-only task but keeps `all` going with a skipped local leg", async () => {
+    // Injected host without a configured directory (headless brain, no dirPath).
+    const { setBackupHostFilesystem, createInjectedBackupHost } =
+      await import("@/lib/data/backup-host-filesystem")
+    const dispose = setBackupHostFilesystem(
+      createInjectedBackupHost({
+        writeTextFile: async () => undefined,
+        readDirNames: async () => [],
+        remove: async () => undefined,
+      })
+    )
+    try {
+      const local = await executeBackupTask(
+        makeTask({ destination: "local" }),
+        makeExecution(),
+        new AbortController().signal
+      )
+      expect(local.success).toBe(false)
+      expect(local.error).toMatch(/no backup directory/)
+      syncPassphrase = "sync-pass"
+      const all = await executeBackupTask(
+        makeTask({ destination: "all" }),
+        makeExecution(),
+        new AbortController().signal
+      )
+      expect(all.success).toBe(true)
+      expect((all.output as { local: { skipped: boolean } }).local.skipped).toBe(true)
+      expect(dispatchMock).toHaveBeenCalledTimes(3)
+    } finally {
+      dispose()
+    }
+  })
+})
+
 describe("destination helpers", () => {
   it("supports local / webdav / all / undefined, rejects other clouds", () => {
     expect(__TESTING__.isSupportedDestination(undefined)).toBe(true)
@@ -307,7 +416,8 @@ describe("destination helpers", () => {
     expect(__TESTING__.isSupportedDestination("webdav")).toBe(true)
     expect(__TESTING__.isSupportedDestination("all")).toBe(true)
     expect(__TESTING__.isSupportedDestination("convex")).toBe(false)
-    expect(__TESTING__.isSupportedDestination("github")).toBe(false)
+    expect(__TESTING__.isSupportedDestination("github")).toBe(true)
+    expect(__TESTING__.isSupportedDestination("googledrive")).toBe(true)
   })
 
   it("routes local vs webdav intent", () => {

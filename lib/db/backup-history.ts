@@ -32,6 +32,12 @@ export interface BackupHistoryRow {
   /** When `success === false`, the human-readable error. */
   errorMessage?: string
   /**
+   * Which destination this row describes (additive 2026-08-16 — non-indexed,
+   * no Dexie bump; old rows lack it and read as "local"). One row per remote
+   * leg when a scheduled backup fans out to `all`.
+   */
+  destination?: "local" | "webdav" | "github" | "googledrive" | "convex" | "all"
+  /**
    * Provenance of the device that produced the snapshot (additive 2026-06 —
    * no Dexie index change; old rows simply lack it). Mirrors
    * `BackupManifestV3.device`.
@@ -64,6 +70,7 @@ export async function appendBackupHistory(
     errorMessage: partial.errorMessage,
     deviceId: partial.deviceId,
     deviceLabel: partial.deviceLabel,
+    destination: partial.destination,
     schemaVersion: 3,
   }
   await db.transaction("rw", db.backupHistory, async () => {

@@ -5,6 +5,15 @@ import { BackupScheduleDialog } from "./backup-schedule-dialog"
 const createTask = jest.fn()
 const onScheduled = jest.fn()
 
+const readinessMock = jest.fn(async () => [
+  { destination: "local", state: "ready" },
+  { destination: "github", state: "not-configured", reason: "github" },
+  { destination: "googledrive", state: "ready" },
+  { destination: "convex", state: "deprecated" },
+])
+jest.mock("@/lib/data/destinations/config", () => ({
+  describeBackupDestinationReadiness: () => readinessMock(),
+}))
 jest.mock("@/hooks/scheduler", () => ({
   useScheduler: () => ({
     createTask,
@@ -45,9 +54,19 @@ const messages = {
       type: "Backup type",
       types: { full: "Full", sessions: "Sessions only", settings: "Settings only", all: "All" },
       destination: "Destination",
-      destinations: { local: "Local file", webdav: "WebDAV Server", all: "All targets" },
+      destinations: {
+        local: "Local file",
+        webdav: "WebDAV Server",
+        github: "GitHub Repository",
+        googledrive: "Google Drive",
+        all: "All targets",
+      },
       destinationLocalHint: "Saved to appDataDir()/backups.",
       destinationWebdavHint: "Uploaded to the configured WebDAV server.",
+      destinationGithubHint: "Committed to GitHub.",
+      destinationGoogleDriveHint: "Uploaded to Drive.",
+      destinationAllHint: "Everything.",
+      destinationNotConfigured: "not configured",
       includeOptions: "Include in backup",
       options: {
         sessions: "Sessions",
@@ -80,8 +99,8 @@ describe("BackupScheduleDialog", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument()
     // The destination select shows the default (local) selection.
     expect(screen.getByText(/local file/i)).toBeInTheDocument()
-    // Unsupported clouds (github/googledrive/convex) are not offered.
-    expect(screen.queryByText(/google drive/i)).not.toBeInTheDocument()
+    // Deprecated convex is gone; github/googledrive are offered but disabled
+    // until configured (Working Rule 7 — inert, never hidden).
     expect(screen.queryByText(/convex/i)).not.toBeInTheDocument()
   })
 

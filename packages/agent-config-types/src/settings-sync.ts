@@ -264,6 +264,7 @@ export const SETTINGS_SYNC = {
   backupReminderDismissedAt: { category: "desktop-only" },
   backupAutoSchedule: { category: "desktop-only" },
   a2uiDefaultEnabled: { category: "desktop-only" },
+  backupDestinations: { category: "desktop-only" },
   a2uiDefaultCatalogId: { category: "desktop-only" },
   a2uiDefaultHostStrategy: { category: "desktop-only" },
   a2uiDefaultTheme: { category: "desktop-only" },

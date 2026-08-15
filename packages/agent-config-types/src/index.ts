@@ -4129,6 +4129,14 @@ export interface AppSettings {
    *   reorder / inline edit / add / remove steps) instead of the static list.
    * - `interactiveHtmlStyle` — built-in visual preset for the interactive
    *   editor (mirrors `lib/agent/plan/plan-html.ts:PLAN_HTML_STYLES`).
+  /**
+   * Remote backup destinations beyond WebDAV (spec 2026-08-16 scheduler
+   * host-neutral, D). Non-secret fields only — the GitHub token, the Google
+   * OAuth client secret and the Google refresh/access tokens live in the host
+   * keyring under the `backup-destinations` namespace
+   * (`lib/data/destinations/config.ts`).
+   */
+  backupDestinations?: BackupDestinationsSettings
    */
   planSettings?: {
     requireApproval?: boolean
@@ -4745,6 +4753,59 @@ export interface McpServer {
   pluginId?: string
   /** Bare tool names denied whenever this server is attached to an agent run. */
   disallowedTools?: string[]
+/**
+ * GitHub backup destination: encrypted snapshots are committed to a PRIVATE
+ * repository through the contents API. Public repositories are refused at
+ * configuration time and again before every upload.
+ */
+export interface GithubBackupDestinationSettings {
+  enabled: boolean
+  /** `owner/name`. */
+  repo: string
+  /** Branch to commit to; defaults to the repository's default branch. */
+  branch?: string
+  /** Directory inside the repo; default `cognia-backups`. */
+  path?: string
+  /**
+   * Where the token comes from: a stored auth session of the built-in
+   * `github-pat` / `github-app` providers, or a PAT saved in the keyring by
+   * the settings card. The token itself never lives here.
+   */
+  credential?:
+    | { kind: "auth-session"; providerId: "github-pat" | "github-app"; sessionId: string }
+    | { kind: "keyring" }
+  /** ISO timestamp of the last successful upload. */
+  lastSyncAt?: string
+  /** Last verified visibility (`private` required); refreshed on connect. */
+  lastVerifiedVisibility?: "private" | "public" | "unknown"
+}
+
+/**
+ * Google Drive backup destination (OAuth 2.0 device flow, `drive.file` scope).
+ * The user supplies their own OAuth client id (installed-app type); the client
+ * secret and the tokens are keyring-only.
+ */
+export interface GoogleDriveBackupDestinationSettings {
+  enabled: boolean
+  /** OAuth 2.0 client id of the user's Google Cloud "Desktop app" credential. */
+  clientId?: string
+  /** Drive folder name (created under My Drive when missing); default `Cognia Backups`. */
+  folderName?: string
+  /** Resolved folder id once created/found. */
+  folderId?: string
+  /** Google account email the tokens belong to (display only). */
+  accountEmail?: string
+  /** ISO timestamp of the last successful upload. */
+  lastSyncAt?: string
+  /** True once a refresh token has been stored (display only; the tokens live in the keyring). */
+  connected?: boolean
+}
+
+export interface BackupDestinationsSettings {
+  github?: GithubBackupDestinationSettings
+  googleDrive?: GoogleDriveBackupDestinationSettings
+}
+
   /** Human-facing label; changing it never changes the SDK namespace. */
   displayName?: string
   /** Persisted governance contract version. Legacy rows omit this until migration. */
