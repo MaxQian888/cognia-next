@@ -77,7 +77,7 @@ Cross-cutting concerns of the desktop shell (command palette, approval dialogs, 
 - **Character / preset selector** — a Popover containing `<Select>`, collaborating with the `usePresets()` + `useCharacter()` data hooks.
 - **Export trigger** — `single-export-trigger.tsx` (`components/chat/dialogs/`), opens a dialog with five options: Markdown / JSON / Plain text / Beautiful HTML / Animated HTML. See [Backup & Data](../data/backup-and-data#single-session-export) for details.
 - **Session cost badge** — `session-cost-badge.tsx`, accumulating tokens and cost estimates.
-- **Agent-flow display toggle** — `agent-flow-display-toggle.tsx`, a 3-way `ToggleGroup` (simplified / standard / detailed) driving the global agent-flow display mode (see [Agent-flow display modes](#agent-flow-display-modes)).
+- **Message display controls** — the per-session `MessageDisplayControls` block inside `session-settings-sheet.tsx` (opened from the header gear) drives preset, layout, agent-flow, reasoning/tool disclosure and metadata (ADR-0114; the former standalone `agent-flow-display-toggle.tsx` was removed in ADR-0127).
 - **Twin badge** — `twin-header-badge.tsx`, displayed when the session is bound to an employee digital twin.
 - **Permission mode indicator** — `permission-mode-indicator.tsx`: allow / deny / ask / plan.
 
@@ -174,7 +174,7 @@ The agent invocation flow (tool calls, reasoning, sub-agents) renders in one of 
 | **detailed** | Every card force-expanded with full input/output. | Reasoning + sub-agent trees expanded. |
 
 - **State** — `AppSettings.agentFlowMode` (`{ mode }`), read/written through `hooks/chat/use-agent-flow-mode.ts` (`useAgentFlowMode`). Defaults to `standard`; persisted via the settings store's generic `save()`.
-- **Two entry points, one value** — the chat-header quick toggle (`components/chat/agent-flow-display-toggle.tsx`, a 3-way `ToggleGroup`) and the appearance settings card (`components/settings/appearance/components/agent-flow-card.tsx`) both drive the same preference, so switching from either place applies everywhere.
+- **Two entry points, one value** — the session settings sheet (`MessageDisplayControls`, per-session override) and the appearance settings card (`components/settings/appearance/components/message-display-card.tsx`, global) both write `messageDisplay.overrides.agentFlowMode`; `AppSettings.agentFlowMode` survives only as a legacy read fallback (ADR-0114 / ADR-0127).
 - **One-line summaries** — `lib/chat/tool-summary.ts` (`summarizeToolCall`) extracts a concise target per tool (file basename, command head, pattern, url host, query…) plus an icon bucket.
 - **Result summaries** — `lib/chat/tool-result-summary.ts` (`describeToolResult`) distills a tool's *output* into a compact, i18n-neutral descriptor — grep → `matches`, glob → `files`, ls → `entries`, read/bash → `lines`, edit/write → `diff` (`+N −M` from the input), and any errored tool → the first error line. The descriptor's `tone` (`neutral`/`success`/`error`) colours the chip; the row component (`ToolResultChip`) maps `kind` → a translated label (`chat.agentFlow.result.*`). Returns `null` while still streaming or when there's no natural summary, so the chip never shows a premature "0". Logic mirrors the CLI's `cli/src/tui/format/tools.ts` result helpers, adapted to the web `ToolUIPart` shape (string / MCP content-block arrays / objects). Note tool parts carry **no per-tool timing**, so no fabricated durations are shown.
 

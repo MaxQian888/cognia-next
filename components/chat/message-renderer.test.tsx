@@ -206,6 +206,26 @@ jest.mock("./read-aloud-button", () => ({
     ReactForMocks.createElement("div", { "data-testid": "read-aloud", "data-msg": messageId }),
 }))
 
+// Checkpoint action: capture the `rewindFiles` closure the renderer hands it so
+// the memo-comparator test below can prove a changed `onRewindFiles` identity
+// reaches the action (its own UI is covered by checkpoint-action.test.tsx).
+const checkpointActionProps: Array<{
+  checkpointId: string
+  rewindFiles: (checkpointId: string, dryRun: boolean) => unknown
+}> = []
+jest.mock("@/components/chat/checkpoint-action", () => ({
+  CheckpointAction: (props: {
+    checkpointId: string
+    rewindFiles: (checkpointId: string, dryRun: boolean) => unknown
+  }) => {
+    checkpointActionProps.push(props)
+    return ReactForMocks.createElement("div", {
+      "data-testid": "checkpoint-action",
+      "data-msg": props.checkpointId,
+    })
+  },
+}))
+
 jest.mock("@/hooks/ui/use-copy", () => ({
   useCopy: () => ({ copied: false, copy: jest.fn(async () => true) }),
 }))
@@ -314,7 +334,7 @@ jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
     ReactForMocks.createElement("div", { "data-test": "tool-call-row", "data-type": part.type }),
 }))
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import { MessageRenderer } from "./message-renderer"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -504,9 +524,9 @@ describe("commentary parts", () => {
     render(<MessageRenderer message={msg} isStreaming />)
 
     expect(
-      screen.getAllByRole("status").find((node) =>
-        node.textContent?.includes("Checking the affected files")
-      )
+      screen
+        .getAllByRole("status")
+        .find((node) => node.textContent?.includes("Checking the affected files"))
     ).toBeDefined()
     expect(document.querySelector("[data-test='reasoning']")).toBeNull()
   })
@@ -1068,6 +1088,56 @@ describe("bookmark", () => {
   })
 })
 
+// ── memo comparator ────────────────────────────────────────────────────────────
+
+describe("memo comparator", () => {
+  afterEach(() => {
+    act(() => useChatStore.setState({ activeSessionId: null }))
+    checkpointActionProps.length = 0
+  })
+
+  // ADR-0127 regression: `onRewindFiles` was missing from the custom memo
+  // comparator, so a parent that swapped the callback (new session / new
+  // project root closure) left the row holding the stale one.
+  it("re-renders when only onRewindFiles changes so CheckpointAction gets the new closure", async () => {
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    const display = resolveMessageDisplayOptions({ preset: "inspector" })
+    const first = jest.fn(async () => ({ ok: true }))
+    const second = jest.fn(async () => ({ ok: true }))
+    const message = userMsg("cp1")
+    const { rerender } = render(
+      <MessageRenderer
+        message={message}
+        messageDisplay={display}
+        onRewindFiles={
+          first as unknown as NonNullable<
+            ReactForMocks.ComponentProps<typeof MessageRenderer>["onRewindFiles"]
+          >
+        }
+      />
+    )
+    expect(screen.getByTestId("checkpoint-action")).toHaveAttribute("data-msg", "cp1")
+    await checkpointActionProps.at(-1)!.rewindFiles("cp1", true)
+    expect(first).toHaveBeenCalledWith("sess-1", "cp1", true)
+
+    // Same message object + same display: only the callback identity differs.
+    rerender(
+      <MessageRenderer
+        message={message}
+        messageDisplay={display}
+        onRewindFiles={
+          second as unknown as NonNullable<
+            ReactForMocks.ComponentProps<typeof MessageRenderer>["onRewindFiles"]
+          >
+        }
+      />
+    )
+    await checkpointActionProps.at(-1)!.rewindFiles("cp1", false)
+    expect(second).toHaveBeenCalledWith("sess-1", "cp1", false)
+    expect(first).toHaveBeenCalledTimes(1)
+  })
+})
+
 // ── branch action ──────────────────────────────────────────────────────────────
 
 describe("branch action", () => {
@@ -1253,6 +1323,34 @@ describe("read-aloud button", () => {
   it("never shows the read-aloud button on user messages", () => {
     settingsState.settings.ttsEnabled = true
     render(<MessageRenderer message={userMsg("ra3")} />)
+    expect(screen.queryByTestId("read-aloud")).toBeNull()
+  })
+
+  // ADR-0127 regression: the button used to live only in the `actions: "all"`
+  // (inspector) branch, so under the shipped default preset (`balanced` →
+  // `core`) and under `focused` (→ `hover`) TTS-enabled users had no read-aloud
+  // affordance on desktop at all. The mocked hook above resolves to `all`,
+  // which is exactly why the gap went unnoticed — pass the real presets here.
+  it.each(["balanced", "focused"] as const)(
+    "keeps the read-aloud button reachable under the %s preset (non-inspector action bar)",
+    (preset) => {
+      settingsState.settings.ttsEnabled = true
+      const display = resolveMessageDisplayOptions({ preset })
+      expect(display.actions).not.toBe("all")
+      render(<MessageRenderer message={assistantMsg(`ra-${preset}`)} messageDisplay={display} />)
+      const el = screen.getByTestId("read-aloud")
+      expect(el).toHaveAttribute("data-msg", `ra-${preset}`)
+    }
+  )
+
+  it("still hides it under a non-inspector preset when TTS is disabled", () => {
+    settingsState.settings.ttsEnabled = false
+    render(
+      <MessageRenderer
+        message={assistantMsg("ra-off")}
+        messageDisplay={resolveMessageDisplayOptions({ preset: "balanced" })}
+      />
+    )
     expect(screen.queryByTestId("read-aloud")).toBeNull()
   })
 })

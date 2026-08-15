@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { KbdInline, KeyboardShortcut } from "./kbd-inline"
+import { KbdInline } from "./kbd-inline"
 
 const meta = {
   title: "Chat/Renderers/KbdInline",
@@ -29,16 +29,5 @@ export const InProse: Story = {
       Press <KbdInline>/</KbdInline> to open the command palette, then <KbdInline>Enter</KbdInline>{" "}
       to run.
     </p>
-  ),
-}
-
-// Multi-key chord via KeyboardShortcut — keys are platform-formatted.
-export const Shortcut: Story = {
-  render: () => (
-    <div className="flex flex-col gap-3 text-sm">
-      <KeyboardShortcut keys={["cmd", "k"]} />
-      <KeyboardShortcut keys={["ctrl", "shift", "p"]} variant="outline" />
-      <KeyboardShortcut keys={["alt", "enter"]} variant="ghost" />
-    </div>
   ),
 }

@@ -1,6 +1,6 @@
 /**
  * Fixture builders for the chat render-performance benchmark
- * (`tests/e2e/quality/chat-render-perf.spec.ts`).
+ * (`tests/e2e/mobile/chat-render-perf.spec.ts`).
  *
  * Dev/E2E only — reached exclusively through `expose-test-globals.tsx`, which
  * is dead-code-eliminated unless `NEXT_PUBLIC_E2E === "1"`.

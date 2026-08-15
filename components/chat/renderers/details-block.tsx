@@ -61,29 +61,4 @@ export const DetailsBlock = memo(function DetailsBlock({
   )
 })
 
-interface DetailsGroupProps {
-  children: React.ReactNode
-  className?: string
-  allowMultiple?: boolean
-}
-
-export const DetailsGroup = memo(function DetailsGroup({
-  children,
-  className,
-  allowMultiple = true,
-}: DetailsGroupProps) {
-  return (
-    <div
-      className={cn(
-        "space-y-2 my-4",
-        !allowMultiple && "[&>*]:data-[state=open]:border-primary/50",
-        className
-      )}
-      data-allow-multiple={allowMultiple}
-    >
-      {children}
-    </div>
-  )
-})
-
 export default DetailsBlock

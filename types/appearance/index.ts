@@ -432,7 +432,17 @@ export function isUsageDisplayMode(value: unknown): value is UsageDisplayMode {
   return value === "simplified" || value === "standard" || value === "detailed"
 }
 
-/** Defaults filled in by `getSettings()` for back-compat with older rows. */
+/**
+ * The single default source for the appearance-owned settings keys.
+ *
+ * `lib/db/settings.ts` spreads this object into canonical `DEFAULTS` (minus
+ * `agentFlowMode`, the legacy read-only fallback that must stay `undefined` so
+ * it never overrides a preset — ADR-0114 / ADR-0127), which is what makes
+ * every key here visible to per-section reset, the changed-settings review,
+ * and profile transfer. `messageDisplay: { preset: "balanced" }` resolves to
+ * `DEFAULT_MESSAGE_DISPLAY_OPTIONS` in `lib/chat/message-display.ts`; the
+ * resolver's test pins that equivalence.
+ */
 export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   background: DEFAULT_BACKGROUND_SETTINGS,
   wallpapers: [],

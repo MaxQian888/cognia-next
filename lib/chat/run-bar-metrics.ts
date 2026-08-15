@@ -12,20 +12,11 @@ import type { UsageInfo } from "@/lib/claude/adapter"
 import type { RunStatusBarSettings } from "@cognia/agent-config-types"
 import { computeContextWindowUsage, getLatestUsage } from "@/lib/claude/usage"
 
-/**
- * Default metric visibility. Elapsed + output-tokens + speed + tools are on
- * (informative without $ clutter); cost + context% are opt-in — the composer's
- * `ContextUsageIndicator` already carries the exact model-sized context figure
- * right below the bar, so context% here is a redundant convenience.
- */
-export const DEFAULT_RUN_STATUS_BAR: Required<RunStatusBarSettings> = {
-  showElapsed: true,
-  showOutputTokens: true,
-  showSpeed: true,
-  showCost: false,
-  showContextPct: false,
-  showTools: true,
-}
+// Defaults live in the leaf `run-bar-defaults.ts` (no heavy imports) so
+// `lib/db/settings.ts` can spread them into canonical DEFAULTS; re-exported here
+// so existing consumers keep importing from this module.
+export { DEFAULT_RUN_STATUS_BAR } from "./run-bar-defaults"
+import { DEFAULT_RUN_STATUS_BAR } from "./run-bar-defaults"
 
 /**
  * Resolve a stored (possibly absent / partial) {@link RunStatusBarSettings} to

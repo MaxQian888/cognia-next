@@ -837,12 +837,6 @@
       "summaryPlan": "规划",
       "summaryUtility": "辅助"
     },
-    "flowDisplay": {
-      "aria": "Agent 流程展示模式",
-      "detailed": "详细",
-      "simplified": "简化",
-      "standard": "标准"
-    },
     "forkAria": "派生会话",
     "forkSuccess": "已派生新会话，已切换到该分支。",
     "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",

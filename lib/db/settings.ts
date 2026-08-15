@@ -16,7 +16,8 @@ import {
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
   createDefaultSearchUsageStats,
 } from "@cognia/web-search/types"
-import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import { DEFAULT_APPEARANCE_SLICE, DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import { DEFAULT_RUN_STATUS_BAR } from "@/lib/chat/run-bar-defaults"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 import { DEFAULT_GIT_SETTINGS } from "@/types/git"
@@ -238,6 +239,27 @@ export const DEFAULTS: AppSettings = {
 export async function getSettings(): Promise<AppSettings> {
   // Retried across a connection close: this read is what every window makes at
   // boot, right when the plugin table bridge closes and reopens the shared
+  // Appearance slice (ADR-0029 / ADR-0114 / ADR-0127). `DEFAULT_APPEARANCE_SLICE`
+  // is the single default source for the appearance-owned keys; spreading it
+  // here is what makes them canonical `DEFAULTS` keys, so per-section reset,
+  // the changed-settings review, and profile transfer all see them.
+  //
+  // `agentFlowMode` is deliberately NOT defaulted: it is the legacy read-only
+  // fallback for `messageDisplay` (`resolveMessageDisplayOptions`), and a
+  // non-undefined default would override every preset's own agent-flow value.
+  ...omitAgentFlowMode(DEFAULT_APPEARANCE_SLICE),
+  // Run status bar metrics + composer behavior/assistance (Conversation section)
+  // — defaulted here so they are claimable by `SECTION_OWNED_KEYS`.
+  runStatusBar: { ...DEFAULT_RUN_STATUS_BAR },
+  composerBehavior: {},
+  composerAssistance: {},
+}
+
+function omitAgentFlowMode(
+  slice: typeof DEFAULT_APPEARANCE_SLICE
+): Omit<typeof DEFAULT_APPEARANCE_SLICE, "agentFlowMode"> {
+  const { agentFlowMode: _legacy, ...rest } = slice
+  return rest
   // connection to register plugin stores. Losing it used to strand the whole
   // window on DEFAULTS for the rest of the session (see `withDbReopenRetry`).
   const row = await withDbReopenRetry(() => getDb().settings.get(SINGLETON_ID))

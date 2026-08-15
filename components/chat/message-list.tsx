@@ -576,6 +576,7 @@ export function MessageList({
       <MessageRenderer
         message={m}
         characterById={characterById}
+        directCharacter={directCharacter}
         isStreaming={isStreaming}
         isLastAssistant={m.id === lastAssistantId}
         onCopy={onCopy}

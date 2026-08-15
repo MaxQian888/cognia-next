@@ -837,12 +837,6 @@
       "summaryPlan": "Plan",
       "summaryUtility": "Utility"
     },
-    "flowDisplay": {
-      "aria": "Agent flow display mode",
-      "detailed": "Detailed",
-      "simplified": "Simplified",
-      "standard": "Standard"
-    },
     "forkAria": "Fork session",
     "forkSuccess": "Session forked. The new branch is now active.",
     "forkTooltip": "Fork conversation — branches a new session from this one's history",

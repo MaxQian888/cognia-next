@@ -306,6 +306,26 @@ describe("MessageList", () => {
     )
   })
 
+  // ADR-0127 regression: only the mobile `LongPress` branch forwarded
+  // `directCharacter`, so on desktop a 1:1 session's bound voice never reached
+  // `ReadAloudButton` (`speaker ?? directCharacter` resolved to null).
+  it("forwards directCharacter to MessageRenderer on the desktop branch too", () => {
+    const character = { id: "char-1", name: "Nova" } as unknown as NonNullable<
+      ReactForMocks.ComponentProps<typeof MessageList>["directCharacter"]
+    >
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("m1", "hello")]}
+          status="idle"
+          directCharacter={character}
+        />
+      </Wrapper>
+    )
+    expect(messageRendererProps.at(-1)?.directCharacter).toBe(character)
+  })
+
   it("resolves a session presentation override for rows and mobile actions", () => {
     ;(usePlatform as jest.Mock).mockReturnValue("mobile")
     const Wrapper = withAdapter(makeAdapter())

@@ -41,6 +41,11 @@ export const APPEARANCE_CONFIG_KEYS = [
   "autoMode",
   "monacoLink",
   "activeThemePackId",
+  // ADR-0114 / ADR-0127: `messageDisplay` supersedes `agentFlowMode`; both are
+  // exported so an old config still round-trips its legacy value while a new
+  // one carries the live preference (previously only the deprecated field
+  // travelled and the live one was silently dropped).
+  "messageDisplay",
   "agentFlowMode",
   "usageDisplayMode",
 ] as const satisfies readonly (keyof AppSettings)[]

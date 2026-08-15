@@ -9,8 +9,10 @@
  *   2. The outer `MessageRenderer` body (header, mentions, avatar, plugin
  *      slots, action bar) stays out of the per-token render path conceptually.
  *      The memo equality on (text, isStreaming) is a no-op when text changes
- *      per token, but pairs with Stage 4's heavy-block lazy-load + Stage 6's
- *      `<Activity>` to keep the streaming subtree minimal.
+ *      per token, but pairs with the heavy-block `next/dynamic` lazy-load in
+ *      `markdown-renderer.tsx` and the per-block `content-visibility` wrapper
+ *      below to keep the streaming subtree minimal. (An earlier plan mentioned
+ *      React `<Activity>`; it was never adopted here — ADR-0127.)
  *
  * Pairs with the non-streaming text branch in `MessageRenderer`, which
  * routes through `<MarkdownRenderer>` for the finalised message.

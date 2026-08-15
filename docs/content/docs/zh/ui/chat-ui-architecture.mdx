@@ -64,7 +64,7 @@ interface ChatPaneProps {
 - **角色 / 预设选择器** —— Popover 内嵌 `<Select>`，与 `usePresets()` + `useCharacter()` data hook 协作。
 - **导出触发器** —— `single-export-trigger.tsx`（`components/chat/dialogs/`），弹 Markdown / JSON / Plain text / Beautiful HTML / Animated HTML 五选一的对话框。详见 [备份 & 数据](../data/backup-and-data#%E5%8D%95%E4%BC%9A%E8%AF%9D%E5%AF%BC%E5%87%BA)。
 - **会话花费徽章** —— `session-cost-badge.tsx`，累加 token 与费用估算。
-- **Agent 流程展示切换** —— `agent-flow-display-toggle.tsx`，3 档 `ToggleGroup`（简化 / 标准 / 详细），驱动全局 Agent 流程展示模式（见 [Agent 流程展示模式](#agent-流程展示模式)）。
+- **消息展示控件** —— `session-settings-sheet.tsx` 内的会话级 `MessageDisplayControls`（从头部齿轮打开）驱动预设、布局、Agent 流程、推理/工具展开与元数据（ADR-0114；原独立的 `agent-flow-display-toggle.tsx` 已在 ADR-0127 移除）。
 - **Twin 徽章** —— `twin-header-badge.tsx`，会话绑定了员工孪生时显示。
 - **权限模式指示** —— `permission-mode-indicator.tsx`：allow / deny / ask / plan。
 
@@ -161,7 +161,7 @@ Agent 调用流程（工具调用、推理、子代理）按三种**展示模式
 | **详细** | 每张卡强制展开，显示完整输入/输出。 | 推理 + 子代理树展开。 |
 
 - **状态** —— `AppSettings.agentFlowMode`（`{ mode }`），通过 `hooks/chat/use-agent-flow-mode.ts`（`useAgentFlowMode`）读写。默认 `standard`，经设置 store 的通用 `save()` 持久化。
-- **两个入口、同一值** —— 聊天头部快捷切换（`components/chat/agent-flow-display-toggle.tsx`，3 档 `ToggleGroup`）与外观设置卡（`components/settings/appearance/components/agent-flow-card.tsx`）驱动同一偏好，从任一处切换即全局生效。
+- **两个入口、同一值** —— 会话设置抽屉（`MessageDisplayControls`，会话级覆盖）与外观设置卡（`components/settings/appearance/components/message-display-card.tsx`，全局）都写 `messageDisplay.overrides.agentFlowMode`；`AppSettings.agentFlowMode` 仅作为遗留读取回退保留（ADR-0114 / ADR-0127）。
 - **单行摘要** —— `lib/chat/tool-summary.ts`（`summarizeToolCall`）按工具抽取简洁目标（文件名、命令头、模式、URL host、查询…）和图标分类。
 - **结果摘要** —— `lib/chat/tool-result-summary.ts`（`describeToolResult`）把工具**输出**蒸馏成紧凑、i18n 中立的描述符——grep → `matches`、glob → `files`、ls → `entries`、read/bash → `lines`、edit/write → `diff`（从输入算 `+N −M`），任何出错工具 → 首行错误。描述符的 `tone`（`neutral`/`success`/`error`）给 chip 着色；行组件（`ToolResultChip`）把 `kind` 映射成翻译标签（`chat.agentFlow.result.*`）。仍在流式或无自然摘要时返回 `null`，故 chip 不会过早显示"0"。逻辑对齐 CLI `cli/src/tui/format/tools.ts` 的结果助手，适配 Web `ToolUIPart` 形状（字符串 / MCP 内容块数组 / 对象）。注意工具 part **不携带逐工具时间**，故不显示任何捏造的耗时。
 

@@ -2,8 +2,8 @@
 
 /**
  * Quick 3-way toggle for the usage / consumption display mode, mounted in the
- * Subscription → Usage toolbar. Mirrors the chat-header `AgentFlowDisplayToggle`
- * (shadcn `ToggleGroup`) but is bound to the global `useUsageDisplayMode`, so it
+ * Subscription → Usage toolbar. A shadcn `ToggleGroup` bound to the global
+ * `useUsageDisplayMode`, so it
  * stays in sync with the appearance settings card and applies to every usage
  * surface (dashboard, composer read-out, agent-team tile, mobile stats).
  */

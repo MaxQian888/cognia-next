@@ -85,4 +85,16 @@ describe("appearance-config-io", () => {
     expect(APPEARANCE_CONFIG_KEYS).not.toContain("wallpapers")
     expect(APPEARANCE_CONFIG_KEYS).not.toContain("background")
   })
+
+  it("round-trips the live messageDisplay preference, not only the legacy agentFlowMode (ADR-0127)", () => {
+    expect(APPEARANCE_CONFIG_KEYS).toContain("messageDisplay")
+    expect(APPEARANCE_CONFIG_KEYS).toContain("agentFlowMode")
+    const doc = exportAppearanceConfig({
+      messageDisplay: { preset: "inspector", overrides: { layout: "cards" } },
+      agentFlowMode: { mode: "detailed" },
+    })
+    const patch = importAppearanceConfig(doc)
+    expect(patch.messageDisplay).toEqual({ preset: "inspector", overrides: { layout: "cards" } })
+    expect(patch.agentFlowMode).toEqual({ mode: "detailed" })
+  })
 })

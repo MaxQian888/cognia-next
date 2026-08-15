@@ -29,21 +29,43 @@ function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n
 }
 
+/** Normalized (0..1) marker positions for absolute turn `starts` in a `total`-px scroll range. */
+export function computeTurnPositions(starts: number[], total: number): number[] {
+  return total <= 0 ? starts.map(() => 0) : starts.map((start) => clamp01(start / total))
+}
+
 /**
- * Pure geometry math, split out so it can be unit-tested without a DOM. Given
- * the scroll metrics and the absolute pixel `starts` of each turn, produce the
- * fractional positions, the viewport window, and the active turn (the last
- * turn whose start sits at/above a small probe below the viewport top).
+ * Pure geometry math shared by the hook and its unit tests. Given the scroll
+ * metrics and the absolute pixel `starts` of each turn, produce the fractional
+ * positions, the viewport window, and the active turn (the last turn whose
+ * start sits at/above a small probe below the viewport top). The hook passes
+ * its cached `positions` so a plain scroll never recomputes them; callers
+ * without a cache may omit them.
  */
 export function computeTimelineGeometry(params: {
   scrollTop: number
   clientHeight: number
   total: number
   starts: number[]
+  positions?: number[]
 }): TimelineGeometry {
   const { scrollTop, clientHeight, total, starts } = params
-  const positions = total <= 0 ? starts.map(() => 0) : starts.map((start) => clamp01(start / total))
-  return computeViewportGeometry({ scrollTop, clientHeight, total, starts, positions })
+  const positions = params.positions ?? computeTurnPositions(starts, total)
+  if (total <= 0) {
+    return {
+      positions,
+      viewportTop: 0,
+      viewportHeight: 1,
+      activeIndex: starts.length ? 0 : -1,
+    }
+  }
+  const probe = scrollTop + Math.min(clientHeight * 0.3, 120)
+  return {
+    positions,
+    viewportTop: clamp01(scrollTop / total),
+    viewportHeight: clamp01(clientHeight / total),
+    activeIndex: findActiveIndex(starts, probe),
+  }
 }
 
 function findActiveIndex(starts: number[], probe: number): number {
@@ -61,31 +83,6 @@ function findActiveIndex(starts: number[], probe: number): number {
     }
   }
   return found
-}
-
-function computeViewportGeometry(params: {
-  scrollTop: number
-  clientHeight: number
-  total: number
-  starts: number[]
-  positions: number[]
-}): TimelineGeometry {
-  const { scrollTop, clientHeight, total, starts, positions } = params
-  if (total <= 0) {
-    return {
-      positions,
-      viewportTop: 0,
-      viewportHeight: 1,
-      activeIndex: starts.length ? 0 : -1,
-    }
-  }
-  const probe = scrollTop + Math.min(clientHeight * 0.3, 120)
-  return {
-    positions,
-    viewportTop: clamp01(scrollTop / total),
-    viewportHeight: clamp01(clientHeight / total),
-    activeIndex: findActiveIndex(starts, probe),
-  }
 }
 
 export interface UseScrollSyncArgs {
@@ -151,12 +148,9 @@ export function useTimelineScrollSync({
       const total = virtualize && virtualizer ? virtualizer.getTotalSize() : el.scrollHeight
       if (remeasure || startsRef.current == null || positionsRef.current == null) {
         startsRef.current = measureStarts(el, total)
-        positionsRef.current =
-          total <= 0
-            ? startsRef.current.map(() => 0)
-            : startsRef.current.map((start) => clamp01(start / total))
+        positionsRef.current = computeTurnPositions(startsRef.current, total)
       }
-      return computeViewportGeometry({
+      return computeTimelineGeometry({
         scrollTop: el.scrollTop,
         clientHeight: el.clientHeight,
         total,

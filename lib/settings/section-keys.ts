@@ -60,6 +60,10 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "autoRouting",
   ],
   "agent-runtime": [
+    // Provider diagnostics tab preferences (`provider-diagnostics-tab.tsx`);
+    // was in DEFAULTS but unclaimed, which is exactly the class the
+    // completeness guard exists to catch.
+    "providerDiagnostics",
     "subagentNesting",
     // Moved here from the former standalone "general" section (their UI now
     // lives in agent-runtime → Defaults).
@@ -120,6 +124,16 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "language",
   ],
   speech: [
+    // ADR-0127: message presentation + typography + usage display were
+    // defined/edited under Appearance but never claimed here, so "reset this
+    // section", the changed-settings review, and appearance export all skipped
+    // them. `agentFlowMode` is the legacy read-only fallback for
+    // `messageDisplay` (ADR-0114) — claimed so a reset clears it too.
+    "messageDisplay",
+    "agentFlowMode",
+    "typographyExt",
+    "usageDisplayMode",
+    "activeThemePackId",
     "sttLanguage",
     "selectedMicId",
     "ttsProvider",
@@ -213,6 +227,12 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "conversationSidebar",
   ],
   notifications: ["notificationPreferences"],
+    // ADR-0127: run-status-bar metrics and composer behavior/assistance are
+    // edited in the Conversation section (`run-status-bar-card`,
+    // `composer-behavior-card`, `composer-assistance-card`).
+    "runStatusBar",
+    "composerBehavior",
+    "composerAssistance",
   terminal: ["terminal"],
   memory: ["memory", "memoryView"],
   artifacts: ["artifacts"],

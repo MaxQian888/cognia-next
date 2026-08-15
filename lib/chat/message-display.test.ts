@@ -1,8 +1,26 @@
+import { DEFAULT_APPEARANCE_SLICE } from "@/types/appearance"
+import { DEFAULTS } from "@/lib/db/settings"
 import { DEFAULT_MESSAGE_DISPLAY_OPTIONS, resolveMessageDisplayOptions } from "./message-display"
 
 describe("resolveMessageDisplayOptions", () => {
   it("uses the balanced preset by default", () => {
     expect(resolveMessageDisplayOptions()).toEqual(DEFAULT_MESSAGE_DISPLAY_OPTIONS)
+  })
+
+  it("the settings default slice resolves to the same options as no preference (ADR-0127)", () => {
+    // `DEFAULT_APPEARANCE_SLICE.messageDisplay` is spread into canonical
+    // DEFAULTS; a fresh install therefore carries `{ preset: "balanced" }` and
+    // must resolve identically to a row that has no preference at all.
+    expect(resolveMessageDisplayOptions(DEFAULT_APPEARANCE_SLICE.messageDisplay)).toEqual(
+      DEFAULT_MESSAGE_DISPLAY_OPTIONS
+    )
+    expect(DEFAULTS.messageDisplay).toEqual(DEFAULT_APPEARANCE_SLICE.messageDisplay)
+    // …and the default row must not carry a legacy agent-flow that would
+    // override a chosen preset.
+    expect(
+      resolveMessageDisplayOptions({ preset: "focused" }, undefined, DEFAULTS.agentFlowMode?.mode)
+        .agentFlowMode
+    ).toBe(resolveMessageDisplayOptions({ preset: "focused" }).agentFlowMode)
   })
 
   it("applies preset defaults before global and session overrides", () => {

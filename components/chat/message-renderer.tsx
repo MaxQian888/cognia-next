@@ -841,6 +841,17 @@ function MessageRendererInner({
                 </DropdownMenuContent>
               </DropdownMenu>
 
+              {/* ADR-0127: read-aloud is a host command (`readAloud`) and must
+                stay reachable under every preset, not only `inspector` — the
+                `all` branch below is the only place it used to render. */}
+              {hasActionCommand("readAloud") && (
+                <ReadAloudButton
+                  messageId={message.id}
+                  text={extractText(message)}
+                  character={speaker ?? directCharacter ?? null}
+                />
+              )}
+
               <BranchNavigator message={message} className="mx-1" />
               {branchSessionId && (
                 <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
@@ -1097,6 +1108,7 @@ export const MessageRenderer = memo(
     prev.onCopy === next.onCopy &&
     prev.onRegenerate === next.onRegenerate &&
     prev.onEditResend === next.onEditResend &&
+    prev.onRewindFiles === next.onRewindFiles &&
     prev.projectRoot === next.projectRoot &&
     prev.messageDisplay === next.messageDisplay
 )

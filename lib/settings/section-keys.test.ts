@@ -99,6 +99,51 @@ describe("section-keys", () => {
     })
   })
 
+  describe("message presentation + conversation surfaces (ADR-0127)", () => {
+    it("appearance owns messageDisplay, its legacy fallback, typography, usage display and theme pack", () => {
+      expect(SECTION_OWNED_KEYS.appearance).toEqual(
+        expect.arrayContaining([
+          "messageDisplay",
+          "agentFlowMode",
+          "typographyExt",
+          "usageDisplayMode",
+          "activeThemePackId",
+        ])
+      )
+      expect(keyToSection("messageDisplay")).toBe("appearance")
+      expect(keyToSection("typographyExt")).toBe("appearance")
+    })
+
+    it("conversation owns the run-status-bar and composer knobs", () => {
+      expect(SECTION_OWNED_KEYS.conversation).toEqual(
+        expect.arrayContaining(["runStatusBar", "composerBehavior", "composerAssistance"])
+      )
+      expect(keyToSection("runStatusBar")).toBe("conversation")
+      expect(keyToSection("composerAssistance")).toBe("conversation")
+    })
+
+    it("those keys are canonical DEFAULTS keys, so the completeness guard covers them", () => {
+      // Before ADR-0127 none of these were in DEFAULTS, so the guard passed
+      // while reset / review / transfer silently skipped them.
+      for (const key of [
+        "messageDisplay",
+        "typographyExt",
+        "usageDisplayMode",
+        "activeThemePackId",
+        "runStatusBar",
+        "composerBehavior",
+        "composerAssistance",
+      ] as const) {
+        expect(Object.prototype.hasOwnProperty.call(DEFAULTS, key)).toBe(true)
+      }
+      // The legacy fallback must stay undefined (never overrides a preset).
+      expect(DEFAULTS.agentFlowMode).toBeUndefined()
+      expect(resetKeysForSection("appearance")).toEqual(
+        expect.arrayContaining(["messageDisplay", "typographyExt"])
+      )
+    })
+  })
+
   describe("workbench rail", () => {
     it("owns both rail keys, not just the layout", () => {
       // The workbench customizer writes `workbenchRail` and
