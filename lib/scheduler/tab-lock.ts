@@ -39,6 +39,20 @@ const state: TabLeaderState = {
   storageHandler: null,
 }
 
+/**
+ * True only for a real browser window with the DOM event surface. The headless
+ * brain assigns `globalThis.window = globalThis` (fake-indexeddb shim), which
+ * has no `addEventListener` — treating that as a browser tab used to throw
+ * from the heartbeat fallback and abort scheduler initialization.
+ */
+function hasBrowserWindow(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof (window as { addEventListener?: unknown }).addEventListener === "function" &&
+    typeof document !== "undefined"
+  )
+}
+
 function setLeader(value: boolean): void {
   if (state.isLeader === value) return
   state.isLeader = value
@@ -56,8 +70,9 @@ function setLeader(value: boolean): void {
  * Start leader election using Web Locks API (preferred) or heartbeat fallback.
  */
 export async function startLeaderElection(): Promise<void> {
-  if (typeof window === "undefined") {
-    // SSR — always leader
+  if (!hasBrowserWindow()) {
+    // SSR / Node (the headless brain installs a bare `globalThis` window shim
+    // without the DOM event surface) — a single process, always leader.
     setLeader(true)
     return
   }
@@ -170,7 +185,9 @@ function startHeartbeatElection(): void {
       }
     }
   }
-  window.addEventListener("storage", state.storageHandler)
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("storage", state.storageHandler)
+  }
 }
 
 function writeHeartbeat(): void {
@@ -220,7 +237,9 @@ export function stopLeaderElection(): void {
 
   // Remove storage event listener
   if (state.storageHandler) {
-    window.removeEventListener("storage", state.storageHandler)
+    if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+      window.removeEventListener("storage", state.storageHandler)
+    }
     state.storageHandler = null
   }
 

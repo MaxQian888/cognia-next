@@ -10,9 +10,19 @@ import {
   unregisterTaskExecutor,
   createTaskScheduler,
   waitForTaskExecutor,
+  resolveDefaultTimingDriver,
   EXECUTOR_REGISTRATION_GRACE_MS,
   TaskSchedulerImpl,
 } from "./task-scheduler"
+import { NodeTimingDriver } from "./timing/node-driver"
+import { RendererTimingDriver } from "./timing/renderer-driver"
+import { RustDaemonTimingDriver } from "./timing/rust-daemon-driver"
+
+const platformState = { value: "web" as "web" | "tauri" | "headless" | "mobile" }
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: () => platformState.value,
+}))
 import type {
   ScheduledTask,
   CreateScheduledTaskInput,
@@ -3036,6 +3046,34 @@ describe("TaskScheduler", () => {
       await expect(sched.resumeTask("task-hn")).rejects.toMatchObject({
         code: "DEPRECATED_TASK_TYPE",
       })
+    })
+  })
+
+  describe("resolveDefaultTimingDriver", () => {
+    afterEach(() => {
+      platformState.value = "web"
+    })
+
+    it("maps tauri → Rust daemon, headless → Node timers, web/mobile → renderer", () => {
+      platformState.value = "tauri"
+      expect(resolveDefaultTimingDriver()).toBeInstanceOf(RustDaemonTimingDriver)
+      platformState.value = "headless"
+      const headless = resolveDefaultTimingDriver()
+      expect(headless).toBeInstanceOf(NodeTimingDriver)
+      expect(headless.supportsLeaderElection).toBe(false)
+      platformState.value = "web"
+      expect(resolveDefaultTimingDriver()).toBeInstanceOf(RendererTimingDriver)
+      platformState.value = "mobile"
+      expect(resolveDefaultTimingDriver()).toBeInstanceOf(RendererTimingDriver)
+    })
+
+    it("initializes on the headless host with the Node driver and no leader election", async () => {
+      platformState.value = "headless"
+      const sched = createTaskScheduler()
+      await sched.initialize()
+      const status = sched.getStatus()
+      expect(status).toBeDefined()
+      sched.stop()
     })
   })
 })

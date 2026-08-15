@@ -35,7 +35,8 @@ import { emitSchedulerEvent } from "./event-integration"
 import { SchedulerError } from "./errors"
 import { RendererTimingDriver } from "./timing/renderer-driver"
 import { RustDaemonTimingDriver } from "./timing/rust-daemon-driver"
-import { isTauri } from "@/lib/platform/detect"
+import { NodeTimingDriver } from "./timing/node-driver"
+import { detectPlatform } from "@/lib/platform/detect"
 import type { LeaderAwareTimingDriver, SchedulerTimingDriver } from "@/types/scheduler"
 import { loggers } from "@cognia/logging"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
@@ -136,6 +137,27 @@ export function waitForTaskExecutor(
 }
 
 /**
+ * Pick the timing driver for the local host:
+ *
+ *   - `tauri`    → Rust alarm daemon (fires while minimized to the tray);
+ *   - `headless` → Node timers — the brain is one always-on process, the sole
+ *                  authority for its own SchedulerDB (no tab-lock, no drift poll);
+ *   - `web` / `mobile` → renderer timers + multi-tab leader election.
+ *
+ * Exported so tests pin the mapping; `createTaskScheduler(driver)` bypasses it.
+ */
+export function resolveDefaultTimingDriver(): SchedulerTimingDriver {
+  switch (detectPlatform()) {
+    case "tauri":
+      return new RustDaemonTimingDriver()
+    case "headless":
+      return new NodeTimingDriver()
+    default:
+      return new RendererTimingDriver()
+  }
+}
+
+/**
  * Task Scheduler class
  */
 const EXECUTION_CHANNEL_NAME = "cognia-scheduler-executions"
@@ -201,9 +223,10 @@ class TaskSchedulerImpl {
   private visibilityHandler: (() => void) | null = null
   private executionChannel: BroadcastChannel | null = null
   /**
-   * Pluggable timing source. Resolved on `initialize()` to the Rust alarm
-   * daemon driver (Tauri) or the renderer driver (web/mobile), unless a driver
-   * was injected via `createTaskScheduler(driver)` for tests.
+   * Pluggable timing source. Resolved on `initialize()` by host platform —
+   * Rust alarm daemon (Tauri desktop), Node timers (headless brain), renderer
+   * timers + tab-lock (web / mobile) — unless a driver was injected via
+   * `createTaskScheduler(driver)` for tests. See `resolveDefaultTimingDriver`.
    */
   private driver: SchedulerTimingDriver | null
   /** Injectable randomness source for deterministic jitter in tests. */
@@ -265,10 +288,9 @@ class TaskSchedulerImpl {
     log.info("Initializing task scheduler...")
 
     try {
-      // Resolve the timing driver: Rust alarm daemon on desktop (fires while
-      // minimized to tray), renderer timers + leader election elsewhere.
+      // Resolve the timing driver for this host (see resolveDefaultTimingDriver).
       if (!this.driver) {
-        this.driver = isTauri() ? new RustDaemonTimingDriver() : new RendererTimingDriver()
+        this.driver = resolveDefaultTimingDriver()
       }
       const driver = this.driver
 
