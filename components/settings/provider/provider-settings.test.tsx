@@ -280,8 +280,25 @@ jest.mock("./local-provider-settings", () => ({
   ),
 }))
 jest.mock("./local-provider-model-manager", () => ({
-  LocalProviderModelManager: ({ providerId }: { providerId: string }) => (
-    <div data-testid="local-provider-model-manager" data-provider-id={providerId} />
+  LocalProviderModelManager: ({
+    providerId,
+    onModelsChange,
+  }: {
+    providerId: string
+    onModelsChange?: (
+      models: Array<{ id: string; owned_by?: string; context_length?: number }>
+    ) => void
+  }) => (
+    <div data-testid="local-provider-model-manager" data-provider-id={providerId}>
+      <button
+        data-testid="mock-local-models-discovered"
+        onClick={() =>
+          onModelsChange?.([{ id: "llama3", owned_by: "ollama", context_length: 8192 }])
+        }
+      >
+        discovered
+      </button>
+    </div>
   ),
 }))
 // Newly-mounted provider-specific panels. Each shipped fully built with a
@@ -947,6 +964,47 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     )
     expect(screen.getByTestId("provider-detail-cost-tab")).toBeEmptyDOMElement()
     expect(screen.getByTestId("provider-detail-advanced-tab")).toBeEmptyDOMElement()
+  })
+
+  it("persists a local engine's discovered models only when the set changed", async () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["ollama", { name: "Ollama", defaultModel: "" }]],
+      selectedProviderId: "ollama",
+    })
+    // First discovery → persisted (with a default model picked).
+    const { findByTestId, unmount } = render(<ProviderSettings />)
+    await findByTestId("local-provider-model-manager")
+    fireEvent.click(screen.getByTestId("mock-local-models-discovered"))
+    await waitFor(() =>
+      expect(mockSetProviderConfig).toHaveBeenCalledWith(
+        "ollama",
+        expect.objectContaining({
+          discoveredModels: [
+            { id: "llama3", name: "llama3", provider: "ollama", contextLength: 8192 },
+          ],
+          defaultModel: "llama3",
+        })
+      )
+    )
+    unmount()
+    mockSetProviderConfig.mockClear()
+
+    // Same set already stored → the 30 s poll must not rewrite the settings row.
+    mockHookState.providerSettings.ollama = {
+      providerId: "ollama",
+      enabled: true,
+      defaultModel: "llama3",
+      discoveredModels: [{ id: "llama3", name: "llama3", provider: "ollama", contextLength: 8192 }],
+      discoveredModelsLastFetched: 1,
+    }
+    render(<ProviderSettings />)
+    await findByTestId("local-provider-model-manager")
+    fireEvent.click(screen.getByTestId("mock-local-models-discovered"))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockSetProviderConfig).not.toHaveBeenCalledWith(
+      "ollama",
+      expect.objectContaining({ discoveredModels: expect.anything() })
+    )
   })
 
   it("filters built-in providers by name match against the search input", () => {

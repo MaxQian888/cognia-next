@@ -30,7 +30,9 @@ import { Label } from "@/components/ui/label"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings"
 import { useDraftField } from "@/hooks/settings/use-draft-field"
+import { useHostProfile } from "@/hooks/use-host-profile"
 import { LocalProviderCard } from "./local-provider-card"
+import { ProviderHostNotice } from "./provider-host-notice"
 import { LocalProviderSetupWizard } from "./local-provider-setup-wizard"
 import { TransportHeadersEditor } from "./transport-headers-editor"
 
@@ -74,6 +76,12 @@ export function LocalProviderSettings({ providerId }: LocalProviderSettingsProps
   const config = LOCAL_PROVIDER_CONFIGS[providerId]
   const installInfo = getInstallInstructions(providerId)
   const effectiveBaseUrl = settings?.baseURL?.trim() || config.defaultBaseURL
+  const hostProfile = useHostProfile()
+  // On the phone "localhost" is the phone: probing the default base URL can
+  // only fail (and, on Android, hang on the timeout). Probe automatically only
+  // when the user pointed the engine somewhere else; the notice explains why.
+  const isMobileShell = hostProfile === "mobile-companion"
+  const autoProbeAllowed = !isMobileShell || Boolean(settings?.baseURL?.trim())
   const apiKey = settings?.apiKey?.trim() || undefined
   const customHeaders = settings?.customHeaders
 
@@ -98,12 +106,13 @@ export function LocalProviderSettings({ providerId }: LocalProviderSettingsProps
   // store (and this effect) until the user pauses; the short delay here also
   // coalesces the two writes a base-URL + key edit can produce.
   useEffect(() => {
+    if (!autoProbeAllowed) return
     const timeoutId = setTimeout(() => {
       void refreshStatus()
     }, 150)
 
     return () => clearTimeout(timeoutId)
-  }, [refreshStatus])
+  }, [refreshStatus, autoProbeAllowed])
 
   const setApiKey = useCallback(
     (apiKey: string) => void setProviderConfig(providerId, { apiKey }),
@@ -199,6 +208,7 @@ export function LocalProviderSettings({ providerId }: LocalProviderSettingsProps
   return (
     <TooltipProvider>
       <div className="space-y-6" data-testid="local-provider-settings">
+        <ProviderHostNotice kind="mobile-local" />
         <LocalProviderCard
           providerId={providerId}
           enabled={settings?.enabled ?? false}

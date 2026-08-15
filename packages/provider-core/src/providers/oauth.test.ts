@@ -23,6 +23,8 @@ import {
   saveTokenExpiry,
   verifyOAuthState,
   type OAuthState,
+  buildNativeOAuthRedirectUri,
+  parseNativeOAuthDeepLink,
 } from "./oauth"
 
 const fetchMock = jest.fn()
@@ -74,14 +76,39 @@ describe("OAuth provider helpers", () => {
     expect(parsed.origin).toBe("https://openrouter.ai")
     expect(parsed.pathname).toBe("/auth")
     expect(parsed.searchParams.get("state")).toBe(result!.state.state)
-    expect(parsed.searchParams.get("scope")).toBe("openid profile")
+    // OpenRouter's PKCE flow has no scope parameter.
+    expect(parsed.searchParams.get("scope")).toBeNull()
     expect(parsed.searchParams.get("code_challenge")).toBeTruthy()
     expect(parsed.searchParams.get("code_challenge_method")).toBe("S256")
+    // OpenRouter names the redirect target `callback_url`; the default
+    // resolves the static-export settings route against the current origin.
+    expect(parsed.searchParams.get("callback_url")).toBe(
+      "http://localhost/settings?section=providers&oauthProvider=openrouter"
+    )
     expect(getOAuthState()).toMatchObject({
       providerId: "openrouter",
       state: result!.state.state,
-      redirectUri: "http://localhost/api/oauth/openrouter/callback",
+      redirectUri: "http://localhost/settings?section=providers&oauthProvider=openrouter",
     })
+  })
+
+  it("uses a host-supplied redirect URI (native deep link) when given", async () => {
+    const redirectUri = buildNativeOAuthRedirectUri("openrouter")
+    expect(redirectUri).toBe("cognia://provider/oauth/openrouter")
+    const result = await buildOAuthUrl("openrouter", { redirectUri })
+    const parsed = new URL(result!.url)
+    expect(parsed.searchParams.get("callback_url")).toBe(redirectUri)
+    expect(getOAuthState()?.redirectUri).toBe(redirectUri)
+    expect(parseNativeOAuthDeepLink("cognia://provider/oauth/openrouter?code=abc&state=s")).toEqual(
+      {
+        providerId: "openrouter",
+        search: expect.any(URLSearchParams),
+      }
+    )
+    expect(
+      parseNativeOAuthDeepLink("cognia://provider/oauth/openrouter?code=abc")?.search.get("code")
+    ).toBe("abc")
+    expect(parseNativeOAuthDeepLink("cognia://connector/oauth/slack?code=x")).toBeNull()
   })
 
   it("returns empty results for providers without OAuth support", async () => {
@@ -103,10 +130,11 @@ describe("OAuth provider helpers", () => {
     expect(request?.init.method).toBe("POST")
     expect(request?.init.headers).toMatchObject({ "Content-Type": "application/json" })
 
-    expect(
-      extractOAuthExchangeResult("openrouter", { apiKey: "sk-or-test", expiresAt: "123" })
-    ).toMatchObject({ apiKey: "sk-or-test", expiresAt: 123 })
-    expect(extractOAuthExchangeResult("openrouter", { apiKey: "" })).toBeNull()
+    // OpenRouter answers `{ key }` — the catalog's response mapping reads it.
+    expect(extractOAuthExchangeResult("openrouter", { key: "sk-or-test" })).toMatchObject({
+      apiKey: "sk-or-test",
+    })
+    expect(extractOAuthExchangeResult("openrouter", { key: "" })).toBeNull()
   })
 
   it("applies custom OAuth rule maps, transforms, callback extraction, and GET exchange requests", async () => {
@@ -251,16 +279,17 @@ describe("OAuth provider helpers", () => {
     expect(localStorage.getItem("cognia-oauth-state")).toBeNull()
   })
 
-  it("exchanges callback codes through the API route and reports failures as null", async () => {
-    fetchMock.mockResolvedValueOnce(response({ key: "sk-key", expiresAt: 123 }))
-    await expect(exchangeCodeForApiKey("openrouter", { code: "abc" })).resolves.toEqual({
-      apiKey: "sk-key",
-      expiresAt: 123,
-    })
-    expect(fetchMock).toHaveBeenCalledWith("/api/oauth/openrouter/exchange", {
+  it("exchanges callback codes directly against the token endpoint and reports failures as null", async () => {
+    fetchMock.mockResolvedValueOnce(response({ key: "sk-key" }))
+    await expect(
+      exchangeCodeForApiKey("openrouter", { code: "abc", codeVerifier: "ver" })
+    ).resolves.toEqual({ apiKey: "sk-key", expiresAt: undefined })
+    // No `/api/oauth/*` route exists in the static export — the exchange goes
+    // to the provider's `tokenUrl` with the PKCE verifier.
+    expect(fetchMock).toHaveBeenCalledWith("https://openrouter.ai/api/v1/auth/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: "abc" }),
+      body: JSON.stringify({ code: "abc", code_verifier: "ver", code_challenge_method: "S256" }),
     })
 
     fetchMock.mockResolvedValueOnce(response({ error: "denied" }, 400))

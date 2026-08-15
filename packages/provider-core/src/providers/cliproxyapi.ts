@@ -2,7 +2,14 @@
  * CLIProxyAPI Provider Integration
  * Self-hosted AI proxy aggregating multiple providers
  * https://help.router-for.me
+ *
+ * Every management call goes through `proxyFetch` (the Rust proxy command on
+ * the desktop, plain fetch elsewhere): the packaged desktop CSP has no `http:`
+ * in `connect-src`, so a bare `fetch("http://localhost:8317/…")` was blocked in
+ * the shipped app and every probe failed instantly.
  */
+
+import { proxyFetch } from "./runtime-adapters"
 
 export interface CLIProxyAPIConfig {
   host: string
@@ -73,7 +80,7 @@ export async function testConnection(
   const startTime = Date.now()
 
   try {
-    const response = await fetch(`${getAPIURL(host, port)}/models`, {
+    const response = await proxyFetch(`${getAPIURL(host, port)}/models`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -114,7 +121,7 @@ export async function fetchModels(
   port: number = 8317
 ): Promise<CLIProxyAPIModel[]> {
   try {
-    const response = await fetch(`${getAPIURL(host, port)}/models`, {
+    const response = await proxyFetch(`${getAPIURL(host, port)}/models`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -154,7 +161,7 @@ export async function fetchHealthStatus(
   port: number = 8317
 ): Promise<{ healthy: boolean; message: string }> {
   try {
-    const response = await fetch(`${getBaseURL(host, port)}/health`, {
+    const response = await proxyFetch(`${getBaseURL(host, port)}/health`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -183,7 +190,7 @@ export async function fetchUsageStats(
   port: number = 8317
 ): Promise<CLIProxyAPIUsageStats | null> {
   try {
-    const response = await fetch(`${getBaseURL(host, port)}/v0/management/stats`, {
+    const response = await proxyFetch(`${getBaseURL(host, port)}/v0/management/stats`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${managementKey}`,
@@ -209,7 +216,7 @@ export async function checkWebUIAccess(
   port: number = 8317
 ): Promise<boolean> {
   try {
-    const response = await fetch(`${getWebUIURL(host, port)}`, {
+    const response = await proxyFetch(`${getWebUIURL(host, port)}`, {
       method: "HEAD",
     })
     return response.ok

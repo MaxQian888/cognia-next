@@ -64,6 +64,57 @@ describe("useLocalProvider — initial state and refresh", () => {
     expect(onModelsDiscovered).toHaveBeenCalledWith(oneModel)
   })
 
+  it("pauses auto-refresh while the document is hidden and resumes on visibility", async () => {
+    jest.useFakeTimers()
+    let visibility: DocumentVisibilityState = "visible"
+    const visibilitySpy = jest
+      .spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => visibility)
+    try {
+      renderHook(() =>
+        useLocalProvider({
+          providerId: "ollama",
+          baseUrl: "http://localhost:11434",
+          autoRefresh: true,
+          refreshInterval: 1000,
+        })
+      )
+      await act(async () => {
+        jest.advanceTimersByTime(0)
+      })
+      const afterMount = getStatus.mock.calls.length
+      await act(async () => {
+        jest.advanceTimersByTime(2000)
+      })
+      expect(getStatus.mock.calls.length).toBeGreaterThan(afterMount)
+
+      // Hidden: the interval stops.
+      visibility = "hidden"
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"))
+      })
+      const whileHidden = getStatus.mock.calls.length
+      await act(async () => {
+        jest.advanceTimersByTime(5000)
+      })
+      expect(getStatus.mock.calls.length).toBe(whileHidden)
+
+      // Visible again: immediate refresh + interval resumes.
+      visibility = "visible"
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"))
+      })
+      expect(getStatus.mock.calls.length).toBe(whileHidden + 1)
+      await act(async () => {
+        jest.advanceTimersByTime(1000)
+      })
+      expect(getStatus.mock.calls.length).toBe(whileHidden + 2)
+    } finally {
+      visibilitySpy.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+
   it("skips network calls when baseUrl is absent", async () => {
     const { result } = renderHook(() => useLocalProvider({ providerId: "ollama" }))
     // wait a microtask for the scheduled timeout

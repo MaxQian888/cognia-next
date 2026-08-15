@@ -10,7 +10,7 @@ import {
   type OAuthRuleTransform,
   type OAuthRuleValue,
 } from "@cognia/provider-types"
-import { getProviderCoreLogger } from "./runtime-adapters"
+import { getProviderCoreLogger, proxyFetch } from "./runtime-adapters"
 
 const log = getProviderCoreLogger("ai")
 
@@ -176,6 +176,10 @@ function getDefaultAuthorizationParams(
 ): Record<string, OAuthRuleValue> {
   const params: Record<string, OAuthRuleValue> = {
     state: { from: "runtime.state" },
+    // Where the IdP sends the user back. This was missing entirely, so the
+    // authorize URL never named a callback and OpenRouter rejected the flow
+    // before the user saw a consent screen.
+    [config.redirectUriParam ?? "redirect_uri"]: { from: "runtime.redirectUri" },
   }
 
   if (config.clientId) {
@@ -218,7 +222,44 @@ export const OAUTH_PROVIDERS: Record<string, ProviderOAuthConfig> = Object.fromE
     ])
 )
 
-export async function buildOAuthUrl(providerId: string): Promise<{
+export interface BuildOAuthUrlOptions {
+  /**
+   * Host-resolved redirect URI. Desktop / mobile shells pass their
+   * `cognia://provider/oauth/<id>` deep link, the web build a real route on
+   * its origin; omitted → `callbackPath` resolved against the current origin.
+   */
+  redirectUri?: string
+}
+
+/**
+ * The deep-link the native shells hand to the IdP as the redirect target. The
+ * shells' deep-link plumbing (`ConnectorDeepLinkRouter` pattern) delivers the
+ * final `cognia://provider/oauth/<id>?code=…` URL back to the renderer.
+ */
+export function buildNativeOAuthRedirectUri(providerId: string): string {
+  return `cognia://provider/oauth/${encodeURIComponent(providerId)}`
+}
+
+/** Matches `cognia://provider/oauth/<id>?code=…` and returns the provider id. */
+export function parseNativeOAuthDeepLink(
+  raw: string
+): { providerId: string; search: URLSearchParams } | null {
+  const match = /^cognia:\/\/provider\/oauth\/([^?#/]+)/.exec(raw)
+  if (!match) return null
+  let url: URL
+  try {
+    // URL needs an http-ish base to parse the query string.
+    url = new URL(raw.replace(/^cognia:\/\//, "https://cognia-placeholder/"))
+  } catch {
+    return null
+  }
+  return { providerId: decodeURIComponent(match[1]), search: url.searchParams }
+}
+
+export async function buildOAuthUrl(
+  providerId: string,
+  options: BuildOAuthUrlOptions = {}
+): Promise<{
   url: string
   state: OAuthState
 } | null> {
@@ -228,7 +269,7 @@ export async function buildOAuthUrl(providerId: string): Promise<{
   const state = nanoid(32)
   const codeVerifier = generateCodeVerifier()
   const codeChallenge = config.pkceRequired ? await generateCodeChallenge(codeVerifier) : undefined
-  const redirectUri = resolveRedirectUri(config.callbackPath)
+  const redirectUri = options.redirectUri ?? resolveRedirectUri(config.callbackPath)
 
   const oauthState: OAuthState = {
     state,
@@ -361,27 +402,42 @@ export function extractOAuthExchangeResult(
   return result
 }
 
+/**
+ * Exchange the authorization code straight against the provider's token
+ * endpoint (`tokenUrl`) using the catalog's exchange spec. This used to POST
+ * to `/api/oauth/:id/exchange` — a Next.js API route that does not exist in
+ * the static export, so the flow could never complete on any shipped host.
+ */
 export async function exchangeCodeForApiKey(
   providerId: string,
   payload: { code: string; codeVerifier?: string }
 ): Promise<{ apiKey: string; expiresAt?: number } | null> {
   try {
-    const response = await fetch(`/api/oauth/${providerId}/exchange`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
+    const request = buildOAuthExchangeRequest(providerId, payload)
+    if (!request) return null
+    const response = await proxyFetch(request.url, request.init)
 
+    let body: unknown = null
+    try {
+      body = await response.json()
+    } catch {
+      body = null
+    }
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.message || error.error || "Failed to exchange code for API key")
+      const error = (body ?? {}) as { message?: string; error?: string | { message?: string } }
+      const detail =
+        typeof error.error === "string"
+          ? error.error
+          : (error.error?.message ?? error.message ?? `HTTP ${response.status}`)
+      throw new Error(`Failed to exchange code for API key: ${detail}`)
     }
 
-    const data = await response.json()
-    return {
-      apiKey: data.apiKey || data.key,
-      expiresAt: data.expiresAt,
-    }
+    const extracted = extractOAuthExchangeResult(providerId, body)
+    if (extracted) return { apiKey: extracted.apiKey, expiresAt: extracted.expiresAt }
+    // Lenient fallbacks for providers whose response mapping is not spelled out.
+    const loose = (body ?? {}) as { apiKey?: string; key?: string; access_token?: string }
+    const apiKey = loose.apiKey ?? loose.key ?? loose.access_token
+    return apiKey ? { apiKey } : null
   } catch (error) {
     log.error("OAuth exchange failed", error as Error)
     return null

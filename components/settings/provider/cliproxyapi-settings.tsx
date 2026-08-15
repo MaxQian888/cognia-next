@@ -6,7 +6,7 @@
  * https://help.router-for.me
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useTranslations } from "next-intl"
 import {
   Server,
@@ -90,11 +90,16 @@ export function CLIProxyAPISettings({ className }: CLIProxyAPISettingsProps) {
 
   const updateCLIProxyAPISettings = useCallback(
     (updates: Partial<CLIProxyAPIProviderSettings>) => {
+      const next = { ...cliProxyAPISettings, ...updates }
       updateProviderSettings("cliproxyapi", {
-        cliProxyAPISettings: {
-          ...cliProxyAPISettings,
-          ...updates,
-        },
+        cliProxyAPISettings: next,
+        // Host / port are what the user edits, but dispatch reads
+        // `baseURL` — keep the two in lock-step so changing the port here
+        // actually moves the chat traffic (before, it only moved this
+        // panel's own probes).
+        ...("host" in updates || "port" in updates
+          ? { baseURL: getAPIURL(next.host || "localhost", next.port || 8317) }
+          : {}),
       })
     },
     [cliProxyAPISettings, updateProviderSettings]
@@ -125,14 +130,14 @@ export function CLIProxyAPISettings({ className }: CLIProxyAPISettingsProps) {
       }
     } catch (error) {
       setConnectionStatus("error")
-      setConnectionError(error instanceof Error ? error.message : "Connection failed")
+      setConnectionError(error instanceof Error ? error.message : t("connectionFailed"))
       updateCLIProxyAPISettings({
         connectionStatus: "error",
       })
     } finally {
       setIsConnectionTesting(false)
     }
-  }, [apiKey, host, port, updateCLIProxyAPISettings])
+  }, [apiKey, host, port, updateCLIProxyAPISettings, t])
 
   const handleFetchModels = useCallback(async () => {
     if (!apiKey) return
@@ -157,11 +162,11 @@ export function CLIProxyAPISettings({ className }: CLIProxyAPISettingsProps) {
         },
       })
     } catch (error) {
-      setModelsError(error instanceof Error ? error.message : "Failed to fetch models")
+      setModelsError(error instanceof Error ? error.message : t("fetchModelsFailed"))
     } finally {
       setIsModelsLoading(false)
     }
-  }, [cliProxyAPISettings, host, port, apiKey, updateProviderSettings])
+  }, [cliProxyAPISettings, host, port, apiKey, updateProviderSettings, t])
 
   const handleOpenWebUI = useCallback(() => {
     const url = getWebUIURL(host, port)
@@ -179,14 +184,22 @@ export function CLIProxyAPISettings({ className }: CLIProxyAPISettingsProps) {
     setTimeout(() => setCopiedUrl(false), 2000)
   }, [host, port])
 
-  // Auto-test connection when API key changes
+  // Auto-test when the connection INPUTS change (key / host / port / enabled).
+  // The handler is read through a ref: it depends on the settings object,
+  // and the test itself writes `lastHealthCheck` into that object, so listing
+  // it as a dependency re-armed this effect after every write — an infinite
+  // test → write → test loop while the provider was enabled with a key.
+  const handleTestConnectionRef = useRef(handleTestConnection)
+  useEffect(() => {
+    handleTestConnectionRef.current = handleTestConnection
+  }, [handleTestConnection])
   useEffect(() => {
     if (!apiKey || !enabled) return
     const timer = setTimeout(() => {
-      handleTestConnection()
-    }, 0)
+      void handleTestConnectionRef.current()
+    }, 300)
     return () => clearTimeout(timer)
-  }, [apiKey, enabled, handleTestConnection])
+  }, [apiKey, enabled, host, port])
 
   if (!enabled) {
     return null
@@ -456,7 +469,7 @@ export function CLIProxyAPISettings({ className }: CLIProxyAPISettingsProps) {
                   }
                 >
                   <SelectTrigger id="routing-strategy">
-                    <SelectValue placeholder="Select strategy" />
+                    <SelectValue placeholder={t("selectStrategy")} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="round-robin">{t("roundRobin")}</SelectItem>

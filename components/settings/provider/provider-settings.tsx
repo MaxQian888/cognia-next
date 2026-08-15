@@ -73,6 +73,7 @@ import { useDraftField } from "@/hooks/settings/use-draft-field"
 import { cn } from "@/lib/utils"
 import { ProviderSidebar } from "./provider-sidebar"
 import { ProviderSetupChecklist } from "./provider-setup-checklist"
+import { ProviderHostNotice } from "./provider-host-notice"
 import { ProviderEmptyState } from "./provider-empty-state"
 import { ProviderSkeleton } from "./provider-skeleton"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
@@ -957,6 +958,19 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         provider: model.owned_by,
         contextLength: model.context_length,
       }))
+      // The Models tab polls the engine every 30 s and reports the list each
+      // time. Only write when the discovered set actually changed — an
+      // unconditional write here was a settings-singleton save (and a
+      // companion sync re-emit) every poll while the tab was open.
+      const previous = selectedSettings?.discoveredModels ?? []
+      const unchanged =
+        previous.length === discoveredModels.length &&
+        previous.every(
+          (model, index) =>
+            model.id === discoveredModels[index]?.id &&
+            model.contextLength === discoveredModels[index]?.contextLength
+        )
+      if (unchanged && selectedSettings?.discoveredModelsLastFetched) return
       const enabledDiscoveredModel = selectedSettings?.enabledModels?.find((id) =>
         discoveredModels.some((model) => model.id === id)
       )
@@ -977,6 +991,8 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
       selectedId,
       selectedSettings?.defaultModel,
       selectedSettings?.enabledModels,
+      selectedSettings?.discoveredModels,
+      selectedSettings?.discoveredModelsLastFetched,
       setProviderConfig,
     ]
   )
@@ -1124,6 +1140,8 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
+      {/* Companion hosts: keys entered here never reach the paired host. */}
+      <ProviderHostNotice kind="companion" />
       <ProviderOnboardingBanner
         onScrollToProvider={(id) => {
           // Clear any active search/category filter so the target row is

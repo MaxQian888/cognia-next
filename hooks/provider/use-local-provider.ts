@@ -176,10 +176,36 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
     if (!autoRefresh) {
       return () => clearTimeout(initial)
     }
-    const id = setInterval(() => void refresh(), refreshInterval)
+    // Poll only while the document is visible: a background tab / minimised
+    // window kept probing the local engine every interval (and, via the
+    // discovery callback, could keep rewriting settings) for nothing. Resume
+    // with an immediate refresh when it comes back.
+    const canObserveVisibility =
+      typeof document !== "undefined" && typeof document.addEventListener === "function"
+    let id: ReturnType<typeof setInterval> | null = null
+    const start = () => {
+      if (id === null) id = setInterval(() => void refresh(), refreshInterval)
+    }
+    const stop = () => {
+      if (id !== null) {
+        clearInterval(id)
+        id = null
+      }
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        stop()
+      } else {
+        void refresh()
+        start()
+      }
+    }
+    if (!canObserveVisibility || document.visibilityState !== "hidden") start()
+    if (canObserveVisibility) document.addEventListener("visibilitychange", onVisibility)
     return () => {
       clearTimeout(initial)
-      clearInterval(id)
+      stop()
+      if (canObserveVisibility) document.removeEventListener("visibilitychange", onVisibility)
     }
   }, [refresh, autoRefresh, refreshInterval])
 

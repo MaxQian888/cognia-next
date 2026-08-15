@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { CLIProxyAPISettings } from "./cliproxyapi-settings"
 import { useSettingsStore } from "@/stores"
 import * as cliproxyapi from "@cognia/provider-core/providers/cliproxyapi"
@@ -91,7 +91,9 @@ jest.mock("@/stores", () => {
 jest.mock("@cognia/provider-core/providers/cliproxyapi", () => ({
   testConnection: jest.fn(),
   getWebUIURL: jest.fn(() => "http://localhost:8317/management.html"),
-  getAPIURL: jest.fn(() => "http://localhost:8317/v1"),
+  getAPIURL: jest.fn(
+    (host: string = "localhost", port: number = 8317) => `http://${host}:${port}/v1`
+  ),
 }))
 
 jest.mock("@cognia/provider-core/providers/model-discovery", () => ({
@@ -260,6 +262,31 @@ describe("CLIProxyAPISettings", () => {
 
     const state = useSettingsStore.getState()
     expect(state.providerSettings.cliproxyapi?.cliProxyAPISettings?.port).toBe(9000)
+    // Dispatch reads `baseURL`, so the host/port edit must move it too.
+    expect(state.providerSettings.cliproxyapi?.baseURL).toBe("http://localhost:9000/v1")
+  })
+
+  it("auto-tests once per input change instead of looping on its own writes", async () => {
+    // Regression: the auto-test effect depended on the test handler, which
+    // depended on the settings object the test itself rewrote
+    // (`lastHealthCheck`), so an enabled provider with a key tested forever.
+    jest.useFakeTimers()
+    try {
+      mockTestConnection.mockResolvedValue({ success: true, latency: 5, message: "ok" })
+      render(<CLIProxyAPISettings />)
+      await act(async () => {
+        jest.advanceTimersByTime(400)
+      })
+      // Let the write → re-render → (would-be) re-arm cycle settle a few times.
+      for (let i = 0; i < 5; i += 1) {
+        await act(async () => {
+          jest.advanceTimersByTime(400)
+        })
+      }
+      expect(mockTestConnection).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("should fetch models when refresh is clicked", async () => {

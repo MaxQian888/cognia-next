@@ -114,7 +114,18 @@ export interface OAuthConfig {
   clientId?: string
   scope?: string
   pkceRequired?: boolean
+  /**
+   * Fallback callback path, resolved against `window.location.origin` when the
+   * host does not supply a redirect URI. Hosts should pass one: the desktop
+   * and mobile shells use a `cognia://` deep link, the web build a real
+   * static-export route (there is no `/api/*` at runtime).
+   */
   callbackPath: string
+  /**
+   * Query parameter the IdP expects the redirect URI under. Defaults to
+   * `redirect_uri`; OpenRouter uses `callback_url`.
+   */
+  redirectUriParam?: string
   authorizationParams?: Record<string, OAuthRuleValue>
   callback?: OAuthCallbackConfig
   exchange?: OAuthExchangeConfig
@@ -1555,12 +1566,17 @@ const INLINE_PROVIDERS: Record<string, ProviderConfig> = {
     dashboardUrl: "https://openrouter.ai/keys",
     docsUrl: "https://openrouter.ai/docs",
     supportsOAuth: true,
+    // OpenRouter PKCE: `GET https://openrouter.ai/auth?callback_url=…&code_challenge=…`
+    // → redirect back with `?code=…` → `POST /api/v1/auth/keys { code,
+    // code_verifier, code_challenge_method }` → `{ key }`. No client id, no
+    // server-side secret — the exchange happens straight from the client.
     oauthConfig: {
       authorizationUrl: "https://openrouter.ai/auth",
       tokenUrl: "https://openrouter.ai/api/v1/auth/keys",
       pkceRequired: true,
-      callbackPath: "/api/oauth/openrouter/callback",
-      scope: "openid profile",
+      callbackPath: "/settings?section=providers&oauthProvider=openrouter",
+      redirectUriParam: "callback_url",
+      exchange: { response: { apiKey: "body.key" } },
     },
     models: [
       {
