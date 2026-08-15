@@ -6363,6 +6363,8 @@
   },
   "contextWorkbench": {
     "actions": {
+      "close": "Close",
+      "closeSplit": "Close split pane",
       "collapse": "Collapse workbench",
       "expand": "Expand workbench",
       "focus": "Focus mode",
@@ -6374,7 +6376,11 @@
       "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
       "resetLayout": "Reset layout",
       "resize": "Resize workbench",
+      "resizeSplit": "Resize split",
       "retry": "Retry panel",
+      "splitBelow": "Split below",
+      "splitBelowPanel": "Open below the current panel",
+      "splitNeedsWide": "Split below (switch to Wide first)",
       "switchPanel": "Switch panel",
       "unpin": "Unpin panel",
       "wide": "Wide mode"
@@ -6467,14 +6473,22 @@
     },
     "customize": {
       "dragHint": "Drag to reorder",
+      "groups": "Panel groups",
+      "groupsPlannedReason": "Collecting several panels behind one rail icon is modelled and stored, but nothing renders the group tab strip yet.",
       "hidden": "Hidden",
       "hiddenEmpty": "Nothing hidden.",
       "hideItem": "Hide",
       "hint": "Hiding an activity removes its rail button only — the panel stays reachable from the command palette and its shortcut.",
       "onRail": "On the rail",
       "onRailEmpty": "No activities on the rail.",
+      "panelsHint": "Reorder or remove the tabs inside each activity. Hiding one takes away its tab only — the panel stays reachable from the command palette and its shortcut.",
+      "panelsShown": "Tabs",
+      "panelsShownEmpty": "No tabs in this activity.",
+      "perProject": "Per-project layout",
+      "perProjectPlannedReason": "A rail order that differs per project is modelled and stored, but no screen passes a project to read it with.",
       "persistentRail": "Keep the icon rail on screen",
       "persistentRailHint": "Closing the workbench leaves its activity icons in a narrow column you can drag back open. Turn this off to have the whole right column collapse away.",
+      "plannedBadge": "Planned",
       "restoreDefaults": "Restore defaults",
       "showItem": "Show"
     },

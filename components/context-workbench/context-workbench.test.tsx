@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
@@ -69,7 +69,11 @@ const messages = {
   contextWorkbench: {
     actions: {
       close: "Close",
-      splitPlanned: "Split view (not available yet)",
+      closeSplit: "Close split pane",
+      resizeSplit: "Resize split",
+      splitBelow: "Split below",
+      splitBelowPanel: "Open below the current panel",
+      splitNeedsWide: "Split below (switch to Wide first)",
       layoutMenu: "Layout options",
       resetLayout: "Reset layout",
       collapse: "Collapse",
@@ -442,12 +446,11 @@ describe("ContextWorkbench", () => {
   })
 
   /**
-   * Working Rule 7's third axis for split view. `contextWorkbenchStore` carries
-   * `splitPanelId` / `splitRatio` plus `activateSplit` / `closeSplit` /
-   * `setSplitRatio`, all persisted and clamped, and no renderer reads any of
-   * it. The type says so; this is the half a user can see.
+   * Replaces the tripwire that pinned split view as dormant (ADR-0121's third
+   * axis). The feature is real now, so the menu has to offer it — but only where
+   * there is room, and it still has to say why when there is not.
    */
-  it("names split view as unavailable rather than hiding that it exists", () => {
+  it("explains why it cannot split rather than hiding that split exists", () => {
     renderWorkbench([
       {
         id: "comments",
@@ -461,8 +464,9 @@ describe("ContextWorkbench", () => {
     // Radix opens a dropdown from the keyboard path too, which is the one that
     // survives jsdom's missing PointerEvent constructor intact.
     fireEvent.keyDown(screen.getByTestId("context-workbench-layout-menu"), { key: "Enter" })
-    const item = screen.getByTestId("context-workbench-split-planned")
-    expect(item).toHaveTextContent("Split view (not available yet)")
+    // Narrow by default, and a lone panel has nothing to split against.
+    const item = screen.getByTestId("context-workbench-split-unavailable")
+    expect(item).toHaveTextContent("Split below (switch to Wide first)")
     expect(item).toHaveAttribute("aria-disabled", "true")
   })
 
@@ -1904,6 +1908,114 @@ describe("ContextWorkbench — vertical split", () => {
       mode: "wide",
       splitPanelId: "review",
     })
+  })
+
+  it("offers a split candidate in wide mode and opens it below", () => {
+    renderSplit()
+    act(() => useContextWorkbenchStore.getState().navigatePanel(SCOPE, "comments", "wide"))
+
+    fireEvent.keyDown(screen.getByTestId("context-workbench-layout-menu"), { key: "Enter" })
+    fireEvent.click(screen.getByTestId("context-workbench-split-below"))
+    fireEvent.click(screen.getByTestId("context-workbench-split-candidate-review"))
+
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.splitPanelId).toBe("review")
+    expect(screen.getByTestId("panel-review")).toHaveTextContent("review:true")
+  })
+
+  it("closes the split from the pane's own header button", () => {
+    renderSplit()
+    openSplit()
+
+    fireEvent.click(screen.getByTestId("context-workbench-close-split"))
+
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.splitPanelId).toBeNull()
+    expect(screen.getByTestId("panel-comments")).toHaveTextContent("comments:true")
+  })
+
+  it("trades the tabs pattern for two labelled regions when a second pane opens", () => {
+    renderSplit()
+    act(() => useContextWorkbenchStore.getState().navigatePanel(SCOPE, "comments", "wide"))
+    expect(document.getElementById("context-workbench-panel-comments")).toHaveAttribute(
+      "role",
+      "tabpanel"
+    )
+
+    openSplit()
+
+    // One selected tab cannot describe two visible panes, so the tabs widget
+    // degrades to plain regions rather than lying about the selection.
+    for (const id of ["comments", "review"]) {
+      expect(document.getElementById(`context-workbench-panel-${id}`)).toHaveAttribute(
+        "role",
+        "region"
+      )
+    }
+    // Labels render as their raw key in this harness, as everywhere else here.
+    expect(screen.getByTestId("context-workbench-split-bar")).toHaveTextContent(
+      "contextWorkbench.panels.review"
+    )
+  })
+
+  it("persists the ratio on release, not during the drag", () => {
+    const { container } = renderSplit()
+    openSplit()
+    const body = container.querySelector("[data-split]") as HTMLElement
+    // jsdom reports a zero-height box, and the drag maths needs a real one.
+    jest.spyOn(body, "getBoundingClientRect").mockReturnValue({ top: 0, height: 400 } as DOMRect)
+    const separator = screen.getByTestId("context-workbench-split-separator")
+
+    fireEvent.pointerDown(separator, { clientY: 200 })
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientY: 260 }))
+    })
+
+    // Mid-gesture the preview moved but the store did not: a write per move
+    // would re-render a Monaco buffer and an embedded browser on every frame.
+    expect(body.style.getPropertyValue("--wb-split")).toBe("65%")
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.splitRatio).toBe(50)
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointerup"))
+    })
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.splitRatio).toBe(65)
+  })
+
+  it("resizes the split from the keyboard", () => {
+    renderSplit()
+    openSplit()
+    const separator = screen.getByTestId("context-workbench-split-separator")
+    const ratio = () => useContextWorkbenchStore.getState().layouts[SCOPE]?.splitRatio
+
+    fireEvent.keyDown(separator, { key: "ArrowDown" })
+    expect(ratio()).toBe(52)
+    fireEvent.keyDown(separator, { key: "ArrowUp", shiftKey: true })
+    expect(ratio()).toBe(42)
+    fireEvent.keyDown(separator, { key: "End" })
+    expect(ratio()).toBe(80)
+    fireEvent.keyDown(separator, { key: "Home" })
+    expect(ratio()).toBe(20)
+    expect(separator).toHaveAttribute("aria-valuenow", "20")
+  })
+
+  it("keeps a crashing second pane from taking the first one down", () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    const Boom = () => {
+      throw new Error("boom")
+    }
+    renderSplit([PANELS[0]!, { ...PANELS[1]!, renderer: Boom }])
+    openSplit()
+
+    // Each pane carries its own error boundary, so the second one failing must
+    // not take the first — or the whole workbench — with it.
+    const primary = document.getElementById("context-workbench-panel-comments")
+    const secondary = document.getElementById("context-workbench-panel-review")!
+    expect(primary?.textContent).toContain("comments:true")
+    // The crashed pane shows its boundary's retry affordance instead of its
+    // renderer. Asserted structurally rather than by copy, which this file
+    // resolves from the real message catalogue.
+    expect(secondary.textContent).not.toContain("review:")
+    expect(within(secondary).getByRole("button")).toBeInTheDocument()
+    consoleError.mockRestore()
   })
 
   it("unmounts an ephemeral second pane on close but keeps a stateful one", () => {

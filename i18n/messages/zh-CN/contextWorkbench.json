@@ -1,5 +1,7 @@
 {
   "actions": {
+    "close": "关闭",
+    "closeSplit": "关闭分屏",
     "collapse": "收起工作台",
     "expand": "展开工作台",
     "focus": "聚焦模式",
@@ -11,7 +13,11 @@
     "pinHint": "固定后面板不再被自动切换，自动打开改为角标提示",
     "resetLayout": "重置布局",
     "resize": "调整工作台宽度",
+    "resizeSplit": "调整分屏比例",
     "retry": "重试面板",
+    "splitBelow": "向下分屏",
+    "splitBelowPanel": "在当前面板下方打开",
+    "splitNeedsWide": "向下分屏（请先切换到宽栏模式）",
     "switchPanel": "切换面板",
     "unpin": "取消固定面板",
     "wide": "宽栏模式"
@@ -104,14 +110,22 @@
   },
   "customize": {
     "dragHint": "拖拽以排序",
+    "groups": "面板分组",
+    "groupsPlannedReason": "把多个面板收进一个图标的分组已经建模并会被保存，但还没有任何界面绘制分组标签条。",
     "hidden": "已隐藏",
     "hiddenEmpty": "暂无隐藏项。",
     "hideItem": "隐藏",
     "hint": "隐藏某个活动只会移除它的图标按钮——面板仍可通过命令面板和快捷键到达。",
     "onRail": "在活动栏上",
     "onRailEmpty": "活动栏上暂无活动。",
+    "panelsHint": "调整每个活动内部标签页的顺序，或把它们移除。隐藏只会去掉标签页本身——面板仍然可以通过命令面板和快捷键打开。",
+    "panelsShown": "标签页",
+    "panelsShownEmpty": "该活动下没有标签页。",
+    "perProject": "按项目布局",
+    "perProjectPlannedReason": "按项目区分的图标栏顺序已经建模并会被保存，但还没有任何界面把项目传进来读取它。",
     "persistentRail": "常驻图标栏",
     "persistentRailHint": "收起工作台后，活动图标会留在右侧的窄列里，可以拖拽重新展开。关闭后整个右栏会完全收起。",
+    "plannedBadge": "规划中",
     "restoreDefaults": "恢复默认",
     "showItem": "显示"
   },

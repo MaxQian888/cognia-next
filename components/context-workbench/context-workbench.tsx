@@ -30,7 +30,7 @@ import {
   SlidersHorizontalIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  Columns2Icon,
+  Rows2Icon,
   XIcon,
 } from "lucide-react"
 import {
@@ -54,6 +54,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -84,6 +87,9 @@ import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   CONTEXT_WORKBENCH_DEFAULT_WIDTH,
   CONTEXT_WORKBENCH_MIN_WIDTH,
+  CONTEXT_WORKBENCH_SPLIT_DEFAULT_RATIO,
+  CONTEXT_WORKBENCH_SPLIT_MAX_RATIO,
+  CONTEXT_WORKBENCH_SPLIT_MIN_RATIO,
   CONTEXT_WORKBENCH_SPLIT_MIN_WIDTH,
   isSplitEligibleMode,
   useContextWorkbenchStore,
@@ -880,18 +886,29 @@ export function ContextWorkbench({
   const splitFitsWidth = bodyWidth === 0 || bodyWidth >= CONTEXT_WORKBENCH_SPLIT_MIN_WIDTH
   const splitActive = Boolean(splitPanel) && splitFitsWidth
   const secondaryPanelId = splitActive && splitPanel ? splitPanel.id : null
-  const visiblePanels = useMemo(
-    () =>
-      resolvedPanels.filter(
-        (panel) => panel.id === layout.activePanelId || panel.id === secondaryPanelId
-      ),
-    [layout.activePanelId, resolvedPanels, secondaryPanelId]
+  // Not manually memoised: the React Compiler cannot preserve a memo whose deps
+  // it believes may be mutated, and this is a filter over at most a dozen
+  // panels — cheap enough to let the compiler decide.
+  const visiblePanels = resolvedPanels.filter(
+    (panel) => panel.id === layout.activePanelId || panel.id === secondaryPanelId
   )
   // Sorted and JSON-encoded, so the key is order-insensitive and unambiguous
   // whatever a panel id contains. It exists only as the change detector and
   // effect dep for the lifecycle effect below: swapping the two panes leaves it
   // untouched, which is exactly what makes a swap fire no lifecycle.
   const visiblePanelsKey = JSON.stringify(visiblePanels.map((panel) => panel.id).sort())
+  // `resolvedPanels` is already filtered by `appliesTo`, capability and
+  // permission, so "resolved and permitted" is free here; only the user's own
+  // hide list still has to be applied (it governs tabs, not resolution).
+  const splitCandidates = useMemo(
+    () =>
+      resolvedPanels.filter(
+        (panel) =>
+          panel.id !== layout.activePanelId && !isWorkbenchPanelHidden(panel.id, panelLayout)
+      ),
+    [layout.activePanelId, panelLayout, resolvedPanels]
+  )
+  const canOfferSplit = splitEligible && splitFitsWidth && splitCandidates.length > 0
   const resourceSession = useResourceWorkbenchSession(
     resource,
     Boolean(activePanel?.requiresChatScope),
@@ -1194,6 +1211,62 @@ export function ContextWorkbench({
     }
     window.addEventListener("pointermove", handleMove)
     window.addEventListener("pointerup", handleUp)
+  }
+
+  /** Clamp to the store's own bounds so the preview can never show a ratio it would reject. */
+  const clampSplitRatio = (ratio: number) =>
+    Math.max(CONTEXT_WORKBENCH_SPLIT_MIN_RATIO, Math.min(CONTEXT_WORKBENCH_SPLIT_MAX_RATIO, ratio))
+
+  /**
+   * Drag the divider between the two panes.
+   *
+   * Unlike {@link handleResizeStart}, which writes the width on every move, this
+   * only mutates the `--wb-split` custom property while the pointer is down and
+   * commits to the store once on release. A store write per move would re-render
+   * the whole workbench mid-gesture — and with it a Monaco buffer, an embedded
+   * browser and a terminal — for a number nothing else reads until the drag ends.
+   */
+  const handleSplitResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const body = bodyRef.current
+    if (!body) return
+    const bounds = body.getBoundingClientRect()
+    if (bounds.height <= 0) return
+    let lastRatio = layout.splitRatio
+    const handleMove = (moveEvent: PointerEvent) => {
+      lastRatio = clampSplitRatio(((moveEvent.clientY - bounds.top) / bounds.height) * 100)
+      body.style.setProperty("--wb-split", `${lastRatio}%`)
+    }
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove)
+      window.removeEventListener("pointerup", handleUp)
+      setSplitRatio(scopeKey, lastRatio)
+    }
+    window.addEventListener("pointermove", handleMove)
+    window.addEventListener("pointerup", handleUp)
+  }
+
+  /**
+   * Keyboard resize, so the divider is not a pointer-only control.
+   *
+   * Commits immediately — a key press is already a discrete, finished gesture,
+   * so there is no drag to keep out of the store.
+   */
+  const handleSplitResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 10 : 2
+    const next =
+      event.key === "ArrowUp"
+        ? layout.splitRatio - step
+        : event.key === "ArrowDown"
+          ? layout.splitRatio + step
+          : event.key === "Home"
+            ? CONTEXT_WORKBENCH_SPLIT_MIN_RATIO
+            : event.key === "End"
+              ? CONTEXT_WORKBENCH_SPLIT_MAX_RATIO
+              : null
+    if (next === null) return
+    event.preventDefault()
+    setSplitRatio(scopeKey, clampSplitRatio(next))
   }
 
   const handleActivityKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
@@ -1553,7 +1626,13 @@ export function ContextWorkbench({
               ) : null}
               {activeGroup.length > 1 && !headerLeading ? (
                 <div
-                  role="tablist"
+                  // A `role="tab"` outside a tablist is invalid, and a tablist
+                  // cannot describe two visible panes with one selection — so
+                  // while split the group degrades to a plain button group whose
+                  // buttons report `aria-pressed` instead. Keyboard navigation is
+                  // unaffected: `handleGroupTabKeyDown` queries the data
+                  // attribute, not the role.
+                  role={splitActive ? "group" : "tablist"}
                   className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
                   onKeyDown={handleGroupTabKeyDown}
                 >
@@ -1564,8 +1643,14 @@ export function ContextWorkbench({
                       size="sm"
                       variant={layout.activePanelId === panel.id ? "secondary" : "ghost"}
                       data-workbench-group-tab
-                      role="tab"
-                      aria-selected={layout.activePanelId === panel.id}
+                      data-split-secondary={secondaryPanelId === panel.id || undefined}
+                      role={splitActive ? undefined : "tab"}
+                      aria-selected={splitActive ? undefined : layout.activePanelId === panel.id}
+                      aria-pressed={
+                        splitActive
+                          ? layout.activePanelId === panel.id || secondaryPanelId === panel.id
+                          : undefined
+                      }
                       aria-controls={`context-workbench-panel-${panel.id}`}
                       className={cn(
                         "min-w-0 overflow-hidden",
@@ -1660,21 +1745,47 @@ export function ContextWorkbench({
                         <FocusIcon className="size-4" />
                         {t("contextWorkbench.actions.focus")}
                       </DropdownMenuItem>
-                      {/* Modelled and persisted in `contextWorkbenchStore`
-                          (`splitPanelId` / `splitRatio` + three actions) with
-                          no renderer behind it. Named here as explicitly
-                          unavailable rather than left invisible: Working Rule 7
-                          asks that dormancy be legible in the UI, not only in
-                          the type. Same shape as the deferred bridge scopes in
-                          `settings/external-bridge/panels/scopes-panel.tsx`. */}
-                      <DropdownMenuItem
-                        disabled
-                        data-testid="context-workbench-split-planned"
-                        onSelect={(event) => event.preventDefault()}
-                      >
-                        <Columns2Icon className="size-4" />
-                        {t("contextWorkbench.actions.splitPlanned")}
-                      </DropdownMenuItem>
+                      {/* `Rows2Icon`, not `Columns2Icon`: the split stacks, and
+                          `Rows3Icon` is already the Wide glyph, so the two read
+                          as a family. */}
+                      {splitActive ? (
+                        <DropdownMenuItem
+                          data-testid="context-workbench-close-split-menu"
+                          onSelect={handleCloseSplit}
+                        >
+                          <Rows2Icon className="size-4" />
+                          {t("contextWorkbench.actions.closeSplit")}
+                        </DropdownMenuItem>
+                      ) : canOfferSplit ? (
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger data-testid="context-workbench-split-below">
+                            <Rows2Icon className="size-4" />
+                            {t("contextWorkbench.actions.splitBelow")}
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent
+                            aria-label={t("contextWorkbench.actions.splitBelowPanel")}
+                          >
+                            {splitCandidates.map((panel) => (
+                              <DropdownMenuItem
+                                key={panel.id}
+                                data-testid={`context-workbench-split-candidate-${panel.id}`}
+                                onSelect={() => handleSplitBelow(panel)}
+                              >
+                                {getPanelLabel(panel)}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      ) : (
+                        <DropdownMenuItem
+                          disabled
+                          data-testid="context-workbench-split-unavailable"
+                          onSelect={(event) => event.preventDefault()}
+                        >
+                          <Rows2Icon className="size-4" />
+                          {t("contextWorkbench.actions.splitNeedsWide")}
+                        </DropdownMenuItem>
+                      )}
                       {onResetLayout ? (
                         <DropdownMenuItem
                           data-testid="context-workbench-reset-layout"
@@ -1769,7 +1880,18 @@ export function ContextWorkbench({
                 const content = (
                   <div
                     id={`context-workbench-panel-${panel.id}`}
-                    role="tabpanel"
+                    // Two visible tabpanels under one selected tab is not a tabs
+                    // widget, so while split both panes become plain regions. The
+                    // secondary borrows the visible title in the split bar;
+                    // the primary has no visible title of its own and takes a
+                    // label directly.
+                    role={splitActive ? "region" : "tabpanel"}
+                    aria-labelledby={
+                      splitActive && isSecondary
+                        ? `context-workbench-split-title-${panel.id}`
+                        : undefined
+                    }
+                    aria-label={splitActive && isPrimary ? getPanelLabel(panel) : undefined}
                     className={cn(
                       "h-full",
                       !active && "pointer-events-none",
@@ -1831,6 +1953,54 @@ export function ContextWorkbench({
                   </Activity>
                 )
               })}
+              {/* One bar, rendered *outside* the panel map so no panel ever gains
+                  or loses a DOM parent when it appears. React treats the array
+                  and this conditional as two independent child slots. It is the
+                  second pane's title strip, its drag handle and its close button
+                  at once — the same three jobs a VS Code split editor header
+                  does. */}
+              {splitActive && splitPanel ? (
+                <div
+                  className="absolute inset-x-0 z-20 flex items-center gap-1 border-y bg-muted/40 px-2"
+                  style={{ top: "var(--wb-split)", height: SPLIT_BAR_HEIGHT }}
+                  data-testid="context-workbench-split-bar"
+                >
+                  <div
+                    role="separator"
+                    aria-orientation="horizontal"
+                    tabIndex={0}
+                    aria-label={t("contextWorkbench.actions.resizeSplit")}
+                    aria-controls={`context-workbench-panel-${layout.activePanelId}`}
+                    aria-valuenow={Math.round(layout.splitRatio)}
+                    aria-valuemin={CONTEXT_WORKBENCH_SPLIT_MIN_RATIO}
+                    aria-valuemax={CONTEXT_WORKBENCH_SPLIT_MAX_RATIO}
+                    data-testid="context-workbench-split-separator"
+                    className="absolute inset-x-0 -top-1 h-3 cursor-row-resize touch-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
+                    onPointerDown={handleSplitResizeStart}
+                    onKeyDown={handleSplitResizeKeyDown}
+                    onDoubleClick={() =>
+                      setSplitRatio(scopeKey, CONTEXT_WORKBENCH_SPLIT_DEFAULT_RATIO)
+                    }
+                  />
+                  <span
+                    id={`context-workbench-split-title-${splitPanel.id}`}
+                    className="pointer-events-none truncate text-xs font-medium text-muted-foreground"
+                  >
+                    {getPanelLabel(splitPanel)}
+                  </span>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="ml-auto size-5"
+                    aria-label={t("contextWorkbench.actions.closeSplit")}
+                    data-testid="context-workbench-close-split"
+                    onClick={handleCloseSplit}
+                  >
+                    <XIcon className="size-3.5" />
+                  </Button>
+                </div>
+              ) : null}
             </div>
             <PluginExtensionSlot
               point="panel.footer"
