@@ -110,24 +110,25 @@ describe("WorkbenchCustomizer", () => {
   })
 
   describe("persistent rail switch", () => {
-    it("is on when the user has never touched it", () => {
-      // The rail is what makes the right-hand panels discoverable at all, so
-      // the pre-minibar behaviour is the opt-out rather than the default.
-      renderCustomizer()
-      expect(screen.getByTestId("workbench-persistent-rail")).toBeChecked()
-    })
-
-    it("reflects an explicit opt-out", () => {
-      setLayout(undefined, false)
+    it("is off when the user has never touched it", () => {
+      // A persistent rail beside a closed panel is a second icon column boxing
+      // the conversation in, so the minibar is the opt-in rather than the
+      // default — see `useWorkbenchRailPersistent`.
       renderCustomizer()
       expect(screen.getByTestId("workbench-persistent-rail")).not.toBeChecked()
+    })
+
+    it("reflects an explicit opt-in", () => {
+      setLayout(undefined, true)
+      renderCustomizer()
+      expect(screen.getByTestId("workbench-persistent-rail")).toBeChecked()
     })
 
     it("writes only its own settings key, leaving the rail order untouched", () => {
       renderCustomizer()
       fireEvent.click(screen.getByTestId("workbench-persistent-rail"))
       const patch = saveMock.mock.calls.at(-1)?.[0]
-      expect(patch).toEqual({ workbenchRailPersistent: false })
+      expect(patch).toEqual({ workbenchRailPersistent: true })
       // Kept out of `workbenchRail` on purpose: that type's mutators rebuild
       // their object, and its "restore defaults" means "put my activity order
       // back" — which must not also switch the rail off.

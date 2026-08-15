@@ -216,9 +216,11 @@ beforeEach(() => {
   localStorage.clear()
   useBreakpointMock.mockReturnValue("desktop")
   __resetCodeServerPaneManagerForTesting()
-  // The persistent rail is a settings field defaulting to on; start every test
-  // from a clean settings object so one that switches it off cannot leak.
-  useSettingsStore.setState({ settings: {} as never })
+  // The persistent rail is a settings field defaulting to OFF (see
+  // `useWorkbenchRailPersistent`). Most of this suite exercises the minibar —
+  // the collapsed dock keeping its activity column — so it opts in explicitly;
+  // the tests that want the shipped default reset the settings themselves.
+  useSettingsStore.setState({ settings: { workbenchRailPersistent: true } as never })
   act(() => {
     useArtifactDockLayoutStore.getState().resetLayout()
     // Tabs and the active artifact are bucketed per conversation.
@@ -300,6 +302,20 @@ describe("ArtifactWorkspaceDock", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  it("collapses to zero width out of the box — the minibar is an opt-in", () => {
+    // Shipped default: no `workbenchRailPersistent` stored. A collapsed dock
+    // must not leave a 48px icon column beside the chat, or the idle screen
+    // has an icon rail on both sides of the conversation.
+    useSettingsStore.setState({ settings: {} as never })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "0%")
   })
 
   it("mobile: renders children plus the Sheet fallback (no resizable dock)", () => {

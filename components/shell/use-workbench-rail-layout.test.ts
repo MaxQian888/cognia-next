@@ -43,12 +43,21 @@ describe("workbenchRailLayoutOf", () => {
 })
 
 describe("useWorkbenchRailPersistent", () => {
-  it("keeps the rail on screen when the user has expressed no preference", () => {
-    // Defaults ON: the rail is what makes the right-hand panels discoverable at
-    // all, and the pre-minibar behaviour — a column that vanishes completely —
-    // is the opt-out. Four hosts read this to decide their collapsed width, so
-    // a wrong default is four surfaces wrong at once.
+  it("collapses the rail away when the user has expressed no preference", () => {
+    // Defaults OFF: a persistent rail beside a closed panel is a second icon
+    // column boxing the conversation in from the right, opposite the left nav
+    // rail. Four hosts read this to decide their collapsed width, so a wrong
+    // default is four surfaces wrong at once.
     setStored(undefined)
+    const { result } = renderHook(() => useWorkbenchRailPersistent())
+    expect(result.current).toBe(false)
+  })
+
+  it("honours an explicit opt-in", () => {
+    useSettingsStore.setState({
+      settings: { workbenchRailPersistent: true } as never,
+      save: saveMock as never,
+    })
     const { result } = renderHook(() => useWorkbenchRailPersistent())
     expect(result.current).toBe(true)
   })

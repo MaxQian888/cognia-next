@@ -156,6 +156,14 @@ export interface ArtifactDockLayoutState {
   toggleDock: () => void
   setDockCollapsed: (collapsed: boolean) => void
   /**
+   * Fold an *idle* dock away — one showing "No artifacts yet" for a
+   * conversation that has none. Unlike `setDockCollapsed(true)` this is not a
+   * dismissal: `userDismissed` is left alone, so the next artifact to arrive
+   * still raises the dock instead of only flagging the toggle unread. Called
+   * from the session-focus seam (`lib/artifacts/park-idle-dock.ts`).
+   */
+  parkDock: () => void
+  /**
    * A new artifact became active. Expands the dock unless the user dismissed it
    * (then only flags it unread), so we never yank open a panel the user closed.
    */
@@ -329,6 +337,10 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
                 unreadArtifact: false,
                 mobileSheetOpen: true,
               }
+        ),
+      parkDock: () =>
+        set((state) =>
+          state.dockCollapsed ? state : { dockCollapsed: true, mobileSheetOpen: false }
         ),
       notifyNewArtifact: () =>
         set((state) =>

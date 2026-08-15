@@ -27,6 +27,14 @@ beforeEach(() => {
     useChatStore.getState().clear()
     useArtifactDockLayoutStore.getState().resetLayout()
     useArtifactStore.getState().resetSessionScopedWorkspaceFilters(null)
+    // The idle-dock rule reads per-conversation artifact ownership; start empty.
+    useArtifactStore.setState({
+      artifacts: {},
+      artifactVersions: {},
+      pendingReviews: {},
+      activeArtifactIdBySession: {},
+      openArtifactIdsBySession: {},
+    } as never)
   })
 })
 
@@ -49,7 +57,50 @@ describe("applySessionFocusChange", () => {
   })
 })
 
+describe("applySessionFocusChange — idle dock", () => {
+  it("parks a dock left open by an earlier conversation when the next has no artifacts", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+
+    act(() => applySessionFocusChange("session-b"))
+
+    const dock = useArtifactDockLayoutStore.getState()
+    expect(dock.dockCollapsed).toBe(true)
+    // Parked, not dismissed: an artifact arriving in session-b still raises it.
+    expect(dock.userDismissed).toBe(false)
+  })
+
+  it("follows the user into a conversation that does have artifacts", () => {
+    act(() => {
+      useArtifactStore.getState().createArtifact({
+        sessionId: "session-b",
+        messageId: "m-1",
+        type: "html",
+        title: "Page",
+        content: "<p>hi</p>",
+      })
+      useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+    })
+
+    act(() => applySessionFocusChange("session-b"))
+
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+  })
+})
+
 describe("SessionFocusInitializer", () => {
+  it("parks an idle dock once at mount, for the conversation restored at start-up", () => {
+    // `dockCollapsed` is persisted; a reload lands on the restored conversation
+    // without passing through a switch, so the seam checks once on mount.
+    act(() => {
+      useChatStore.getState().setActiveSession("session-a")
+      useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+    })
+
+    render(<SessionFocusInitializer />)
+
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+  })
+
   it("runs on every conversation switch", () => {
     render(<SessionFocusInitializer />)
     seedStaleRightRailState()

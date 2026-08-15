@@ -1569,33 +1569,42 @@ export function ContextWorkbench({
                 narrow end rather than squashing everything. */}
             <header className="@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2">
               {/* Panel history back/forward — hidden on mobile and when
-                  the header is very narrow (<12rem) to not crowd the tabs. */}
-              <div className="hidden shrink-0 items-center @[12rem]/wb-header:flex">
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  disabled={!panelHistory.canGoBack}
-                  aria-label={t("contextWorkbench.actions.historyBack")}
-                  title={t("contextWorkbench.actions.historyBack")}
-                  onClick={handleHistoryBack}
-                  data-testid="panel-history-back"
+                  the header is very narrow (<12rem) to not crowd the tabs.
+                  Also not drawn at all until there is somewhere to go: a
+                  disabled pair on a fresh panel is a second set of chevrons
+                  beside the title bar's route history, same glyphs with a
+                  different meaning, on every idle screen. */}
+              {panelHistory.canGoBack || panelHistory.canGoForward ? (
+                <div
+                  className="hidden shrink-0 items-center @[12rem]/wb-header:flex"
+                  data-testid="panel-history-nav"
                 >
-                  <ChevronLeftIcon className="size-4" />
-                </Button>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  disabled={!panelHistory.canGoForward}
-                  aria-label={t("contextWorkbench.actions.historyForward")}
-                  title={t("contextWorkbench.actions.historyForward")}
-                  onClick={handleHistoryForward}
-                  data-testid="panel-history-forward"
-                >
-                  <ChevronRightIcon className="size-4" />
-                </Button>
-              </div>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={!panelHistory.canGoBack}
+                    aria-label={t("contextWorkbench.actions.historyBack")}
+                    title={t("contextWorkbench.actions.historyBack")}
+                    onClick={handleHistoryBack}
+                    data-testid="panel-history-back"
+                  >
+                    <ChevronLeftIcon className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={!panelHistory.canGoForward}
+                    aria-label={t("contextWorkbench.actions.historyForward")}
+                    title={t("contextWorkbench.actions.historyForward")}
+                    onClick={handleHistoryForward}
+                    data-testid="panel-history-forward"
+                  >
+                    <ChevronRightIcon className="size-4" />
+                  </Button>
+                </div>
+              ) : null}
               {headerLeading}
               {activeGroup.length > 1 && headerLeading ? (
                 <DropdownMenu>

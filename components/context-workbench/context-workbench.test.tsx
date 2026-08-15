@@ -6,6 +6,7 @@ import { NextIntlClientProvider } from "next-intl"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { resetPanelHistoryForTesting } from "@/hooks/context-workbench/use-panel-history"
 import {
   ContextWorkbench,
   ContextWorkbenchMobileDrawer,
@@ -2027,5 +2028,92 @@ describe("ContextWorkbench — vertical split", () => {
 
     expect(screen.queryByTestId("panel-review")).not.toBeInTheDocument()
     expect(screen.getByTestId("panel-comments")).toBeInTheDocument()
+  })
+})
+
+describe("ContextWorkbench — panel history chevrons", () => {
+  const twoPanels: ContextPanelDefinition[] = [
+    {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      renderer: () => <div>comments-panel</div>,
+    },
+    {
+      id: "review",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      appliesTo: () => true,
+      renderer: () => <div>review-panel</div>,
+    },
+  ]
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {} })
+    useSettingsStore.setState({ settings: {} as never })
+    resetPanelHistoryForTesting()
+  })
+
+  it("does not draw the ‹ › pair until there is somewhere to go", () => {
+    // A disabled pair on a fresh panel is a second set of chevrons beside the
+    // title bar's route history — same glyphs, different meaning — on every
+    // idle screen. It appears only once a navigation has been recorded.
+    renderWorkbench(twoPanels)
+    expect(screen.queryByTestId("panel-history-nav")).not.toBeInTheDocument()
+
+    // An externally-published navigation (a reveal, a restored layout) never
+    // touches `handleActivate`; the history effect is what records it.
+    act(() => {
+      useContextWorkbenchStore
+        .getState()
+        .navigatePanel("window-a::canvas:doc-1", "review", "narrow")
+    })
+
+    expect(screen.getByTestId("panel-history-nav")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-history-back")).toBeEnabled()
+    expect(screen.getByTestId("panel-history-forward")).toBeDisabled()
+  })
+
+  it("records a rail click and walks back to the previous panel", () => {
+    // The rail's click path claims `lastActivePanelRef` before writing to the
+    // store, which silences the history effect — so `handleActivate` has to
+    // push the entry itself, or an ordinary rail click never grows the stack
+    // and the ‹ › pair never appears.
+    renderWorkbench(twoPanels)
+    const scopeKey = "window-a::canvas:doc-1"
+    const activeId = () => useContextWorkbenchStore.getState().layouts[scopeKey]?.activePanelId
+    expect(activeId()).toBe("comments")
+    expect(screen.queryByTestId("panel-history-nav")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.review" }))
+    expect(activeId()).toBe("review")
+    expect(screen.getByText("review-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-history-nav")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-history-back")).toBeEnabled()
+    expect(screen.getByTestId("panel-history-forward")).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("panel-history-back"))
+    expect(activeId()).toBe("comments")
+    expect(screen.getByText("comments-panel")).toBeInTheDocument()
+    // Going back must not truncate the forward entry: the effect re-fires for
+    // the store write, but pushing the panel that is already current is a
+    // no-op in the history.
+    expect(screen.getByTestId("panel-history-back")).toBeDisabled()
+    expect(screen.getByTestId("panel-history-forward")).toBeEnabled()
+
+    fireEvent.click(screen.getByTestId("panel-history-forward"))
+    expect(activeId()).toBe("review")
+    expect(screen.getByTestId("panel-history-back")).toBeEnabled()
+    expect(screen.getByTestId("panel-history-forward")).toBeDisabled()
+  })
+
+  it("re-opening the panel that was last in front does not duplicate the entry", () => {
+    renderWorkbench(twoPanels)
+    // Comments is already in front, so a rail click toggles the body shut and a
+    // second click re-opens it. Neither is a new place to go back to.
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
+    expect(screen.queryByTestId("panel-history-nav")).not.toBeInTheDocument()
   })
 })

@@ -979,7 +979,7 @@ function ChannelListSearch({
   }, [cancelQueryChange, onQueryChange])
 
   return (
-    <div className="px-3 pb-2.5">
+    <div className="px-3 pt-2.5 pb-2.5">
       <InputGroup className="h-9 rounded-xl border-transparent bg-muted/60 shadow-none">
         <InputGroupAddon align="inline-start" className="pr-0 pl-2">
           <SearchIcon className="size-3.5" aria-hidden />
@@ -1091,7 +1091,10 @@ function Header({
   const isArchived = view === "archived"
   const viewLabel = isArchived ? t("viewActive") : t("viewArchived")
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-3">
+    // `h-10` + `border-b`: the same 40px and bottom rule as the chat header
+    // and the workbench header beside it, so the three column headers line up
+    // as one continuous bar instead of stepping 44 / 36 / 40.
+    <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b px-3">
       <div className="flex min-w-0 items-center gap-2">
         {isTeam ? (
           <UsersIcon

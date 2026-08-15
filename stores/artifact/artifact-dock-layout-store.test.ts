@@ -168,6 +168,31 @@ describe("useArtifactDockLayoutStore", () => {
       act(() => result.current.setDockCollapsed(false))
       expect(result.current.dockCollapsed).toBe(false)
     })
+
+    it("parkDock folds the dock away without counting as a dismissal", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockCollapsed(false))
+      expect(result.current.mobileSheetOpen).toBe(true)
+
+      act(() => result.current.parkDock())
+      expect(result.current.dockCollapsed).toBe(true)
+      expect(result.current.mobileSheetOpen).toBe(false)
+      expect(result.current.userDismissed).toBe(false)
+
+      // The whole point: an artifact arriving after an idle park still raises
+      // the dock, where one arriving after a manual close only flags unread.
+      act(() => result.current.notifyNewArtifact())
+      expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.unreadArtifact).toBe(false)
+    })
+
+    it("parkDock is a no-op on an already-collapsed dock", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      const before = useArtifactDockLayoutStore.getState()
+      act(() => result.current.parkDock())
+      // Identity-stable: no subscriber wakes for a park that changed nothing.
+      expect(useArtifactDockLayoutStore.getState()).toBe(before)
+    })
   })
 
   describe("dismiss + unread artifact", () => {

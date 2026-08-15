@@ -35,6 +35,10 @@ import {
 } from "@/components/context-workbench/context-workbench"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
+import {
+  ARTIFACT_DOCK_WORKBENCH_HOST_KEY,
+  sessionWorkbenchScopeKey,
+} from "@/lib/artifacts/session-workbench-scope-key"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import type { ContextPanelMode, ContextResource } from "@/types/context-workbench"
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
@@ -112,19 +116,6 @@ function useDockWidthHint() {
     },
     [dockProfile, requestDockSize]
   )
-}
-
-/**
- * The scope key standing in for "this conversation". Built in one place because
- * both dock surfaces need the identical string: the session surface uses it as
- * its own layout scope, and the artifact surface hands it to the workbench so
- * `scope: "session"` panels record their activation against the conversation.
- */
-function sessionWorkbenchScopeKey(
-  workbenchInstanceId: string,
-  activeSessionId: string | null
-): string {
-  return `${workbenchInstanceId}::session:${activeSessionId ?? "none"}`
 }
 
 /**
@@ -231,7 +222,7 @@ export function ArtifactContextWorkbench({
   mobile?: SheetHost
   railOnly?: boolean
 }) {
-  const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
+  const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
   const artifact = useArtifactStore((state) => state.artifacts[artifactId])
   const unresolvedCommentCount = useContextCommentBadge("artifact", artifactId)
   const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
@@ -426,7 +417,7 @@ export function SessionContextWorkbench({
   mobile?: SheetHost
   railOnly?: boolean
 }) {
-  const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
+  const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
   const activeSessionId = useChatStore((state) => state.activeSessionId)
   // The conversation's *record* (model, working dir, timestamps) lives in
   // `sessionStore`; `chatStore.sessions` is the per-session message slice.

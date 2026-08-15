@@ -124,7 +124,21 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
     : undefined
 
   return (
-    <header className="flex h-9 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
+    <header
+      // `h-10` is the shared column-header height: the conversation rail's
+      // header (`channel-list.tsx`) and the right-hand workbench header
+      // (`context-workbench.tsx`) draw the same 40px with the same bottom rule,
+      // so the three columns read as one bar rather than three stepped ones.
+      className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur"
+      // Opt the bar into the shared wallpaper-aware tonality system
+      // (app/globals.css §5), same tier as the conversation rail. Without it
+      // the hardcoded `bg-background/80` stayed an opaque slab while the
+      // message area a pixel below showed the wallpaper — the seam this header
+      // is supposed to sit flush against. `bg-background/80` remains the
+      // no-wallpaper fallback; the tonality rules only fire under
+      // `body[data-bg-enabled="true"]` and honour prefers-reduced-transparency.
+      data-tonality="translucent"
+    >
       <Button
         variant="ghost"
         size="icon"

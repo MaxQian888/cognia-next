@@ -54,6 +54,7 @@ import { SessionSourcesPanel } from "@/components/context-workbench/session-sour
 import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
 import { ArtifactPanelContent, type ArtifactPanelMode } from "./artifact-panel-content"
 import { ArtifactList } from "./artifact-list"
+import { SESSION_ARTIFACT_LIST_PANEL_ID } from "@/lib/artifacts/session-workbench-scope-key"
 import { ArtifactReviewView } from "./artifact-review-view"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
 import { ProjectOverviewPanel } from "./workspace-mode/project-overview-panel"
@@ -234,7 +235,7 @@ export function useArtifactSurfacePanels({
         // It shared that word with `PanelVersionHistory`, which is the real
         // version history and lives in the preview panel's overflow menu, so
         // the rail promised one thing and delivered the other.
-        id: "artifacts",
+        id: SESSION_ARTIFACT_LIST_PANEL_ID,
         activity: "review",
         labelKey: "artifacts.dock.browseArtifacts",
         icon: LibraryIcon,
@@ -409,7 +410,7 @@ export function useSessionSurfacePanels({
   return useMemo<ContextPanelDefinition[]>(
     () => [
       {
-        id: "artifacts",
+        id: SESSION_ARTIFACT_LIST_PANEL_ID,
         activity: "review",
         labelKey: "artifacts.dock.browseArtifacts",
         icon: LibraryIcon,

@@ -68,12 +68,20 @@ export function workbenchRailLayoutOf(
  * A one-field selector rather than part of {@link useWorkbenchRailLayout},
  * because the hosts that need it (the chat dock's `ResizablePanel`, Canvas, the
  * workflow editor) only want this boolean and must not re-render on every
- * reorder of the rail. Defaults to on: the rail is what makes the right-hand
- * panels discoverable at all, and the pre-minibar behaviour — a column that
- * vanishes completely — is the opt-out.
+ * reorder of the rail.
+ *
+ * Defaults to off: with the panel closed, a persistent rail is a second
+ * icon column beside the left navigation rail, and the two of them boxed the
+ * conversation in on every idle screen. The panels stay discoverable through
+ * the header dock toggle, ⌘/Ctrl+J and the title-bar layout controls; users
+ * who want the minibar back opt in from the workbench customizer.
  */
+export const DEFAULT_WORKBENCH_RAIL_PERSISTENT = false
+
 export function useWorkbenchRailPersistent(): boolean {
-  return useSettingsStore((s) => s.settings?.workbenchRailPersistent ?? true)
+  return useSettingsStore(
+    (s) => s.settings?.workbenchRailPersistent ?? DEFAULT_WORKBENCH_RAIL_PERSISTENT
+  )
 }
 
 export function useWorkbenchRailLayout(projectId?: string | null): UseWorkbenchRailLayout {

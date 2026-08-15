@@ -12,6 +12,10 @@
  * - `artifactStore` — the artifact list's search query and type/runtime filters
  *   are one global blob, so narrowing typed in one conversation silently keeps
  *   narrowing every conversation after it.
+ * - `artifactDockLayoutStore.dockCollapsed` — persisted and written `false` by
+ *   every reveal, so a dock raised by one conversation's artifact stays open,
+ *   empty, for every conversation after it. `parkIdleArtifactDock` folds it
+ *   away when the incoming conversation has nothing to show in it.
  *
  * Both need the same trigger, so they share one subscriber rather than each
  * store growing its own chat-store dependency. Doing it here rather than inside
@@ -31,6 +35,7 @@ import { useEffect } from "react"
 import { useChatStore } from "@/stores/chat"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { parkIdleArtifactDock } from "@/lib/artifacts/park-idle-dock"
 import { retryTitleIfNeeded } from "@/lib/ai/generation/title-retry"
 import { subscribeResume } from "@/lib/capacitor/app"
 
@@ -42,6 +47,9 @@ import { subscribeResume } from "@/lib/capacitor/app"
 export function applySessionFocusChange(sessionId: string | null): void {
   useArtifactDockLayoutStore.getState().clearSessionScopedReveals()
   useArtifactStore.getState().resetSessionScopedWorkspaceFilters(sessionId)
+  // A dock left open by an earlier conversation's artifact must not follow the
+  // user into one that has none — see `parkIdleArtifactDock`.
+  parkIdleArtifactDock(sessionId)
   // Retry failed title generation when the user re-focuses a session.
   if (sessionId) void retryTitleIfNeeded(sessionId)
 }
@@ -55,6 +63,10 @@ export function SessionFocusInitializer() {
       if (state.activeSessionId === prevState.activeSessionId) return
       applySessionFocusChange(state.activeSessionId)
     })
+    // `dockCollapsed` is persisted, so the conversation restored at start-up
+    // never passes through the switch above — park an idle dock once here too,
+    // or a reload lands on the empty panel the previous session left open.
+    parkIdleArtifactDock(useChatStore.getState().activeSessionId)
 
     // On app resume (foreground), retry title for the currently active session.
     let disposed = false

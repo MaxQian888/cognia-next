@@ -288,6 +288,8 @@ describe("CanvasShell", () => {
     })
 
     it("keeps the right wrapper visible when collapsed, because the rail lives in it", () => {
+      // The minibar is an opt-in (see `useWorkbenchRailPersistent`).
+      useSettingsStore.setState({ settings: { workbenchRailPersistent: true } as never })
       act(() => {
         useCanvasLayoutStore.getState().setRightCollapsed(true)
       })
@@ -299,6 +301,7 @@ describe("CanvasShell", () => {
     })
 
     it("tells the side panels to draw rail-only while the column is collapsed", () => {
+      useSettingsStore.setState({ settings: { workbenchRailPersistent: true } as never })
       renderWithProviders(<CanvasShell />)
       expect(screen.getByTestId("side-panels")).not.toHaveAttribute("data-rail-only")
 
