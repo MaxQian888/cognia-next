@@ -531,11 +531,16 @@
     "errors": {
       "agentIdRequired": "External agent is required",
       "characterIdRequired": "Character is required for agent tasks",
+      "conversationKeyRequired": "Conversation key is required for IM push tasks",
+      "imPushTextRequired": "Message text (or segments) is required",
+      "inputsInvalidJson": "Inputs must be valid JSON",
       "objectiveRequired": "Objective is required for goal tasks",
       "planIdRequired": "Plan is required for plan tasks",
       "promptRequired": "Prompt is required",
+      "segmentsInvalid": "Segments must be a non-empty JSON array of message segments",
       "skillIdRequired": "Skill is required for skill tasks",
-      "teamIdRequired": "Team is required for agent-team tasks"
+      "teamIdRequired": "Team is required for agent-team tasks",
+      "workflowIdRequired": "Workflow is required for workflow tasks"
     },
     "externalAgent": {
       "agentId": "External agent",
@@ -556,6 +561,19 @@
       "objectiveHelp": "The objective is PII-redacted before it reaches the model. The loop self-terminates on its exit conditions.",
       "objectivePlaceholder": "What should the goal accomplish?",
       "timeoutMinutes": "Timeout (min)"
+    },
+    "imPush": {
+      "conversationKey": "Conversation key",
+      "conversationKeyHelp": "The bot must already have exchanged a message with this conversation (a delivery target is persisted) and proactive push must be enabled in its conversation settings.",
+      "conversationKeyPlaceholder": "e.g. lark:oc_xxx",
+      "guardrails": "Guardrails: the message passes the PII gate before it leaves the app, the conversation's proactive-push opt-in is enforced, and each execution is idempotency-keyed so a retry never double-sends.",
+      "idempotencyKey": "Idempotency key",
+      "idempotencyKeyPlaceholder": "Defaults to task-id:execution-id",
+      "segments": "Raw segments (JSON, optional)",
+      "segmentsHelp": "Advanced: a MessageSegment[] array for rich content. Leave empty to send plain text.",
+      "text": "Message",
+      "textIgnoredHint": "Ignored while raw segments are provided.",
+      "textPlaceholder": "Text to push into the conversation"
     },
     "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
     "maxTurns": "Max turns",
@@ -598,7 +616,25 @@
     },
     "webhookUrl": "Webhook URL",
     "webhookUrlInvalid": "Webhook URL must start with http:// or https://",
-    "webhookUrlPlaceholder": "https://example.com/webhook"
+    "webhookUrlPlaceholder": "https://example.com/webhook",
+    "workflow": {
+      "deploymentHelp": "The workflow needs an active deployment in the chosen environment; the run is otherwise refused at admission and the execution row says why.",
+      "environment": "Environment",
+      "idempotencyKey": "Idempotency key",
+      "idempotencyKeyHelp": "A re-fired slot with the same key reuses the existing run instead of starting a second one.",
+      "idempotencyKeyPlaceholder": "Defaults to task-id:execution-id",
+      "inputs": "Inputs (JSON)",
+      "inputsHelp": "Handed to the run as its trigger payload and validated against the workflow input schema.",
+      "noWorkflows": "No workflows found — create one in the workflow editor first.",
+      "triggerId": "Trigger node id",
+      "triggerIdHelp": "Enter through this cron trigger node instead of the manual trigger.",
+      "triggerIdPlaceholder": "Optional",
+      "unknownWorkflowHint": "This id is not in the local workflow list; it must exist on the host that runs the task.",
+      "workflowId": "Workflow",
+      "workflowIdManual": "Workflow id",
+      "workflowIdManualPlaceholder": "…or paste a workflow id",
+      "workflowPlaceholder": "Pick a workflow"
+    }
   },
   "payloadDescription": "Data passed to the task executor",
   "payloadEditorMode": {

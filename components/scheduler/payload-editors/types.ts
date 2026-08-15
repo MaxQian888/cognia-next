@@ -13,9 +13,11 @@ import type {
   ChatLikeTaskPayload,
   ExternalAgentTaskPayload,
   GoalTaskPayload,
+  ImPushTaskPayload,
   PlanTaskPayload,
   ScheduledTaskType,
   SkillTaskPayload,
+  WorkflowTaskPayload,
 } from "@/types/scheduler"
 import type { BuiltinToolsConfig, SendOptions } from "@cognia/agent-config-types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
@@ -100,9 +102,44 @@ export interface PlanDraft {
   replanOnFailure: boolean
 }
 
+/**
+ * Draft for `workflow` tasks — runs a published visual workflow. `inputsJson`
+ * is kept as text so partially-typed JSON survives re-renders; it is parsed
+ * on submit.
+ */
+export interface WorkflowDraft {
+  workflowId: string
+  environment: string
+  inputsJson: string
+  triggerId: string
+  idempotencyKey: string
+}
+
+/** Draft for `im-push` tasks — text (or raw segments JSON) into a bound conversation. */
+export interface ImPushDraft {
+  conversationKey: string
+  text: string
+  /** Optional raw `MessageSegment[]` JSON; when non-empty it wins over `text`. */
+  segmentsJson: string
+  idempotencyKey: string
+}
+
 export const EMPTY_AGENT_TEAM_DRAFT: AgentTeamDraft = { teamId: "", ultracode: false }
 export const EMPTY_GOAL_DRAFT: GoalDraft = { objective: "" }
 export const EMPTY_PLAN_DRAFT: PlanDraft = { planId: "", replanOnFailure: false }
+export const EMPTY_WORKFLOW_DRAFT: WorkflowDraft = {
+  workflowId: "",
+  environment: "",
+  inputsJson: "",
+  triggerId: "",
+  idempotencyKey: "",
+}
+export const EMPTY_IM_PUSH_DRAFT: ImPushDraft = {
+  conversationKey: "",
+  text: "",
+  segmentsJson: "",
+  idempotencyKey: "",
+}
 
 /**
  * Convert an existing JSON-shaped payload back into a `ChatLikeDraft` so an
@@ -368,6 +405,101 @@ export function planDraftToPayload(draft: PlanDraft): PlanTaskPayload {
   return out
 }
 
+// ── workflow / im-push drafts ───────────────────────────────────────────────
+
+export function payloadToWorkflowDraft(raw: unknown): WorkflowDraft {
+  const draft: WorkflowDraft = { ...EMPTY_WORKFLOW_DRAFT }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
+  const p = raw as Record<string, unknown>
+  if (typeof p.workflowId === "string") draft.workflowId = p.workflowId
+  if (typeof p.environment === "string") draft.environment = p.environment
+  if (typeof p.triggerId === "string") draft.triggerId = p.triggerId
+  if (typeof p.idempotencyKey === "string") draft.idempotencyKey = p.idempotencyKey
+  if (p.inputs !== undefined) {
+    try {
+      draft.inputsJson = JSON.stringify(p.inputs, null, 2)
+    } catch {
+      draft.inputsJson = ""
+    }
+  }
+  return draft
+}
+
+export function workflowDraftToPayload(draft: WorkflowDraft): WorkflowTaskPayload {
+  const errors: Record<string, string> = {}
+  const workflowId = trimOrUndef(draft.workflowId)
+  if (!workflowId) errors.workflowId = "workflowIdRequired"
+  let inputs: unknown
+  const inputsText = draft.inputsJson.trim()
+  if (inputsText.length > 0) {
+    try {
+      inputs = JSON.parse(inputsText)
+    } catch {
+      errors.inputsJson = "inputsInvalidJson"
+    }
+  }
+  if (Object.keys(errors).length > 0) throw new DraftValidationError(errors)
+  const out: WorkflowTaskPayload = { workflowId: workflowId! }
+  const environment = trimOrUndef(draft.environment)
+  if (environment) out.environment = environment
+  if (inputs !== undefined) out.inputs = inputs
+  const triggerId = trimOrUndef(draft.triggerId)
+  if (triggerId) out.triggerId = triggerId
+  const idempotencyKey = trimOrUndef(draft.idempotencyKey)
+  if (idempotencyKey) out.idempotencyKey = idempotencyKey
+  return out
+}
+
+export function payloadToImPushDraft(raw: unknown): ImPushDraft {
+  const draft: ImPushDraft = { ...EMPTY_IM_PUSH_DRAFT }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
+  const p = raw as Record<string, unknown>
+  if (typeof p.conversationKey === "string") draft.conversationKey = p.conversationKey
+  if (typeof p.text === "string") draft.text = p.text
+  if (typeof p.idempotencyKey === "string") draft.idempotencyKey = p.idempotencyKey
+  if (Array.isArray(p.segments)) {
+    try {
+      draft.segmentsJson = JSON.stringify(p.segments, null, 2)
+    } catch {
+      draft.segmentsJson = ""
+    }
+  }
+  return draft
+}
+
+export function imPushDraftToPayload(draft: ImPushDraft): ImPushTaskPayload {
+  const errors: Record<string, string> = {}
+  const conversationKey = trimOrUndef(draft.conversationKey)
+  if (!conversationKey) errors.conversationKey = "conversationKeyRequired"
+  const text = trimOrUndef(draft.text)
+  let segments: ImPushTaskPayload["segments"]
+  const segmentsText = draft.segmentsJson.trim()
+  if (segmentsText.length > 0) {
+    try {
+      const parsed = JSON.parse(segmentsText)
+      if (
+        !Array.isArray(parsed) ||
+        parsed.length === 0 ||
+        parsed.some((s) => !s || typeof s !== "object" || typeof s.type !== "string")
+      ) {
+        errors.segmentsJson = "segmentsInvalid"
+      } else {
+        segments = parsed as ImPushTaskPayload["segments"]
+      }
+    } catch {
+      errors.segmentsJson = "segmentsInvalid"
+    }
+  }
+  if (!text && !segments && !errors.segmentsJson) errors.text = "imPushTextRequired"
+  if (Object.keys(errors).length > 0) throw new DraftValidationError(errors)
+  const out: ImPushTaskPayload = { conversationKey: conversationKey! }
+  if (segments) out.segments = segments
+  else out.text = text
+  const idempotencyKey = trimOrUndef(draft.idempotencyKey)
+  if (idempotencyKey) out.idempotencyKey = idempotencyKey
+  return out
+}
+
 /** Whether a task type uses the chat-like structured editor. */
 export function isChatLikeTaskType(t: ScheduledTaskType): boolean {
   return t === "chat" || t === "agent" || t === "skill"
@@ -379,6 +511,8 @@ export function isStructuredEditableTaskType(t: ScheduledTaskType): boolean {
     t === "external-agent" ||
     t === "agent-team" ||
     t === "goal" ||
-    t === "plan"
+    t === "plan" ||
+    t === "workflow" ||
+    t === "im-push"
   )
 }

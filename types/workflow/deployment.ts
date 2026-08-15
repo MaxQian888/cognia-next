@@ -46,7 +46,18 @@ export interface WorkflowDeployment {
 }
 
 export type WorkflowEntrypoint =
-  "http" | "mcp" | "portal" | "trigger" | "skill" | "agent-tool" | "subworkflow" | "desktop" | "cli"
+  | "http"
+  | "mcp"
+  | "portal"
+  | "trigger"
+  | "skill"
+  | "agent-tool"
+  | "subworkflow"
+  | "desktop"
+  | "cli"
+  // A `workflow` scheduled task (app scheduler) — see
+  // `lib/scheduler/executors/workflow-executor.ts`.
+  | "schedule"
 
 export interface WorkflowInvocation {
   id: string

@@ -14154,6 +14154,8 @@
       "fontScaleMd": "中",
       "fontScaleSm": "小",
       "language": "语言",
+      "messageDisplayHelp": "聊天消息的预设、内容渲染（公式、图表、代码）与元数据。",
+      "messageDisplayTitle": "消息展示",
       "privacyTitle": "无障碍与隐私",
       "reconnectButton": "重连 WebRTC",
       "reconnectFailed": "重连失败（{reason}）。",
@@ -14651,8 +14653,6 @@
       "verified": "已验证"
     },
     "title": "模型目录"
-      "messageDisplayHelp": "聊天消息的预设、内容渲染（公式、图表、代码）与元数据。",
-      "messageDisplayTitle": "消息展示",
   },
   "notFound": {
     "description": "我们找不到你要访问的页面。它可能已被移动、重命名或删除。",
@@ -20661,11 +20661,16 @@
       "errors": {
         "agentIdRequired": "外部代理必填",
         "characterIdRequired": "agent 任务必须选择角色",
+        "conversationKeyRequired": "IM 推送任务需要会话键",
+        "imPushTextRequired": "需要消息文本（或 segments）",
+        "inputsInvalidJson": "输入必须是合法的 JSON",
         "objectiveRequired": "goal 任务必须填写目标",
         "planIdRequired": "plan 任务必须选择计划",
         "promptRequired": "提示词不能为空",
+        "segmentsInvalid": "segments 必须是非空的消息片段 JSON 数组",
         "skillIdRequired": "skill 任务必须选择技能",
-        "teamIdRequired": "agent-team 任务必须选择团队"
+        "teamIdRequired": "agent-team 任务必须选择团队",
+        "workflowIdRequired": "工作流任务需要选择工作流"
       },
       "externalAgent": {
         "agentId": "外部代理",
@@ -20686,6 +20691,19 @@
         "objectiveHelp": "目标在发送给模型前会进行 PII 脱敏。循环会在满足退出条件时自动终止。",
         "objectivePlaceholder": "这个目标要完成什么？",
         "timeoutMinutes": "超时 (分钟)"
+      },
+      "imPush": {
+        "conversationKey": "会话键",
+        "conversationKeyHelp": "机器人必须已与该会话有过消息往来（已持久化投递目标），且该会话的设置中已开启主动推送。",
+        "conversationKeyPlaceholder": "例如 lark:oc_xxx",
+        "guardrails": "护栏：消息离开应用前经过 PII 门控，会话的主动推送开关会被强制校验，每次执行都带幂等键，重试不会重复发送。",
+        "idempotencyKey": "幂等键",
+        "idempotencyKeyPlaceholder": "默认为 任务ID:执行ID",
+        "segments": "原始 segments（JSON，可选）",
+        "segmentsHelp": "高级：MessageSegment[] 数组用于富内容。留空则发送纯文本。",
+        "text": "消息",
+        "textIgnoredHint": "提供原始 segments 时此项被忽略。",
+        "textPlaceholder": "要推送到该会话的文本"
       },
       "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
       "maxTurns": "最大轮次",
@@ -20728,7 +20746,25 @@
       },
       "webhookUrl": "Webhook URL",
       "webhookUrlInvalid": "Webhook URL 必须以 http:// 或 https:// 开头",
-      "webhookUrlPlaceholder": "https://example.com/webhook"
+      "webhookUrlPlaceholder": "https://example.com/webhook",
+      "workflow": {
+        "deploymentHelp": "工作流需要在所选环境中有活动的部署；否则准入时会被拒绝，执行记录会说明原因。",
+        "environment": "环境",
+        "idempotencyKey": "幂等键",
+        "idempotencyKeyHelp": "同一键的重复触发会复用已有运行，而不是再启动一次。",
+        "idempotencyKeyPlaceholder": "默认为 任务ID:执行ID",
+        "inputs": "输入（JSON）",
+        "inputsHelp": "作为触发负载传给本次运行，并按工作流输入 schema 校验。",
+        "noWorkflows": "未找到工作流——请先在工作流编辑器中创建。",
+        "triggerId": "触发节点 ID",
+        "triggerIdHelp": "通过该 cron 触发节点进入，而不是手动触发。",
+        "triggerIdPlaceholder": "可选",
+        "unknownWorkflowHint": "该 ID 不在本地工作流列表中；它必须存在于运行该任务的宿主上。",
+        "workflowId": "工作流",
+        "workflowIdManual": "工作流 ID",
+        "workflowIdManualPlaceholder": "……或粘贴工作流 ID",
+        "workflowPlaceholder": "选择一个工作流"
+      }
     },
     "payloadDescription": "传递给执行器的数据",
     "payloadEditorMode": {
@@ -22872,6 +22908,11 @@
           "label": "布局"
         },
         "metadata": {
+          "bodyFont": {
+            "label": "正文字体",
+            "sans": "无衬线",
+            "serif": "衬线"
+          },
           "cost": "费用",
           "duration": "耗时",
           "finishState": "结束状态",
@@ -22885,6 +22926,44 @@
         "motion": {
           "expressive": "丰富",
           "label": "消息动效",
+          "markdown": {
+            "codeLineNumbers": {
+              "hint": "行号栏的默认值；每个代码块仍可单独切换。",
+              "label": "代码行号"
+            },
+            "codeWrap": {
+              "hint": "软换行的默认值；每个代码块仍可单独切换。",
+              "label": "长代码行自动换行"
+            },
+            "diff": {
+              "hint": "用 diff 查看器渲染 ```diff 代码块；关闭则显示普通代码块。",
+              "label": "Diff 视图"
+            },
+            "label": "内容渲染",
+            "math": {
+              "hint": "将 $…$ 与 $$…$$ 渲染为排版公式；关闭则显示源码。",
+              "label": "数学公式（KaTeX）"
+            },
+            "mathAlign": {
+              "center": "居中",
+              "label": "块级公式对齐",
+              "left": "左对齐"
+            },
+            "mathCopy": {
+              "hint": "悬停行内公式时显示复制按钮。",
+              "label": "行内公式复制按钮"
+            },
+            "mathFontScale": {
+              "1": "标准",
+              "0_8": "小",
+              "1_2": "大",
+              "label": "公式字号"
+            },
+            "mermaid": {
+              "hint": "将 ```mermaid 代码块渲染为图表；关闭则显示代码。",
+              "label": "Mermaid 图表"
+            }
+          },
           "off": "关闭",
           "restrained": "克制"
         },
@@ -23546,55 +23625,12 @@
           "large": "头像图片偏大——使用更小的图片可让角色数据更轻量。",
           "upload": "上传图片"
         },
-        "bodyFont": {
-          "label": "正文字体",
-          "sans": "无衬线",
-          "serif": "衬线"
-        },
         "browserToolsToggle": {
           "aria": "切换智能体浏览器工具",
           "description": "允许该角色操作应用内预览浏览器（导航、快照、点击、输入、读取控制台/网络）。仅桌面端可用。",
           "label": "智能体浏览器工具"
         },
         "computerUseSubSettings": {
-        "markdown": {
-          "codeLineNumbers": {
-            "hint": "行号栏的默认值；每个代码块仍可单独切换。",
-            "label": "代码行号"
-          },
-          "codeWrap": {
-            "hint": "软换行的默认值；每个代码块仍可单独切换。",
-            "label": "长代码行自动换行"
-          },
-          "diff": {
-            "hint": "用 diff 查看器渲染 ```diff 代码块；关闭则显示普通代码块。",
-            "label": "Diff 视图"
-          },
-          "label": "内容渲染",
-          "math": {
-            "hint": "将 $…$ 与 $$…$$ 渲染为排版公式；关闭则显示源码。",
-            "label": "数学公式（KaTeX）"
-          },
-          "mathAlign": {
-            "center": "居中",
-            "label": "块级公式对齐",
-            "left": "左对齐"
-          },
-          "mathCopy": {
-            "hint": "悬停行内公式时显示复制按钮。",
-            "label": "行内公式复制按钮"
-          },
-          "mathFontScale": {
-            "1": "标准",
-            "0_8": "小",
-            "1_2": "大",
-            "label": "公式字号"
-          },
-          "mermaid": {
-            "hint": "将 ```mermaid 代码块渲染为图表；关闭则显示代码。",
-            "label": "Mermaid 图表"
-          }
-        },
           "allowedToolIds": {
             "description": "限制该角色可使用的已注册原生 Anthropic 工具。全部取消勾选 = 不限制。",
             "empty": "尚未注册任何原生 Anthropic 工具 —— 安装 Computer Use 插件即可暴露 computer / bash / text_editor。",
@@ -27595,6 +27631,8 @@
       "title": "生命周期钩子",
       "unsaved": "有未保存的更改"
     },
+    "hostUnavailableSectionBody": "该设置项管理的能力在你当前连接的主机上不可用——它需要桌面应用，或一台已配对且运行该能力的主机。请在那里打开 Cognia 使用。",
+    "hostUnavailableSectionTitle": "当前主机不可用",
     "instructions": {
       "description": "将活动工作区的磁盘指令文件（CLAUDE.md / AGENTS.md / AGENT.md）加载进 Agent 的系统提示，支持嵌套目录发现与 @import 展开。",
       "enabled": "启用指令文件",
@@ -28300,8 +28338,6 @@
           "land": "落地",
           "levelUp": "升级",
           "love": "爱心",
-    "hostUnavailableSectionBody": "该设置项管理的能力在你当前连接的主机上不可用——它需要桌面应用，或一台已配对且运行该能力的主机。请在那里打开 Cognia 使用。",
-    "hostUnavailableSectionTitle": "当前主机不可用",
           "petted": "被抚摸",
           "sad": "难过",
           "sleepy": "困倦",

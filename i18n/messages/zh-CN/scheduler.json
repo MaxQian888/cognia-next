@@ -531,11 +531,16 @@
     "errors": {
       "agentIdRequired": "外部代理必填",
       "characterIdRequired": "agent 任务必须选择角色",
+      "conversationKeyRequired": "IM 推送任务需要会话键",
+      "imPushTextRequired": "需要消息文本（或 segments）",
+      "inputsInvalidJson": "输入必须是合法的 JSON",
       "objectiveRequired": "goal 任务必须填写目标",
       "planIdRequired": "plan 任务必须选择计划",
       "promptRequired": "提示词不能为空",
+      "segmentsInvalid": "segments 必须是非空的消息片段 JSON 数组",
       "skillIdRequired": "skill 任务必须选择技能",
-      "teamIdRequired": "agent-team 任务必须选择团队"
+      "teamIdRequired": "agent-team 任务必须选择团队",
+      "workflowIdRequired": "工作流任务需要选择工作流"
     },
     "externalAgent": {
       "agentId": "外部代理",
@@ -556,6 +561,19 @@
       "objectiveHelp": "目标在发送给模型前会进行 PII 脱敏。循环会在满足退出条件时自动终止。",
       "objectivePlaceholder": "这个目标要完成什么？",
       "timeoutMinutes": "超时 (分钟)"
+    },
+    "imPush": {
+      "conversationKey": "会话键",
+      "conversationKeyHelp": "机器人必须已与该会话有过消息往来（已持久化投递目标），且该会话的设置中已开启主动推送。",
+      "conversationKeyPlaceholder": "例如 lark:oc_xxx",
+      "guardrails": "护栏：消息离开应用前经过 PII 门控，会话的主动推送开关会被强制校验，每次执行都带幂等键，重试不会重复发送。",
+      "idempotencyKey": "幂等键",
+      "idempotencyKeyPlaceholder": "默认为 任务ID:执行ID",
+      "segments": "原始 segments（JSON，可选）",
+      "segmentsHelp": "高级：MessageSegment[] 数组用于富内容。留空则发送纯文本。",
+      "text": "消息",
+      "textIgnoredHint": "提供原始 segments 时此项被忽略。",
+      "textPlaceholder": "要推送到该会话的文本"
     },
     "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
     "maxTurns": "最大轮次",
@@ -598,7 +616,25 @@
     },
     "webhookUrl": "Webhook URL",
     "webhookUrlInvalid": "Webhook URL 必须以 http:// 或 https:// 开头",
-    "webhookUrlPlaceholder": "https://example.com/webhook"
+    "webhookUrlPlaceholder": "https://example.com/webhook",
+    "workflow": {
+      "deploymentHelp": "工作流需要在所选环境中有活动的部署；否则准入时会被拒绝，执行记录会说明原因。",
+      "environment": "环境",
+      "idempotencyKey": "幂等键",
+      "idempotencyKeyHelp": "同一键的重复触发会复用已有运行，而不是再启动一次。",
+      "idempotencyKeyPlaceholder": "默认为 任务ID:执行ID",
+      "inputs": "输入（JSON）",
+      "inputsHelp": "作为触发负载传给本次运行，并按工作流输入 schema 校验。",
+      "noWorkflows": "未找到工作流——请先在工作流编辑器中创建。",
+      "triggerId": "触发节点 ID",
+      "triggerIdHelp": "通过该 cron 触发节点进入，而不是手动触发。",
+      "triggerIdPlaceholder": "可选",
+      "unknownWorkflowHint": "该 ID 不在本地工作流列表中；它必须存在于运行该任务的宿主上。",
+      "workflowId": "工作流",
+      "workflowIdManual": "工作流 ID",
+      "workflowIdManualPlaceholder": "……或粘贴工作流 ID",
+      "workflowPlaceholder": "选择一个工作流"
+    }
   },
   "payloadDescription": "传递给执行器的数据",
   "payloadEditorMode": {

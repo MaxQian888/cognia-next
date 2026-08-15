@@ -761,8 +761,11 @@ export interface WorkflowTriggeredFrom {
    * `"chat"` = the main chat `/workflow` slash command; `"desktop"` = the
    * library card Run button. Both are surfaced by the global run-progress
    * toaster (`"ui"` — editor/run-list — keeps its own inline toasts).
+   * `"schedule"` = a `workflow` scheduled task fired by the app scheduler
+   * (`lib/scheduler/executors/workflow-executor.ts`); run history can then
+   * tell a timed run from a human-initiated one.
    */
-  source: "im" | "ui" | "api" | "chat" | "desktop"
+  source: "im" | "ui" | "api" | "chat" | "desktop" | "schedule"
   adapterId?: string
   conversationKey?: string
   sourceMessageId?: string

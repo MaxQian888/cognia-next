@@ -13,6 +13,12 @@ export type { GoalPayloadEditorProps } from "./goal-payload-editor"
 export { PlanPayloadEditor } from "./plan-payload-editor"
 export type { PlanPayloadEditorProps } from "./plan-payload-editor"
 
+export { WorkflowPayloadEditor } from "./workflow-payload-editor"
+export type { WorkflowPayloadEditorProps } from "./workflow-payload-editor"
+
+export { ImPushPayloadEditor } from "./im-push-payload-editor"
+export type { ImPushPayloadEditorProps } from "./im-push-payload-editor"
+
 export { ToolPicker, SDK_BUILTIN_TOOLS } from "./tool-picker"
 export type { ToolPickerProps } from "./tool-picker"
 
@@ -34,16 +40,22 @@ export {
   EMPTY_AGENT_TEAM_DRAFT,
   EMPTY_GOAL_DRAFT,
   EMPTY_PLAN_DRAFT,
+  EMPTY_WORKFLOW_DRAFT,
+  EMPTY_IM_PUSH_DRAFT,
   payloadToChatLikeDraft,
   payloadToExternalAgentDraft,
   payloadToAgentTeamDraft,
   payloadToGoalDraft,
   payloadToPlanDraft,
+  payloadToWorkflowDraft,
+  payloadToImPushDraft,
   chatLikeDraftToPayload,
   externalAgentDraftToPayload,
   agentTeamDraftToPayload,
   goalDraftToPayload,
   planDraftToPayload,
+  workflowDraftToPayload,
+  imPushDraftToPayload,
   isChatLikeTaskType,
   isStructuredEditableTaskType,
   DraftValidationError,
@@ -54,5 +66,7 @@ export type {
   AgentTeamDraft,
   GoalDraft,
   PlanDraft,
+  WorkflowDraft,
+  ImPushDraft,
   McpPickerMode,
 } from "./types"

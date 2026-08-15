@@ -39,21 +39,29 @@ import {
   TeamPayloadEditor,
   GoalPayloadEditor,
   PlanPayloadEditor,
+  WorkflowPayloadEditor,
+  ImPushPayloadEditor,
   EMPTY_CHAT_LIKE_DRAFT,
   EMPTY_EXTERNAL_AGENT_DRAFT,
   EMPTY_AGENT_TEAM_DRAFT,
   EMPTY_GOAL_DRAFT,
   EMPTY_PLAN_DRAFT,
+  EMPTY_WORKFLOW_DRAFT,
+  EMPTY_IM_PUSH_DRAFT,
   payloadToChatLikeDraft,
   payloadToExternalAgentDraft,
   payloadToAgentTeamDraft,
   payloadToGoalDraft,
   payloadToPlanDraft,
+  payloadToWorkflowDraft,
+  payloadToImPushDraft,
   chatLikeDraftToPayload,
   externalAgentDraftToPayload,
   agentTeamDraftToPayload,
   goalDraftToPayload,
   planDraftToPayload,
+  workflowDraftToPayload,
+  imPushDraftToPayload,
   isChatLikeTaskType,
   isStructuredEditableTaskType,
   DraftValidationError,
@@ -62,6 +70,8 @@ import {
   type AgentTeamDraft,
   type GoalDraft,
   type PlanDraft,
+  type WorkflowDraft,
+  type ImPushDraft,
 } from "@/components/scheduler/payload-editors"
 import {
   validateCronExpression,
@@ -95,12 +105,11 @@ const TASK_TYPES: Array<{ value: ScheduledTaskType }> = [
   { value: "goal" },
   { value: "plan" },
   { value: "workflow" },
-  { value: "sync" },
   { value: "backup" },
   { value: "script" },
   { value: "background-command" },
   { value: "monitor" },
-  { value: "ai-generation" },
+  { value: "im-push" },
   { value: "test" },
   { value: "custom" },
   { value: "plugin" },
@@ -253,6 +262,10 @@ interface TaskFormState {
   goalDraft: GoalDraft
   /** Structured-mode draft for plan task type. */
   planDraft: PlanDraft
+  /** Structured-mode draft for workflow task type. */
+  workflowDraft: WorkflowDraft
+  /** Structured-mode draft for im-push task type. */
+  imPushDraft: ImPushDraft
   /**
    * Which editor to render. Toggling structured → JSON serializes the draft
    * into payloadJson; toggling back parses payloadJson into the draft. Free-
@@ -322,6 +335,10 @@ function buildStructuredPayload(f: TaskFormState): Record<string, unknown> {
       return goalDraftToPayload(f.goalDraft) as Record<string, unknown>
     case "plan":
       return planDraftToPayload(f.planDraft) as Record<string, unknown>
+    case "workflow":
+      return workflowDraftToPayload(f.workflowDraft) as Record<string, unknown>
+    case "im-push":
+      return imPushDraftToPayload(f.imPushDraft) as Record<string, unknown>
     default:
       return chatLikeDraftToPayload(f.taskType, f.chatLikeDraft) as Record<string, unknown>
   }
@@ -345,7 +362,11 @@ function serializeStructuredDraft(f: TaskFormState): string {
             ? f.goalDraft
             : f.taskType === "plan"
               ? f.planDraft
-              : f.chatLikeDraft
+              : f.taskType === "workflow"
+                ? f.workflowDraft
+                : f.taskType === "im-push"
+                  ? f.imPushDraft
+                  : f.chatLikeDraft
     return JSON.stringify(raw, null, 2)
   }
 }
@@ -364,6 +385,10 @@ function parseIntoDraftUpdates(
       return { goalDraft: payloadToGoalDraft(parsed) }
     case "plan":
       return { planDraft: payloadToPlanDraft(parsed) }
+    case "workflow":
+      return { workflowDraft: payloadToWorkflowDraft(parsed) }
+    case "im-push":
+      return { imPushDraft: payloadToImPushDraft(parsed) }
     default:
       return isChatLikeTaskType(taskType)
         ? { chatLikeDraft: payloadToChatLikeDraft(taskType, parsed) }
@@ -403,6 +428,14 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
       initialType === "goal" ? payloadToGoalDraft(initialValues?.payload) : { ...EMPTY_GOAL_DRAFT },
     planDraft:
       initialType === "plan" ? payloadToPlanDraft(initialValues?.payload) : { ...EMPTY_PLAN_DRAFT },
+    workflowDraft:
+      initialType === "workflow"
+        ? payloadToWorkflowDraft(initialValues?.payload)
+        : { ...EMPTY_WORKFLOW_DRAFT },
+    imPushDraft:
+      initialType === "im-push"
+        ? payloadToImPushDraft(initialValues?.payload)
+        : { ...EMPTY_IM_PUSH_DRAFT },
     payloadEditorMode: startInStructured ? "structured" : "json",
     payloadFieldErrors: {},
     notifyOnStart: initialValues?.notification?.onStart ?? false,
@@ -634,6 +667,12 @@ export function TaskForm({
         input.type === "goal" ? payloadToGoalDraft(input.payload) : { ...EMPTY_GOAL_DRAFT },
       planDraft:
         input.type === "plan" ? payloadToPlanDraft(input.payload) : { ...EMPTY_PLAN_DRAFT },
+      workflowDraft:
+        input.type === "workflow"
+          ? payloadToWorkflowDraft(input.payload)
+          : { ...EMPTY_WORKFLOW_DRAFT },
+      imPushDraft:
+        input.type === "im-push" ? payloadToImPushDraft(input.payload) : { ...EMPTY_IM_PUSH_DRAFT },
       payloadEditorMode: isStructuredEditableTaskType(input.type) ? "structured" : "json",
       payloadFieldErrors: {},
       notifyOnStart: input.notification?.onStart ?? false,
@@ -1332,6 +1371,30 @@ export function TaskForm({
             errors={f.payloadFieldErrors}
             disabled={isSubmitting}
             testId="scheduler-task-plan-editor"
+          />
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "workflow" && (
+          <WorkflowPayloadEditor
+            draft={f.workflowDraft}
+            onDraftChange={(draft) =>
+              updateForm({ workflowDraft: draft, payloadError: null, payloadFieldErrors: {} })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-workflow-editor"
+          />
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "im-push" && (
+          <ImPushPayloadEditor
+            draft={f.imPushDraft}
+            onDraftChange={(draft) =>
+              updateForm({ imPushDraft: draft, payloadError: null, payloadFieldErrors: {} })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-im-push-editor"
           />
         )}
 

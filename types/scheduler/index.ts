@@ -199,6 +199,52 @@ export interface WikiRebuildTaskPayload extends Record<string, unknown> {
 }
 
 /**
+ * Payload for `workflow` tasks — runs a published visual workflow through the
+ * canonical admission ingress (`executeDeployedWorkflow`,
+ * `lib/workflow/runtime/execution-authority.ts`) with
+ * `entrypoint: "schedule"` / `triggeredBy.source: "schedule"`. The workflow
+ * must have an active deployment in `environment` (default `production`).
+ */
+export interface WorkflowTaskPayload extends Record<string, unknown> {
+  /** Required. Id of the workflow (`workflows` table). */
+  workflowId: string
+  /** Deployment environment; defaults to `production`. */
+  environment?: string
+  /** Trigger input handed to the run as its payload. */
+  inputs?: unknown
+  /**
+   * Trigger node to enter through. When set, the run is admitted with
+   * `triggerKind: "trigger.cron"` bound to this node; when omitted the run
+   * enters through the manual trigger.
+   */
+  triggerId?: string
+  /**
+   * Idempotency key so a re-fired slot does not start a second run of the
+   * same logical invocation. Defaults to `<taskId>:<executionId>`.
+   */
+  idempotencyKey?: string
+}
+
+/**
+ * Payload for `im-push` tasks — pushes a message into an already-bound IM
+ * conversation through the governed outbound queue
+ * (`lib/scheduler/executors/im-push-executor.ts`). Exactly one of `text` /
+ * `segments` is required; `text` is wrapped as a single text segment.
+ * `adapterId` is derived from the persisted conversation delivery target, so
+ * the payload only names the conversation.
+ */
+export interface ImPushTaskPayload extends Record<string, unknown> {
+  /** Required. Canonical connector conversation key. */
+  conversationKey: string
+  /** Plain-text body (wrapped into one text segment). */
+  text?: string
+  /** Pre-built rich segments; takes precedence over `text` when both are set. */
+  segments?: import("@/types/connectors/segment").MessageSegment[]
+  /** Idempotency key for the outbound job; defaults to `<taskId>:<executionId>`. */
+  idempotencyKey?: string
+}
+
+/**
  * Payload for `test` tasks — a diagnostic executor that proves the trigger →
  * execution → notification chain without side effects. `echo` is copied into
  * the execution output, `delayMs` sleeps (abortable) before completing, and
@@ -229,6 +275,8 @@ export type ScheduledTaskPayload =
   | BackupTaskPayload
   | WikiRebuildTaskPayload
   | TestTaskPayload
+  | WorkflowTaskPayload
+  | ImPushTaskPayload
   | BackgroundCommandTaskPayload
   | MonitorTaskPayload
   | ChatLikeTaskPayload

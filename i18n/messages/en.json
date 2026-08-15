@@ -14154,6 +14154,8 @@
       "fontScaleMd": "M",
       "fontScaleSm": "S",
       "language": "Language",
+      "messageDisplayHelp": "Presets, content rendering (math, diagrams, code) and metadata for chat messages.",
+      "messageDisplayTitle": "Message display",
       "privacyTitle": "Accessibility & privacy",
       "reconnectButton": "Reconnect WebRTC",
       "reconnectFailed": "Reconnect failed ({reason}).",
@@ -14651,8 +14653,6 @@
       "verified": "Verified"
     },
     "title": "Model Catalog"
-      "messageDisplayHelp": "Presets, content rendering (math, diagrams, code) and metadata for chat messages.",
-      "messageDisplayTitle": "Message display",
   },
   "notFound": {
     "description": "We couldn't find the page you were looking for. It may have been moved, renamed, or deleted.",
@@ -20661,11 +20661,16 @@
       "errors": {
         "agentIdRequired": "External agent is required",
         "characterIdRequired": "Character is required for agent tasks",
+        "conversationKeyRequired": "Conversation key is required for IM push tasks",
+        "imPushTextRequired": "Message text (or segments) is required",
+        "inputsInvalidJson": "Inputs must be valid JSON",
         "objectiveRequired": "Objective is required for goal tasks",
         "planIdRequired": "Plan is required for plan tasks",
         "promptRequired": "Prompt is required",
+        "segmentsInvalid": "Segments must be a non-empty JSON array of message segments",
         "skillIdRequired": "Skill is required for skill tasks",
-        "teamIdRequired": "Team is required for agent-team tasks"
+        "teamIdRequired": "Team is required for agent-team tasks",
+        "workflowIdRequired": "Workflow is required for workflow tasks"
       },
       "externalAgent": {
         "agentId": "External agent",
@@ -20686,6 +20691,19 @@
         "objectiveHelp": "The objective is PII-redacted before it reaches the model. The loop self-terminates on its exit conditions.",
         "objectivePlaceholder": "What should the goal accomplish?",
         "timeoutMinutes": "Timeout (min)"
+      },
+      "imPush": {
+        "conversationKey": "Conversation key",
+        "conversationKeyHelp": "The bot must already have exchanged a message with this conversation (a delivery target is persisted) and proactive push must be enabled in its conversation settings.",
+        "conversationKeyPlaceholder": "e.g. lark:oc_xxx",
+        "guardrails": "Guardrails: the message passes the PII gate before it leaves the app, the conversation's proactive-push opt-in is enforced, and each execution is idempotency-keyed so a retry never double-sends.",
+        "idempotencyKey": "Idempotency key",
+        "idempotencyKeyPlaceholder": "Defaults to task-id:execution-id",
+        "segments": "Raw segments (JSON, optional)",
+        "segmentsHelp": "Advanced: a MessageSegment[] array for rich content. Leave empty to send plain text.",
+        "text": "Message",
+        "textIgnoredHint": "Ignored while raw segments are provided.",
+        "textPlaceholder": "Text to push into the conversation"
       },
       "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
       "maxTurns": "Max turns",
@@ -20728,7 +20746,25 @@
       },
       "webhookUrl": "Webhook URL",
       "webhookUrlInvalid": "Webhook URL must start with http:// or https://",
-      "webhookUrlPlaceholder": "https://example.com/webhook"
+      "webhookUrlPlaceholder": "https://example.com/webhook",
+      "workflow": {
+        "deploymentHelp": "The workflow needs an active deployment in the chosen environment; the run is otherwise refused at admission and the execution row says why.",
+        "environment": "Environment",
+        "idempotencyKey": "Idempotency key",
+        "idempotencyKeyHelp": "A re-fired slot with the same key reuses the existing run instead of starting a second one.",
+        "idempotencyKeyPlaceholder": "Defaults to task-id:execution-id",
+        "inputs": "Inputs (JSON)",
+        "inputsHelp": "Handed to the run as its trigger payload and validated against the workflow input schema.",
+        "noWorkflows": "No workflows found — create one in the workflow editor first.",
+        "triggerId": "Trigger node id",
+        "triggerIdHelp": "Enter through this cron trigger node instead of the manual trigger.",
+        "triggerIdPlaceholder": "Optional",
+        "unknownWorkflowHint": "This id is not in the local workflow list; it must exist on the host that runs the task.",
+        "workflowId": "Workflow",
+        "workflowIdManual": "Workflow id",
+        "workflowIdManualPlaceholder": "…or paste a workflow id",
+        "workflowPlaceholder": "Pick a workflow"
+      }
     },
     "payloadDescription": "Data passed to the task executor",
     "payloadEditorMode": {
@@ -22872,6 +22908,11 @@
           "label": "Layout"
         },
         "metadata": {
+          "bodyFont": {
+            "label": "Body font",
+            "sans": "Sans-serif",
+            "serif": "Serif"
+          },
           "cost": "Cost",
           "duration": "Duration",
           "finishState": "Finish state",
@@ -22885,6 +22926,44 @@
         "motion": {
           "expressive": "Expressive",
           "label": "Message motion",
+          "markdown": {
+            "codeLineNumbers": {
+              "hint": "Default for the line-number gutter; each block can still toggle it.",
+              "label": "Code line numbers"
+            },
+            "codeWrap": {
+              "hint": "Default for soft wrapping; each block can still toggle it.",
+              "label": "Wrap long code lines"
+            },
+            "diff": {
+              "hint": "Render ```diff fences with the diff viewer; off shows a plain code block.",
+              "label": "Diff viewer"
+            },
+            "label": "Content rendering",
+            "math": {
+              "hint": "Render $…$ and $$…$$ as typeset math; off shows the source.",
+              "label": "Math (KaTeX)"
+            },
+            "mathAlign": {
+              "center": "Centered",
+              "label": "Display math alignment",
+              "left": "Left"
+            },
+            "mathCopy": {
+              "hint": "Show a copy affordance when hovering inline math.",
+              "label": "Copy button on inline math"
+            },
+            "mathFontScale": {
+              "1": "Normal",
+              "0_8": "Small",
+              "1_2": "Large",
+              "label": "Math size"
+            },
+            "mermaid": {
+              "hint": "Render ```mermaid fences as diagrams; off shows the code.",
+              "label": "Mermaid diagrams"
+            }
+          },
           "off": "Off",
           "restrained": "Restrained"
         },
@@ -23546,55 +23625,12 @@
           "large": "Avatar image is large — a smaller image keeps the character data lean.",
           "upload": "Upload image"
         },
-        "bodyFont": {
-          "label": "Body font",
-          "sans": "Sans-serif",
-          "serif": "Serif"
-        },
         "browserToolsToggle": {
           "aria": "Toggle agent browser tools",
           "description": "Let this character drive the in-app preview browser (navigate, snapshot, click, type, read console/network). Desktop only.",
           "label": "Agent browser tools"
         },
         "computerUseSubSettings": {
-        "markdown": {
-          "codeLineNumbers": {
-            "hint": "Default for the line-number gutter; each block can still toggle it.",
-            "label": "Code line numbers"
-          },
-          "codeWrap": {
-            "hint": "Default for soft wrapping; each block can still toggle it.",
-            "label": "Wrap long code lines"
-          },
-          "diff": {
-            "hint": "Render ```diff fences with the diff viewer; off shows a plain code block.",
-            "label": "Diff viewer"
-          },
-          "label": "Content rendering",
-          "math": {
-            "hint": "Render $…$ and $$…$$ as typeset math; off shows the source.",
-            "label": "Math (KaTeX)"
-          },
-          "mathAlign": {
-            "center": "Centered",
-            "label": "Display math alignment",
-            "left": "Left"
-          },
-          "mathCopy": {
-            "hint": "Show a copy affordance when hovering inline math.",
-            "label": "Copy button on inline math"
-          },
-          "mathFontScale": {
-            "1": "Normal",
-            "0_8": "Small",
-            "1_2": "Large",
-            "label": "Math size"
-          },
-          "mermaid": {
-            "hint": "Render ```mermaid fences as diagrams; off shows the code.",
-            "label": "Mermaid diagrams"
-          }
-        },
           "allowedToolIds": {
             "description": "Restrict which registered native Anthropic tools this character can use. Uncheck all to let every registered tool through.",
             "empty": "No native Anthropic tools registered yet — install the Computer Use plugin to expose computer / bash / text_editor.",
@@ -27595,6 +27631,8 @@
       "title": "Lifecycle hooks",
       "unsaved": "Unsaved changes"
     },
+    "hostUnavailableSectionBody": "This section administers a capability the host you are connected to doesn't provide — it needs the desktop app, or a paired host that runs it. Open Cognia there to use it.",
+    "hostUnavailableSectionTitle": "Not available on this host",
     "instructions": {
       "description": "Load on-disk instruction files (CLAUDE.md / AGENTS.md / AGENT.md) from the active workspace into the agent's system prompt, with nested directory discovery and @import expansion.",
       "enabled": "Enable instruction files",
@@ -28300,8 +28338,6 @@
           "land": "Landing",
           "levelUp": "Level up",
           "love": "Love",
-    "hostUnavailableSectionBody": "This section administers a capability the host you are connected to doesn't provide — it needs the desktop app, or a paired host that runs it. Open Cognia there to use it.",
-    "hostUnavailableSectionTitle": "Not available on this host",
           "petted": "Petted",
           "sad": "Sad",
           "sleepy": "Sleepy",

@@ -83,6 +83,8 @@ import { executeOnExternalAgent } from "@/lib/ai/agent/external/manager"
 import { loggers } from "@cognia/logging"
 import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { executeTestTask } from "./test-executor"
+import { executeWorkflowTask } from "./workflow-executor"
+import { executeImPushTask } from "./im-push-executor"
 
 const log = loggers.scheduler
 
@@ -847,9 +849,11 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("goal", executeGoalTask)
   registerTaskExecutor("plan", executePlanTask)
   registerTaskExecutor("test", executeTestTask)
+  registerTaskExecutor("workflow", executeWorkflowTask)
+  registerTaskExecutor("im-push", executeImPushTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan, test"
+    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan, test, workflow, im-push"
   )
 }
 
