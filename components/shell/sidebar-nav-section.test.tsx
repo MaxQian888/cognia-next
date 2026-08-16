@@ -128,6 +128,25 @@ describe("SidebarRow", () => {
     expect(row).toHaveAttribute("data-active", "true")
   })
 
+  it("can be active with the highlight off and a leading disclosure glyph", () => {
+    render(
+      <SidebarRow
+        active
+        highlight={false}
+        leading={<span data-testid="leading" />}
+        onClick={() => {}}
+        icon={<span />}
+        label="Row"
+        testId="row"
+      />
+    )
+    const row = screen.getByTestId("row")
+    expect(row).toHaveAttribute("data-active", "true")
+    expect(row).toContainElement(screen.getByTestId("leading"))
+    // `MotionSelectionIndicator` renders nothing when inactive: no tint span.
+    expect(row.querySelector(".bg-primary\\/10")).toBeNull()
+  })
+
   it("can be active without claiming to be the current page (toggles, section headers)", () => {
     render(
       <SidebarRow

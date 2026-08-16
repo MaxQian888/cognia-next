@@ -54,6 +54,14 @@ export interface SidebarRowProps extends Omit<
 > {
   active?: boolean
   onClick?: () => void
+  /**
+   * Draw the travelling selection tint behind an active row. Off for rows
+   * whose "active" is *open* rather than *selected* (the guild accordion
+   * headers): those read as headings — bold, no fill — not as a choice.
+   */
+  highlight?: boolean
+  /** Before the icon slot: a disclosure chevron for collapsible rows. */
+  leading?: ReactNode
   /** Leading glyph — an icon, an avatar, a chevron. */
   icon: ReactNode
   label: string
@@ -73,6 +81,8 @@ export interface SidebarRowProps extends Omit<
 export function SidebarRow({
   active = false,
   onClick,
+  highlight = true,
+  leading,
   icon,
   label,
   trailing,
@@ -98,9 +108,14 @@ export function SidebarRow({
     >
       <MotionSelectionIndicator
         groupId={SIDEBAR_SELECTION_GROUP}
-        active={active}
+        active={active && highlight}
         className="absolute inset-0 rounded-md bg-primary/10"
       />
+      {leading ? (
+        <span className="relative -ml-0.5 flex size-4 shrink-0 items-center justify-center [&>svg]:size-3.5">
+          {leading}
+        </span>
+      ) : null}
       <span className="relative flex size-4 shrink-0 items-center justify-center [&>svg]:size-4">
         {icon}
       </span>

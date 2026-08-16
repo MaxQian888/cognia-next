@@ -160,6 +160,30 @@ describe("SidebarGuildSectionRows", () => {
     expect(screen.getByTestId("sidebar-guild-dm")).not.toHaveTextContent("archivedTitleSuffix")
   })
 
+  it("draws the open section's actions beside its heading only, and no selection tint", () => {
+    const { before } = splitGuildSections(teams, { kind: "team", teamId: "t-1" })
+    render(
+      <SidebarGuildSectionRows
+        rows={before}
+        openKey="t-1"
+        openActions={<button data-testid="open-action">+</button>}
+      />
+    )
+    const actions = screen.getByTestId("sidebar-guild-open-actions")
+    expect(actions).toContainElement(screen.getByTestId("open-action"))
+    // Beside the open row (its listitem), not inside the button, not on DM.
+    const openItem = screen.getByTestId("sidebar-guild-team-t-1").closest('[role="listitem"]')
+    expect(openItem).toContainElement(actions)
+    expect(screen.getByTestId("sidebar-guild-team-t-1")).not.toContainElement(actions)
+    expect(
+      screen.getByTestId("sidebar-guild-dm").closest('[role="listitem"]')
+    ).not.toContainElement(actions)
+    // The open row is a heading: bold, no traveling highlight, chevron turned.
+    expect(screen.getByTestId("sidebar-guild-team-t-1")).toHaveClass("font-medium")
+    expect(screen.getByTestId("sidebar-guild-team-t-1").querySelector(".rotate-90")).not.toBeNull()
+    expect(screen.getByTestId("sidebar-guild-dm").querySelector(".rotate-90")).toBeNull()
+  })
+
   it("renders nothing for an empty run", () => {
     const { container } = render(<SidebarGuildSectionRows rows={[]} openKey="dm" />)
     expect(container).toBeEmptyDOMElement()

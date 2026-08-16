@@ -13,6 +13,7 @@
  * rows here, the icon column and the chat pane all agree.
  */
 
+import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { ChevronRightIcon, MailIcon, PlusIcon } from "lucide-react"
@@ -58,6 +59,13 @@ interface RowsProps {
    * where you are).
    */
   archived?: boolean
+  /**
+   * The open section's own actions (new conversation, list menu), drawn at
+   * the right end of its header row — a section heads its content the way a
+   * Discord category does, with "+" on the heading. Sits *beside* the row
+   * button, not inside it: buttons do not nest.
+   */
+  openActions?: ReactNode
   className?: string
   testId?: string
 }
@@ -65,8 +73,20 @@ interface RowsProps {
 /**
  * A run of accordion header rows. Render once with `before` above the list
  * and once with `after` below it.
+ *
+ * Disclosure reads from the left — `›` closed, `⌄` open — the way a Finder or
+ * Codex tree does, so the right end stays free for the open section's
+ * actions; the open row is a heading (bold, no selection tint), because
+ * "which section is open" is structure, not a choice among peers.
  */
-export function SidebarGuildSectionRows({ rows, openKey, archived, className, testId }: RowsProps) {
+export function SidebarGuildSectionRows({
+  rows,
+  openKey,
+  archived,
+  openActions,
+  className,
+  testId,
+}: RowsProps) {
   const t = useTranslations("desktop.channelList")
   const { switchToDm, switchToTeam } = useShellNav()
   if (rows.length === 0) return null
@@ -81,12 +101,22 @@ export function SidebarGuildSectionRows({ rows, openKey, archived, className, te
         const isDm = row.key === "dm"
         const label = isDm ? t("directMessages") : row.team.name
         return (
-          <div role="listitem" key={row.key}>
+          <div role="listitem" key={row.key} className="flex min-w-0 items-center gap-0.5">
             <SidebarRow
               active={open}
+              highlight={false}
               current={false}
               aria-expanded={open}
               onClick={isDm ? switchToDm : () => switchToTeam(row.key)}
+              leading={
+                <ChevronRightIcon
+                  aria-hidden
+                  className={cn(
+                    "text-muted-foreground/60 transition-transform duration-200 motion-reduce:transition-none",
+                    open && "rotate-90"
+                  )}
+                />
+              }
               icon={
                 isDm ? (
                   <MailIcon />
@@ -96,27 +126,23 @@ export function SidebarGuildSectionRows({ rows, openKey, archived, className, te
               }
               label={label}
               trailing={
-                <>
-                  {open && archived ? (
-                    <span
-                      className="mr-1 truncate text-xs text-muted-foreground"
-                      data-testid="channel-list-archived-suffix"
-                    >
-                      · {t("archivedTitleSuffix")}
-                    </span>
-                  ) : null}
-                  <ChevronRightIcon
-                    aria-hidden
-                    className={cn(
-                      "size-3.5 text-muted-foreground/70 transition-transform duration-200 motion-reduce:transition-none",
-                      open && "rotate-90"
-                    )}
-                  />
-                </>
+                open && archived ? (
+                  <span
+                    className="truncate text-xs font-normal text-muted-foreground"
+                    data-testid="channel-list-archived-suffix"
+                  >
+                    · {t("archivedTitleSuffix")}
+                  </span>
+                ) : undefined
               }
               testId={isDm ? "sidebar-guild-dm" : `sidebar-guild-team-${row.key}`}
-              className={cn(open && "font-medium")}
+              className={cn("w-auto flex-1", open && "font-medium text-foreground")}
             />
+            {open && openActions ? (
+              <div className="flex shrink-0 items-center" data-testid="sidebar-guild-open-actions">
+                {openActions}
+              </div>
+            ) : null}
           </div>
         )
       })}
