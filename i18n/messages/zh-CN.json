@@ -11593,6 +11593,7 @@
       "removeResource": "移除资源",
       "repoHint": "该仓库的 issue 会以只读行的形式出现在看板上。",
       "repoInvalid": "请使用 owner/repository 形式。",
+      "repoPlaceholder": "owner/repository",
       "repoTaken": "该仓库已绑定到某个项目。",
       "resourceDirectory": "本地目录",
       "resourceKind": "类型",
@@ -11704,6 +11705,7 @@
       },
       "labelsHint": "用英文逗号分隔。标签必须已存在于该仓库。",
       "labelsLabel": "标签",
+      "labelsPlaceholder": "bug, needs-triage",
       "reason": {
         "completed": "已完成",
         "not_planned": "不再计划"

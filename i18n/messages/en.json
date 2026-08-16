@@ -11593,6 +11593,7 @@
       "removeResource": "Remove resource",
       "repoHint": "Issues from this repository appear on the board as read-only rows.",
       "repoInvalid": "Use the owner/repository form.",
+      "repoPlaceholder": "owner/repository",
       "repoTaken": "That repository is already bound to a project.",
       "resourceDirectory": "Local directory",
       "resourceKind": "Kind",
@@ -11704,6 +11705,7 @@
       },
       "labelsHint": "Comma-separated. Labels must already exist on the repository.",
       "labelsLabel": "Labels",
+      "labelsPlaceholder": "bug, needs-triage",
       "reason": {
         "completed": "Completed",
         "not_planned": "Not planned"
