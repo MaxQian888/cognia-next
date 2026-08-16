@@ -269,7 +269,8 @@ interface ComposerHandle {
 `components/chat/composer/bottom-toolbar.tsx` 挂在 Composer 下方，承载**会话级元数据**：
 
 - **ModelPicker** —— 切当前会话默认 model；写入会话设置。
-- **AgentRuntimeSelector / AgentModeSelector / ExternalAgentSelector** —— 选哪个 agent 实现处理这条消息（详见 [Provider 系统](../chat/provider-system)）。
+- **AgentRuntimeSelector** —— 选哪个 agent 实现处理这条消息：内置 Claude SDK 运行时与各个已配置的外部 Agent 同处一个单选组（详见 [Provider 系统](../chat/provider-system)）。
+- **AgentModeSelector** —— Claude SDK 运行时组合的 Agent Mode；选中外部 Agent 时隐藏，因为外部 Agent 自带模式。
 - **WebSearchToggle** —— 启用搜索工具调用。
 - **PermissionModeIndicator** —— 当前 allow / deny / ask / plan。
 - **Context Usage** —— 实时计算并显示当前会话上下文窗口的输入/输出/缓存使用率：

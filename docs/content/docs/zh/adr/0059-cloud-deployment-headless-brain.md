@@ -100,6 +100,41 @@ Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务�
 - PII的涂黑门禁（`packages/redact/src/index.ts:hasNoLeakingPii`）位于Brain中，因此在移动后保持不变;在每个阶段发售前，请先通过PII审核审核确认门禁。
 - 客户端秘密保持密钥环;**服务器端秘密通过密钥迁移到加密文件存储**（模式前例：`FilePushCredStore`），主密钥通过env/boot秘密。
 
+### D7 — headless ↔ 桌面的能力等价
+
+2026-08-15 新增。本 ADR 的本意始终是让云端主机与桌面近乎等价。一次清点（`pnpm audit:host-parity`，完整报告见 [主机能力等价审计 — 2026-08-15](/docs/audits/host-parity-2026-08-15)）确认：机制是完整的，往它上面的迁移大约只做了一半 —— 带宿主守卫的 154 个子系统中，仅 **14** 个是物理不可能；68 个未迁移，62 个是 UI 按主机判断，10 个是 seam 自身。
+
+**唯一事实源。** `protocol/companion-commands.json` 对"某主机能到达什么"具有权威性。`lib/platform/capabilities.ts`（粗粒度的按平台基线，用于 UI 降级）与 `lib/platform/host-feature-manifest.ts`（按 feature 的协议协商）是派生视图，不得与之矛盾。三者曾在**两个方向**上漂移 —— `source-control.git` 被声明为 `tauri` 专属，而它的 RPC arm 根本没有宿主门禁；反过来 `capabilities.ts` 为 `headless` 声明了 `connector-runtime`，而 4 个 IM 平台在那里根本收不到消息。门的 E 类负责保持三者一致。
+
+**UI 声明能力，而非主机。** 2026-08-15 完成。按主机判断的 UI 会在后端已等价之后仍把功能藏起来，因此 `components/settings/settings-nav-config.ts` 中的 `desktopOnly: true` 已移除：`NavItem` 现在携带 `requires: CapabilityId[]`——以 `capabilityAvailable` 语义求值（本地 ∪ 服务端提供，与 `CapabilityGate` 同一规则）——外加对应 `CapabilityGateProps.profiles` 的 `profiles: HostProfile[]`。沿用已有先例 `NodeCatalogEntry.requires` + `lib/workflow/runtime/capability-preflight.ts`。21 个分区全部迁移，云端伴生服务现已可达终端、源代码管理、连接、沙箱、LSP、工具、Webhook、网关、Pro IDE、工作区信任与订阅。
+
+七个分区保留 profile 钉定，但原因分两类。桌面、侧边栏、companion、远程主机属于本地外壳界面——真实边界。ccswitch、hooks、fleet 是**过渡性**钉定：其渲染端路径是 Class A seam 绕过，直接裸调 `invoke`（`lib/claude/settings.ts`、`lib/ccswitch/client.ts`、`lib/tauri/fleet.ts`、`lib/claude/hooks/fleet-hooks.ts`），UI 会够到传输层根本到不了的后端。每处钉定的注释都点名了需先迁移的文件；它们是有明确去处的债，不是决定。
+
+**已记录的物理边界。** 已成定论，不再讨论：系统托盘；桌面宠物的覆盖窗口；AX/UIA 自动化本体；划词工具栏与桌面选区感知；全局 OS 快捷键；生物识别；本地麦克风与屏幕捕获；系统剪贴板；技能录制器；`apple-vision` 与 `windows-media-ocr` 两个 OCR 后端（`tesseract`/`ocrs`/`paddle` 到处都能跑，且 `packages/ocr/src/registry.ts` 已经为 headless 精确减去了这两个绑定 OS 的后端）。
+
+**两件不是边界的事。** OS 钥匙串不是差距 —— headless 通过 `cognia-secrets` 达到等价。computer-use 的 **consent** 也不是差距：`headless` 已带有 `notifications.remote` 与 `remote_notification_publish`，consent 请求可路由到已配对设备批准。只有自动化**本体**绑定桌面。
+
+**错误方向。** `RpcError::headless_unsupported` 曾被双向使用：约 27 个 arm 意为"这需要桌面"，约 105 个意为"这是云端专属" —— 而后者回给桌面调用方的文案指向的是相反的主机。现在 `headless_host_required` 承载第二种含义，两个方向各说各的实话。
+
+那 15 个既是云端专属、又是 `target=execution` 且开放 `http`/`websocket`/`webrtc` 的 arm（即配对手机在两种主机上都够得到），已有 11 个通过 `DispatchHost` 访问器变为 host-neutral（`exec_backend`、`agent_event_emitter`、`remote_spawn_policy`、`harden_spawn_config`、`plugin_runtime`、`vscode_plugins`），沿用 `sidecar_state()` / `api_keys()` 的模式。两点需要钉住：
+
+- **远程 spawn 在两种主机上都走严格策略。** 桌面的 `validate_desktop` 放宽是因为本地 Tauri `invoke` 意味着有人坐在键盘前；网络可达的 arm 拿不到这个前提。而**约束**仍随主机 —— 桌面照其本地命令的做法把子进程包进 sandbox host。
+- **4 个 `codeserver_*` arm 保持云端专属，这是对的。** 桌面的 code-server 是另一个子系统（`codeserver::embedded`，ADR-0088）；云端那个是固定生命周期 + 设备绑定中继，按设计"配对的桌面无法安装或升级它"。没有可分支的桌面实例；而降级为 `service` 会切断那些正当地在云端主机上驱动它的配对设备。现在 `headless_host_required` 会把这件事原原本本告诉桌面调用方。
+
+**连接器运行时的单一所有者。** 同一账号跑两份运行时会把每个机器人拨号两次——每条入站消息被处理两次，每条回复被发送两次。可能的碰撞有三种，各自需要不同的守卫。同一桌面应用的两个 webview 由 Web Locks（按 origin 作用域）覆盖。**驱动**远程主机的桌面端由路由覆盖：`isRemoteHostActive()` 期间 `ConnectorBusProvider` 会拆掉本地运行时。剩下没被覆盖的是：桌面 webview 与挂在该桌面伴生服务上的 brain 进程（ADR-0078 的 CLI 桥拓扑）——两个守卫的命名空间不相交，互相看不见。
+
+现在 `connectors_runtime_lease_*` 是绑定同一个 `ConnectorsState` 的所有参与者的唯一仲裁者。三处改动使其成立：
+
+- 这些 arm 变为**主机中立**（`DispatchHost::connectors_state()`），并同时注册为 Tauri 命令——桌面 webview 说的是 IPC，够不到自己伴生服务的 HTTP 面。两条路径绑定同一份 managed state，因此只有一个槽位。
+- 它们是 **`target: execution` / `capability: agent.run`**，而非 service 作用域。桌面端持有的是设备 JWT 而非服务令牌；若保持 service-only，最需要参与竞争的一方反而无法参与。
+- 所有权在 owner-id 前缀中携带**优先级类别**（`brain:` / `desktop:`）。brain 可立即抢占存活的 desktop 租约；desktop 永不驱逐 brain；同类之间保持先到先得，以免两个云端副本在每个续约周期互相抢夺。没有抢占的话，恰好先启动的笔记本会让常驻进程每次被挡住一整个 TTL。无法识别的前缀归入 `desktop`（较低类别）——解析不了的 owner id 绝不能驱逐运行中的 brain。
+
+该租约在**桌面端失败即放行**、在 **brain 端失败即拒绝**。够不到伴生服务的 brain 按定义就是一个未经仲裁的第二所有者；而桌面端的伴生服务面是可选的，调用出错的安装必须与守卫存在之前完全一样地启动——Web Lock 仍覆盖其自身的 webview。
+
+仍未覆盖、且刻意不在本次范围内：桌面端**本地**路由，同时另一个无关的云端部署服务于同一批已同步的适配器行。两者对接的是不同的伴生服务，不存在共享槽位。要关掉它，就得让桌面端去拨一个它并未路由到的伴生服务——那是远超单 owner 守卫的行为改动。
+
+**棘轮的切换。** `pnpm audit:host-parity` 以**只报告**模式交付：`scripts/gates/check-host-parity.mjs` 中 `ENFORCE_RATCHET = false`，使存量债不阻塞第一批偿还。该批落地后即转为硬失败 —— 该批定义为 connectors seam 迁移 + 那 15 个远端可达的 arm。有一个测试钉住当前值，使切换不可能是意外发生的；本句即是"缓冲期非无限期"的承诺。
+
 ## 计划
 
 工作包按依赖排序。每个TS/Rust项都遵循仓库规则：共址测试、≥90%覆盖率、任意 UI 字符串的 i18n、常规提交;每个阶段以预检审计集结束（测试间隙、I18N、静态导出、Tauri-Rust、PII-门禁、布线）。

@@ -3,7 +3,7 @@ info:
   title: Cognia Headless Service Event and Bridge API
   version: "1"
   description: Generated WebSocket contract for the existing Headless event stream and Brain data-plane bridge.
-  x-cognia-catalog-hash: d701e8b044d0adb7ac9434158bbaf8935863b069a1d437c4b26c289454986254
+  x-cognia-catalog-hash: 07bc09ba3a6849d7a0e2f99f88c75ad930b80185b496ab3b577a0684f76efec1
 servers:
   loopback:
     host: 127.0.0.1:{port}
@@ -26,6 +26,12 @@ channels:
         $ref: "#/components/messages/ResyncRequiredFrame"
       ping:
         $ref: "#/components/messages/EventPingFrame"
+      subscribe:
+        $ref: "#/components/messages/SubscribeFrame"
+      subscribed:
+        $ref: "#/components/messages/SubscribedFrame"
+      subscribeError:
+        $ref: "#/components/messages/SubscribeErrorFrame"
   headlessBridge:
     address: /internal/bridge
     messages:
@@ -53,6 +59,14 @@ operations:
       - $ref: "#/channels/headlessEvents/messages/streamReady"
       - $ref: "#/channels/headlessEvents/messages/resyncRequired"
       - $ref: "#/channels/headlessEvents/messages/ping"
+      - $ref: "#/channels/headlessEvents/messages/subscribed"
+      - $ref: "#/channels/headlessEvents/messages/subscribeError"
+  sendHeadlessEventControl:
+    action: send
+    channel:
+      $ref: "#/channels/headlessEvents"
+    messages:
+      - $ref: "#/channels/headlessEvents/messages/subscribe"
   sendBridgeFrames:
     action: send
     channel:
@@ -146,6 +160,81 @@ components:
           ts:
             type: integer
             format: int64
+    SubscribeFrame:
+      name: SubscribeFrame
+      payload:
+        type: object
+        required:
+          - type
+          - channels
+        additionalProperties: false
+        properties:
+          type:
+            type: string
+            const: subscribe
+          mode:
+            type: string
+            enum:
+              - replace
+              - add
+              - remove
+            default: replace
+          channels:
+            type: array
+            items:
+              type: string
+    SubscribedFrame:
+      name: SubscribedFrame
+      payload:
+        type: object
+        required:
+          - type
+          - channels
+          - rejected
+        additionalProperties: false
+        properties:
+          type:
+            type: string
+            const: subscribed
+          channels:
+            type: array
+            items:
+              type: string
+          rejected:
+            type: array
+            items:
+              type: object
+              required:
+                - channel
+                - reason
+              additionalProperties: false
+              properties:
+                channel:
+                  type: string
+                reason:
+                  type: string
+                  enum:
+                    - unknown_channel
+                    - scope_forbidden
+    SubscribeErrorFrame:
+      name: SubscribeErrorFrame
+      payload:
+        type: object
+        required:
+          - type
+          - message
+          - channels
+        additionalProperties: false
+        properties:
+          type:
+            type: string
+            const: subscribe_error
+          message:
+            type: string
+          channels:
+            type: array
+            items:
+              type: string
     BridgeHelloFrame:
       name: BridgeHelloFrame
       payload:
@@ -183,7 +272,7 @@ components:
               type: string
           catalogHash:
             type: string
-            const: d701e8b044d0adb7ac9434158bbaf8935863b069a1d437c4b26c289454986254
+            const: 07bc09ba3a6849d7a0e2f99f88c75ad930b80185b496ab3b577a0684f76efec1
           contractVersion:
             type: integer
             const: 1
@@ -214,7 +303,7 @@ components:
             type: string
           catalogHash:
             type: string
-            const: d701e8b044d0adb7ac9434158bbaf8935863b069a1d437c4b26c289454986254
+            const: 07bc09ba3a6849d7a0e2f99f88c75ad930b80185b496ab3b577a0684f76efec1
           contractVersion:
             type: integer
             const: 1

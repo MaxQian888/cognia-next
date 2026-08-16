@@ -282,7 +282,8 @@ Use case: user clicks a row in the team member list, desktop shell calls `compos
 `components/chat/composer/bottom-toolbar.tsx` hangs below the Composer, carrying **session-level metadata**:
 
 - **ModelPicker** — switch the default model for the current session; writes to session settings.
-- **AgentRuntimeSelector / AgentModeSelector / ExternalAgentSelector** — choose which agent implementation handles this message (see [Provider System](../chat/provider-system)).
+- **AgentRuntimeSelector** — choose which agent implementation handles this message: the built-in Claude SDK runtime or one of the configured external agents, both in the same radio group (see [Provider System](../chat/provider-system)).
+- **AgentModeSelector** — the Agent Mode the Claude SDK runtime composes with; hidden while an external agent is selected, which brings its own.
 - **WebSearchToggle** — enable search tool calls.
 - **PermissionModeIndicator** — current allow / deny / ask / plan.
 - **Context Usage** — real-time calculation and display of the current session's context window input/output/cache usage:

@@ -16,6 +16,15 @@ documented in ADR-0091.
   resolve, intents, JSSDK signature).
 - Adapter credentials (`appId`/`appSecret`) already in the connectors keyring.
 
+On a self-hosted (headless) deployment both base URLs are plain `.env` entries
+passed through to the `cognia-server` container — see
+[`deploy/compose/README.md`](../../deploy/compose/README.md) § _Lark / Feishu
+entry surfaces_. `cognia-server serve` validates them on boot: a value that
+cannot work (no scheme, plaintext `http://` on a public host, a query string,
+embedded credentials) refuses to start and names the variable, so a typo never
+reaches a user as an opaque 503. Loopback bases and a `COGNIA_LARK_WEB_BASE`
+with no `COGNIA_LARK_PUBLIC_BASE` behind it print a warning and start.
+
 ## 2. Lark developer-console configuration
 
 ### 2.1 OAuth (Web SSO)
@@ -24,6 +33,28 @@ documented in ADR-0091.
    `{COGNIA_LARK_PUBLIC_BASE}/integrations/lark/web/callback`.
 2. Required scopes: none beyond basic identity (`authen` user info). The SSO
    flow only reads `open_id` / `tenant_key`.
+
+### 2.1b Send-as-user OAuth (optional)
+
+A second, separate redirect. Add
+`{COGNIA_LARK_PUBLIC_BASE}/connectors/oauth/lark/callback` (self-hosted) or
+`{tunnel}/oauth/lark/callback` (desktop) as a 重定向 URL, and grant
+`offline_access im:message`.
+
+The authorization is driven by the **brain**, which mints the `state` + PKCE
+verifier, keeps them in the adapter's encrypted secret store, and spends them
+when the relay hands the code back — one implementation for both hosts. On the
+desktop, Settings → Connections → the adapter → _Send as me_ → **Connect**. A
+self-hosted install has no such dialog and uses the operator channel:
+
+```bash
+cognia-agent lark authorize --adapter <id>     # add --redirect for a proxied origin
+```
+
+It prints an authorize URL; open it in a browser signed in to Feishu. The link
+is good for 10 minutes and completion lands in the running `serve` process —
+so the brain must be up, and the redirect must match this console entry byte
+for byte.
 
 ### 2.2 Permissions (tenant token)
 

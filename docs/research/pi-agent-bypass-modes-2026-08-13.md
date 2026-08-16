@@ -15,12 +15,12 @@
 
 官方默认状态为：
 
-| 状态 | 默认行为 |
-| --- | --- |
-| `default` | Bash、Edit、Write 均确认；项目内 Bash 仍在 OS 沙箱运行 |
-| `plan` | 只读 Bash 沙箱；仅允许项目内 Markdown 变更 |
-| `build` | 项目内读写和 Bash 无确认，但 Bash 仍在 OS 沙箱内 |
-| `yolo` | 无确认、无 OS 沙箱、跳过 protected-path backstop，以当前用户的完整权限运行 |
+| 状态      | 默认行为                                                                   |
+| --------- | -------------------------------------------------------------------------- |
+| `default` | Bash、Edit、Write 均确认；项目内 Bash 仍在 OS 沙箱运行                     |
+| `plan`    | 只读 Bash 沙箱；仅允许项目内 Markdown 变更                                 |
+| `build`   | 项目内读写和 Bash 无确认，但 Bash 仍在 OS 沙箱内                           |
+| `yolo`    | 无确认、无 OS 沙箱、跳过 protected-path backstop，以当前用户的完整权限运行 |
 
 这些行为由包内的[固定版本默认配置](https://github.com/wynainfo/pi-permission-modes/blob/v2.2.0/permission-mode.defaults.json)定义；安全边界和 YOLO 风险见该版本的[官方安全模型](https://github.com/wynainfo/pi-permission-modes/blob/v2.2.0/SECURITY.md)。
 
@@ -93,4 +93,3 @@
 当前这套配置更适合先保留 `@gotgenes/pi-permission-system`，直接通过 `/permission-system` 打开 `yoloMode`：它不会绕过敏感文件、危险删除和强推等明确 `deny`，也保留现有 subagent 权限转发。
 
 如果明确需要“一条命令进入真正 bypass”，再执行一次有意识的替换：卸载 gotgenes 权限系统，并将现有独立 Plan 插件一并纳入迁移评估，然后安装 `pi-permission-modes@2.2.0`，把 `cycleOrder` 配成不含 `yolo`，只允许通过 `/perm yolo` 显式进入。不要把两套权限引擎同时加载作为长期配置。
-

@@ -74,7 +74,21 @@ flowchart TB
 
 运行时由一个小 store `useAgentRuntimeStore` 选择，它持有 `runtime`（`"claude-sdk" | "external"`）与
 `externalAgentId`。UI 选择器是 `components/agent/mode/runtime-selector.tsx`（`AgentRuntimeSelector`）——
-claude-sdk（`:76`）与 external（`:83`）的单选项；一个兄弟 `<ExternalAgentSelector>` 选择*哪个* Agent 记录。
+同一个单选组里既有内置的 `claude-sdk` 运行时，也为每个已配置的外部 Agent 各出一行：选运行时与选
+Agent 记录是同一次点击。`getExternalAgentExecutionBlockReason(...)` 非空的行以禁用态渲染并给出原因；
+若恢复出来的选择已无法解析为可运行的 Agent，则回落到 `claude-sdk`，而不是把输入框停在一个没有可派发对象的
+外部运行时上。
+
+每一行还会带上"上一次真正接触该 Agent 时的结果"，取自 `agentValidity[id]`（由 `useExternalAgent` 在
+连接 / 健康检查 / 执行时写入）：启动失败原样展示运行时给出的 `blockingReason`，待登录与健康探测异常则给出
+本地化提示。它们是历史而非判决——一小时前找不到的二进制现在可能已经装上了——所以与配置级阻断不同，它们只警告、
+不禁用该行。
+
+**"当前是哪个 Agent"存在两个 store，且互不派生**：聊天派发读 `useAgentRuntimeStore.externalAgentId`，
+而管理器、`useExternalAgent`、Agent Team 工作区读 `useExternalAgentStore.activeAgentId`。所有写入都经过
+`lib/agent/external-agent-selection.ts`（`selectExternalAgent` / `clearExternalAgentSelectionIfActive`），
+两者因此不可能不一致——在此之前，在管理器里选一个 Agent 对聊天实际派发到哪里毫无影响。选择 Agent **不会**
+切换运行时车道，只有输入框上的运行时 chip 会。
 
 真正的派发在 `hooks/chat/use-claude-chat.ts`——**而非** `use-team-chat.ts`：
 

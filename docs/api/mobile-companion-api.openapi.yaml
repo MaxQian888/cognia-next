@@ -859,7 +859,7 @@ paths:
           description: |
             Switching protocols — the connection is now a WebSocket. Subsequent
             text frames carry one of the schemas under `content` (server → client)
-            or `WsClientFrame` (client → server).
+            or `SubscribeFrame` (client → server).
           headers:
             Upgrade:
               schema:
@@ -885,6 +885,8 @@ paths:
                   - $ref: "#/components/schemas/EventFrame"
                   - $ref: "#/components/schemas/PingFrame"
                   - $ref: "#/components/schemas/ResyncRequiredFrame"
+                  - $ref: "#/components/schemas/SubscribedFrame"
+                  - $ref: "#/components/schemas/SubscribeErrorFrame"
         "200":
           description: |
             Synthetic 2xx documenting the WebSocket message contract. The router never
@@ -900,6 +902,8 @@ paths:
                   - $ref: "#/components/schemas/EventFrame"
                   - $ref: "#/components/schemas/PingFrame"
                   - $ref: "#/components/schemas/ResyncRequiredFrame"
+                  - $ref: "#/components/schemas/SubscribedFrame"
+                  - $ref: "#/components/schemas/SubscribeErrorFrame"
         "401":
           $ref: "#/components/responses/AuthenticationRejected"
         "426":
@@ -7419,8 +7423,6 @@ paths:
             schema:
               type: object
               required:
-                - session_id
-                - request_id
                 - decision
               properties:
                 session_id:
@@ -7451,7 +7453,102 @@ paths:
                       additionalProperties: {}
                       example: {}
                     - type: "null"
+                remote_execution_context:
+                  type: object
+                  description: |
+                    Remote-execution provenance minted by the host when the turn was dispatched.
+                    Required on every companion-originated control message: the arm validates and
+                    consumes it (remote_execution::validate_and_consume) before acting.
+                  required:
+                    - hostId
+                    - originDeviceId
+                    - sessionId
+                    - generation
+                    - requestId
+                    - issuedAt
+                    - expiresAt
+                  properties:
+                    hostId:
+                      type: string
+                    originDeviceId:
+                      type: string
+                    sessionId:
+                      type: string
+                    generation:
+                      type: integer
+                      minimum: 0
+                    requestId:
+                      type: string
+                    issuedAt:
+                      type: integer
+                      minimum: 0
+                    expiresAt:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
+                sessionId:
+                  type: string
+                requestId:
+                  type: string
+                  description: ID of the pending approval request emitted via WS.
+                updatedInput:
+                  description: "Replacement tool input — substituted for the original arguments when sent (typically with `decision:
+                    allow`)."
+                  oneOf:
+                    - type: object
+                      additionalProperties: {}
+                      example: {}
+                    - type: "null"
+                remoteExecutionContext:
+                  type: object
+                  description: |
+                    Remote-execution provenance minted by the host when the turn was dispatched.
+                    Required on every companion-originated control message: the arm validates and
+                    consumes it (remote_execution::validate_and_consume) before acting.
+                  required:
+                    - hostId
+                    - originDeviceId
+                    - sessionId
+                    - generation
+                    - requestId
+                    - issuedAt
+                    - expiresAt
+                  properties:
+                    hostId:
+                      type: string
+                    originDeviceId:
+                      type: string
+                    sessionId:
+                      type: string
+                    generation:
+                      type: integer
+                      minimum: 0
+                    requestId:
+                      type: string
+                    issuedAt:
+                      type: integer
+                      minimum: 0
+                    expiresAt:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
+                - anyOf:
+                    - required:
+                        - request_id
+                    - required:
+                        - requestId
+                - anyOf:
+                    - required:
+                        - remote_execution_context
+                    - required:
+                        - remoteExecutionContext
       responses:
         "200":
           description: Command completed.
@@ -7563,12 +7660,18 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - session_id
               properties:
                 session_id:
                   type: string
+                sessionId:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
       responses:
         "200":
           description: Command completed.
@@ -7680,8 +7783,6 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - session_id
               properties:
                 session_id:
                   type: string
@@ -7690,7 +7791,15 @@ paths:
                     - string
                     - "null"
                   description: Optional compact instruction/focus.
+                sessionId:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
       responses:
         "200":
           description: Command completed.
@@ -8022,12 +8131,18 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - session_id
               properties:
                 session_id:
                   type: string
+                sessionId:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
       responses:
         "200":
           description: Command completed.
@@ -8139,9 +8254,6 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - sessionId
-                - toolUseId
               properties:
                 sessionId:
                   type: string
@@ -8150,7 +8262,93 @@ paths:
                 result: {}
                 error:
                   type: string
+                remote_execution_context:
+                  type: object
+                  description: |
+                    Remote-execution provenance minted by the host when the turn was dispatched.
+                    Required on every companion-originated control message: the arm validates and
+                    consumes it (remote_execution::validate_and_consume) before acting.
+                  required:
+                    - hostId
+                    - originDeviceId
+                    - sessionId
+                    - generation
+                    - requestId
+                    - issuedAt
+                    - expiresAt
+                  properties:
+                    hostId:
+                      type: string
+                    originDeviceId:
+                      type: string
+                    sessionId:
+                      type: string
+                    generation:
+                      type: integer
+                      minimum: 0
+                    requestId:
+                      type: string
+                    issuedAt:
+                      type: integer
+                      minimum: 0
+                    expiresAt:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
+                session_id:
+                  type: string
+                tool_use_id:
+                  type: string
+                remoteExecutionContext:
+                  type: object
+                  description: |
+                    Remote-execution provenance minted by the host when the turn was dispatched.
+                    Required on every companion-originated control message: the arm validates and
+                    consumes it (remote_execution::validate_and_consume) before acting.
+                  required:
+                    - hostId
+                    - originDeviceId
+                    - sessionId
+                    - generation
+                    - requestId
+                    - issuedAt
+                    - expiresAt
+                  properties:
+                    hostId:
+                      type: string
+                    originDeviceId:
+                      type: string
+                    sessionId:
+                      type: string
+                    generation:
+                      type: integer
+                      minimum: 0
+                    requestId:
+                      type: string
+                    issuedAt:
+                      type: integer
+                      minimum: 0
+                    expiresAt:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
+                - anyOf:
+                    - required:
+                        - tool_use_id
+                    - required:
+                        - toolUseId
+                - anyOf:
+                    - required:
+                        - remote_execution_context
+                    - required:
+                        - remoteExecutionContext
       responses:
         "200":
           description: Command completed.
@@ -8269,7 +8467,88 @@ paths:
                   type: object
                   additionalProperties: {}
                   example: {}
+                remote_execution_context:
+                  type: object
+                  description: |
+                    Remote-execution provenance minted by the host when the turn was dispatched.
+                    Required on every companion-originated control message: the arm validates and
+                    consumes it (remote_execution::validate_and_consume) before acting.
+                  required:
+                    - hostId
+                    - originDeviceId
+                    - sessionId
+                    - generation
+                    - requestId
+                    - issuedAt
+                    - expiresAt
+                  properties:
+                    hostId:
+                      type: string
+                    originDeviceId:
+                      type: string
+                    sessionId:
+                      type: string
+                    generation:
+                      type: integer
+                      minimum: 0
+                    requestId:
+                      type: string
+                    issuedAt:
+                      type: integer
+                      minimum: 0
+                    expiresAt:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
+                session_id:
+                  type: string
+                remoteExecutionContext:
+                  type: object
+                  description: |
+                    Remote-execution provenance minted by the host when the turn was dispatched.
+                    Required on every companion-originated control message: the arm validates and
+                    consumes it (remote_execution::validate_and_consume) before acting.
+                  required:
+                    - hostId
+                    - originDeviceId
+                    - sessionId
+                    - generation
+                    - requestId
+                    - issuedAt
+                    - expiresAt
+                  properties:
+                    hostId:
+                      type: string
+                    originDeviceId:
+                      type: string
+                    sessionId:
+                      type: string
+                    generation:
+                      type: integer
+                      minimum: 0
+                    requestId:
+                      type: string
+                    issuedAt:
+                      type: integer
+                      minimum: 0
+                    expiresAt:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
+                sessionId:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - remote_execution_context
+                    - required:
+                        - remoteExecutionContext
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
       responses:
         "200":
           description: Command completed.
@@ -8493,13 +8772,20 @@ paths:
             schema:
               type: object
               required:
-                - sessionId
                 - messages
               properties:
                 sessionId:
                   type: string
                 messages: {}
+                session_id:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
       responses:
         "200":
           description: Command completed.
@@ -8612,7 +8898,6 @@ paths:
             schema:
               type: object
               required:
-                - session_id
                 - prompt
               properties:
                 session_id:
@@ -8744,7 +9029,16 @@ paths:
                       type: object
                       additionalProperties: {}
                       example: {}
+                sessionId:
+                  type: string
+                  description: Logical session id chosen by the caller (Dexie row key).
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
       responses:
         "200":
           description: Command completed.
@@ -8975,7 +9269,6 @@ paths:
             schema:
               type: object
               required:
-                - sessionId
                 - mode
               properties:
                 sessionId:
@@ -8989,7 +9282,21 @@ paths:
                     - bypassPermissions
                     - dontAsk
                     - auto
+                command_id:
+                  type: string
+                  description: Correlation id echoed on the sidecar ack, so the caller can match the response to this request.
+                session_id:
+                  type: string
+                commandId:
+                  type: string
+                  description: Correlation id echoed on the sidecar ack, so the caller can match the response to this request.
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
       responses:
         "200":
           description: Command completed.
@@ -9228,6 +9535,30 @@ paths:
                   oneOf:
                     - type: string
                     - type: "null"
+                custom_headers:
+                  description: Ordered `[name, value]` pairs forwarded as ANTHROPIC_CUSTOM_HEADER_* at sidecar spawn. Omit to leave the
+                    existing set untouched; send [] to clear it.
+                  oneOf:
+                    - type: array
+                      items:
+                        type: array
+                        items:
+                          type: string
+                        minItems: 2
+                        maxItems: 2
+                    - type: "null"
+                customHeaders:
+                  description: Ordered `[name, value]` pairs forwarded as ANTHROPIC_CUSTOM_HEADER_* at sidecar spawn. Omit to leave the
+                    existing set untouched; send [] to clear it.
+                  oneOf:
+                    - type: array
+                      items:
+                        type: array
+                        items:
+                          type: string
+                        minItems: 2
+                        maxItems: 2
+                    - type: "null"
               additionalProperties: false
       responses:
         "200":
@@ -9451,16 +9782,99 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - sessionId
-                - reviewId
               properties:
                 sessionId:
                   type: string
                 reviewId:
                   type: string
                 updatedToolOutput: {}
+                remote_execution_context:
+                  type: object
+                  description: |
+                    Remote-execution provenance minted by the host when the turn was dispatched.
+                    Required on every companion-originated control message: the arm validates and
+                    consumes it (remote_execution::validate_and_consume) before acting.
+                  required:
+                    - hostId
+                    - originDeviceId
+                    - sessionId
+                    - generation
+                    - requestId
+                    - issuedAt
+                    - expiresAt
+                  properties:
+                    hostId:
+                      type: string
+                    originDeviceId:
+                      type: string
+                    sessionId:
+                      type: string
+                    generation:
+                      type: integer
+                      minimum: 0
+                    requestId:
+                      type: string
+                    issuedAt:
+                      type: integer
+                      minimum: 0
+                    expiresAt:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
+                session_id:
+                  type: string
+                review_id:
+                  type: string
+                remoteExecutionContext:
+                  type: object
+                  description: |
+                    Remote-execution provenance minted by the host when the turn was dispatched.
+                    Required on every companion-originated control message: the arm validates and
+                    consumes it (remote_execution::validate_and_consume) before acting.
+                  required:
+                    - hostId
+                    - originDeviceId
+                    - sessionId
+                    - generation
+                    - requestId
+                    - issuedAt
+                    - expiresAt
+                  properties:
+                    hostId:
+                      type: string
+                    originDeviceId:
+                      type: string
+                    sessionId:
+                      type: string
+                    generation:
+                      type: integer
+                      minimum: 0
+                    requestId:
+                      type: string
+                    issuedAt:
+                      type: integer
+                      minimum: 0
+                    expiresAt:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_id
+                    - required:
+                        - sessionId
+                - anyOf:
+                    - required:
+                        - review_id
+                    - required:
+                        - reviewId
+                - anyOf:
+                    - required:
+                        - remote_execution_context
+                    - required:
+                        - remoteExecutionContext
       responses:
         "200":
           description: Command completed.
@@ -11856,6 +12270,429 @@ paths:
                 $ref: "#/components/schemas/RpcError"
       security:
         - dpopAccess: []
+  /api/_rpc/connectors_runtime_lease_acquire:
+    post:
+      operationId: publicRpcConnectorsRuntimeLeaseAcquire
+      tags:
+        - rpc-dispatch
+      summary: connectors_runtime_lease_acquire (agent.run)
+      description: "Device-reachable write command. Risk: critical; approval: signed-policy."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                owner_id:
+                  type: string
+                  example: ""
+                  description: Also accepted as `ownerId`.
+                ttl_ms:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
+                  description: Also accepted as `ttlMs`.
+                handoff_aware:
+                  type: boolean
+                  example: false
+                  description: Also accepted as `handoffAware`.
+                ownerId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `ownerId`.
+                ttlMs:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
+                  description: Also accepted as `ttlMs`.
+                handoffAware:
+                  type: boolean
+                  example: false
+                  description: Also accepted as `handoffAware`.
+              additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - owner_id
+                    - required:
+                        - ownerId
+                - anyOf:
+                    - required:
+                        - ttl_ms
+                    - required:
+                        - ttlMs
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+  /api/_rpc/connectors_runtime_lease_release:
+    post:
+      operationId: publicRpcConnectorsRuntimeLeaseRelease
+      tags:
+        - rpc-dispatch
+      summary: connectors_runtime_lease_release (agent.run)
+      description: "Device-reachable write command. Risk: critical; approval: signed-policy."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                owner_id:
+                  type: string
+                  example: ""
+                  description: Also accepted as `ownerId`.
+                ownerId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `ownerId`.
+              additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - owner_id
+                    - required:
+                        - ownerId
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
+  /api/_rpc/connectors_runtime_lease_renew:
+    post:
+      operationId: publicRpcConnectorsRuntimeLeaseRenew
+      tags:
+        - rpc-dispatch
+      summary: connectors_runtime_lease_renew (agent.run)
+      description: "Device-reachable write command. Risk: critical; approval: signed-policy."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                owner_id:
+                  type: string
+                  example: ""
+                  description: Also accepted as `ownerId`.
+                ttl_ms:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
+                  description: Also accepted as `ttlMs`.
+                ownerId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `ownerId`.
+                ttlMs:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
+                  description: Also accepted as `ttlMs`.
+              additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - owner_id
+                    - required:
+                        - ownerId
+                - anyOf:
+                    - required:
+                        - ttl_ms
+                    - required:
+                        - ttlMs
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      security:
+        - dpopAccess: []
   /api/_rpc/conversation_overrides_update:
     post:
       operationId: publicRpcConversationOverridesUpdate
@@ -12722,6 +13559,11 @@ paths:
                   format: int64
                   minimum: 0
                   description: Also accepted as `expiresAt`.
+                expiresAt:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: Also accepted as `expiresAt`.
               additionalProperties: false
       responses:
         "200":
@@ -12946,14 +13788,22 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - client_id
               properties:
                 client_id:
                   type: string
                   example: ""
                   description: Also accepted as `clientId`.
+                clientId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `clientId`.
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - client_id
+                    - required:
+                        - clientId
       responses:
         "200":
           description: Command completed.
@@ -13065,14 +13915,22 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - client_id
               properties:
                 client_id:
                   type: string
                   example: ""
                   description: Also accepted as `clientId`.
+                clientId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `clientId`.
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - client_id
+                    - required:
+                        - clientId
       responses:
         "200":
           description: Command completed.
@@ -16498,12 +17356,18 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - agent_id
               properties:
                 agent_id:
                   type: string
+                agentId:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - agent_id
+                    - required:
+                        - agentId
       responses:
         "200":
           description: Command completed.
@@ -25440,8 +26304,8 @@ paths:
             schema:
               type: object
               required:
-                - operations
                 - confirmed
+                - operations
               properties:
                 operations:
                   type: array
@@ -25456,6 +26320,11 @@ paths:
                 confirmed:
                   type: boolean
                   example: false
+                ttlSeconds:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: Also accepted as `ttlSeconds`.
               additionalProperties: false
       responses:
         "200":
@@ -26348,12 +27217,18 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - agent_id
               properties:
                 agent_id:
                   type: string
+                agentId:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - agent_id
+                    - required:
+                        - agentId
       responses:
         "200":
           description: Command completed.
@@ -26958,7 +27833,6 @@ paths:
               required:
                 - port
                 - token
-                - settingsJson
               additionalProperties: false
               properties:
                 port:
@@ -26976,6 +27850,15 @@ paths:
                   deprecated: true
                   description: Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
                     sidecar.
+                settings_json:
+                  type: string
+                  description: Serialized ExternalBridgeSettings snapshot.
+              allOf:
+                - anyOf:
+                    - required:
+                        - settings_json
+                    - required:
+                        - settingsJson
       responses:
         "200":
           description: Command completed.
@@ -27090,7 +27973,6 @@ paths:
               required:
                 - port
                 - token
-                - settingsJson
               additionalProperties: false
               properties:
                 port:
@@ -27108,6 +27990,15 @@ paths:
                   deprecated: true
                   description: Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host
                     sidecar.
+                settings_json:
+                  type: string
+                  description: Serialized ExternalBridgeSettings snapshot.
+              allOf:
+                - anyOf:
+                    - required:
+                        - settings_json
+                    - required:
+                        - settingsJson
       responses:
         "200":
           description: Command completed.
@@ -30647,7 +31538,7 @@ paths:
         - rpc-dispatch
       summary: plugin_install_from_github (process.spawn)
       description: "Device-reachable write command. Risk: critical; approval: signed-policy."
-      x-cognia-request-schema-source: contract
+      x-cognia-request-schema-source: zod-contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -30657,19 +31548,25 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - repo
               properties:
                 repo:
                   type: string
+                  minLength: 1
                 gitRef:
-                  type:
-                    - string
-                    - "null"
+                  type: string
+                  minLength: 1
                 subdir:
-                  type:
-                    - string
-                    - "null"
+                  type: string
+                  minLength: 1
+                generatedFiles:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties:
+                    type: string
+                  example: {}
+              required:
+                - repo
               additionalProperties: false
       responses:
         "200":
@@ -30893,9 +31790,7 @@ paths:
             schema:
               type: object
               required:
-                - pluginId
                 - permission
-                - grantedBy
               properties:
                 pluginId:
                   type: string
@@ -30908,7 +31803,22 @@ paths:
                     - string
                     - "null"
                   format: date-time
+                plugin_id:
+                  type: string
+                granted_by:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - plugin_id
+                    - required:
+                        - pluginId
+                - anyOf:
+                    - required:
+                        - granted_by
+                    - required:
+                        - grantedBy
       responses:
         "200":
           description: Command completed.
@@ -31017,12 +31927,18 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - pluginId
               properties:
                 pluginId:
                   type: string
+                plugin_id:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - plugin_id
+                    - required:
+                        - pluginId
       responses:
         "200":
           description: Command completed.
@@ -31137,14 +32053,21 @@ paths:
             schema:
               type: object
               required:
-                - pluginId
                 - permission
               properties:
                 pluginId:
                   type: string
                 permission:
                   type: string
+                plugin_id:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - plugin_id
+                    - required:
+                        - pluginId
       responses:
         "200":
           description: Command completed.
@@ -35425,14 +36348,21 @@ paths:
             schema:
               type: object
               required:
-                - agent_id
                 - message
               properties:
                 agent_id:
                   type: string
                 message:
                   type: string
+                agentId:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - agent_id
+                    - required:
+                        - agentId
       responses:
         "200":
           description: Command completed.
@@ -35785,14 +36715,22 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - handle_id
               properties:
                 handle_id:
                   type: string
                   example: ""
                   description: Also accepted as `handleId`.
+                handleId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `handleId`.
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - handle_id
+                    - required:
+                        - handleId
       responses:
         "200":
           description: Command completed.
@@ -35904,14 +36842,22 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - handle_id
               properties:
                 handle_id:
                   type: string
                   example: ""
                   description: Also accepted as `handleId`.
+                handleId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `handleId`.
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - handle_id
+                    - required:
+                        - handleId
       responses:
         "200":
           description: Command completed.
@@ -36143,10 +37089,7 @@ paths:
             schema:
               type: object
               required:
-                - handle_id
                 - offset
-                - data_base64
-                - chunk_hash
               properties:
                 handle_id:
                   type: string
@@ -36165,7 +37108,35 @@ paths:
                   type: string
                   example: ""
                   description: Also accepted as `chunkHash`.
+                handleId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `handleId`.
+                dataBase64:
+                  type: string
+                  example: ""
+                  description: Also accepted as `dataBase64`.
+                chunkHash:
+                  type: string
+                  example: ""
+                  description: Also accepted as `chunkHash`.
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - handle_id
+                    - required:
+                        - handleId
+                - anyOf:
+                    - required:
+                        - data_base64
+                    - required:
+                        - dataBase64
+                - anyOf:
+                    - required:
+                        - chunk_hash
+                    - required:
+                        - chunkHash
       responses:
         "200":
           description: Command completed.
@@ -36389,14 +37360,22 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - handle_id
               properties:
                 handle_id:
                   type: string
                   example: ""
                   description: Also accepted as `handleId`.
+                handleId:
+                  type: string
+                  example: ""
+                  description: Also accepted as `handleId`.
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - handle_id
+                    - required:
+                        - handleId
       responses:
         "200":
           description: Command completed.
@@ -36899,7 +37878,6 @@ paths:
               type: object
               required:
                 - target
-                - dir_name
               properties:
                 target:
                   type: object
@@ -36909,7 +37887,17 @@ paths:
                   type: string
                   example: ""
                   description: Also accepted as `dirName`.
+                dirName:
+                  type: string
+                  example: ""
+                  description: Also accepted as `dirName`.
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - dir_name
+                    - required:
+                        - dirName
       responses:
         "200":
           description: Command completed.
@@ -44255,7 +45243,6 @@ paths:
             schema:
               type: object
               required:
-                - approvalId
                 - decision
               properties:
                 approvalId:
@@ -44265,7 +45252,15 @@ paths:
                   enum:
                     - approved
                     - rejected
+                approval_id:
+                  type: string
               additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - approval_id
+                    - required:
+                        - approvalId
       responses:
         "200":
           description: Command completed.
@@ -45930,6 +46925,9 @@ components:
           - connector_approve_draft
           - connector_reject_draft
           - connector_send
+          - connectors_runtime_lease_acquire
+          - connectors_runtime_lease_release
+          - connectors_runtime_lease_renew
           - conversation_overrides_update
           - default_export_dir
           - device_capabilities_report
@@ -46940,6 +47938,102 @@ components:
           type: string
           enum:
             - resync_required
+    SubscribeFrame:
+      type: object
+      description: |
+        Client → server. Widen or narrow which event channels this connection
+        receives.
+
+        A connection starts on the host's default channel set, so a client that
+        never sends this frame keeps the stream it has always had. Naming a
+        channel the host does not publish, or one this connection's scope may
+        not receive, does not fail the request — the valid channels still apply
+        and the refusals come back named in `SubscribedFrame.rejected`.
+      required:
+        - type
+        - channels
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+            - subscribe
+        mode:
+          type: string
+          default: replace
+          description: |
+            `replace` (the default) sets the subscription to exactly `channels`.
+            `add` and `remove` adjust the current set.
+          enum:
+            - replace
+            - add
+            - remove
+        channels:
+          type: array
+          description: |
+            Channel names, or a family pattern ending in `*` where the host
+            publishes runtime-minted names (`connectors://*`).
+          items:
+            type: string
+    SubscribedFrame:
+      type: object
+      description: Server → client. The resulting subscription, refusals included.
+      required:
+        - type
+        - channels
+        - rejected
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+            - subscribed
+        channels:
+          type: array
+          description: The channels this connection now receives, sorted.
+          items:
+            type: string
+        rejected:
+          type: array
+          description: |
+            Channels the host refused. Empty on a fully accepted request.
+          items:
+            type: object
+            required:
+              - channel
+              - reason
+            additionalProperties: false
+            properties:
+              channel:
+                type: string
+              reason:
+                type: string
+                enum:
+                  - unknown_channel
+                  - scope_forbidden
+    SubscribeErrorFrame:
+      type: object
+      description: |
+        Server → client. The frame was labelled `subscribe` but did not parse.
+        Answered rather than ignored, so a client cannot be left believing it
+        widened a stream that never changed.
+      required:
+        - type
+        - message
+        - channels
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+            - subscribe_error
+        message:
+          type: string
+        channels:
+          type: array
+          description: The unchanged subscription, so the client can resynchronise.
+          items:
+            type: string
     RpcArgs:
       type: object
       additionalProperties: true
@@ -47778,9 +48872,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 350
-  generatedRequestSchemaCount: 350
+  publicCommandCount: 353
+  generatedRequestSchemaCount: 353
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 350
+  contractRequestSchemaCount: 353
   genericRequestSchemaCount: 0
   legacyCompatibility: false

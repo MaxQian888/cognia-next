@@ -7,9 +7,23 @@
 
 > **修复进行中。** 针对安全层与最高严重度 P0 的第一轮修复已经落地。下文标记 ✅ 的发现已修复，**这些章节的 `file:line` 引用描述的是修复前的代码，已与 `main` 不一致**；未标记的仍未修复，其引用依然准确。
 >
-> 已修复：**SEC-1、SEC-2、SEC-3**（禁闭层现已覆盖全部写工具与带路径的读工具，`collectPathTargets` 读取全部 17 个路径键及 `paths[]`，`file-ops` 写工具均调用 `assertNotSecretEscape`）·**SEC-4**（`get_env`/`list_env` 的 `revealSecrets` 已移除）·**SEC-6**（两份拒绝清单改为由 `requiresApproval` 元数据派生，`CORE_MUTATING_TOOL_NAMES` 已接上电）·**SEC-7**（`kill_shell` 改判为 `requiresApproval: true`）·**P0-1**（`bash` 的 spawn 失败与信号终止现在返回 `isError`）·**P0-6**（resolver 缺失时 `lsp`/`codeGraph` 进入拒绝清单）·**P0-8**（`ast_grep_*` 改在会话 cwd 下运行）·**P0-9**（被中断的改写返回错误）·**P0-11**（`impactCount` 附带 `impactCountExact`）·**P2-0**（测试 glob 已扩展——纳入门禁的测试从 1428 增至 1644）·以及 §7 中缺失的 9 个 i18n key。
+> **已修复——安全层。** **SEC-1、SEC-2、SEC-3**（禁闭层现已覆盖全部写工具与带路径的读工具；`collectPathTargets` 读取全部 17 个路径键及 `paths[]`，并采集**每一个**存在的键而非只取首个匹配；`file-ops` 写工具均调用 `assertNotSecretEscape`，传输类工具对源与目标双向校验）·**SEC-4**（`get_env`/`list_env` 的 `revealSecrets` 已移除）·**SEC-6**（两份拒绝清单改为由 `requiresApproval` 元数据派生，`CORE_MUTATING_TOOL_NAMES` 已接上电）·**SEC-7**（`kill_shell` 改判档位）·**SEC-8**（Anthropic 轨现已对两个 cognia 自有 MCP 服务强制计划模式，SDK 原生与用户 MCP 工具仍交由 SDK 治理）·**SEC-12**（外部 agent 桥在鉴权之后按各工具 zod shape 校验输入）。
 >
-> 仍未修复：**SEC-5、SEC-8 – SEC-12**，**P0-2、P0-3、P0-4、P0-5、P0-7、P0-10、P0-12、P0-13**，**§6（P1）全部**，以及 **§7 的其余部分**。§9 的实施章节未改动。
+> **已修复——P0。** **P0-1**（`bash` 的 spawn 失败与信号终止返回 `isError`）·**P0-2**（JSON-Schema→zod 转换现已保留 `enum`/`const`、字符串/数值/数组边界、`default` 以及嵌套 `properties`/`required`，不再把对象塌缩——已用直接 parse 测试验证）·**P0-4**（Monitor 三兄弟不再在桥上广告，因其在那里永远不可用；`sessionId` 已透传）·**P0-6**（resolver 缺失时 `lsp`/`codeGraph` 进入拒绝清单）·**P0-7**（错误提示不再把模型引向并不存在的 `file_delete`）·**P0-8**（`ast_grep_*` 改在会话 cwd 下运行）·**P0-9**（被中断的改写返回错误）·**P0-11**（`impactCount` 附带 `impactCountExact`）。
+>
+> **已修复——P1/P2。** **P1-1**（ai-sdk 轨将 `AbortSignal` 透传进 handler；`grep`/`glob` 与 `ast_grep_*` 已消费它，中断现在会杀掉子进程而非留下孤儿）·**P1-4**（统一的 `plan-mode-policy.mjs` 取代已漂移的多份副本）·**P2-0**（**完全关闭**——167/167 个 sidecar 测试文件全部纳入运行，门禁测试从 1428 增至 1726；与一个并行修复共同完成）·§7 中缺失的 9 个 i18n key，以及新增的 `sdk-native` 标签。
+>
+> **SEC-5 部分修复。** 两处低成本改动已落地：扩充 `SDK_CORE_TOOL_NAMES`，并把 SDK 原生工具作为第五个来源接入 `lib/tools/tool-catalog.ts`（同时接好两处 UI 来源清单与 i18n，否则新条目会被静默丢弃）。核心缺陷——`allowedTools` 在一条轨上是预批准、在另两条轨上是白名单——**尚未**修复，需要产品决策。
+>
+> **P0-3 刻意未修。** 曾尝试把 `ok: false` 一律映射为 `error`，随后回退：该做法与一项有测试固定的设计决策冲突——「拒绝」应当是模型可读可适应的结构化结果，而非中断步骤的工具错误。详见 `lib/claude/plugin-tool-ipc.ts` 中的说明。真正关闭它需要逐工具裁定「拒绝 vs 错误」，并配合 P1-2 的信封统一。
+>
+> **SEC-9 已修复。** 两份机密集合现已取并集（`.gpg`、`.config/gcloud`、`.config/gh`、`.git-credentials`、`_netrc`、`.pypirc` 原先仅存在于 sidecar 侧；`.cognia`、`.npmrc`、`.pgpass`、`id_rsa`、`id_ed25519`、`known_hosts` 原先仅存在于 CLI 侧）。CLI 侧新增符号链接解析与双分隔符切分，两侧现均在 macOS 与 Windows 上大小写折叠；CLI 的路径键清单补入 `workdir`、`output`、`oldPath`/`newPath`、`pathA`/`pathB` 以及数组型 `paths[]`。两个强制点仍刻意分离——Cognia 不应信任运行在被约束进程内的检查——但数据不再漂移。已验证：16/16 条凭据路径被拒，普通项目路径仍放行。
+>
+> **P0-13 已修复。** supervisor 路径（在所有生产接线下真正执行的那条）现已记录 pid，因此 `get_tracked_processes` 不再恒为空，`get_process_manager_status` 不再对一个不可能非空的注册表宣称 `enabled: true`，`terminate_process` 也不再拒绝它刚刚启动的 pid。
+>
+> **P1-5 部分修复。** `list_shells` 在宿主失败时抛出错误，而不是报告「零个 shell」；`git_stage` 改为报告索引中真实暂存的内容（当路径被忽略或无变更时，`git add` 会以 0 退出却什么都没暂存）。该发现中其余的吞错点未改动。
+>
+> **仍未修复：** SEC-5（核心）、**SEC-10、SEC-11**，**P0-3、P0-5、P0-10、P0-12**，**P1-2、P1-3、P1-6、P1-7** 及 P1-5 的其余部分，以及 **§7 的其余部分**。§9 的实施章节未改动。
 
 ---
 

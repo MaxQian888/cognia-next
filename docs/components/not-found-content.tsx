@@ -6,6 +6,7 @@ import { NextIntlClientProvider, useTranslations } from "next-intl"
 // Relative rather than `@/`: the repo's Jest runner maps that alias to the
 // app root, not to `docs/`, and this component has tests.
 import { localeFromPathname } from "../lib/locale-path"
+import { DOCS_TIME_ZONE } from "../lib/time-zone"
 
 type Locale = "en" | "zh"
 const subscribeToPathname = () => () => {}
@@ -40,7 +41,13 @@ export function NotFoundContent({ languages, defaultLanguage, messages }: Props)
   )
 
   return (
-    <NextIntlClientProvider locale={locale === "zh" ? "zh-CN" : "en"} messages={messages[locale]}>
+    <NextIntlClientProvider
+      locale={locale === "zh" ? "zh-CN" : "en"}
+      messages={messages[locale]}
+      // `out/404.html` is prerendered like every other page — this provider
+      // needs the same global default as `intl-provider.tsx`.
+      timeZone={DOCS_TIME_ZONE}
+    >
       <NotFoundBody locale={locale} />
     </NextIntlClientProvider>
   )

@@ -76,8 +76,26 @@ flowchart TB
 
 The runtime is selected by a small store, `useAgentRuntimeStore`, holding `runtime`
 (`"claude-sdk" | "external"`) and `externalAgentId`. The UI picker is
-`components/agent/mode/runtime-selector.tsx` (`AgentRuntimeSelector`) — radio items for claude-sdk
-(`:76`) and external (`:83`); a sibling `<ExternalAgentSelector>` chooses *which* agent record.
+`components/agent/mode/runtime-selector.tsx` (`AgentRuntimeSelector`) — one radio group holding the
+built-in `claude-sdk` runtime plus one row per configured external agent, so picking a lane and
+picking the agent record are the same click. Rows whose
+`getExternalAgentExecutionBlockReason(...)` is non-null render disabled with that reason, and a
+restored selection that no longer resolves to a runnable agent falls back to `claude-sdk` instead of
+parking the composer on an external lane with nothing to dispatch to.
+
+A row also carries what the last real contact with the agent found, read from
+`agentValidity[id]` (written by `useExternalAgent` on connect / health check / execution): a failed
+start shows the runtime's own `blockingReason` verbatim, a pending sign-in and an unhealthy probe
+show a translated hint. These are history, not verdicts — a binary missing an hour ago may be
+installed now — so unlike a config-level block they warn without disabling the row.
+
+**Two stores hold "which agent", and neither derives from the other**: chat dispatch reads
+`useAgentRuntimeStore.externalAgentId`, while the manager, `useExternalAgent`, and the Agent-Team
+workspace read `useExternalAgentStore.activeAgentId`. Every write goes through
+`lib/agent/external-agent-selection.ts` (`selectExternalAgent` / `clearExternalAgentSelectionIfActive`)
+so they cannot disagree — before it, selecting an agent in the manager changed nothing about where
+chat actually dispatched. Selecting an agent deliberately does **not** switch the runtime lane; only
+the composer's runtime chip does that.
 
 The actual dispatch is in `hooks/chat/use-claude-chat.ts` — **not** `use-team-chat.ts`:
 

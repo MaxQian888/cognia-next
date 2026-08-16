@@ -1,0 +1,94 @@
+---
+title: Host parity audit — 2026-08-15
+description: Evidence-backed inventory of every gap between the headless/cloud host and the desktop, classified by whether it is physically impossible or simply unmigrated.
+---
+
+# Host parity audit — 2026-08-15
+
+## Why this exists
+
+The goal is a cloud (`headless`) host whose capability is near-equivalent to the desktop's. The question nobody could answer was how far away that is — the guards, the one-sided dispatch arms and the host-keyed UI were never counted, so scoping the work was guesswork.
+
+This audit is the count. It is produced mechanically by `pnpm audit:host-parity:report`; the per-subsystem judgment is recorded by hand in `scripts/gates/host-parity-annotations.json`. Both are ratcheted by `pnpm audit:host-parity` so the inventory cannot silently grow.
+
+## Headline
+
+**The equivalence machinery is complete and working. The migration onto it is roughly half done.**
+
+`DispatchHost` (Tauri / Headless arms), the whole-transport swap in `setTransport`, and the 1,066-command classification in `protocol/companion-commands.json` are not a half-built mechanism — they are the finished article. What is missing is that a large amount of code never moved onto them.
+
+Of 154 subsystems carrying host guards:
+
+| Classification | Subsystems | Meaning |
+| --- | --- | --- |
+| `unmigrated` | 68 | No physical reason — the work was simply not done |
+| `ui-assumption` | 62 | Backend can reach parity; the UI keys off the host instead of a capability |
+| `physically-impossible` | 14 | The host genuinely lacks the surface |
+| `seam-infrastructure` | 10 | This *is* the host-detection/transport layer; branching on host is its job |
+
+Only **14 of 154** are physical. And the gap runs in **both** directions — `headless` already holds capabilities the desktop does not (`secrets.store`, and the 28-operation `browser.remote` surface).
+
+## The four gap classes
+
+252 individually-tracked findings, all in `scripts/gates/host-parity-baseline.json`.
+
+| Class | Count | What it is |
+| --- | --- | --- |
+| A — transport-seam bypass | 98 | A shipped file importing `invoke`/`listen` straight from `@tauri-apps/api/*`, bypassing the swappable seam. Throws on every non-Tauri host by construction. |
+| B — desktop-only UI section | 21 | `desktopOnly: true` in `components/settings/settings-nav-config.ts`. Hides the feature even after the backend reaches parity. |
+| C — one-sided RPC arm | 132 | 27 desktop-only (`host.tauri_app(name)?`), 105 headless-only (`host.headless().ok_or_else(...)`) |
+| E — capability misreport | 1 | `source-control.git` is declared `tauri`-only while its RPC arms carry no host gate at all |
+
+Class D — the raw `isTauri()` / `isHeadlessHost()` / `usePlatform()` census, 999 call sites across 506 shipped files — is deliberately **not** ratcheted. Most of those guards are legitimate. What *is* enforced is that every subsystem the census finds carries a recorded classification; an unannotated subsystem is a gap nobody has looked at.
+
+## Findings worth acting on first
+
+### 15 headless-only commands are reachable from a paired device — and 503 with the wrong reason
+
+These arms are `target=execution` and open over `http`/`websocket`/`webrtc`, so a phone paired to a **desktop** host reaches them and receives `headless_unsupported`: *"not available on a headless server (requires the desktop app)"* — the exact opposite of the truth.
+
+```
+codeserver_ensure          codeserver_status         codeserver_stop
+codeserver_stop_all        get_external_agent_status kill_external_agent
+lsp_host_ensure            lsp_host_request          plugin_api_batch_invoke
+plugin_api_invoke          plugin_permission_grant   plugin_permission_list
+plugin_permission_revoke   send_to_external_agent    spawn_external_agent
+```
+
+A mobile client paired to the *cloud* can start external agents and drive code-server; paired to the *desktop* it cannot. That is backwards from any user's expectation.
+
+### The plugin subsystem is split in half, with neither half complete
+
+`rpc/plugins.rs` holds **52 headless-only arms** (`plugin_set_status`, `plugin_permission_*`, …) and **12 desktop-only ones** (`plugin_list`, `plugin_runtime_snapshot`, `plugin_backup_*`, `plugin_stage_version`, `plugin_uninstall`, staged-update commit/discard/finalize). None of the desktop-only twelve has a physical reason — `plugin_list` and `plugin_runtime_snapshot` are read-only. This is two migrations that each stopped halfway.
+
+### Only 17 command names plus the `codex_app` family ever claim to need a desktop
+
+`host.tauri_app(name)?` is the single place the codebase says "this needs the desktop". Across 940 registered Tauri commands it guards 27 arms. Of those, the genuinely physical ones are narrow:
+
+- `automation_consent_pending` / `automation_consent_respond` — needs a human at a screen. But `headless` already carries `notifications.remote` and `remote_notification_publish`, so routing consent to a paired device is a wiring job, not a redesign. Recorded as **not** a permanent boundary.
+- `ocr_extract_native` — only `apple-vision` and `windows-media-ocr` are OS-bound, and `packages/ocr/src/registry.ts` already subtracts exactly those two for headless. `tesseract` / `ocrs` / `paddle` run anywhere.
+- `codex_app_*` — gated as a whole family by one `host.tauri_app(name)?` at the top of dispatch in `rpc/codex_app.rs`. **Corrected 2026-08-16: this one IS a physical boundary.** The family drives the installed Codex *desktop app*: `codex_app_dispatch.rs` resolves `~/.codex/app-server-control/app-server-control.sock`, and when that socket is absent `connect_or_launch` recovers by opening `codex://threads/new` through the OS URL-scheme handler. A container has neither the app nor a handler to register the scheme. The plumbing around it is host-neutral (`run_cdp_control` shells a Node sidecar), which is what made this look migratable — but making the sidecar host-agnostic would not conjure the socket.
+
+### The connectors seam was adopted halfway, and it costs four IM platforms
+
+`lib/connectors/events.ts` exposes a swappable `connectorListen` and the brain swaps it at boot — but only 5 webhook transports use it. Ten shipped files still import `listen` directly, and the brain has no `__TAURI_INTERNALS__` shim, so those calls throw. Discord (both modes), OneBot, WeCom and DingTalk cannot receive on a cloud host, while `lib/platform/capabilities.ts` advertises `connector-runtime` for `headless` without qualification.
+
+## Recorded physical boundaries
+
+These are settled and should not be re-litigated: OS tray; desktop pet overlay window; AX/UIA automation itself (a Linux container has no desktop to automate — **consent is not in this category**); the selection toolbar and desktop selection awareness; global OS hotkeys; biometrics; local microphone and screen capture; system clipboard; the skill recorder; `apple-vision` and `windows-media-ocr`.
+
+**The OS keyring is not a gap.** Headless reaches equivalence through the `cognia-secrets` encrypted store, and `lib/keyring/index.ts` branches to an AES-GCM IndexedDB blob elsewhere.
+
+## Confidence
+
+10 of 154 rows are marked `confidence: "low"` — classified from naming plus a spot check rather than a full read. A reviewer should start there:
+
+`lib/connectivity`, `lib/device`, `components/desktop`, `lib/voice`, `lib/appearance`, `lib/tts`, `lib/app-metadata.ts`, `lib/monaco`, `plugins/impeccable`, `plugins/cognia-backend-refactor`
+
+## The ratchet
+
+`pnpm audit:host-parity` runs in the `audit` group of `pnpm check:all`. It is **report-only** today: new findings print but do not fail the build, so the first paydown batch is not blocked by pre-existing debt. Flipping `ENFORCE_RATCHET` in `scripts/gates/check-host-parity.mjs` makes it a hard failure, and a test pins the current value so the switch has to be deliberate. See ADR-0059 for the switch-over condition.
+
+```bash
+pnpm audit:host-parity:report
+```

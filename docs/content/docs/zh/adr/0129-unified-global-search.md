@@ -61,11 +61,13 @@ description: 一个搜索面（⌘K）、一个打开入口、一个可重绑的
 
 ### 5. 不在范围内 / 保持独立
 
-编辑器局部调色板保留：工作流编辑器的节点调色板与 spotlight（`components/workflow/editor/`）、画布内联命令、工作台 `PanelQuickSwitch`（自有可重绑组合键）、会话内查找栏（`chat.search.toggle`）、以及 web 搜索 `/search` 页（不同产品：BYOK 网页问答）。工作流编辑器的裸 ⌘K 监听在 `/workflows/editor` 内仍与全局监听竞争；并入同一接缝是后续工作（`canvas.tsx` 正被并行会话重构）。
+编辑器局部调色板保留：工作流编辑器的节点调色板与 spotlight（`components/workflow/editor/`）、画布内联命令、工作台 `PanelQuickSwitch`（自有可重绑组合键）、会话内查找栏（`chat.search.toggle`）、以及 web 搜索 `/search` 页（不同产品：BYOK 网页问答）。
+
+工作流编辑器调色板保留 ⌘K，但不再走裸监听。它通过 `hooks/workflow/use-workflow-command-palette-shortcut.ts` 在同一分发器上注册 `workflow.commandPalette.toggle`，并在画布挂载期间发布 `view.workflowEditor`；`app.commandPalette.toggle` 则带上完全取反的 `!view.workflowEditor`。同一组合键、相反 `when` ⇒ 分发器的"首个命中即停"循环只可能触发其中一个，`findAppConflict` 不会把这对报成冲突，两行在设置 → 快捷键中都可重绑。编辑器内仍可通过标题栏搜索胶囊（走 `requestCommandPalette()`）打开全局搜索。
 
 ## 后果
 
 - 任一路由上一次按键只打开一个对话框；绑定在 设置 → 快捷键 中可见、可重绑。
 - 每个实体族距离调色板只差一个 provider 文件；移动端调色板获得它从未有过的 14 个分组，桌面端获得工作流、技能、记忆、模板、计划任务、插件、MCP 服务器、收件箱会话与设置控件。
 - 移除：`components/inbox/inbox-command-palette.tsx`、`components/settings/finder/settings-finder.tsx`、桌面调色板 500 行主体、移动端的复制品，以及 `desktop.commandPalette` / `mobile.search` / `inbox.commandPalette` 文案树与查找器自身的界面文案（由 `globalSearch.*` 取代；`settings.finder.controls.*` 作为控件标签保留）。
-- 后续：把工作流编辑器调色板并入接缝；触及常驻语料上限时加 `*grams` 会话预过滤（ADR-0099 B 阶段）；为伴侣画像在服务端持久化"最近打开"。
+- 后续：触及常驻语料上限时加 `*grams` 会话预过滤（ADR-0099 B 阶段）；为伴侣画像在服务端持久化"最近打开"。

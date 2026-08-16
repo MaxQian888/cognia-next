@@ -61,11 +61,13 @@ An audit of every "search" entry in the three shells found no unified registry �
 
 ### 5. Out of scope / kept separate
 
-Editor-local palettes stay: the workflow editor's node palette and spotlight (`components/workflow/editor/`), the canvas inline command, the workbench `PanelQuickSwitch` (its own rebindable chord), the in-conversation find bar (`chat.search.toggle`), and the web-search `/search` page (a different product: BYOK web answers). The workflow editor's raw ⌘K listener still races the global one inside `/workflows/editor`; folding it into the same seam is a follow-up (`canvas.tsx` was mid-refactor in a concurrent session).
+Editor-local palettes stay: the workflow editor's node palette and spotlight (`components/workflow/editor/`), the canvas inline command, the workbench `PanelQuickSwitch` (its own rebindable chord), the in-conversation find bar (`chat.search.toggle`), and the web-search `/search` page (a different product: BYOK web answers).
+
+The workflow editor's palette keeps ⌘K, but no longer on a raw listener. It registers `workflow.commandPalette.toggle` on the same dispatcher (`hooks/workflow/use-workflow-command-palette-shortcut.ts`) and publishes `view.workflowEditor` while the canvas is mounted; `app.commandPalette.toggle` carries the exact negation `!view.workflowEditor`. Same chord, opposite `when` ⇒ the dispatcher's first-match-wins loop can only ever fire one of them, `findAppConflict` does not report the pair, and both rows are rebindable in Settings → Shortcuts. Global search stays reachable inside the editor from the title-bar search pill, which goes through `requestCommandPalette()`.
 
 ## Consequences
 
 - One keystroke opens exactly one dialog on every route; the binding is visible and rebindable in Settings → Shortcuts.
 - Every entity family is one provider file away from the palette; the mobile palette gains 14 groups it never had, the desktop one gains workflows, skills, memories, templates, scheduled tasks, plugins, MCP servers, inbox conversations and settings controls.
 - Removed: `components/inbox/inbox-command-palette.tsx`, `components/settings/finder/settings-finder.tsx`, the desktop palette's 500-line body, the mobile palette's copy of it, and the `desktop.commandPalette` / `mobile.search` / `inbox.commandPalette` message trees plus the finder's own chrome strings (replaced by `globalSearch.*`; `settings.finder.controls.*` stays as the control labels).
-- Follow-ups: fold the workflow-editor palette onto the seam; a `*grams` session prefilter if the resident corpus cap is reached (ADR-0099 phase B); persist "recently opened" server-side for the companion profile.
+- Follow-ups: a `*grams` session prefilter if the resident corpus cap is reached (ADR-0099 phase B); persist "recently opened" server-side for the companion profile.

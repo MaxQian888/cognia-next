@@ -105,9 +105,11 @@ the implementation plan):
    - **Remote code-server / LSP** — `codeserver_*` are Tauri commands and no
      `lsp_*` companion arm exists; promoting them is VS Code Remote-SSH-scale
      work. Deferred (v3).
-   - **SSH provisioning / tunnel fallback** — automated provisioning and
-     implicit tunnel creation remain deferred (v3). The explicit SSH terminal
-     profile described below is not a provisioning mechanism.
+   - **SSH provisioning** — automated provisioning remains deferred (v3). The
+     explicit SSH terminal profile described below is not a provisioning
+     mechanism. *Implicit* tunnel creation stays deferred too; the explicit,
+     per-rule forwarding in §9 is the opposite of implicit and does not
+     supersede this.
 
 8. **SSH terminal security amendment (accepted 2026-07-31).** Explicit SSH
    terminal profiles are permitted under the following fail-closed boundary:
@@ -127,6 +129,42 @@ the implementation plan):
      profile. It does not bind a new inbound port, provision a server, weaken
      TLS/device pairing, or bypass terminal grants, controller leases, replay
      limits, and per-device session quotas.
+
+9. **SSH forwarding and jump host amendment (accepted 2026-08-16).** Jump hosts
+   and explicit port forwarding are permitted under the boundary below. This
+   amends §8's "does not bind a new inbound port", which was written when no
+   forwarding existed: a `-L` rule binds a local port, and an enabled `-R` rule
+   causes the remote server to bind one. Both are narrowed rather than allowed
+   outright.
+   - **Both ends bind loopback, always.** `127.0.0.1` is a constant in
+     `crates/cognia-terminal/src/ssh_forward.rs`, not a setting, in both
+     directions. There is no shape a profile can take that widens it — not even
+     against a server with `GatewayPorts` on, which is precisely when the user
+     is least likely to know the difference.
+   - **`-R` is off until deliberately enabled, per rule.** A remote forward
+     opens a listening socket on someone else's machine pointing back at this
+     one, so a newly added rule is inert and the UI states that consequence
+     rather than the mechanism. `-L` rules default on: they listen only here.
+   - **Forwarding never rides a synchronized profile.** `buildSynchronizedSshProfiles`
+     emits no jump chain and no forwarding rules, so a phone or LAN client
+     naming a profile id gets a shell and can never make the desktop — or a
+     server the desktop can reach — open a port. Pinned by test rather than left
+     to omission.
+   - **Starting or stopping a forward on a live session is local-identity only**
+     (`TerminalHost::set_forward_enabled`), for the same reason as re-trusting a
+     changed host key in §8.
+   - **Every hop is a server in its own right.** A bastion authenticates on its
+     own account, against its own keyring entry, and is TOFU-verified against
+     the same `known_hosts` file; a changed key on any hop fails the whole chain
+     closed and names that hop. Chains are capped at 5 hops and cycles are
+     refused at resolve time, before a socket is touched.
+   - **Forwarding state is pulled, never pushed.** `SshForwardControl` /
+     `SshForwardSnapshot` are a request/response pair; the host never volunteers
+     them, preserving the ADR-0033 invariant that an older client is never sent
+     a frame kind it cannot decode.
+   - **An inbound forwarded channel is authorized by port.** The client rejects
+     any `forwarded-tcpip` whose port does not belong to an enabled rule on that
+     session, and rejects server-initiated `direct-tcpip` outright.
 
 ## Consequences
 

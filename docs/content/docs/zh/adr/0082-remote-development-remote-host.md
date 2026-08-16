@@ -82,8 +82,9 @@ WAN 机制的前提下,获得外向"连接远程 Cognia 主机"模式。
      **以及**无头 external-agent initializer 抽取(ADR-0059)。两者落地前推迟。
    - **远程 code-server / LSP** —— `codeserver_*` 是 Tauri 命令,且不存在 `lsp_*`
      companion 臂;把它们提上来是 VS Code Remote-SSH 量级的活。推迟(v3)。
-   - **SSH provisioning / 隧道 fallback** —— 自动 provisioning 与隐式建隧道仍
-     推迟(v3)。下述显式 SSH 终端 profile 不属于 provisioning。
+   - **SSH provisioning** —— 自动 provisioning 仍推迟(v3)。下述显式 SSH 终端
+     profile 不属于 provisioning。*隐式*建隧道同样仍推迟;§9 中逐条显式启用的
+     端口转发恰恰是"隐式"的反面,不构成对本条的推翻。
 
 8. **SSH 终端安全补充决策（2026-07-31 接受）。** 显式 SSH 终端 profile 仅在以下
    fail-closed 边界内允许:
@@ -97,6 +98,31 @@ WAN 机制的前提下,获得外向"连接远程 Cognia 主机"模式。
    - SSH 仅在用户创建并选择 profile 后产生外向连接;它不新增 inbound 监听端口、
      不 provisioning 服务器、不削弱 TLS/device pairing,也不绕过 terminal grant、
      controller lease、replay 限额与单设备 session 配额。
+
+9. **SSH 端口转发与跳板机补充决策（2026-08-16 接受）。** 跳板机与显式端口转发
+   仅在以下边界内允许。本节修正 §8 中"不新增 inbound 监听端口"一句——该句写于
+   尚无转发能力之时:`-L` 规则会在本机绑定端口,启用的 `-R` 规则会让远端服务器
+   绑定端口。二者不是被放行,而是被收窄:
+   - **两端一律绑定回环。** `127.0.0.1` 是 `crates/cognia-terminal/src/ssh_forward.rs`
+     里的常量而非配置项,两个方向都如此。不存在任何一种 profile 形态能把它放宽
+     ——即便服务器开启了 `GatewayPorts` 也不行,而那恰恰是用户最难察觉差异的场景。
+   - **`-R` 逐条默认关闭,须显式启用。** 远程转发会在别人的机器上开一个指回本机
+     的监听套接字,因此新建的规则是惰性的,UI 陈述的是这一后果而非机制。`-L` 默认
+     开启:它只在本机监听。
+   - **转发配置永不随同步 profile 下发。** `buildSynchronizedSshProfiles` 不输出
+     跳板链与任何转发规则,因此手机或局域网客户端凭 profile id 只能拿到 shell,
+     永远无法让桌面(或桌面可达的服务器)开监听端口。此不变量由测试钉死,而非
+     依赖"恰好没有复制字段"。
+   - **在运行中的会话上启停转发仅限本地身份**(`TerminalHost::set_forward_enabled`),
+     理由与 §8 中重新信任变更的主机密钥相同。
+   - **每一跳都是独立的服务器。** 跳板机以自己的账号、自己的 keyring 条目认证,
+     并针对同一 `known_hosts` 做 TOFU 校验;任意一跳密钥变更都会让整条链 fail
+     closed 并指明是哪一跳。链长上限 5 跳,成环在解析阶段即被拒绝,不会触及套接字。
+   - **转发状态是拉取的,从不推送。** `SshForwardControl` / `SshForwardSnapshot`
+     是一对请求/响应;主机从不主动发送,从而保持 ADR-0033 的不变量:旧客户端
+     永远不会收到它无法解码的 frame kind。
+   - **入站转发通道按端口鉴权。** 客户端拒绝任何端口不属于本会话已启用规则的
+     `forwarded-tcpip`,并直接拒绝服务器发起的 `direct-tcpip`。
 
 ## 影响
 

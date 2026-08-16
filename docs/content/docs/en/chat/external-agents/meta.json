@@ -6,6 +6,7 @@
     "manager",
     "acp-client",
     "opencode-adapter",
+    "pi-adapter",
     "canonical-readiness",
     "ecosystem-presets",
     "translation",

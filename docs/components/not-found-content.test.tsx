@@ -1,13 +1,24 @@
 /** @jest-environment jsdom */
 
 import { render, screen } from "@testing-library/react"
+import { DOCS_TIME_ZONE } from "../lib/time-zone"
 import { NotFoundContent } from "./not-found-content"
 
 let activeLocale = "en"
+let activeTimeZone: string | undefined
 
 jest.mock("next-intl", () => ({
-  NextIntlClientProvider: ({ locale, children }: { locale: string; children: React.ReactNode }) => {
+  NextIntlClientProvider: ({
+    locale,
+    timeZone,
+    children,
+  }: {
+    locale: string
+    timeZone?: string
+    children: React.ReactNode
+  }) => {
     activeLocale = locale
+    activeTimeZone = timeZone
     return <>{children}</>
   },
   useTranslations: () => (key: string) => {
@@ -40,5 +51,13 @@ describe("NotFoundContent", () => {
 
     expect(screen.getByRole("heading", { name: "页面不存在" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "返回文档首页" })).toHaveAttribute("href", "/zh/docs")
+  })
+
+  it("pins the same global time zone as the docs root provider", () => {
+    // `out/404.html` is prerendered too, so this provider needs the default
+    // just as much as `intl-provider.tsx`.
+    render(<NotFoundContent languages={["zh", "en"]} defaultLanguage="zh" messages={messages} />)
+
+    expect(activeTimeZone).toBe(DOCS_TIME_ZONE)
   })
 })

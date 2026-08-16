@@ -1,6 +1,13 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
+    // The root config narrows `types` to `["node"]`; the co-located tests in
+    // this workspace need the Jest globals too, and `types` is replaced
+    // wholesale by a child config rather than merged. `next build --webpack`
+    // type-checks this program, so without them the docs build fails on
+    // `describe`/`it`/`expect` before it ever reaches MDX prerender — the one
+    // stage that gate exists to protect (see `.claude/rules/docs.md`).
+    "types": ["node", "jest"],
     "paths": {
       "@/*": ["./*"],
       "collections/*": ["./.source/*"]

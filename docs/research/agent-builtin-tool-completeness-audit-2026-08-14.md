@@ -12,21 +12,68 @@ evidence for every claim. No production code was changed while producing the aud
 > those sections describe the **pre-fix** code and will no longer match `main`. Everything
 > unmarked is still open and its citations remain accurate.
 >
-> Fixed: **SEC-1, SEC-2, SEC-3** (confinement now classifies every mutating and
-> path-bearing read tool, `collectPathTargets` reads all 17 path keys plus `paths[]`, and
-> the `file-ops` mutators call `assertNotSecretEscape`) · **SEC-4** (`revealSecrets`
-> removed from `get_env`/`list_env`) · **SEC-6** (both deny lists now derived from
-> `requiresApproval` metadata; `CORE_MUTATING_TOOL_NAMES` wired in) · **SEC-7**
-> (`kill_shell` re-tiered to `requiresApproval: true`) · **P0-1** (`bash` spawn failures
-> and signal kills now return `isError`) · **P0-6** (`lsp`/`codeGraph` denied when the
-> resolver is absent) · **P0-8** (`ast_grep_*` now run in the session cwd) · **P0-9**
-> (interrupted rewrite returns an error) · **P0-11** (`impactCount` reports
-> `impactCountExact`) · **P2-0** (test glob extended — 1428 → 1644 tests now gated) ·
-> the 9 missing i18n keys in §7.
+> **Fixed — security tier.** **SEC-1, SEC-2, SEC-3** (confinement now classifies every
+> mutating and path-bearing read tool, `collectPathTargets` reads all 17 path keys plus
+> `paths[]` and collects _every_ present key rather than first-match, and the `file-ops`
+> mutators call `assertNotSecretEscape` — transfers guard both source and destination) ·
+> **SEC-4** (`revealSecrets` removed from `get_env`/`list_env`) · **SEC-6** (both deny
+> lists derived from `requiresApproval` metadata; `CORE_MUTATING_TOOL_NAMES` wired in) ·
+> **SEC-7** (`kill_shell` re-tiered) · **SEC-8** (the Anthropic rail now enforces plan
+> mode over the two cognia-owned MCP servers, deferring SDK-native and user MCP tools to
+> the SDK) · **SEC-12** (the external-agent bridge validates input against each tool's zod
+> shape, after authorisation).
 >
-> Still open: **SEC-5, SEC-8 – SEC-12**, **P0-2, P0-3, P0-4, P0-5, P0-7, P0-10, P0-12,
-> P0-13**, all of **§6 (P1)**, and the remainder of **§7**. §9's implementation chapter is
-> untouched.
+> **Fixed — P0.** **P0-1** (`bash` spawn failures and signal kills return `isError`) ·
+> **P0-2** (the JSON-Schema→zod conversion now preserves `enum`/`const`, string/number/
+> array bounds, `default`, and nested `properties`/`required` instead of collapsing
+> objects — verified by direct parse tests) · **P0-4** (the Monitor family is no longer
+> advertised on the bridge, where it could never work; `sessionId` is threaded) · **P0-6**
+> (`lsp`/`codeGraph` denied when the resolver is absent) · **P0-7** (the error text no
+> longer steers the model to a `file_delete` tool that does not exist) · **P0-8**
+> (`ast_grep_*` run in the session cwd) · **P0-9** (interrupted rewrite returns an error) ·
+> **P0-11** (`impactCount` reports `impactCountExact`).
+>
+> **Fixed — P1/P2.** **P1-1** (the ai-sdk rail forwards `AbortSignal` into handlers;
+> `grep`/`glob` and `ast_grep_*` now consume it, so an interrupt kills the child instead of
+> orphaning it) · **P1-4** (one shared `plan-mode-policy.mjs` replaces the drifted copies) ·
+> **P2-0** (**fully closed** — 167/167 sidecar test files now run, 1428 → 1726 tests
+> gated; completed jointly with a parallel fix to the root suites) · the 9 missing i18n
+> keys in §7, plus new `sdk-native` labels.
+>
+> **SEC-5 partially fixed.** The two cheap parts landed: `SDK_CORE_TOOL_NAMES` expanded, and
+> SDK-native tools added as a fifth `lib/tools/tool-catalog.ts` source (with both UI source
+> lists and their i18n wired, or the entries would have been silently dropped). The core
+> defect — `allowedTools` meaning pre-approval on one rail and a whitelist on two others —
+> is **not** fixed; it needs a product decision.
+>
+> **P0-3 deliberately left open.** Blanket-mapping `ok: false` onto `error` was attempted
+> and reverted: it contradicts a tested design decision that a refusal is a structured
+> result, not a tool error. See the note in `lib/claude/plugin-tool-ipc.ts`. Closing it
+> needs a per-tool refusal-vs-error decision plus the P1-2 envelope unification.
+>
+> **SEC-9 fixed.** The two secret sets are now the UNION of both sides (`.gpg`,
+> `.config/gcloud`, `.config/gh`, `.git-credentials`, `_netrc`, `.pypirc` were sidecar-only;
+> `.cognia`, `.npmrc`, `.pgpass`, `id_rsa`, `id_ed25519`, `known_hosts` were CLI-only). The
+> CLI gained symlink resolution and cross-separator splitting, both sides now case-fold on
+> macOS as well as Windows, and the CLI's path-key list gained `workdir`, `output`,
+> `oldPath`/`newPath`, `pathA`/`pathB` and array-valued `paths[]`. The two enforcement
+> points stay separate on purpose — Cognia must not trust a check running inside the
+> process it confines — but the data no longer drifts. Verified: 16/16 credential paths
+> denied, a normal project path still allowed.
+>
+> **P0-13 fixed.** The supervisor path — the one that actually runs in every production
+> wiring — now records the pid, so `get_tracked_processes` is no longer permanently empty,
+> `get_process_manager_status` no longer claims `enabled: true` for an unfillable registry,
+> and `terminate_process` no longer refuses pids it just spawned.
+>
+> **P1-5 partially fixed.** `list_shells` surfaces a host failure instead of reporting zero
+> shells, and `git_stage` reports what the index actually holds (`git add` exits 0 having
+> staged nothing when paths are ignored or unchanged). The remaining swallowed-error sites
+> in that finding are untouched.
+>
+> **Still open:** SEC-5 (core), **SEC-10, SEC-11**, **P0-3, P0-5, P0-10, P0-12**,
+> **P1-2, P1-3, P1-6, P1-7** and the rest of P1-5, and the remainder of **§7**. §9's
+> implementation chapter is untouched.
 
 ---
 

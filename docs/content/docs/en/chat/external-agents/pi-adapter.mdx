@@ -1,0 +1,160 @@
+---
+title: Pi Native RPC Adapter
+description: PiRpcClientAdapter drives `pi --mode rpc` over Pi's own JSONL command/event protocol — replacing the community pi-acp bridge. Covers the strict LF codec and why readline could not be used, the per-session process model, the certified-version policy, the bundled permission extension, and the explicit migration off the bridge.
+---
+
+# Pi Native RPC Adapter
+
+<Status variant="beta" />
+
+<TLDR>
+  Cognia drives Pi through **Pi's own protocol**, not ACP. `pi --mode rpc` speaks a JSONL
+  command/event stream where frames are bare `{type, id}` objects answered by
+  `{"type":"response", command, success, data}` — close enough to JSON-RPC to be mistaken for it,
+  and different enough that reusing the JSON-RPC peer would mis-route every event. The adapter
+  keeps thinking levels, the steering and follow-up queues, the compaction lifecycle, session forks
+  and usage detail that the community `pi-acp` bridge flattened away. See
+  [ADR-0119](../../adr/0119-pi-native-rpc-integration).
+</TLDR>
+
+## Why not readline
+
+Every other external agent's stdout is framed by the shared host with `readline`. Pi cannot use it.
+
+Node's `readline` treats **U+2028** and **U+2029** as line terminators, and `JSON.stringify` does
+not escape them. A single valid Pi frame whose payload contains U+2028 — which appears in real text
+copied from the web and in model output — arrives split into several unparseable fragments.
+
+So `pi-rpc` opts into a raw-chunk forwarding mode (`framing: "raw"` on the spawn config, delivered
+base64 on `external-agent://stdout-raw`) and frames the bytes itself in `pi-rpc-peer.ts`:
+
+- split on the `0x0A` byte only; strip one trailing `\r` so CRLF still parses
+- a lone `\r` is **not** a delimiter — inside JSON a carriage return must be escaped, so treating
+  one as a boundary could only ever break a well-formed frame
+- decode per frame, not per chunk, so a chunk boundary inside a multi-byte UTF-8 sequence cannot
+  produce replacement characters
+- 16 MiB per frame and 32 MiB of unterminated buffer, past which the session ends with
+  `protocol_frame_invalid`
+
+The Rust host is byte-oriented and was already correct; only the Node host needed the new path.
+ACP, Codex and OpenCode keep the existing `readline` path unchanged.
+
+## Correlation
+
+Three behaviours were established by running Pi 0.84.1, and each defeats an obvious implementation:
+
+| Observed | Consequence |
+| --- | --- |
+| Responses are **not** FIFO — an `abort` reply landed after a later `get_state` | Correlate by `id` only; ordering means nothing |
+| A malformed inbound frame is answered with `command: "parse"` and **no `id`** | An id-less error must not resolve or fail any pending request |
+| Events interleave with responses, including *before* the response they relate to | Neither stream may block the other |
+
+`prompt` returning success means Pi **accepted** the turn. Completion is `agent_settled` alone —
+`agent_end` and `turn_end` can each be followed by an automatic retry or a queued continuation, so
+treating either as completion truncates the turn mid-flight.
+
+## One process per session
+
+Pi can switch sessions inside one process. Cognia does not: sharing a process would interleave two
+conversations' events and permission answers on one stream. Each Cognia session gets its own
+`pi --mode rpc --session-id <uuid>`.
+
+That flag means "use this exact id, creating it if missing", so **resume is the same flag again**
+and the persisted link stores only the UUID, cwd and Pi version — no absolute session-file path
+ever crosses a device boundary. Forking uses `--fork`.
+
+A per-host cap of four processes reclaims the least-recently-used **idle** process. When every slot
+is mid-turn the request fails with `resource_limit` rather than killing someone's live work.
+
+## Version policy
+
+`0.84.1` is the certified version.
+
+- **exactly certified** — runs normally
+- **newer** — runs, reported as unverified, and emits a signal. A Pi upgrade degrades to a warning
+  rather than an outage.
+- **older or unparseable** — refused with `runtime_version_unsupported`. Pi has renamed fields
+  between releases, and a missing field reads as an empty turn rather than as an error.
+
+The version is probed by running `pi --version` through the same sandboxed spawn path a session
+uses, not inferred from a handshake: `get_state` reports the session-format version, not the release.
+
+## The bundled extension
+
+Pi's built-in `read` / `grep` / `find` / `ls` / `edit` / `write` / `bash` execute inside the Pi
+process and never reach Cognia's tool-host broker. A first-party extension intercepts them via
+`pi.on("tool_call")`.
+
+It **owns no policy**. The matrix is computed in `lib/ai/agent/external/pi-permission.ts`, where it
+is typechecked and tested, and handed to the extension as data — `sidecar/` sits outside both the
+root tsconfig and Jest, so decision logic living there would be permanently unverified.
+
+| Mode | Native tool behaviour |
+| --- | --- |
+| `default` | reads run; `edit` / `write` / `bash` ask |
+| `acceptEdits` | reads and edits run; `bash` still asks — a shell can do everything `edit` can and more |
+| `bypassPermissions` | nothing prompts (still inside the strict sandbox) |
+| `plan` | reads run; everything mutating is **denied**, not asked — plan mode's promise is that nothing changes |
+| `dontAsk` | only pre-approved tools run; the rest are refused with no prompt |
+
+Two independent layers enforce the restrictive modes: this table applied per call, and Pi's own
+`--tools` allowlist pinned at spawn, which holds even if the extension never loads.
+
+That second layer is load-bearing, not belt-and-braces. Pi ships **no permission prompts of its
+own** — its tools run with the full rights of the process — so `default` and `acceptEdits` only
+mean anything while the extension is intercepting. When no extension can be resolved, those two
+modes collapse to the read-only floor rather than silently permitting `edit` / `write` / `bash`.
+`bypassPermissions` is untouched (the user opted out of prompts, and the sandbox still contains the
+process), and `plan` / `dontAsk` never needed to ask.
+
+The extension is pinned by SHA-256 (`sidecar/pi-extension/integrity.json`, regenerated with
+`pnpm pi:extension:pin`). A file that does not match is refused rather than loaded — the handshake
+cannot catch tampering, because a modified extension can still announce itself.
+
+### Isolation means four flags
+
+`--no-extensions` alone does **not** isolate Pi: skills under `~/.agents/skills/` and Pi's built-in
+inline extensions still load. The `isolated` policy passes
+`--no-extensions --no-skills --no-prompt-templates --no-approve`.
+
+`AGENTS.md` / `CLAUDE.md` context files are deliberately still loaded — they are data, not
+executable code, and they materially improve results.
+
+Isolation also disables the user's own Pi extension stack inside Cognia-run sessions. That is the
+point: community permission engines such as `pi-permission-system` also hook `tool_call`, and two
+engines intercepting one call produce duplicate prompts and unpredictable blocking.
+
+## Sandbox
+
+No exception. Pi runs under the same mandatory launcher as every other external agent; when the
+launcher is missing or the platform is not macOS/Linux the session is refused with
+`sandbox_unavailable`. ADR-0077's "never falls back to an unsandboxed process" is unchanged, and
+the escape hatches considered during planning were all rejected.
+
+## Migrating off the bridge
+
+`pi-acp` remains available as a separate compatibility preset. Nothing is rewritten automatically.
+
+Migration is offered only for a config that satisfies **all three** conditions — `metadata.preset`
+is `pi`, the protocol is `acp`, and the argv is `npx … pi-acp` — because any one alone produces
+false positives that would rewrite a config the user meant to keep.
+
+It rewrites **in place** so the agent id survives; teams, the scheduler and the runtime all hold
+that id, and a create-then-delete would orphan every reference. The previous protocol, process and
+preset are captured in a versioned `metadata.piMigration` snapshot, so rollback restores exactly
+what was there rather than a reconstruction from defaults.
+
+An ACP session id does not map onto a Pi session: the first run after migrating starts a fresh
+native session. Rollback restores the adapter config only — Pi session files and Cognia transcripts
+are user data and are left in place.
+
+## Operations
+
+`COGNIA_DISABLE_PI_RPC=1` blocks **new** Pi RPC sessions without terminating running ones; killing a
+turn mid-tool-call can leave a half-written file behind. It is re-read per session, so no restart is
+needed to engage or clear it.
+
+Session history imports through the `pi` source in
+[session import](../../subsystems/cognia-agent-external-hosting/index): the active leaf becomes the
+main conversation and every other leaf imports as a nested conversation, so branches still reachable
+in Pi's `/tree` are not discarded.

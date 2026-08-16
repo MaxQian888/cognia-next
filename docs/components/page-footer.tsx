@@ -1,3 +1,7 @@
+// Relative rather than `@/`: the repo's Jest runner maps that alias to the app
+// root, not to `docs/`, and this component has tests.
+import { formatDocsDate } from "../lib/time-zone"
+
 const REPO = "MaxQian888/cognia-next"
 const BRANCH = "master"
 
@@ -50,6 +54,7 @@ export function PageFooter({ slug, sourcePath, lastModified }: Props) {
   const altHref = buildAlternateHref(slug)
   const locale = detectLocale(slug)
   const altLabel = locale === "en" ? "中文版本" : locale === "zh" ? "English version" : null
+  const lastModifiedLabel = lastModified ? formatDocsDate(lastModified, locale) : null
 
   return (
     <footer className="not-prose mt-16 space-y-6 border-t border-fd-border pt-8 text-sm text-fd-muted-foreground">
@@ -101,10 +106,9 @@ export function PageFooter({ slug, sourcePath, lastModified }: Props) {
           ) : null}
         </div>
 
-        {lastModified ? (
+        {lastModified && lastModifiedLabel ? (
           <span className="text-xs">
-            Last updated:{" "}
-            <time dateTime={lastModified}>{new Date(lastModified).toLocaleDateString()}</time>
+            Last updated: <time dateTime={lastModified}>{lastModifiedLabel}</time>
           </span>
         ) : null}
       </div>

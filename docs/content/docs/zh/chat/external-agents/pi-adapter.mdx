@@ -1,0 +1,136 @@
+---
+title: Pi 原生 RPC 适配器
+description: PiRpcClientAdapter 经 Pi 自身的 JSONL 命令/事件协议驱动 `pi --mode rpc`，取代社区 pi-acp 桥。涵盖严格 LF codec 与不能使用 readline 的原因、每会话独占进程模型、认证版本策略、随包权限扩展，以及从桥接方式的显式迁移。
+---
+
+# Pi 原生 RPC 适配器
+
+<Status variant="beta" />
+
+<TLDR>
+  Cognia 通过 **Pi 自身的协议**驱动 Pi，而非 ACP。`pi --mode rpc` 讲一套 JSONL 命令/事件流，
+  帧是裸的 `{type, id}` 对象，应答为 `{"type":"response", command, success, data}`——像到足以被误认为
+  JSON-RPC，又不同到复用 JSON-RPC peer 会把每个事件都路由错。该适配器保住了社区 `pi-acp` 桥所压平的
+  thinking 等级、steering 与 follow-up 队列、compaction 生命周期、会话分叉与 usage 明细。
+  参见 [ADR-0119](../../adr/0119-pi-native-rpc-integration)。
+</TLDR>
+
+## 为什么不能用 readline
+
+其他所有外部智能体的 stdout 都由共享 host 以 `readline` 分帧。Pi 不能这样用。
+
+Node 的 `readline` 会把 **U+2028** 与 **U+2029** 当作行终止符，而 `JSON.stringify` 不转义这两个字符。
+只要一个合法 Pi 帧的正文含 U+2028——它真实存在于网页复制文本与模型输出中——就会被切成若干无法解析的片段。
+
+因此 `pi-rpc` 启用按需的 raw chunk 转发模式（spawn 配置上的 `framing: "raw"`，以 base64 经
+`external-agent://stdout-raw` 投递），并在 `pi-rpc-peer.ts` 中自行分帧：
+
+- 只按 `0x0A` 字节分帧；删除尾部单个 `\r`，使 CRLF 仍可解析
+- 孤立 `\r` **不是**分隔符——JSON 内的回车必须转义，把它当边界只会切坏本来完好的帧
+- 按帧而非按 chunk 解码，因此落在多字节 UTF-8 序列中间的 chunk 边界不会产生替换字符
+- 单帧 16 MiB、未终止缓冲 32 MiB，越界即以 `protocol_frame_invalid` 结束会话
+
+Rust host 是字节导向的，本就正确；只有 Node host 需要这条新路径。ACP、Codex、OpenCode 保持既有
+`readline` 路径不变。
+
+## 关联
+
+有三条行为是通过实跑 Pi 0.84.1 确认的，每一条都会让朴素实现出错：
+
+| 观察到的现象 | 后果 |
+| --- | --- |
+| 响应**不是**先进先出——`abort` 的应答晚于其后的 `get_state` | 只能按 `id` 关联，顺序没有意义 |
+| 入站畸形帧的应答带 `command: "parse"` 且**不带 `id`** | 无 id 的错误帧不得 resolve 或 reject 任何 pending 请求 |
+| 事件与响应交错，甚至先于其相关的响应到达 | 两条流互不阻塞 |
+
+`prompt` 返回成功只表示 Pi **已接受**该轮。完成的唯一信号是 `agent_settled`——`agent_end` 与
+`turn_end` 之后都可能跟随自动重试或排队续跑，把两者之一当作完成会导致该轮被中途截断。
+
+## 每会话一个进程
+
+Pi 可以在一个进程内切换会话，Cognia 不这样做：共享进程会把两段对话的事件与权限应答交错到同一条流上。
+每个 Cognia session 独占一个 `pi --mode rpc --session-id <uuid>`。
+
+该 flag 的含义是"使用这个精确 id，不存在则创建"，因此**恢复就是再次传入同一 flag**，持久化的 link 只保存
+UUID、cwd 与 Pi 版本——任何 session 文件的绝对路径都不会跨设备。分叉使用 `--fork`。
+
+每 host 上限 4 个进程，回收最近最少使用的**空闲**进程；当所有槽位都在执行中时返回 `resource_limit`，
+而不是终止别人正在跑的工作。
+
+## 版本策略
+
+`0.84.1` 为认证版本。
+
+- **恰好认证** —— 正常运行
+- **更高** —— 运行，标记为未认证并打点。Pi 升级因此降级为一条警告，而非一次中断。
+- **更低或不可解析** —— 以 `runtime_version_unsupported` 拒绝。Pi 在版本间重命名过字段，缺失字段
+  表现为空的一轮，而不是一个错误。
+
+版本通过与会话相同的沙箱化 spawn 路径运行 `pi --version` 探测，而非从握手推断：`get_state` 报告的是
+会话格式版本，不是发行版本。
+
+## 随包扩展
+
+Pi 内建的 `read` / `grep` / `find` / `ls` / `edit` / `write` / `bash` 在 Pi 进程内执行，永远到不了 Cognia
+的 tool-host broker。一个第一方扩展经 `pi.on("tool_call")` 拦截它们。
+
+它**不持有任何策略**。矩阵在 `lib/ai/agent/external/pi-permission.ts` 中计算，那里可被类型检查与测试，
+再以数据形式交给扩展——`sidecar/` 位于根 tsconfig 与 Jest 之外，任何住在那里的决策逻辑都将永久无法验证。
+
+| 模式 | 原生工具行为 |
+| --- | --- |
+| `default` | 读类放行；`edit` / `write` / `bash` 询问 |
+| `acceptEdits` | 读与编辑放行；`bash` 仍询问——shell 能做 `edit` 的一切且更多 |
+| `bypassPermissions` | 不再弹窗（仍在严格沙箱内） |
+| `plan` | 读类放行；一切变更类**拒绝**而非询问——plan 模式的承诺是什么都不改 |
+| `dontAsk` | 只有预批准的工具放行，其余拒绝且不弹窗 |
+
+限制性模式由两层独立执行：逐次应用的该表，以及启动时固定的 Pi 自身 `--tools` 允许名单——即使扩展从未加载，
+后者依然成立。
+
+第二层是承重的，不是锦上添花。Pi **自身不提供任何权限确认**——其工具以进程的完整权限运行——因此
+`default` 与 `acceptEdits` 只在扩展进行拦截时才有意义。当无法解析出扩展时，这两种模式会收敛到只读底线，
+而不是静默放行 `edit` / `write` / `bash`。`bypassPermissions` 不受影响（用户已显式放弃确认，且沙箱仍在约束
+该进程），`plan` 与 `dontAsk` 本就不需要询问。
+
+扩展以 SHA-256 固定（`sidecar/pi-extension/integrity.json`，用 `pnpm pi:extension:pin` 重新生成）。
+不匹配的文件会被拒绝而非加载——握手无法发现篡改，因为被修改的扩展同样可以宣告自己就绪。
+
+### 隔离意味着四个 flag
+
+`--no-extensions` 本身**不构成**隔离：`~/.agents/skills/` 下的 skills 与 Pi 内建 inline extension 仍会加载。
+`isolated` 策略传入 `--no-extensions --no-skills --no-prompt-templates --no-approve`。
+
+`AGENTS.md` / `CLAUDE.md` 上下文文件刻意仍然加载——它们是数据而非可执行代码，且对结果有实质帮助。
+
+隔离同时会在 Cognia 发起的会话中停用用户自己的 Pi 扩展栈。这正是目的：`pi-permission-system` 等社区权限
+引擎同样 hook `tool_call`，两套引擎拦截同一次调用会产生重复确认与不可预测的阻断。
+
+## 沙箱
+
+无例外。Pi 与其他所有外部智能体一样运行在同一个强制 launcher 之下；launcher 缺失或平台非 macOS/Linux 时，
+会话以 `sandbox_unavailable` 被拒。ADR-0077 的"从不回退到无沙箱进程"原样保持，规划期间考虑过的逃生通道
+全部否决。
+
+## 从桥接方式迁移
+
+`pi-acp` 作为独立兼容 preset 保留。任何配置都不会被自动改写。
+
+迁移仅对**同时**满足三个条件的配置提供——`metadata.preset` 为 `pi`、协议为 `acp`、argv 为
+`npx … pi-acp`——因为其中任一条件单独成立都会产生误判，改写用户本想保留的配置。
+
+迁移**原地**改写以保住 agent id；team、scheduler 与 runtime 都持有该 id，create-then-delete 会让所有
+引用成为孤儿。此前的 protocol、process 与 preset 会写入版本化的 `metadata.piMigration` 快照，因此回滚
+恢复的是当时的原样，而不是按默认值重建。
+
+ACP session id 并不映射到 Pi session：迁移后的首次运行会新建一个原生会话。回滚只恢复适配器配置——
+Pi 的 session 文件与 Cognia 的记录属于用户数据，原样保留。
+
+## 运维
+
+`COGNIA_DISABLE_PI_RPC=1` 阻断**新的** Pi RPC 会话，但不终止正在运行的会话；在工具调用中途终止一轮可能
+留下写了一半的文件。该开关按会话重新读取，因此启用或清除都不需要重启。
+
+会话历史经 `pi` 源导入（见
+[session import](../../subsystems/cognia-agent-external-hosting/index)）：活动 leaf 成为主对话，
+其他每个 leaf 导入为 nested conversation，因此在 Pi 的 `/tree` 中仍可达的分支不会被丢弃。

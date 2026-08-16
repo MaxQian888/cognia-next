@@ -2,6 +2,14 @@
 
 Date: 2026-07-19
 
+> **Coverage counts below are stale as of 2026-08-15.** The "441 canonical
+> commands / 611 client-owned" figures are now 493 / 593. For the current
+> inventory — and for the semantic-parity findings this document does not
+> cover (dropped arguments, unforwarded event channels, flattened errors) —
+> see [`rpc-tauri-semantic-parity-audit-2026-08-15.md`](./rpc-tauri-semantic-parity-audit-2026-08-15.md).
+> That audit also landed `pnpm audit:rpc-semantic-parity`, which keeps these
+> numbers from drifting again.
+
 Scope: ADR-0059 (headless brain and frontend/backend separation), ADR-0082
 (desktop driving a remote Cognia host), and ADR-0085 (persistent workspace
 runtime and shared browser). This inventory describes the current working tree,

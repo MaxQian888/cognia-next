@@ -1,0 +1,94 @@
+---
+title: 主机能力等价审计 — 2026-08-15
+description: 云端（headless）与桌面之间每一处能力差距的证据化清单，并按「物理不可能」与「只是没迁移」分类。
+---
+
+# 主机能力等价审计 — 2026-08-15
+
+## 为什么有这份审计
+
+目标是让云端（`headless`）主机的能力与桌面近乎等价。但没人能回答"还差多远"——宿主守卫、单边 dispatch arm、按主机硬编码的 UI 从未被清点过，所以定范围只能靠猜。
+
+这份审计就是那个清点。数据由 `pnpm audit:host-parity:report` 机械产出；每个子系统的判断由人工记录在 `scripts/gates/host-parity-annotations.json`。两者都由 `pnpm audit:host-parity` 棘轮化，清单无法悄悄变长。
+
+## 结论
+
+**等价机制是完整且工作着的；往它上面的迁移大约只做了一半。**
+
+`DispatchHost`（Tauri / Headless 两个 arm）、`setTransport` 的整体传输替换、`protocol/companion-commands.json` 的 1066 条命令分级 —— 这些不是半成品，是成品。缺的是大量代码从未搬上去。
+
+带宿主守卫的 154 个子系统中：
+
+| 分类 | 子系统数 | 含义 |
+| --- | --- | --- |
+| `unmigrated` | 68 | 无物理理由 —— 单纯是没做 |
+| `ui-assumption` | 62 | 后端可等价；UI 按主机而非按能力判断 |
+| `physically-impossible` | 14 | 该主机确实没有这个面 |
+| `seam-infrastructure` | 10 | 它**就是**宿主检测/传输层，按主机分支是它的职责 |
+
+**154 个里只有 14 个是物理性的。** 而且差距是**双向**的 —— `headless` 已经拥有桌面没有的能力（`secrets.store`，以及 28 个操作的 `browser.remote` 面）。
+
+## 四类差距
+
+252 条逐项追踪的发现，全部记录在 `scripts/gates/host-parity-baseline.json`。
+
+| 类 | 数量 | 是什么 |
+| --- | --- | --- |
+| A — 绕过传输 seam | 98 | 生产文件直接从 `@tauri-apps/api/*` 导入 `invoke`/`listen`，绕过可替换 seam。在任何非 Tauri 主机上必然抛错。 |
+| B — 按主机硬编码的 UI | 21 | `components/settings/settings-nav-config.ts` 里的 `desktopOnly: true`。即使后端等价了，界面仍把功能藏起来。 |
+| C — 单边 RPC arm | 132 | 27 条桌面专属（`host.tauri_app(name)?`），105 条云端专属（`host.headless().ok_or_else(...)`） |
+| E — 能力表误报 | 1 | `source-control.git` 被声明为 `tauri` 专属，而它的 RPC arm 根本没有任何宿主门禁 |
+
+D 类 —— `isTauri()` / `isHeadlessHost()` / `usePlatform()` 的原始普查，506 个生产文件里 999 处调用 —— **刻意不做棘轮**。其中大部分守卫是合理的。真正被强制的是：普查发现的每个子系统都必须带一条已记录的分类；未标注的子系统 = 没人看过的差距。
+
+## 最该先动的发现
+
+### 15 条云端专属命令能被已配对设备访问 —— 且 503 的理由完全相反
+
+这些 arm 是 `target=execution` 且开放 `http`/`websocket`/`webrtc`，所以配对到**桌面**主机的手机能够到它们，收到的却是 `headless_unsupported`：*"not available on a headless server (requires the desktop app)"* —— 与事实恰好相反。
+
+```
+codeserver_ensure          codeserver_status         codeserver_stop
+codeserver_stop_all        get_external_agent_status kill_external_agent
+lsp_host_ensure            lsp_host_request          plugin_api_batch_invoke
+plugin_api_invoke          plugin_permission_grant   plugin_permission_list
+plugin_permission_revoke   send_to_external_agent    spawn_external_agent
+```
+
+手机配对**云端**能拉起 external agent、能用 code-server；配对**桌面**反而不行。这与任何用户的预期都是反的。
+
+### 插件子系统被劈成两半，两边都不完整
+
+`rpc/plugins.rs` 里有 **52 条云端专属 arm**（`plugin_set_status`、`plugin_permission_*` …）和 **12 条桌面专属 arm**（`plugin_list`、`plugin_runtime_snapshot`、`plugin_backup_*`、`plugin_stage_version`、`plugin_uninstall`、staged-update 的 commit/discard/finalize）。这 12 条没有一条有物理理由 —— `plugin_list` 和 `plugin_runtime_snapshot` 是只读的。这是两次各走了一半的迁移。
+
+### 全代码库只有 17 个命令名 + `codex_app` 一族声称需要桌面
+
+`host.tauri_app(name)?` 是代码库里唯一说"这需要桌面"的地方。在 940 条已注册 Tauri 命令中，它守住 27 个 arm。其中真正物理性的很窄：
+
+- `automation_consent_pending` / `automation_consent_respond` —— 需要有人在屏幕前。但 `headless` 已经带有 `notifications.remote` 和 `remote_notification_publish`，把 consent 路由到已配对设备是接线工作，不是重新设计。**已记录为非永久边界。**
+- `ocr_extract_native` —— 只有 `apple-vision` 和 `windows-media-ocr` 绑定 OS，而 `packages/ocr/src/registry.ts` 已经为 headless 精确地减去了这两个。`tesseract` / `ocrs` / `paddle` 到处都能跑。
+- `codex_app_*` —— 由 `rpc/codex_app.rs` 顶部的一个 `host.tauri_app(name)?` 整族拦下。**2026-08-16 更正：这一条确实是物理边界。** 该族驱动的是已安装的 Codex *桌面应用*：`codex_app_dispatch.rs` 解析 `~/.codex/app-server-control/app-server-control.sock`；当该 socket 不存在时，`connect_or_launch` 会通过操作系统的 URL scheme 处理器打开 `codex://threads/new` 来兜底。容器里既没有这个应用，也没有能注册该 scheme 的处理器。其外围管道本身是主机中立的（`run_cdp_control` 起一个 Node sidecar），这正是它看起来可迁移的原因 —— 但把 sidecar 改成主机无关并不会凭空造出那个 socket。
+
+### connectors 的 seam 只采纳了一半，代价是 4 个 IM 平台
+
+`lib/connectors/events.ts` 暴露了可替换的 `connectorListen`，brain 在启动时替换它 —— 但只有 5 个 webhook transport 用了。仍有 10 个生产文件直接导入 `listen`，而 brain 没有 `__TAURI_INTERNALS__` shim，这些调用必然抛错。Discord（两种模式）、OneBot、WeCom、DingTalk 在云端主机上收不到消息，而 `lib/platform/capabilities.ts` 却无条件地为 `headless` 声明了 `connector-runtime`。
+
+## 已记录的物理边界
+
+以下已成定论，不再反复讨论：系统托盘；桌面宠物的 OS 覆盖窗口；AX/UIA 自动化本体（Linux 容器没有可自动化的桌面 —— **consent 不在此列**）；划词工具栏与桌面选区感知；全局 OS 快捷键；生物识别；本地麦克风与屏幕捕获；系统剪贴板；技能录制器；`apple-vision` 与 `windows-media-ocr`。
+
+**OS 钥匙串不是差距。** headless 通过 `cognia-secrets` 加密存储达到等价，`lib/keyring/index.ts` 在其他主机上分支到 AES-GCM 的 IndexedDB blob。
+
+## 置信度
+
+154 行中有 10 行标了 `confidence: "low"` —— 依据命名加抽查而非通读得出。复核应从这些开始：
+
+`lib/connectivity`、`lib/device`、`components/desktop`、`lib/voice`、`lib/appearance`、`lib/tts`、`lib/app-metadata.ts`、`lib/monaco`、`plugins/impeccable`、`plugins/cognia-backend-refactor`
+
+## 棘轮
+
+`pnpm audit:host-parity` 在 `pnpm check:all` 的 `audit` 组中运行。今天是**只报告**模式：新发现会打印但不会让构建失败，这样第一批偿还不会被存量债堵住。翻转 `scripts/gates/check-host-parity.mjs` 里的 `ENFORCE_RATCHET` 即变为硬失败，并有一个测试钉住当前值，使这次切换必须是刻意的。切换条件见 ADR-0059。
+
+```bash
+pnpm audit:host-parity:report
+```

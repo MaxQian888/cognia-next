@@ -52,13 +52,13 @@ Managed Workspace Registry needs a new patch/snapshot/undo primitive.
 - `add(main_repo, path, branch, base_ref?)` — shells out to
   `git worktree add`; auto-picks branch when caller supplies one.
 - `remove(main_repo, path, force, delete_branch?)` — `git worktree remove
-  [--force]` then optional `worktree prune` + `branch -D`.
+[--force]` then optional `worktree prune` + `branch -D`.
 - `list`, `prune`, `commit` — parse `--porcelain` / delegate to
   `git worktree prune` / stage+commit convenience.
 - Registered as `git_worktree_*` Tauri commands and in the companion RPC
   allowlist.
-- The module's own header comment: *"Git worktree management for agent-team
-  per-dispatch isolation"* — the seam was originated by agent-team and later
+- The module's own header comment: _"Git worktree management for agent-team
+  per-dispatch isolation"_ — the seam was originated by agent-team and later
   reused by the user-facing manual panel.
 
 ### Three parallel worktree owners
@@ -84,6 +84,7 @@ to three owners with no way to attribute a row to its owner or protect it
 from another owner's cleanup.
 
 ### Session Execution Context (`types/execution-context.ts` +
+
 `lib/task-workspace/session-execution-context.ts`)
 
 - `SessionExecutionContext.baseRef` exists on the type, but
@@ -100,7 +101,7 @@ from another owner's cleanup.
 - When `location === "managedWorktree"`, it opens a fresh
   `openTaskWorkspaceRunLease` per fire — good.
 - When `location === "local"`, it sets `finalOptions.cwd =
-  executionContext.projectRoot` — **the user's live tree**. A background
+executionContext.projectRoot` — **the user's live tree**. A background
   task can therefore land on a dirty tree with no isolation.
 - The system-task scheduler (`crates/cognia-scheduling`) takes a plain
   `working_dir: Option<String>` per registered task and forwards it to
@@ -156,7 +157,7 @@ from another owner's cleanup.
 ### PR abstraction (already provider-neutral)
 
 - `types/review.ts:57-65` — `PullRequestProvider { id,
-  getAuthenticationState, findForBranch, push, create, publishFeedback }`.
+getAuthenticationState, findForBranch, push, create, publishFeedback }`.
 - `lib/review/github-provider.ts` — the sole implementation.
 - `lib/ai/agent/team/pr-feedback/*` still directly imports
   `@/lib/github/pr-observe/*` (Octokit-shaped). Not neutralized yet; kept
@@ -164,20 +165,20 @@ from another owner's cleanup.
 
 ## Identified gaps
 
-| # | Gap | Concrete evidence |
-| - | --- | ----------------- |
-| 1 | No single owner of worktree lifecycle | Three parallel owners; none coordinate; no lock reason today |
-| 2 | Ownership is inferred, not signed | Task Workspace signals ownership via `cognia/task/**` branch-name prefix; a peer can trivially collide |
-| 3 | `baseRef` is a hint, not an input | `create_execution` hardcodes `HEAD`; `SessionExecutionContext.baseRef` unused end-to-end |
-| 4 | Every dispatch creates a stale branch | `-b cognia/task/**` per run leaves branches to clean up; `--detach` is never used |
-| 5 | Scheduled `local` runs land on the live tree | `executors/index.ts` `location === "local"` sets `cwd = projectRoot` with no isolation |
-| 6 | No multi-root / cross-repo bundle | Only per-`Project` multi-root; no atomic apply across roots or repos |
-| 7 | No project-versioned workspace config | No `.cognia/workspace.json`; no place for sparse paths, cache links, include patterns to live under version control |
-| 8 | Sensitive-resource authorization is ad-hoc | `is_sensitive_resource` filters preview bytes; there is no user-visible "grant this path" flow |
-| 9 | `WorktreeCreate` / `WorktreeRemove` hooks defined but dormant | No producer; three worktree owners bypass them |
-| 10 | Retention is task-scoped, not workspace-scoped | Directory reclaim and blob expiration are inside `service.prune`; no separated policy for "active dir limit" vs "snapshot age" |
-| 11 | Managed items and manual `git worktree list` items are indistinguishable in the UI | `worktree-panel.tsx` can force-remove anything |
-| 12 | Legacy allocator produces branches nobody owns | `AgentWorkspaceAllocator` writes under `.cognia-agent-worktrees/**`; a crashed run leaves them behind |
+| #   | Gap                                                                                | Concrete evidence                                                                                                              |
+| --- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | No single owner of worktree lifecycle                                              | Three parallel owners; none coordinate; no lock reason today                                                                   |
+| 2   | Ownership is inferred, not signed                                                  | Task Workspace signals ownership via `cognia/task/**` branch-name prefix; a peer can trivially collide                         |
+| 3   | `baseRef` is a hint, not an input                                                  | `create_execution` hardcodes `HEAD`; `SessionExecutionContext.baseRef` unused end-to-end                                       |
+| 4   | Every dispatch creates a stale branch                                              | `-b cognia/task/**` per run leaves branches to clean up; `--detach` is never used                                              |
+| 5   | Scheduled `local` runs land on the live tree                                       | `executors/index.ts` `location === "local"` sets `cwd = projectRoot` with no isolation                                         |
+| 6   | No multi-root / cross-repo bundle                                                  | Only per-`Project` multi-root; no atomic apply across roots or repos                                                           |
+| 7   | No project-versioned workspace config                                              | No `.cognia/workspace.json`; no place for sparse paths, cache links, include patterns to live under version control            |
+| 8   | Sensitive-resource authorization is ad-hoc                                         | `is_sensitive_resource` filters preview bytes; there is no user-visible "grant this path" flow                                 |
+| 9   | `WorktreeCreate` / `WorktreeRemove` hooks defined but dormant                      | No producer; three worktree owners bypass them                                                                                 |
+| 10  | Retention is task-scoped, not workspace-scoped                                     | Directory reclaim and blob expiration are inside `service.prune`; no separated policy for "active dir limit" vs "snapshot age" |
+| 11  | Managed items and manual `git worktree list` items are indistinguishable in the UI | `worktree-panel.tsx` can force-remove anything                                                                                 |
+| 12  | Legacy allocator produces branches nobody owns                                     | `AgentWorkspaceAllocator` writes under `.cognia-agent-worktrees/**`; a crashed run leaves them behind                          |
 
 ## Design implications
 
@@ -228,12 +229,12 @@ The gaps split into three coherent layers:
 
 ## Retention defaults (proposed)
 
-| Knob | Default | User-adjustable |
-| --- | --- | --- |
-| Active managed directories | ≤ 15 | Yes |
-| Snapshot retention | 30 days | Yes |
-| Blob budget | 1 GiB | Yes |
-| Ineligible for auto-prune | `active`, `pinned`, `permanent`, `locked`, `dirty`, `untracked`, `unpushed`, `unapplied`, `conflict` | No |
+| Knob                       | Default                                                                                              | User-adjustable |
+| -------------------------- | ---------------------------------------------------------------------------------------------------- | --------------- |
+| Active managed directories | ≤ 15                                                                                                 | Yes             |
+| Snapshot retention         | 30 days                                                                                              | Yes             |
+| Blob budget                | 1 GiB                                                                                                | Yes             |
+| Ineligible for auto-prune  | `active`, `pinned`, `permanent`, `locked`, `dirty`, `untracked`, `unpushed`, `unapplied`, `conflict` | No              |
 
 ## Rollback
 
@@ -247,10 +248,10 @@ retained. The kill switch is removed in the next release.
 Rust:
 
 - `crates/cognia-task-workspace/src/{lib,service,store,snapshot,ledger,
-  types}.rs`
+types}.rs`
 - `crates/cognia-git/src/worktree.rs`
 - `src-tauri/src/{task_workspace.rs, hooks/types.rs, hooks/mod.rs,
-  companion_api/rpc.rs}`
+companion_api/rpc.rs}`
 - `crates/cognia-scheduling/src/scheduler/types.rs`
 
 TypeScript:
@@ -259,9 +260,9 @@ TypeScript:
 - `types/workspace/index.ts`
 - `types/review.ts`
 - `lib/task-workspace/{session-execution-context.ts, managed-workspace.ts,
-  handoff.ts, run-lease.ts, client.ts, projection.ts}`
+handoff.ts, run-lease.ts, client.ts, projection.ts}`
 - `lib/ai/agent/{agent-team-runtime.ts, team/dispatch-teammate.ts,
-  team/workspace/allocator.ts, team/workspace/reconciler.ts}`
+team/workspace/allocator.ts, team/workspace/reconciler.ts}`
 - `lib/scheduler/executors/index.ts`
 - `lib/claude/hooks/event-catalog.ts`
 - `lib/workspace/{trust-gate.ts, roots.ts}`
@@ -270,9 +271,9 @@ TypeScript:
 UI:
 
 - `components/chat/{chat-header.tsx, empty-state.tsx, chat-view.tsx,
-  session-execution-workspace.tsx, session-settings-sheet.tsx}`
+session-execution-workspace.tsx, session-settings-sheet.tsx}`
 - `components/source-control/{source-control-panel.tsx, worktree-panel.tsx,
-  root-switcher.tsx}`
+root-switcher.tsx}`
 - `components/settings/sections/developer-flags-card.tsx`
 
 ADRs to amend:
