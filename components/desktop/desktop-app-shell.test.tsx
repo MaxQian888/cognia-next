@@ -111,6 +111,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
     selector(settingsStateRef),
 }))
 
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { DesktopAppShell, isShellBypassRoute } from "./desktop-app-shell"
 
 beforeEach(() => {
@@ -122,6 +123,7 @@ beforeEach(() => {
   platformValue = "web"
   uiStateRef.guildRailCollapsed = false
   uiStateRef.statusBarCollapsed = false
+  act(() => useShellColumnsStore.setState({ sidebarHostsNav: false }))
   settingsStateRef.settings = undefined
 })
 
@@ -288,6 +290,24 @@ describe("collapse toggles from ui-store", () => {
     )
     expect(screen.queryByTestId("guild-rail-stub")).toBeNull()
     expect(screen.getByTestId("route-content")).toBeInTheDocument()
+  })
+
+  test("hides the guild rail while the expanded sidebar hosts the navigation, and brings it back", () => {
+    act(() => useShellColumnsStore.setState({ sidebarHostsNav: true }))
+    const { rerender } = render(
+      <DesktopAppShell>
+        <div data-testid="route-content" />
+      </DesktopAppShell>
+    )
+    expect(screen.queryByTestId("guild-rail-stub")).toBeNull()
+    // Sidebar collapsed / left `/`: the rows are gone, the icon column returns.
+    act(() => useShellColumnsStore.setState({ sidebarHostsNav: false }))
+    rerender(
+      <DesktopAppShell>
+        <div data-testid="route-content" />
+      </DesktopAppShell>
+    )
+    expect(screen.getByTestId("guild-rail-stub")).toBeInTheDocument()
   })
 
   test("hides status bar when statusBarCollapsed is true", () => {

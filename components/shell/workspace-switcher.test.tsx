@@ -8,8 +8,11 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-const isTauriMock = jest.fn(() => true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+// Hoist-safe: the module graph under the switcher (`lib/db/*` → keyring
+// store) calls `isTauri()` while modules are still being evaluated, i.e.
+// before a top-level `const` in this file is initialised.
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
+const isTauriMock = jest.requireMock("@/lib/tauri").isTauri as jest.Mock
 const openDialogMock = jest.fn()
 jest.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => openDialogMock(...a) }))
 jest.mock("@/lib/db/trusted-workspaces", () => ({
@@ -96,6 +99,41 @@ describe("WorkspaceSwitcher", () => {
     const trigger = screen.getByTestId("workspace-switcher")
     expect(trigger).toHaveAttribute("aria-label", "active")
     expect(trigger).toHaveTextContent("B")
+  })
+
+  it("wide variant spells the active name beside the initial and still switches", () => {
+    act(() => {
+      useProjectStore.setState({
+        projects: [
+          makeProject("p1", { name: "Backend", rootDir: "/srv" }),
+          makeProject("p2", { name: "Web", rootDir: "/web" }),
+        ],
+        activeProjectId: "p1",
+      })
+    })
+    render(
+      <TooltipProvider>
+        <WorkspaceSwitcher variant="wide" />
+      </TooltipProvider>
+    )
+    const trigger = screen.getByTestId("workspace-switcher")
+    expect(trigger).toHaveAttribute("data-variant", "wide")
+    expect(trigger).toHaveAttribute("aria-label", "active")
+    expect(trigger).toHaveTextContent("Backend")
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByTestId("workspace-switch-p2"))
+    expect(useProjectStore.getState().activeProjectId).toBe("p2")
+  })
+
+  it("wide variant falls back to the 'none' label with a folder glyph", () => {
+    render(
+      <TooltipProvider>
+        <WorkspaceSwitcher variant="wide" />
+      </TooltipProvider>
+    )
+    const trigger = screen.getByTestId("workspace-switcher")
+    expect(trigger).toHaveTextContent("none")
+    expect(trigger.querySelector("svg")).toBeInTheDocument()
   })
 
   it("lists workspaces and switches the active one on click", () => {

@@ -51,7 +51,7 @@ import {
   useTitleBarProjectionState,
 } from "@/components/shell/title-bar-outlets"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
-import { DEFAULT_SIDEBAR_SIDE, GUILD_RAIL_WIDTH_PX } from "@/types/shell/sidebar"
+import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
 import {
   automationKillSwitchAction,
@@ -92,6 +92,16 @@ import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
 const log = loggers.ui
+
+/**
+ * End-zone items the projected chat header duplicates
+ * (`components/chat/chat-header.tsx`: its own conversation-list toggle and
+ * `ArtifactDockToggle`). Filtered out while the centre outlet is live.
+ */
+const PROJECTED_CENTER_DUPLICATES: ReadonlySet<string> = new Set([
+  "primarySidebarToggle",
+  "secondarySidebarToggle",
+])
 const NARROW_QUERY = "(max-width: 760px)"
 
 // Override classes applied at the call site of every MenubarContent /
@@ -218,6 +228,7 @@ export function TitleBar() {
   const startOutletRef = useTitleBarOutletRef("start")
   const centerOutletRef = useTitleBarOutletRef("center")
   const endOutletRef = useTitleBarOutletRef("end")
+  const measuredRailPx = useShellColumnsStore((s) => s.widths.rail)
   const sidebarPx = useShellColumnsStore((s) => s.widths.sidebar)
   const dockPx = useShellColumnsStore((s) => s.widths.dock)
   const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
@@ -312,7 +323,9 @@ export function TitleBar() {
   // Where the columns start and end relative to the bar's edges. The nav rail
   // is the outermost column on `sidebarSide`, so the conversation rail begins
   // after it on the left, and the dock ends before it on the right.
-  const railPx = guildRailCollapsed ? 0 : GUILD_RAIL_WIDTH_PX
+  // Measured, like the sidebar and dock: the rail hides below `md` and while
+  // the expanded sidebar hosts the navigation, and reports 0 both times.
+  const railPx = guildRailCollapsed ? 0 : measuredRailPx
   const railLeftPx = sidebarSide === "left" ? railPx : 0
   const railRightPx = sidebarSide === "right" ? railPx : 0
   // Must match the header's `pl-20` / `pl-2` below.
@@ -1313,7 +1326,19 @@ export function TitleBar() {
             hidden={!projected.center}
             className="flex h-full min-w-0 flex-1 items-center"
           />
-          <TitleBarZone items={bar.zones.center} ctx={itemCtx} />
+          {/* With the sidebar's header in the start zone the workspace is
+              already named there (the switcher, `channel-list.tsx`), so the
+              centre's workspace pill — the same project, one click from the
+              same list — steps aside. It comes back on any route without a
+              projected sidebar. */}
+          <TitleBarZone
+            items={
+              projected.start
+                ? bar.zones.center.filter((item) => item.id !== "workspace")
+                : bar.zones.center
+            }
+            ctx={itemCtx}
+          />
           <PluginExtensionSlot
             point="toolbar.center"
             className="ml-2 flex items-center gap-1 empty:hidden"
@@ -1336,14 +1361,14 @@ export function TitleBar() {
           />
 
           {/* The projected chat header already carries the conversation-list
-              and artifact-dock toggles at their columns' edges, so the bar's
-              own copies step aside while it is up — one control per action. */}
+              toggle and the artifact-dock ("right sidebar") toggle at their
+              columns' edges, so the bar's own copies step aside while it is up
+              — one control per action. The terminal-panel toggle has no copy
+              in that header and stays. */}
           <TitleBarZone
             items={
               projected.center
-                ? bar.zones.end.filter(
-                    (item) => item.id !== "primarySidebarToggle" && item.id !== "panelToggle"
-                  )
+                ? bar.zones.end.filter((item) => !PROJECTED_CENTER_DUPLICATES.has(item.id))
                 : bar.zones.end
             }
             ctx={itemCtx}

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   CheckIcon,
+  ChevronDownIcon,
   FolderIcon,
   FolderOpenIcon,
   PlusIcon,
@@ -45,7 +46,18 @@ const RECENT_COUNT = 3
  * For large workspace sets the popover adds a live filter (name + folder path)
  * and a pinned "Recent" group so the list stays navigable at scale.
  */
-export function WorkspaceSwitcher() {
+interface WorkspaceSwitcherProps {
+  /**
+   * `rail` (default) — the 40px square initial in the icon column, tooltip
+   * for the name, popover opening rightward. `wide` — a text trigger for the
+   * title bar's start zone above the expanded sidebar: initial · name ·
+   * chevron, popover opening downward under it. Same list, same actions.
+   */
+  variant?: "rail" | "wide"
+  className?: string
+}
+
+export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwitcherProps = {}) {
   const t = useTranslations("workspace.switcher")
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
@@ -113,6 +125,7 @@ export function WorkspaceSwitcher() {
 
   const triggerLabel = active ? t("active", { name: active.name }) : t("none")
   const initial = active?.name.trim().charAt(0).toUpperCase()
+  const wide = variant === "wide"
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
@@ -195,28 +208,58 @@ export function WorkspaceSwitcher() {
   return (
     <>
       <Popover open={open} onOpenChange={handleOpenChange}>
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={triggerLabel}
-                data-testid="workspace-switcher"
-                className="size-10 rounded-2xl text-muted-foreground transition-all hover:rounded-xl hover:text-foreground"
+        {wide ? (
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={triggerLabel}
+              data-testid="workspace-switcher"
+              data-variant="wide"
+              className={cn(
+                "h-7 max-w-full min-w-0 gap-1.5 rounded-md px-1.5 text-foreground",
+                className
+              )}
+            >
+              <span
+                aria-hidden
+                className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/15 text-[11px] font-semibold text-primary"
               >
-                {initial ? (
-                  <span className="text-sm font-semibold">{initial}</span>
-                ) : (
-                  <FolderIcon className="size-5" />
-                )}
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="right">{triggerLabel}</TooltipContent>
-        </Tooltip>
+                {initial ?? <FolderIcon className="size-3.5" />}
+              </span>
+              <span className="truncate text-sm font-semibold tracking-tight">
+                {active?.name ?? t("none")}
+              </span>
+              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            </Button>
+          </PopoverTrigger>
+        ) : (
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={triggerLabel}
+                  data-testid="workspace-switcher"
+                  className={cn(
+                    "size-10 rounded-2xl text-muted-foreground transition-all hover:rounded-xl hover:text-foreground",
+                    className
+                  )}
+                >
+                  {initial ? (
+                    <span className="text-sm font-semibold">{initial}</span>
+                  ) : (
+                    <FolderIcon className="size-5" />
+                  )}
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="right">{triggerLabel}</TooltipContent>
+          </Tooltip>
+        )}
 
-        <PopoverContent side="right" align="start" className="w-72 p-1">
+        <PopoverContent side={wide ? "bottom" : "right"} align="start" className="w-72 p-1">
           <div className="flex items-center justify-between gap-2 px-2 py-1.5">
             <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
               {t("heading")}

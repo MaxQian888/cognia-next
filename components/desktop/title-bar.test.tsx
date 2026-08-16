@@ -1810,7 +1810,12 @@ function renderProjecting(zones: Array<"start" | "center" | "end">) {
 
 describe("column-header projection", () => {
   beforeEach(() => {
-    act(() => useShellColumnsStore.setState({ widths: { sidebar: 0, dock: 0 } }))
+    act(() =>
+      useShellColumnsStore.setState({
+        widths: { rail: 0, sidebar: 0, dock: 0 },
+        sidebarHostsNav: false,
+      })
+    )
   })
 
   test("outlets stay hidden and empty until something projects", async () => {
@@ -1836,18 +1841,35 @@ describe("column-header projection", () => {
   test("hosts the conversation-rail header in the start outlet, sized to the rail below", async () => {
     isTauriMock.mockReturnValue(true)
     setPlatform("Win32")
-    act(() => useShellColumnsStore.getState().setColumnWidth("sidebar", 296))
+    act(() => {
+      useShellColumnsStore.getState().setColumnWidth("rail", 56)
+      useShellColumnsStore.getState().setColumnWidth("sidebar", 296)
+    })
     renderProjecting(["start"])
     const start = await screen.findByTestId("title-bar-outlet-start")
     await waitFor(() => expect(start).toContainElement(screen.getByTestId("projected-start")))
     expect(start).not.toHaveAttribute("hidden")
-    // nav rail 64 + conversation rail 296, less the bar's own `pl-2` (8) and
-    // the (jsdom-zero) width of the chrome ahead of the outlet.
-    expect(start).toHaveStyle({ width: "352px" })
+    // measured nav rail 56 + conversation rail 296, less the bar's own `pl-2`
+    // (8) and the (jsdom-zero) width of the chrome ahead of the outlet.
+    expect(start).toHaveStyle({ width: "344px" })
     // The Windows/Linux menubar folds into the hamburger so it cannot sit over
     // the conversation rail's column.
     expect(screen.getByTestId("title-bar-hamburger")).toBeInTheDocument()
     expect(screen.queryByText("desktop.menu.file.label")).toBeNull()
+    // The sidebar's header names the workspace (its switcher), so the centre's
+    // workspace pill steps aside while the start zone is projected.
+    expect(screen.queryByTestId("title-bar-workspace-seg")).toBeNull()
+  })
+
+  test("with the rail hidden (sidebar hosting the navigation) the start outlet spans the sidebar alone", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    // The rail reports 0 while unmounted; the outlet is offset by what it draws.
+    act(() => useShellColumnsStore.getState().setColumnWidth("sidebar", 296))
+    renderProjecting(["start"])
+    const start = await screen.findByTestId("title-bar-outlet-start")
+    await waitFor(() => expect(start).toContainElement(screen.getByTestId("projected-start")))
+    expect(start).toHaveStyle({ width: "288px" })
   })
 
   test("with the chat header in the centre, the header leads and the bar's segments follow it", async () => {
@@ -1866,11 +1888,12 @@ describe("column-header projection", () => {
     expect(center.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // The pill goes compact beside a title it would otherwise repeat.
     expect(search).toHaveAttribute("data-compact", "true")
-    // The chat header carries the sidebar and dock toggles, so the bar's own
-    // copies step aside; the secondary-sidebar toggle has no twin and stays.
+    // The chat header carries the conversation-list toggle and the artifact
+    // dock ("right sidebar") toggle, so the bar's own copies step aside; the
+    // terminal-panel toggle has no twin in that header and stays.
     expect(screen.queryByTestId("title-bar-toggle-sidebar")).toBeNull()
-    expect(screen.queryByTestId("title-bar-toggle-panel")).toBeNull()
-    expect(screen.getByTestId("title-bar-toggle-right-sidebar")).toBeInTheDocument()
+    expect(screen.queryByTestId("title-bar-toggle-right-sidebar")).toBeNull()
+    expect(screen.getByTestId("title-bar-toggle-panel")).toBeInTheDocument()
     // Start and end are still idle.
     expect(screen.getByTestId("title-bar-outlet-start")).toHaveAttribute("hidden")
     expect(screen.getByTestId("title-bar-outlet-end")).toHaveAttribute("hidden")

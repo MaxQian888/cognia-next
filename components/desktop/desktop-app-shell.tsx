@@ -26,6 +26,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/shell/guild-rail"
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { TitleBarOutletsProvider } from "@/components/shell/title-bar-outlets"
 import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
@@ -85,6 +86,10 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // View menu collapse toggles. Both default to `false` (visible). Persisted
   // by the ui-store so the choice sticks across reloads.
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
+  // The expanded workspace sidebar hosts the shell navigation as rows
+  // (`components/shell/sidebar-nav-section.tsx`); while it does, the 56px
+  // icon column is its collapsed twin and stays off screen.
+  const sidebarHostsNav = useShellColumnsStore((s) => s.sidebarHostsNav)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
 
   // Which edge the rail occupies. Selected as a scalar rather than through
@@ -155,9 +160,10 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // Rendered on whichever edge `sidebarSide` names — outermost either way, so
   // the rail is pinned to the window edge and never shifts when the (transient,
   // plugin-driven) extension host bar appears beside it.
-  const guildRail = guildRailCollapsed ? null : (
-    <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
-  )
+  const guildRail =
+    guildRailCollapsed || sidebarHostsNav ? null : (
+      <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
+    )
 
   return (
     // The provider is what lets the chat workspace's column headers render into

@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useSyncExternalStore } from "react"
+import { createContext, useContext, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
@@ -18,7 +18,7 @@ import { avatarColor } from "@/lib/ui/avatar"
 import { listTeams } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
 import { useClientLiveQuery } from "@/hooks/data"
-import { useUIStore } from "@/stores/ui"
+import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import type { Team } from "@cognia/agent-config-types"
 import {
   EllipsisIcon,
@@ -32,22 +32,12 @@ import {
   SlidersHorizontalIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { usePathname, useRouter } from "next/navigation"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
-import {
-  getViewContainerSnapshot,
-  subscribeViewContainers,
-} from "@/lib/plugin/registries/view-container-registry"
-import {
-  evaluateContextWhen,
-  getContextKeyRevision,
-  subscribeContextKeys,
-} from "@/lib/plugin/context-keys/context-key-store"
-import { useSidebarLayout } from "./use-sidebar-layout"
+import { useShellNav } from "./use-shell-nav"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { WorkspaceSwitcher } from "./workspace-switcher"
 import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
@@ -84,8 +74,14 @@ interface Props {
 }
 
 /**
- * The 64px-wide navigation rail. Discord-style top-level navigation extended
+ * The 56px-wide navigation rail. Discord-style top-level navigation extended
  * with route-aware feature buttons.
+ *
+ * It is also the *collapsed* form of the workspace sidebar: while the
+ * conversation rail is expanded on `/` it hosts these same destinations as
+ * labelled rows (`sidebar-nav-section.tsx`) and the shell hides this column
+ * (`sidebarHostsNav`); collapse the sidebar, or leave `/`, and the icon
+ * column is back. Both read `useShellNav`, so they cannot drift.
  *
  *   ┌───── DM · Canvas ──────┐ ← chat guilds (set selected guild + go to /)
  *   ├──── Pinned features ───┤ ← user-customizable; router.push to routes
@@ -105,25 +101,30 @@ interface Props {
 export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Props) {
   const t = useTranslations("desktop.guildRail")
   const pluginT = useTranslations()
-  const router = useRouter()
-  const pathname = usePathname() ?? "/"
-  const selected = useUIStore((s) => s.selectedGuild)
-  const setSelected = useUIStore((s) => s.setSelectedGuild)
   const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
-  // Plugin-contributed view containers (B1). Re-render on registry mutation
-  // and on context-key changes (the `when` filter reads the context store).
-  const viewContainers = useSyncExternalStore(
-    subscribeViewContainers,
-    getViewContainerSnapshot,
-    getViewContainerSnapshot
-  )
-  useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
-  const railContainers = viewContainers.filter(
-    (c) => c.def.location !== "panel" && evaluateContextWhen(c.def.when)
-  )
-  const { resolved, pin, unpin, hide, side } = useSidebarLayout()
+  const {
+    pathname,
+    isDmActive,
+    isCanvasActive,
+    isTeamActive,
+    isViewContainerActive,
+    isFeatureActive,
+    overflowActive,
+    railContainers,
+    layout: { resolved, pin, unpin, hide, side },
+    switchToDm,
+    switchToCanvas,
+    switchToTeam,
+    switchToViewContainer,
+    goToFeature,
+  } = useShellNav()
   const [moreOpen, setMoreOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
+  // The title bar sizes its start / end outlets from the rail's rendered
+  // width — measured, not assumed, so a hidden rail (below `md`, or while the
+  // sidebar hosts the navigation) counts as 0 without a second flag.
+  const asideRef = useRef<HTMLElement | null>(null)
+  useReportShellColumn("rail", asideRef)
 
   // Inside the mobile nav Sheet the rail is not on a window edge at all — it is
   // the drawer's leading column with the channel list to its right, so overlays
@@ -132,37 +133,6 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
   /** Where tooltips and the "More" popover open: inward, away from the edge. */
   const overlaySide = effectiveSide === "right" ? "left" : "right"
 
-  const onHomeRoute = pathname === "/"
-  const isDmActive = onHomeRoute && selected.kind === "dm"
-  const isCanvasActive = onHomeRoute && selected.kind === "canvas"
-
-  const isFeatureActive = (route: string) => pathname === route || pathname.startsWith(route + "/")
-  const overflowActive = resolved.overflow.some((item) => isFeatureActive(item.route))
-
-  const switchToDm = () => {
-    log.info("guild switch dm")
-    setSelected({ kind: "dm" })
-    if (!onHomeRoute) router.push("/")
-  }
-  const switchToCanvas = () => {
-    log.info("guild switch canvas")
-    setSelected({ kind: "canvas" })
-    if (!onHomeRoute) router.push("/")
-  }
-  const switchToTeam = (teamId: string) => {
-    log.info("guild switch team", { teamId })
-    setSelected({ kind: "team", teamId })
-    if (!onHomeRoute) router.push("/")
-  }
-  const switchToViewContainer = (containerId: string) => {
-    log.info("guild switch plugin-view", { containerId })
-    setSelected({ kind: "plugin-view", containerId })
-    if (!onHomeRoute) router.push("/")
-  }
-  const goToFeature = (route: string) => {
-    log.info("guild navigate feature", { route })
-    router.push(route)
-  }
   const openOverflowItem = (route: string) => {
     setMoreOpen(false)
     goToFeature(route)
@@ -183,6 +153,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
   return (
     <OverlaySideContext.Provider value={overlaySide}>
       <aside
+        ref={asideRef}
         // Tint, no border — on the left. Shell chrome (this rail, the title bar,
         // the status bar) separates from content by its `bg-muted/40` tone alone;
         // stacking a border on top of a tone difference draws the seam twice.
@@ -194,7 +165,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
         // disappears entirely. The border is what keeps a 64px navigation rail
         // and a 48px activity rail from reading as one 112px column.
         className={cn(
-          "h-full w-16 shrink-0 flex-col items-center bg-muted/40 py-2",
+          "h-full w-14 shrink-0 flex-col items-center bg-muted/40 py-2",
           effectiveSide === "right" && "border-l",
           variant === "sheet" ? "flex" : "hidden md:flex"
         )}
@@ -239,11 +210,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
               return (
                 <RailButton
                   key={c.fullId}
-                  active={
-                    onHomeRoute &&
-                    selected.kind === "plugin-view" &&
-                    selected.containerId === c.fullId
-                  }
+                  active={isViewContainerActive(c.fullId)}
                   ariaLabel={title}
                   tooltip={title}
                   onClick={() => switchToViewContainer(c.fullId)}
@@ -353,7 +320,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
                 <li key={team.id}>
                   <TeamButton
                     team={team}
-                    active={onHomeRoute && selected.kind === "team" && selected.teamId === team.id}
+                    active={isTeamActive(team.id)}
                     onSelect={() => switchToTeam(team.id)}
                   />
                 </li>

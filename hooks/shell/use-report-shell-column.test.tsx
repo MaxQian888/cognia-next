@@ -34,7 +34,7 @@ beforeAll(() => {
 beforeEach(() => {
   observers.length = 0
   width = 0
-  act(() => useShellColumnsStore.setState({ widths: { sidebar: 0, dock: 0 } }))
+  act(() => useShellColumnsStore.setState({ widths: { rail: 0, sidebar: 0, dock: 0 } }))
 })
 
 function Column({ column }: { column: "sidebar" | "dock" }) {
@@ -62,6 +62,6 @@ describe("useReportShellColumn", () => {
   it("keeps the two columns independent", () => {
     width = 400
     render(<Column column="dock" />)
-    expect(useShellColumnsStore.getState().widths).toEqual({ sidebar: 0, dock: 400 })
+    expect(useShellColumnsStore.getState().widths).toEqual({ rail: 0, sidebar: 0, dock: 400 })
   })
 })
