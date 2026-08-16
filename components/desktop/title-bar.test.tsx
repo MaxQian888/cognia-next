@@ -321,6 +321,7 @@ import {
   useTitleBarProjection,
 } from "@/components/shell/title-bar-outlets"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
+import { COMMAND_PALETTE_REQUEST_EVENT } from "@/lib/shell/command-palette-request"
 
 beforeEach(() => {
   resetNavHistory()
@@ -708,21 +709,21 @@ test("Edit > Copy delegates to document.execCommand", async () => {
   exec.mockRestore()
 })
 
-test("View > Command Palette dispatches Ctrl+K", async () => {
+test("View > Command Palette asks the palette to open", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
-  const seen: KeyboardEvent[] = []
-  const listener = (e: Event) => seen.push(e as KeyboardEvent)
-  window.addEventListener("keydown", listener)
+  const seen: unknown[] = []
+  const listener = (e: Event) => seen.push((e as CustomEvent).detail)
+  window.addEventListener(COMMAND_PALETTE_REQUEST_EVENT, listener)
   try {
     render(<TitleBar />)
     await waitFor(() => expect(screen.getByText("desktop.menu.view.label")).toBeInTheDocument())
     await user.click(screen.getByText("desktop.menu.view.label"))
     await user.click(await screen.findByText("desktop.menu.view.commandPalette"))
-    await waitFor(() => expect(seen.find((e) => e.key === "k" && e.ctrlKey)).toBeTruthy())
+    await waitFor(() => expect(seen).toHaveLength(1))
   } finally {
-    window.removeEventListener("keydown", listener)
+    window.removeEventListener(COMMAND_PALETTE_REQUEST_EVENT, listener)
   }
 })
 
@@ -907,40 +908,30 @@ test("shows the restore icon (and label) once the window is maximized", async ()
   await waitFor(() => expect(screen.getByLabelText("desktop.titleBar.restore")).toBeInTheDocument())
 })
 
-test("clicking the search pill dispatches Ctrl+K", async () => {
-  isTauriMock.mockReturnValue(true)
-  setPlatform("Win32")
+test("clicking the search pill asks the palette to open — on every platform, in and out of Tauri", async () => {
+  // It used to forge ⌘K / Ctrl+K and had to guess the modifier; the web shell
+  // (where `isMac` is deliberately false) sent Ctrl+K to a Mac palette that
+  // listens for ⌘K, and nothing opened. A request has no modifier to get wrong.
   const user = userEvent.setup()
-  const seen: KeyboardEvent[] = []
-  const listener = (e: Event) => seen.push(e as KeyboardEvent)
-  window.addEventListener("keydown", listener)
-  try {
-    render(<TitleBar />)
-    await waitFor(() => expect(screen.getByTestId("title-bar-search-pill")).toBeInTheDocument())
-    await user.click(screen.getByTestId("title-bar-search-pill"))
-    expect(seen.some((e) => e.key === "k" && e.ctrlKey)).toBe(true)
-  } finally {
-    window.removeEventListener("keydown", listener)
-  }
-})
-
-test("clicking the search pill on Mac dispatches Cmd+K (metaKey, not ctrlKey)", async () => {
-  // The command palette's global listener keys off `metaKey` on macOS and
-  // `ctrlKey` elsewhere. A synthetic dispatch must therefore carry the
-  // platform-correct modifier or the palette never opens from the title bar.
-  isTauriMock.mockReturnValue(true)
-  setPlatform("MacIntel")
-  const user = userEvent.setup()
-  const seen: KeyboardEvent[] = []
-  const listener = (e: Event) => seen.push(e as KeyboardEvent)
-  window.addEventListener("keydown", listener)
-  try {
-    render(<TitleBar />)
-    await waitFor(() => expect(screen.getByTestId("title-bar-search-pill")).toBeInTheDocument())
-    await user.click(screen.getByTestId("title-bar-search-pill"))
-    expect(seen.some((e) => e.key === "k" && e.metaKey && !e.ctrlKey)).toBe(true)
-  } finally {
-    window.removeEventListener("keydown", listener)
+  for (const [tauri, platform] of [
+    [true, "Win32"],
+    [true, "MacIntel"],
+    [false, "MacIntel"],
+  ] as const) {
+    isTauriMock.mockReturnValue(tauri)
+    setPlatform(platform)
+    const seen: unknown[] = []
+    const listener = (e: Event) => seen.push((e as CustomEvent).detail)
+    window.addEventListener(COMMAND_PALETTE_REQUEST_EVENT, listener)
+    const view = render(<TitleBar />)
+    try {
+      await waitFor(() => expect(screen.getByTestId("title-bar-search-pill")).toBeInTheDocument())
+      await user.click(screen.getByTestId("title-bar-search-pill"))
+      expect(seen).toHaveLength(1)
+    } finally {
+      window.removeEventListener(COMMAND_PALETTE_REQUEST_EVENT, listener)
+      view.unmount()
+    }
   }
 })
 
@@ -1561,20 +1552,20 @@ test.each([
 // Tools menu
 // ---------------------------------------------------------------------------
 
-test("Tools > Command Palette dispatches Ctrl+K", async () => {
+test("Tools > Command Palette asks the palette to open", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
-  const seen: KeyboardEvent[] = []
-  const listener = (e: Event) => seen.push(e as KeyboardEvent)
-  window.addEventListener("keydown", listener)
+  const seen: unknown[] = []
+  const listener = (e: Event) => seen.push((e as CustomEvent).detail)
+  window.addEventListener(COMMAND_PALETTE_REQUEST_EVENT, listener)
   try {
     const user = userEvent.setup()
     render(<TitleBar />)
     await user.click(await screen.findByText("desktop.menu.tools.label"))
     await user.click(await screen.findByText("desktop.menu.tools.commandPalette"))
-    expect(seen.some((e) => e.key === "k" && e.ctrlKey)).toBe(true)
+    expect(seen).toHaveLength(1)
   } finally {
-    window.removeEventListener("keydown", listener)
+    window.removeEventListener(COMMAND_PALETTE_REQUEST_EVENT, listener)
   }
 })
 

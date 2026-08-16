@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl"
 import { FolderIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { useProjectStore } from "@/stores/project/project-store"
 
@@ -32,9 +33,9 @@ export function TitleBarWorkspace({ className }: { className?: string }) {
   const primary = primaryRootOf(active)
   const name = active.name.trim() || (primary ? basename(primary.path) : t("workspaceUntitled"))
 
-  const openCommandPalette = () => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))
-  }
+  // Not a forged ⌘K: that keystroke was hard-wired to `ctrlKey`, so on macOS
+  // the palette (which listens for ⌘) never opened from this pill.
+  const openCommandPalette = () => requestCommandPalette()
 
   return (
     <button

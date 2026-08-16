@@ -44,6 +44,7 @@ import {
 import { listSessions } from "@/lib/db/sessions"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
+import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 import { useElementWidth } from "@/hooks/use-element-width"
 import {
   useTitleBarOutletRef,
@@ -422,13 +423,11 @@ export function TitleBar() {
 
   const handleCommandPalette = () => {
     log.info("title-bar menu command-palette")
-    // The command palette's global listener keys off the platform-native
-    // modifier — `metaKey` (⌘) on macOS, `ctrlKey` elsewhere. The synthetic
-    // dispatch must mirror that or clicking the search pill / menu item never
-    // opens the palette on Mac (see command-palette.tsx).
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "k", ctrlKey: !isMac, metaKey: isMac })
-    )
+    // Ask the palette directly instead of forging ⌘K / Ctrl+K: the keystroke
+    // had to guess the platform modifier, and in the web shell `isMac` is
+    // deliberately false (no window chrome), so a Mac browser sent Ctrl+K to a
+    // palette listening for ⌘K and nothing opened.
+    requestCommandPalette()
   }
   const handleToggleSidebar = () => {
     log.info("title-bar menu toggle-sidebar")

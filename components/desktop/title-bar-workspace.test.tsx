@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import { COMMAND_PALETTE_REQUEST_EVENT } from "@/lib/shell/command-palette-request"
 import type { Project } from "@/types"
 
 jest.mock("next-intl", () => ({
@@ -67,15 +68,17 @@ describe("TitleBarWorkspace", () => {
 
   it("opens the command palette on click", () => {
     mockState = { projects: [project("p1", "Cognia")], activeProjectId: "p1" }
-    const seen: KeyboardEvent[] = []
-    const listener = (e: Event) => seen.push(e as KeyboardEvent)
-    window.addEventListener("keydown", listener)
+    // Through the palette's request seam, not a forged keystroke: the old
+    // Ctrl+K dispatch never opened the ⌘K-listening palette on macOS.
+    const seen: unknown[] = []
+    const listener = (e: Event) => seen.push((e as CustomEvent).detail)
+    window.addEventListener(COMMAND_PALETTE_REQUEST_EVENT, listener)
     try {
       render(<TitleBarWorkspace />)
       fireEvent.click(screen.getByTestId("title-bar-workspace"))
-      expect(seen.some((e) => e.key === "k" && e.ctrlKey)).toBe(true)
+      expect(seen).toHaveLength(1)
     } finally {
-      window.removeEventListener("keydown", listener)
+      window.removeEventListener(COMMAND_PALETTE_REQUEST_EVENT, listener)
     }
   })
 })
