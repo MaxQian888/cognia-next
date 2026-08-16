@@ -101,6 +101,8 @@ describe("isStructuredEditableTaskType", () => {
 
   it("excludes non-structured types", () => {
     expect(isStructuredEditableTaskType("backup")).toBe(false)
-    expect(isStructuredEditableTaskType("workflow")).toBe(false)
+    expect(isStructuredEditableTaskType("script")).toBe(false)
+    // `workflow` / `im-push` gained structured editors in ADR-0128.
+    expect(isStructuredEditableTaskType("workflow")).toBe(true)
   })
 })

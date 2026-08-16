@@ -365,7 +365,10 @@ Description=Timer for Cognia Task: {}
                 validate_open_url(url).map_err(SchedulerError::InvalidConfig)?;
                 // `xdg-open` hands the URL to the registered handler (the
                 // Cognia desktop app for `cognia://`, the browser for https).
-                Ok((format!("xdg-open {}", url), None, HashMap::new()))
+                // Absolute path: systemd < 239 rejects a bare program name in
+                // `ExecStart=`. `validate_open_url` already rejects `%`, so
+                // no specifier escaping is needed on the URL.
+                Ok((format!("/usr/bin/xdg-open {}", url), None, HashMap::new()))
             }
         }
     }
@@ -939,11 +942,20 @@ mod tests {
                 url: "cognia://scheduler/task/abc?run=tok".to_string(),
             })
             .unwrap();
-        assert_eq!(exec_start, "xdg-open cognia://scheduler/task/abc?run=tok");
+        assert_eq!(
+            exec_start,
+            "/usr/bin/xdg-open cognia://scheduler/task/abc?run=tok"
+        );
         assert!(working_dir.is_none());
         assert!(env.is_empty());
         let err = LinuxScheduler::build_exec_start(&SystemTaskAction::OpenUrl {
             url: "cognia://a b".to_string(),
+        })
+        .unwrap_err();
+        assert!(matches!(err, SchedulerError::InvalidConfig(_)));
+        // `%` is a systemd specifier — refused before it can reach the unit.
+        let err = LinuxScheduler::build_exec_start(&SystemTaskAction::OpenUrl {
+            url: "cognia://a%h".to_string(),
         })
         .unwrap_err();
         assert!(matches!(err, SchedulerError::InvalidConfig(_)));

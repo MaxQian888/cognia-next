@@ -1,3 +1,8 @@
+//! Test module for `companion_api::rpc` — included from `rpc.rs` behind
+//! `#[cfg(test)] mod tests;`; the inner attribute below keeps the file itself
+//! test-only when compiled through any other path.
+#![cfg(test)]
+
 use super::*;
 use crate::companion_api::{
     deny_list::DenyList, idempotency::IdempotencyCache, jwt::issue_device_jwt, CompanionState,

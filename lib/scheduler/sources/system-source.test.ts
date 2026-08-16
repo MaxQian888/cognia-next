@@ -109,6 +109,16 @@ describe("createSystemSource", () => {
     expect(await source.list()).toEqual([])
   })
 
+  it("defaults availability to the local host's desktop-shell capability", async () => {
+    // jsdom / node test hosts are neither Tauri nor headless: no desktop shell,
+    // so the default gate (no `isAvailable` injected) yields an empty list
+    // without touching the native adapter.
+    const stubs = makeStubs()
+    const source = createSystemSource({ native: stubs.native, pollIntervalMs: 0 })
+    expect(await source.list()).toEqual([])
+    expect(stubs.native.listSystemTasks).not.toHaveBeenCalled()
+  })
+
   it("returns unified items when Tauri is available", async () => {
     const stubs = makeStubs()
     const source = createSystemSource({

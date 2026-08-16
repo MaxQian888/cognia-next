@@ -8,6 +8,7 @@ import {
   describeUnsupportedTaskType,
   getTaskTypeHostSupport,
   hostSatisfies,
+  isCardAuthoredTaskType,
   isDeprecatedTaskType,
   unsupportedOnHost,
   type SchedulerHostDescriptor,
@@ -147,5 +148,14 @@ describe("host-support matrix", () => {
     // In jsdom/node tests the platform is "web": only the webview baseline.
     expect(local.capabilities).toContain("webview")
     expect(getTaskTypeHostSupport("test").supported).toBe(true)
+  })
+
+  describe("isCardAuthoredTaskType", () => {
+    it("recognises card-authored types and nothing else", () => {
+      expect(isCardAuthoredTaskType("twin")).toBe(true)
+      expect(isCardAuthoredTaskType("connection:presence:refresh")).toBe(true)
+      expect(isCardAuthoredTaskType("chat")).toBe(false)
+      expect(isCardAuthoredTaskType("nope")).toBe(false)
+    })
   })
 })

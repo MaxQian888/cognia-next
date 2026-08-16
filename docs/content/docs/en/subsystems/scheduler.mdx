@@ -17,8 +17,8 @@ description: A cross-platform scheduler that promotes tasks from in-app cron to 
   <Stat label="Trigger types" value="4" hint="cron · interval · once · event" />
   <Stat
     label="Built-in executors"
-    value="6"
-    hint="claude-send · shell · script · backup · twin · plugin"
+    value="20+"
+    hint="chat · agent · script · workflow · im-push · backup · plugin · test · …"
   />
   <Stat label="Native platforms" value="3" hint="Windows · macOS · Linux" />
   <Stat label="History cap" value="200" hint="per task" />
@@ -190,29 +190,59 @@ This surfaces in the workbench's "Create with AI" panel.
 
 ## Executors
 
-Built-in executors:
+`registerBuiltInExecutors()` in `lib/scheduler/executors/index.ts` registers every built-in executor. All chat-like types (chat / agent / skill / goal / plan / agent-team) go through the same `resolveSendOptions` pipeline the interactive composer uses, so a scheduled prompt has exactly the semantics of a manual send.
 
-| Executor                       | Where                                                                                                                  |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `claude-send`                  | `executors/claude-send.ts` — sends a templated message via `claude_send`                                               |
-| `shell`                        | `executors/shell.ts` → `lib/native/local-runtime.ts` → `src-tauri/src/shell.rs`; gated by trusted-workspace allow-list |
-| `script`                       | `executors/script.ts` → `script-executor.ts` (sandboxed JS via `lib/sandbox/`)                                         |
-| `backup`                       | `executors/backup.ts` — calls `lib/data/build-package` + encrypt                                                       |
-| `twin-ingest` / `twin-distill` | `executors/twin-*.ts` — enqueue to the twin job worker                                                                 |
-| `plugin`                       | `executors/plugin.ts` — invoke a plugin's scheduled job (see [Plugin system](./plugin-system))                         |
+| Type                                                     | Purpose                                                                                                        | Key dependency                                                                          |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `chat` / `agent` / `skill`                               | Run one Claude turn (optionally with a bound persona / one-shot skill)                                         | `lib/claude/ipc.sendPrompt` + `resolveSendOptions`                                      |
+| `goal` / `plan` / `agent-team`                           | Advance a goal, run a plan, or launch a built-in team                                                          | ADR-0019 / ADR-0022 runtimes                                                            |
+| `external-agent`                                         | Hand the task to an ACP external agent (Claude Desktop, Cursor, …)                                             | `lib/ai/agent/external/manager.executeOnExternalAgent`                                  |
+| `script` / `background-command` / `monitor`              | Run a user script or command through the host shell                                                            | `script-executor.ts` (`shell_exec` on desktop, jobs supervisor on headless)             |
+| `workflow`                                               | Run a published visual workflow with `triggeredBy.source = "schedule"`                                         | `executeDeployedWorkflow` (ADR-0011)                                                    |
+| `im-push`                                                | Push a message into a bound IM conversation through the governed outbound queue                                | `enqueueGoverned` + `hasNoLeakingPii` + per-conversation `proactivePush` opt-in         |
+| `backup`                                                 | Build + encrypt a snapshot and fan it out to every configured destination (local, WebDAV / S3, GitHub, Drive)  | `lib/data/destinations/`, `lib/data/backup-host-filesystem.ts`                          |
+| `wiki-rebuild` / `wiki-lint`                             | Rebuild / lint the wiki (needs a host filesystem)                                                              | `lib/wiki/rebuild-runner.ts`                                                            |
+| `plugin`                                                 | Fire a plugin-registered scheduled job (see [Plugin system](./plugin-system))                                  | `executors/plugin-executor.ts`                                                          |
+| `twin`, `connection:*`, `github-issue-sync`              | Card-authored types (created by their own subsystem, not by the form)                                          | their subsystem                                                                         |
+| `test`                                                   | Diagnostic: echoes its payload to validate the trigger chain end-to-end on any host                            | `executors/test-executor.ts`                                                            |
+| `custom`                                                 | Fails with `EXECUTOR_NOT_FOUND` unless a handler was registered                                                | `registerTaskExecutor("custom-<name>", fn)`                                             |
+| `sync`, `ai-generation`                                  | **Deprecated** — no executor; existing rows are auto-paused at init and labelled in the detail view            | —                                                                                       |
 
 Each executor returns:
 
 ```ts
-interface ExecutorResult {
-  status: "success" | "failure"
-  output?: string
+interface TaskExecutorResult {
+  success: boolean
+  output?: Record<string, unknown>
   error?: string
-  durationMs: number
+  /** "unsupported-on-host" | "deprecated-type" | "executor-not-found" | … */
+  terminalReason?: string
 }
 ```
 
 Results are written to `schedulerHistory` (capped at 200 newest per task).
+
+## Which host runs a task (ADR-0128)
+
+Placement is **host-owned**: the desktop, the headless brain (`cognia-server`), and a web / companion webview each keep their own `CogniaSchedulerDB`, and nothing hands tasks between hosts. What differs is which types a host can *run*. `lib/scheduler/host-support.ts` declares the requirement per type; the executor refuses with a structured `unsupported-on-host` result, and the task form shows unsupported types **disabled with the reason** (never hidden).
+
+| Type                                                     | Requires            | Desktop | Headless brain | Web / companion webview |
+| -------------------------------------------------------- | ------------------- | ------- | -------------- | ----------------------- |
+| `chat` `agent` `skill` `goal` `plan` `agent-team`        | `sidecar`           | ✓       | ✓              | ✗                       |
+| `external-agent` `script` `background-command` `monitor` | `shell`             | ✓       | ✓              | ✗                       |
+| `backup` `wiki-rebuild`                                  | `host-filesystem`   | ✓       | ✓              | ✗                       |
+| `im-push`                                                | `connector-runtime` | ✓       | ✓              | ✗                       |
+| `workflow` `test` `plugin` `custom` (with handler)       | —                   | ✓       | ✓              | ✓                       |
+| `system` (native OS tasks)                               | `desktop-shell`     | ✓       | ✗              | ✗                       |
+| `sync` `ai-generation`                                   | deprecated          | paused  | paused         | paused                  |
+
+Timing drivers follow the host too: the Rust daemon on Tauri, `NodeTimingDriver` on headless, the renderer loop + tab lock on web / mobile.
+
+**Which schedule the page manages.** A client can look at two schedules: `local` (this device) and `paired` (the host it drives or is paired with, via the `scheduled_task_*` companion RPCs). Companions and a desktop driving a remote host default to `paired`; the scheduler page's **host bar** says which one you are managing and lets you switch (`lib/scheduler/scheduler-host-target.ts`). The type picker resolves the *target* host's capabilities through the `host_capabilities` RPC.
+
+**Headless bridges.** Workflow triggers on the brain arrive through the Companion `subscribe` control frame (`lib/headless/runtimes/workflow-trigger-bridge.ts`); toast / OS notifications raised on the brain are published once through `remote_notification_publish` and ingested into the local notification center by connected clients (`lib/notifications/remote-subscription.ts`).
+
+**OS promotion is wake-and-delegate.** A promoted task's native entry opens `cognia://scheduler/task/<id>?run=<token>`; the app verifies the token and runs the task through the ordinary in-app executor, so promoted and in-app runs never diverge. Headless hosts do not promote (they are always on).
 
 ## Notifications
 

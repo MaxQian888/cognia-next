@@ -169,32 +169,59 @@ flowchart TB
 
 ## 内置 executor
 
-`lib/scheduler/executors/index.ts` 中的 `registerBuiltInExecutors()` 注册下表全部 9 个内置 executor。所有的 chat 类（chat / agent / skill）都通过同一份 `resolveSendOptions` 流水线，复用交互式 Composer 使用的角色 / agent mode / 技能 / 工具 / MCP / 内置工具配置 —— 调度任务跑出的提示词与人工发送的语义完全一致。
+`lib/scheduler/executors/index.ts` 中的 `registerBuiltInExecutors()` 注册全部内置 executor。所有 chat 类（chat / agent / skill / goal / plan / agent-team）都通过同一份 `resolveSendOptions` 流水线，复用交互式 Composer 使用的角色 / agent mode / 技能 / 工具 / MCP / 内置工具配置 —— 调度任务跑出的提示词与人工发送的语义完全一致。
 
-| executor 标签    | 用途                                                  | 关键依赖                                                                      |
-| ---------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `chat`           | 跑一次普通的 Claude 会话（无绑定角色）                | `lib/claude/ipc.sendPrompt` + `resolveSendOptions`                            |
-| `agent`          | chat + 绑定的角色（"agent persona"）                  | 同上 + `characterId`                                                          |
-| `skill`          | chat + 一项临时技能叠加                               | 同上 + 单次技能注入                                                           |
-| `external-agent` | 把任务派给 ACP 外部 agent（Claude Desktop、Cursor……） | `lib/ai/agent/external/manager.executeOnExternalAgent`                        |
-| `script`         | 通过受信任工作区跑用户脚本                            | `lib/scheduler/script-executor.ts` → `shell_exec`（`src-tauri/src/shell.rs`） |
-| `plugin`         | 触发插件注册的定时任务                                | `executors/plugin-executor.ts`（见[插件系统](./plugin-system)）               |
-| `backup`         | 构建 + 加密一份备份并写入 `appDataDir()/backups/`     | `executors/backup-executor.ts` + `lib/data/build-package`                     |
-| `twin`           | 入队孪生 ingest 或 distill 任务                       | `executors/twin-executor.ts`                                                  |
-| `custom`         | 默认 no-op；用户可注册自定义实现                      | `registerTaskExecutor("custom-<name>", fn)`                                   |
+| 类型                                                     | 用途                                                                                        | 关键依赖                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `chat` / `agent` / `skill`                               | 跑一次 Claude 会话（可绑定角色 / 单次技能）                                                | `lib/claude/ipc.sendPrompt` + `resolveSendOptions`                             |
+| `goal` / `plan` / `agent-team`                           | 推进目标、执行计划或启动内置团队                                                            | ADR-0019 / ADR-0022 运行时                                                     |
+| `external-agent`                                         | 把任务派给 ACP 外部 agent（Claude Desktop、Cursor……）                                       | `lib/ai/agent/external/manager.executeOnExternalAgent`                         |
+| `script` / `background-command` / `monitor`              | 通过主机 shell 跑用户脚本或命令                                                             | `script-executor.ts`（桌面走 `shell_exec`，无头走 jobs supervisor）             |
+| `workflow`                                               | 以 `triggeredBy.source = "schedule"` 运行已发布的可视化工作流                               | `executeDeployedWorkflow`（ADR-0011）                                          |
+| `im-push`                                                | 经治理出站队列向绑定的 IM 会话推送消息                                                      | `enqueueGoverned` + `hasNoLeakingPii` + 每会话 `proactivePush` 选择加入         |
+| `backup`                                                 | 构建 + 加密快照并扇出到所有已配置目的地（本地、WebDAV / S3、GitHub、Drive）                 | `lib/data/destinations/`、`lib/data/backup-host-filesystem.ts`                 |
+| `wiki-rebuild` / `wiki-lint`                             | 重建 / 检查 wiki（需要主机文件系统）                                                        | `lib/wiki/rebuild-runner.ts`                                                   |
+| `plugin`                                                 | 触发插件注册的定时任务（见[插件系统](./plugin-system)）                                     | `executors/plugin-executor.ts`                                                 |
+| `twin`、`connection:*`、`github-issue-sync`              | 卡片创作类型（由各自子系统创建，不经表单）                                                  | 各自子系统                                                                     |
+| `test`                                                   | 诊断：回显 payload，在任意主机上端到端验证触发链                                            | `executors/test-executor.ts`                                                   |
+| `custom`                                                 | 未注册处理器时以 `EXECUTOR_NOT_FOUND` 失败                                                  | `registerTaskExecutor("custom-<name>", fn)`                                    |
+| `sync`、`ai-generation`                                  | **已弃用** —— 无 executor；现有行在初始化时自动暂停并在详情视图标注                         | —                                                                              |
 
 每个 executor 返回：
 
 ```ts
-interface ExecutorResult {
+interface TaskExecutorResult {
   success: boolean
   output?: Record<string, unknown>
   error?: string
-  durationMs?: number
+  /** "unsupported-on-host" | "deprecated-type" | "executor-not-found" | … */
+  terminalReason?: string
 }
 ```
 
 结果写入 `schedulerHistory`（每任务最多 200 行）。
+
+## 任务在哪台主机上跑（ADR-0128）
+
+归属是**主机自有**的：桌面、无头大脑（`cognia-server`）与 web / 伴侣 webview 各自维护自己的 `CogniaSchedulerDB`，任务不在主机间交接。差别在于主机能*运行*哪些类型。`lib/scheduler/host-support.ts` 按类型声明需求；executor 以结构化的 `unsupported-on-host` 结果拒绝，任务表单把不支持的类型**禁用并给出原因**（从不隐藏）。
+
+| 类型                                                     | 需要                | 桌面 | 无头大脑 | Web / 伴侣 webview |
+| -------------------------------------------------------- | ------------------- | ---- | -------- | ------------------ |
+| `chat` `agent` `skill` `goal` `plan` `agent-team`        | `sidecar`           | ✓    | ✓        | ✗                  |
+| `external-agent` `script` `background-command` `monitor` | `shell`             | ✓    | ✓        | ✗                  |
+| `backup` `wiki-rebuild`                                  | `host-filesystem`   | ✓    | ✓        | ✗                  |
+| `im-push`                                                | `connector-runtime` | ✓    | ✓        | ✗                  |
+| `workflow` `test` `plugin` `custom`（有处理器）          | —                   | ✓    | ✓        | ✓                  |
+| `system`（原生 OS 任务）                                  | `desktop-shell`     | ✓    | ✗        | ✗                  |
+| `sync` `ai-generation`                                   | 已弃用              | 暂停 | 暂停     | 暂停               |
+
+定时驱动同样跟随主机：Tauri 上是 Rust 守护进程，无头上是 `NodeTimingDriver`，web / 移动上是渲染端循环 + tab 锁。
+
+**页面管理哪份日程。** 客户端可以查看两份日程：`local`（本机）与 `paired`（它驱动或配对的主机，经 `scheduled_task_*` 伴侣 RPC）。伴侣与驱动远端主机的桌面默认 `paired`；调度器页面的**主机栏**说明当前管理的是哪一份并允许切换（`lib/scheduler/scheduler-host-target.ts`）。类型选择器通过 `host_capabilities` RPC 解析*目标*主机的能力。
+
+**无头桥接。** 大脑上的 workflow 触发经伴侣 `subscribe` 控制帧到达（`lib/headless/runtimes/workflow-trigger-bridge.ts`）；大脑上产生的 toast / OS 通知通过 `remote_notification_publish` 发布一次，由已连接客户端摄入本地通知中心（`lib/notifications/remote-subscription.ts`）。
+
+**OS 提升 = 唤醒并委托。** 提升任务的原生条目打开 `cognia://scheduler/task/<id>?run=<token>`；应用校验令牌后经普通应用内 executor 运行任务，提升运行与应用内运行永不分叉。无头主机不提升（常驻在线）。
 
 ## 注册自定义 executor
 

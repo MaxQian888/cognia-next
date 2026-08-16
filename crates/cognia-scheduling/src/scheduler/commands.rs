@@ -591,6 +591,29 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_validate_task_impl_surfaces_open_url_validation_errors() {
+        let state = SchedulerState::default();
+        let input = |url: &str| CreateSystemTaskInput {
+            name: "wake".to_string(),
+            description: None,
+            trigger: SystemTaskTrigger::Interval { seconds: 3600 },
+            action: SystemTaskAction::OpenUrl {
+                url: url.to_string(),
+            },
+            run_level: RunLevel::User,
+            tags: vec![],
+        };
+        let bad = scheduler_validate_task_impl(&state, input("file:///etc/passwd"));
+        assert!(!bad.valid);
+        assert!(bad
+            .errors
+            .iter()
+            .any(|e| e.contains("scheme") && e.contains("not allowed")));
+        let good = scheduler_validate_task_impl(&state, input("cognia://scheduler/task/1?run=t"));
+        assert!(good.valid, "{:?}", good.errors);
+    }
+
+    #[test]
     fn scheduler_validate_task_impl_adds_interval_and_script_warnings() {
         let state = SchedulerState::default();
         let result = scheduler_validate_task_impl(

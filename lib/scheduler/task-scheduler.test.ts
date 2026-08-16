@@ -3189,6 +3189,14 @@ describe("TaskScheduler", () => {
       )
 
       mockSchedulerDb.getTask.mockResolvedValue(makeTask())
+      port.getSchedulerCapabilities.mockResolvedValueOnce({
+        available: true,
+        backend: "legacy",
+        supported_actions: ["run_command"],
+      })
+      const noOpenUrl = await sched.promoteTask("task-p", { platform: "linux" })
+      expect(noOpenUrl.status).toBe("unavailable")
+      expect(noOpenUrl.status === "unavailable" && noOpenUrl.reason).toMatch(/wake-up URLs/)
       port.getSchedulerCapabilities.mockResolvedValueOnce({ available: false, backend: "none" })
       expect((await sched.promoteTask("task-p", { platform: "linux" })).status).toBe("unavailable")
       port.getSchedulerCapabilities.mockRejectedValueOnce(new Error("ipc down"))

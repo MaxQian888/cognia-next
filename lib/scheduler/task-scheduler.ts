@@ -1095,7 +1095,7 @@ class TaskSchedulerImpl {
       return { status: "promoted", task, systemTaskId: task.promotion.systemTaskId }
     }
     const port = this.systemSchedulerPort ?? (await loadNativeSystemScheduler())
-    let capabilities: { available: boolean; backend: string }
+    let capabilities: { available: boolean; backend: string; supported_actions?: string[] }
     try {
       capabilities = await port.getSchedulerCapabilities()
     } catch (err) {
@@ -1103,6 +1103,18 @@ class TaskSchedulerImpl {
     }
     if (!capabilities.available) {
       return { status: "unavailable", reason: "The OS scheduler is not available on this host." }
+    }
+    // Wake-and-delegate needs the backend to open the `cognia://` wake URL.
+    // Backends that report their action set must include `open_url`; a report
+    // without the field predates the capability and is assumed to support it.
+    if (
+      Array.isArray(capabilities.supported_actions) &&
+      !capabilities.supported_actions.includes("open_url")
+    ) {
+      return {
+        status: "unavailable",
+        reason: `The ${capabilities.backend} scheduler backend cannot open wake-up URLs.`,
+      }
     }
     const mapped = promoteToSystemTask(task, options.platform, { token: options.token })
     if (!mapped.promotable || !mapped.input || !mapped.token) {

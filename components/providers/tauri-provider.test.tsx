@@ -59,6 +59,12 @@ jest.mock("@/lib/native/crash-context", () => ({
 }))
 jest.mock("@/lib/notifications/install", () => ({ installNotificationBridges: jest.fn() }))
 jest.mock("next-themes", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }))
+const routerPushMock = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPushMock }) }))
+const handlePromotedTaskWakeMock = jest.fn(async (..._args: unknown[]) => ({ ran: true }))
+jest.mock("@/lib/scheduler/promoted-wake", () => ({
+  handlePromotedTaskWake: (...args: unknown[]) => handlePromotedTaskWakeMock(...args),
+}))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), message: jest.fn() } }))
 
 jest.mock("@/stores/chat", () => ({
@@ -151,6 +157,27 @@ describe("<TauriProvider /> launch CLI args", () => {
 
     await waitFor(() => expect(getLaunchCliMock).not.toHaveBeenCalled())
     expect(startNewSessionMock).not.toHaveBeenCalled()
+  })
+
+  it("routes a cold-start scheduler wake-up link through the shared promoted-task handler", async () => {
+    getLaunchDeepLinkMock.mockResolvedValue([
+      "cognia://scheduler/task/task-9?run=tok-1",
+      "cognia://scheduler/",
+      "https://example.com/not-cognia",
+    ])
+    render(
+      <TauriProvider>
+        <div />
+      </TauriProvider>
+    )
+    await waitFor(() => expect(handlePromotedTaskWakeMock).toHaveBeenCalledTimes(1))
+    const [input, deps] = handlePromotedTaskWakeMock.mock.calls[0] as unknown as [
+      { taskId: string; runToken?: string },
+      { navigate: (path: string) => void },
+    ]
+    expect(input).toEqual({ taskId: "task-9", runToken: "tok-1" })
+    deps.navigate("/scheduler")
+    expect(routerPushMock).toHaveBeenCalledWith("/scheduler")
   })
 
   it("renders its children", () => {

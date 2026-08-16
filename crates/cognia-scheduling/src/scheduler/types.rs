@@ -213,14 +213,21 @@ pub enum SystemTaskAction {
 /// task cannot become a generic "run whatever the handler does" primitive.
 pub const OPEN_URL_ALLOWED_SCHEMES: &[&str] = &["cognia", "https", "http"];
 
-/// Validate an `OpenUrl` target: non-empty, no control chars/whitespace, an
-/// allow-listed scheme, and no shell metacharacters (the backends pass the URL
-/// as ONE argv entry, but a defensive check keeps `Command`-string backends
-/// honest too).
+/// Validate an `OpenUrl` target: non-empty, exactly as it will be executed
+/// (no surrounding whitespace — the backends consume the value verbatim), no
+/// control chars/whitespace, an allow-listed scheme, and no shell / unit-file
+/// metacharacters. This check is LOAD-BEARING for the Windows (`cmd /C start`)
+/// and Linux (`ExecStart=` line, where `%` is a systemd specifier and `^` is
+/// the cmd escape) backends, which build a command string rather than argv;
+/// macOS passes one argv entry but keeps the same rule so a URL is valid on
+/// every host.
 pub fn validate_open_url(url: &str) -> std::result::Result<(), String> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return Err("URL cannot be empty".to_string());
+    }
+    if trimmed.len() != url.len() {
+        return Err("URL must not have leading or trailing whitespace".to_string());
     }
     if trimmed.len() > 2048 {
         return Err("URL is too long (max 2048 bytes)".to_string());
@@ -228,7 +235,10 @@ pub fn validate_open_url(url: &str) -> std::result::Result<(), String> {
     if trimmed.chars().any(|c| {
         c.is_control()
             || c.is_whitespace()
-            || matches!(c, '"' | '\'' | '`' | '$' | '&' | '|' | ';' | '<' | '>')
+            || matches!(
+                c,
+                '"' | '\'' | '`' | '$' | '&' | '|' | ';' | '<' | '>' | '%' | '^' | '(' | ')'
+            )
     }) {
         return Err("URL contains characters that are not allowed".to_string());
     }
@@ -663,6 +673,14 @@ mod tests {
         assert!(validate_open_url("cognia://a;rm").is_err());
         assert!(validate_open_url("cognia://a\"b").is_err());
         assert!(validate_open_url(&format!("cognia://{}", "x".repeat(2100))).is_err());
+        // Backends consume the URL verbatim: surrounding whitespace is rejected
+        // rather than silently trimmed.
+        assert!(validate_open_url(" cognia://scheduler/task/abc").is_err());
+        assert!(validate_open_url("cognia://scheduler/task/abc\n").is_err());
+        // cmd.exe / systemd unit-file metacharacters.
+        assert!(validate_open_url("cognia://a%41").is_err());
+        assert!(validate_open_url("cognia://a^b").is_err());
+        assert!(validate_open_url("cognia://a(b)").is_err());
     }
 
     #[test]

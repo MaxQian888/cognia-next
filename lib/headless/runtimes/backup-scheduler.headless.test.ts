@@ -4,6 +4,7 @@ import { bootstrapHeadlessRuntimes } from "../bootstrap"
 import { __resetHeadlessRuntimesForTesting } from "../registry"
 import type { HeadlessRuntimeContext } from "../types"
 import { startBackupScheduler } from "@/lib/data/backup-scheduler"
+import { resolveBackupHostFilesystem } from "@/lib/data/backup-host-filesystem"
 
 const stop = jest.fn()
 jest.mock("@/lib/data/backup-scheduler", () => ({
@@ -60,8 +61,16 @@ it("boots the shared backup scheduler with the Node host filesystem and translat
     })
   )
 
+  // The scheduled `backup` executor's local leg resolves the same Node
+  // filesystem through the host seam while the runtime is up …
+  const host = await resolveBackupHostFilesystem()
+  expect(host?.kind).toBe("injected")
+  expect(host?.filesystem).toBe(filesystem)
+
   await result.stop()
   expect(stop).toHaveBeenCalledTimes(1)
+  // … and the seam is cleared again once the runtime stops.
+  expect(await resolveBackupHostFilesystem()).toBeNull()
 })
 
 it("fails visibly instead of silently disabling backups without a host filesystem", async () => {

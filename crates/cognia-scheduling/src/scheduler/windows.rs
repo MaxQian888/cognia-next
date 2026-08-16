@@ -420,14 +420,17 @@ impl WindowsScheduler {
             SystemTaskAction::OpenUrl { url } => {
                 validate_open_url(url).map_err(SchedulerError::InvalidConfig)?;
                 // `start` is a cmd.exe builtin; the empty "" is the window
-                // title argument so the URL is not mistaken for it.
+                // title argument so the URL is not mistaken for it. The URL is
+                // quoted as well so `?`/`=` never reach cmd's parser unquoted
+                // (`validate_open_url` bans `&|<>%^"` outright, so the quotes
+                // cannot be broken out of).
                 Ok((
                     "cmd.exe".to_string(),
                     vec![
                         "/C".to_string(),
                         "start".to_string(),
                         "\"\"".to_string(),
-                        url.clone(),
+                        format!("\"{}\"", url),
                     ],
                 ))
             }
@@ -1159,7 +1162,7 @@ mod tests {
                 "/C".to_string(),
                 "start".to_string(),
                 "\"\"".to_string(),
-                "cognia://scheduler/task/abc?run=tok".to_string()
+                "\"cognia://scheduler/task/abc?run=tok\"".to_string()
             ]
         );
         let err = WindowsScheduler::build_action_command(&SystemTaskAction::OpenUrl {
@@ -1167,6 +1170,14 @@ mod tests {
         })
         .unwrap_err();
         assert!(matches!(err, SchedulerError::InvalidConfig(_)));
+        // cmd metacharacters (`%VAR%` expansion, `^` escape) never reach `start`.
+        for bad in ["cognia://a%PATH%", "cognia://a^b", "cognia://a\"&calc"] {
+            let err = WindowsScheduler::build_action_command(&SystemTaskAction::OpenUrl {
+                url: bad.to_string(),
+            })
+            .unwrap_err();
+            assert!(matches!(err, SchedulerError::InvalidConfig(_)));
+        }
     }
 
     #[test]

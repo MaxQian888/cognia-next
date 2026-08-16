@@ -65,6 +65,10 @@
  * - `session-peer-runtime` — reachability is defined by renderer-open conversation panes
  *   and delivery appends into their live chat slices. Headless sessions are independently
  *   addressed through the brain transport and do not share this UI-local presence model.
+ * - `remote-notification-initializer` — the CLIENT-side ingest of
+ *   `notification://remote` frames into the local notification center; the
+ *   brain is the publisher (`lib/notifications/runtime.ts` →
+ *   `remote_notification_publish`) and must not subscribe to itself.
  */
 
 import "./desktop-sync-source"

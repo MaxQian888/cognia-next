@@ -351,6 +351,14 @@ describe("TaskForm", () => {
     expect(screen.getByTestId("task-type-host-warning")).toBeInTheDocument()
   })
 
+  it("never offers card-authored types in the picker", () => {
+    render(<TaskForm onSubmit={jest.fn(async () => undefined)} onCancel={jest.fn()} />)
+    expect(screen.queryByTestId("task-type-twin")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("task-type-wiki-lint")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("task-type-connection:presence:refresh")).not.toBeInTheDocument()
+    expect(screen.getByTestId("task-type-plugin")).toBeInTheDocument()
+  })
+
   it("enables every type on a full desktop host and hides the warning", () => {
     render(
       <TaskForm

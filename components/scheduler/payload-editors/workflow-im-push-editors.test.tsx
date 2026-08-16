@@ -1,16 +1,11 @@
 /**
  * @jest-environment jsdom
  *
- * Component + converter tests for the `workflow` and `im-push` structured
- * payload editors. The workflow list is injected through `loadWorkflows` so
- * no Dexie is touched; `useLiveQuery` is stubbed to run the loader once.
+ * Converter tests for the `workflow` and `im-push` structured payload drafts.
+ * Component tests live in `workflow-payload-editor.test.tsx` and
+ * `im-push-payload-editor.test.tsx`.
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { NextIntlClientProvider } from "next-intl"
-import { useState } from "react"
-import { WorkflowPayloadEditor } from "./workflow-payload-editor"
-import { ImPushPayloadEditor } from "./im-push-payload-editor"
 import {
   DraftValidationError,
   EMPTY_IM_PUSH_DRAFT,
@@ -21,82 +16,7 @@ import {
   payloadToWorkflowDraft,
   workflowDraftToPayload,
   type ImPushDraft,
-  type WorkflowDraft,
 } from "./types"
-
-const liveQueryState: { rows: unknown } = { rows: undefined }
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: (loader: () => Promise<unknown>) => {
-    // Resolve synchronously-ish for tests: kick the loader and expose the
-    // last resolved value through module state.
-    void Promise.resolve(loader()).then((rows) => {
-      liveQueryState.rows = rows
-    })
-    return liveQueryState.rows
-  },
-}))
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    workflows: { toArray: async () => [{ id: "wf-db", name: "From Dexie" }] },
-  }),
-}))
-
-const messages = {
-  scheduler: {
-    payload: {
-      workflow: {
-        workflowId: "Workflow",
-        workflowPlaceholder: "Pick a workflow",
-        noWorkflows: "No workflows",
-        workflowIdManual: "Workflow id",
-        workflowIdManualPlaceholder: "paste id",
-        unknownWorkflowHint: "unknown id",
-        deploymentHelp: "needs deployment",
-        environment: "Environment",
-        triggerId: "Trigger node id",
-        triggerIdPlaceholder: "Optional",
-        triggerIdHelp: "cron node",
-        inputs: "Inputs (JSON)",
-        inputsHelp: "payload",
-        idempotencyKey: "Idempotency key",
-        idempotencyKeyPlaceholder: "default",
-        idempotencyKeyHelp: "reuse",
-      },
-      imPush: {
-        conversationKey: "Conversation key",
-        conversationKeyPlaceholder: "lark:oc",
-        conversationKeyHelp: "bound conversation",
-        text: "Message",
-        textPlaceholder: "text",
-        textIgnoredHint: "ignored while segments",
-        segments: "Raw segments",
-        segmentsHelp: "advanced",
-        idempotencyKey: "Idempotency key",
-        idempotencyKeyPlaceholder: "default",
-        guardrails: "guardrails",
-      },
-      errors: {
-        workflowIdRequired: "Workflow is required",
-        inputsInvalidJson: "Inputs must be valid JSON",
-        conversationKeyRequired: "Conversation key is required",
-        segmentsInvalid: "Segments invalid",
-        imPushTextRequired: "Message text is required",
-      },
-    },
-  },
-}
-
-function wrap(ui: React.ReactNode) {
-  return (
-    <NextIntlClientProvider locale="en" messages={messages}>
-      {ui}
-    </NextIntlClientProvider>
-  )
-}
-
-beforeEach(() => {
-  liveQueryState.rows = undefined
-})
 
 describe("workflow converters", () => {
   it("round-trips a full payload", () => {
@@ -214,108 +134,5 @@ describe("im-push converters", () => {
     expect(isStructuredEditableTaskType("workflow")).toBe(true)
     expect(isStructuredEditableTaskType("im-push")).toBe(true)
     expect(isStructuredEditableTaskType("script")).toBe(false)
-  })
-})
-
-describe("WorkflowPayloadEditor", () => {
-  it("lists workflows from the loader and accepts a pasted id with a hint", async () => {
-    function Host() {
-      const [draft, setDraft] = useState<WorkflowDraft>({ ...EMPTY_WORKFLOW_DRAFT })
-      return (
-        <WorkflowPayloadEditor
-          draft={draft}
-          onDraftChange={setDraft}
-          loadWorkflows={async () => [{ id: "wf-a", name: "Alpha" }]}
-        />
-      )
-    }
-    render(wrap(<Host />))
-    await waitFor(() => expect(liveQueryState.rows).toBeDefined())
-    const idInput = screen.getByTestId(
-      "workflow-payload-editor-workflow-id-input"
-    ) as HTMLInputElement
-    fireEvent.change(idInput, { target: { value: "wf-zzz" } })
-    expect(idInput.value).toBe("wf-zzz")
-    expect(await screen.findByText(/not in the local workflow list/)).toBeInTheDocument()
-
-    fireEvent.change(screen.getByTestId("workflow-payload-editor-environment-input"), {
-      target: { value: "staging" },
-    })
-    fireEvent.change(screen.getByTestId("workflow-payload-editor-trigger-id-input"), {
-      target: { value: "trig" },
-    })
-    fireEvent.change(screen.getByTestId("workflow-payload-editor-inputs-input"), {
-      target: { value: '{"a":1}' },
-    })
-    fireEvent.change(screen.getByTestId("workflow-payload-editor-idempotency-input"), {
-      target: { value: "key" },
-    })
-    expect(
-      (screen.getByTestId("workflow-payload-editor-idempotency-input") as HTMLInputElement).value
-    ).toBe("key")
-  })
-
-  it("renders field errors and the default Dexie loader", async () => {
-    render(
-      wrap(
-        <WorkflowPayloadEditor
-          draft={{ ...EMPTY_WORKFLOW_DRAFT, inputsJson: "{" }}
-          onDraftChange={() => {}}
-          errors={{ workflowId: "workflowIdRequired", inputsJson: "inputsInvalidJson" }}
-        />
-      )
-    )
-    expect(screen.getByText(/Workflow is required/)).toBeInTheDocument()
-    expect(screen.getByText(/Inputs must be valid JSON/)).toBeInTheDocument()
-    await waitFor(() => expect(liveQueryState.rows).toEqual([{ id: "wf-db", name: "From Dexie" }]))
-  })
-})
-
-describe("ImPushPayloadEditor", () => {
-  it("edits every field and disables text while segments are provided", () => {
-    function Host() {
-      const [draft, setDraft] = useState<ImPushDraft>({ ...EMPTY_IM_PUSH_DRAFT })
-      return <ImPushPayloadEditor draft={draft} onDraftChange={setDraft} />
-    }
-    render(wrap(<Host />))
-    fireEvent.change(screen.getByTestId("im-push-payload-editor-conversation-input"), {
-      target: { value: "lark:oc_1" },
-    })
-    fireEvent.change(screen.getByTestId("im-push-payload-editor-text-input"), {
-      target: { value: "hello" },
-    })
-    fireEvent.change(screen.getByTestId("im-push-payload-editor-idempotency-input"), {
-      target: { value: "k1" },
-    })
-    const text = screen.getByTestId("im-push-payload-editor-text-input") as HTMLTextAreaElement
-    expect(text.value).toBe("hello")
-    expect(text.disabled).toBe(false)
-    fireEvent.change(screen.getByTestId("im-push-payload-editor-segments-input"), {
-      target: { value: '[{"type":"text","text":"x"}]' },
-    })
-    expect(
-      (screen.getByTestId("im-push-payload-editor-text-input") as HTMLTextAreaElement).disabled
-    ).toBe(true)
-    expect(screen.getByText(/Ignored while raw segments/)).toBeInTheDocument()
-    expect(screen.getByText(/^Guardrails:/)).toBeInTheDocument()
-  })
-
-  it("renders field errors", () => {
-    render(
-      wrap(
-        <ImPushPayloadEditor
-          draft={{ ...EMPTY_IM_PUSH_DRAFT }}
-          onDraftChange={() => {}}
-          errors={{
-            conversationKey: "conversationKeyRequired",
-            text: "imPushTextRequired",
-            segmentsJson: "segmentsInvalid",
-          }}
-        />
-      )
-    )
-    expect(screen.getByText(/Conversation key is required/)).toBeInTheDocument()
-    expect(screen.getByText(/Message text \(or segments\) is required/)).toBeInTheDocument()
-    expect(screen.getByText(/Segments must be a non-empty JSON array/)).toBeInTheDocument()
   })
 })

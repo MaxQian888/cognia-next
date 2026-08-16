@@ -68,10 +68,11 @@ desktop:
 
 ### Backup destinations
 12. `github`: reuse `lib/github` credentials, user picks repo + sub-path, contents API upload,
-    retainCount pruning, **public repositories refused**. `googledrive`: OAuth after the
-    `mcp_oauth` pattern (desktop: Rust commands + Node helper loopback/PKCE + keyring; headless:
-    cognia-server callback route + host keyring; companion initiates), client id/secret supplied
-    by the user in settings. `convex`: deprecated. Settings → Data gets GitHub / Google Drive
+    retainCount pruning, **public repositories refused**. `googledrive`: OAuth **device flow**
+    (grill Q30 superseded the earlier `mcp_oauth` loopback/PKCE plan — no callback route needed,
+    the same code-at-google.com/device flow works on the desktop and when driving a headless host
+    from a companion; tokens + client secret in the `backup-destinations` keyring namespace),
+    client id/secret supplied by the user in settings. `convex`: deprecated. Settings → Data gets GitHub / Google Drive
     destination cards; the scheduler dialog enables destinations that are configured; backup
     history rows gain a `destination` column.
 
@@ -80,6 +81,9 @@ desktop:
     disabled with a reason. Types created by their own cards stay out of the form.
 14. Scheduler page host bar ("Managing: this device / cloud host X") with a switch to view the
     other side read-only (local list labelled "suspended: taken over by cloud host").
+    Companions (phone / cloud browser) default to the **paired host's** schedule and can switch
+    to this device (grill Q29); the local webview schedule is labelled "runs only while this app
+    is open". The preference is remembered per device (`scheduler-host-target.ts`).
 
 ### Delivery
 15. ADR-0128, bilingual subsystem doc "runnable-by-host matrix", `minor` changeset, phased

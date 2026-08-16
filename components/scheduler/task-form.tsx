@@ -33,7 +33,11 @@ import {
   CRON_PRESETS,
   DEFAULT_EXECUTION_CONFIG,
 } from "@/types/scheduler"
-import { getTaskTypeHostSupport, type SchedulerHostDescriptor } from "@/lib/scheduler/host-support"
+import {
+  getTaskTypeHostSupport,
+  isCardAuthoredTaskType,
+  type SchedulerHostDescriptor,
+} from "@/lib/scheduler/host-support"
 import { useSchedulerTargetHost } from "@/hooks/scheduler/use-scheduler-host-target"
 import {
   ChatPayloadEditor,
@@ -100,24 +104,30 @@ interface TaskFormProps {
 
 // Display labels are sourced from i18n keys `scheduler.taskTypes.*` and
 // `scheduler.triggerTypes.*` — only the value (and icon for triggers) lives here.
-const TASK_TYPES: Array<{ value: ScheduledTaskType }> = [
-  { value: "chat" },
-  { value: "agent" },
-  { value: "skill" },
-  { value: "external-agent" },
-  { value: "agent-team" },
-  { value: "goal" },
-  { value: "plan" },
-  { value: "workflow" },
-  { value: "backup" },
-  { value: "script" },
-  { value: "background-command" },
-  { value: "monitor" },
-  { value: "im-push" },
-  { value: "test" },
-  { value: "custom" },
-  { value: "plugin" },
-]
+// Types a user may author from the form. Card-authored types (twin,
+// connection:*, wiki-lint, github-issue-sync, …) are created by their own
+// subsystem and must never appear here — pinned by the filter below and by
+// `task-form.test.tsx`.
+const TASK_TYPES: Array<{ value: ScheduledTaskType }> = (
+  [
+    { value: "chat" },
+    { value: "agent" },
+    { value: "skill" },
+    { value: "external-agent" },
+    { value: "agent-team" },
+    { value: "goal" },
+    { value: "plan" },
+    { value: "workflow" },
+    { value: "backup" },
+    { value: "script" },
+    { value: "background-command" },
+    { value: "monitor" },
+    { value: "im-push" },
+    { value: "test" },
+    { value: "custom" },
+    { value: "plugin" },
+  ] satisfies Array<{ value: ScheduledTaskType }>
+).filter((type) => !isCardAuthoredTaskType(type.value))
 
 const TRIGGER_TYPES: Array<{ value: TaskTriggerType; icon: React.ReactNode }> = [
   { value: "cron", icon: <Clock className="h-4 w-4" /> },

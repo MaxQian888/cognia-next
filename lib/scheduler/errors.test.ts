@@ -16,6 +16,13 @@ describe("SchedulerError", () => {
     expect((err as Error & { cause?: unknown }).cause).toBeUndefined()
   })
 
+  it("builds the deprecated-task-type error with the offending type", () => {
+    const err = SchedulerError.deprecatedTaskType("sync")
+    expect(err.code).toBe("DEPRECATED_TASK_TYPE")
+    expect(err.message).toContain('"sync"')
+    expect(err.details).toEqual({ taskType: "sync" })
+  })
+
   it("carries optional details map", () => {
     const err = new SchedulerError("DB_ERROR", "boom", { table: "tasks" })
     expect(err.details).toEqual({ table: "tasks" })

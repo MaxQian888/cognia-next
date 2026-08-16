@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { useLocale } from "next-intl"
 import { toast } from "sonner"
@@ -35,6 +36,11 @@ import { isMainAppWindow } from "@/lib/pet/window-role"
  * `app/layout.tsx`.
  */
 export function TauriProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter()
+  const routerRef = useRef(router)
+  useEffect(() => {
+    routerRef.current = router
+  }, [router])
   useTauriEvents()
   useSessionNotifications()
   // Wire the runtime-independent Notification Center inbound bridges
@@ -164,6 +170,18 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
                 }
               } else if (head === "settings") {
                 useUIStore.getState().requestOpenSettings(url.searchParams.get("tab") ?? undefined)
+              } else if (head === "scheduler") {
+                // OS-promoted task wake-up when the timer had to launch the
+                // app (ADR-0128 §5): same handler as the running-app path.
+                const { parseCogniaDeeplink } = await import("@/lib/navigation/cognia-deeplink")
+                const action = parseCogniaDeeplink(raw)
+                if (action.kind === "open_scheduler_task" && action.taskId) {
+                  const { handlePromotedTaskWake } = await import("@/lib/scheduler/promoted-wake")
+                  await handlePromotedTaskWake(
+                    { taskId: action.taskId, runToken: action.runToken },
+                    { navigate: (path) => routerRef.current.push(path) }
+                  )
+                }
               }
             } catch {
               // Ignore individual malformed URLs; log once at top level below.

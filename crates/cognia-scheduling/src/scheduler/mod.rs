@@ -1144,6 +1144,14 @@ mod tests {
     }
 
     #[test]
+    fn summarize_action_describes_open_url() {
+        let summary = SchedulerState::summarize_action(&SystemTaskAction::OpenUrl {
+            url: "cognia://scheduler/task/1?run=t".to_string(),
+        });
+        assert_eq!(summary, "Open URL: cognia://scheduler/task/1?run=t");
+    }
+
+    #[test]
     fn test_admin_script_is_critical() {
         let task = SystemTask {
             id: "test".to_string(),

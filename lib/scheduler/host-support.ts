@@ -83,6 +83,11 @@ export const CARD_AUTHORED_TASK_TYPES: readonly ScheduledTaskType[] = Object.fre
   "connection:presence:refresh",
 ] as const)
 
+/** True when the type is authored by its own card / subsystem, not the form. */
+export function isCardAuthoredTaskType(type: string): type is ScheduledTaskType {
+  return (CARD_AUTHORED_TASK_TYPES as readonly string[]).includes(type)
+}
+
 /**
  * Per-type host requirements. A type absent from this table has no
  * requirement beyond "an executor is registered" (plugin/custom/im-push/…).

@@ -9,7 +9,13 @@
  */
 
 import "fake-indexeddb/auto"
-import { __TESTING__, ZERO_EMBEDDING, rebuildWiki, type FileSystem } from "./orchestrator"
+import {
+  __TESTING__,
+  PII_BLOCKED_MESSAGE,
+  ZERO_EMBEDDING,
+  rebuildWiki,
+  type FileSystem,
+} from "./orchestrator"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import {
@@ -162,6 +168,47 @@ describe("rebuildWiki — first build", () => {
     )
     expect(result.articles).toHaveLength(1)
     expect(result.errors).toEqual([{ module: "lib/bar", message: "LLM down for bar" }])
+  })
+})
+
+describe("rebuildWiki — PII gate", () => {
+  it("skips a module whose sources trip the PII gate and never sends it to the model", async () => {
+    const fs = new InMemoryFs()
+      .set("lib/foo/index.ts", "export const ok = 1")
+      .set("lib/secrets/index.ts", "export const card = 'leak'")
+    const prompts: string[] = []
+    const llm: LlmClient = {
+      async complete(prompt) {
+        prompts.push(prompt)
+        if (prompt.includes("Output a Markdown page")) return FAKE_INDEX_BODY
+        return FAKE_ARTICLE_BODY
+      },
+    }
+    const result = await rebuildWiki(
+      { fs, llm, isPiiSafe: (text) => !text.includes("leak") },
+      { scope: "cognia-self", rootDir: ".", generatorVersion: "v1" }
+    )
+    expect(result.articles.map((a) => a.module)).toEqual(["lib/foo"])
+    expect(result.errors).toEqual([{ module: "lib/secrets", message: PII_BLOCKED_MESSAGE }])
+    expect(prompts.some((p) => p.includes("leak"))).toBe(false)
+  })
+
+  it("defaults to the shared hasNoLeakingPii gate", async () => {
+    const fs = new InMemoryFs().set(
+      "lib/pii/index.ts",
+      "// contact: someone@example.com, card 4111 1111 1111 1111\nexport const x = 1"
+    )
+    const llm: LlmClient = {
+      async complete() {
+        return FAKE_ARTICLE_BODY
+      },
+    }
+    const result = await rebuildWiki(
+      { fs, llm },
+      { scope: "cognia-self", rootDir: ".", generatorVersion: "v1" }
+    )
+    expect(result.errors).toEqual([{ module: "lib/pii", message: PII_BLOCKED_MESSAGE }])
+    expect(result.articles).toHaveLength(0)
   })
 })
 

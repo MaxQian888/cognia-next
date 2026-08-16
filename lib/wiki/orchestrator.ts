@@ -23,6 +23,7 @@
  *   • The standalone bundle with `node:fs` + the Anthropic client
  */
 
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { prepareChunks } from "@/lib/twin/ingest/chunk"
 import { runIndexPageAgent, type ArticleSummary } from "./agents/index-page-agent"
@@ -67,7 +68,19 @@ export interface WikiOrchestratorDeps {
   fs: FileSystem
   llm: LlmClient
   embed?: EmbedFn
+  /**
+   * PII gate applied to every module's source chunks BEFORE they are sent to
+   * the LLM (cross-cutting rule: `hasNoLeakingPii` guards every model call).
+   * A module that fails the gate is skipped and reported in `errors` with
+   * `PII_BLOCKED_MESSAGE`; nothing of it reaches the model. Injectable for
+   * tests; defaults to `hasNoLeakingPii`.
+   */
+  isPiiSafe?: (text: string) => boolean
 }
+
+/** `errors[].message` for a module whose source tripped the PII gate. */
+export const PII_BLOCKED_MESSAGE =
+  "PII detected in module sources — skipped (nothing was sent to the model)"
 
 export interface RebuildOptions {
   scope: WikiScope
@@ -117,6 +130,7 @@ export async function rebuildWiki(
   const startedAt = Date.now()
   const errors: { module: string; message: string }[] = []
   const embed: EmbedFn = deps.embed ?? (async () => [...ZERO_EMBEDDING])
+  const isPiiSafe = deps.isPiiSafe ?? hasNoLeakingPii
 
   // 1. Walk + filter.
   const allPaths = await deps.fs.walk(opts.rootDir)
@@ -203,6 +217,13 @@ export async function rebuildWiki(
     const moduleChunks = chunksByModule.get(modulePath) ?? []
     if (moduleChunks.length === 0) continue
     const inBudget = chunksWithinBudget(moduleChunks, tokenBudget)
+    // PII gate on exactly the text that would leave the process. Source
+    // trees can contain fixtures / .env samples / customer data — a module
+    // that trips the gate is skipped, never redacted-and-sent.
+    if (!isPiiSafe(inBudget.map((chunk) => chunk.content).join("\n"))) {
+      errors.push({ module: modulePath, message: PII_BLOCKED_MESSAGE })
+      continue
+    }
     try {
       const llmResponse = await deps.llm.complete(
         moduleArticlePrompt({ module: modulePath, stat, chunks: inBudget }),
