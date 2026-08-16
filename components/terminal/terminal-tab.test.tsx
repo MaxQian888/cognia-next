@@ -194,4 +194,103 @@ describe("TerminalTab", () => {
     fireEvent.contextMenu(screen.getByTestId("terminal-tab"))
     expect(onContextMenu).toHaveBeenCalledTimes(1)
   })
+
+  it("marks a throttled background tab so it is legible without switching to it", () => {
+    render(
+      <TerminalTab row={row()} active={false} onSelect={jest.fn()} onClose={jest.fn()} throttled />
+    )
+    const tab = screen.getByTestId("terminal-tab")
+    expect(tab.getAttribute("data-throttled")).toBe("true")
+    expect(tab.className).toContain("ring-orange-500/50")
+  })
+
+  it("draws the accent border only when a tab colour is chosen", () => {
+    const { rerender } = render(
+      <TerminalTab
+        row={row({ tabColor: "none" })}
+        active
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("terminal-tab").className).not.toContain("border-l-2")
+
+    rerender(
+      <TerminalTab
+        row={row({ tabColor: "blue" })}
+        active
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("terminal-tab").className).toContain("border-l-2")
+  })
+
+  it("shows the activity dot only on an inactive tab", () => {
+    const { rerender } = render(
+      <TerminalTab
+        row={row()}
+        active={false}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        hasActivity
+      />
+    )
+    expect(screen.getByLabelText("status.newOutput")).toBeInTheDocument()
+
+    // Switching to the tab is what acknowledges the output, so the badge goes.
+    rerender(
+      <TerminalTab row={row()} active onSelect={jest.fn()} onClose={jest.fn()} hasActivity />
+    )
+    expect(screen.queryByLabelText("status.newOutput")).toBeNull()
+  })
+
+  describe("SSH tabs", () => {
+    function renderTab(overrides: Partial<TerminalSessionRow>) {
+      render(
+        <TerminalTab row={row(overrides)} active={false} onSelect={jest.fn()} onClose={jest.fn()} />
+      )
+      return screen.getByTestId("terminal-tab")
+    }
+
+    it("marks the transport kind on the element", () => {
+      expect(renderTab({ kind: "ssh" }).getAttribute("data-kind")).toBe("ssh")
+    })
+
+    it("treats a row saved before the field existed as a local shell", () => {
+      expect(renderTab({}).getAttribute("data-kind")).toBe("localPty")
+    })
+
+    it("gives an SSH tab a default glyph so it is not mistaken for a local shell", () => {
+      const { container } = render(
+        <TerminalTab
+          row={row({ kind: "ssh", tabIcon: "none" })}
+          active={false}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+        />
+      )
+      expect(container.querySelector("svg.lucide-server")).not.toBeNull()
+    })
+
+    it("lets a deliberately chosen icon override the SSH default", () => {
+      const { container } = render(
+        <TerminalTab
+          row={row({ kind: "ssh", tabIcon: "rocket" })}
+          active={false}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+        />
+      )
+      expect(container.querySelector("svg.lucide-rocket")).not.toBeNull()
+      expect(container.querySelector("svg.lucide-server")).toBeNull()
+    })
+
+    it("leaves a local tab without a glyph", () => {
+      const { container } = render(
+        <TerminalTab row={row()} active={false} onSelect={jest.fn()} onClose={jest.fn()} />
+      )
+      expect(container.querySelector("svg.lucide-server")).toBeNull()
+    })
+  })
 })

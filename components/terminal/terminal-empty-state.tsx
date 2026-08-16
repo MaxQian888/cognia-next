@@ -1,13 +1,17 @@
 "use client"
 
 /**
- * Empty-state body for the terminal dock. Four variants:
+ * Empty-state body for the terminal dock. Five variants:
  *
  *   * `desktop` — Tauri shell with its in-process PTY.
  *   * `remote`  — a desktop driving a remote Cognia host; new terminals open
  *     on that host, over the same `ws` frames the mobile screen uses.
  *   * `mobile`  — Capacitor shell talking to a paired desktop over LAN/WAN.
- *   * `unsupported` — plain browser. No terminal possible.
+ *   * `cloud`   — a browser paired to a cognia-server (ADR-0059 C1). Same `ws`
+ *     frames as `mobile`, but there is no LAN leg to explain — the pairing is
+ *     an explicit server URL, so the copy must not tell the user to pair with
+ *     a desktop on their network.
+ *   * `unsupported` — web standalone, no server. No terminal possible.
  *
  * The action button is gated on `onNew` being supplied, not on the variant.
  * That is deliberate: the dock passes `onNew` only when a spawn is actually
@@ -20,7 +24,7 @@ import { PlusIcon, TerminalIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 
-export type TerminalEmptyStateVariant = "desktop" | "remote" | "mobile" | "unsupported"
+export type TerminalEmptyStateVariant = "desktop" | "remote" | "mobile" | "cloud" | "unsupported"
 
 export interface TerminalEmptyStateProps {
   variant: TerminalEmptyStateVariant

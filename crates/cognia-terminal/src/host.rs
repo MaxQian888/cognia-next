@@ -25,6 +25,7 @@ use crate::session::{
     SessionOrigin, SpawnRequest, TerminalEvent,
 };
 use crate::ssh::{spawn_hosted_ssh, SshSpawnRequest};
+use crate::ssh_forward::ForwardStatus;
 
 pub const DEFAULT_MAX_SESSIONS: usize = 32;
 pub const DEFAULT_MAX_REMOTE_SESSIONS_PER_DEVICE: usize = 8;
@@ -335,6 +336,20 @@ pub trait HostedTerminalProcess: Send + Sync {
     /// their source say so by returning `Err`, which the host surfaces rather
     /// than pretending the pause took.
     fn set_flow_paused(&self, paused: bool) -> Result<(), String>;
+
+    /// Live state of this session's SSH port forwards.
+    ///
+    /// Empty for anything that cannot forward — a local PTY has no tunnels, and
+    /// an SSH session configured without rules has none either, which is the
+    /// same answer from the caller's point of view.
+    fn forward_status(&self) -> Vec<ForwardStatus> {
+        Vec::new()
+    }
+
+    /// Start or stop one forward on a running session.
+    fn set_forward_enabled(&self, _id: &str, _enabled: bool) -> Result<(), String> {
+        Err("this session does not support port forwarding".into())
+    }
 }
 
 impl HostedTerminalProcess for PtySession {
@@ -1288,6 +1303,58 @@ impl TerminalHost {
     /// one clears. Deliberately NOT controller-gated — a viewer that cannot
     /// keep up is exactly who needs to pause, and a read-only client asking the
     /// producer to slow down cannot affect anyone's session contents.
+    /// Live forwarding state for a session the caller is attached to.
+    pub fn forward_status(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+    ) -> Result<Vec<ForwardStatus>, HostError> {
+        let connection = parse_connection_id(connection_id)?;
+        self.identity(connection)?;
+        let state = self.inner.state.lock();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or(HostError::SessionNotFound)?;
+        if !session.attachments.contains(&connection) {
+            return Err(HostError::PermissionDenied);
+        }
+        Ok(session.process.forward_status())
+    }
+
+    /// Start or stop one forward on a running session.
+    ///
+    /// Local-identity only. Enabling a rule opens a listening socket on the
+    /// desktop, or asks the remote server to open one pointing back at it —
+    /// neither is a decision a phone or LAN client gets to make on the
+    /// desktop's behalf (ADR-0082 §8.3).
+    pub fn set_forward_enabled(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        forward_id: &str,
+        enabled: bool,
+    ) -> Result<Vec<ForwardStatus>, HostError> {
+        let connection = parse_connection_id(connection_id)?;
+        let identity = self.identity(connection)?;
+        if !identity.local {
+            return Err(HostError::PermissionDenied);
+        }
+        let state = self.inner.state.lock();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or(HostError::SessionNotFound)?;
+        if !session.attachments.contains(&connection) {
+            return Err(HostError::PermissionDenied);
+        }
+        session
+            .process
+            .set_forward_enabled(forward_id, enabled)
+            .map_err(HostError::InvalidRequest)?;
+        Ok(session.process.forward_status())
+    }
+
     pub fn set_flow_control(
         &self,
         connection_id: &str,
@@ -1839,6 +1906,9 @@ mod tests {
             project_id: None,
             profile_id: profile_id.into(),
             display_name: "Production".into(),
+            jump_chain: Vec::new(),
+            local_forwards: Vec::new(),
+            remote_forwards: Vec::new(),
         }
     }
 

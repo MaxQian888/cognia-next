@@ -4,10 +4,15 @@
 
 let mockIsTauri = false
 let mockIsCapacitor = false
+let mockHasWebCompanionTarget = false
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri,
   isCapacitor: () => mockIsCapacitor,
+}))
+
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: () => mockHasWebCompanionTarget,
 }))
 
 import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
@@ -26,6 +31,7 @@ const activeRemoteFake: Transport = {
 beforeEach(() => {
   mockIsTauri = false
   mockIsCapacitor = false
+  mockHasWebCompanionTarget = false
   __resetRoutingForTests()
 })
 afterEach(() => {
@@ -104,5 +110,45 @@ describe("remote host active (ADR-0082)", () => {
     setActiveRemoteTransport(activeRemoteFake)
     setActiveRemoteTransport(null)
     expect(selectTerminalTransport()).toBe("tauri-channel")
+  })
+})
+
+describe("cloud companion (ADR-0059 C1)", () => {
+  it("returns ws in a browser paired to a cognia-server", () => {
+    mockHasWebCompanionTarget = true
+    expect(selectTerminalTransport()).toBe("ws")
+  })
+
+  it("reports the terminal as available", () => {
+    mockHasWebCompanionTarget = true
+    expect(terminalAvailable()).toBe(true)
+  })
+
+  it("tries the server over ws then WebRTC", () => {
+    mockHasWebCompanionTarget = true
+    expect(selectTerminalTransportChain()).toEqual(["ws", "webrtc"])
+  })
+
+  it("stays unsupported for a web standalone build with no server", () => {
+    expect(selectTerminalTransport()).toBe("unsupported")
+    expect(selectTerminalTransportChain()).toEqual([])
+    expect(terminalAvailable()).toBe(false)
+  })
+
+  it("keeps the in-process PTY on Tauri even with a build-time server URL", () => {
+    // The same bundle feeds the browser and the desktop shell, so a baked-in
+    // NEXT_PUBLIC_COGNIA_SERVER_URL must not divert the desktop off its local
+    // PTY — the web-companion branch is checked last for exactly this reason.
+    mockIsTauri = true
+    mockHasWebCompanionTarget = true
+    expect(selectTerminalTransport()).toBe("tauri-channel")
+    expect(selectTerminalTransportChain()).toEqual(["tauri-channel"])
+  })
+
+  it("keeps the Capacitor chain when a build-time server URL is also present", () => {
+    mockIsCapacitor = true
+    mockHasWebCompanionTarget = true
+    expect(selectTerminalTransport()).toBe("ws")
+    expect(selectTerminalTransportChain()).toEqual(["ws", "webrtc"])
   })
 })

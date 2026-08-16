@@ -161,4 +161,85 @@ describe("SshTerminalSession", () => {
       { role: "viewer", controllerId: null, reason: "released" },
     ])
   })
+
+  describe("reattach", () => {
+    const listed = {
+      id: "remote-9",
+      projectId: "project-1",
+      extensionId: null,
+      origin: "local" as const,
+      shell: "ssh deploy@prod.example.com",
+      kind: "ssh" as const,
+      profileId: "ssh-1",
+      sshHostKeyStatus: "verified" as const,
+      sshHostKeyFingerprint: "SHA256:listed",
+    }
+
+    it("restores the host-key verdict the host reports", async () => {
+      mockInvoke.mockResolvedValue({ ...listed, sshHostKeyFingerprint: "SHA256:fresh" })
+      const session = await SshTerminalSession.reattach(listed)
+
+      expect(mockInvoke).toHaveBeenCalledWith("terminal_reattach", {
+        id: "remote-9",
+        onEvent: expect.anything(),
+        resumeFrom: 0,
+      })
+      // The host's answer wins over the listing that led us here.
+      expect(session.hostKeyFingerprint).toBe("SHA256:fresh")
+      expect(session.hostKeyStatus).toBe("verified")
+      expect(session.profileId).toBe("ssh-1")
+    })
+
+    it("falls back to the listing when the host omits the key fields", async () => {
+      // A host predating the field pair answers without them; the session is
+      // still usable and keeps whatever the listing knew.
+      mockInvoke.mockResolvedValue({
+        id: "remote-9",
+        projectId: "project-1",
+        extensionId: null,
+        origin: "local",
+        shell: "ssh deploy@prod.example.com",
+      })
+      const session = await SshTerminalSession.reattach(listed)
+
+      expect(session.hostKeyFingerprint).toBe("SHA256:listed")
+      expect(session.hostKeyStatus).toBe("verified")
+      expect(session.profileId).toBe("ssh-1")
+    })
+
+    it("stays usable when neither side knows the host key", async () => {
+      // Both the host and the listing predate the field pair. Reattaching must
+      // still produce a working handle rather than throwing — the fingerprint
+      // is simply unknown until the next connect.
+      const bare = {
+        id: "remote-9",
+        projectId: null,
+        extensionId: null,
+        origin: "local" as const,
+        shell: "ssh deploy@prod.example.com",
+        kind: "ssh" as const,
+      }
+      mockInvoke.mockResolvedValue(bare)
+      const session = await SshTerminalSession.reattach(bare)
+
+      expect(session.hostKeyStatus).toBe("learned")
+      expect(session.hostKeyFingerprint).toBe("")
+      expect(session.profileId).toBe("")
+    })
+
+    it("streams host events into the rebuilt handle", async () => {
+      mockInvoke.mockResolvedValue(listed)
+      const session = await SshTerminalSession.reattach(listed, 42)
+      const chunks: Uint8Array[] = []
+      session.onData((bytes) => chunks.push(bytes))
+
+      channels[0]?.onmessage?.({ seq: 43, event: { kind: "data", bytes: [104, 105] } })
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "terminal_reattach",
+        expect.objectContaining({ resumeFrom: 42 })
+      )
+      expect(Array.from(chunks[0] ?? [])).toEqual([104, 105])
+    })
+  })
 })

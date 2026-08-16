@@ -119,10 +119,65 @@ jest.mock("@/lib/terminal/session-registry", () => {
   }
 })
 
+const toastError = jest.fn()
+const toastSuccess = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => toastError(...args),
+    success: (...args: unknown[]) => toastSuccess(...args),
+  },
+}))
+
+const mockConnectSsh = jest.fn(async (..._args: unknown[]): Promise<unknown> => ({
+  kind: "connected",
+  sessionId: "ssh-session-1",
+  hostKeyStatus: "learned",
+  hostKeyFingerprint: "SHA256:abc",
+}))
+// `resolveSshHostLaunch` stays real — the dock's guard rails are the point of
+// these tests; only the native connection is stubbed.
+jest.mock("@/lib/terminal/ssh-connect", () => ({
+  ...jest.requireActual("@/lib/terminal/ssh-connect"),
+  connectSshFromDock: (...args: unknown[]) => mockConnectSsh(...args),
+}))
+
+// The picker's own rendering (grouping, filtering, Radix menu) is covered by
+// `terminal-shell-picker.test.tsx`. Here it is reduced to the two affordances
+// the dock wires, keeping `terminal-dock-new` so the spawn tests still work.
+jest.mock("./terminal-shell-picker", () => ({
+  TerminalShellPicker: ({
+    onNew,
+    sshHosts,
+    onNewSshHost,
+  }: {
+    onNew: (shell?: string) => void | Promise<void>
+    sshHosts?: Array<{ id: string }>
+    onNewSshHost?: (hostId: string) => void | Promise<void>
+  }) => (
+    <div>
+      <button type="button" data-testid="terminal-dock-new" onClick={() => void onNew()} />
+      {(sshHosts ?? []).map((host) => (
+        <button
+          key={host.id}
+          type="button"
+          data-testid={`dock-ssh-${host.id}`}
+          onClick={() => void onNewSshHost?.(host.id)}
+        />
+      ))}
+      <button
+        type="button"
+        data-testid="dock-ssh-missing"
+        onClick={() => void onNewSshHost?.("ssh-does-not-exist")}
+      />
+    </div>
+  ),
+}))
+
 import { TerminalDock } from "./terminal-dock"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useChatStore } from "@/stores/chat/chat-store"
+import { useSettingsStore } from "@/stores/settings"
 
 beforeEach(() => {
   cleanup()
@@ -134,6 +189,10 @@ beforeEach(() => {
   mockKillFromDock.mockClear()
   mockDetachFromDock.mockClear()
   mockPush.mockClear()
+  toastError.mockClear()
+  toastSuccess.mockClear()
+  mockConnectSsh.mockClear()
+  useSettingsStore.setState({ settings: undefined })
   transportKind = "tauri-channel"
   platformKind = "tauri"
 })
@@ -400,12 +459,125 @@ describe("TerminalDock", () => {
     expect(screen.getByTestId("terminal-dock-clear")).toBeInTheDocument()
   })
 
+  it("renders the cloud empty state for a browser paired to a cognia-server", () => {
+    // A paired browser is `platform === "web"` with a ws transport. It must NOT
+    // get the mobile copy, which tells the user to pair with a desktop on their
+    // LAN — the cloud pairing is an explicit server URL.
+    transportKind = "ws"
+    platformKind = "web"
+    seedProjectAndSession()
+    render(<TerminalDock />)
+    expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe("cloud")
+  })
+
+  it("offers a spawn action to a paired browser", () => {
+    transportKind = "ws"
+    platformKind = "web"
+    seedProjectAndSession()
+    render(<TerminalDock />)
+    fireEvent.click(screen.getByTestId("terminal-empty-state-new"))
+    expect(mockSpawnFromDock).toHaveBeenCalled()
+  })
+
   it("renders the unsupported empty state in plain browser", () => {
     transportKind = "unsupported"
+    platformKind = "web"
     seedProjectAndSession()
     render(<TerminalDock />)
     expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe(
       "unsupported"
     )
+    expect(screen.queryByTestId("terminal-empty-state-new")).toBeNull()
+  })
+
+  describe("SSH hosts in the shell picker", () => {
+    function seedSshHost(overrides: Record<string, unknown> = {}) {
+      useSettingsStore.setState({
+        settings: {
+          terminal: {
+            sshHosts: [
+              {
+                id: "ssh-1",
+                name: "Production",
+                host: "prod.example.com",
+                port: 22,
+                username: "deploy",
+                authMethod: "agent",
+                ...overrides,
+              },
+            ],
+          },
+        },
+      } as never)
+    }
+
+    it("connects the chosen host and reports the host-key verdict", async () => {
+      seedSshHost()
+      seedProjectAndSession()
+      render(<TerminalDock />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("dock-ssh-ssh-1"))
+      })
+
+      expect(mockConnectSsh).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile: expect.objectContaining({ id: "ssh-1" }),
+          rows: 24,
+          cols: 80,
+        })
+      )
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "sshConnected.learned",
+        expect.objectContaining({ description: "SHA256:abc" })
+      )
+      // SSH never routes through the local shell/profile/cwd precedence.
+      expect(mockSpawnFromDock).not.toHaveBeenCalled()
+    })
+
+    it("sends a password host with no stored credential back to settings", async () => {
+      seedSshHost({ authMethod: "password", credentialRef: undefined })
+      seedProjectAndSession()
+      render(<TerminalDock />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("dock-ssh-ssh-1"))
+      })
+
+      expect(mockConnectSsh).not.toHaveBeenCalled()
+      expect(toastError).toHaveBeenCalledWith("sshCredentialRequired")
+    })
+
+    it("surfaces a failed connection without opening a tab", async () => {
+      seedSshHost()
+      seedProjectAndSession()
+      mockConnectSsh.mockResolvedValueOnce({ kind: "error", message: "host unreachable" })
+      render(<TerminalDock />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("dock-ssh-ssh-1"))
+      })
+
+      expect(toastError).toHaveBeenCalledWith("spawnError")
+      expect(toastSuccess).not.toHaveBeenCalled()
+    })
+
+    it("ignores an id that no longer matches a saved host", async () => {
+      seedSshHost()
+      seedProjectAndSession()
+      render(<TerminalDock />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("dock-ssh-missing"))
+      })
+
+      expect(mockConnectSsh).not.toHaveBeenCalled()
+      expect(toastError).not.toHaveBeenCalled()
+    })
+
+    it("withholds SSH hosts from the picker outside Tauri", () => {
+      seedSshHost()
+      transportKind = "ws"
+      platformKind = "mobile"
+      seedProjectAndSession()
+      render(<TerminalDock />)
+      expect(screen.queryByTestId("dock-ssh-ssh-1")).toBeNull()
+    })
   })
 })

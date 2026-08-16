@@ -663,10 +663,19 @@ fn terminal_script_dir() -> PathBuf {
         .unwrap_or(development)
 }
 
+/// The dedicated TOFU store for SSH server keys.
+///
+/// Defined once so the host process that writes it and the app process that
+/// lets the user forget an entry can never disagree about which file is
+/// authoritative.
+pub fn ssh_known_hosts_path() -> PathBuf {
+    terminal_host_data_dir().join("ssh").join("known_hosts")
+}
+
 pub async fn run_terminal_host(endpoint: String) -> Result<(), String> {
     let (host, script_dir, known_hosts_path, diagnostics) = tokio::task::spawn_blocking(|| {
         let data_dir = terminal_host_data_dir();
-        let known_hosts_path = data_dir.join("ssh").join("known_hosts");
+        let known_hosts_path = ssh_known_hosts_path();
         if let Some(parent) = known_hosts_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("terminal host SSH directory failed: {error}"))?;

@@ -75,6 +75,47 @@ describe("terminal host profile synchronization", () => {
     ])
   })
 
+  it("never synchronizes a jump chain or a tunnel to the terminal host", () => {
+    // A synchronized profile is what a phone or LAN client names to get a
+    // shell. Carrying forwarding here would let a remote client make the
+    // desktop open a listening port, which ADR-0082 §8 forbids — so the
+    // stripping is pinned rather than left to `sshHostToConnectRequest`
+    // happening not to copy the fields.
+    const [synchronized] = buildSynchronizedSshProfiles([
+      {
+        id: "production",
+        name: "Production",
+        host: "server.example.com",
+        port: 22,
+        username: "deploy",
+        authMethod: "agent",
+        jumpHostId: "bastion",
+        localForwards: [
+          {
+            id: "lfwd-1",
+            localPort: 8080,
+            remoteHost: "db.internal",
+            remotePort: 5432,
+            enabled: true,
+          },
+        ],
+        remoteForwards: [
+          {
+            id: "rfwd-1",
+            remotePort: 9000,
+            localHost: "localhost",
+            localPort: 3000,
+            enabled: true,
+          },
+        ],
+      },
+    ])
+
+    expect(synchronized.request).not.toHaveProperty("jumpChain")
+    expect(synchronized.request).not.toHaveProperty("localForwards")
+    expect(synchronized.request).not.toHaveProperty("remoteForwards")
+  })
+
   it("replaces the host profile set, including clearing deleted profiles", async () => {
     const call = jest.fn(async () => undefined)
     await syncTerminalHostProfiles([], {}, call as never)

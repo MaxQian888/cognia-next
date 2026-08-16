@@ -73,15 +73,12 @@ export function TerminalTemplatePrompt({
     setState({ variables, values: initialValues })
   }
 
-  const setValues = React.useCallback(
-    (update: React.SetStateAction<Record<string, string>>) => {
-      setState((current) => ({
-        ...current,
-        values: typeof update === "function" ? update(current.values) : update,
-      }))
-    },
-    []
-  )
+  const setValues = React.useCallback((update: React.SetStateAction<Record<string, string>>) => {
+    setState((current) => ({
+      ...current,
+      values: typeof update === "function" ? update(current.values) : update,
+    }))
+  }, [])
   const values = state.values
 
   const handleSubmit = (e: React.FormEvent) => {

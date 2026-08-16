@@ -69,6 +69,8 @@ describe("terminal protocol", () => {
       FlowControl: TerminalFrameKind.FlowControl,
       HistoryQuery: TerminalFrameKind.HistoryQuery,
       HistorySnapshot: TerminalFrameKind.HistorySnapshot,
+      SshForwardControl: TerminalFrameKind.SshForwardControl,
+      SshForwardSnapshot: TerminalFrameKind.SshForwardSnapshot,
     }).toEqual({
       Hello: 1,
       List: 2,
@@ -93,16 +95,18 @@ describe("terminal protocol", () => {
       FlowControl: 21,
       HistoryQuery: 22,
       HistorySnapshot: 23,
+      SshForwardControl: 24,
+      SshForwardSnapshot: 25,
     })
   })
 
   it("decodes every assigned frame kind and rejects the first unassigned one", () => {
-    for (let kind = 1; kind <= TerminalFrameKind.HistorySnapshot; kind += 1) {
+    for (let kind = 1; kind <= TerminalFrameKind.SshForwardSnapshot; kind += 1) {
       const encoded = encodeTerminalFrame(makeTerminalFrame(kind as TerminalFrameKind))
       expect(decodeTerminalFrame(encoded).kind).toBe(kind)
     }
     const unknown = encodeTerminalFrame(makeTerminalFrame(TerminalFrameKind.List))
-    unknown[4] = TerminalFrameKind.HistorySnapshot + 1
+    unknown[4] = TerminalFrameKind.SshForwardSnapshot + 1
     expect(() => decodeTerminalFrame(unknown)).toThrow("unknown terminal frame kind")
   })
 

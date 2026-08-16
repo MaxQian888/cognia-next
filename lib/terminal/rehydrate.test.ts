@@ -13,7 +13,8 @@ import { rehydrateTerminals } from "./rehydrate"
 import { registerLiveSession } from "./session-registry"
 import { wireSessionToStore, type TerminalStoreLike } from "./spawn-orchestrator"
 import type { SessionInfo } from "./types"
-import type { TerminalSession } from "./session"
+import { TerminalSession } from "./session"
+import { SshTerminalSession } from "./ssh-session"
 import { RemoteTerminalSession } from "./transport-ws"
 
 function info(id: string): SessionInfo {
@@ -37,9 +38,14 @@ function makeStore(): TestStore {
   }
 }
 
-type ReattachFn = typeof TerminalSession.reattach
-const fakeReattach = (id: string): Promise<TerminalSession> =>
-  Promise.resolve({ info: info(id) } as unknown as TerminalSession)
+/**
+ * Reattach receives the whole listing entry, not just an id — it has to read
+ * `kind` to decide between a local `TerminalSession` and an
+ * `SshTerminalSession` that keeps the host-key verdict.
+ */
+type ReattachFn = (listed: SessionInfo, resumeAfter: number) => Promise<TerminalSession>
+const fakeReattach = (listed: SessionInfo): Promise<TerminalSession> =>
+  Promise.resolve({ info: listed } as unknown as TerminalSession)
 
 beforeEach(() => {
   mockTransportChain = ["tauri-channel"]
@@ -79,8 +85,8 @@ describe("rehydrateTerminals", () => {
 
     expect(res).toEqual({ restored: 2, failed: 0 })
     expect(store.registerSession).toHaveBeenCalledTimes(2)
-    expect(reattach).toHaveBeenCalledWith("a", 0)
-    expect(reattach).toHaveBeenCalledWith("b", 0)
+    expect(reattach).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }), 0)
+    expect(reattach).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }), 0)
     expect(registerLiveSession).toHaveBeenCalledTimes(2)
     expect(wireSessionToStore).toHaveBeenCalledTimes(2)
     expect(store.restorePersistedLayout).toHaveBeenCalledTimes(1)
@@ -101,9 +107,9 @@ describe("rehydrateTerminals", () => {
 
     // The legacy row (transport predating the flag) is still restored.
     expect(res).toEqual({ restored: 2, failed: 0 })
-    expect(reattach).toHaveBeenCalledWith("alive", 0)
-    expect(reattach).toHaveBeenCalledWith("legacy", 0)
-    expect(reattach).not.toHaveBeenCalledWith("dead", 0)
+    expect(reattach).toHaveBeenCalledWith(expect.objectContaining({ id: "alive" }), 0)
+    expect(reattach).toHaveBeenCalledWith(expect.objectContaining({ id: "legacy" }), 0)
+    expect(reattach).not.toHaveBeenCalledWith(expect.objectContaining({ id: "dead" }), 0)
   })
 
   it("restores layout only after every surviving PTY row is registered", async () => {
@@ -161,11 +167,92 @@ describe("rehydrateTerminals", () => {
     expect(store.restorePersistedLayout).not.toHaveBeenCalled()
   })
 
+  it("reports an unusable transport instead of silently restoring nothing", async () => {
+    // Defensive `default:` arms in both switches. A chain entry the module does
+    // not know about must surface as a host error, not as a quiet empty restore
+    // — the dock would otherwise show no tabs and no explanation.
+    mockTransportChain = ["bluetooth" as unknown as "ws"]
+    const store: TestStore & { setHostState?: jest.Mock } = {
+      ...makeStore(),
+      setHostState: jest.fn(),
+    }
+
+    const res = await rehydrateTerminals({ store })
+
+    expect(res).toEqual({ restored: 0, failed: 0 })
+    expect(store.setHostState).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("transport unavailable")
+    )
+  })
+
+  it("counts a per-session reattach that no transport can serve", async () => {
+    mockTransportChain = ["bluetooth" as unknown as "ws"]
+    const store = makeStore()
+
+    const res = await rehydrateTerminals({ store, list: jest.fn(async () => [info("a")]) })
+
+    expect(res).toEqual({ restored: 0, failed: 1 })
+    expect(store.registerSession).not.toHaveBeenCalled()
+  })
+
+  it("rebuilds an SSH session through the SSH class, not the generic one", async () => {
+    // Exercises the real `reattachToActiveHost` (no injected `reattach`), which
+    // is where the transport-and-kind decision actually lives. Rebuilding SSH
+    // as a plain `TerminalSession` still moves bytes, so only this assertion
+    // catches the fingerprint being silently dropped.
+    const store = makeStore()
+    const sshInfo: SessionInfo = { ...info("ssh-a"), kind: "ssh", profileId: "ssh-1" }
+    const sshReattach = jest
+      .spyOn(SshTerminalSession, "reattach")
+      .mockResolvedValue({ info: sshInfo } as unknown as SshTerminalSession)
+    const localReattach = jest
+      .spyOn(TerminalSession, "reattach")
+      .mockResolvedValue({ info: info("local-a") } as unknown as TerminalSession)
+
+    await rehydrateTerminals({
+      store,
+      list: jest.fn(async () => [sshInfo, info("local-a")]),
+    })
+
+    expect(sshReattach).toHaveBeenCalledWith(expect.objectContaining({ kind: "ssh" }), 0)
+    expect(localReattach).toHaveBeenCalledWith("local-a", 0)
+  })
+
+  it("carries SSH identity onto the restored row", async () => {
+    // Without `kind` and `profileId` the restored tab is indistinguishable
+    // from a local shell called "ssh", and nothing can map it back to the
+    // host profile it came from.
+    const store = makeStore()
+    const sshInfo: SessionInfo = {
+      ...info("ssh-a"),
+      kind: "ssh",
+      profileId: "ssh-1",
+      hostId: "host-1",
+      shell: "ssh deploy@prod.example.com",
+      sshHostKeyStatus: "verified",
+      sshHostKeyFingerprint: "SHA256:abc",
+    }
+    const reattach = jest.fn(fakeReattach) as unknown as ReattachFn
+
+    await rehydrateTerminals({ store, list: jest.fn(async () => [sshInfo]), reattach })
+
+    expect(reattach).toHaveBeenCalledWith(expect.objectContaining({ kind: "ssh" }), 0)
+    expect(store.registerSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "ssh-a",
+        kind: "ssh",
+        profileId: "ssh-1",
+        hostId: "host-1",
+      })
+    )
+  })
+
   it("counts per-session failures without aborting the rest", async () => {
     const store = makeStore()
     const list = jest.fn(async () => [info("ok"), info("bad")])
-    const reattach = jest.fn((id: string) =>
-      id === "bad" ? Promise.reject(new Error("gone")) : fakeReattach(id)
+    const reattach = jest.fn((listed: SessionInfo) =>
+      listed.id === "bad" ? Promise.reject(new Error("gone")) : fakeReattach(listed)
     ) as unknown as ReattachFn
 
     const res = await rehydrateTerminals({ store, list, reattach })

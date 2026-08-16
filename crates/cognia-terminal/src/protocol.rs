@@ -59,6 +59,15 @@ pub enum FrameKind {
     HistoryQuery = 22,
     /// Host→client response to [`FrameKind::HistoryQuery`]. Never pushed.
     HistorySnapshot = 23,
+    /// Client→host request to read, start, or stop a session's SSH port
+    /// forwards. Answered with [`FrameKind::SshForwardSnapshot`].
+    ///
+    /// Deliberately pull-only. The forwarding UI polls while it is open rather
+    /// than being pushed at, so an older client that never asks is never sent a
+    /// kind it cannot decode — the compatibility invariant above.
+    SshForwardControl = 24,
+    /// Host→client response to [`FrameKind::SshForwardControl`]. Never pushed.
+    SshForwardSnapshot = 25,
 }
 
 impl TryFrom<u8> for FrameKind {
@@ -89,6 +98,8 @@ impl TryFrom<u8> for FrameKind {
             21 => Self::FlowControl,
             22 => Self::HistoryQuery,
             23 => Self::HistorySnapshot,
+            24 => Self::SshForwardControl,
+            25 => Self::SshForwardSnapshot,
             other => return Err(ProtocolError::UnknownFrameKind(other)),
         })
     }
@@ -285,19 +296,19 @@ mod tests {
         assert_eq!(TerminalFrame::decode(&bytes).unwrap(), frame);
     }
 
-    /// Every discriminant in 1..=23 must survive the `u8` round trip, and the
+    /// Every discriminant in 1..=25 must survive the `u8` round trip, and the
     /// first unassigned value must be rejected rather than silently accepted —
     /// `decode` relies on this to reject a frame from a newer peer.
     #[test]
     fn every_frame_kind_round_trips_through_its_discriminant() {
-        for value in 1u8..=23 {
+        for value in 1u8..=25 {
             let kind = FrameKind::try_from(value)
                 .unwrap_or_else(|error| panic!("discriminant {value} is unmapped: {error}"));
             assert_eq!(kind as u8, value);
         }
         assert_eq!(
-            FrameKind::try_from(24),
-            Err(ProtocolError::UnknownFrameKind(24))
+            FrameKind::try_from(26),
+            Err(ProtocolError::UnknownFrameKind(26))
         );
         assert_eq!(
             FrameKind::try_from(0),
@@ -333,6 +344,8 @@ mod tests {
         assert_eq!(FrameKind::FlowControl as u8, 21);
         assert_eq!(FrameKind::HistoryQuery as u8, 22);
         assert_eq!(FrameKind::HistorySnapshot as u8, 23);
+        assert_eq!(FrameKind::SshForwardControl as u8, 24);
+        assert_eq!(FrameKind::SshForwardSnapshot as u8, 25);
     }
 
     #[test]

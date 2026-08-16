@@ -39,6 +39,10 @@ export enum TerminalFrameKind {
   HistoryQuery = 22,
   /** Host→client: answer to `HistoryQuery`. Never pushed unsolicited. */
   HistorySnapshot = 23,
+  /** Client→host: read, start, or stop a session's SSH port forwards. */
+  SshForwardControl = 24,
+  /** Host→client: answer to `SshForwardControl`. Never pushed unsolicited. */
+  SshForwardSnapshot = 25,
 }
 
 export const TerminalFrameFlag = {
@@ -195,7 +199,7 @@ function isFrameKind(value: number): value is TerminalFrameKind {
   return (
     Number.isInteger(value) &&
     value >= TerminalFrameKind.Hello &&
-    value <= TerminalFrameKind.HistorySnapshot
+    value <= TerminalFrameKind.SshForwardSnapshot
   )
 }
 

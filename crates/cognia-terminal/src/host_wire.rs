@@ -15,6 +15,7 @@ use crate::host::{ClientIdentity, HostError, HostEvent, TerminalHost, TerminalHo
 use crate::protocol::{FrameKind, TerminalFrame, HEADER_LEN, MAX_FRAME_PAYLOAD};
 use crate::session::{PathInjection, SpawnRequest};
 use crate::ssh::SshSpawnRequest;
+use crate::ssh_forward::ForwardStatus;
 
 const MAX_WIRE_FRAME: usize = HEADER_LEN + MAX_FRAME_PAYLOAD;
 
@@ -70,7 +71,7 @@ impl From<PathInjectionPayload> for PathInjection {
 /// The bridge reuses an already-running host, which may be an older binary
 /// installed as a login service — clients check this list before sending a
 /// command that an older host would reject as an unknown frame kind.
-const PROTOCOL_FEATURES: &[&str] = &["pathInjection", "flowControl", "history"];
+const PROTOCOL_FEATURES: &[&str] = &["pathInjection", "flowControl", "history", "sshForwarding"];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +96,28 @@ struct ResizePayload {
 #[derive(Debug, Deserialize)]
 struct FlowControlPayload {
     paused: bool,
+}
+
+/// Read the forwards, or change one and read them back.
+///
+/// A toggle answers with the same snapshot a plain read would, so the UI never
+/// has to guess what its own change did — it gets the post-change truth in the
+/// reply it was already waiting for.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SshForwardControlPayload {
+    Status,
+    #[serde(rename_all = "camelCase")]
+    SetEnabled {
+        forward_id: String,
+        enabled: bool,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshForwardSnapshotPayload {
+    forwards: Vec<ForwardStatus>,
 }
 
 #[derive(Debug, Serialize)]
@@ -308,6 +331,30 @@ async fn dispatch_command(
                     .and_then(|()| ack_frame(host, session_id, sequence))
             })
         }
+        FrameKind::SshForwardControl => parse_json::<SshForwardControlPayload>(&frame.payload)
+            .and_then(|payload| match payload {
+                SshForwardControlPayload::Status => {
+                    host.forward_status(connection_id, &session_id.to_string())
+                }
+                SshForwardControlPayload::SetEnabled {
+                    forward_id,
+                    enabled,
+                } => host.set_forward_enabled(
+                    connection_id,
+                    &session_id.to_string(),
+                    &forward_id,
+                    enabled,
+                ),
+            })
+            .and_then(|forwards| {
+                json_frame(
+                    FrameKind::SshForwardSnapshot,
+                    session_id,
+                    sequence,
+                    &SshForwardSnapshotPayload { forwards },
+                )
+                .map_err(HostError::InvalidRequest)
+            }),
         _ => Err(HostError::InvalidRequest(format!(
             "frame kind {:?} is not a client command",
             frame.kind
@@ -575,7 +622,7 @@ mod tests {
         assert_eq!(ack["ok"], true);
         assert_eq!(
             ack["protocolFeatures"],
-            serde_json::json!(["pathInjection", "flowControl", "history"])
+            serde_json::json!(["pathInjection", "flowControl", "history", "sshForwarding"])
         );
 
         let applied = observed.path_injection();

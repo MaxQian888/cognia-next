@@ -18,6 +18,7 @@ import {
   type TerminalErrorCode,
   type TerminalFrame,
 } from "./protocol"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isCapacitor } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 import { issueSocketTicket } from "@/lib/tauri/companion-auth"
@@ -43,7 +44,12 @@ const defaultResolver: CompanionEndpointResolver = async () => {
   if (remote) {
     return remote
   }
-  if (!isCapacitor()) return null
+  // Capacitor and the cloud companion (ADR-0059 C1) both keep their pairing in
+  // the companion target book. `pickCompanionStorage()` is already
+  // shell-agnostic — it resolves the Browser Vault backend in a browser and the
+  // secure-storage backend on mobile — so the only thing this gate decides is
+  // whether a pairing is expected to exist at all.
+  if (!isCapacitor() && !hasWebCompanionTarget()) return null
   const { pickCompanionStorage } = await import("@/lib/tauri/companion-storage")
   const config = await pickCompanionStorage().load()
   return config
@@ -611,6 +617,6 @@ function isStreamEvent(kind: TerminalFrameKind): boolean {
 }
 
 export function pickRemoteSpawn(): typeof RemoteTerminalSession.spawn | null {
-  if (!isCapacitor()) return null
+  if (!isCapacitor() && !hasWebCompanionTarget()) return null
   return RemoteTerminalSession.spawn.bind(RemoteTerminalSession)
 }

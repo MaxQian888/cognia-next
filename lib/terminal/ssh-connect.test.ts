@@ -12,7 +12,7 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({ dispatchTerminalLifecycle: lifecycle }),
 }))
 
-import { connectSshFromDock } from "./ssh-connect"
+import { connectSshFromDock, resolveSshHostLaunch } from "./ssh-connect"
 import type { SshHostProfile } from "./ssh-profiles"
 import { SshTerminalSession } from "./ssh-session"
 
@@ -133,5 +133,42 @@ describe("connectSshFromDock", () => {
       })
     ).resolves.toEqual({ kind: "error", message: "native unavailable" })
     expect(connect).toHaveBeenCalled()
+  })
+})
+
+describe("resolveSshHostLaunch", () => {
+  it("returns the saved host for a known id", () => {
+    expect(resolveSshHostLaunch("ssh-1", [profile])).toEqual({ kind: "ready", profile })
+  })
+
+  it("reports an unknown id without inventing a profile", () => {
+    expect(resolveSshHostLaunch("ssh-9", [profile])).toEqual({ kind: "unknownHost" })
+    expect(resolveSshHostLaunch("ssh-1", undefined)).toEqual({ kind: "unknownHost" })
+    expect(resolveSshHostLaunch("ssh-1", [])).toEqual({ kind: "unknownHost" })
+  })
+
+  it("refuses a password host that has never stored a credential", () => {
+    // Callers reached by id have no secret field, so this would otherwise fail
+    // deep in native code with an opaque keyring miss.
+    expect(resolveSshHostLaunch("ssh-1", [{ ...profile, credentialRef: undefined }])).toEqual({
+      kind: "credentialRequired",
+      name: "Production",
+    })
+  })
+
+  it("launches key and agent hosts that hold no credential", () => {
+    const key: SshHostProfile = {
+      ...profile,
+      authMethod: "privateKey",
+      privateKeyPath: "~/.ssh/id_ed25519",
+      credentialRef: undefined,
+    }
+    const agent: SshHostProfile = {
+      ...profile,
+      authMethod: "agent",
+      credentialRef: undefined,
+    }
+    expect(resolveSshHostLaunch("ssh-1", [key])).toEqual({ kind: "ready", profile: key })
+    expect(resolveSshHostLaunch("ssh-1", [agent])).toEqual({ kind: "ready", profile: agent })
   })
 })

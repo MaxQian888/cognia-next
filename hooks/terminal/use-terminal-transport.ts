@@ -14,6 +14,12 @@
  * want. Gating "+ New" on `kind === "tauri-channel"` meant a desktop driving a
  * remote host got a dock with no way to create a terminal at all, even though
  * `spawnFromDock` walks the very chain this reads and works fine over `ws`.
+ *
+ * Two independent signals can move the answer, so both are subscribed:
+ * activating/dropping a remote Cognia host (ADR-0082) and pairing/unpairing a
+ * cloud companion (ADR-0059 C1). The latter only writes localStorage, which
+ * fires no React update of its own — `cognia:companion-config-changed` is the
+ * canonical broadcast the companion boot providers already listen on.
  */
 
 import { useSyncExternalStore } from "react"
@@ -24,6 +30,9 @@ import {
   type TerminalTransportKind,
 } from "@/lib/terminal/pick-transport"
 import { subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+
+/** Broadcast by every companion-pairing write (`lib/tauri/transport-companion.ts`). */
+const COMPANION_CONFIG_CHANGED_EVENT = "cognia:companion-config-changed"
 
 export interface TerminalTransportState {
   /** Preferred transport for a new session. */
@@ -77,8 +86,26 @@ function serverSnapshot(): TerminalTransportState {
   return SERVER_SNAPSHOT
 }
 
+/**
+ * Fan out to both activation signals. `useSyncExternalStore` takes one
+ * subscribe function, and it must be referentially stable or React resubscribes
+ * on every render — so this is a module-level function, not a closure.
+ *
+ * No `typeof window` guard: React only ever calls `subscribe` from an effect,
+ * which never runs during the static export's server pass. SSR is served by
+ * {@link serverSnapshot} instead.
+ */
+function subscribeTransportChanges(onStoreChange: () => void): () => void {
+  const unsubscribeRemoteHost = subscribeActiveRemoteTransport(onStoreChange)
+  window.addEventListener(COMPANION_CONFIG_CHANGED_EVENT, onStoreChange)
+  return () => {
+    window.removeEventListener(COMPANION_CONFIG_CHANGED_EVENT, onStoreChange)
+    unsubscribeRemoteHost()
+  }
+}
+
 export function useTerminalTransport(): TerminalTransportState {
-  return useSyncExternalStore(subscribeActiveRemoteTransport, snapshot, serverSnapshot)
+  return useSyncExternalStore(subscribeTransportChanges, snapshot, serverSnapshot)
 }
 
 /** Test-only: drop the memoised snapshots so a re-stubbed shell is observed. */

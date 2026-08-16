@@ -1,232 +1,259 @@
-/**
- * Tests for SSH jump host and port forwarding extensions.
- */
-
 import {
-  validateLocalForward,
-  validateRemoteForward,
+  buildForwardedConnectRequest,
   formatLocalForward,
   formatRemoteForward,
-  buildLocalForwardFlag,
-  buildRemoteForwardFlag,
+  jumpHostCandidates,
+  MAX_JUMP_DEPTH,
+  newLocalForward,
+  newRemoteForward,
   resolveJumpChain,
-  buildProxyJumpFlag,
-  type LocalForward,
-  type RemoteForward,
-  type SshExtendedProfile,
+  validateLocalForward,
+  validateRemoteForward,
 } from "./ssh-forwarding"
+import type { LocalForward, RemoteForward, SshHostProfile } from "./ssh-profiles"
 
-function makeProfile(id: string, overrides?: Partial<SshExtendedProfile>): SshExtendedProfile {
+function host(id: string, overrides: Partial<SshHostProfile> = {}): SshHostProfile {
   return {
     id,
-    name: `Host ${id}`,
-    host: `${id}.example.com`,
+    name: id,
+    host: `${id}.example`,
     port: 22,
-    username: "user",
-    authMethod: "password",
-    jumpHostId: null,
-    localForwards: [],
-    remoteForwards: [],
+    username: "deploy",
+    authMethod: "agent",
     ...overrides,
   }
 }
 
-describe("ssh-forwarding", () => {
-  describe("validateLocalForward", () => {
-    it("returns null for valid forward", () => {
-      const fwd: LocalForward = { localPort: 8080, remoteHost: "db.internal", remotePort: 5432 }
-      expect(validateLocalForward(fwd)).toBeNull()
-    })
+function local(overrides: Partial<LocalForward> = {}): LocalForward {
+  return {
+    id: "lfwd-1",
+    localPort: 8080,
+    remoteHost: "db.internal",
+    remotePort: 5432,
+    enabled: true,
+    ...overrides,
+  }
+}
 
-    it("rejects port below 1", () => {
-      expect(validateLocalForward({ localPort: 0, remoteHost: "h", remotePort: 80 })).toBe(
-        "port_out_of_range"
-      )
-    })
+function remote(overrides: Partial<RemoteForward> = {}): RemoteForward {
+  return {
+    id: "rfwd-1",
+    remotePort: 9000,
+    localHost: "localhost",
+    localPort: 3000,
+    enabled: true,
+    ...overrides,
+  }
+}
 
-    it("rejects port above 65535", () => {
-      expect(validateLocalForward({ localPort: 8080, remoteHost: "h", remotePort: 70000 })).toBe(
-        "port_out_of_range"
-      )
-    })
+describe("forward validation", () => {
+  it("accepts a well-formed rule in either direction", () => {
+    expect(validateLocalForward(local())).toBeNull()
+    expect(validateRemoteForward(remote())).toBeNull()
+  })
 
-    it("rejects empty remote host", () => {
-      expect(validateLocalForward({ localPort: 8080, remoteHost: "", remotePort: 80 })).toBe(
-        "host_empty"
-      )
-    })
+  it("rejects ports outside the 16-bit range on both ends", () => {
+    expect(validateLocalForward(local({ localPort: 0 }))).toBe("port_out_of_range")
+    expect(validateLocalForward(local({ localPort: 65_536 }))).toBe("port_out_of_range")
+    expect(validateLocalForward(local({ remotePort: 0 }))).toBe("port_out_of_range")
+    // A port typed into a number input arrives as a float often enough to be
+    // worth refusing rather than truncating behind the user's back.
+    expect(validateLocalForward(local({ localPort: 80.5 }))).toBe("port_out_of_range")
+    expect(validateRemoteForward(remote({ remotePort: 0 }))).toBe("port_out_of_range")
+    expect(validateRemoteForward(remote({ localPort: 70_000 }))).toBe("port_out_of_range")
+  })
 
-    it("rejects duplicate local port", () => {
-      const fwd: LocalForward = { localPort: 8080, remoteHost: "h", remotePort: 80 }
-      expect(validateLocalForward(fwd, [8080, 3000])).toBe("duplicate_local_port")
-    })
+  it("distinguishes a missing destination from a malformed one", () => {
+    expect(validateLocalForward(local({ remoteHost: "   " }))).toBe("host_empty")
+    expect(validateLocalForward(local({ remoteHost: "db internal" }))).toBe("host_invalid")
+    expect(validateRemoteForward(remote({ localHost: "" }))).toBe("host_empty")
+    expect(validateRemoteForward(remote({ localHost: "local host" }))).toBe("host_invalid")
+  })
 
-    it("allows non-duplicate local port", () => {
-      const fwd: LocalForward = { localPort: 9090, remoteHost: "h", remotePort: 80 }
-      expect(validateLocalForward(fwd, [8080, 3000])).toBeNull()
+  it("refuses two rules claiming one port, in both directions", () => {
+    expect(validateLocalForward(local(), [8080])).toBe("duplicate_local_port")
+    expect(validateLocalForward(local(), [9090])).toBeNull()
+    // The original module checked this for `-L` only, so two `-R` rules could
+    // silently fight over one port on the server.
+    expect(validateRemoteForward(remote(), [9000])).toBe("duplicate_remote_port")
+    expect(validateRemoteForward(remote(), [9001])).toBeNull()
+  })
+})
+
+describe("forward formatting", () => {
+  it("names the loopback bind so the UI cannot imply a wider one", () => {
+    expect(formatLocalForward(local())).toBe("127.0.0.1:8080 → db.internal:5432")
+    expect(formatRemoteForward(remote())).toBe("remote 127.0.0.1:9000 → localhost:3000")
+  })
+})
+
+describe("resolveJumpChain", () => {
+  it("returns the target alone when nothing is in front of it", () => {
+    const target = host("target")
+    expect(resolveJumpChain(target, [target])?.map((hop) => hop.id)).toEqual(["target"])
+  })
+
+  it("orders hops outermost first with the target last", () => {
+    const outer = host("outer")
+    const inner = host("inner", { jumpHostId: "outer" })
+    const target = host("target", { jumpHostId: "inner" })
+    expect(resolveJumpChain(target, [outer, inner, target])?.map((hop) => hop.id)).toEqual([
+      "outer",
+      "inner",
+      "target",
+    ])
+  })
+
+  it("refuses a chain that points at a profile that is gone", () => {
+    const target = host("target", { jumpHostId: "deleted" })
+    // Connecting direct would reach a machine the user did not ask for, so a
+    // broken chain has to fail rather than degrade.
+    expect(resolveJumpChain(target, [target])).toBeNull()
+  })
+
+  it("refuses a cycle rather than walking it forever", () => {
+    const a = host("a", { jumpHostId: "b" })
+    const b = host("b", { jumpHostId: "a" })
+    expect(resolveJumpChain(a, [a, b])).toBeNull()
+
+    const self = host("self", { jumpHostId: "self" })
+    expect(resolveJumpChain(self, [self])).toBeNull()
+  })
+
+  it("refuses a chain deeper than the native limit", () => {
+    const profiles = Array.from({ length: MAX_JUMP_DEPTH + 2 }, (_, index) =>
+      host(`h${index}`, { jumpHostId: index === 0 ? null : `h${index - 1}` })
+    )
+    const deepest = profiles[profiles.length - 1]
+    expect(resolveJumpChain(deepest, profiles)).toBeNull()
+    expect(resolveJumpChain(profiles[MAX_JUMP_DEPTH], profiles)).not.toBeNull()
+  })
+})
+
+describe("jumpHostCandidates", () => {
+  it("never offers the profile itself", () => {
+    const a = host("a")
+    const b = host("b")
+    expect(jumpHostCandidates(a, [a, b]).map((profile) => profile.id)).toEqual(["b"])
+  })
+
+  it("hides a profile that already routes through this one", () => {
+    const bastion = host("bastion")
+    // `edge` goes through `bastion`, so `bastion` cannot also go through `edge`.
+    const edge = host("edge", { jumpHostId: "bastion" })
+    expect(jumpHostCandidates(bastion, [bastion, edge]).map((p) => p.id)).toEqual([])
+    expect(jumpHostCandidates(edge, [bastion, edge]).map((p) => p.id)).toEqual(["bastion"])
+  })
+
+  it("hides a profile whose own chain is already broken", () => {
+    const target = host("target")
+    const broken = host("broken", { jumpHostId: "missing" })
+    expect(jumpHostCandidates(target, [target, broken])).toEqual([])
+  })
+})
+
+describe("new rule defaults", () => {
+  it("starts a local forward enabled and a remote forward off", () => {
+    // `-L` listens only on this machine; `-R` opens a socket on someone
+    // else's and points it back here, so it waits to be turned on.
+    expect(newLocalForward([]).enabled).toBe(true)
+    expect(newRemoteForward([]).enabled).toBe(false)
+  })
+
+  it("mints ids that do not collide with existing rules", () => {
+    const existing = [local({ id: "lfwd-1" }), local({ id: "lfwd-2" })]
+    expect(newLocalForward(existing).id).toBe("lfwd-3")
+    expect(newRemoteForward([remote({ id: "rfwd-1" })]).id).toBe("rfwd-2")
+  })
+})
+
+describe("buildForwardedConnectRequest", () => {
+  const base = { rows: 24, cols: 80, projectId: "project-1" }
+
+  it("carries the resolved hops, excluding the target itself", () => {
+    const outer = host("outer", { username: "jump", port: 2222 })
+    const target = host("target", { jumpHostId: "outer" })
+    const built = buildForwardedConnectRequest({
+      profile: target,
+      allProfiles: [outer, target],
+      ...base,
+    })
+    expect(built.kind).toBe("ok")
+    if (built.kind !== "ok") return
+    expect(built.request.jumpChain).toEqual([
+      {
+        host: "outer.example",
+        port: 2222,
+        username: "jump",
+        authMethod: "agent",
+        credentialRef: undefined,
+        privateKeyPath: undefined,
+      },
+    ])
+    expect(built.request.host).toBe("target.example")
+  })
+
+  it("drops disabled rules instead of shipping them with a flag", () => {
+    const profile = host("target", {
+      localForwards: [local({ id: "on" }), local({ id: "off", localPort: 9090, enabled: false })],
+      remoteForwards: [remote({ id: "roff", enabled: false })],
+    })
+    const built = buildForwardedConnectRequest({ profile, allProfiles: [profile], ...base })
+    expect(built.kind).toBe("ok")
+    if (built.kind !== "ok") return
+    // A rule the user switched off must not reach the native side at all —
+    // there is then nothing for a default to revive.
+    expect(built.request.localForwards?.map((rule) => rule.id)).toEqual(["on"])
+    expect(built.request.remoteForwards).toEqual([])
+  })
+
+  it("reports which part of the profile is wrong, not just that it is", () => {
+    const profile = host("target", { host: "bad host" })
+    const built = buildForwardedConnectRequest({ profile, allProfiles: [profile], ...base })
+    expect(built).toEqual({ kind: "invalid", reason: "host" })
+  })
+
+  it("refuses a broken jump chain", () => {
+    const profile = host("target", { jumpHostId: "missing" })
+    expect(buildForwardedConnectRequest({ profile, allProfiles: [profile], ...base })).toEqual({
+      kind: "invalid",
+      reason: "jumpChain",
     })
   })
 
-  describe("validateRemoteForward", () => {
-    it("returns null for valid forward", () => {
-      const fwd: RemoteForward = { remotePort: 9090, localHost: "localhost", localPort: 3000 }
-      expect(validateRemoteForward(fwd)).toBeNull()
-    })
-
-    it("rejects port out of range", () => {
-      expect(
-        validateRemoteForward({ remotePort: -1, localHost: "localhost", localPort: 3000 })
-      ).toBe("port_out_of_range")
-    })
-
-    it("rejects empty local host", () => {
-      expect(validateRemoteForward({ remotePort: 9090, localHost: "  ", localPort: 3000 })).toBe(
-        "host_empty"
-      )
-    })
+  it("refuses a bastion that could not authenticate on its own account", () => {
+    // A jump host is a server we log into, not a transparent relay, so an
+    // incomplete one is as fatal as an incomplete target.
+    const bastion = host("bastion", { authMethod: "privateKey", privateKeyPath: "  " })
+    const profile = host("target", { jumpHostId: "bastion" })
+    expect(
+      buildForwardedConnectRequest({ profile, allProfiles: [bastion, profile], ...base })
+    ).toEqual({ kind: "invalid", reason: "jumpChain" })
   })
 
-  describe("formatLocalForward", () => {
-    it("formats standard forward", () => {
-      expect(
-        formatLocalForward({ localPort: 8080, remoteHost: "db.internal", remotePort: 5432 })
-      ).toBe("8080 → db.internal:5432")
+  it("refuses two enabled rules that would fight over one port", () => {
+    const profile = host("target", {
+      localForwards: [local({ id: "a" }), local({ id: "b" })],
+    })
+    expect(buildForwardedConnectRequest({ profile, allProfiles: [profile], ...base })).toEqual({
+      kind: "invalid",
+      reason: "localForward",
     })
 
-    it("includes bind address when non-default", () => {
-      expect(
-        formatLocalForward({
-          localPort: 8080,
-          remoteHost: "db",
-          remotePort: 5432,
-          bindAddress: "0.0.0.0",
-        })
-      ).toBe("0.0.0.0:8080 → db:5432")
+    const remoteClash = host("target", {
+      remoteForwards: [remote({ id: "a" }), remote({ id: "b" })],
     })
-
-    it("omits bind address when 127.0.0.1", () => {
-      expect(
-        formatLocalForward({
-          localPort: 3000,
-          remoteHost: "app",
-          remotePort: 80,
-          bindAddress: "127.0.0.1",
-        })
-      ).toBe("3000 → app:80")
-    })
+    expect(
+      buildForwardedConnectRequest({ profile: remoteClash, allProfiles: [remoteClash], ...base })
+    ).toEqual({ kind: "invalid", reason: "remoteForward" })
   })
 
-  describe("formatRemoteForward", () => {
-    it("formats standard forward", () => {
-      expect(
-        formatRemoteForward({ remotePort: 9090, localHost: "localhost", localPort: 3000 })
-      ).toBe("9090 → localhost:3000")
+  it("ignores a clash between rules that are not both on", () => {
+    const profile = host("target", {
+      localForwards: [local({ id: "a" }), local({ id: "b", enabled: false })],
     })
-  })
-
-  describe("buildLocalForwardFlag", () => {
-    it("builds correct -L flag", () => {
-      expect(buildLocalForwardFlag({ localPort: 8080, remoteHost: "db", remotePort: 5432 })).toBe(
-        "-L 127.0.0.1:8080:db:5432"
-      )
-    })
-
-    it("uses custom bind address", () => {
-      expect(
-        buildLocalForwardFlag({
-          localPort: 8080,
-          remoteHost: "db",
-          remotePort: 5432,
-          bindAddress: "0.0.0.0",
-        })
-      ).toBe("-L 0.0.0.0:8080:db:5432")
-    })
-  })
-
-  describe("buildRemoteForwardFlag", () => {
-    it("builds correct -R flag", () => {
-      expect(
-        buildRemoteForwardFlag({ remotePort: 9090, localHost: "localhost", localPort: 3000 })
-      ).toBe("-R 127.0.0.1:9090:localhost:3000")
-    })
-  })
-
-  describe("resolveJumpChain", () => {
-    it("returns single-element chain for direct connection", () => {
-      const target = makeProfile("target")
-      const chain = resolveJumpChain(target, [target])
-      expect(chain).toEqual([target])
-    })
-
-    it("resolves a single jump host", () => {
-      const jump = makeProfile("jump")
-      const target = makeProfile("target", { jumpHostId: "jump" })
-      const chain = resolveJumpChain(target, [jump, target])
-
-      expect(chain).toHaveLength(2)
-      expect(chain![0].id).toBe("jump")
-      expect(chain![1].id).toBe("target")
-    })
-
-    it("resolves multi-hop chain", () => {
-      const bastion = makeProfile("bastion")
-      const middle = makeProfile("middle", { jumpHostId: "bastion" })
-      const target = makeProfile("target", { jumpHostId: "middle" })
-      const all = [bastion, middle, target]
-
-      const chain = resolveJumpChain(target, all)
-      expect(chain).toHaveLength(3)
-      expect(chain!.map((p) => p.id)).toEqual(["bastion", "middle", "target"])
-    })
-
-    it("returns null for broken chain (missing jump host)", () => {
-      const target = makeProfile("target", { jumpHostId: "missing" })
-      expect(resolveJumpChain(target, [target])).toBeNull()
-    })
-
-    it("returns null for circular reference", () => {
-      const a = makeProfile("a", { jumpHostId: "b" })
-      const b = makeProfile("b", { jumpHostId: "a" })
-      expect(resolveJumpChain(a, [a, b])).toBeNull()
-    })
-
-    it("returns null when chain exceeds max depth", () => {
-      const profiles: SshExtendedProfile[] = []
-      for (let i = 0; i < 7; i++) {
-        profiles.push(makeProfile(`host-${i}`, { jumpHostId: i > 0 ? `host-${i - 1}` : null }))
-      }
-      const target = makeProfile("target", { jumpHostId: "host-6" })
-      profiles.push(target)
-
-      // maxDepth=5 means 5 jumps max
-      expect(resolveJumpChain(target, profiles, 5)).toBeNull()
-    })
-  })
-
-  describe("buildProxyJumpFlag", () => {
-    it("returns empty for no jump hosts", () => {
-      expect(buildProxyJumpFlag([])).toBe("")
-    })
-
-    it("builds single jump", () => {
-      expect(
-        buildProxyJumpFlag([{ username: "admin", host: "bastion.example.com", port: 22 }])
-      ).toBe("-J admin@bastion.example.com")
-    })
-
-    it("includes non-standard port", () => {
-      expect(
-        buildProxyJumpFlag([{ username: "admin", host: "bastion.example.com", port: 2222 }])
-      ).toBe("-J admin@bastion.example.com:2222")
-    })
-
-    it("builds multi-hop jump", () => {
-      expect(
-        buildProxyJumpFlag([
-          { username: "user1", host: "hop1.com", port: 22 },
-          { username: "user2", host: "hop2.com", port: 443 },
-        ])
-      ).toBe("-J user1@hop1.com,user2@hop2.com:443")
-    })
+    expect(buildForwardedConnectRequest({ profile, allProfiles: [profile], ...base }).kind).toBe(
+      "ok"
+    )
   })
 })

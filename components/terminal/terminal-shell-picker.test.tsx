@@ -33,10 +33,21 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
   ),
 }))
 
+let mockIsTauri = false
+jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
+
+const mockInvoke = jest.fn(async (..._args: unknown[]): Promise<unknown> => [])
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}))
+
 import { TerminalShellPicker, type DetectShells } from "./terminal-shell-picker"
 
 beforeEach(() => {
   cleanup()
+  mockIsTauri = false
+  mockInvoke.mockClear()
+  mockInvoke.mockResolvedValue([])
 })
 
 /** No detection — exercises the platform list unchanged. */
@@ -162,5 +173,112 @@ describe("TerminalShellPicker", () => {
     expect(screen.queryByText("Blank")).toBeNull()
     fireEvent.click(screen.getByTestId("terminal-shell-picker-profile-profile-1"))
     expect(onNewProfile).toHaveBeenCalledWith("profile-1")
+  })
+
+  it("lists saved SSH hosts and connects the chosen one", async () => {
+    const onNewSshHost = jest.fn()
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onNewSshHost={onNewSshHost}
+        sshHosts={[
+          {
+            id: "ssh-1",
+            name: "Production",
+            host: "prod.example.com",
+            port: 22,
+            username: "deploy",
+            authMethod: "password",
+          },
+          // Half-filled draft rows from the settings editor never reach the
+          // menu — connecting would only surface a validation error.
+          {
+            id: "ssh-2",
+            name: "Draft",
+            host: "",
+            port: 22,
+            username: "deploy",
+            authMethod: "password",
+          },
+        ]}
+      />
+    )
+    expect(screen.queryByText("Draft")).toBeNull()
+    fireEvent.click(screen.getByTestId("terminal-shell-picker-ssh-ssh-1"))
+    expect(onNewSshHost).toHaveBeenCalledWith("ssh-1")
+  })
+
+  it("omits the SSH group when no hosts are supplied", async () => {
+    await renderPicker(
+      <TerminalShellPicker onNew={jest.fn()} platform="macos" detectShells={noDetect} />
+    )
+    expect(screen.queryByText("terminal.shellPicker.sshLabel")).toBeNull()
+  })
+
+  describe("default PATH detection", () => {
+    it("returns nothing off-desktop so the full platform list survives", async () => {
+      // No `detectShells` prop — exercises the module's own default.
+      await renderPicker(<TerminalShellPicker onNew={jest.fn()} platform="macos" />)
+      expect(mockInvoke).not.toHaveBeenCalled()
+      expect(screen.getByTestId("terminal-shell-picker-shell-zsh")).toBeInTheDocument()
+      expect(screen.getByTestId("terminal-shell-picker-shell-nu")).toBeInTheDocument()
+    })
+
+    it("narrows to the binaries the Rust PATH scan resolves", async () => {
+      mockIsTauri = true
+      mockInvoke.mockImplementation(async (_cmd, args) => {
+        const prefix = (args as { prefix: string }).prefix
+        // Only zsh and bash are installed; `.exe` stems are matched loosely so
+        // `cmd.exe` would satisfy a `cmd` probe on Windows.
+        return prefix === "zsh" ? ["zsh"] : prefix === "bash" ? ["BASH.exe"] : []
+      })
+      await renderPicker(<TerminalShellPicker onNew={jest.fn()} platform="macos" />)
+
+      expect(mockInvoke).toHaveBeenCalledWith("terminal_list_path_executables", {
+        prefix: "zsh",
+        limit: 8,
+      })
+      expect(screen.getByTestId("terminal-shell-picker-shell-zsh")).toBeInTheDocument()
+      expect(screen.getByTestId("terminal-shell-picker-shell-bash")).toBeInTheDocument()
+      expect(screen.queryByTestId("terminal-shell-picker-shell-nu")).toBeNull()
+    })
+
+    it("leaves a shell undetected when its probe throws", async () => {
+      mockIsTauri = true
+      mockInvoke.mockImplementation(async (_cmd, args) => {
+        const prefix = (args as { prefix: string }).prefix
+        if (prefix === "zsh") return ["zsh"]
+        throw new Error("scan unavailable")
+      })
+      await renderPicker(<TerminalShellPicker onNew={jest.fn()} platform="macos" />)
+
+      expect(screen.getByTestId("terminal-shell-picker-shell-zsh")).toBeInTheDocument()
+      expect(screen.queryByTestId("terminal-shell-picker-shell-nu")).toBeNull()
+    })
+  })
+
+  it("omits the SSH group when hosts exist but no connect handler is wired", async () => {
+    // The dock withholds `onNewSshHost` nowhere today, but a caller that
+    // supplies hosts without a handler must not render dead menu rows.
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        sshHosts={[
+          {
+            id: "ssh-1",
+            name: "Production",
+            host: "prod.example.com",
+            port: 22,
+            username: "deploy",
+            authMethod: "agent",
+          },
+        ]}
+      />
+    )
+    expect(screen.queryByTestId("terminal-shell-picker-ssh-ssh-1")).toBeNull()
   })
 })

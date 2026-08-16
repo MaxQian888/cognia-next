@@ -4,11 +4,8 @@ import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 import { registerLiveSession } from "./session-registry"
 import { wireSessionToStore, type TerminalStoreLike } from "./spawn-orchestrator"
-import {
-  sshHostToConnectRequest,
-  validateSshHostProfile,
-  type SshHostProfile,
-} from "./ssh-profiles"
+import { buildForwardedConnectRequest } from "./ssh-forwarding"
+import { type SshHostProfile } from "./ssh-profiles"
 import { SshTerminalSession } from "./ssh-session"
 
 export type SshConnectOutcome =
@@ -20,23 +17,65 @@ export type SshConnectOutcome =
     }
   | { kind: "error"; message: string }
 
+/**
+ * Whether a saved host can be launched by id alone.
+ *
+ * Callers outside the settings editor — the dock's shell picker today — have no
+ * secret field, so a password host that has never been connected from settings
+ * has nothing in the keyring to authenticate with. Catching that here turns an
+ * opaque native "credential was not found" into an instruction the user can
+ * act on, and keeps every id-based entry point honest about the same rule.
+ */
+export type SshHostLaunch =
+  | { kind: "ready"; profile: SshHostProfile }
+  | { kind: "unknownHost" }
+  | { kind: "credentialRequired"; name: string }
+
+export function resolveSshHostLaunch(
+  hostId: string,
+  hosts: readonly SshHostProfile[] | undefined
+): SshHostLaunch {
+  const profile = (hosts ?? []).find((host) => host.id === hostId)
+  if (!profile) return { kind: "unknownHost" }
+  // Key and agent auth both connect without anything in the keyring: an
+  // unencrypted key needs no passphrase, and the agent holds its own material.
+  if (profile.authMethod === "password" && !profile.credentialRef) {
+    return { kind: "credentialRequired", name: profile.name }
+  }
+  return { kind: "ready", profile }
+}
+
+/**
+ * Launch a saved host interactively.
+ *
+ * `allProfiles` is required rather than optional because a jump host is stored
+ * as a profile id: without the set to resolve it against, a bastion-backed host
+ * would silently connect direct — the one failure mode worth designing out, as
+ * it would reach a machine the user did not mean to reach.
+ */
 export async function connectSshFromDock(input: {
   profile: SshHostProfile
+  allProfiles: readonly SshHostProfile[]
   rows: number
   cols: number
   projectId?: string
   store: TerminalStoreLike
   connect?: typeof SshTerminalSession.connect
 }): Promise<SshConnectOutcome> {
-  const request = sshHostToConnectRequest(input.profile, input.rows, input.cols, input.projectId)
-  if (!request) {
-    const field = validateSshHostProfile(input.profile) ?? "profile"
-    return { kind: "error", message: `invalid SSH host profile: ${field}` }
+  const built = buildForwardedConnectRequest({
+    profile: input.profile,
+    allProfiles: input.allProfiles,
+    rows: input.rows,
+    cols: input.cols,
+    projectId: input.projectId,
+  })
+  if (built.kind === "invalid") {
+    return { kind: "error", message: `invalid SSH host profile: ${built.reason}` }
   }
 
   let session: SshTerminalSession
   try {
-    session = await (input.connect ?? SshTerminalSession.connect)(request)
+    session = await (input.connect ?? SshTerminalSession.connect)(built.request)
   } catch (error) {
     return {
       kind: "error",

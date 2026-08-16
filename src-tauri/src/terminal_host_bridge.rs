@@ -18,7 +18,8 @@ use cognia_terminal::host_wire::{read_frame, write_frame};
 use cognia_terminal::osc633::IntegrationEvent;
 use cognia_terminal::protocol::{FrameKind, TerminalErrorCode, TerminalFrame, MAX_FRAME_PAYLOAD};
 use cognia_terminal::session::SpawnRequest;
-use cognia_terminal::ssh::SshSpawnRequest;
+use cognia_terminal::ssh::{forget_host_key, SshSpawnRequest};
+use cognia_terminal::ssh_forward::ForwardStatus;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -29,8 +30,8 @@ use uuid::Uuid;
 use crate::terminal_host_service::{
     connect_terminal_host, connect_terminal_host_as, default_terminal_host_endpoint,
     load_terminal_host_settings, provision_terminal_host_descriptor, save_terminal_host_settings,
-    set_terminal_host_login_service, BoxedTerminalHostIo, TerminalHostDescriptor,
-    TerminalHostSettings,
+    set_terminal_host_login_service, ssh_known_hosts_path, BoxedTerminalHostIo,
+    TerminalHostDescriptor, TerminalHostSettings,
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -920,6 +921,97 @@ pub async fn ssh_terminal_kill<R: Runtime>(
     id: String,
 ) -> Result<(), String> {
     terminal_kill(app, state, id).await
+}
+
+/// Drop the trusted key for `host:port` so the next connection re-learns it.
+///
+/// Runs in the app process rather than over the host socket: it edits a local
+/// file both processes agree on ([`ssh_known_hosts_path`]), and a new host
+/// frame kind would need protocol negotiation (ADR-0033) to carry an operation
+/// that never touches a session.
+///
+/// Being a `#[tauri::command]` on the main webview *is* the local-identity gate
+/// required by ADR-0082 §8.3 — remote and mobile clients reach the terminal
+/// through the host socket and have no path to this surface, so they cannot
+/// re-trust a server on the desktop's behalf.
+#[tauri::command]
+pub async fn ssh_forget_host_key(host: String, port: u16) -> Result<usize, String> {
+    let host = host.trim().to_string();
+    if host.is_empty() || host.chars().any(char::is_whitespace) {
+        return Err("SSH host is invalid".into());
+    }
+    if port == 0 {
+        return Err("SSH port is invalid".into());
+    }
+    tokio::task::spawn_blocking(move || {
+        let path = ssh_known_hosts_path();
+        if !path.exists() {
+            return Ok(0);
+        }
+        forget_host_key(&host, port, &path)
+    })
+    .await
+    .map_err(|error| format!("SSH known_hosts task failed: {error}"))?
+}
+
+async fn ssh_forward_control<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &TerminalHostBridgeState,
+    id: &str,
+    action: serde_json::Value,
+) -> Result<Vec<ForwardStatus>, String> {
+    let response = state
+        .client(app)
+        .await?
+        .request_json(FrameKind::SshForwardControl, parse_session_id(id)?, &action)
+        .await?;
+    let value: serde_json::Value = serde_json::from_slice(&response.payload)
+        .map_err(|error| format!("SSH forwarding snapshot is invalid: {error}"))?;
+    serde_json::from_value(value.get("forwards").cloned().unwrap_or_default())
+        .map_err(|error| format!("SSH forwarding snapshot is invalid: {error}"))
+}
+
+/// Live state of a session's SSH tunnels.
+///
+/// Pull-only by design: the forwarding panel asks while it is open rather than
+/// being pushed at, so a host that gained forwarding never sends an older
+/// client a frame kind it cannot decode (ADR-0033).
+#[tauri::command]
+pub async fn ssh_terminal_forward_status<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+) -> Result<Vec<ForwardStatus>, String> {
+    ssh_forward_control(&app, &state, &id, serde_json::json!({ "kind": "status" })).await
+}
+
+/// Start or stop one forward on a running session, and read the result back.
+///
+/// The host refuses this from any non-local identity: enabling a rule opens a
+/// listening socket on the desktop, or asks the remote server to open one
+/// pointing back at it, and neither is a phone's decision (ADR-0082 §8.3).
+#[tauri::command]
+pub async fn ssh_terminal_set_forward_enabled<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, TerminalHostBridgeState>,
+    id: String,
+    forward_id: String,
+    enabled: bool,
+) -> Result<Vec<ForwardStatus>, String> {
+    if forward_id.trim().is_empty() {
+        return Err("SSH forward id is required".into());
+    }
+    ssh_forward_control(
+        &app,
+        &state,
+        &id,
+        serde_json::json!({
+            "kind": "setEnabled",
+            "forwardId": forward_id,
+            "enabled": enabled,
+        }),
+    )
+    .await
 }
 
 async fn list_sessions<R: Runtime>(

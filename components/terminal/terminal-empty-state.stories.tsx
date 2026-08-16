@@ -3,8 +3,9 @@ import { fn } from "storybook/test"
 
 import { TerminalEmptyState } from "./terminal-empty-state"
 
-// Empty-state body for the terminal dock across the three shells: desktop (with a
-// "+ New terminal" CTA), mobile (LAN bridge placeholder), and plain browser.
+// Empty-state body for the terminal dock across every shell: desktop (with a
+// "+ New terminal" CTA), mobile (LAN bridge placeholder), remote host, cloud
+// companion (browser paired to a cognia-server), and plain browser.
 const meta = {
   title: "Terminal/EmptyState",
   component: TerminalEmptyState,
@@ -26,4 +27,8 @@ export const Desktop: Story = {}
 
 export const Mobile: Story = { args: { variant: "mobile" } }
 
-export const Unsupported: Story = { args: { variant: "unsupported" } }
+export const Remote: Story = { args: { variant: "remote" } }
+
+export const Cloud: Story = { args: { variant: "cloud" } }
+
+export const Unsupported: Story = { args: { variant: "unsupported", onNew: undefined } }

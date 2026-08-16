@@ -1,9 +1,23 @@
 /** @jest-environment jsdom */
 
+let mockIsCapacitor = true
+let mockHasWebCompanionTarget = false
+const mockCompanionStorageLoad = jest.fn(async () => COMPANION_ENDPOINT_FROM_STORAGE)
+
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
-  isCapacitor: () => true,
+  isCapacitor: () => mockIsCapacitor,
 }))
+
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: () => mockHasWebCompanionTarget,
+}))
+
+jest.mock("@/lib/tauri/companion-storage", () => ({
+  pickCompanionStorage: () => ({ load: mockCompanionStorageLoad }),
+}))
+
+import { setActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
 import {
   decodeTerminalFrame,
@@ -13,6 +27,7 @@ import {
   TerminalFrameKind,
 } from "./protocol"
 import {
+  __resetEndpointResolverForTesting,
   __setSocketTicketIssuerForTesting,
   __setTerminalDataChannelResolverForTesting,
   __setWebSocketFactoryForTesting,
@@ -27,6 +42,13 @@ const COMPANION_ENDPOINT = {
   devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key" },
   deviceKeyThumbprint: "thumbprint",
   serverVersion: "1.0.0",
+}
+
+/** What the shell-agnostic companion target book hands back. */
+const COMPANION_ENDPOINT_FROM_STORAGE = {
+  ...COMPANION_ENDPOINT,
+  baseUrl: "https://cognia.example:27890",
+  deviceId: "browser-device-1",
 }
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111"
@@ -212,6 +234,9 @@ beforeAll(() => {
 beforeEach(() => {
   sockets.splice(0)
   ticketCounter = 0
+  mockIsCapacitor = true
+  mockHasWebCompanionTarget = false
+  mockCompanionStorageLoad.mockClear()
   configureCompanionEndpointResolver(async () => ({
     ...COMPANION_ENDPOINT,
   }))
@@ -225,6 +250,7 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.useRealTimers()
+  __resetEndpointResolverForTesting()
 })
 
 describe("RemoteTerminalSession canonical LAN transport", () => {
@@ -446,4 +472,76 @@ describe("RemoteTerminalSession canonical WAN transport", () => {
 
 it("selects the remote session adapter on Capacitor", () => {
   expect(pickRemoteSpawn()).toBeTruthy()
+})
+
+describe("cloud companion endpoint resolution (ADR-0059 C1)", () => {
+  beforeEach(() => {
+    // Drop the per-test stub so the production default resolver runs.
+    __resetEndpointResolverForTesting()
+  })
+
+  afterEach(() => {
+    setActiveRemoteEndpoint(null)
+  })
+
+  it("selects the remote session adapter for a browser paired to a server", () => {
+    mockIsCapacitor = false
+    mockHasWebCompanionTarget = true
+    expect(pickRemoteSpawn()).toBeTruthy()
+  })
+
+  it("has no remote adapter for a web standalone build", () => {
+    mockIsCapacitor = false
+    mockHasWebCompanionTarget = false
+    expect(pickRemoteSpawn()).toBeNull()
+  })
+
+  it("resolves the endpoint from the companion target book in a paired browser", async () => {
+    mockIsCapacitor = false
+    mockHasWebCompanionTarget = true
+    const promise = RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })
+    // The default resolver `import()`s the storage module, so the socket lands
+    // a few extra microtask ticks later than the stubbed-resolver tests.
+    for (let index = 0; index < 10 && sockets.length === 0; index += 1) await flush()
+    const socket = latestSocket()
+    expect(socket.url).toContain("wss://cognia.example:27890/ws/terminal")
+    expect(mockCompanionStorageLoad).toHaveBeenCalled()
+    socket.fireOpen()
+    await flush()
+    const frame = decodeTerminalFrame(socket.sent[0]!)
+    socket.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), frame.sequence)
+    await expect(promise).resolves.toMatchObject({ id: SESSION_ID })
+  })
+
+  it("lets an active remote host outrank the local pairing", async () => {
+    // ADR-0082 precedence: a desktop driving a remote Cognia must target that
+    // host, never whatever pairing happens to sit in this shell's target book.
+    mockIsCapacitor = true
+    setActiveRemoteEndpoint({
+      baseUrl: "https://remote-host.example:27890",
+      deviceId: "remote-device",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "remote-key" },
+      deviceKeyThumbprint: "remote-thumbprint",
+      serverVersion: "1.0.0",
+    })
+    const promise = RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })
+    for (let index = 0; index < 10 && sockets.length === 0; index += 1) await flush()
+    const socket = latestSocket()
+    expect(socket.url).toContain("wss://remote-host.example:27890/ws/terminal")
+    expect(mockCompanionStorageLoad).not.toHaveBeenCalled()
+    socket.fireOpen()
+    await flush()
+    const frame = decodeTerminalFrame(socket.sent[0]!)
+    socket.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), frame.sequence)
+    await expect(promise).resolves.toMatchObject({ id: SESSION_ID })
+  })
+
+  it("still reports unpaired for a web standalone build", async () => {
+    mockIsCapacitor = false
+    mockHasWebCompanionTarget = false
+    await expect(
+      RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })
+    ).rejects.toMatchObject({ code: "unpaired" })
+    expect(mockCompanionStorageLoad).not.toHaveBeenCalled()
+  })
 })

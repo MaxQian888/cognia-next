@@ -72,6 +72,19 @@ export interface TerminalSessionRow {
   /** User-supplied tab title via Rename action. `null` falls back to `title`. */
   customTitle: string | null
   shell: string
+  /**
+   * Which transport owns this session. `origin` cannot answer this — it means
+   * "local process vs. LAN/WS client", so an SSH tab and a local shell both
+   * read `"local"` there. Optional: rows persisted before this field existed
+   * simply lack it and are treated as `"localPty"`.
+   */
+  kind?: "localPty" | "ssh"
+  /**
+   * The saved profile this session was launched from — a `TerminalProfile` id
+   * for a local shell, an `SshHostProfile` id for SSH. Reattaching after a
+   * reload needs it to rebuild the right session class.
+   */
+  profileId?: string
   origin: "local" | "remote"
   status: TerminalTabStatus
   exitCode: number | null
@@ -380,7 +393,18 @@ function makeTitle(info: SessionInfo): string {
   if (info.extensionId) {
     return `${info.extensionId} · ${shortShell(info.shell)}`
   }
+  // The host reports an SSH session's shell as `ssh <user>@<host>`, so the
+  // generic first-word collapse would label every remote tab just "ssh".
+  // Callers that know the profile name (the settings editor, the dock picker)
+  // pass an explicit title and never reach this.
+  if (info.kind === "ssh") return sshTarget(info.shell) ?? shortShell(info.shell)
   return shortShell(info.shell)
+}
+
+/** `ssh deploy@prod.example.com` → `deploy@prod.example.com`. */
+function sshTarget(shell: string): string | null {
+  const match = /^ssh\s+(\S+)$/.exec(shell.trim())
+  return match?.[1] ?? null
 }
 
 function shortShell(path: string): string {
@@ -651,6 +675,8 @@ export const useTerminalStore = create<TerminalStoreState>()(
           title: opts.title ?? makeTitle(info),
           customTitle: null,
           shell: info.shell,
+          kind: info.kind,
+          profileId: info.profileId,
           origin: info.origin,
           status: "idle",
           exitCode: null,

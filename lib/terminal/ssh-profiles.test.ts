@@ -51,6 +51,22 @@ describe("SSH host profiles", () => {
     ).toBe("privateKeyPath")
   })
 
+  it("accepts an agent profile that carries neither a key path nor a credential", () => {
+    const agent = host({
+      authMethod: "agent",
+      privateKeyPath: undefined,
+      credentialRef: undefined,
+    })
+    expect(validateSshHostProfile(agent)).toBeNull()
+    expect(sshHostToConnectRequest(agent, 24, 80)).toEqual(
+      expect.objectContaining({
+        authMethod: "agent",
+        credentialRef: undefined,
+        privateKeyPath: undefined,
+      })
+    )
+  })
+
   it("allows an unencrypted private key without storing a credential", () => {
     expect(
       validateSshHostProfile(

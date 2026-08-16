@@ -19,6 +19,7 @@
  */
 
 import { listAllTerminals, TerminalSession } from "./session"
+import { SshTerminalSession } from "./ssh-session"
 import { RemoteTerminalSession } from "./transport-ws"
 import { selectTerminalTransportChain, type TerminalTransportKind } from "./pick-transport"
 import { registerLiveSession } from "./session-registry"
@@ -67,17 +68,24 @@ function listFromActiveHost(): Promise<SessionInfo[]> {
 }
 
 function reattachToActiveHost(
-  sessionId: string,
+  info: SessionInfo,
   resumeAfter: number
 ): Promise<BaseTerminalSession> {
   return tryTransportChain((transport) => {
     switch (transport) {
       case "tauri-channel":
-        return TerminalSession.reattach(sessionId, resumeAfter)
+        // An SSH session reattaches through the same host command, but as an
+        // `SshTerminalSession` so its host-key verdict and profile id survive
+        // the reload. Rebuilding it as a plain `TerminalSession` still moves
+        // bytes — the `ssh_terminal_*` commands are aliases of their generic
+        // twins — but silently drops the fingerprint the user was shown.
+        return info.kind === "ssh"
+          ? SshTerminalSession.reattach(info, resumeAfter)
+          : TerminalSession.reattach(info.id, resumeAfter)
       case "ws":
-        return RemoteTerminalSession.reattachLan(sessionId, resumeAfter)
+        return RemoteTerminalSession.reattachLan(info.id, resumeAfter)
       case "webrtc":
-        return RemoteTerminalSession.reattachWan(sessionId, resumeAfter)
+        return RemoteTerminalSession.reattachWan(info.id, resumeAfter)
       default:
         return Promise.reject(new Error("terminal transport unavailable"))
     }
@@ -88,7 +96,7 @@ export async function rehydrateTerminals(
   opts: {
     store?: RehydrateStore
     list?: () => Promise<SessionInfo[]>
-    reattach?: (sessionId: string, resumeAfter: number) => Promise<BaseTerminalSession>
+    reattach?: (info: SessionInfo, resumeAfter: number) => Promise<BaseTerminalSession>
   } = {}
 ): Promise<RehydrateResult> {
   const store = opts.store ?? useTerminalStore.getState()
@@ -121,7 +129,7 @@ export async function rehydrateTerminals(
       // the row first (as the original code did) let the instance mount during
       // the `await reattach` gap — before the live session existed — leaving a
       // dead, black terminal. This mirrors the spawn path (spawn-orchestrator).
-      const session = await reattach(info.id, 0)
+      const session = await reattach(info, 0)
       registerLiveSession(session)
       store.registerSession({
         id: info.id,
@@ -129,6 +137,12 @@ export async function rehydrateTerminals(
         extensionId: info.extensionId,
         origin: info.origin,
         shell: info.shell,
+        // Without these the restored row cannot tell an SSH tab from a local
+        // one, so it renders as a shell called "ssh" with no way back to the
+        // profile it came from.
+        kind: info.kind,
+        profileId: info.profileId,
+        hostId: info.hostId,
       })
       wireSessionToStore(session, store)
       restored++

@@ -133,7 +133,8 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
       return sortDir === "asc" ? cmp : -cmp
     }
     const roots = filterProcessTree(buildProcessTree(processes, compare), searchQuery)
-    const rows: Array<{ process: (typeof processes)[number]; depth: number; orphaned: boolean }> = []
+    const rows: Array<{ process: (typeof processes)[number]; depth: number; orphaned: boolean }> =
+      []
     const visit = (nodes: ProcessTreeNode[], depth: number) => {
       for (const node of nodes) {
         rows.push({ process: node.process, depth, orphaned: node.orphaned })
@@ -264,8 +265,15 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
               {sorted.map(({ process: p, depth, orphaned }) => (
                 <TableRow key={p.pid} data-testid={`perf-proc-row-${p.pid}`}>
                   <TableCell>
-                    <div className="flex items-center gap-2" style={{ paddingInlineStart: `${depth * 16}px` }}>
-                      {depth > 0 && <span aria-hidden="true" className="text-muted-foreground">↳</span>}
+                    <div
+                      className="flex items-center gap-2"
+                      style={{ paddingInlineStart: `${depth * 16}px` }}
+                    >
+                      {depth > 0 && (
+                        <span aria-hidden="true" className="text-muted-foreground">
+                          ↳
+                        </span>
+                      )}
                       <Badge variant="secondary" className={cn("shrink-0", ROLE_BADGE[p.role])}>
                         {t(`roles.${p.role}`)}
                       </Badge>

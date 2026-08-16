@@ -52,6 +52,38 @@ export class SshTerminalSession extends BaseTerminalSession {
     return new SshTerminalSession(result, req.profileId, onEvent)
   }
 
+  /**
+   * Rebuild a handle on an SSH session the host already owns, after a renderer
+   * reload dropped the JS side.
+   *
+   * The generic `terminal_reattach` command carries the stream because SSH and
+   * local PTYs share one host-side session registry; what would otherwise be
+   * lost is the SSH-specific identity, so the host key verdict and profile id
+   * are restored from the listing rather than re-derived. A session listed
+   * without them predates this field pair on the wire — reattaching still
+   * works, the fingerprint is simply unknown until the next connect.
+   */
+  static async reattach(listed: SessionInfo, resumeFrom = 0): Promise<SshTerminalSession> {
+    const onEvent = new Channel<SeqEvent>()
+    // The host's answer is authoritative and fresher than the listing that got
+    // us here, but a transport predating the host-key fields returns them
+    // unset — fall back to the listing before giving up on them.
+    const info = await invoke<SessionInfo>("terminal_reattach", {
+      id: listed.id,
+      onEvent,
+      resumeFrom,
+    })
+    return new SshTerminalSession(
+      {
+        session: info,
+        hostKeyStatus: info.sshHostKeyStatus ?? listed.sshHostKeyStatus ?? "learned",
+        hostKeyFingerprint: info.sshHostKeyFingerprint ?? listed.sshHostKeyFingerprint ?? "",
+      },
+      info.profileId ?? listed.profileId ?? "",
+      onEvent
+    )
+  }
+
   async write(data: Uint8Array | string): Promise<void> {
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data
     await invoke("ssh_terminal_write", { id: this.info.id, data: Array.from(bytes) })

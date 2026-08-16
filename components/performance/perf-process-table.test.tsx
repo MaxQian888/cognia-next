@@ -74,7 +74,10 @@ describe("PerfProcessTable", () => {
   it("renders a row per process with its role badge", () => {
     render(
       <PerfProcessTable
-        history={hist([proc(1, "cognia", "main", 10), proc(2, "node", "sidecar", 30, { parentPid: null })])}
+        history={hist([
+          proc(1, "cognia", "main", 10),
+          proc(2, "node", "sidecar", 30, { parentPid: null }),
+        ])}
       />
     )
     expect(screen.getByTestId("perf-proc-row-1")).toBeInTheDocument()
@@ -152,7 +155,10 @@ describe("PerfProcessTable", () => {
   it("sorts by name when the name header is clicked", () => {
     render(
       <PerfProcessTable
-        history={hist([proc(1, "zeta", "main", 10), proc(2, "alpha", "child", 5, { parentPid: null })])}
+        history={hist([
+          proc(1, "zeta", "main", 10),
+          proc(2, "alpha", "child", 5, { parentPid: null }),
+        ])}
       />
     )
     fireEvent.click(within(screen.getByTestId("perf-proc-th-name")).getByRole("button"))

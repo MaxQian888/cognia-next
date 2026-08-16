@@ -3,6 +3,7 @@
  */
 
 import * as React from "react"
+import { renderToString } from "react-dom/server"
 import { act, render, screen } from "@testing-library/react"
 
 import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
@@ -17,9 +18,17 @@ jest.mock("@/lib/tauri", () => ({
   isCapacitor: jest.fn(() => false),
 }))
 
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: jest.fn(() => false),
+}))
+
 const tauri = jest.requireMock("@/lib/tauri") as {
   isTauri: jest.Mock
   isCapacitor: jest.Mock
+}
+
+const webCompanion = jest.requireMock("@/lib/platform/web-companion") as {
+  hasWebCompanionTarget: jest.Mock
 }
 
 // Collected in an effect rather than during render: reassigning module state
@@ -48,6 +57,7 @@ beforeEach(() => {
   snapshots.length = 0
   tauri.isTauri.mockReturnValue(false)
   tauri.isCapacitor.mockReturnValue(false)
+  webCompanion.hasWebCompanionTarget.mockReturnValue(false)
   __resetTerminalTransportSnapshotsForTests()
 })
 
@@ -106,6 +116,42 @@ describe("useTerminalTransport", () => {
     expect(screen.getByTestId("probe")).toHaveAttribute("data-kind", "tauri-channel")
   })
 
+  it("treats a browser paired to a cognia-server as spawnable over ws", () => {
+    webCompanion.hasWebCompanionTarget.mockReturnValue(true)
+    render(<Probe />)
+    const probe = screen.getByTestId("probe")
+    expect(probe).toHaveAttribute("data-kind", "ws")
+    expect(probe).toHaveAttribute("data-can-spawn", "true")
+    expect(probe).toHaveAttribute("data-local-pty", "false")
+  })
+
+  it("re-renders when a cloud companion pairing completes mid-session", () => {
+    // Pairing only writes localStorage, so without the config-changed
+    // subscription the dock would keep rendering the unsupported empty state
+    // until some unrelated re-render happened to move it.
+    render(<Probe />)
+    expect(screen.getByTestId("probe")).toHaveAttribute("data-kind", "unsupported")
+
+    webCompanion.hasWebCompanionTarget.mockReturnValue(true)
+    act(() => {
+      window.dispatchEvent(new Event("cognia:companion-config-changed"))
+    })
+    expect(screen.getByTestId("probe")).toHaveAttribute("data-kind", "ws")
+    expect(screen.getByTestId("probe")).toHaveAttribute("data-can-spawn", "true")
+  })
+
+  it("stops listening for pairing changes once unmounted", () => {
+    const { unmount } = render(<Probe />)
+    unmount()
+    webCompanion.hasWebCompanionTarget.mockReturnValue(true)
+    // No React update may be scheduled for an unmounted tree.
+    expect(() =>
+      act(() => {
+        window.dispatchEvent(new Event("cognia:companion-config-changed"))
+      })
+    ).not.toThrow()
+  })
+
   it("hands back an identical snapshot while the transport is unchanged", () => {
     tauri.isTauri.mockReturnValue(true)
     const { rerender } = render(<Probe />)
@@ -116,17 +162,14 @@ describe("useTerminalTransport", () => {
   })
 
   it("pins a stable server snapshot for the static export's pre-hydration HTML", () => {
-    // The SSR pass runs with the web detectors, so the answer must be the
-    // frozen "unsupported" value rather than a memoised guess.
+    // `renderToString` takes the getServerSnapshot path — the only way to prove
+    // the SSR answer is the frozen "unsupported" value and not a memoised guess
+    // that hydration is about to contradict.
     tauri.isTauri.mockReturnValue(true)
-    const { useTerminalTransport: hook } = jest.requireActual<
-      typeof import("./use-terminal-transport")
-    >("./use-terminal-transport")
-    expect(typeof hook).toBe("function")
-
-    // Directly assert the exported constant's shape through a web-shell render.
-    tauri.isTauri.mockReturnValue(false)
-    render(<Probe />)
-    expect(screen.getByTestId("probe")).toHaveAttribute("data-kind", "unsupported")
+    webCompanion.hasWebCompanionTarget.mockReturnValue(true)
+    const html = renderToString(<Probe />)
+    expect(html).toContain('data-kind="unsupported"')
+    expect(html).toContain('data-can-spawn="false"')
+    expect(html).toContain('data-local-pty="false"')
   })
 })

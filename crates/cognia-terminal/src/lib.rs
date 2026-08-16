@@ -32,6 +32,7 @@ pub mod protocol;
 pub mod replay;
 pub mod session;
 pub mod ssh;
+pub mod ssh_forward;
 
 use std::collections::HashMap;
 use std::sync::Arc;

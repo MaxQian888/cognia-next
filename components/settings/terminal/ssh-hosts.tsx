@@ -16,6 +16,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { connectSshFromDock } from "@/lib/terminal/ssh-connect"
+import {
+  forgetSshHostKey,
+  parseHostKeyChange,
+  type SshHostKeyChange,
+} from "@/lib/terminal/ssh-host-key"
+import { SshConfigImportDialog } from "./ssh-config-import-dialog"
+import { SshForwardingEditor } from "./ssh-forwarding-editor"
+import { SshHostKeyDialog } from "./ssh-host-key-dialog"
 import { syncTerminalHostProfiles } from "@/lib/terminal/host-profiles"
 import { clearSshCredential, saveSshCredential } from "@/lib/terminal/ssh-credentials"
 import { nextSshHostId, type SshAuthMethod, type SshHostProfile } from "@/lib/terminal/ssh-profiles"
@@ -38,6 +46,7 @@ export function SshHosts() {
   const hosts = (terminal.sshHosts ?? []) as SshHostProfile[]
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [hostKeyChange, setHostKeyChange] = useState<SshHostKeyChange | null>(null)
   const hostSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(
@@ -110,7 +119,10 @@ export function SshHosts() {
     try {
       let effective = profile
       const secret = secrets[profile.id]
-      if (secret) {
+      // Agent auth never writes a keyring entry: the agent holds the key. A
+      // secret can still linger in state from before the method was switched,
+      // so gate on the method rather than on the field being empty.
+      if (secret && profile.authMethod !== "agent") {
         await saveSshCredential(
           profile.id,
           profile.authMethod === "password" ? { password: secret } : { passphrase: secret }
@@ -125,13 +137,31 @@ export function SshHosts() {
       }
       const result = await connectSshFromDock({
         profile: effective,
+        // The jump host is a reference into this same list, and the edited
+        // profile has to replace its saved copy or a just-typed change would
+        // be ignored for this one connection.
+        allProfiles: hosts.map((host) => (host.id === effective.id ? effective : host)),
         projectId: activeProjectId ?? undefined,
         rows: 24,
         cols: 80,
         store: useTerminalStore.getState(),
       })
       if (result.kind === "error") {
-        toast.error(t("toasts.connectFailed"), { description: result.message })
+        // A changed server key is refused before anything else can happen, and
+        // it is the one failure the user must adjudicate rather than retry.
+        const hostKeyChange = parseHostKeyChange(result.message)
+        if (hostKeyChange) {
+          setHostKeyChange(hostKeyChange)
+          return
+        }
+        // A missing or empty agent is the common first-run stumble, and the
+        // generic failure title buries it. The native side reports both cases
+        // as "SSH agent …", and the exact reason still rides in the body.
+        const agentProblem =
+          effective.authMethod === "agent" && /\bssh agent\b/i.test(result.message)
+        toast.error(agentProblem ? t("toasts.agentUnavailable") : t("toasts.connectFailed"), {
+          description: result.message,
+        })
         return
       }
       setPanelOpen(true)
@@ -200,12 +230,16 @@ export function SshHosts() {
                 </div>
                 <Select
                   value={profile.authMethod}
-                  onValueChange={(value) =>
+                  onValueChange={(value) => {
+                    // Drop the typed-but-unsaved secret alongside the reference
+                    // it would have been stored under; a passphrase left over
+                    // from key auth means nothing to a password or agent login.
+                    setSecrets((current) => ({ ...current, [profile.id]: "" }))
                     updateHost(profile.id, {
                       authMethod: value as SshAuthMethod,
                       credentialRef: undefined,
                     })
-                  }
+                  }}
                 >
                   <SelectTrigger className="h-8 text-xs" aria-label={t("fields.authMethod")}>
                     <SelectValue />
@@ -213,6 +247,7 @@ export function SshHosts() {
                   <SelectContent>
                     <SelectItem value="password">{t("auth.password")}</SelectItem>
                     <SelectItem value="privateKey">{t("auth.privateKey")}</SelectItem>
+                    <SelectItem value="agent">{t("auth.agent")}</SelectItem>
                   </SelectContent>
                 </Select>
                 {profile.authMethod === "privateKey" ? (
@@ -226,29 +261,43 @@ export function SshHosts() {
                     className="h-8 font-mono text-xs"
                   />
                 ) : null}
-                <Input
-                  type="password"
-                  value={secrets[profile.id] ?? ""}
-                  onChange={(event) =>
-                    setSecrets((current) => ({
-                      ...current,
-                      [profile.id]: event.target.value,
-                    }))
-                  }
-                  aria-label={
-                    profile.authMethod === "password"
-                      ? t("fields.password")
-                      : t("fields.passphrase")
-                  }
-                  placeholder={
-                    profile.credentialRef
-                      ? t("fields.credentialSaved")
-                      : profile.authMethod === "password"
+                {profile.authMethod === "agent" ? (
+                  <p
+                    className="text-[11px] text-muted-foreground"
+                    data-testid={`ssh-host-agent-notice-${profile.id}`}
+                  >
+                    {t("fields.agentNotice")}
+                  </p>
+                ) : (
+                  <Input
+                    type="password"
+                    value={secrets[profile.id] ?? ""}
+                    onChange={(event) =>
+                      setSecrets((current) => ({
+                        ...current,
+                        [profile.id]: event.target.value,
+                      }))
+                    }
+                    aria-label={
+                      profile.authMethod === "password"
                         ? t("fields.password")
-                        : t("fields.passphraseOptional")
-                  }
-                  className="h-8 text-xs"
-                  data-testid={`ssh-host-secret-${profile.id}`}
+                        : t("fields.passphrase")
+                    }
+                    placeholder={
+                      profile.credentialRef
+                        ? t("fields.credentialSaved")
+                        : profile.authMethod === "password"
+                          ? t("fields.password")
+                          : t("fields.passphraseOptional")
+                    }
+                    className="h-8 text-xs"
+                    data-testid={`ssh-host-secret-${profile.id}`}
+                  />
+                )}
+                <SshForwardingEditor
+                  profile={profile}
+                  allProfiles={hosts}
+                  onChange={(patch) => updateHost(profile.id, patch)}
                 />
                 <div className="flex items-center justify-between">
                   <Button
@@ -281,17 +330,53 @@ export function SshHosts() {
         </div>
       )}
 
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-7 text-xs"
-        onClick={addHost}
-        data-testid="ssh-hosts-add"
-      >
-        <PlusIcon className="mr-1 h-3.5 w-3.5" />
-        {t("add")}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          onClick={addHost}
+          data-testid="ssh-hosts-add"
+        >
+          <PlusIcon className="mr-1 h-3.5 w-3.5" />
+          {t("add")}
+        </Button>
+        <SshConfigImportDialog
+          hosts={hosts}
+          onImport={async (result) => {
+            await persistHosts(result.profiles)
+            // A jump host the user declined to import means the profile
+            // connects direct — to a different machine than their config
+            // described — so it is said out loud rather than left to be
+            // noticed later.
+            if (result.droppedJumps.length > 0) {
+              toast.warning(
+                t("toasts.importJumpsDropped", { names: result.droppedJumps.join(", ") })
+              )
+            }
+            toast.success(
+              t("toasts.imported", { created: result.created, replaced: result.replaced })
+            )
+          }}
+        />
+      </div>
+
+      <SshHostKeyDialog
+        change={hostKeyChange}
+        onDismiss={() => setHostKeyChange(null)}
+        onTrust={async (change) => {
+          try {
+            await forgetSshHostKey(change.host, change.port)
+            setHostKeyChange(null)
+            toast.success(t("toasts.hostKeyForgotten"))
+          } catch (error) {
+            toast.error(t("toasts.hostKeyForgetFailed"), {
+              description: error instanceof Error ? error.message : String(error),
+            })
+          }
+        }}
+      />
     </section>
   )
 }

@@ -31,7 +31,18 @@ portable-pty = "0.9"
 parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1", features = ["process", "sync", "io-util", "time"] }
+# `net` + `macros` + `rt` are used directly by the SSH forwarding runtime
+# (loopback listeners, `select!`, and the per-tunnel tasks); they were reaching
+# this crate only through feature unification before.
+tokio = { version = "1", features = [
+  "process",
+  "sync",
+  "io-util",
+  "time",
+  "net",
+  "macros",
+  "rt",
+] }
 uuid = { version = "1", features = ["v4", "v7"] }
 dirs = "6"
 log = "0.4"

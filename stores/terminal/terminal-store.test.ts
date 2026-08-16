@@ -915,3 +915,149 @@ describe("split panes (1A)", () => {
     expect(useTerminalStore.getState().pendingReloadLayout).toBeNull()
   })
 })
+
+describe("tab activity badge", () => {
+  it("marks only background tabs — output on the visible tab is already seen", () => {
+    const state = () => useTerminalStore.getState()
+    state().registerSession(baseInfo({ id: "a" }))
+    state().registerSession(baseInfo({ id: "b" }))
+    state().setActiveSession("proj-a", "a")
+
+    state().markTabActivity("a")
+    state().markTabActivity("b")
+
+    expect(state().tabActivity["a"]).toBeUndefined()
+    expect(state().tabActivity["b"]).toBe(true)
+  })
+
+  it("ignores unknown sessions and repeat marks", () => {
+    const state = () => useTerminalStore.getState()
+    state().registerSession(baseInfo({ id: "b" }))
+    state().setActiveSession("proj-a", "a")
+
+    state().markTabActivity("ghost")
+    expect(state().tabActivity["ghost"]).toBeUndefined()
+
+    state().markTabActivity("b")
+    const first = state().tabActivity
+    state().markTabActivity("b")
+    expect(state().tabActivity).toBe(first)
+  })
+
+  it("clears the badge, and clearing twice is a no-op", () => {
+    const state = () => useTerminalStore.getState()
+    state().registerSession(baseInfo({ id: "b" }))
+    state().setActiveSession("proj-a", "a")
+    state().markTabActivity("b")
+
+    state().clearTabActivity("b")
+    expect(state().tabActivity["b"]).toBeUndefined()
+
+    const after = state().tabActivity
+    state().clearTabActivity("b")
+    expect(state().tabActivity).toBe(after)
+  })
+})
+
+describe("group anchor promotion", () => {
+  it("follows the promoted anchor when the active tab was a different tab", () => {
+    // Removing an anchor promotes the next pane so the group survives. A
+    // project whose active tab is elsewhere must still track the rename, or
+    // the active pointer keeps naming a session that no longer exists.
+    const state = () => useTerminalStore.getState()
+    state().registerSession(baseInfo({ id: "anchor" }))
+    state().registerSession(baseInfo({ id: "pane" }))
+    state().registerSession(baseInfo({ id: "other" }))
+    state().addPaneToGroup("anchor", "pane", "row")
+    state().setActiveSession("proj-a", "anchor")
+
+    state().removeSession("anchor")
+
+    expect(state().sessions["anchor"]).toBeUndefined()
+    expect(state().getActiveSession("proj-a")).toBe("pane")
+  })
+
+  it("falls back to the last remaining tab when a standalone active tab is removed", () => {
+    const state = () => useTerminalStore.getState()
+    state().registerSession(baseInfo({ id: "a" }))
+    state().registerSession(baseInfo({ id: "b" }))
+    state().setActiveSession("proj-a", "b")
+
+    state().removeSession("b")
+
+    expect(state().getActiveSession("proj-a")).toBe("a")
+  })
+})
+
+describe("tab appearance", () => {
+  it("applies colour and icon independently and leaves the other untouched", () => {
+    const state = () => useTerminalStore.getState()
+    state().registerSession(baseInfo({ id: "a" }))
+
+    state().setTabAppearance("a", { color: "blue" })
+    expect(state().sessions["a"]?.tabColor).toBe("blue")
+    expect(state().sessions["a"]?.tabIcon).toBe("none")
+
+    state().setTabAppearance("a", { icon: "server" })
+    expect(state().sessions["a"]?.tabColor).toBe("blue")
+    expect(state().sessions["a"]?.tabIcon).toBe("server")
+  })
+
+  it("ignores an unknown session", () => {
+    const state = () => useTerminalStore.getState()
+    const before = state().sessions
+    state().setTabAppearance("ghost", { color: "blue" })
+    expect(state().sessions).toBe(before)
+  })
+})
+
+describe("SSH session rows", () => {
+  it("keeps the transport kind and profile id on the row", () => {
+    useTerminalStore.getState().registerSession(
+      baseInfo({
+        id: "ssh-a",
+        kind: "ssh",
+        profileId: "ssh-1",
+        shell: "ssh deploy@prod.example.com",
+      })
+    )
+    const row = useTerminalStore.getState().sessions["ssh-a"]
+    expect(row?.kind).toBe("ssh")
+    expect(row?.profileId).toBe("ssh-1")
+  })
+
+  it("titles an SSH tab by its target, not the word ssh", () => {
+    // `origin` cannot carry this — an SSH tab and a local shell both read
+    // "local" there — so collapsing `ssh user@host` to its first word used to
+    // label every remote tab "ssh".
+    useTerminalStore
+      .getState()
+      .registerSession(baseInfo({ id: "ssh-a", kind: "ssh", shell: "ssh deploy@prod.example.com" }))
+    expect(useTerminalStore.getState().sessions["ssh-a"]?.title).toBe("deploy@prod.example.com")
+  })
+
+  it("falls back to the shell word when the host reports an unexpected SSH shell", () => {
+    useTerminalStore
+      .getState()
+      .registerSession(baseInfo({ id: "ssh-b", kind: "ssh", shell: "/usr/bin/ssh -J a b" }))
+    expect(useTerminalStore.getState().sessions["ssh-b"]?.title).toBe("ssh")
+  })
+
+  it("lets an explicit title win over the derived target", () => {
+    useTerminalStore
+      .getState()
+      .registerSession(
+        baseInfo({ id: "ssh-c", kind: "ssh", shell: "ssh deploy@prod.example.com" }),
+        { title: "Production" }
+      )
+    expect(useTerminalStore.getState().sessions["ssh-c"]?.title).toBe("Production")
+  })
+
+  it("leaves local rows untouched", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "local-a" }))
+    const row = useTerminalStore.getState().sessions["local-a"]
+    expect(row?.kind).toBeUndefined()
+    expect(row?.profileId).toBeUndefined()
+    expect(row?.title).toBe("bash")
+  })
+})

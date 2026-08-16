@@ -76,7 +76,15 @@ export function TerminalTab({
         : "bg-muted-foreground/60"
 
   const colorBorder = tabColorBorderClass(row.tabColor)
-  const TabIcon = row.tabIcon !== "none" ? TAB_ICON_COMPONENTS[row.tabIcon] : null
+  // An SSH tab defaults to the server glyph so a remote shell is never mistaken
+  // for a local one — but a deliberate per-tab icon still wins, since the user
+  // picking one is a stronger signal than the transport default.
+  const TabIcon =
+    row.tabIcon !== "none"
+      ? TAB_ICON_COMPONENTS[row.tabIcon]
+      : row.kind === "ssh"
+        ? TAB_ICON_COMPONENTS.server
+        : null
 
   return (
     <div
@@ -87,6 +95,7 @@ export function TerminalTab({
       data-id={row.id}
       data-active={active}
       data-status={row.status}
+      data-kind={row.kind ?? "localPty"}
       data-agent-trusted={row.agentTrusted ? "true" : undefined}
       data-throttled={throttled ? "true" : undefined}
       aria-selected={active}

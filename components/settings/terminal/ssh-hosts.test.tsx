@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 const saveSettings = jest.fn(async (..._args: unknown[]) => undefined)
 const saveCredential = jest.fn(async (..._args: unknown[]) => undefined)
@@ -66,6 +67,11 @@ jest.mock("@/lib/terminal/host-profiles", () => ({
   syncTerminalHostProfiles: (...args: unknown[]) => mockSyncHostProfiles(...args),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
+const mockForgetHostKey = jest.fn(async (..._args: unknown[]) => 1)
+jest.mock("@/lib/terminal/ssh-host-key", () => ({
+  ...jest.requireActual("@/lib/terminal/ssh-host-key"),
+  forgetSshHostKey: (...args: unknown[]) => mockForgetHostKey(...args),
+}))
 
 import { SshHosts } from "./ssh-hosts"
 
@@ -82,6 +88,7 @@ beforeEach(() => {
     hostKeyFingerprint: "SHA256:abc",
   })
   mockSyncHostProfiles.mockResolvedValue(undefined)
+  mockForgetHostKey.mockResolvedValue(1)
   mockTauri = true
 })
 
@@ -450,5 +457,210 @@ describe("SshHosts", () => {
       description: "host unavailable",
     })
     jest.useRealTimers()
+  })
+
+  describe("changed host key", () => {
+    const change = {
+      host: "prod.example.com",
+      port: 22,
+      knownFingerprint: "SHA256:old",
+      presentedFingerprint: "SHA256:new",
+    }
+
+    function seedAndFail(): void {
+      settings = {
+        terminal: {
+          sshHosts: [
+            {
+              id: "ssh-1",
+              name: "Production",
+              host: "prod.example.com",
+              port: 22,
+              username: "deploy",
+              authMethod: "agent",
+            },
+          ],
+        },
+      }
+      connect.mockResolvedValueOnce({
+        kind: "error",
+        message: `ssh_host_key_changed:${JSON.stringify(change)}`,
+      })
+    }
+
+    it("raises the warning dialog instead of a generic failure toast", async () => {
+      seedAndFail()
+      render(<SshHosts />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
+      })
+
+      expect(screen.getByTestId("ssh-host-key-dialog")).toBeInTheDocument()
+      expect(screen.getByTestId("ssh-host-key-expected")).toHaveTextContent("SHA256:old")
+      expect(screen.getByTestId("ssh-host-key-presented")).toHaveTextContent("SHA256:new")
+      // A refused key is not a connection error the user should be told to retry.
+      expect(toastError).not.toHaveBeenCalled()
+    })
+
+    it("leaves known_hosts alone when the user keeps the block", async () => {
+      seedAndFail()
+      render(<SshHosts />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-key-cancel"))
+      })
+
+      expect(mockForgetHostKey).not.toHaveBeenCalled()
+    })
+
+    it("forgets the old key only on the explicit re-trust", async () => {
+      seedAndFail()
+      render(<SshHosts />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-key-trust"))
+      })
+
+      expect(mockForgetHostKey).toHaveBeenCalledWith("prod.example.com", 22)
+      expect(toastSuccess).toHaveBeenCalledWith("toasts.hostKeyForgotten")
+      expect(screen.queryByTestId("ssh-host-key-dialog")).toBeNull()
+    })
+
+    it("keeps the dialog up when known_hosts cannot be written", async () => {
+      seedAndFail()
+      mockForgetHostKey.mockRejectedValueOnce(new Error("read-only file system"))
+      render(<SshHosts />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-key-trust"))
+      })
+
+      expect(toastError).toHaveBeenCalledWith("toasts.hostKeyForgetFailed", {
+        description: "read-only file system",
+      })
+      // Still open — the server is still untrusted and the user still has to decide.
+      expect(screen.getByTestId("ssh-host-key-dialog")).toBeInTheDocument()
+    })
+  })
+
+  describe("agent authentication", () => {
+    function agentHost(overrides: Record<string, unknown> = {}): void {
+      settings = {
+        terminal: {
+          sshHosts: [
+            {
+              id: "ssh-1",
+              name: "Bastion",
+              host: "bastion.example.com",
+              port: 22,
+              username: "deploy",
+              authMethod: "agent",
+              ...overrides,
+            },
+          ],
+        },
+      }
+    }
+
+    it("replaces the secret field with the agent notice", () => {
+      agentHost()
+      render(<SshHosts />)
+      expect(screen.getByTestId("ssh-host-agent-notice-ssh-1")).toBeInTheDocument()
+      expect(screen.queryByTestId("ssh-host-secret-ssh-1")).not.toBeInTheDocument()
+    })
+
+    it("connects without a credential and never writes to the keyring", async () => {
+      // A `credentialRef` left behind by a previous password profile must not
+      // be resolved or re-saved — the agent holds the key material.
+      agentHost({ credentialRef: "ssh-1" })
+      render(<SshHosts />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
+      })
+
+      expect(saveCredential).not.toHaveBeenCalled()
+      expect(toastError).not.toHaveBeenCalled()
+      expect(connect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile: expect.objectContaining({ authMethod: "agent" }),
+        })
+      )
+      expect(setPanelOpen).toHaveBeenCalledWith(true)
+    })
+
+    it("names the agent when the native side cannot reach one", async () => {
+      agentHost()
+      connect.mockResolvedValueOnce({
+        kind: "error",
+        message: "SSH agent is unavailable; check that SSH_AUTH_SOCK is set (no such file)",
+      })
+      render(<SshHosts />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
+      })
+
+      expect(toastError).toHaveBeenCalledWith(
+        "toasts.agentUnavailable",
+        expect.objectContaining({
+          description: expect.stringContaining("SSH_AUTH_SOCK"),
+        })
+      )
+    })
+
+    it("keeps the generic failure title for non-agent errors on an agent profile", async () => {
+      agentHost()
+      connect.mockResolvedValueOnce({ kind: "error", message: "connection refused" })
+      render(<SshHosts />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("ssh-host-connect-ssh-1"))
+      })
+
+      expect(toastError).toHaveBeenCalledWith("toasts.connectFailed", {
+        description: "connection refused",
+      })
+    })
+
+    it("discards a typed secret when the auth method changes", async () => {
+      const user = userEvent.setup()
+      settings = {
+        terminal: {
+          sshHosts: [
+            {
+              id: "ssh-1",
+              name: "Production",
+              host: "prod.example.com",
+              port: 22,
+              username: "deploy",
+              authMethod: "password",
+            },
+          ],
+        },
+      }
+      render(<SshHosts />)
+      fireEvent.change(screen.getByTestId("ssh-host-secret-ssh-1"), {
+        target: { value: "typed-but-unsaved" },
+      })
+      expect(screen.getByTestId("ssh-host-secret-ssh-1")).toHaveValue("typed-but-unsaved")
+
+      // Switch to key auth, which still renders a secret field — so an empty
+      // value proves the password was dropped rather than merely unmounted.
+      await user.click(screen.getByLabelText("fields.authMethod"))
+      await user.click(await screen.findByRole("option", { name: "auth.privateKey" }))
+
+      expect(screen.getByTestId("ssh-host-secret-ssh-1")).toHaveValue("")
+      expect(saveSettings).toHaveBeenLastCalledWith({
+        terminal: expect.objectContaining({
+          sshHosts: [
+            expect.objectContaining({ authMethod: "privateKey", credentialRef: undefined }),
+          ],
+        }),
+      })
+    })
   })
 })

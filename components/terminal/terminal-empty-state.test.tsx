@@ -39,6 +39,14 @@ describe("TerminalEmptyState", () => {
     expect(screen.getByTestId("terminal-empty-state-new")).toBeInTheDocument()
   })
 
+  it("renders the cloud variant for a browser paired to a cognia-server", () => {
+    const onNew = jest.fn()
+    render(<TerminalEmptyState variant="cloud" onNew={onNew} />)
+    expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe("cloud")
+    fireEvent.click(screen.getByTestId("terminal-empty-state-new"))
+    expect(onNew).toHaveBeenCalled()
+  })
+
   it("renders the unsupported variant", () => {
     render(<TerminalEmptyState variant="unsupported" />)
     expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe(

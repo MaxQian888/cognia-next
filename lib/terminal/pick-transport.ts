@@ -10,7 +10,8 @@
  *                          Rust `terminal_*` commands + `Channel`)
  *   - Capacitor mobile   → `"ws"` (LAN — companion server WebSocket)
  *   - Capacitor over WAN → `"webrtc"` (ordered terminal data channel)
- *   - Plain web          → `"unsupported"`
+ *   - Cloud companion    → `"ws"` (browser paired to a cognia-server)
+ *   - Web standalone     → `"unsupported"`
  *
  * `selectTerminalTransport` returns the *preferred* transport for the
  * current shell. `selectTerminalTransportChain` returns a fallback
@@ -19,6 +20,7 @@
  * through to WebRTC).
  */
 
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isCapacitor, isTauri } from "@/lib/tauri"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 
@@ -36,6 +38,12 @@ export function selectTerminalTransport(): TerminalTransportKind {
   if (isRemoteHostActive()) return "ws"
   if (isTauri()) return "tauri-channel"
   if (isCapacitor()) return "ws"
+  // Cloud companion (ADR-0059 C1): a plain browser paired to a cognia-server
+  // runs terminals on that server's headless host, over the same `/ws/terminal`
+  // frames Capacitor uses. Checked LAST so a Tauri/Capacitor build that also
+  // has NEXT_PUBLIC_COGNIA_SERVER_URL baked in keeps its native transport —
+  // the same ordering `lib/tauri/transport-instance.ts:pickTransport` uses.
+  if (hasWebCompanionTarget()) return "ws"
   return "unsupported"
 }
 
@@ -46,12 +54,17 @@ export function selectTerminalTransport(): TerminalTransportKind {
  *   - Tauri host: just the in-process channel (no remote ambiguity).
  *   - Capacitor mobile: `ws` (LAN/mDNS), then the already-authenticated
  *     Companion WebRTC peer when no direct socket is reachable.
- *   - Web: returns `[]` — caller should surface "unsupported".
+ *   - Cloud companion: same pair. A browser skips LAN discovery but still
+ *     gets the WebRTC tier — `installCompanionSignalingController` runs for
+ *     `hasWebCompanionTarget()` too, so `CompanionTransport` can hold a
+ *     terminal data channel exactly as it does on mobile.
+ *   - Web standalone: returns `[]` — caller should surface "unsupported".
  */
 export function selectTerminalTransportChain(): TerminalTransportKind[] {
   if (isRemoteHostActive()) return ["ws", "webrtc"]
   if (isTauri()) return ["tauri-channel"]
   if (isCapacitor()) return ["ws", "webrtc"]
+  if (hasWebCompanionTarget()) return ["ws", "webrtc"]
   return []
 }
 

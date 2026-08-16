@@ -72,6 +72,14 @@ export interface SessionInfo {
   /** Host-owned process kind. */
   kind?: "localPty" | "ssh"
   profileId?: string
+  /**
+   * TOFU verdict for the remote server key, present only on `kind: "ssh"`
+   * sessions (the host omits both fields otherwise). Carried on the listing so
+   * a reattach after a reload can restore what the user was told on connect
+   * rather than silently dropping the fingerprint.
+   */
+  sshHostKeyStatus?: "learned" | "verified"
+  sshHostKeyFingerprint?: string
   createdAt?: number
   lastActivityAt?: number
   currentController?: string | null

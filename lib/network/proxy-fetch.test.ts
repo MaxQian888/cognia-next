@@ -137,6 +137,38 @@ describe("createProxyFetch", () => {
   })
 })
 
+describe("null-body statuses", () => {
+  // Regression: a zero-length ArrayBuffer is still a *body*, and the Response
+  // constructor rejects any body on a null-body status. The TypeError was
+  // thrown inside the try block and rewrapped as "Proxy request failed", which
+  // sent readers hunting a network fault that never happened.
+  it.each([204, 205, 304])("returns a %s response instead of throwing", async (status) => {
+    mockedInvoke.mockResolvedValue(nativeResponse(new Uint8Array(), status))
+    const response = await createProxyFetch()("https://example.test/resource")
+    expect(response.status).toBe(status)
+    expect(response.body).toBeNull()
+  })
+
+  it("preserves headers on a 304 so ETag revalidation can proceed", async () => {
+    mockedInvoke.mockResolvedValue({
+      status: 304,
+      headers: { etag: 'W/"abc"', "x-ratelimit-remaining": "4999" },
+      bodyBase64: "",
+    })
+    const response = await createProxyFetch()("https://example.test/resource")
+    expect(response.status).toBe(304)
+    expect(response.headers.get("etag")).toBe('W/"abc"')
+    expect(response.headers.get("x-ratelimit-remaining")).toBe("4999")
+  })
+
+  it("still returns a body for a normal 200", async () => {
+    mockedInvoke.mockResolvedValue(nativeResponse(new TextEncoder().encode("ok"), 200))
+    await expect((await createProxyFetch()("https://example.test/resource")).text()).resolves.toBe(
+      "ok"
+    )
+  })
+})
+
 describe("public proxy helpers", () => {
   it("returns only sanitized endpoint metadata", () => {
     getActiveProxyUrl.mockReturnValue("http://alice:secret@proxy.example:8080")

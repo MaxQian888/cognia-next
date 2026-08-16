@@ -69,6 +69,25 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
   return buffer
 }
 
+/**
+ * HTTP statuses that MUST NOT carry a body. The `Response` constructor throws
+ * a `TypeError` for any non-null body on these — and a zero-length
+ * `ArrayBuffer` is still a body, so decoding an empty payload was enough to
+ * blow up. The throw happened inside the try below and got rewrapped as an
+ * opaque "Proxy request failed", pointing the reader at the network instead of
+ * at the line above.
+ *
+ * This matters well beyond cosmetics: 304 is the whole point of an ETag
+ * conditional request (`lib/github/pr-observe/fetch.ts`, and now the GitHub
+ * issue mirror), and 204 is what GitHub's DELETE endpoints return. Both were
+ * unreachable through this transport.
+ */
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([101, 103, 204, 205, 304])
+
+function nullBodyFor(status: number, bodyBase64: string): ArrayBuffer | null {
+  return NULL_BODY_STATUSES.has(status) ? null : base64ToArrayBuffer(bodyBase64)
+}
+
 function headerRecord(headers: Headers): Record<string, string> {
   const result: Record<string, string> = {}
   headers.forEach((value, key) => {
@@ -122,7 +141,7 @@ async function tauriProxiedFetch(
     const native = invoke<ProxiedRequestOutput>("proxy_http_request", { input: payload })
     const result = await Promise.race([native, aborted])
     const responseHeaders = new Headers(result.headers)
-    return new Response(base64ToArrayBuffer(result.bodyBase64), {
+    return new Response(nullBodyFor(result.status, result.bodyBase64), {
       status: result.status,
       headers: responseHeaders,
     })

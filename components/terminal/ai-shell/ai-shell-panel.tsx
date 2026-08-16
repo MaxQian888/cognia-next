@@ -13,14 +13,7 @@
 
 import { useCallback, useRef, useState, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
-import {
-  BotIcon,
-  CircleStopIcon,
-  PlayIcon,
-  SparklesIcon,
-  Trash2Icon,
-  XIcon,
-} from "lucide-react"
+import { BotIcon, CircleStopIcon, PlayIcon, SparklesIcon, Trash2Icon, XIcon } from "lucide-react"
 
 import { MotionPopover } from "@/components/chat/motion/motion-reveal"
 import { Button } from "@/components/ui/button"

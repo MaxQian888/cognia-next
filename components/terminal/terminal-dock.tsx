@@ -49,6 +49,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { type TerminalProfile } from "@/lib/terminal/profiles"
+import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
+import { type SshHostProfile } from "@/lib/terminal/ssh-profiles"
 import { nextDockPosition } from "@/lib/terminal/dock-position"
 import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
 import {
@@ -72,7 +74,8 @@ import {
 } from "@/stores/terminal/terminal-store"
 
 import { TerminalDockGrip } from "./terminal-dock-grip"
-import { TerminalEmptyState } from "./terminal-empty-state"
+import { TerminalEmptyState, type TerminalEmptyStateVariant } from "./terminal-empty-state"
+import { TerminalForwardPanel } from "./terminal-forward-panel"
 import { TerminalHistoryPanel } from "./terminal-history-panel"
 import { TerminalHostStateBanner } from "./terminal-host-state-banner"
 import { type TerminalInstanceHandle } from "./terminal-instance"
@@ -121,6 +124,9 @@ export function TerminalDock() {
   )
   const settingsProfiles = useSettingsStore(
     (s) => (s.settings?.terminal as { profiles?: TerminalProfile[] } | undefined)?.profiles
+  )
+  const settingsSshHosts = useSettingsStore(
+    (s) => (s.settings?.terminal as { sshHosts?: SshHostProfile[] } | undefined)?.sshHosts
   )
 
   const projectKey = activeProjectId ?? ""
@@ -205,6 +211,45 @@ export function TerminalDock() {
       void spawnWithFeedback({ profileId })
     },
     [spawnWithFeedback]
+  )
+
+  /**
+   * Connect a saved SSH host straight from the dock.
+   *
+   * Deliberately bypasses `spawnWithFeedback`: SSH does not go through
+   * `spawnDefaultTerminal`'s shell/profile/cwd precedence, and its outcome
+   * carries the host-key verdict the user needs to see on first connect.
+   * Secrets stay where they are — the dock offers no secret field, so a
+   * password host that has never been connected from settings is sent back
+   * there rather than failing with a bare native error.
+   */
+  const handleNewSshHost = useCallback(
+    async (hostId: string) => {
+      const launch = resolveSshHostLaunch(hostId, settingsSshHosts)
+      if (launch.kind === "unknownHost") return
+      if (launch.kind === "credentialRequired") {
+        toast.error(t("sshCredentialRequired", { name: launch.name }))
+        return
+      }
+      const result = await connectSshFromDock({
+        profile: launch.profile,
+        // A jump host is stored as a profile id, so the whole set has to travel
+        // with the one being launched or a bastion-backed host connects direct.
+        allProfiles: settingsSshHosts ?? [],
+        projectId: activeProjectId ?? undefined,
+        rows: 24,
+        cols: 80,
+        store: useTerminalStore.getState(),
+      })
+      if (result.kind === "error") {
+        toast.error(t("spawnError", { message: result.message }))
+        return
+      }
+      toast.success(t(`sshConnected.${result.hostKeyStatus}`), {
+        description: result.hostKeyFingerprint,
+      })
+    },
+    [activeProjectId, settingsSshHosts, t]
   )
 
   /** Plain "+ New": the configured default profile, else the resolved shell. */
@@ -410,7 +455,13 @@ export function TerminalDock() {
   // Reactive transport: activating a remote Cognia host mid-session must move
   // the dock's affordances with it, and `canSpawn` — not "is this the local
   // PTY" — is what a spawn button should key off.
-  const { kind: transport, canSpawn } = useTerminalTransport()
+  const { kind: transport, canSpawn, isLocalPty } = useTerminalTransport()
+  /**
+   * Gate the SSH group on `isLocalPty` rather than `canSpawn`: the SSH session
+   * class invokes Tauri commands directly, so a LAN or WebRTC client can spawn
+   * local shells through the host but has no path to open an SSH one.
+   */
+  const pickerSshHosts = isLocalPty ? settingsSshHosts : undefined
   const platform = usePlatform()
 
   // Percent-per-CSS-pixel for the axis this dock resizes along, so a pointer
@@ -452,13 +503,15 @@ export function TerminalDock() {
   // The empty state's action depends on whether a session *can* be created,
   // not on which transport would create it — a desktop driving a remote host
   // spawns over `ws` exactly like the mobile screen does.
-  const emptyVariant: "desktop" | "remote" | "mobile" | "unsupported" =
+  const emptyVariant: TerminalEmptyStateVariant =
     transport === "tauri-channel"
       ? "desktop"
       : transport === "ws" || transport === "webrtc"
         ? platform === "tauri"
           ? "remote"
-          : "mobile"
+          : platform === "mobile"
+            ? "mobile"
+            : "cloud"
         : "unsupported"
 
   return (
@@ -527,6 +580,8 @@ export function TerminalDock() {
                 onNew={handleNewWithShell}
                 profiles={settingsProfiles}
                 onNewProfile={handleNewFromProfile}
+                sshHosts={pickerSshHosts}
+                onNewSshHost={handleNewSshHost}
               />
             ) : null}
             {canSpawn && activeRow ? (
@@ -655,6 +710,15 @@ export function TerminalDock() {
                 focusedSessionId && sessions[focusedSessionId] ? focusedSessionId : activeRow.id
               }
               onLocateInChat={handleLocateInChat}
+            />
+            {/* Hides itself for a local shell, and for an SSH tab with no rules.
+                Keyed by session so switching tabs cannot leave another tab's
+                tunnels on screen while the first poll is in flight. */}
+            <TerminalForwardPanel
+              key={focusedSessionId && sessions[focusedSessionId] ? focusedSessionId : activeRow.id}
+              sessionId={
+                focusedSessionId && sessions[focusedSessionId] ? focusedSessionId : activeRow.id
+              }
             />
             {renameTarget && sessions[renameTarget] ? (
               <DockRenameOverlay

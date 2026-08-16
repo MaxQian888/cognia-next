@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { isTauri } from "@/lib/tauri"
 import type { TerminalProfile } from "@/lib/terminal/profiles"
+import type { SshHostProfile } from "@/lib/terminal/ssh-profiles"
 import {
   detectPlatform,
   filterDetectedShellOptions,
@@ -55,6 +56,14 @@ export interface TerminalShellPickerProps {
   profiles?: TerminalProfile[]
   /** Spawn a tab from a saved profile id. */
   onNewProfile?: (profileId: string) => void | Promise<void>
+  /**
+   * Saved SSH hosts to offer alongside the local profiles. The caller is
+   * responsible for withholding these off-desktop — SSH sessions are spawned
+   * through Tauri commands and have no web or mobile path.
+   */
+  sshHosts?: SshHostProfile[]
+  /** Connect a tab to a saved SSH host. */
+  onNewSshHost?: (hostId: string) => void | Promise<void>
   /** Override platform sniffing (tests). Defaults to `detectPlatform()`. */
   platform?: ShellPlatform
   /**
@@ -94,11 +103,18 @@ export function TerminalShellPicker({
   onNew,
   profiles,
   onNewProfile,
+  sshHosts,
+  onNewSshHost,
   platform,
   detectShells = defaultDetectShells,
 }: TerminalShellPickerProps) {
   const t = useTranslations()
   const namedProfiles = (profiles ?? []).filter((p) => p.shell.trim().length > 0)
+  // A half-filled host row is a draft in the settings editor, not something
+  // worth offering here — connecting would only produce a validation error.
+  const namedSshHosts = (sshHosts ?? []).filter(
+    (h) => h.name.trim().length > 0 && h.host.trim().length > 0 && h.username.trim().length > 0
+  )
 
   const baseOptions = useMemo(() => platformShellOptions(platform ?? detectPlatform()), [platform])
   // Empty until the PATH scan resolves → the full platform list shows first,
@@ -166,6 +182,26 @@ export function TerminalShellPicker({
                   data-testid={`terminal-shell-picker-profile-${profile.id}`}
                 >
                   {profile.name}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+          {namedSshHosts.length > 0 && onNewSshHost ? (
+            <>
+              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+                {t("terminal.shellPicker.sshLabel")}
+              </DropdownMenuLabel>
+              {namedSshHosts.map((host) => (
+                <DropdownMenuItem
+                  key={host.id}
+                  onSelect={() => {
+                    void onNewSshHost(host.id)
+                  }}
+                  className="text-xs"
+                  data-testid={`terminal-shell-picker-ssh-${host.id}`}
+                >
+                  {host.name}
                 </DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />
