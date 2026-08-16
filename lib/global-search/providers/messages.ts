@@ -124,5 +124,3 @@ export function createMessagesProvider(deps: MessagesProviderDeps = {}): GlobalS
     },
   }
 }
-
-export const messagesProvider = createMessagesProvider()

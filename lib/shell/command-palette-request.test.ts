@@ -12,9 +12,11 @@ describe("command palette request seam", () => {
     const off = onCommandPaletteRequest(handler)
     requestCommandPalette({ query: "budget" })
     expect(handler).toHaveBeenCalledWith({ query: "budget" })
+    requestCommandPalette({ query: "in:settings ", scope: "pages" })
+    expect(handler).toHaveBeenLastCalledWith({ query: "in:settings ", scope: "pages" })
     off()
     requestCommandPalette({ query: "after" })
-    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledTimes(2)
   })
 
   it("normalises a bare request to an empty detail", () => {

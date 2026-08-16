@@ -6,9 +6,12 @@
  * so the palette is never a back door into an unreachable section.
  */
 
-import { SettingsIcon, SlidersHorizontalIcon } from "lucide-react"
+import { SlidersHorizontalIcon } from "lucide-react"
 
-import { SETTING_CONTROLS } from "@/components/settings/finder/control-registry"
+import {
+  SETTING_CONTROLS,
+  type SettingControl,
+} from "@/components/settings/finder/control-registry"
 import {
   SETTINGS_NAV,
   SETTINGS_SEARCH_KEYWORDS,
@@ -33,41 +36,60 @@ interface SettingsCandidate {
   isControl: boolean
 }
 
-const SECTION_LABEL_KEY: Record<string, string> = Object.fromEntries(
-  SETTINGS_NAV.map((n) => [n.id, n.labelKey])
-)
+/** The registries the provider reads — injectable for tests. */
+export interface SettingsSources {
+  nav: readonly NavItem[]
+  controls: readonly SettingControl[]
+  keywords: Readonly<Partial<Record<string, readonly string[]>>>
+}
 
-function sectionLabel(ctx: GlobalSearchContext, id: SettingsSectionId): string {
-  return ctx.t(`settings.tabs.${SECTION_LABEL_KEY[id] ?? id}`)
+const DEFAULT_SOURCES: SettingsSources = {
+  nav: SETTINGS_NAV,
+  controls: SETTING_CONTROLS,
+  keywords: SETTINGS_SEARCH_KEYWORDS,
+}
+
+function sectionLabel(
+  ctx: GlobalSearchContext,
+  nav: readonly NavItem[],
+  id: SettingsSectionId
+): string {
+  // A control may point at a merged / redirected section id that is no longer
+  // a nav entry; fall back to the id so the row still names something.
+  const labelKey = nav.find((n) => n.id === id)?.labelKey ?? id
+  return ctx.t(`settings.tabs.${labelKey}`)
 }
 
 function reachable(ctx: GlobalSearchContext, id: SettingsSectionId): boolean {
   return ctx.host.reachableSettingsSections.has(id)
 }
 
-export function settingsCandidates(ctx: GlobalSearchContext): SettingsCandidate[] {
-  const sections = SETTINGS_NAV.filter((item: NavItem) => reachable(ctx, item.id)).map(
-    (item): SettingsCandidate => ({
+export function settingsCandidates(
+  ctx: GlobalSearchContext,
+  sources: SettingsSources = DEFAULT_SOURCES
+): SettingsCandidate[] {
+  const sections = sources.nav
+    .filter((item: NavItem) => reachable(ctx, item.id))
+    .map((item): SettingsCandidate => ({
       id: `section:${item.id}`,
-      title: sectionLabel(ctx, item.id),
+      title: sectionLabel(ctx, sources.nav, item.id),
       secondary: ctx.t(`settings.descriptions.${item.descriptionKey}`),
-      keywords: [item.id, ...(SETTINGS_SEARCH_KEYWORDS[item.id] ?? [])],
+      keywords: [item.id, ...(sources.keywords[item.id] ?? [])],
       icon: { lucide: item.icon as never },
       action: { type: "open-settings", tab: item.id },
       isControl: false,
-    })
-  )
-  const controls = SETTING_CONTROLS.filter((c) => reachable(ctx, c.sectionId)).map(
-    (c): SettingsCandidate => ({
+    }))
+  const controls = sources.controls
+    .filter((c) => reachable(ctx, c.sectionId))
+    .map((c): SettingsCandidate => ({
       id: `control:${c.id}`,
       title: ctx.t(`settings.finder.controls.${c.labelKey}`),
       keywords: [c.id, ...(c.keywords ?? [])],
-      meta: sectionLabel(ctx, c.sectionId),
+      meta: sectionLabel(ctx, sources.nav, c.sectionId),
       icon: { lucide: SlidersHorizontalIcon },
       action: { type: "open-settings", tab: c.sectionId, focus: c.id },
       isControl: true,
-    })
-  )
+    }))
   return [...sections, ...controls]
 }
 
@@ -83,7 +105,7 @@ function toItem(
     titlePositions: positions,
     subtitle: c.isControl ? undefined : c.secondary,
     meta: c.meta,
-    icon: c.icon ?? { lucide: SettingsIcon },
+    icon: c.icon,
     keywords: c.keywords,
     // Controls sit just below sections when both match equally well.
     score: c.isControl ? Math.max(0, score - 0.02) : score,

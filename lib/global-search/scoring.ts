@@ -21,6 +21,9 @@ export const RECENCY_HALF_LIFE_DAYS = 14
 
 const DAY_MS = 86_400_000
 
+/** Fuzzy floor: `fuzzyMatch` gives 1 per char + bonuses; require ≥ 2 per char. */
+const FUZZY_MIN_SCORE_PER_CHAR = 2
+
 export interface TitleMatch {
   score: number
   /** Indices in the *primary* text that matched (for highlighting). */
@@ -121,7 +124,10 @@ export function scoreTitleMatch(
 
   if (fuzzy && needle.length >= 2) {
     const match = fuzzyMatch(needle, title)
-    if (match) {
+    // A subsequence scattered one letter at a time through a long title
+    // ("sett" inside "Subworkflow orchestrator") is noise; demand at least a
+    // boundary or consecutive-run bonus per needle character.
+    if (match && match.score >= needle.length * FUZZY_MIN_SCORE_PER_CHAR) {
       // fuzzyMatch scores are unbounded; squash into (0, 0.25].
       const squashed = 0.25 * (1 - Math.exp(-Math.max(0, match.score) / 12))
       return {

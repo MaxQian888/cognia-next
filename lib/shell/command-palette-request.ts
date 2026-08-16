@@ -11,11 +11,18 @@
  * the rail and the palette.
  */
 
+import type { GlobalSearchScope } from "@/lib/global-search/types"
+
 export const COMMAND_PALETTE_REQUEST_EVENT = "cognia:command-palette:request"
 
 export interface CommandPaletteRequestDetail {
   /** Seed the palette's search field with this text (already-typed words). */
   query?: string
+  /**
+   * Open on this scope tab (ADR-0129): the settings shell asks for `pages`,
+   * the conversation rail for `chats`. Omitted = the *All* tab.
+   */
+  scope?: GlobalSearchScope
 }
 
 export function requestCommandPalette(detail: CommandPaletteRequestDetail = {}): void {

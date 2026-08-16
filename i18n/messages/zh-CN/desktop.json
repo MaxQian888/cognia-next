@@ -142,57 +142,6 @@
     },
     "title": "聊天当前为只读"
   },
-  "commandPalette": {
-    "actions": {
-      "checkUpdates": "检查更新",
-      "clearChat": "清空当前会话",
-      "exportMd": "将当前聊天导出为 Markdown",
-      "manageApiKey": "管理 API 密钥",
-      "manageCharacters": "管理角色",
-      "manageMcp": "管理 MCP 服务器",
-      "manageSkills": "管理技能",
-      "manageTeams": "管理团队",
-      "newChat": "快速聊天",
-      "newChatHint": "持久化任务",
-      "openFolder": "打开文件夹为工作区…",
-      "openSettings": "打开设置",
-      "toggleTheme": "切换主题"
-    },
-    "description": "搜索命令和会话",
-    "empty": "未找到匹配项。",
-    "groups": {
-      "actions": "操作",
-      "messages": "消息",
-      "navigate": "前往",
-      "newChat": "与角色开始新聊天",
-      "pluginActions": "插件操作",
-      "sessions": "会话",
-      "settings": "设置",
-      "switchTeam": "切换团队",
-      "workbenchPanels": "工作台面板",
-      "workspaces": "切换工作区"
-    },
-    "placeholder": "输入命令或会话名…",
-    "search": {
-      "coverage": "正在索引较早的历史记录，部分匹配项可能暂未显示。",
-      "error": "消息搜索暂时不可用。",
-      "jumpFailed": "无法打开匹配的消息。",
-      "loading": "正在搜索消息历史…"
-    },
-    "title": "命令面板",
-    "titles": {
-      "chatWith": "与 {name} 的聊天"
-    },
-    "toasts": {
-      "conversationCleared": "会话已清空。",
-      "nothingToExport": "没有可导出的内容 — 先开始一次对话吧。",
-      "openFolderDesktopOnly": "仅桌面端支持将文件夹打开为工作区。",
-      "upToDate": "已是最新版本。",
-      "updateAvailable": "有可用更新：{version}",
-      "updateFailed": "检查更新失败：{message}",
-      "updatesDesktopOnly": "仅桌面端支持检查更新。"
-    }
-  },
   "find": {
     "close": "关闭查找",
     "matchOf": "第 {index} / {total} 项",

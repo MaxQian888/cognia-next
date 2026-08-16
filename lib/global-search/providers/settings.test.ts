@@ -76,4 +76,29 @@ describe("settings provider", () => {
     expect(lastSection).toBeLessThan(firstControl)
     expect(out.total).toBe(SETTINGS_NAV.length + SETTING_CONTROLS.length)
   })
+
+  it("tolerates a control pointing at a section without a nav entry, and sections without keywords", () => {
+    const ctx = makeTestContext({
+      host: {
+        reachableSettingsSections: new Set(["ghost", "appearance"]),
+        recorderAvailable: false,
+        theme: "light",
+        hasApiKey: false,
+        pluginQuickActions: [],
+        workbenchPanels: [],
+      },
+    })
+    const rows = settingsCandidates(ctx, {
+      nav: SETTINGS_NAV.filter((n) => n.id === "appearance"),
+      controls: [
+        { id: "orphan", sectionId: "ghost" as never, labelKey: "orphan" },
+        { id: "lang", sectionId: "appearance", labelKey: "language", keywords: ["语言"] },
+      ],
+      keywords: {},
+    })
+    expect(rows.find((r) => r.id === "control:orphan")!.meta).toBe("settings.tabs.ghost")
+    expect(rows.find((r) => r.id === "control:orphan")!.keywords).toEqual(["orphan"])
+    expect(rows.find((r) => r.id === "control:lang")!.keywords).toEqual(["lang", "语言"])
+    expect(rows.find((r) => r.id === "section:appearance")!.keywords).toEqual(["appearance"])
+  })
 })

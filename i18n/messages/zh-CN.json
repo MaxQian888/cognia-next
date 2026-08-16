@@ -1467,9 +1467,9 @@
       "operationFailed": "本地账户操作失败。",
       "passwordLabel": "密码",
       "passwordPlaceholder": "密码",
-      "recoveryContinue": "继续",
       "recoveryCopied": "已复制",
       "recoveryCopy": "复制恢复密钥",
+      "recoveryContinue": "继续",
       "recoveryDescription": "继续前请保存这枚一次性恢复密钥。忘记账户密码时，可用它解锁浏览器 Vault。",
       "recoveryDownload": "下载 .txt",
       "recoveryForm": "保存恢复密钥",
@@ -7062,57 +7062,6 @@
       },
       "title": "聊天当前为只读"
     },
-    "commandPalette": {
-      "actions": {
-        "checkUpdates": "检查更新",
-        "clearChat": "清空当前会话",
-        "exportMd": "将当前聊天导出为 Markdown",
-        "manageApiKey": "管理 API 密钥",
-        "manageCharacters": "管理角色",
-        "manageMcp": "管理 MCP 服务器",
-        "manageSkills": "管理技能",
-        "manageTeams": "管理团队",
-        "newChat": "快速聊天",
-        "newChatHint": "持久化任务",
-        "openFolder": "打开文件夹为工作区…",
-        "openSettings": "打开设置",
-        "toggleTheme": "切换主题"
-      },
-      "description": "搜索命令和会话",
-      "empty": "未找到匹配项。",
-      "groups": {
-        "actions": "操作",
-        "messages": "消息",
-        "navigate": "前往",
-        "newChat": "与角色开始新聊天",
-        "pluginActions": "插件操作",
-        "sessions": "会话",
-        "settings": "设置",
-        "switchTeam": "切换团队",
-        "workbenchPanels": "工作台面板",
-        "workspaces": "切换工作区"
-      },
-      "placeholder": "输入命令或会话名…",
-      "search": {
-        "coverage": "正在索引较早的历史记录，部分匹配项可能暂未显示。",
-        "error": "消息搜索暂时不可用。",
-        "jumpFailed": "无法打开匹配的消息。",
-        "loading": "正在搜索消息历史…"
-      },
-      "title": "命令面板",
-      "titles": {
-        "chatWith": "与 {name} 的聊天"
-      },
-      "toasts": {
-        "conversationCleared": "会话已清空。",
-        "nothingToExport": "没有可导出的内容 — 先开始一次对话吧。",
-        "openFolderDesktopOnly": "仅桌面端支持将文件夹打开为工作区。",
-        "upToDate": "已是最新版本。",
-        "updateAvailable": "有可用更新：{version}",
-        "updateFailed": "检查更新失败：{message}",
-        "updatesDesktopOnly": "仅桌面端支持检查更新。"
-      }
-    },
     "find": {
       "close": "关闭查找",
       "matchOf": "第 {index} / {total} 项",
@@ -9809,6 +9758,152 @@
       "you": "你："
     }
   },
+  "globalSearch": {
+    "actions": {
+      "checkUpdates": "检查更新",
+      "clearChat": "清空当前会话",
+      "clearRecents": "清除最近搜索",
+      "desktopOnly": "仅桌面端",
+      "exportMd": "将当前聊天导出为 Markdown",
+      "manageApiKey": "管理 API 密钥",
+      "manageCharacters": "管理角色",
+      "manageMcp": "管理 MCP 服务器",
+      "manageSkills": "管理技能",
+      "manageTeams": "管理团队",
+      "newChat": "新建会话",
+      "newChatHint": "开始一段持久化的对话",
+      "openFolder": "打开文件夹为工作区…",
+      "openSettings": "打开设置",
+      "switchToDark": "切换到深色主题",
+      "switchToLight": "切换到浅色主题",
+      "toggleSidebar": "切换侧栏"
+    },
+    "badges": {
+      "archived": "已归档",
+      "branchCopies": "+{count} 个分支副本",
+      "current": "当前",
+      "occurrences": "×{count}"
+    },
+    "description": "搜索会话、消息、命令、页面、人物与你的资料库。",
+    "empty": "没有与“{query}”匹配的结果。",
+    "emptyFilters": "输入几个字符，即可按这些过滤条件搜索。",
+    "emptyHint": "试试其他范围，或输入 > 搜命令、@ 搜人物、in:messages 搜历史消息。",
+    "error": "搜索失败：{message}",
+    "filters": {
+      "after": "晚于",
+      "before": "早于",
+      "from": "来自",
+      "in": "范围",
+      "is": "状态",
+      "remove": "移除过滤条件 {filter}",
+      "title": "仅标题",
+      "workspace": "工作区"
+    },
+    "footer": {
+      "close": "关闭",
+      "coverageIndexing": "仍在索引较早的历史 — 部分匹配可能暂未显示。",
+      "coveragePartial": "较早的历史未完全扫描 — 缩小查询范围可查看更多。",
+      "navigate": "移动",
+      "open": "打开",
+      "results": "{count, plural, =0 {无结果} other {# 条结果}}",
+      "scopes": "切换范围",
+      "syntax": "搜索语法",
+      "took": "{ms} 毫秒"
+    },
+    "groups": {
+      "messagesInChats": "提到“{query}”的会话"
+    },
+    "jumpFailed": "无法打开匹配的消息。",
+    "kinds": {
+      "action": "命令",
+      "character": "角色",
+      "inbox-conversation": "收件箱会话",
+      "mcp-server": "MCP 服务器",
+      "memory": "记忆",
+      "message": "消息",
+      "navigation": "页面",
+      "plugin": "插件",
+      "plugin-action": "插件操作",
+      "scheduled-task": "计划任务",
+      "session": "会话",
+      "settings": "设置",
+      "skill": "技能",
+      "team": "团队",
+      "template": "模板",
+      "workbench-panel": "工作台面板",
+      "workflow": "工作流",
+      "workspace": "工作区"
+    },
+    "library": {
+      "disabled": "已禁用",
+      "enabled": "已启用",
+      "workflowTemplate": "模板"
+    },
+    "loading": "正在搜索…",
+    "people": {
+      "members": "{count} 位成员",
+      "newChatWith": "新建会话"
+    },
+    "placeholder": "搜索或跳转…（> 命令，@ 人物）",
+    "placeholders": {
+      "chats": "按标题或内容搜索会话…",
+      "commands": "输入命令…",
+      "library": "搜索工作流、技能、记忆、模板、插件…",
+      "messages": "搜索消息历史…（from:me、after:7d、is:archived）",
+      "pages": "前往页面或设置…",
+      "people": "查找角色或团队…"
+    },
+    "recents": {
+      "clear": "清除",
+      "items": "最近打开",
+      "queries": "最近搜索",
+      "remove": "移除",
+      "unavailable": "该操作已不可用。"
+    },
+    "roles": {
+      "assistant": "助手",
+      "other": "工具",
+      "system": "系统",
+      "user": "你"
+    },
+    "scopes": {
+      "all": "全部",
+      "chats": "会话",
+      "commands": "命令",
+      "library": "资料库",
+      "messages": "消息",
+      "pages": "页面",
+      "people": "人物"
+    },
+    "showAll": "在“{scope}”中显示全部 {count} 条",
+    "showMore": "显示更多",
+    "suggestions": "建议",
+    "syntax": {
+      "after": "after:2026-08-01 · after:7d — 晚于某时间",
+      "before": "before:2026-08-16 — 早于某时间",
+      "from": "from:me · from:assistant — 消息作者",
+      "in": "in:messages · in:skills — 只搜某一类",
+      "is": "is:archived — 包含已归档会话",
+      "prefixes": "> 命令 · @ 人物",
+      "title": "title:词 — 仅匹配会话标题",
+      "workspace": "workspace:current — 仅当前工作区"
+    },
+    "title": "搜索",
+    "titles": {
+      "chatWith": "与 {name} 的聊天"
+    },
+    "toasts": {
+      "conversationCleared": "会话已清空。",
+      "nothingToExport": "没有可导出的内容 — 先开始一次对话吧。",
+      "openFolderDesktopOnly": "仅桌面端支持将文件夹打开为工作区。",
+      "recentsCleared": "最近搜索已清除。",
+      "upToDate": "已是最新版本。",
+      "updateAvailable": "有可用更新：{version}",
+      "updateFailed": "检查更新失败：{message}",
+      "updatesDesktopOnly": "仅桌面端支持检查更新。"
+    },
+    "untitledConversation": "未命名会话"
+  },
   "goal": {
     "acceptance": {
       "accept": "验收通过",
@@ -10405,13 +10500,6 @@
       "manage": "管理快捷回复",
       "searchPlaceholder": "搜索快捷回复……",
       "triggerAria": "插入快捷回复"
-    },
-    "commandPalette": {
-      "conversations": "会话",
-      "description": "跨连接器快速跳转到任意会话。",
-      "empty": "未找到会话",
-      "placeholder": "搜索会话…",
-      "title": "搜索会话"
     },
     "connectionLoss": {
       "dismiss": "关闭",
@@ -13942,6 +14030,10 @@
       "fingerprintPinned": "桌面身份已锁定",
       "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
       "formCardTitle": "配对手机",
+      "invitationSummary": {
+        "description": "服务器 v{version} · {expiresAt, time, short} 过期",
+        "title": "已识别 {host} 的配对邀请"
+      },
       "health": {
         "checking": "检查中",
         "continueToChat": "进入聊天",
@@ -13962,10 +14054,6 @@
         "generic": "配对失败（HTTP {status}）。"
       },
       "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
-      "invitationSummary": {
-        "description": "服务器 v{version} · {expiresAt, time, short} 过期",
-        "title": "已识别 {host} 的配对邀请"
-      },
       "loadingManualCta": "手动配对",
       "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
       "loadingTitle": "正在检查既有配对…",
@@ -14066,8 +14154,8 @@
         "headlessTitle": "正在使用 Headless 服务器？",
         "httpsRequired": "浏览器配对必须使用 HTTPS，避免配对凭据以明文发送。请输入 HTTPS Companion 地址。",
         "intro": "使用 Cognia 服务器签发的一次性邀请连接此浏览器。",
-        "pasteClipboard": "粘贴",
         "pasteHint": "粘贴完整的 cgnp3|… 邀请，系统会自动验证服务器地址和身份。",
+        "pasteClipboard": "粘贴",
         "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
         "storageNoticeTitle": "凭据保存在此浏览器中",
         "title": "连接到服务器"
@@ -14148,33 +14236,6 @@
         "untitled": "未命名会话"
       },
       "title": "远程会话"
-    },
-    "search": {
-      "actions": {
-        "newChat": "新建会话",
-        "openSettings": "打开设置"
-      },
-      "description": "搜索会话、角色与工作流，或执行快捷操作。",
-      "empty": "无结果。",
-      "groups": {
-        "actions": "操作",
-        "characters": "角色",
-        "messages": "消息",
-        "sessions": "会话",
-        "teams": "团队",
-        "workflows": "工作流"
-      },
-      "placeholder": "搜索或快速跳转…",
-      "search": {
-        "coverage": "正在索引较早的历史记录，部分匹配项可能暂未显示。",
-        "error": "消息搜索暂时不可用。",
-        "jumpFailed": "无法打开匹配的消息。",
-        "loading": "正在搜索消息历史…"
-      },
-      "title": "搜索",
-      "titles": {
-        "chatWith": "与 {name} 对话"
-      }
     },
     "security": {
       "deletePairing": {
@@ -16589,6 +16650,8 @@
     "triggerText": "计划任务（{count}）"
   },
   "plugins": {
+    "description": "浏览、安装、配置并治理在 Cognia 中运行的插件。查看权限、定时任务、使用统计与开发工具——完整的市场搜索与安装流程都在这里。",
+    "title": "插件",
     "activation": {
       "cancelled": "启用在「{phase}」阶段被取消",
       "countLabel": "第 {processed} 步，共 {total} 步",
@@ -16953,7 +17016,6 @@
       "unresolved": "未解决",
       "warningsTitle": "{count} 个警告"
     },
-    "description": "浏览、安装、配置并治理在 Cognia 中运行的插件。查看权限、定时任务、使用统计与开发工具——完整的市场搜索与安装流程都在这里。",
     "detail": {
       "activation": "激活事件",
       "capabilitiesTitle": "能力",
@@ -17006,6 +17068,14 @@
         "switchAria": "信任此插件的前端代码",
         "title": "信任前端代码"
       },
+      "logs": {
+        "aria": "Python 宿主日志条目",
+        "clear": "清空",
+        "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
+        "exited": "宿主进程已退出",
+        "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
+        "streamEnd": "— 流式输出结束 —"
+      },
       "lifecycle": {
         "activating": "正在激活",
         "dirty": "需要清理",
@@ -17015,14 +17085,6 @@
         "retrying": "正在重试清理",
         "stopping": "正在停止",
         "waiting": "正在等待服务"
-      },
-      "logs": {
-        "aria": "Python 宿主日志条目",
-        "clear": "清空",
-        "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
-        "exited": "宿主进程已退出",
-        "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
-        "streamEnd": "— 流式输出结束 —"
       },
       "metaAuthor": "作者",
       "metaCreatedAt": "安装时间",
@@ -17188,15 +17250,15 @@
         "loading": "正在采集插件信息…",
         "refresh": "刷新"
       },
+      "logs": {
+        "empty": "未捕获到日志。"
+      },
       "lifecycle": {
         "effects": "资源（活动 / 等待 / 失败）",
         "empty": "尚未观测到插件生命周期 generation。",
         "plugin": "插件",
         "services": "服务",
         "state": "Generation 与状态"
-      },
-      "logs": {
-        "empty": "未捕获到日志。"
       },
       "profiler": {
         "avgDuration": "平均耗时",
@@ -17214,8 +17276,8 @@
         "hooks": "Hook 历史",
         "hotReload": "热重载",
         "inspect": "运行时检查",
-        "lifecycle": "生命周期",
         "logs": "日志",
+        "lifecycle": "生命周期",
         "profiler": "性能分析",
         "triggers": "触发记录"
       },
@@ -17678,7 +17740,6 @@
       "permissions": "权限",
       "scheduled": "定时任务"
     },
-    "title": "插件",
     "toolbar": {
       "checkUpdates": "检查更新",
       "fromFile": "从文件…",
@@ -21835,6 +21896,24 @@
     }
   },
   "settings": {
+    "backToChat": "返回聊天",
+    "close": "关闭",
+    "customModes": "自定义代理模式",
+    "customModesDesc": "创建并管理具有特定工具、提示词和行为的自定义代理模式。",
+    "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
+    "groupAi": "AI 核心",
+    "groupData": "数据",
+    "groupExtensions": "扩展",
+    "groupInterface": "界面",
+    "groupObservability": "可观测性",
+    "groupSystem": "系统",
+    "hostUnavailableSectionBody": "该设置项管理的能力在你当前连接的主机上不可用——它需要桌面应用，或一台已配对且运行该能力的主机。请在那里打开 Cognia 使用。",
+    "hostUnavailableSectionTitle": "当前主机不可用",
+    "loadingSection": "正在加载设置项",
+    "loadingSettings": "正在加载设置…",
+    "noSettingsFound": "没有匹配的设置。",
+    "searchPlaceholder": "搜索设置…",
+    "title": "设置",
     "a2ui": {
       "debugger": {
         "allSurfaces": "所有 surface",
@@ -23422,7 +23501,6 @@
       "showNotificationLabel": "自动创建时弹出提示",
       "title": "作品"
     },
-    "backToChat": "返回聊天",
     "builtInSkills": {
       "conversation": {
         "allowedListLabel": "允许的技能 ID",
@@ -24123,7 +24201,6 @@
         "partial": "同步完成但有问题——成功 {ok} 项，失败 {errors} 项。"
       }
     },
-    "close": "关闭",
     "common": {
       "unsavedBar": {
         "discard": "放弃",
@@ -26058,8 +26135,6 @@
       },
       "useDefault": "使用对话默认"
     },
-    "customModes": "自定义代理模式",
-    "customModesDesc": "创建并管理具有特定工具、提示词和行为的自定义代理模式。",
     "data": {
       "apply": "应用",
       "applying": "应用中…",
@@ -26713,7 +26788,6 @@
         "usernamePlaceholder": "你的用户名"
       }
     },
-    "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
     "descriptions": {
       "a2ui": "Agent-to-UI 小应用、运行时默认值、MCP 桥接与调试器。",
       "about": "版本、构建、诊断、更新与致谢。",
@@ -27254,12 +27328,6 @@
         "webTools": "网页工具",
         "workingDir": "默认工作目录"
       },
-      "controlsHeading": "设置项",
-      "description": "搜索设置并直接跳转到对应控件。",
-      "empty": "没有匹配的设置。",
-      "placeholder": "搜索设置…",
-      "sectionsHeading": "分区",
-      "title": "查找设置",
       "triggerAria": "查找设置"
     },
     "fleet": {
@@ -27689,12 +27757,6 @@
       "useSdkDefault": "使用 SDK 默认值",
       "workingDirectory": "工作目录"
     },
-    "groupAi": "AI 核心",
-    "groupData": "数据",
-    "groupExtensions": "扩展",
-    "groupInterface": "界面",
-    "groupObservability": "可观测性",
-    "groupSystem": "系统",
     "hooks": {
       "addGroup": "新建分组",
       "builtin": {
@@ -27806,8 +27868,6 @@
       "title": "生命周期钩子",
       "unsaved": "有未保存的更改"
     },
-    "hostUnavailableSectionBody": "该设置项管理的能力在你当前连接的主机上不可用——它需要桌面应用，或一台已配对且运行该能力的主机。请在那里打开 Cognia 使用。",
-    "hostUnavailableSectionTitle": "当前主机不可用",
     "instructions": {
       "description": "将活动工作区的磁盘指令文件（CLAUDE.md / AGENTS.md / AGENT.md）加载进 Agent 的系统提示，支持嵌套目录发现与 @import 展开。",
       "enabled": "启用指令文件",
@@ -27831,8 +27891,6 @@
       "saved": "指令设置已保存。",
       "title": "项目指令"
     },
-    "loadingSection": "正在加载设置项",
-    "loadingSettings": "正在加载设置…",
     "logs": {
       "linkCardDescription": "列表 / 仪表盘 / 追踪 三种视图，实时搜索、过滤、分组、导出与收藏日志。",
       "linkCardFooter": "关闭设置弹窗，跳转到 /logs。",
@@ -28303,7 +28361,6 @@
       },
       "title": "网络代理"
     },
-    "noSettingsFound": "没有匹配的设置。",
     "notifications": {
       "badgeHint": "在通知铃铛上显示未读角标。",
       "badgeLabel": "角标",
@@ -29199,7 +29256,6 @@
         "title": "工作区约束"
       }
     },
-    "searchPlaceholder": "搜索设置…",
     "sectionReset": {
       "button": "重置此分区",
       "cancel": "取消",
@@ -29275,6 +29331,7 @@
         "chatNextAnchor": "跳到下一个消息锚点",
         "chatPrevAnchor": "跳到上一个消息锚点",
         "chatSearchToggle": "在会话中查找",
+        "commandPaletteToggle": "打开全局搜索 / 命令面板",
         "dockLayoutRedo": "重做停靠布局更改",
         "dockLayoutReset": "重置停靠布局",
         "dockLayoutUndo": "撤销停靠布局更改",
@@ -30383,7 +30440,6 @@
         "label": "允许无人值守执行"
       }
     },
-    "title": "设置",
     "tray": {
       "addItem": "添加项目",
       "description": "自定义系统托盘菜单中显示的项目。",
@@ -34613,6 +34669,9 @@
     }
   },
   "workflows": {
+    "notFoundBackToLibrary": "返回工作流库",
+    "notFoundDescription": "你要打开的工作流不存在或已被删除。",
+    "notFoundTitle": "未找到工作流",
     "canvasToast": {
       "completed": "工作流执行完成",
       "exported": "已下载工作流 JSON",
@@ -38970,9 +39029,6 @@
         }
       }
     },
-    "notFoundBackToLibrary": "返回工作流库",
-    "notFoundDescription": "你要打开的工作流不存在或已被删除。",
-    "notFoundTitle": "未找到工作流",
     "runs": {
       "detail": {
         "backToRuns": "返回运行列表",

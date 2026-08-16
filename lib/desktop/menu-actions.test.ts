@@ -289,15 +289,20 @@ test("loadRecentSessions returns [] when the Dexie call throws", async () => {
   expect(logWarn).toHaveBeenCalled()
 })
 
-test("commandPaletteAction dispatches Ctrl+K", () => {
-  const seen: KeyboardEvent[] = []
-  const listener = (e: Event) => seen.push(e as KeyboardEvent)
-  window.addEventListener("keydown", listener)
+test("commandPaletteAction asks the palette through the request seam (no forged keystroke)", () => {
+  const seen: Event[] = []
+  const requests: Event[] = []
+  const keyListener = (e: Event) => seen.push(e)
+  const requestListener = (e: Event) => requests.push(e)
+  window.addEventListener("keydown", keyListener)
+  window.addEventListener("cognia:command-palette:request", requestListener)
   try {
     commandPaletteAction()
-    expect(seen.some((e) => e.key === "k" && e.ctrlKey)).toBe(true)
+    expect(requests).toHaveLength(1)
+    expect(seen).toHaveLength(0)
   } finally {
-    window.removeEventListener("keydown", listener)
+    window.removeEventListener("keydown", keyListener)
+    window.removeEventListener("cognia:command-palette:request", requestListener)
   }
 })
 

@@ -30,6 +30,7 @@ import { getDb } from "@/lib/db/schema"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 
+import { MobileGlobalSearchHost } from "./mobile-global-search-host"
 import { MobileTabBar, tabHref, type TabId } from "./mobile-tab-bar"
 import { useMobileTabLayout } from "./use-mobile-tab-layout"
 
@@ -178,6 +179,11 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
           the two places a file link is clicked. Self-gating on its own store,
           so an unopened viewer costs nothing. */}
       <FileViewerDialog />
+      {/* Same reasoning for the unified global search (ADR-0129): ⌘K and the
+          `command-palette-request` seam must answer on `/settings`, `/inbox`
+          and `/me/*` too. The host renders nothing on `/`, where
+          `AppShellMobile` mounts the picker-aware palette instead. */}
+      <MobileGlobalSearchHost />
       {showTabBar ? <MobileTabBar badges={mergedBadges} keyboardHidden={keyboard.isVisible} /> : null}
     </div>
   )

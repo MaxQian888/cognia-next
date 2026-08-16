@@ -35,7 +35,6 @@ import {
 import { InboxSidebar, InboxSidebarContent } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
 import { InboxNoticeArea } from "./notices/notice-area"
-import { InboxCommandPalette } from "./inbox-command-palette"
 
 export type InboxView = "all" | "by-adapter" | "by-platform" | "conversation"
 
@@ -163,7 +162,8 @@ function DesktopInboxShell({
           <DetailContent emptyPrompt={emptyPrompt}>{children}</DetailContent>
         </ResizablePanel>
       </ResizablePanelGroup>
-      <InboxCommandPalette />
+      {/* ⌘K is the unified global search (ADR-0129); platform-bound
+          conversations are one of its providers, so no inbox-local palette. */}
     </SidebarProvider>
   )
 }
@@ -238,7 +238,6 @@ export function InboxShell({
         <InboxNoticeArea conversationKey={conversationKey} />
         <DetailContent emptyPrompt={t("selectPrompt")}>{children}</DetailContent>
       </SidebarInset>
-      <InboxCommandPalette />
     </SidebarProvider>
   )
 }

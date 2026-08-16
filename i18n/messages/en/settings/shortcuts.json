@@ -15,6 +15,7 @@
     "chatNextAnchor": "Jump to next message anchor",
     "chatPrevAnchor": "Jump to previous message anchor",
     "chatSearchToggle": "Find in conversation",
+    "commandPaletteToggle": "Open global search / command palette",
     "dockLayoutRedo": "Redo dock layout change",
     "dockLayoutReset": "Reset the dock layout",
     "dockLayoutUndo": "Undo dock layout change",

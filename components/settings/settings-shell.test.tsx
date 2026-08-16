@@ -56,12 +56,9 @@ jest.mock("./common/section-reset-button", () => ({
   ),
 }))
 
-const finderOpenSpy = jest.fn()
-jest.mock("./finder/settings-finder", () => ({
-  SettingsFinder: ({ open }: { open: boolean }) => {
-    finderOpenSpy(open)
-    return <div data-testid="settings-finder" data-open={open} />
-  },
+const requestCommandPalette = jest.fn()
+jest.mock("@/lib/shell/command-palette-request", () => ({
+  requestCommandPalette: (...args: unknown[]) => requestCommandPalette(...args),
 }))
 
 jest.mock("@/hooks/settings/use-setting-focus", () => ({
@@ -104,12 +101,12 @@ describe("SettingsShell reset button", () => {
     expect(screen.queryByTestId("section-reset-button")).not.toBeInTheDocument()
   })
 
-  it("opens the finder from the header trigger", async () => {
+  it("opens the global search pre-scoped to settings from the header trigger", async () => {
     const user = userEvent.setup()
     mockSection = "appearance"
     render(<SettingsShell />)
     await user.click(screen.getByTestId("settings-finder-trigger"))
-    expect(screen.getByTestId("settings-finder")).toHaveAttribute("data-open", "true")
+    expect(requestCommandPalette).toHaveBeenCalledWith({ query: "in:settings ", scope: "pages" })
   })
 
   it("provides AI Connections with an action target inside the header", () => {

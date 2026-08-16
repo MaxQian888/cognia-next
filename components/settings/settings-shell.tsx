@@ -13,7 +13,7 @@ import { FeaturePageHeader } from "@/components/feature-shell/feature-page-heade
 import { SettingsSidebar } from "./settings-sidebar"
 import { SectionResetButton } from "./common/section-reset-button"
 import { SettingsEmptyState } from "./common/settings-section"
-import { SettingsFinder } from "./finder/settings-finder"
+import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 import { resetKeysForSection } from "@/lib/settings/section-keys"
 import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { useSettingFocus } from "@/hooks/settings/use-setting-focus"
@@ -335,22 +335,15 @@ function SettingsShellInner({ actions }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState("")
-  const [finderOpen, setFinderOpen] = useState(false)
   const [sectionHeaderActionsTarget, setSectionHeaderActionsTarget] =
     useState<HTMLDivElement | null>(null)
 
   useSettingFocus()
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault()
-        setFinderOpen((v) => !v)
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+  // ⌘/Ctrl+K belongs to the unified global search (ADR-0129); its settings
+  // provider carries every reachable section and finder control, so the
+  // header trigger just opens it pre-scoped to settings.
+  const openSettingsFinder = () => requestCommandPalette({ query: "in:settings ", scope: "pages" })
 
   const requested = searchParams.get("section")
   const redirectTarget = requested ? DEPRECATED_REDIRECT[requested] : undefined
@@ -438,7 +431,7 @@ function SettingsShellInner({ actions }: Props) {
                 variant="ghost"
                 size="icon"
                 className="size-8"
-                onClick={() => setFinderOpen(true)}
+                onClick={openSettingsFinder}
                 aria-label={t("finder.triggerAria")}
                 data-testid="settings-finder-trigger"
               >
@@ -448,8 +441,6 @@ function SettingsShellInner({ actions }: Props) {
             </>
           }
         />
-
-        <SettingsFinder open={finderOpen} onOpenChange={setFinderOpen} />
 
         {FILL_HEIGHT_SECTIONS.has(activeSection) ? (
           <div

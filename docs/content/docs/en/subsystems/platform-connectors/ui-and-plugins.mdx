@@ -159,8 +159,10 @@ highlight and the list filter.
   `showDetail = !isMobile || Boolean(conversationKey)`
   (`inbox-shell.tsx:212-213`). The sidebar becomes an offcanvas Sheet.
 
-`InboxCommandPalette` (cmdk) is mounted in **both** the desktop and the
-tablet/mobile layouts.
+Neither layout mounts a palette of its own any more: ⌘/Ctrl+K is the unified
+global search (ADR-0129), and platform-bound conversations are one of its
+providers (`lib/global-search/providers/system.ts`), so a search from anywhere
+in the app reaches them.
 
 ```mermaid
 graph TD
@@ -174,8 +176,6 @@ graph TD
   Flex --> SB["InboxSidebar offcanvas"]
   Flex --> List["ConversationList"]
   Flex --> Inset["SidebarInset : detail"]
-  Desk --> CP["InboxCommandPalette cmdk"]
-  Flex --> CP
 ```
 
 ### Mode switcher

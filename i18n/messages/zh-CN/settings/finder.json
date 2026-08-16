@@ -24,11 +24,5 @@
     "webTools": "网页工具",
     "workingDir": "默认工作目录"
   },
-  "controlsHeading": "设置项",
-  "description": "搜索设置并直接跳转到对应控件。",
-  "empty": "没有匹配的设置。",
-  "placeholder": "搜索设置…",
-  "sectionsHeading": "分区",
-  "title": "查找设置",
   "triggerAria": "查找设置"
 }

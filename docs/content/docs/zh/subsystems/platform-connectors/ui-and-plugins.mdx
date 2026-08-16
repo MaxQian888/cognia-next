@@ -149,7 +149,9 @@ sequenceDiagram
   `showDetail = !isMobile || Boolean(conversationKey)`
   （`inbox-shell.tsx:212-213`）。侧栏变为离屏 Sheet。
 
-`InboxCommandPalette`（cmdk）在桌面与平板/移动两种布局中**都**挂载。
+两种布局都不再挂载自己的调色板：⌘/Ctrl+K 是统一全局搜索（ADR-0129），绑定平台的会话
+是它的一个 provider（`lib/global-search/providers/system.ts`），因此在应用任何位置
+搜索都能找到它们。
 
 ```mermaid
 graph TD
@@ -163,8 +165,6 @@ graph TD
   Flex --> SB["InboxSidebar offcanvas"]
   Flex --> List["ConversationList"]
   Flex --> Inset["SidebarInset : detail"]
-  Desk --> CP["InboxCommandPalette cmdk"]
-  Flex --> CP
 ```
 
 ### 模式切换器

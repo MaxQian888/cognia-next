@@ -30,6 +30,11 @@ describe("scoreTitleMatch", () => {
     expect(fuzzy.positions).toEqual([0, 2, 3, 5])
   })
 
+  it("rejects scattered subsequences that only match one letter at a time", () => {
+    expect(scoreTitleMatch("sett", "Subworkflow orchestrator", { now: NOW })).toBeNull()
+    expect(scoreTitleMatch("dply", "Deploy", { now: NOW })).not.toBeNull()
+  })
+
   it("returns null when nothing matches, and honours fuzzy=false", () => {
     expect(scoreTitleMatch("zzz", "Deploy", { now: NOW })).toBeNull()
     expect(scoreTitleMatch("dply", "Deploy", { now: NOW, fuzzy: false })).toBeNull()

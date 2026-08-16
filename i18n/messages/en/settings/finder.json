@@ -24,11 +24,5 @@
     "webTools": "Web tools",
     "workingDir": "Default working directory"
   },
-  "controlsHeading": "Settings",
-  "description": "Search settings and jump straight to a control.",
-  "empty": "No matching settings.",
-  "placeholder": "Search settings…",
-  "sectionsHeading": "Sections",
-  "title": "Find a setting",
   "triggerAria": "Find a setting"
 }

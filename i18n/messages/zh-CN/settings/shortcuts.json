@@ -15,6 +15,7 @@
     "chatNextAnchor": "跳到下一个消息锚点",
     "chatPrevAnchor": "跳到上一个消息锚点",
     "chatSearchToggle": "在会话中查找",
+    "commandPaletteToggle": "打开全局搜索 / 命令面板",
     "dockLayoutRedo": "重做停靠布局更改",
     "dockLayoutReset": "重置停靠布局",
     "dockLayoutUndo": "撤销停靠布局更改",

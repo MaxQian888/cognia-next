@@ -17,6 +17,17 @@ import type { Chord, ShortcutDescriptor } from "./types"
  */
 export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
   {
+    // The unified global search / command palette (ADR-0129). `ctrl` folds
+    // with ⌘ in the dispatcher, so one chord serves both platforms; the
+    // command id keeps the plugin-facing name the old palette announced.
+    id: "app.commandPalette.toggle",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.commandPaletteToggle",
+    category: "app.navigation",
+    defaultChord: "ctrl+k",
+    commandId: "command-palette.toggle",
+  },
+  {
     id: "app.search.focus",
     scope: "app",
     labelKey: "settings.shortcuts.catalog.searchFocus",

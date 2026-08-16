@@ -477,7 +477,7 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
   "settings.ai": "components/settings/provider/anthropic-subscription-reuse-card.tsx",
   "settings.plugins": "components/plugins/plugin-panel.tsx",
-  "command-palette": "components/desktop/command-palette.tsx",
+  "command-palette": "components/global-search/global-search-dialog.tsx",
   "inbox.sidebar.section": "components/inbox/inbox-sidebar.tsx",
   "inbox.conversation.actions": "components/inbox/conversation-row.tsx",
   "inbox.composer.actions": "components/inbox/inbox-composer-actions-host.tsx",

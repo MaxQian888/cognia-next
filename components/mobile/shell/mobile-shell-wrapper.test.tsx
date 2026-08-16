@@ -47,6 +47,12 @@ jest.mock("@/components/mobile/offline-banner", () => ({
   OfflineBanner: () => <div data-testid="offline-banner-stub" />,
 }))
 
+// The real host drags the whole global-search stack (Dexie providers, next-intl
+// formatters) into every wrapper test; the mount itself is what matters here.
+jest.mock("./mobile-global-search-host", () => ({
+  MobileGlobalSearchHost: () => <div data-testid="mobile-global-search-host" />,
+}))
+
 const inboundUnreadRef = { value: 0 }
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => inboundUnreadRef.value,
@@ -136,6 +142,19 @@ describe("<MobileShellWrapper />", () => {
       </MobileShellWrapper>
     )
     expect(screen.getAllByTestId("file-viewer-dialog").length).toBeGreaterThan(0)
+  })
+
+  it("mounts the global-search host for every mobile route", () => {
+    // `AppShellMobile` renders only on `/`, so without this mount ⌘K and the
+    // settings header's search button dispatched into nothing on /settings,
+    // /inbox and /me/* (ADR-0129).
+    pathnameMock.mockReturnValue("/settings")
+    render(
+      <MobileShellWrapper>
+        <div>settings</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-global-search-host")).toBeInTheDocument()
   })
 
   it("leaves the file viewer dialog to the desktop shell off mobile", () => {

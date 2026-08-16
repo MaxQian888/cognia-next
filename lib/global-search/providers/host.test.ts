@@ -33,6 +33,10 @@ describe("host providers", () => {
     })
     const byActivity = await workbenchPanelsProvider.search(makeProviderInput("explorer", { ctx }))
     expect(byActivity.items[0]!.id).toBe("workbench-panel:files")
+    // Panels without an activity still match by label / id.
+    const bare = host({ workbenchPanels: [{ id: "bare", label: "Bare panel" }] })
+    const bareOut = await workbenchPanelsProvider.search(makeProviderInput("bare", { ctx: bare }))
+    expect(bareOut.items[0]!.meta).toBeUndefined()
     const none = await workbenchPanelsProvider.search(makeProviderInput("zzz", { ctx }))
     expect(none.items).toEqual([])
   })
@@ -59,5 +63,10 @@ describe("host providers", () => {
     expect(byPlugin.items).toHaveLength(1)
     const byDesc = await pluginActionsProvider.search(makeProviderInput("greets", { ctx }))
     expect(byDesc.items).toHaveLength(1)
+    const terse = host({
+      pluginQuickActions: [{ ...entry, description: "  " } as unknown as QuickActionEntry],
+    })
+    const terseOut = await pluginActionsProvider.search(makeProviderInput("hello", { ctx: terse }))
+    expect(terseOut.items[0]!.subtitle).toBeUndefined()
   })
 })

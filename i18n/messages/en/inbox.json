@@ -93,13 +93,6 @@
     "searchPlaceholder": "Search canned responses…",
     "triggerAria": "Insert a canned response"
   },
-  "commandPalette": {
-    "conversations": "Conversations",
-    "description": "Jump to any conversation across your connectors.",
-    "empty": "No conversations found",
-    "placeholder": "Search conversations…",
-    "title": "Search conversations"
-  },
   "connectionLoss": {
     "dismiss": "Dismiss",
     "headline": "{count, plural, =1 {1 adapter is offline} other {# adapters are offline}}",

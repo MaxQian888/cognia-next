@@ -31,6 +31,7 @@ import { useUIStore } from "@/stores/ui/ui-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import type { AppLanguage, AppSettings, ChatSession } from "@cognia/agent-config-types"
+import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 
 const log = loggers.ui
 
@@ -293,7 +294,9 @@ export function dispatchKeyChord(key: string, mods: { ctrl?: boolean; shift?: bo
 
 export function commandPaletteAction(): void {
   log.info("menu action command-palette")
-  dispatchKeyChord("k", { ctrl: true })
+  // Ask the palette directly rather than forging Ctrl+K: on macOS the palette
+  // listened for ⌘K, so the forged chord opened nothing (ADR-0129).
+  requestCommandPalette()
 }
 
 export function toggleSidebarAction(): void {

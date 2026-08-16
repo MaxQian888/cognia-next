@@ -142,57 +142,6 @@
     },
     "title": "Chat is read-only right now"
   },
-  "commandPalette": {
-    "actions": {
-      "checkUpdates": "Check for updates",
-      "clearChat": "Clear current conversation",
-      "exportMd": "Export current chat as Markdown",
-      "manageApiKey": "Manage API key",
-      "manageCharacters": "Manage characters",
-      "manageMcp": "Manage MCP servers",
-      "manageSkills": "Manage skills",
-      "manageTeams": "Manage teams",
-      "newChat": "Quick Chat",
-      "newChatHint": "persisted task",
-      "openFolder": "Open folder as workspace…",
-      "openSettings": "Open settings",
-      "toggleTheme": "Toggle theme"
-    },
-    "description": "Search for commands and sessions",
-    "empty": "No matches found.",
-    "groups": {
-      "actions": "Actions",
-      "messages": "Messages",
-      "navigate": "Go to",
-      "newChat": "New chat with character",
-      "pluginActions": "Plugin actions",
-      "sessions": "Sessions",
-      "settings": "Settings",
-      "switchTeam": "Switch to team",
-      "workbenchPanels": "Workbench panels",
-      "workspaces": "Switch workspace"
-    },
-    "placeholder": "Type a command or session name…",
-    "search": {
-      "coverage": "Search is still indexing older history; some matches may be missing.",
-      "error": "Message search is temporarily unavailable.",
-      "jumpFailed": "The matching message could not be opened.",
-      "loading": "Searching message history…"
-    },
-    "title": "Command palette",
-    "titles": {
-      "chatWith": "Chat with {name}"
-    },
-    "toasts": {
-      "conversationCleared": "Conversation cleared.",
-      "nothingToExport": "Nothing to export — start a conversation first.",
-      "openFolderDesktopOnly": "Opening folders as workspaces is only available in the desktop build.",
-      "upToDate": "You're on the latest version.",
-      "updateAvailable": "Update available: {version}",
-      "updateFailed": "Update check failed: {message}",
-      "updatesDesktopOnly": "Updates are only available in the desktop build."
-    }
-  },
   "find": {
     "close": "Close find",
     "matchOf": "{index} of {total}",

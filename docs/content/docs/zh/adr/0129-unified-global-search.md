@@ -10,7 +10,7 @@ description: 一个搜索面（⌘K）、一个打开入口、一个可重绑的
 | 状态 | 已接受                                                                                                                                                                                                                                                                                                                   |
 | 日期 | 2026-08-16                                                                                                                                                                                                                                                                                                              |
 | 基于 | ADR-0099 会话历史搜索引擎（`lib/chat/search/`）；ADR-0094 会话锚点与跨会话跳转；ADR-0098 常驻工作台栏；ADR-0108 Codex 风格桌面工作流（标题栏搜索胶囊、`command-palette-request` 接缝）；ADR-0059 主机画像 / 能力门禁                                                                                                    |
-| 范围 | `lib/global-search/**`、`hooks/global-search/`、`components/global-search/`、`lib/shell/command-palette-request.ts`、`lib/shortcuts/app-catalog.ts`、`lib/chat/search/engine.ts`（过滤器）、薄适配器 `components/desktop/command-palette.tsx` 与 `components/mobile/home/mobile-command-palette.tsx`、`components/inbox/inbox-shell.tsx`、`components/settings/settings-shell.tsx`、`lib/desktop/menu-actions.ts` |
+| 范围 | `lib/global-search/**`、`hooks/global-search/`、`components/global-search/`、`lib/shell/command-palette-request.ts`、`lib/shortcuts/app-catalog.ts`、`lib/chat/search/engine.ts`（过滤器）、薄适配器 `components/desktop/command-palette.tsx` 与 `components/mobile/home/mobile-command-palette.tsx`、`components/inbox/inbox-shell.tsx`、`components/settings/settings-shell.tsx`、`components/mobile/shell/mobile-shell-wrapper.tsx`、`lib/desktop/menu-actions.ts`、`lib/plugin/contracts/plugin-points.ts` |
 
 ## 背景
 
@@ -32,6 +32,8 @@ description: 一个搜索面（⌘K）、一个打开入口、一个可重绑的
 - 在 app 级快捷键目录上注册 **`app.commandPalette.toggle`**（`ctrl+k`、`allowInEditable`、插件命令 id `command-palette.toggle`）——共享派发器 first-match-wins，可在 设置 → 快捷键 里重绑，不再有私有 `window` 监听；
 - 订阅既有的 DOM 接缝 `lib/shell/command-palette-request.ts`，其 detail 由 `{ query? }` 扩展为 **`{ query?, scope? }`**，任何界面都能带着预设范围打开它（会话栏的"全局搜索"、设置壳的查找按钮、原生菜单、标题栏胶囊）；
 - 接受可选的受控 `open` / `onOpenChange`，移动端首页壳仍可从搜索条与快捷动作宫格驱动它；另有 `host` 适配器（`onOpenSettings`、`onNewChat?`、`onSelectSession?`）承载两种壳特有的行为。
+
+**移动端两个挂载点，但永不并存。** `AppShellMobile` 只在 `/` 渲染，只挂在那里会让 ⌘K 与接缝在 `/settings`、`/inbox`、`/me/*` 上失效——而这些路由过去是被各自的调色板覆盖的。`components/mobile/shell/mobile-global-search-host.tsx` 由包裹所有移动路由的 `MobileShellWrapper` 挂载，并在 `/` 上返回 `null`，把该路由交给首页壳中懂角色选择器与抽屉的 `MobileCommandPalette`。
 
 `components/desktop/command-palette.tsx` 与 `components/mobile/home/mobile-command-palette.tsx` 变为保持原有 props 的薄适配器，`desktop-app-shell.tsx` 与 `app-shell-mobile.tsx` 无需改动。`InboxCommandPalette` 与 `SettingsFinder` 被移除：它们的数据源成为下述内置 provider，其所在壳不再监听 ⌘K。`commandPaletteAction()` 改为调用 `requestCommandPalette()`。
 
@@ -65,5 +67,5 @@ description: 一个搜索面（⌘K）、一个打开入口、一个可重绑的
 
 - 任一路由上一次按键只打开一个对话框；绑定在 设置 → 快捷键 中可见、可重绑。
 - 每个实体族距离调色板只差一个 provider 文件；移动端调色板获得它从未有过的 14 个分组，桌面端获得工作流、技能、记忆、模板、计划任务、插件、MCP 服务器、收件箱会话与设置控件。
-- 移除：`components/inbox/inbox-command-palette.tsx`、`components/settings/finder/settings-finder.tsx`、桌面调色板 500 行主体、移动端的复制品，以及 `desktop.commandPalette` / `mobile.search` / `inbox.commandPalette` / `settings.finder` 文案树（由 `globalSearch.*` 取代）。
+- 移除：`components/inbox/inbox-command-palette.tsx`、`components/settings/finder/settings-finder.tsx`、桌面调色板 500 行主体、移动端的复制品，以及 `desktop.commandPalette` / `mobile.search` / `inbox.commandPalette` 文案树与查找器自身的界面文案（由 `globalSearch.*` 取代；`settings.finder.controls.*` 作为控件标签保留）。
 - 后续：把工作流编辑器调色板并入接缝；触及常驻语料上限时加 `*grams` 会话预过滤（ADR-0099 B 阶段）；为伴侣画像在服务端持久化"最近打开"。

@@ -116,6 +116,7 @@
     "0114-chat-message-presentation",
     "0115-unified-memory-rag-infrastructure",
     "0127-chat-render-transport-efficiency",
-    "0128-scheduler-host-neutral"
+    "0128-scheduler-host-neutral",
+    "0129-unified-global-search"
   ]
 }

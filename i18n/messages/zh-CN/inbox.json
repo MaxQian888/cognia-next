@@ -93,13 +93,6 @@
     "searchPlaceholder": "搜索快捷回复……",
     "triggerAria": "插入快捷回复"
   },
-  "commandPalette": {
-    "conversations": "会话",
-    "description": "跨连接器快速跳转到任意会话。",
-    "empty": "未找到会话",
-    "placeholder": "搜索会话…",
-    "title": "搜索会话"
-  },
   "connectionLoss": {
     "dismiss": "关闭",
     "headline": "{count, plural, =1 {1 个适配器已离线} other {# 个适配器已离线}}",

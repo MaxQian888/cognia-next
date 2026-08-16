@@ -1467,9 +1467,9 @@
       "operationFailed": "Local account operation failed.",
       "passwordLabel": "Password",
       "passwordPlaceholder": "Password",
-      "recoveryContinue": "Continue",
       "recoveryCopied": "Copied",
       "recoveryCopy": "Copy recovery key",
+      "recoveryContinue": "Continue",
       "recoveryDescription": "Save this one-time recovery key before continuing. It can unlock your browser Vault if you forget the account password.",
       "recoveryDownload": "Download .txt",
       "recoveryForm": "Save recovery key",
@@ -7062,57 +7062,6 @@
       },
       "title": "Chat is read-only right now"
     },
-    "commandPalette": {
-      "actions": {
-        "checkUpdates": "Check for updates",
-        "clearChat": "Clear current conversation",
-        "exportMd": "Export current chat as Markdown",
-        "manageApiKey": "Manage API key",
-        "manageCharacters": "Manage characters",
-        "manageMcp": "Manage MCP servers",
-        "manageSkills": "Manage skills",
-        "manageTeams": "Manage teams",
-        "newChat": "Quick Chat",
-        "newChatHint": "persisted task",
-        "openFolder": "Open folder as workspace…",
-        "openSettings": "Open settings",
-        "toggleTheme": "Toggle theme"
-      },
-      "description": "Search for commands and sessions",
-      "empty": "No matches found.",
-      "groups": {
-        "actions": "Actions",
-        "messages": "Messages",
-        "navigate": "Go to",
-        "newChat": "New chat with character",
-        "pluginActions": "Plugin actions",
-        "sessions": "Sessions",
-        "settings": "Settings",
-        "switchTeam": "Switch to team",
-        "workbenchPanels": "Workbench panels",
-        "workspaces": "Switch workspace"
-      },
-      "placeholder": "Type a command or session name…",
-      "search": {
-        "coverage": "Search is still indexing older history; some matches may be missing.",
-        "error": "Message search is temporarily unavailable.",
-        "jumpFailed": "The matching message could not be opened.",
-        "loading": "Searching message history…"
-      },
-      "title": "Command palette",
-      "titles": {
-        "chatWith": "Chat with {name}"
-      },
-      "toasts": {
-        "conversationCleared": "Conversation cleared.",
-        "nothingToExport": "Nothing to export — start a conversation first.",
-        "openFolderDesktopOnly": "Opening folders as workspaces is only available in the desktop build.",
-        "upToDate": "You're on the latest version.",
-        "updateAvailable": "Update available: {version}",
-        "updateFailed": "Update check failed: {message}",
-        "updatesDesktopOnly": "Updates are only available in the desktop build."
-      }
-    },
     "find": {
       "close": "Close find",
       "matchOf": "{index} of {total}",
@@ -9809,6 +9758,152 @@
       "you": "You:"
     }
   },
+  "globalSearch": {
+    "actions": {
+      "checkUpdates": "Check for updates",
+      "clearChat": "Clear current conversation",
+      "clearRecents": "Clear recent searches",
+      "desktopOnly": "Desktop only",
+      "exportMd": "Export current chat as Markdown",
+      "manageApiKey": "Manage API key",
+      "manageCharacters": "Manage characters",
+      "manageMcp": "Manage MCP servers",
+      "manageSkills": "Manage skills",
+      "manageTeams": "Manage teams",
+      "newChat": "New chat",
+      "newChatHint": "starts a persisted conversation",
+      "openFolder": "Open folder as workspace…",
+      "openSettings": "Open settings",
+      "switchToDark": "Switch to dark theme",
+      "switchToLight": "Switch to light theme",
+      "toggleSidebar": "Toggle sidebar"
+    },
+    "badges": {
+      "archived": "Archived",
+      "branchCopies": "+{count} branch copies",
+      "current": "Current",
+      "occurrences": "×{count}"
+    },
+    "description": "Search conversations, messages, commands, pages, people and your library.",
+    "empty": "No results for “{query}”.",
+    "emptyFilters": "Type a few characters to search with these filters.",
+    "emptyHint": "Try another scope, or type > for commands, @ for people, in:messages for history.",
+    "error": "Search failed: {message}",
+    "filters": {
+      "after": "after",
+      "before": "before",
+      "from": "from",
+      "in": "in",
+      "is": "is",
+      "remove": "Remove filter {filter}",
+      "title": "title only",
+      "workspace": "workspace"
+    },
+    "footer": {
+      "close": "close",
+      "coverageIndexing": "Still indexing older history — some matches may be missing.",
+      "coveragePartial": "Older history not fully scanned — narrow the query for more.",
+      "navigate": "navigate",
+      "open": "open",
+      "results": "{count, plural, =0 {no results} one {# result} other {# results}}",
+      "scopes": "switch scope",
+      "syntax": "Search syntax",
+      "took": "{ms} ms"
+    },
+    "groups": {
+      "messagesInChats": "Conversations mentioning “{query}”"
+    },
+    "jumpFailed": "The matching message could not be opened.",
+    "kinds": {
+      "action": "Commands",
+      "character": "Characters",
+      "inbox-conversation": "Inbox conversations",
+      "mcp-server": "MCP servers",
+      "memory": "Memories",
+      "message": "Messages",
+      "navigation": "Pages",
+      "plugin": "Plugins",
+      "plugin-action": "Plugin actions",
+      "scheduled-task": "Scheduled tasks",
+      "session": "Conversations",
+      "settings": "Settings",
+      "skill": "Skills",
+      "team": "Teams",
+      "template": "Templates",
+      "workbench-panel": "Workbench panels",
+      "workflow": "Workflows",
+      "workspace": "Workspaces"
+    },
+    "library": {
+      "disabled": "Disabled",
+      "enabled": "Enabled",
+      "workflowTemplate": "Template"
+    },
+    "loading": "Searching…",
+    "people": {
+      "members": "{count, plural, one {# member} other {# members}}",
+      "newChatWith": "New chat"
+    },
+    "placeholder": "Search or jump to… (> commands, @ people)",
+    "placeholders": {
+      "chats": "Search conversations by title or content…",
+      "commands": "Type a command…",
+      "library": "Search workflows, skills, memories, templates, plugins…",
+      "messages": "Search message history… (from:me, after:7d, is:archived)",
+      "pages": "Go to a page or setting…",
+      "people": "Find a character or team…"
+    },
+    "recents": {
+      "clear": "Clear",
+      "items": "Recently opened",
+      "queries": "Recent searches",
+      "remove": "Remove",
+      "unavailable": "That action is no longer available."
+    },
+    "roles": {
+      "assistant": "Assistant",
+      "other": "Tool",
+      "system": "System",
+      "user": "You"
+    },
+    "scopes": {
+      "all": "All",
+      "chats": "Chats",
+      "commands": "Commands",
+      "library": "Library",
+      "messages": "Messages",
+      "pages": "Pages",
+      "people": "People"
+    },
+    "showAll": "Show all {count} in {scope}",
+    "showMore": "Show more",
+    "suggestions": "Suggestions",
+    "syntax": {
+      "after": "after:2026-08-01 · after:7d — newer than",
+      "before": "before:2026-08-16 — older than",
+      "from": "from:me · from:assistant — message author",
+      "in": "in:messages · in:skills — one kind only",
+      "is": "is:archived — include archived conversations",
+      "prefixes": "> commands · @ people",
+      "title": "title:word — conversation titles only",
+      "workspace": "workspace:current — this workspace only"
+    },
+    "title": "Search",
+    "titles": {
+      "chatWith": "Chat with {name}"
+    },
+    "toasts": {
+      "conversationCleared": "Conversation cleared.",
+      "nothingToExport": "Nothing to export — start a conversation first.",
+      "openFolderDesktopOnly": "Opening folders as workspaces is only available in the desktop build.",
+      "recentsCleared": "Recent searches cleared.",
+      "upToDate": "You're on the latest version.",
+      "updateAvailable": "Update available: {version}",
+      "updateFailed": "Update check failed: {message}",
+      "updatesDesktopOnly": "Updates are only available in the desktop build."
+    },
+    "untitledConversation": "Untitled conversation"
+  },
   "goal": {
     "acceptance": {
       "accept": "Accept",
@@ -10405,13 +10500,6 @@
       "manage": "Manage canned responses",
       "searchPlaceholder": "Search canned responses…",
       "triggerAria": "Insert a canned response"
-    },
-    "commandPalette": {
-      "conversations": "Conversations",
-      "description": "Jump to any conversation across your connectors.",
-      "empty": "No conversations found",
-      "placeholder": "Search conversations…",
-      "title": "Search conversations"
     },
     "connectionLoss": {
       "dismiss": "Dismiss",
@@ -13942,6 +14030,10 @@
       "fingerprintPinned": "Desktop identity pinned",
       "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
       "formCardTitle": "Pair this phone",
+      "invitationSummary": {
+        "description": "Server v{version} · expires at {expiresAt, time, short}",
+        "title": "Invitation ready for {host}"
+      },
       "health": {
         "checking": "Checking",
         "continueToChat": "Continue to chat",
@@ -13962,10 +14054,6 @@
         "generic": "Pairing failed (HTTP {status})."
       },
       "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
-      "invitationSummary": {
-        "description": "Server v{version} · expires at {expiresAt, time, short}",
-        "title": "Invitation ready for {host}"
-      },
       "loadingManualCta": "Set up manually",
       "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
       "loadingTitle": "Checking for an existing pairing…",
@@ -14066,8 +14154,8 @@
         "headlessTitle": "Using a headless server?",
         "httpsRequired": "Browser pairing requires HTTPS so the pair credential is never sent in cleartext. Use an HTTPS companion URL.",
         "intro": "Connect this browser with a one-time invitation issued by your cognia server.",
-        "pasteClipboard": "Paste",
         "pasteHint": "Paste the full cgnp3|… invitation; the server address and identity are verified automatically.",
+        "pasteClipboard": "Paste",
         "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
         "storageNoticeTitle": "Credential stays in this browser",
         "title": "Connect to your server"
@@ -14148,33 +14236,6 @@
         "untitled": "Untitled session"
       },
       "title": "Remote sessions"
-    },
-    "search": {
-      "actions": {
-        "newChat": "New chat",
-        "openSettings": "Open settings"
-      },
-      "description": "Search chats, characters, and workflows, or run a quick action.",
-      "empty": "No results.",
-      "groups": {
-        "actions": "Actions",
-        "characters": "Characters",
-        "messages": "Messages",
-        "sessions": "Chats",
-        "teams": "Teams",
-        "workflows": "Workflows"
-      },
-      "placeholder": "Search or jump to…",
-      "search": {
-        "coverage": "Older history is still being indexed; some matches may be missing.",
-        "error": "Message search is temporarily unavailable.",
-        "jumpFailed": "The matching message could not be opened.",
-        "loading": "Searching message history…"
-      },
-      "title": "Search",
-      "titles": {
-        "chatWith": "Chat with {name}"
-      }
     },
     "security": {
       "deletePairing": {
@@ -16589,6 +16650,8 @@
     "triggerText": "Plan / tasks ({count})"
   },
   "plugins": {
+    "description": "Browse, install, configure, and govern the plugins running inside Cognia. Inspect their permissions, scheduled jobs, analytics, and devtools — full marketplace search and installation flows are available here.",
+    "title": "Plugins",
     "activation": {
       "cancelled": "Activation cancelled at: {phase}",
       "countLabel": "Step {processed} of {total}",
@@ -16953,7 +17016,6 @@
       "unresolved": "Unresolved",
       "warningsTitle": "{count} warnings"
     },
-    "description": "Browse, install, configure, and govern the plugins running inside Cognia. Inspect their permissions, scheduled jobs, analytics, and devtools — full marketplace search and installation flows are available here.",
     "detail": {
       "activation": "Activation events",
       "capabilitiesTitle": "Capabilities",
@@ -17006,6 +17068,14 @@
         "switchAria": "Trust this plugin's frontend code",
         "title": "Trust frontend code"
       },
+      "logs": {
+        "aria": "Python host log entries",
+        "clear": "Clear",
+        "empty": "No host activity yet. Logs, pip progress, and streaming output appear here once the Python host runs.",
+        "exited": "Host process exited",
+        "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
+        "streamEnd": "— stream ended —"
+      },
       "lifecycle": {
         "activating": "Activating",
         "dirty": "Cleanup required",
@@ -17015,14 +17085,6 @@
         "retrying": "Retrying cleanup",
         "stopping": "Stopping",
         "waiting": "Waiting for service"
-      },
-      "logs": {
-        "aria": "Python host log entries",
-        "clear": "Clear",
-        "empty": "No host activity yet. Logs, pip progress, and streaming output appear here once the Python host runs.",
-        "exited": "Host process exited",
-        "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
-        "streamEnd": "— stream ended —"
       },
       "metaAuthor": "Author",
       "metaCreatedAt": "Installed at",
@@ -17188,15 +17250,15 @@
         "loading": "Inspecting plugins…",
         "refresh": "Refresh"
       },
+      "logs": {
+        "empty": "No logs captured."
+      },
       "lifecycle": {
         "effects": "Effects (active / pending / failed)",
         "empty": "No lifecycle generations have been observed.",
         "plugin": "Plugin",
         "services": "Services",
         "state": "Generation and state"
-      },
-      "logs": {
-        "empty": "No logs captured."
       },
       "profiler": {
         "avgDuration": "Average duration",
@@ -17214,8 +17276,8 @@
         "hooks": "Hook history",
         "hotReload": "Hot reload",
         "inspect": "Inspect",
-        "lifecycle": "Lifecycle",
         "logs": "Logs",
+        "lifecycle": "Lifecycle",
         "profiler": "Profiler",
         "triggers": "Triggers"
       },
@@ -17678,7 +17740,6 @@
       "permissions": "Permissions",
       "scheduled": "Scheduled"
     },
-    "title": "Plugins",
     "toolbar": {
       "checkUpdates": "Check for updates",
       "fromFile": "From file…",
@@ -21835,6 +21896,24 @@
     }
   },
   "settings": {
+    "backToChat": "Back to chat",
+    "close": "Close",
+    "customModes": "Custom Agent Modes",
+    "customModesDesc": "Create and manage custom agent modes with specific tools, prompts, and behaviors.",
+    "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
+    "groupAi": "AI Core",
+    "groupData": "Data",
+    "groupExtensions": "Extensions",
+    "groupInterface": "Interface",
+    "groupObservability": "Observability",
+    "groupSystem": "System",
+    "hostUnavailableSectionBody": "This section administers a capability the host you are connected to doesn't provide — it needs the desktop app, or a paired host that runs it. Open Cognia there to use it.",
+    "hostUnavailableSectionTitle": "Not available on this host",
+    "loadingSection": "Loading section",
+    "loadingSettings": "Loading settings…",
+    "noSettingsFound": "No settings match your search.",
+    "searchPlaceholder": "Search settings…",
+    "title": "Settings",
     "a2ui": {
       "debugger": {
         "allSurfaces": "All surfaces",
@@ -23422,7 +23501,6 @@
       "showNotificationLabel": "Toast on auto-create",
       "title": "Artifacts"
     },
-    "backToChat": "Back to chat",
     "builtInSkills": {
       "conversation": {
         "allowedListLabel": "Allowed skill IDs",
@@ -24123,7 +24201,6 @@
         "partial": "Synced with issues — {ok} ok, {errors} failed."
       }
     },
-    "close": "Close",
     "common": {
       "unsavedBar": {
         "discard": "Discard",
@@ -26058,8 +26135,6 @@
       },
       "useDefault": "Use chat default"
     },
-    "customModes": "Custom Agent Modes",
-    "customModesDesc": "Create and manage custom agent modes with specific tools, prompts, and behaviors.",
     "data": {
       "apply": "Apply",
       "applying": "Applying…",
@@ -26713,7 +26788,6 @@
         "usernamePlaceholder": "your-username"
       }
     },
-    "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
     "descriptions": {
       "a2ui": "Agent-to-UI mini-apps, runtime defaults, MCP bridge, and debugger.",
       "about": "Version, build, diagnostics, updates and credits.",
@@ -27254,12 +27328,6 @@
         "webTools": "Web tools",
         "workingDir": "Default working directory"
       },
-      "controlsHeading": "Settings",
-      "description": "Search settings and jump straight to a control.",
-      "empty": "No matching settings.",
-      "placeholder": "Search settings…",
-      "sectionsHeading": "Sections",
-      "title": "Find a setting",
       "triggerAria": "Find a setting"
     },
     "fleet": {
@@ -27689,12 +27757,6 @@
       "useSdkDefault": "Use SDK default",
       "workingDirectory": "Working directory"
     },
-    "groupAi": "AI Core",
-    "groupData": "Data",
-    "groupExtensions": "Extensions",
-    "groupInterface": "Interface",
-    "groupObservability": "Observability",
-    "groupSystem": "System",
     "hooks": {
       "addGroup": "Add group",
       "builtin": {
@@ -27806,8 +27868,6 @@
       "title": "Lifecycle hooks",
       "unsaved": "Unsaved changes"
     },
-    "hostUnavailableSectionBody": "This section administers a capability the host you are connected to doesn't provide — it needs the desktop app, or a paired host that runs it. Open Cognia there to use it.",
-    "hostUnavailableSectionTitle": "Not available on this host",
     "instructions": {
       "description": "Load on-disk instruction files (CLAUDE.md / AGENTS.md / AGENT.md) from the active workspace into the agent's system prompt, with nested directory discovery and @import expansion.",
       "enabled": "Enable instruction files",
@@ -27831,8 +27891,6 @@
       "saved": "Instruction settings saved.",
       "title": "Project instructions"
     },
-    "loadingSection": "Loading section",
-    "loadingSettings": "Loading settings…",
     "logs": {
       "linkCardDescription": "List, dashboard, trace views — search, filter, group, export and bookmark logs in real time.",
       "linkCardFooter": "Closes the settings dialog and navigates to /logs.",
@@ -28303,7 +28361,6 @@
       },
       "title": "Network Proxy"
     },
-    "noSettingsFound": "No settings match your search.",
     "notifications": {
       "badgeHint": "Show the unread badge on the bell.",
       "badgeLabel": "Badge",
@@ -29199,7 +29256,6 @@
         "title": "Workspace confinement"
       }
     },
-    "searchPlaceholder": "Search settings…",
     "sectionReset": {
       "button": "Reset section",
       "cancel": "Cancel",
@@ -29275,6 +29331,7 @@
         "chatNextAnchor": "Jump to next message anchor",
         "chatPrevAnchor": "Jump to previous message anchor",
         "chatSearchToggle": "Find in conversation",
+        "commandPaletteToggle": "Open global search / command palette",
         "dockLayoutRedo": "Redo dock layout change",
         "dockLayoutReset": "Reset the dock layout",
         "dockLayoutUndo": "Undo dock layout change",
@@ -30383,7 +30440,6 @@
         "label": "Allow unattended execution"
       }
     },
-    "title": "Settings",
     "tray": {
       "addItem": "Add item",
       "description": "Customise the items shown in the system tray menu.",
@@ -34613,6 +34669,9 @@
     }
   },
   "workflows": {
+    "notFoundBackToLibrary": "Back to library",
+    "notFoundDescription": "The workflow you tried to open doesn't exist or has been deleted.",
+    "notFoundTitle": "Workflow not found",
     "canvasToast": {
       "completed": "Workflow completed",
       "exported": "Workflow JSON downloaded",
@@ -38970,9 +39029,6 @@
         }
       }
     },
-    "notFoundBackToLibrary": "Back to library",
-    "notFoundDescription": "The workflow you tried to open doesn't exist or has been deleted.",
-    "notFoundTitle": "Workflow not found",
     "runs": {
       "detail": {
         "backToRuns": "Back to runs",
