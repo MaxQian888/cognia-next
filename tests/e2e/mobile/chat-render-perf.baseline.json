@@ -17,7 +17,8 @@
     "SWEEP CHANGE: `preChange` was captured with a fraction-of-range sweep; every entry here",
     "uses the screen-at-a-time sweep that replaced it. Improving the row-height estimator",
     "changes the virtual total, so a fraction-based sweep silently covers more content per step",
-    "and reports the extra work as a regression. Only same-sweep rows compare."
+    "and reports the extra work as a regression. Only same-sweep rows compare.",
+    "ADR-0127: two extra tiers exist — `adr0127-long` (1000 turns / 40 images / 12 charts; bars openMs < 800, longTasks.totalMs < 1500) and `adr0127-codeblock` (one ~200 KB fence; bar longTasks.worstMs < 100). Run with CHAT_PERF_TIER=<tier> CHAT_PERF_BENCH=1, and CHAT_PERF_GATE=1 to assert the bars locally. Their reference rows are added here as they are captured; the streaming (100 tok/s) and Companion frame-count bars are pinned by Jest / Rust unit tests instead."
   ],
   "runner": "pnpm dev (Turbopack), NODE_ENV=development, project mobile-pixel-7",
   "tiers": {
@@ -39,8 +40,15 @@
           "capturedAt": "2026-07-29",
           "openMs": 5986,
           "jsHeapUsedBytes": 345789536,
-          "reactCommits": { "count": 214, "totalMs": 794 },
-          "longTasks": { "count": 16, "totalMs": 3308, "worstMs": 1262 },
+          "reactCommits": {
+            "count": 214,
+            "totalMs": 794
+          },
+          "longTasks": {
+            "count": 16,
+            "totalMs": 3308,
+            "worstMs": 1262
+          },
           "scroll": {
             "worstFrameMs": 108,
             "medianFrameMs": 16,
@@ -52,8 +60,15 @@
           "capturedAt": "2026-07-29",
           "openMs": 4951,
           "jsHeapUsedBytes": 300173380,
-          "reactCommits": { "count": 216, "totalMs": 864 },
-          "longTasks": { "count": 19, "totalMs": 3777, "worstMs": 1201 },
+          "reactCommits": {
+            "count": 216,
+            "totalMs": 864
+          },
+          "longTasks": {
+            "count": 19,
+            "totalMs": 3777,
+            "worstMs": 1201
+          },
           "scroll": {
             "worstFrameMs": 511,
             "medianFrameMs": 13,
@@ -86,16 +101,33 @@
           "sweep": "fraction-of-range — NOT comparable to the row below",
           "openMs": 18196,
           "jsHeapUsedBytes": 1864157420,
-          "reactCommits": { "count": 104, "totalMs": 18246 },
-          "longTasks": { "count": 30, "totalMs": 27141, "worstMs": 9179 },
-          "scroll": { "worstFrameMs": 8067, "medianFrameMs": 23 }
+          "reactCommits": {
+            "count": 104,
+            "totalMs": 18246
+          },
+          "longTasks": {
+            "count": 30,
+            "totalMs": 27141,
+            "worstMs": 9179
+          },
+          "scroll": {
+            "worstFrameMs": 8067,
+            "medianFrameMs": 23
+          }
         },
         "postRenderHardening": {
           "capturedAt": "2026-07-29",
           "openMs": 14730,
           "jsHeapUsedBytes": 2238173184,
-          "reactCommits": { "count": 180, "totalMs": 9741 },
-          "longTasks": { "count": 19, "totalMs": 13506, "worstMs": 8851 },
+          "reactCommits": {
+            "count": 180,
+            "totalMs": 9741
+          },
+          "longTasks": {
+            "count": 19,
+            "totalMs": 13506,
+            "worstMs": 8851
+          },
           "scroll": {
             "worstFrameMs": 152,
             "medianFrameMs": 13,

@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Chat rendering, transport efficiency and message customization (ADR-0127): message display gains content-rendering knobs (math / mermaid / diff toggles, code line numbers and wrap defaults, math size and alignment, sans / serif body font) on desktop, in the session sheet and on mobile; per-surface density (chat / tables / sidebar) and the serif font picker now take effect; the system-prompt preset pill is mounted in the chat header; read-aloud is reachable under every preset. External-agent replies stream with the same per-frame coalescing and mid-turn persistence as the built-in runtime; long code-heavy sessions virtualize by size as well as by count; Companion clients receive batched event frames (≥ 80 % fewer at 100 tok/s). Companion pairing now emits `device-paired`; duplicate-command acks are recorded; web-tools, screenshot and clipboard-history results render as rich cards; the embedded browser gets a live DevTools drawer (console + network) and the agent reuses its page snapshot until the DOM changes.

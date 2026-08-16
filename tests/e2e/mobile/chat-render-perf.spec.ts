@@ -73,6 +73,30 @@ const TIERS: Record<string, Tier> = {
     tableRows: 0,
     codeLines: 0,
   },
+  // ADR-0127 §5 — the two seedable acceptance scenarios. The streaming
+  // (100 tok/s) and Companion-frames bars are pinned deterministically by
+  // `hooks/chat/stream-coalescing.test.ts` and
+  // `src-tauri/src/companion_api/event_batcher.rs`, not here.
+  "adr0127-long": {
+    // 1000 turns ⇒ 2000 messages, 40 images, 12 mermaid charts.
+    turns: 1000,
+    images: 40,
+    imageLongEdge: 1568,
+    charts: 12,
+    chartNodes: 12,
+    tableRows: 0,
+    codeLines: 0,
+  },
+  "adr0127-codeblock": {
+    // One turn carrying a ~200 KB code fence (≈ 80 chars/line × 2600 lines).
+    turns: 1,
+    images: 0,
+    imageLongEdge: 0,
+    charts: 0,
+    chartNodes: 0,
+    tableRows: 0,
+    codeLines: 2600,
+  },
   robust: {
     turns: 200,
     images: 150,
@@ -318,11 +342,40 @@ test.describe("chat render performance", () => {
     // without opening the JSON file.
     console.log("[chat-render-perf]", JSON.stringify(snapshot))
 
-    // The only assertions are robustness invariants — timings are reported,
-    // never gated, because they move with the machine.
+    // The only unconditional assertions are robustness invariants — timings
+    // are reported, never gated by default, because they move with the machine.
     expect(snapshot.messages).toBeGreaterThan(0)
     expect(scroll.samples).toBeGreaterThan(0)
     // Survived the sweep: the list is still mounted and still has rows.
     await expect(page.locator(`${LOG} [data-msg-id]`).first()).toBeVisible()
+
+    // ADR-0127 §5 bars — opt-in (`CHAT_PERF_GATE=1`) so a laptop can gate a
+    // local run without turning CI-machine variance into red builds.
+    if (process.env.CHAT_PERF_GATE === "1") {
+      const bar = ADR0127_BARS[TIER_NAME]
+      if (bar) {
+        if (bar.openMs !== undefined) expect(openMs).toBeLessThan(bar.openMs)
+        if (bar.longTaskTotalMs !== undefined) {
+          expect(snapshot.longTasks.totalMs).toBeLessThan(bar.longTaskTotalMs)
+        }
+        if (bar.longTaskWorstMs !== undefined) {
+          expect(snapshot.longTasks.worstMs).toBeLessThan(bar.longTaskWorstMs)
+        }
+      }
+    }
   })
 })
+
+/**
+ * ADR-0127 §5 acceptance bars per tier (checked only under `CHAT_PERF_GATE=1`).
+ * `openMs` is the spec's time-to-interactive proxy (navigate → first row
+ * visible); `longTaskWorstMs` bounds the single worst main-thread block after
+ * the finalized code fence has painted.
+ */
+const ADR0127_BARS: Record<
+  string,
+  { openMs?: number; longTaskTotalMs?: number; longTaskWorstMs?: number }
+> = {
+  "adr0127-long": { openMs: 800, longTaskTotalMs: 1500 },
+  "adr0127-codeblock": { longTaskWorstMs: 100 },
+}
