@@ -1003,3 +1003,14 @@ describe("history", () => {
     expect(urlBar()).toHaveValue("http://localhost:3000/")
   })
 })
+
+// ADR-0127: the DevTools drawer mounts under the pane next to the recorder
+// (collapsed by default) even when no event plane is available.
+describe("devtools drawer", () => {
+  it("mounts collapsed under the pane", () => {
+    renderPane(<BrowserPreviewPane />)
+    const drawer = document.querySelector('[data-testid="browser-devtools-drawer"]')
+    expect(drawer).not.toBeNull()
+    expect(drawer).toHaveAttribute("data-expanded", "false")
+  })
+})

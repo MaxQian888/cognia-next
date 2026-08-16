@@ -1134,6 +1134,10 @@ struct SignalingRegistrationResponse {
 pub(crate) struct DevicePairedEvent {
     pub device_id: String,
     pub account_id: String,
+    /// Same value as `account_id`, under the key `ws::frame_visible_to_tenant`
+    /// scopes on, so the frame only reaches subscribers of this tenant.
+    #[serde(rename = "tenantId")]
+    pub tenant_id: String,
     pub label: String,
     pub platform: String,
     pub pubkey: String,
@@ -1251,6 +1255,7 @@ async fn register_handler(
         DevicePairedEvent {
             device_id: request.device_id.clone(),
             account_id: authority.tenant_id.clone(),
+            tenant_id: authority.tenant_id.clone(),
             label: request.display_name.clone(),
             platform: request
                 .platform
@@ -1974,6 +1979,7 @@ mod tests {
             DevicePairedEvent {
                 device_id: "dev-1".into(),
                 account_id: "tenant-a".into(),
+                tenant_id: "tenant-a".into(),
                 label: "Pixel".into(),
                 platform: "android".into(),
                 pubkey: "-----BEGIN PUBLIC KEY-----".into(),
@@ -1987,6 +1993,8 @@ mod tests {
         assert_eq!(frame.event_type, "companion://device-paired");
         assert_eq!(frame.payload["device_id"], "dev-1");
         assert_eq!(frame.payload["account_id"], "tenant-a");
+        // Tenant-scoped delivery key (see `ws::frame_visible_to_tenant`).
+        assert_eq!(frame.payload["tenantId"], "tenant-a");
         assert_eq!(frame.payload["label"], "Pixel");
         assert_eq!(frame.payload["platform"], "android");
         assert_eq!(frame.payload["paired_at_ms"], 1_700_000_000_000_i64);

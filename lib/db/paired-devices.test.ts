@@ -104,6 +104,43 @@ describe("addPairedDevice", () => {
     expect(row?.pairedAt).toBe(2)
   })
 
+  // ADR-0127: `companion://device-paired` is emitted on every registration,
+  // so a re-pair must merge over the row instead of resetting device-local
+  // state the pairing event does not carry.
+  it("re-pair keeps device-local state (push token, remote-terminal grant, fingerprint)", async () => {
+    await addPairedDevice({
+      deviceId: "dev-merge",
+      label: "old",
+      platform: "ios",
+      pubkey: "pk1",
+      appVersion: "0.1.0",
+      serverFingerprint: "fp-1",
+      signalingKeyRef: "key-1",
+      nowMs: 1,
+    })
+    await setPushToken("dev-merge", "apns-token")
+    await getDb().pairedDevices.update("dev-merge", { allowRemoteTerminal: true })
+    await addPairedDevice({
+      deviceId: "dev-merge",
+      label: "new",
+      platform: "ios",
+      pubkey: "pk2",
+      appVersion: "0.2.0",
+      nowMs: 2,
+    })
+    const row = await getPairedDevice("dev-merge")
+    expect(row).toMatchObject({
+      label: "new",
+      pubkey: "pk2",
+      appVersion: "0.2.0",
+      pairedAt: 2,
+      allowRemoteTerminal: true,
+      serverFingerprint: "fp-1",
+      signalingKeyRef: "key-1",
+    })
+    expect(row?.pushToken).toBe("apns-token")
+  })
+
   it("persists optional TLS and WebRTC pairing metadata", async () => {
     await addPairedDevice({
       deviceId: "dev-meta",

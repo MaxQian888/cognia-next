@@ -1,9 +1,33 @@
 import { renderHook, act } from "@testing-library/react"
 import type { Virtualizer } from "@tanstack/react-virtual"
-import { computeTimelineGeometry, useTimelineScrollSync } from "./use-timeline-scroll-sync"
+import {
+  computeTimelineGeometry,
+  computeTurnPositions,
+  useTimelineScrollSync,
+} from "./use-timeline-scroll-sync"
 import type { TimelineTurn } from "./use-timeline-turns"
 
 describe("computeTimelineGeometry", () => {
+  // ADR-0127: the hook and this pure function share one implementation; the
+  // hook passes its cached positions, callers without a cache omit them.
+  it("computeTurnPositions clamps to 0..1 and zeroes on a non-positive total", () => {
+    expect(computeTurnPositions([0, 250, 500, 1000, 1500], 1000)).toEqual([0, 0.25, 0.5, 1, 1])
+    expect(computeTurnPositions([0, 10], 0)).toEqual([0, 0])
+  })
+
+  it("accepts precomputed positions and passes them through untouched", () => {
+    const positions = [0.1, 0.9]
+    const g = computeTimelineGeometry({
+      scrollTop: 0,
+      clientHeight: 100,
+      total: 1000,
+      starts: [100, 900],
+      positions,
+    })
+    expect(g.positions).toBe(positions)
+    expect(g.activeIndex).toBe(0)
+  })
+
   it("maps starts to fractions of total", () => {
     const g = computeTimelineGeometry({
       scrollTop: 0,

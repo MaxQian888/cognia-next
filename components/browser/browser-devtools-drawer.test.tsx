@@ -74,4 +74,33 @@ describe("BrowserDevtoolsDrawer (ADR-0127)", () => {
     expect(onClearNetwork).toHaveBeenCalledTimes(1)
     expect(onClearConsole).not.toHaveBeenCalled()
   })
+
+  it("tolerates a missing onLayoutChange, missing durationMs and unknown levels", () => {
+    render(
+      <BrowserDevtoolsDrawer
+        console={[{ level: "trace" as unknown as "log", text: "odd", ts: 9 }]}
+        network={[
+          { url: "https://x/nodur", method: "GET", status: 204, ok: true, durationMs: null },
+        ]}
+        problemCount={0}
+        failedRequests={0}
+        onClearConsole={jest.fn()}
+        onClearNetwork={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("browser-devtools-problems")).toBeNull()
+    expect(screen.queryByTestId("browser-devtools-failed")).toBeNull()
+    fireEvent.click(screen.getByTestId("browser-devtools-toggle"))
+    expect(screen.getByTestId("browser-devtools-console").querySelector("li")).toHaveTextContent(
+      "odd"
+    )
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Network/ }))
+    fireEvent.click(screen.getByRole("tab", { name: /Network/ }))
+    const row = screen.getByTestId("browser-devtools-network").querySelector("li")!
+    expect(row).toHaveTextContent("204")
+    expect(row.textContent).not.toContain("ms")
+    // Collapse again.
+    fireEvent.click(screen.getByTestId("browser-devtools-toggle"))
+    expect(screen.getByTestId("browser-devtools-drawer")).toHaveAttribute("data-expanded", "false")
+  })
 })

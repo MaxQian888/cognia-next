@@ -36,8 +36,20 @@ use super::event_bus::EventFrame;
 pub const BATCH_WINDOW: Duration = Duration::from_millis(50);
 
 /// Upper bound on frames per batch so a pathological burst still produces
-/// bounded envelopes (WebRTC messages are capped at 1 MiB downstream).
+/// bounded envelopes.
 pub const MAX_BATCH_FRAMES: usize = 256;
+
+/// Upper bound on the serialized payload bytes per batch. The WebRTC data
+/// channel refuses messages above 1 MiB (`datachannel_framing`), and a
+/// refused *batch* would lose every frame in it — so a batch closes well
+/// before that. Measured on `payload` only (the envelope overhead is small).
+pub const MAX_BATCH_BYTES: usize = 256 * 1024;
+
+fn payload_bytes(frame: &EventFrame) -> usize {
+    serde_json::to_vec(&frame.payload)
+        .map(|v| v.len())
+        .unwrap_or(0)
+}
 
 /// One send-loop's batching state.
 #[derive(Debug, Default)]
@@ -45,6 +57,8 @@ pub struct EventBatcher {
     /// Frames waiting for the window to expire. Invariant: all share
     /// `event_type` and have increasing `seq`.
     pending: Vec<EventFrame>,
+    /// Serialized payload bytes currently in `pending`.
+    pending_bytes: usize,
     /// When the current window ends. `None` ⇒ idle (next frame goes out now).
     deadline: Option<Instant>,
 }
@@ -77,16 +91,25 @@ impl EventBatcher {
             return out;
         }
 
+        let bytes = payload_bytes(&frame);
         if let Some(last) = self.pending.last() {
-            if last.event_type != frame.event_type {
-                out.push(std::mem::take(&mut self.pending));
+            let channel_changed = last.event_type != frame.event_type;
+            let too_big = self.pending_bytes + bytes > MAX_BATCH_BYTES;
+            if channel_changed || too_big {
+                out.push(self.take_pending());
             }
         }
         self.pending.push(frame);
-        if self.pending.len() >= MAX_BATCH_FRAMES {
-            out.push(std::mem::take(&mut self.pending));
+        self.pending_bytes += bytes;
+        if self.pending.len() >= MAX_BATCH_FRAMES || self.pending_bytes >= MAX_BATCH_BYTES {
+            out.push(self.take_pending());
         }
         out
+    }
+
+    fn take_pending(&mut self) -> Vec<EventFrame> {
+        self.pending_bytes = 0;
+        std::mem::take(&mut self.pending)
     }
 
     /// The instant the loop should wake to flush, if a window is open.
@@ -108,7 +131,7 @@ impl EventBatcher {
             return None;
         }
         self.deadline = Some(now + BATCH_WINDOW);
-        Some(std::mem::take(&mut self.pending))
+        Some(self.take_pending())
     }
 
     /// Flush everything pending regardless of the window (control frames,
@@ -118,7 +141,7 @@ impl EventBatcher {
         if self.pending.is_empty() {
             None
         } else {
-            Some(std::mem::take(&mut self.pending))
+            Some(self.take_pending())
         }
     }
 
@@ -129,19 +152,27 @@ impl EventBatcher {
 }
 
 /// Group an already-ordered replay burst into same-channel runs of at most
-/// [`MAX_BATCH_FRAMES`]. No timing involved — replay is sent as fast as the
-/// socket accepts it, and batching only cuts the frame count.
+/// [`MAX_BATCH_FRAMES`] frames / [`MAX_BATCH_BYTES`] payload bytes. No timing
+/// involved — replay is sent as fast as the socket accepts it, and batching
+/// only cuts the frame count.
 pub fn chunk_replay(frames: Vec<EventFrame>) -> Vec<Vec<EventFrame>> {
     let mut out: Vec<Vec<EventFrame>> = Vec::new();
+    let mut run_bytes = 0usize;
     for frame in frames {
+        let bytes = payload_bytes(&frame);
         match out.last_mut() {
             Some(run)
                 if run.len() < MAX_BATCH_FRAMES
+                    && run_bytes + bytes <= MAX_BATCH_BYTES
                     && run.last().is_some_and(|f| f.event_type == frame.event_type) =>
             {
                 run.push(frame);
+                run_bytes += bytes;
             }
-            _ => out.push(vec![frame]),
+            _ => {
+                out.push(vec![frame]);
+                run_bytes = bytes;
+            }
         }
     }
     out
@@ -289,6 +320,47 @@ mod tests {
         }
         assert_eq!(emitted, 2);
         assert_eq!(b.pending_len(), 0);
+    }
+
+    /// A run of large frames splits before the 1 MiB DataChannel cap would
+    /// refuse the whole batch (which would silently lose every frame in it).
+    #[test]
+    fn byte_budget_splits_large_frames() {
+        let big = |seq: u64| EventFrame {
+            event_type: "claude://message".into(),
+            seq,
+            payload: json!({ "blob": "x".repeat(100 * 1024) }),
+            ts_ms: 0,
+            target_device_id: None,
+        };
+        let mut b = EventBatcher::new();
+        let t0 = Instant::now();
+        b.push(big(0), t0);
+        let mut emitted: Vec<Vec<EventFrame>> = Vec::new();
+        for seq in 1..=6 {
+            emitted.extend(b.push(big(seq), t0 + Duration::from_millis(1)));
+        }
+        if let Some(rest) = b.drain() {
+            emitted.push(rest);
+        }
+        assert!(
+            emitted.len() >= 3,
+            "≈100 KB frames must split into ≤ 256 KB batches"
+        );
+        for batch in &emitted {
+            let bytes: usize = batch.iter().map(payload_bytes).sum();
+            assert!(
+                bytes <= MAX_BATCH_BYTES,
+                "batch of {} bytes exceeds budget",
+                bytes
+            );
+        }
+        // Replay grouping honours the same budget.
+        let runs = chunk_replay((0..6).map(big).collect());
+        assert!(runs.len() >= 3);
+        for run in &runs {
+            assert!(run.iter().map(payload_bytes).sum::<usize>() <= MAX_BATCH_BYTES);
+        }
     }
 
     #[test]

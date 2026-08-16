@@ -43,7 +43,14 @@ export interface AddPairedDeviceInput {
 
 export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void> {
   const now = input.nowMs ?? Date.now()
+  // ADR-0127: `companion://device-paired` is now actually emitted, and a
+  // device re-registers on cert rotation / re-pair. Merge over the existing
+  // row so device-local state the pairing event does not carry (push token,
+  // remote-terminal grant, pause marker, pinned fingerprint, signaling key
+  // ref) survives instead of being reset by a whole-row `put`.
+  const existing = await getDb().pairedDevices.get(input.deviceId)
   const row: PairedDeviceRow = {
+    ...(existing ?? {}),
     deviceId: input.deviceId,
     label: input.label,
     platform: input.platform,
@@ -51,7 +58,7 @@ export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void
     appVersion: input.appVersion,
     pairedAt: now,
     lastSeenAt: now,
-    allowRemoteTerminal: false,
+    allowRemoteTerminal: existing?.allowRemoteTerminal ?? false,
   }
   if (input.accountId) {
     row.accountId = input.accountId

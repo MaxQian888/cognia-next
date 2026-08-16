@@ -17,6 +17,16 @@ function payload(over: Partial<SharePayload>): SharePayload {
 }
 
 describe("PayloadView", () => {
+  // ADR-0127: the share view reads the global message-display preference
+  // (balanced defaults for a visitor without settings) for markdown knobs.
+  it("stamps data-body-font on the markdown article and reads the global markdown knobs", () => {
+    render(<PayloadView payload={payload({ kind: "chat-md", data: "# Title\n\nbody" })} />)
+    const article = document.querySelector("article[data-body-font]")
+    expect(article).not.toBeNull()
+    expect(article).toHaveAttribute("data-body-font", "sans")
+    expect(screen.getByText("body")).toBeInTheDocument()
+  })
+
   it("renders chat-html in a script-free sandboxed iframe", () => {
     render(<PayloadView payload={payload({ kind: "chat-html", data: "<p>hi</p>" })} />)
     const frame = screen.getByTitle("Shared conversation") as HTMLIFrameElement

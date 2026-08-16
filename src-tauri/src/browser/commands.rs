@@ -48,6 +48,13 @@ pub(crate) enum NavDisposition {
     Block,
 }
 
+fn is_sentinel_host(url_str: &str) -> bool {
+    url::Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h == overlay::SENTINEL_HOST))
+        .unwrap_or(false)
+}
+
 pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
     if let Some(payload) = overlay::parse_selection(url_str) {
         return NavDisposition::Selection(payload);
@@ -89,6 +96,12 @@ pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
         } else {
             NavDisposition::Block
         };
+    }
+    // Any other URL on the sentinel host is a malformed sentinel (e.g. a
+    // `data=` body that failed to parse). Never let it fall through to a real
+    // navigation of `https://cognia.invalid/…` — cancel it.
+    if is_sentinel_host(url_str) {
+        return NavDisposition::Block;
     }
     if url_str.starts_with("http://") || url_str.starts_with("https://") {
         return NavDisposition::AllowAndReport;
@@ -247,6 +260,15 @@ mod tests {
         }
         assert_eq!(
             classify_navigation(&mk("/__cognia_console", r#"{"entries":"nope"}"#)),
+            NavDisposition::Block
+        );
+        // A sentinel-host URL whose body does not parse must never navigate.
+        assert_eq!(
+            classify_navigation("https://cognia.invalid/__cognia_console?data=%7Bnot-json"),
+            NavDisposition::Block
+        );
+        assert_eq!(
+            classify_navigation("https://cognia.invalid/anything-else"),
             NavDisposition::Block
         );
         assert_eq!(
