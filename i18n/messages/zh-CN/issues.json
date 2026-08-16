@@ -1,0 +1,237 @@
+{
+  "title": "议题",
+  "summary": "{count, plural, =0 {暂无议题} other {# 个议题}}",
+  "views": {
+    "all": "全部",
+    "assigned": "指派给我",
+    "created": "我创建的",
+    "myAgents": "我的 Agent 与小队"
+  },
+  "status": {
+    "backlog": "待办池",
+    "todo": "待处理",
+    "in_progress": "进行中",
+    "in_review": "待评审",
+    "done": "已完成",
+    "canceled": "已取消"
+  },
+  "priority": {
+    "urgent": "紧急",
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "none": "无优先级"
+  },
+  "actor": {
+    "unassigned": "未指派",
+    "human": "我",
+    "agent": "Agent",
+    "team": "小队",
+    "noLead": "无负责人"
+  },
+  "source": {
+    "local": "本地",
+    "github": "GitHub",
+    "agent-team": "Agent 团队",
+    "agent-task": "Agent 任务",
+    "readOnly": "只读 —— 由 {source} 管理",
+    "degraded": "{count, plural, other {# 个数据源加载失败}}"
+  },
+  "board": {
+    "empty": "暂无议题",
+    "agentsWorking": "{count, plural, =0 {0 个 Agent 在工作} other {# 个 Agent 在工作}}",
+    "awaitingReview": "{count, plural, =0 {} other {# 个待评审}}",
+    "addIssue": "在「{status}」中新建议题",
+    "columnActions": "列操作",
+    "denied": {
+      "federated-read-only": "该议题归属于 {source}，无法在这里移动。",
+      "runtime-owned": "有 Agent 正在处理这个议题 —— 请等待运行结束。",
+      "illegal-transition": "不允许这样移动。"
+    }
+  },
+  "toolbar": {
+    "search": "搜索议题",
+    "filter": "筛选",
+    "display": "显示",
+    "board": "看板",
+    "list": "列表",
+    "clearFilters": "清除筛选",
+    "activeFilters": "{count, plural, other {# 项筛选}}",
+    "groupBy": {
+      "label": "分组方式",
+      "status": "状态",
+      "assignee": "负责人",
+      "priority": "优先级",
+      "project": "项目",
+      "none": "不分组"
+    },
+    "sort": {
+      "label": "排序方式",
+      "manual": "手动",
+      "priority": "优先级",
+      "updated": "最近更新",
+      "created": "创建时间",
+      "title": "标题"
+    },
+    "facet": {
+      "labels": "标签",
+      "priority": "优先级",
+      "assignee": "负责人",
+      "source": "来源",
+      "project": "项目"
+    }
+  },
+  "detail": {
+    "empty": "选择一个议题查看详情",
+    "properties": "属性",
+    "status": "状态",
+    "priority": "优先级",
+    "assignee": "负责人",
+    "labels": "标签",
+    "project": "项目",
+    "created": "创建于",
+    "updated": "更新于",
+    "description": "描述",
+    "descriptionPlaceholder": "添加描述…",
+    "activity": "活动",
+    "commentPlaceholder": "写下评论…",
+    "comment": "评论",
+    "openInGithub": "在 GitHub 中打开",
+    "close": "关闭详情"
+  },
+  "activity": {
+    "created": "创建了这个议题",
+    "status_changed": "将状态从「{from}」改为「{to}」",
+    "assigned": "将其指派给 {to}",
+    "unassigned": "移除了负责人",
+    "reassigned": "将负责人从 {from} 改为 {to}",
+    "priority_changed": "将优先级从「{from}」改为「{to}」",
+    "label_added": "添加了标签",
+    "label_removed": "移除了标签",
+    "title_changed": "重命名了这个议题",
+    "description_changed": "编辑了描述",
+    "project_changed": "将其移动到了另一个项目",
+    "commented": "发表了评论",
+    "run_started": "启动了一次 Agent 运行",
+    "run_succeeded": "完成了一次 Agent 运行",
+    "run_failed": "Agent 运行失败",
+    "artifact_linked": "关联了一个产物",
+    "github_linked": "关联了一个 GitHub 议题",
+    "github_write_back": "向 GitHub 推送了一次变更"
+  },
+  "create": {
+    "trigger": "新建议题",
+    "title": "新建议题",
+    "titleLabel": "标题",
+    "titlePlaceholder": "议题标题",
+    "descriptionLabel": "描述",
+    "projectLabel": "项目",
+    "submit": "创建议题",
+    "cancel": "取消",
+    "noProject": "请先创建一个项目 —— 议题需要有归属。"
+  },
+  "projects": {
+    "title": "项目",
+    "summary": "{count, plural, =0 {暂无项目} other {# 个项目}}",
+    "empty": "还没有项目",
+    "emptyHint": "项目用于归集同一交付物的议题，并携带每次 Agent 运行都能看到的上下文。",
+    "create": "新建项目",
+    "nameLabel": "名称",
+    "namePlaceholder": "项目名称",
+    "keyLabel": "标识前缀",
+    "keyHint": "2–5 个字母。议题编号形如 {example}。创建后不可修改。",
+    "keyInvalid": "2–5 个字符，且以字母开头。",
+    "keyTaken": "该前缀已被占用。",
+    "status": {
+      "backlog": "待办池",
+      "planned": "已计划",
+      "in_progress": "进行中",
+      "paused": "已暂停",
+      "completed": "已完成",
+      "canceled": "已取消"
+    },
+    "lead": "负责人",
+    "startDate": "开始日期",
+    "targetDate": "截止日期",
+    "progress": "进度",
+    "progressCount": "{completed}/{total}",
+    "description": "描述",
+    "descriptionHint": "作为上下文共享给本项目中每一个任务的 Agent。",
+    "resources": "资源",
+    "addResource": "添加资源",
+    "addLocalDirectory": "添加本地目录",
+    "removeResource": "移除资源",
+    "resourceRepo": "GitHub 仓库",
+    "resourceDirectory": "本地目录",
+    "directoryHint": "只能引用已挂载到当前工作区的目录。",
+    "delete": "删除项目",
+    "deleteConfirm": "删除「{name}」及其全部 {count} 个议题？此操作不可撤销。",
+    "addResourceHint": "引用一个 GitHub 仓库以把它的 issue 镜像到看板，或引用一个本工作区已挂载的目录。",
+    "resourceKind": "类型",
+    "repoPlaceholder": "owner/repository",
+    "repoHint": "该仓库的 issue 会以只读行的形式出现在看板上。",
+    "repoInvalid": "请使用 owner/repository 形式。",
+    "repoTaken": "该仓库已绑定到某个项目。",
+    "noRootsAvailable": "本工作区没有尚未绑定的已挂载目录。",
+    "noResources": "尚未绑定任何资源。"
+  },
+  "workspace": {
+    "title": "工作区",
+    "overview": "总览",
+    "issueSummary": "议题",
+    "projectSummary": "项目",
+    "agentsWorking": "工作中的 Agent",
+    "resources": "资源",
+    "noProjects": "当前工作区还没有项目",
+    "openIssues": "未完成议题",
+    "recentActivity": "最近活动",
+    "trust": "工作区信任",
+    "manage": "管理工作区"
+  },
+  "labels": {
+    "title": "标签",
+    "add": "添加标签",
+    "none": "暂无标签",
+    "manage": "管理标签",
+    "remove": "移除 {name}"
+  },
+  "sync": {
+    "now": "立即同步",
+    "running": "同步中…",
+    "done": "{count, plural, =0 {已是最新} other {已更新 # 条 issue}}",
+    "failed": "{repos} 同步失败",
+    "noCredential": "没有可用的 GitHub 凭据。请用 GitHub CLI 登录，或连接一个账号。",
+    "noRepos": "本工作区没有任何项目绑定了 GitHub 仓库。"
+  },
+  "writeback": {
+    "section": "GitHub 操作",
+    "sectionHint": "这些操作会写入 GitHub。看板会在下次同步后反映变更。",
+    "description": "这会写入 GitHub 上的 {issue}，且无法在此撤销。",
+    "title": {
+      "comment": "在 GitHub 上评论",
+      "label": "添加标签",
+      "close": "在 GitHub 上关闭"
+    },
+    "confirm": {
+      "comment": "发表评论",
+      "label": "添加标签",
+      "close": "关闭 issue"
+    },
+    "bodyLabel": "评论",
+    "labelsLabel": "标签",
+    "labelsPlaceholder": "bug, needs-triage",
+    "labelsHint": "用英文逗号分隔。标签必须已存在于该仓库。",
+    "reasonLabel": "原因",
+    "reason": {
+      "completed": "已完成",
+      "not_planned": "不再计划"
+    },
+    "account": "以 {account} 的身份写入",
+    "accountChecking": "正在检查已连接的账号…",
+    "success": "GitHub 已接受该变更。",
+    "error": {
+      "no-account": "没有已启用的 GitHub 账号。请在「设置 → 连接」中连接一个。",
+      "plugin-unavailable": "GitHub delivery 插件不可用。请先启用它再试。"
+    }
+  }
+}

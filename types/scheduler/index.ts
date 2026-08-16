@@ -77,6 +77,9 @@ export type ScheduledTaskType =
   // Wiki-lint (orphan / broken-link check) — registered in
   // `lib/scheduler/executors/wiki-lint-executor.ts`.
   | "wiki-lint"
+  // GitHub issue mirror refresh for the `/issues` board — registered in
+  // `lib/scheduler/executors/github-issue-sync-executor.ts`.
+  | "github-issue-sync"
   // Attention Radar report — registered in
   // `lib/scheduler/executors/radar-report-executor.ts`.
   | "radar-report"

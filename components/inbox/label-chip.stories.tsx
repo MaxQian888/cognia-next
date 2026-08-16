@@ -6,6 +6,7 @@ import type { ConversationLabelRow } from "@/lib/db/crm-types"
 
 const label = (over: Partial<ConversationLabelRow> = {}): ConversationLabelRow => ({
   id: "lbl_1",
+  scope: "conversation",
   name: "follow-up",
   color: "#f59e0b",
   sortOrder: 0,

@@ -7,6 +7,9 @@
     "publicKey": "HywtZKOopAEuRqZGzXIfdqo9ID/FfBgXFvKIj9TF4N0="
   },
   "version": "3.0.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
   "type": "frontend",
   "capabilities": ["integrations"],
   "permissions": [

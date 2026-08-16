@@ -76,6 +76,11 @@ export type CatchupDefaults = Pick<
 const TIER_BY_TYPE: Partial<Record<ScheduledTaskType, CatchupTier>> = {
   // Liveness — replaying a stale value is worse than skipping.
   "connection:presence:refresh": "never",
+  // Explicit rather than implicit: a reader would reasonably guess this belongs
+  // with the "all" tier below. It does not. The sync is watermark-driven, so
+  // the next run covers every window that was missed — replaying them would
+  // spend rate-limit budget re-asking for the same answer.
+  "github-issue-sync": "never",
 
   // Operator-visible deliverables: late-but-fresh beats missing.
   "connection:scheduled:digest": "grace",

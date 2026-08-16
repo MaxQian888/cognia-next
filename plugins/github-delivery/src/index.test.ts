@@ -26,6 +26,7 @@ function providerContext(
 describe("GitHub Delivery v3 official plugin", () => {
   it("publishes complete action schemas and host-owned providers", () => {
     expect(githubPlugin.manifest.version).toBe("3.0.0")
+    expect(githubPlugin.manifest.engines).toEqual({ cognia: ">=0.1.0" })
     expect(githubIntegration.authStrategies.map((strategy) => strategy.id)).toEqual([
       "github-app",
       "pat",

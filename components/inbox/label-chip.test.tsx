@@ -7,7 +7,16 @@ import { LabelChip } from "./label-chip"
 import type { ConversationLabelRow } from "@/lib/db/crm-types"
 
 function lbl(p: Partial<ConversationLabelRow> = {}): ConversationLabelRow {
-  return { id: "l1", name: "VIP", color: "#ff0000", sortOrder: 0, createdAt: 0, updatedAt: 0, ...p }
+  return {
+    id: "l1",
+    scope: "conversation",
+    name: "VIP",
+    color: "#ff0000",
+    sortOrder: 0,
+    createdAt: 0,
+    updatedAt: 0,
+    ...p,
+  }
 }
 
 describe("LabelChip", () => {

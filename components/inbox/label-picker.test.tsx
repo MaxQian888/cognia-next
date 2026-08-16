@@ -14,8 +14,16 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
 }))
 
 const CATALOG: ConversationLabelRow[] = [
-  { id: "l1", name: "VIP", color: "#f00", sortOrder: 0, createdAt: 0, updatedAt: 0 },
-  { id: "l2", name: "Bug", sortOrder: 1, createdAt: 0, updatedAt: 0 },
+  {
+    id: "l1",
+    scope: "conversation",
+    name: "VIP",
+    color: "#f00",
+    sortOrder: 0,
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  { id: "l2", scope: "conversation", name: "Bug", sortOrder: 1, createdAt: 0, updatedAt: 0 },
 ]
 jest.mock("@/hooks/connectors/use-conversation-labels", () => ({
   useConversationLabels: () => CATALOG,

@@ -676,6 +676,7 @@ export const manifest: PluginManifest = {
   description: "GitHub pull request, issue, review, release, tag, and Issue→PR delivery.",
   author: { name: "Cognia Official", publicKey: "HywtZKOopAEuRqZGzXIfdqo9ID/FfBgXFvKIj9TF4N0=" },
   version: "3.0.0",
+  engines: { cognia: ">=0.1.0" },
   type: "frontend",
   capabilities: ["integrations"],
   permissions: [

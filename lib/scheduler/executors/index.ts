@@ -53,6 +53,7 @@ import { executeBackupTask } from "./backup-executor"
 import { executeTwinTask } from "./twin-executor"
 import { executeWikiRebuildTask } from "./wiki-rebuild-executor"
 import { executeWikiLintTask } from "./wiki-lint-executor"
+import { executeGithubIssueSyncTask } from "./github-issue-sync-executor"
 import { executeRadarReportTask } from "./radar-report-executor"
 import { executeAgentTeamTask } from "./team-executor"
 import { executeGoalTask } from "./goal-executor"
@@ -844,6 +845,7 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("twin", executeTwinTask)
   registerTaskExecutor("wiki-rebuild", executeWikiRebuildTask)
   registerTaskExecutor("wiki-lint", executeWikiLintTask)
+  registerTaskExecutor("github-issue-sync", executeGithubIssueSyncTask)
   registerTaskExecutor("radar-report", executeRadarReportTask)
   registerTaskExecutor("agent-team", executeAgentTeamTask)
   registerTaskExecutor("goal", executeGoalTask)
@@ -853,7 +855,7 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("im-push", executeImPushTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan, test, workflow, im-push"
+    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, github-issue-sync, radar-report, agent-team, goal, plan, test, workflow, im-push"
   )
 }
 

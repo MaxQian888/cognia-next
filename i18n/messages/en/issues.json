@@ -1,0 +1,237 @@
+{
+  "title": "Issues",
+  "summary": "{count, plural, =0 {No issues} one {# issue} other {# issues}}",
+  "views": {
+    "all": "All",
+    "assigned": "Assigned",
+    "created": "Created",
+    "myAgents": "My Agents and Squads"
+  },
+  "status": {
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
+    "done": "Done",
+    "canceled": "Canceled"
+  },
+  "priority": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "actor": {
+    "unassigned": "Unassigned",
+    "human": "Me",
+    "agent": "Agent",
+    "team": "Squad",
+    "noLead": "No lead"
+  },
+  "source": {
+    "local": "Local",
+    "github": "GitHub",
+    "agent-team": "Agent Team",
+    "agent-task": "Agent Task",
+    "readOnly": "Read-only — managed by {source}",
+    "degraded": "{count, plural, one {# source failed to load} other {# sources failed to load}}"
+  },
+  "board": {
+    "empty": "No issues",
+    "agentsWorking": "{count, plural, =0 {0 agents working} one {# agent working} other {# agents working}}",
+    "awaitingReview": "{count, plural, =0 {} one {# awaiting review} other {# awaiting review}}",
+    "addIssue": "Add issue to {status}",
+    "columnActions": "Column actions",
+    "denied": {
+      "federated-read-only": "This issue lives in {source} and cannot be moved from here.",
+      "runtime-owned": "An agent is working on this issue — wait for the run to finish.",
+      "illegal-transition": "That move isn't allowed."
+    }
+  },
+  "toolbar": {
+    "search": "Search issues",
+    "filter": "Filter",
+    "display": "Display",
+    "board": "Board",
+    "list": "List",
+    "clearFilters": "Clear filters",
+    "activeFilters": "{count, plural, one {# filter} other {# filters}}",
+    "groupBy": {
+      "label": "Group by",
+      "status": "Status",
+      "assignee": "Assignee",
+      "priority": "Priority",
+      "project": "Project",
+      "none": "No grouping"
+    },
+    "sort": {
+      "label": "Sort by",
+      "manual": "Manual",
+      "priority": "Priority",
+      "updated": "Last updated",
+      "created": "Created",
+      "title": "Title"
+    },
+    "facet": {
+      "labels": "Labels",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "source": "Source",
+      "project": "Project"
+    }
+  },
+  "detail": {
+    "empty": "Select an issue to see its details",
+    "properties": "Properties",
+    "status": "Status",
+    "priority": "Priority",
+    "assignee": "Assignee",
+    "labels": "Labels",
+    "project": "Project",
+    "created": "Created",
+    "updated": "Updated",
+    "description": "Description",
+    "descriptionPlaceholder": "Add description…",
+    "activity": "Activity",
+    "commentPlaceholder": "Leave a comment…",
+    "comment": "Comment",
+    "openInGithub": "Open in GitHub",
+    "close": "Close details"
+  },
+  "activity": {
+    "created": "created this issue",
+    "status_changed": "moved this from {from} to {to}",
+    "assigned": "assigned this to {to}",
+    "unassigned": "removed the assignee",
+    "reassigned": "reassigned this from {from} to {to}",
+    "priority_changed": "changed priority from {from} to {to}",
+    "label_added": "added a label",
+    "label_removed": "removed a label",
+    "title_changed": "renamed this issue",
+    "description_changed": "edited the description",
+    "project_changed": "moved this to another project",
+    "commented": "commented",
+    "run_started": "started an agent run",
+    "run_succeeded": "finished an agent run",
+    "run_failed": "an agent run failed",
+    "artifact_linked": "linked an artifact",
+    "github_linked": "linked a GitHub issue",
+    "github_write_back": "pushed a change to GitHub"
+  },
+  "create": {
+    "trigger": "New issue",
+    "title": "New issue",
+    "titleLabel": "Title",
+    "titlePlaceholder": "Issue title",
+    "descriptionLabel": "Description",
+    "projectLabel": "Project",
+    "submit": "Create issue",
+    "cancel": "Cancel",
+    "noProject": "Create a project first — issues need somewhere to live."
+  },
+  "projects": {
+    "title": "Projects",
+    "summary": "{count, plural, =0 {No projects} one {# project} other {# projects}}",
+    "empty": "No projects yet",
+    "emptyHint": "A project groups issues for one deliverable and carries the context every agent run sees.",
+    "create": "New project",
+    "nameLabel": "Name",
+    "namePlaceholder": "Project name",
+    "keyLabel": "Key",
+    "keyHint": "2–5 letters. Issues read {example}. Cannot be changed later.",
+    "keyInvalid": "2–5 characters, starting with a letter.",
+    "keyTaken": "That key is already in use.",
+    "status": {
+      "backlog": "Backlog",
+      "planned": "Planned",
+      "in_progress": "In Progress",
+      "paused": "Paused",
+      "completed": "Completed",
+      "canceled": "Canceled"
+    },
+    "lead": "Lead",
+    "startDate": "Start date",
+    "targetDate": "Due date",
+    "progress": "Progress",
+    "progressCount": "{completed}/{total}",
+    "description": "Description",
+    "descriptionHint": "Shared with agents as context for every task in this project.",
+    "resources": "Resources",
+    "addResource": "Add resource",
+    "addLocalDirectory": "Add local directory",
+    "removeResource": "Remove resource",
+    "resourceRepo": "GitHub repository",
+    "resourceDirectory": "Local directory",
+    "directoryHint": "Only directories already mounted on this workspace can be referenced.",
+    "delete": "Delete project",
+    "deleteConfirm": "Delete “{name}” and all {count} of its issues? This cannot be undone.",
+    "addResourceHint": "Reference a GitHub repository to mirror its issues onto the board, or a directory this workspace has already mounted.",
+    "resourceKind": "Kind",
+    "repoPlaceholder": "owner/repository",
+    "repoHint": "Issues from this repository appear on the board as read-only rows.",
+    "repoInvalid": "Use the owner/repository form.",
+    "repoTaken": "That repository is already bound to a project.",
+    "noRootsAvailable": "No unbound directories are mounted on this workspace.",
+    "noResources": "No resources bound yet."
+  },
+  "workspace": {
+    "title": "Workspace",
+    "overview": "Overview",
+    "issueSummary": "Issues",
+    "projectSummary": "Projects",
+    "agentsWorking": "Agents working",
+    "resources": "Resources",
+    "noProjects": "No projects in this workspace yet",
+    "openIssues": "Open issues",
+    "recentActivity": "Recent activity",
+    "trust": "Workspace trust",
+    "manage": "Manage workspace"
+  },
+  "labels": {
+    "title": "Labels",
+    "add": "Add label",
+    "none": "No labels",
+    "manage": "Manage labels",
+    "remove": "Remove {name}"
+  },
+  "sync": {
+    "now": "Sync now",
+    "running": "Syncing…",
+    "done": "{count, plural, =0 {Already up to date} one {# issue updated} other {# issues updated}}",
+    "failed": "Sync failed for {repos}",
+    "noCredential": "No GitHub credential available. Sign in with the GitHub CLI or connect an account.",
+    "noRepos": "No GitHub repository is bound to a project in this workspace."
+  },
+  "writeback": {
+    "section": "GitHub actions",
+    "sectionHint": "These write to GitHub. The board reflects the change after the next sync.",
+    "description": "This writes to {issue} on GitHub and cannot be undone from here.",
+    "title": {
+      "comment": "Comment on GitHub",
+      "label": "Add labels",
+      "close": "Close on GitHub"
+    },
+    "confirm": {
+      "comment": "Post comment",
+      "label": "Add labels",
+      "close": "Close issue"
+    },
+    "bodyLabel": "Comment",
+    "labelsLabel": "Labels",
+    "labelsPlaceholder": "bug, needs-triage",
+    "labelsHint": "Comma-separated. Labels must already exist on the repository.",
+    "reasonLabel": "Reason",
+    "reason": {
+      "completed": "Completed",
+      "not_planned": "Not planned"
+    },
+    "account": "Writing as {account}",
+    "accountChecking": "Checking the connected account…",
+    "success": "GitHub accepted the change.",
+    "error": {
+      "no-account": "No enabled GitHub account is connected. Connect one in Settings → Connections.",
+      "plugin-unavailable": "The GitHub delivery plugin is unavailable. Enable it, then try again."
+    }
+  }
+}
