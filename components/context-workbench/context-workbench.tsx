@@ -82,6 +82,7 @@ import {
   touchActiveContextHost,
 } from "@/lib/context-workbench/active-context"
 import { pushPanelHistory, usePanelHistory } from "@/hooks/context-workbench/use-panel-history"
+import { createPortal } from "react-dom"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
@@ -247,6 +248,16 @@ export interface ContextWorkbenchProps {
    * panels alive would lock every other surface out of the webview.
    */
   railOnly?: boolean
+  /**
+   * Where to render the header row instead of drawing it above the panel body.
+   * The chat dock passes the title bar's end outlet
+   * (`components/shell/title-bar-outlets.tsx`) so the dock sits under the
+   * shell's single 40px bar; every other host (Canvas, the workflow editor,
+   * the project editor, the mobile drawer) leaves this unset and keeps the
+   * header where it is. The projected row keeps its `@container/wb-header`
+   * name, so the narrow-header folds still key off the width it actually gets.
+   */
+  headerOutlet?: HTMLElement | null
   /**
    * Activity whose rail button should carry an unread dot. Hosts pass the
    * activity owning whatever they would have revealed — the chat dock's fresh
@@ -556,6 +567,7 @@ export function ContextWorkbench({
   onCollapse,
   onEnsureVisible,
   railOnly = false,
+  headerOutlet = null,
   attentionActivity,
   onModeWidthHint,
   headerLeading,
@@ -1344,6 +1356,289 @@ export function ContextWorkbench({
   // and now the exit too.
   const focusTakeover = isFocus || focusExiting
 
+  // The header row — either drawn above the panel body or, when the host hands
+  // over `headerOutlet`, rendered into the shell's title bar so the workbench
+  // sits under a single 40px row (`components/shell/title-bar-outlets.tsx`).
+  const headerContent = (
+    <>
+      {/* Panel history back/forward — hidden on mobile and when
+                the header is very narrow (<12rem) to not crowd the tabs.
+                Also not drawn at all until there is somewhere to go: a
+                disabled pair on a fresh panel is a second set of chevrons
+                beside the title bar's route history, same glyphs with a
+                different meaning, on every idle screen. */}
+      {panelHistory.canGoBack || panelHistory.canGoForward ? (
+        <div
+          className="hidden shrink-0 items-center @[12rem]/wb-header:flex"
+          data-testid="panel-history-nav"
+        >
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            disabled={!panelHistory.canGoBack}
+            aria-label={t("contextWorkbench.actions.historyBack")}
+            title={t("contextWorkbench.actions.historyBack")}
+            onClick={handleHistoryBack}
+            data-testid="panel-history-back"
+          >
+            <ChevronLeftIcon className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            disabled={!panelHistory.canGoForward}
+            aria-label={t("contextWorkbench.actions.historyForward")}
+            title={t("contextWorkbench.actions.historyForward")}
+            onClick={handleHistoryForward}
+            data-testid="panel-history-forward"
+          >
+            <ChevronRightIcon className="size-4" />
+          </Button>
+        </div>
+      ) : null}
+      {headerLeading}
+      {activeGroup.length > 1 && headerLeading ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            {/* Once the artifact tabs claim the header this is the only
+                      route to the rest of the group, so a bare ⋯ glyph hid
+                      both which panel is showing and that there were others
+                      at all. Name the current panel, and count the siblings
+                      behind it. `w-auto` because the shared icon size is
+                      square and this now carries text. */}
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              data-testid="context-workbench-group-overflow"
+              className="w-auto max-w-32 shrink-0 gap-1 px-1.5"
+            >
+              <MoreHorizontalIcon className="size-4 shrink-0" />
+              <span className="truncate text-xs">
+                {activePanel ? getPanelLabel(activePanel) : null}
+              </span>
+              <Badge
+                variant="secondary"
+                className="h-4 min-w-4 shrink-0 px-1 text-[9px] tabular-nums"
+              >
+                {activeGroup.length - 1}
+              </Badge>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {activeGroup.map((panel) => (
+              <DropdownMenuItem
+                key={panel.id}
+                data-workbench-group-tab
+                onClick={() => handleActivate(panel)}
+              >
+                {getPanelLabel(panel)}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+      {activeGroup.length > 1 && !headerLeading ? (
+        <div
+          // A `role="tab"` outside a tablist is invalid, and a tablist
+          // cannot describe two visible panes with one selection — so
+          // while split the group degrades to a plain button group whose
+          // buttons report `aria-pressed` instead. Keyboard navigation is
+          // unaffected: `handleGroupTabKeyDown` queries the data
+          // attribute, not the role.
+          role={splitActive ? "group" : "tablist"}
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+          onKeyDown={handleGroupTabKeyDown}
+        >
+          {activeGroup.map((panel) => (
+            <Button
+              key={panel.id}
+              type="button"
+              size="sm"
+              variant={layout.activePanelId === panel.id ? "secondary" : "ghost"}
+              data-workbench-group-tab
+              data-split-secondary={secondaryPanelId === panel.id || undefined}
+              role={splitActive ? undefined : "tab"}
+              aria-selected={splitActive ? undefined : layout.activePanelId === panel.id}
+              aria-pressed={
+                splitActive
+                  ? layout.activePanelId === panel.id || secondaryPanelId === panel.id
+                  : undefined
+              }
+              aria-controls={`context-workbench-panel-${panel.id}`}
+              className={cn(
+                "min-w-0 overflow-hidden",
+                layout.activePanelId === panel.id ? "shrink-0" : "shrink"
+              )}
+              onClick={() => handleActivate(panel)}
+            >
+              <span className="truncate">{getPanelLabel(panel)}</span>
+            </Button>
+          ))}
+        </div>
+      ) : null}
+      {headerLeading ? null : activeGroup.length > 1 ? null : <div className="flex-1" />}
+      <PluginExtensionSlot
+        point="panel.header"
+        className="flex shrink-0 items-center gap-1"
+        context={{ resource, activePanelId: activePanel?.id ?? null }}
+      />
+      {placement !== "mobile-sheet" ? (
+        <>
+          {/* Inline above ~20rem of header; below that the same actions
+                    live in the menu beside this, so neither form is ever the
+                    only route to them. */}
+          <div className="hidden shrink-0 items-center gap-1 @[20rem]/wb-header:flex">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant={widthMode === "narrow" ? "secondary" : "ghost"}
+              aria-label={t("contextWorkbench.actions.narrow")}
+              onClick={() => selectMode("narrow")}
+            >
+              <PanelRightIcon className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant={widthMode === "wide" ? "secondary" : "ghost"}
+              aria-label={t("contextWorkbench.actions.wide")}
+              onClick={() => selectMode("wide")}
+            >
+              <Rows3Icon className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant={layout.mode === "focus" ? "secondary" : "ghost"}
+              aria-label={t("contextWorkbench.actions.focus")}
+              onClick={() => selectMode("focus")}
+            >
+              <FocusIcon className="size-4" />
+            </Button>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t("contextWorkbench.actions.layoutMenu")}
+                data-testid="context-workbench-layout-menu"
+                // Reset alone did not justify a permanent button, so this
+                // used to hide above the fold unless `onResetLayout` was
+                // supplied. It no longer can: the menu is the only place
+                // split view is named as unavailable, and a host without
+                // a reset action would otherwise never show that at all —
+                // which is the dormancy being silent again, just at one
+                // breakpoint instead of everywhere.
+                className="shrink-0"
+              >
+                <SlidersHorizontalIcon className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                className="@[20rem]/wb-header:hidden"
+                onSelect={() => selectMode("narrow")}
+              >
+                <PanelRightIcon className="size-4" />
+                {t("contextWorkbench.actions.narrow")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="@[20rem]/wb-header:hidden"
+                onSelect={() => selectMode("wide")}
+              >
+                <Rows3Icon className="size-4" />
+                {t("contextWorkbench.actions.wide")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="@[20rem]/wb-header:hidden"
+                onSelect={() => selectMode("focus")}
+              >
+                <FocusIcon className="size-4" />
+                {t("contextWorkbench.actions.focus")}
+              </DropdownMenuItem>
+              {/* `Rows2Icon`, not `Columns2Icon`: the split stacks, and
+                        `Rows3Icon` is already the Wide glyph, so the two read
+                        as a family. */}
+              {splitActive ? (
+                <DropdownMenuItem
+                  data-testid="context-workbench-close-split-menu"
+                  onSelect={handleCloseSplit}
+                >
+                  <Rows2Icon className="size-4" />
+                  {t("contextWorkbench.actions.closeSplit")}
+                </DropdownMenuItem>
+              ) : canOfferSplit ? (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger data-testid="context-workbench-split-below">
+                    <Rows2Icon className="size-4" />
+                    {t("contextWorkbench.actions.splitBelow")}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent
+                    aria-label={t("contextWorkbench.actions.splitBelowPanel")}
+                  >
+                    {splitCandidates.map((panel) => (
+                      <DropdownMenuItem
+                        key={panel.id}
+                        data-testid={`context-workbench-split-candidate-${panel.id}`}
+                        onSelect={() => handleSplitBelow(panel)}
+                      >
+                        {getPanelLabel(panel)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ) : (
+                <DropdownMenuItem
+                  disabled
+                  data-testid="context-workbench-split-unavailable"
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  <Rows2Icon className="size-4" />
+                  {t("contextWorkbench.actions.splitNeedsWide")}
+                </DropdownMenuItem>
+              )}
+              {onResetLayout ? (
+                <DropdownMenuItem
+                  data-testid="context-workbench-reset-layout"
+                  onSelect={onResetLayout}
+                >
+                  <RotateCcwIcon className="size-4" />
+                  {t("contextWorkbench.actions.resetLayout")}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      ) : null}
+    </>
+  )
+  const headerRow = headerOutlet ? (
+    createPortal(
+      <div
+        data-testid="context-workbench-header"
+        className="@container/wb-header flex h-full min-w-0 flex-1 items-center gap-1 px-2"
+        // The activity rail keeps its column inside the dock, so the projected
+        // row starts where the header used to: past it.
+        style={{ paddingLeft: WORKBENCH_RAIL_WIDTH_PX + 8 }}
+      >
+        {headerContent}
+      </div>,
+      headerOutlet
+    )
+  ) : (
+    <header
+      data-testid="context-workbench-header"
+      className="@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2"
+    >
+      {headerContent}
+    </header>
+  )
+
   return (
     <ContextWorkbenchContext.Provider value={value}>
       <section
@@ -1567,262 +1862,7 @@ export function ContextWorkbench({
                 hold the artifact tabs, the group overflow, plugin actions and
                 the layout controls — so the controls fold into a menu on the
                 narrow end rather than squashing everything. */}
-            <header className="@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2">
-              {/* Panel history back/forward — hidden on mobile and when
-                  the header is very narrow (<12rem) to not crowd the tabs.
-                  Also not drawn at all until there is somewhere to go: a
-                  disabled pair on a fresh panel is a second set of chevrons
-                  beside the title bar's route history, same glyphs with a
-                  different meaning, on every idle screen. */}
-              {panelHistory.canGoBack || panelHistory.canGoForward ? (
-                <div
-                  className="hidden shrink-0 items-center @[12rem]/wb-header:flex"
-                  data-testid="panel-history-nav"
-                >
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    disabled={!panelHistory.canGoBack}
-                    aria-label={t("contextWorkbench.actions.historyBack")}
-                    title={t("contextWorkbench.actions.historyBack")}
-                    onClick={handleHistoryBack}
-                    data-testid="panel-history-back"
-                  >
-                    <ChevronLeftIcon className="size-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    disabled={!panelHistory.canGoForward}
-                    aria-label={t("contextWorkbench.actions.historyForward")}
-                    title={t("contextWorkbench.actions.historyForward")}
-                    onClick={handleHistoryForward}
-                    data-testid="panel-history-forward"
-                  >
-                    <ChevronRightIcon className="size-4" />
-                  </Button>
-                </div>
-              ) : null}
-              {headerLeading}
-              {activeGroup.length > 1 && headerLeading ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    {/* Once the artifact tabs claim the header this is the only
-                        route to the rest of the group, so a bare ⋯ glyph hid
-                        both which panel is showing and that there were others
-                        at all. Name the current panel, and count the siblings
-                        behind it. `w-auto` because the shared icon size is
-                        square and this now carries text. */}
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      data-testid="context-workbench-group-overflow"
-                      className="w-auto max-w-32 shrink-0 gap-1 px-1.5"
-                    >
-                      <MoreHorizontalIcon className="size-4 shrink-0" />
-                      <span className="truncate text-xs">
-                        {activePanel ? getPanelLabel(activePanel) : null}
-                      </span>
-                      <Badge
-                        variant="secondary"
-                        className="h-4 min-w-4 shrink-0 px-1 text-[9px] tabular-nums"
-                      >
-                        {activeGroup.length - 1}
-                      </Badge>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    {activeGroup.map((panel) => (
-                      <DropdownMenuItem
-                        key={panel.id}
-                        data-workbench-group-tab
-                        onClick={() => handleActivate(panel)}
-                      >
-                        {getPanelLabel(panel)}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
-              {activeGroup.length > 1 && !headerLeading ? (
-                <div
-                  // A `role="tab"` outside a tablist is invalid, and a tablist
-                  // cannot describe two visible panes with one selection — so
-                  // while split the group degrades to a plain button group whose
-                  // buttons report `aria-pressed` instead. Keyboard navigation is
-                  // unaffected: `handleGroupTabKeyDown` queries the data
-                  // attribute, not the role.
-                  role={splitActive ? "group" : "tablist"}
-                  className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
-                  onKeyDown={handleGroupTabKeyDown}
-                >
-                  {activeGroup.map((panel) => (
-                    <Button
-                      key={panel.id}
-                      type="button"
-                      size="sm"
-                      variant={layout.activePanelId === panel.id ? "secondary" : "ghost"}
-                      data-workbench-group-tab
-                      data-split-secondary={secondaryPanelId === panel.id || undefined}
-                      role={splitActive ? undefined : "tab"}
-                      aria-selected={splitActive ? undefined : layout.activePanelId === panel.id}
-                      aria-pressed={
-                        splitActive
-                          ? layout.activePanelId === panel.id || secondaryPanelId === panel.id
-                          : undefined
-                      }
-                      aria-controls={`context-workbench-panel-${panel.id}`}
-                      className={cn(
-                        "min-w-0 overflow-hidden",
-                        layout.activePanelId === panel.id ? "shrink-0" : "shrink"
-                      )}
-                      onClick={() => handleActivate(panel)}
-                    >
-                      <span className="truncate">{getPanelLabel(panel)}</span>
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-              {headerLeading ? null : activeGroup.length > 1 ? null : <div className="flex-1" />}
-              <PluginExtensionSlot
-                point="panel.header"
-                className="flex shrink-0 items-center gap-1"
-                context={{ resource, activePanelId: activePanel?.id ?? null }}
-              />
-              {placement !== "mobile-sheet" ? (
-                <>
-                  {/* Inline above ~20rem of header; below that the same actions
-                      live in the menu beside this, so neither form is ever the
-                      only route to them. */}
-                  <div className="hidden shrink-0 items-center gap-1 @[20rem]/wb-header:flex">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant={widthMode === "narrow" ? "secondary" : "ghost"}
-                      aria-label={t("contextWorkbench.actions.narrow")}
-                      onClick={() => selectMode("narrow")}
-                    >
-                      <PanelRightIcon className="size-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant={widthMode === "wide" ? "secondary" : "ghost"}
-                      aria-label={t("contextWorkbench.actions.wide")}
-                      onClick={() => selectMode("wide")}
-                    >
-                      <Rows3Icon className="size-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant={layout.mode === "focus" ? "secondary" : "ghost"}
-                      aria-label={t("contextWorkbench.actions.focus")}
-                      onClick={() => selectMode("focus")}
-                    >
-                      <FocusIcon className="size-4" />
-                    </Button>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={t("contextWorkbench.actions.layoutMenu")}
-                        data-testid="context-workbench-layout-menu"
-                        // Reset alone did not justify a permanent button, so this
-                        // used to hide above the fold unless `onResetLayout` was
-                        // supplied. It no longer can: the menu is the only place
-                        // split view is named as unavailable, and a host without
-                        // a reset action would otherwise never show that at all —
-                        // which is the dormancy being silent again, just at one
-                        // breakpoint instead of everywhere.
-                        className="shrink-0"
-                      >
-                        <SlidersHorizontalIcon className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        className="@[20rem]/wb-header:hidden"
-                        onSelect={() => selectMode("narrow")}
-                      >
-                        <PanelRightIcon className="size-4" />
-                        {t("contextWorkbench.actions.narrow")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="@[20rem]/wb-header:hidden"
-                        onSelect={() => selectMode("wide")}
-                      >
-                        <Rows3Icon className="size-4" />
-                        {t("contextWorkbench.actions.wide")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="@[20rem]/wb-header:hidden"
-                        onSelect={() => selectMode("focus")}
-                      >
-                        <FocusIcon className="size-4" />
-                        {t("contextWorkbench.actions.focus")}
-                      </DropdownMenuItem>
-                      {/* `Rows2Icon`, not `Columns2Icon`: the split stacks, and
-                          `Rows3Icon` is already the Wide glyph, so the two read
-                          as a family. */}
-                      {splitActive ? (
-                        <DropdownMenuItem
-                          data-testid="context-workbench-close-split-menu"
-                          onSelect={handleCloseSplit}
-                        >
-                          <Rows2Icon className="size-4" />
-                          {t("contextWorkbench.actions.closeSplit")}
-                        </DropdownMenuItem>
-                      ) : canOfferSplit ? (
-                        <DropdownMenuSub>
-                          <DropdownMenuSubTrigger data-testid="context-workbench-split-below">
-                            <Rows2Icon className="size-4" />
-                            {t("contextWorkbench.actions.splitBelow")}
-                          </DropdownMenuSubTrigger>
-                          <DropdownMenuSubContent
-                            aria-label={t("contextWorkbench.actions.splitBelowPanel")}
-                          >
-                            {splitCandidates.map((panel) => (
-                              <DropdownMenuItem
-                                key={panel.id}
-                                data-testid={`context-workbench-split-candidate-${panel.id}`}
-                                onSelect={() => handleSplitBelow(panel)}
-                              >
-                                {getPanelLabel(panel)}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuSubContent>
-                        </DropdownMenuSub>
-                      ) : (
-                        <DropdownMenuItem
-                          disabled
-                          data-testid="context-workbench-split-unavailable"
-                          onSelect={(event) => event.preventDefault()}
-                        >
-                          <Rows2Icon className="size-4" />
-                          {t("contextWorkbench.actions.splitNeedsWide")}
-                        </DropdownMenuItem>
-                      )}
-                      {onResetLayout ? (
-                        <DropdownMenuItem
-                          data-testid="context-workbench-reset-layout"
-                          onSelect={onResetLayout}
-                        >
-                          <RotateCcwIcon className="size-4" />
-                          {t("contextWorkbench.actions.resetLayout")}
-                        </DropdownMenuItem>
-                      ) : null}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </>
-              ) : null}
-            </header>
+            {headerRow}
             <div
               ref={bodyRef}
               className="relative min-h-0 flex-1 overflow-hidden"

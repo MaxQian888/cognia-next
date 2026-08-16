@@ -314,6 +314,13 @@ import { TitleBar } from "./title-bar"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import { resetNavHistory } from "@/hooks/desktop/use-nav-history"
 import { DEFAULT_TITLE_BAR_LAYOUT, TITLE_BAR_ITEMS } from "@/types/shell/bars"
+import { createPortal } from "react-dom"
+import {
+  TitleBarOutletsProvider,
+  TitleBarProjectionScope,
+  useTitleBarProjection,
+} from "@/components/shell/title-bar-outlets"
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 
 beforeEach(() => {
   resetNavHistory()
@@ -372,10 +379,25 @@ function setPlatform(platform: "Win32" | "MacIntel") {
   Object.defineProperty(navigator, "platform", { value: platform, configurable: true })
 }
 
-test("renders nothing when not in Tauri", () => {
+test("outside Tauri it is a plain application bar: no window controls, no menubar", async () => {
+  // The bar renders in the web shell too — it is what the column headers
+  // project into — but the frameless-window plumbing stays Tauri-only.
   isTauriMock.mockReturnValue(false)
-  const { container } = render(<TitleBar />)
-  expect(container.firstChild).toBeNull()
+  setPlatform("Win32")
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByTestId("title-bar")).toBeInTheDocument())
+  expect(screen.getByTestId("title-bar")).toHaveClass("h-10")
+  expect(screen.queryByLabelText("desktop.titleBar.minimize")).toBeNull()
+  expect(screen.queryByLabelText("desktop.titleBar.close")).toBeNull()
+  expect(screen.queryByText("desktop.menu.file.label")).toBeNull()
+  expect(screen.queryByTestId("title-bar-hamburger")).toBeNull()
+})
+
+test("is 40px tall, matching the column headers it hosts", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByTestId("title-bar")).toHaveClass("h-10"))
 })
 
 test("renders the brand text in Tauri", async () => {
@@ -1765,5 +1787,129 @@ describe("the Win/Linux right-click system menu", () => {
     await openSystemMenu()
     await user.click(screen.getByTestId("title-bar-customize"))
     expect(await screen.findByTestId("shell-layout-dialog")).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Column-header projection (components/shell/title-bar-outlets.tsx)
+// ---------------------------------------------------------------------------
+
+function ProjectedHeader({ zone }: { zone: "start" | "center" | "end" }) {
+  const outlet = useTitleBarProjection(zone)
+  const content = <span data-testid={`projected-${zone}`}>{zone}</span>
+  return outlet ? (
+    createPortal(content, outlet)
+  ) : (
+    <div data-testid={`inline-${zone}`}>{content}</div>
+  )
+}
+
+function renderProjecting(zones: Array<"start" | "center" | "end">) {
+  return render(
+    <TitleBarOutletsProvider>
+      <TitleBar />
+      <TitleBarProjectionScope enabled>
+        {zones.map((zone) => (
+          <ProjectedHeader key={zone} zone={zone} />
+        ))}
+      </TitleBarProjectionScope>
+    </TitleBarOutletsProvider>
+  )
+}
+
+describe("column-header projection", () => {
+  beforeEach(() => {
+    act(() => useShellColumnsStore.setState({ widths: { sidebar: 0, dock: 0 } }))
+  })
+
+  test("outlets stay hidden and empty until something projects", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    render(
+      <TitleBarOutletsProvider>
+        <TitleBar />
+      </TitleBarOutletsProvider>
+    )
+    const start = await screen.findByTestId("title-bar-outlet-start")
+    expect(start).toHaveAttribute("hidden")
+    expect(screen.getByTestId("title-bar-outlet-center")).toHaveAttribute("hidden")
+    expect(screen.getByTestId("title-bar-outlet-end")).toHaveAttribute("hidden")
+    // The bar's own segments are untouched.
+    expect(screen.getByTestId("title-bar-search-pill")).toBeInTheDocument()
+    expect(screen.getByTestId("title-bar-search-pill")).not.toHaveAttribute("data-compact")
+    expect(screen.getByTestId("title-bar-workspace-seg")).toBeInTheDocument()
+    expect(screen.getByTestId("title-bar-toggle-sidebar")).toBeInTheDocument()
+    expect(screen.getByTestId("title-bar-toggle-panel")).toBeInTheDocument()
+  })
+
+  test("hosts the conversation-rail header in the start outlet, sized to the rail below", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    act(() => useShellColumnsStore.getState().setColumnWidth("sidebar", 296))
+    renderProjecting(["start"])
+    const start = await screen.findByTestId("title-bar-outlet-start")
+    await waitFor(() => expect(start).toContainElement(screen.getByTestId("projected-start")))
+    expect(start).not.toHaveAttribute("hidden")
+    // nav rail 64 + conversation rail 296, less the bar's own `pl-2` (8) and
+    // the (jsdom-zero) width of the chrome ahead of the outlet.
+    expect(start).toHaveStyle({ width: "352px" })
+    // The Windows/Linux menubar folds into the hamburger so it cannot sit over
+    // the conversation rail's column.
+    expect(screen.getByTestId("title-bar-hamburger")).toBeInTheDocument()
+    expect(screen.queryByText("desktop.menu.file.label")).toBeNull()
+  })
+
+  test("with the chat header in the centre, the header leads and the bar's segments follow it", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    renderProjecting(["center"])
+    const center = await screen.findByTestId("title-bar-outlet-center")
+    await waitFor(() => expect(center).toContainElement(screen.getByTestId("projected-center")))
+    // Nothing is dropped — route history, the workspace pill and the VS Code-
+    // style search pill all stay — they follow the header, which keeps the
+    // chat column's leading edge for its sidebar toggle.
+    const nav = screen.getByTestId("title-bar-nav-arrows")
+    const search = screen.getByTestId("title-bar-search-pill")
+    expect(screen.getByTestId("title-bar-workspace-seg")).toBeInTheDocument()
+    expect(center.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(center.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The pill goes compact beside a title it would otherwise repeat.
+    expect(search).toHaveAttribute("data-compact", "true")
+    // The chat header carries the sidebar and dock toggles, so the bar's own
+    // copies step aside; the secondary-sidebar toggle has no twin and stays.
+    expect(screen.queryByTestId("title-bar-toggle-sidebar")).toBeNull()
+    expect(screen.queryByTestId("title-bar-toggle-panel")).toBeNull()
+    expect(screen.getByTestId("title-bar-toggle-right-sidebar")).toBeInTheDocument()
+    // Start and end are still idle.
+    expect(screen.getByTestId("title-bar-outlet-start")).toHaveAttribute("hidden")
+    expect(screen.getByTestId("title-bar-outlet-end")).toHaveAttribute("hidden")
+  })
+
+  test("sizes the end outlet to the artifact dock below", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    act(() => useShellColumnsStore.getState().setColumnWidth("dock", 420))
+    renderProjecting(["end"])
+    const end = await screen.findByTestId("title-bar-outlet-end")
+    await waitFor(() => expect(end).toContainElement(screen.getByTestId("projected-end")))
+    // Rail is on the left by default, so nothing offsets the right edge; the
+    // chrome after the outlet measures zero in jsdom.
+    expect(end).toHaveStyle({ width: "420px" })
+  })
+
+  test("without a provider (mobile shell) headers stay inline and the bar is unaffected", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    render(
+      <>
+        <TitleBar />
+        <TitleBarProjectionScope enabled>
+          <ProjectedHeader zone="center" />
+        </TitleBarProjectionScope>
+      </>
+    )
+    await screen.findByTestId("title-bar")
+    expect(screen.getByTestId("inline-center")).toBeInTheDocument()
+    expect(screen.getByTestId("title-bar-search-pill")).toBeInTheDocument()
   })
 })

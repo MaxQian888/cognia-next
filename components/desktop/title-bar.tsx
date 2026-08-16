@@ -44,6 +44,13 @@ import {
 import { listSessions } from "@/lib/db/sessions"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
+import { useElementWidth } from "@/hooks/use-element-width"
+import {
+  useTitleBarOutletRef,
+  useTitleBarProjectionState,
+} from "@/components/shell/title-bar-outlets"
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
+import { DEFAULT_SIDEBAR_SIDE, GUILD_RAIL_WIDTH_PX } from "@/types/shell/sidebar"
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
 import {
   automationKillSwitchAction,
@@ -74,7 +81,7 @@ import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { TitleBarZone, type TitleBarItemContext } from "@/components/desktop/title-bar-zone"
 import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
@@ -197,6 +204,26 @@ export function TitleBar() {
 
   const narrow = useNarrow()
   const pathname = usePathname()
+
+  // ---- Column-header projection (see `components/shell/title-bar-outlets.tsx`)
+  //
+  // The chat workspace's three column headers render into this bar. The start
+  // and end outlets are sized to the measured width of the conversation rail
+  // and the artifact dock beneath them, less whatever chrome already occupies
+  // that stretch of the bar (traffic lights, hamburger, window buttons), so the
+  // centre is exactly the chat column. Measured, not derived: both columns
+  // animate, and the bar has to track them frame for frame.
+  const projected = useTitleBarProjectionState()
+  const startOutletRef = useTitleBarOutletRef("start")
+  const centerOutletRef = useTitleBarOutletRef("center")
+  const endOutletRef = useTitleBarOutletRef("end")
+  const sidebarPx = useShellColumnsStore((s) => s.widths.sidebar)
+  const dockPx = useShellColumnsStore((s) => s.widths.dock)
+  const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
+  const leftChromeRef = useRef<HTMLDivElement | null>(null)
+  const rightChromeRef = useRef<HTMLDivElement | null>(null)
+  const leftChromePx = useElementWidth(leftChromeRef)
+  const rightChromePx = useElementWidth(rightChromeRef)
   const terminalOpen = useTerminalStore((s) => s.panelOpen)
   const setTerminalPanelOpen = useTerminalStore((s) => s.setPanelOpen)
   const toggleTerminalPanel = useTerminalStore((s) => s.togglePanel)
@@ -238,12 +265,13 @@ export function TitleBar() {
     }
   }, [])
 
-  // Load the most-recent sessions for the File → Recent Sessions submenu.
-  // Refreshes once on mount and whenever the active session id changes (so a
-  // new conversation surfaces immediately the next time the menu opens).
+  // Load the most-recent sessions for the File → Recent Sessions submenu and
+  // the search pill. Refreshes once on mount and whenever the active session id
+  // changes (so a new conversation surfaces immediately the next time the menu
+  // opens). Not Tauri-gated: the bar renders in the web shell too, where the
+  // search pill's recent list is just as useful.
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   useEffect(() => {
-    if (!isTauri()) return
     let cancelled = false
     void (async () => {
       try {
@@ -263,13 +291,40 @@ export function TitleBar() {
   // Feed the back/forward history (the title bar is mounted once for the whole
   // desktop shell, so this observes every route change).
   useEffect(() => {
-    if (!isTauri()) return
     recordNavigation(pathname)
   }, [pathname])
 
-  if (!mounted || !isTauri()) return null
+  if (!mounted) return null
 
-  const isMac = platform.includes("mac")
+  /**
+   * Whether this bar is also the *window* chrome. Inside Tauri it owns the
+   * frameless window's drag region, the Windows/Linux menubar and the
+   * min / max / close cluster; in the web shell it is a plain 40px application
+   * bar with the same customizable zones and none of the window plumbing. It
+   * used to return `null` outside Tauri, which left the web shell with three
+   * stepped column headers and no bar at all; the shell-wide bar is what the
+   * column headers project into (`components/shell/title-bar-outlets.tsx`).
+   */
+  const tauri = isTauri()
+  const isMac = tauri && platform.includes("mac")
+  const windowChrome = tauri && !isMac
+  // Where the columns start and end relative to the bar's edges. The nav rail
+  // is the outermost column on `sidebarSide`, so the conversation rail begins
+  // after it on the left, and the dock ends before it on the right.
+  const railPx = guildRailCollapsed ? 0 : GUILD_RAIL_WIDTH_PX
+  const railLeftPx = sidebarSide === "left" ? railPx : 0
+  const railRightPx = sidebarSide === "right" ? railPx : 0
+  // Must match the header's `pl-20` / `pl-2` below.
+  const barPaddingLeftPx = isMac ? 80 : 8
+  const startOutletPx = projected.start
+    ? Math.max(0, railLeftPx + sidebarPx - barPaddingLeftPx - leftChromePx)
+    : 0
+  const endOutletPx = projected.end ? Math.max(0, railRightPx + dockPx - rightChromePx) : 0
+  // With the conversation rail's header in the bar the Windows/Linux menubar
+  // would sit over that column and push its header off its own rail, so the
+  // menus fold into the hamburger whenever the start zone is projected — the
+  // same fold the bar already does when it is narrow.
+  const menubarFolded = narrow || projected.start
   const appName = t("appName")
   const zoom = clampZoom(persistedZoom ?? DEFAULT_ZOOM)
 
@@ -537,6 +592,9 @@ export function TitleBar() {
   // anyway (they close over `router` / `recentSessions`), and the zones were
   // already re-rendering with the bar before they became data-driven.
   const itemCtx: TitleBarItemContext = {
+    // Icon + shortcut only while the chat header shares the zone: the pill's
+    // "app · conversation" label would repeat the title sitting next to it.
+    compactSearch: projected.center,
     appName,
     separator: t("separator"),
     searchPlaceholder: t("searchPlaceholder"),
@@ -554,7 +612,7 @@ export function TitleBar() {
         data-app-chrome
         data-testid="title-bar"
         onDoubleClick={(e) => {
-          if (isMac) return
+          if (!windowChrome) return
           const target = e.target as HTMLElement
           if (target.closest("button, [role='menuitem'], [data-radix-menu-content]")) return
           void handleMax()
@@ -563,18 +621,23 @@ export function TitleBar() {
         className={cn(
           // Tint, no border — see `guild-rail.tsx`. The tone already reads as
           // "not content"; a border on top of it is a second seam.
-          "relative flex h-8 shrink-0 items-center bg-muted/40 text-xs select-none",
+          // `h-10` (40px) is the shared column-header height: the conversation
+          // rail, chat and workbench headers project their content into this
+          // bar's zones (see `title-bar-outlets.tsx`), so the row has to be as
+          // tall as the headers it replaces. macOS overlay traffic lights sit
+          // at y=14 (`tauri.conf.json`) to centre in it.
+          "relative flex h-10 shrink-0 items-center bg-muted/40 text-xs select-none",
           isMac ? "pl-20" : "pl-2"
         )}
       >
-        <div className="flex items-center gap-1">
+        <div ref={leftChromeRef} className="flex items-center gap-1">
           <TitleBarZone items={bar.zones.start} ctx={itemCtx} />
           <PluginExtensionSlot
             point="toolbar.left"
             className="flex items-center gap-1 empty:hidden"
           />
-          {!isMac &&
-            (narrow ? (
+          {windowChrome &&
+            (menubarFolded ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   aria-label={t("openMenus")}
@@ -1223,10 +1286,34 @@ export function TitleBar() {
             ))}
         </div>
 
+        {/* Conversation-rail header lands here, sized to the rail below. */}
+        <div
+          ref={startOutletRef}
+          data-testid="title-bar-outlet-start"
+          // `hidden` (the attribute) while nothing projects: an empty outlet is
+          // not a control, and must not read as one to the chrome budget.
+          hidden={!projected.start}
+          className="flex h-full min-w-0 shrink-0 items-center overflow-hidden"
+          style={{ width: startOutletPx }}
+        />
+
         <div
           data-tauri-drag-region
           className="flex flex-1 items-center justify-center gap-1 px-2 min-w-0"
         >
+          {/* With the chat header projected the zone reads left to right as
+              the chat column does: the header (sidebar toggle, title, chips,
+              actions) at the column's leading edge, then the bar's own
+              segments in their usual order — route history, workspace pill,
+              the VS Code-style search / palette pill (compact, so it does not
+              compete with the title for width), command centre. Nothing is
+              dropped; the header simply goes first. */}
+          <div
+            ref={centerOutletRef}
+            data-testid="title-bar-outlet-center"
+            hidden={!projected.center}
+            className="flex h-full min-w-0 flex-1 items-center"
+          />
           <TitleBarZone items={bar.zones.center} ctx={itemCtx} />
           <PluginExtensionSlot
             point="toolbar.center"
@@ -1234,39 +1321,62 @@ export function TitleBar() {
           />
         </div>
 
-        <PluginExtensionSlot
-          point="toolbar.right"
-          className="flex items-center gap-1 px-1 empty:hidden"
+        {/* Artifact-dock header lands here, sized to the dock below. */}
+        <div
+          ref={endOutletRef}
+          data-testid="title-bar-outlet-end"
+          hidden={!projected.end}
+          className="flex h-full min-w-0 shrink-0 items-center overflow-hidden"
+          style={{ width: endOutletPx }}
         />
 
-        <TitleBarZone items={bar.zones.end} ctx={itemCtx} />
+        <div ref={rightChromeRef} className="flex items-center">
+          <PluginExtensionSlot
+            point="toolbar.right"
+            className="flex items-center gap-1 px-1 empty:hidden"
+          />
 
-        {!isMac ? (
-          <div className="flex items-center">
-            <TitleBarButton onClick={handleMin} aria-label={t("minimize")}>
-              <MinusIcon className="size-3.5" />
-            </TitleBarButton>
-            <TitleBarButton
-              onClick={handleMax}
-              aria-label={maximized ? t("restore") : t("maximize")}
-            >
-              {maximized ? (
-                <MinimizeIcon className="size-3.5" />
-              ) : (
-                <MaximizeIcon className="size-3.5" />
-              )}
-            </TitleBarButton>
-            <TitleBarButton
-              onClick={handleClose}
-              aria-label={t("close")}
-              className="hover:bg-destructive hover:text-destructive-foreground"
-            >
-              <XIcon className="size-3.5" />
-            </TitleBarButton>
-          </div>
-        ) : (
-          <div data-tauri-drag-region className="w-2" />
-        )}
+          {/* The projected chat header already carries the conversation-list
+              and artifact-dock toggles at their columns' edges, so the bar's
+              own copies step aside while it is up — one control per action. */}
+          <TitleBarZone
+            items={
+              projected.center
+                ? bar.zones.end.filter(
+                    (item) => item.id !== "primarySidebarToggle" && item.id !== "panelToggle"
+                  )
+                : bar.zones.end
+            }
+            ctx={itemCtx}
+          />
+
+          {windowChrome ? (
+            <div className="flex items-center">
+              <TitleBarButton onClick={handleMin} aria-label={t("minimize")}>
+                <MinusIcon className="size-3.5" />
+              </TitleBarButton>
+              <TitleBarButton
+                onClick={handleMax}
+                aria-label={maximized ? t("restore") : t("maximize")}
+              >
+                {maximized ? (
+                  <MinimizeIcon className="size-3.5" />
+                ) : (
+                  <MaximizeIcon className="size-3.5" />
+                )}
+              </TitleBarButton>
+              <TitleBarButton
+                onClick={handleClose}
+                aria-label={t("close")}
+                className="hover:bg-destructive hover:text-destructive-foreground"
+              >
+                <XIcon className="size-3.5" />
+              </TitleBarButton>
+            </div>
+          ) : (
+            <div data-tauri-drag-region className="w-2" />
+          )}
+        </div>
 
         {/* Right-click menu. Anchored to the click point via a 0x0 invisible
           trigger; opening it sets the coords. The window commands are
@@ -1287,7 +1397,7 @@ export function TitleBar() {
               aria-hidden
             />
             <DropdownMenuContent align="start" sideOffset={0} className={MENU_CONTENT_PERF}>
-              {!isMac && (
+              {windowChrome && (
                 <>
                   <DropdownMenuItem
                     disabled={!maximized}
@@ -1351,7 +1461,7 @@ function TitleBarButton({ className, ...props }: React.ComponentProps<typeof But
     <Button
       variant="ghost"
       size="icon"
-      className={cn("h-8 w-10 rounded-none transition-colors", className)}
+      className={cn("h-10 w-10 rounded-none transition-colors", className)}
       {...props}
     />
   )

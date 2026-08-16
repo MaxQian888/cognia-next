@@ -1,6 +1,8 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { createPortal } from "react-dom"
+import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
 import { useTranslations } from "next-intl"
 import {
   Columns2Icon,
@@ -123,22 +125,14 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
       : character.name
     : undefined
 
-  return (
-    <header
-      // `h-10` is the shared column-header height: the conversation rail's
-      // header (`channel-list.tsx`) and the right-hand workbench header
-      // (`context-workbench.tsx`) draw the same 40px with the same bottom rule,
-      // so the three columns read as one bar rather than three stepped ones.
-      className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur"
-      // Opt the bar into the shared wallpaper-aware tonality system
-      // (app/globals.css §5), same tier as the conversation rail. Without it
-      // the hardcoded `bg-background/80` stayed an opaque slab while the
-      // message area a pixel below showed the wallpaper — the seam this header
-      // is supposed to sit flush against. `bg-background/80` remains the
-      // no-wallpaper fallback; the tonality rules only fire under
-      // `body[data-bg-enabled="true"]` and honour prefers-reduced-transparency.
-      data-tonality="translucent"
-    >
+  // Inside the chat workspace this header renders into the title bar's centre
+  // outlet (`title-bar-outlets.tsx`): the bar is the one 40px row above the
+  // columns and the conversation title belongs on it. Anywhere else — the
+  // mobile shell, a host outside the projection scope — it draws its own row.
+  const outlet = useTitleBarProjection("center")
+
+  const content = (
+    <>
       <Button
         variant="ghost"
         size="icon"
@@ -273,6 +267,36 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
       <ArtifactDockToggle className="hidden md:inline-flex" />
 
       <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />
+    </>
+  )
+
+  if (outlet) {
+    return createPortal(
+      <div data-testid="chat-header" className="flex h-full min-w-0 flex-1 items-center gap-2 px-2">
+        {content}
+      </div>,
+      outlet
+    )
+  }
+
+  return (
+    <header
+      data-testid="chat-header"
+      // `h-10` is the shared column-header height: the conversation rail's
+      // header (`channel-list.tsx`) and the right-hand workbench header
+      // (`context-workbench.tsx`) draw the same 40px with the same bottom rule,
+      // so the three columns read as one bar rather than three stepped ones.
+      className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur"
+      // Opt the bar into the shared wallpaper-aware tonality system
+      // (app/globals.css §5), same tier as the conversation rail. Without it
+      // the hardcoded `bg-background/80` stayed an opaque slab while the
+      // message area a pixel below showed the wallpaper — the seam this header
+      // is supposed to sit flush against. `bg-background/80` remains the
+      // no-wallpaper fallback; the tonality rules only fire under
+      // `body[data-bg-enabled="true"]` and honour prefers-reduced-transparency.
+      data-tonality="translucent"
+    >
+      {content}
     </header>
   )
 }

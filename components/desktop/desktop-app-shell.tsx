@@ -26,6 +26,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/shell/guild-rail"
+import { TitleBarOutletsProvider } from "@/components/shell/title-bar-outlets"
 import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
 import { FindBar } from "@/components/desktop/find-bar"
@@ -159,14 +160,18 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   )
 
   return (
-    <div className="relative flex h-screen w-full flex-col bg-background text-foreground">
-      <WindowFocusTracker />
-      <WindowResizeEdges />
-      <ZoomShortcuts />
-      <TerminalToggleShortcut />
-      <PanelQuickSwitch />
-      <TitleBar />
-      {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
+    // The provider is what lets the chat workspace's column headers render into
+    // the title bar's outlets (`components/shell/title-bar-outlets.tsx`); it
+    // has to sit above both the bar and the routed children.
+    <TitleBarOutletsProvider>
+      <div className="relative flex h-screen w-full flex-col bg-background text-foreground">
+        <WindowFocusTracker />
+        <WindowResizeEdges />
+        <ZoomShortcuts />
+        <TerminalToggleShortcut />
+        <PanelQuickSwitch />
+        <TitleBar />
+        {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
           edge drop zones it paints during a drag are `fixed`, so the row's
           child order (which the rail-placement tests pin) is unchanged. */}
       <TerminalDockMoveProvider>
@@ -198,9 +203,10 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           dock, which renders only while that panel is open — so clicking a file
           reference in chat with the terminal closed wrote to the store and showed
           nothing at all. */}
-      <FileViewerDialog />
-      <ShellLayoutNotice />
-      {!statusBarCollapsed && <StatusBar />}
-    </div>
+        <FileViewerDialog />
+        <ShellLayoutNotice />
+        {!statusBarCollapsed && <StatusBar />}
+      </div>
+    </TitleBarOutletsProvider>
   )
 }

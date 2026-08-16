@@ -2117,3 +2117,64 @@ describe("ContextWorkbench — panel history chevrons", () => {
     expect(screen.queryByTestId("panel-history-nav")).not.toBeInTheDocument()
   })
 })
+
+describe("ContextWorkbench — header projection", () => {
+  const panels: ContextPanelDefinition[] = [
+    {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      appliesTo: () => true,
+      renderer: () => <div>comments-panel</div>,
+    },
+    {
+      id: "review",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      appliesTo: () => true,
+      renderer: () => <div>review-panel</div>,
+    },
+  ]
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {} })
+    useSettingsStore.setState({ settings: {} as never })
+  })
+
+  it("draws its own header row when no outlet is handed over", () => {
+    renderWorkbench(panels)
+    const header = screen.getByTestId("context-workbench-header")
+    expect(header.tagName).toBe("HEADER")
+    expect(screen.getByTestId("context-workbench")).toContainElement(header)
+  })
+
+  it("renders the header row into the host's outlet, past the activity rail", () => {
+    const outlet = document.createElement("div")
+    outlet.setAttribute("data-testid", "end-outlet")
+    document.body.appendChild(outlet)
+    try {
+      render(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <ContextWorkbench
+            workbenchInstanceId="window-a"
+            resource={resource}
+            panels={panels}
+            headerOutlet={outlet}
+          />
+        </NextIntlClientProvider>
+      )
+      const header = screen.getByTestId("context-workbench-header")
+      expect(outlet).toContainElement(header)
+      expect(screen.getByTestId("context-workbench")).not.toContainElement(header)
+      // Same container name, so the narrow-header folds keep working there.
+      expect(header.className).toContain("@container/wb-header")
+      // Starts past the 48px activity rail that stays inside the dock.
+      expect(header).toHaveStyle({ paddingLeft: "56px" })
+      // The activity rail and the panel body are still where they were.
+      expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+      expect(screen.getByText("comments-panel")).toBeInTheDocument()
+    } finally {
+      outlet.remove()
+    }
+  })
+})

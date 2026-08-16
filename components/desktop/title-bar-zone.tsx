@@ -29,6 +29,8 @@ import type { BarItemMinWidth } from "@/types/shell/bars"
 
 /** Everything a title-bar segment can need from the bar that hosts it. */
 export interface TitleBarItemContext {
+  /** Draw the search pill as icon + shortcut only (the chat header is beside it). */
+  compactSearch?: boolean
   appName: string
   separator: string
   searchPlaceholder: string
@@ -88,6 +90,7 @@ function TitleBarSegment({ item, ctx }: { item: BarCatalogItem; ctx: TitleBarIte
           separator={ctx.separator}
           placeholder={ctx.searchPlaceholder}
           kbdHint={ctx.kbdHint}
+          compact={ctx.compactSearch}
           onClick={ctx.onCommandPalette}
         />
       )

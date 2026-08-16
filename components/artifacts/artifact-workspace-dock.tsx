@@ -26,6 +26,7 @@ import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
 import { cn } from "@/lib/utils"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
 import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
+import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
@@ -288,6 +289,11 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const railPersistent = useWorkbenchRailPersistent()
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
+  // The title bar hosts this dock's header and sizes its end outlet to the
+  // dock's rendered width (`title-bar-outlets.tsx`), including mid-resize and
+  // mid-collapse — so the panel reports what it measures rather than the
+  // percentage the layout store holds.
+  useReportShellColumn("dock", dockPanelElementRef)
   const previousDockCollapsedRef = useRef(dockCollapsed)
   const previousDockSizeRequestRef = useRef(dockSizeRequest)
   /**

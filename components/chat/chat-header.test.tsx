@@ -94,6 +94,11 @@ import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import type { ChatSession, Character, SystemPromptPreset, Skill } from "@cognia/agent-config-types"
+import {
+  TitleBarOutletsProvider,
+  TitleBarProjectionScope,
+  useTitleBarOutletRef,
+} from "@/components/shell/title-bar-outlets"
 
 // Stable empty references — chat-header has `useMemo(() => presetsRaw ?? [],
 // [presetsRaw])` and similar memoised derivations that infinite-loop if the
@@ -607,5 +612,54 @@ describe("ChatHeader", () => {
     expect(countControls(container.querySelector("header"))).toBeLessThanOrEqual(
       CHROME_BUDGET.chatHeader
     )
+  })
+})
+
+describe("ChatHeader — title-bar projection", () => {
+  function CenterOutlet() {
+    const ref = useTitleBarOutletRef("center")
+    return <div ref={ref} data-testid="center-outlet" />
+  }
+
+  beforeEach(() => {
+    mockIsTauri.mockReturnValue(false)
+    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
+    sidebarCollapsed = false
+  })
+
+  it("renders into the title bar's centre outlet inside the chat workspace's scope", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <TitleBarOutletsProvider>
+          <CenterOutlet />
+          <TitleBarProjectionScope enabled>
+            <ChatHeader session={mkSession({ title: "Projected" })} />
+          </TitleBarProjectionScope>
+        </TitleBarOutletsProvider>
+      </Wrapper>
+    )
+    // No row of its own — the bar is the row.
+    expect(container.querySelector("header")).toBeNull()
+    const outlet = screen.getByTestId("center-outlet")
+    expect(outlet).toContainElement(screen.getByTestId("chat-header"))
+    expect(outlet).toHaveTextContent("Projected")
+    // The conversation-list toggle is still the first control in the row.
+    const toggle = screen.getByRole("button", { name: "Collapse conversation list" })
+    expect(screen.getByTestId("chat-header").firstElementChild).toBe(toggle)
+  })
+
+  it("draws its own row when the outlet exists but nothing enabled projection", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <TitleBarOutletsProvider>
+          <CenterOutlet />
+          <ChatHeader session={mkSession()} />
+        </TitleBarOutletsProvider>
+      </Wrapper>
+    )
+    expect(container.querySelector("header")).not.toBeNull()
+    expect(screen.getByTestId("center-outlet")).toBeEmptyDOMElement()
   })
 })

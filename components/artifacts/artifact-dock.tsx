@@ -39,6 +39,7 @@ import {
   ARTIFACT_DOCK_WORKBENCH_HOST_KEY,
   sessionWorkbenchScopeKey,
 } from "@/lib/artifacts/session-workbench-scope-key"
+import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import type { ContextPanelMode, ContextResource } from "@/types/context-workbench"
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
@@ -223,6 +224,10 @@ export function ArtifactContextWorkbench({
   railOnly?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
+  // Desktop only: the workbench header renders into the title bar's end
+  // outlet (`title-bar-outlets.tsx`). The mobile drawer keeps its own header,
+  // and a rail-only dock has no header to project.
+  const headerOutlet = useTitleBarProjection("end", { active: !mobile && !railOnly })
   const artifact = useArtifactStore((state) => state.artifacts[artifactId])
   const unresolvedCommentCount = useContextCommentBadge("artifact", artifactId)
   const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
@@ -392,6 +397,7 @@ export function ArtifactContextWorkbench({
       onCollapse={() => setDockCollapsed(true)}
       onEnsureVisible={() => setDockCollapsed(false)}
       railOnly={railOnly}
+      headerOutlet={headerOutlet}
       attentionActivity={unreadArtifact ? ARTIFACT_ATTENTION_ACTIVITY : undefined}
       onModeWidthHint={dockWidthHint}
       resolvedMode={resolvedDockMode}
@@ -418,6 +424,10 @@ export function SessionContextWorkbench({
   railOnly?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
+  // Desktop only: the workbench header renders into the title bar's end
+  // outlet (`title-bar-outlets.tsx`). The mobile drawer keeps its own header,
+  // and a rail-only dock has no header to project.
+  const headerOutlet = useTitleBarProjection("end", { active: !mobile && !railOnly })
   const activeSessionId = useChatStore((state) => state.activeSessionId)
   // The conversation's *record* (model, working dir, timestamps) lives in
   // `sessionStore`; `chatStore.sessions` is the per-session message slice.
@@ -515,6 +525,7 @@ export function SessionContextWorkbench({
       onCollapse={() => setDockCollapsed(true)}
       onEnsureVisible={() => setDockCollapsed(false)}
       railOnly={railOnly}
+      headerOutlet={headerOutlet}
       attentionActivity={unreadArtifact ? SESSION_ATTENTION_ACTIVITY : undefined}
       onModeWidthHint={dockWidthHint}
       resolvedMode={resolvedDockMode}

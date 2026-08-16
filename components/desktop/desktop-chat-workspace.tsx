@@ -28,6 +28,7 @@ import { CharacterPicker } from "@/components/chat/character-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { MemberList } from "@/components/shell/member-list"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
+import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { CanvasShell } from "@/components/canvas/canvas-shell"
 import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
@@ -544,7 +545,11 @@ export function DesktopChatWorkspace() {
           <CanvasShell />
         ) : null
       ) : (
-        <>
+        // The one place that turns header projection on: the conversation
+        // rail's, the chat pane's and the artifact dock's headers all render
+        // into the title bar's zones here (`title-bar-outlets.tsx`), so the
+        // workspace sits under a single 40px row instead of one per column.
+        <TitleBarProjectionScope enabled>
           {/* Always mounted so the rail can animate its width to 0 when
               collapsed (a smooth transition needs the element to stay in the
               DOM). It self-hides to a 0-width column — no leftover strip — and
@@ -659,7 +664,7 @@ export function DesktopChatWorkspace() {
               onMention={handleMemberMention}
             />
           )}
-        </>
+        </TitleBarProjectionScope>
       )}
 
       <CharacterPicker

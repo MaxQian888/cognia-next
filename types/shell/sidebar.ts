@@ -104,6 +104,15 @@ export type SidebarSide = "left" | "right"
 export const DEFAULT_SIDEBAR_SIDE: SidebarSide = "left"
 
 /**
+ * The nav rail's width in px — the `w-16` `guild-rail.tsx` draws, named because
+ * the title bar needs it as a *layout* number: its start / end outlets are
+ * offset by the rail so the conversation-rail header lands over the
+ * conversation rail and not over the nav rail beside it. Same reason
+ * `WORKBENCH_RAIL_WIDTH_PX` lives in `@/types/shell/workbench-rail`.
+ */
+export const GUILD_RAIL_WIDTH_PX = 64
+
+/**
  * The rail's shipped pins.
  *
  * This used to be "every `feature` item", which put eleven icons on a 64px rail
