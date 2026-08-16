@@ -151,7 +151,7 @@ export function MessageDisplayControls({
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-4 pt-2">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 @md/appearance-pane:grid-cols-2">
             <PreferenceSelect
               label={t("layout.label")}
               value={ownOverrides?.layout}
@@ -257,7 +257,7 @@ export function MessageDisplayControls({
 
           <div className="space-y-2">
             <Label className="text-xs">{t("metadata.label")}</Label>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 @md/appearance-pane:grid-cols-2">
               {METADATA_FIELDS.map((key) => (
                 <PreferenceSelect
                   key={key}

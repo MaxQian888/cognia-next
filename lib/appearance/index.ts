@@ -46,6 +46,31 @@ export { DensityApplier, resolveDensityAttrs, densitySurfaceProps } from "./dens
 export { RadiusApplier, resolveRadiusVar } from "./radius-applier"
 export { MotionApplier, resolveMotionState } from "./motion-applier"
 export {
+  FOCAL_PRESETS,
+  WALLPAPER_POSITIONS,
+  backgroundFitStyle,
+  clampFocal,
+  focalPresetId,
+  resolveBackgroundFit,
+  supportsFocalPoint,
+} from "./background-fit"
+export type { BackgroundFit, FocalPreset } from "./background-fit"
+export {
+  AA_LARGE_TEXT,
+  AA_NORMAL_TEXT,
+  bandRatio,
+  computeOpacityVerdict,
+  effectiveContrast,
+  maxOpacityForRatio,
+  readThemeColors,
+  wallpaperFloorRatio,
+} from "./wallpaper-readability"
+export type {
+  OpacityVerdict,
+  ReadabilityBand,
+  ReadabilityVerdict as WallpaperReadabilityVerdict,
+} from "./wallpaper-readability"
+export {
   BUILTIN_COLOR_PRESETS,
   BUILTIN_GRADIENT_PRESETS,
   BUILTIN_WALLPAPERS,

@@ -5,6 +5,10 @@
 // elevation (shadow depth), and corner radius. Reads/writes
 // `settings.componentStyles`; the `ComponentStyleApplier` turns the result into
 // an injected stylesheet keyed off each component's `data-slot`.
+//
+// Every breakpoint here is `@…/appearance-pane`, not a viewport one: the rows
+// render inside the section's detail pane, so the label column and the three
+// axis selects have to size off that box rather than the window behind it.
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
@@ -121,10 +125,10 @@ export function ComponentsTab() {
                   <div
                     key={entry.key}
                     data-component-key={entry.key}
-                    className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center"
+                    className="flex flex-col gap-3 rounded-lg border p-3 @2xl/appearance-pane:flex-row @2xl/appearance-pane:items-center"
                   >
                     {/* Live preview swatch — reflects elevation + radius directly. */}
-                    <div className="flex items-center gap-3 sm:w-40">
+                    <div className="flex items-center gap-3 @2xl/appearance-pane:w-40">
                       <div
                         aria-hidden
                         data-slot="component-preview"
@@ -140,7 +144,7 @@ export function ComponentsTab() {
                       <span className="text-sm font-medium">{t(`items.${entry.labelKey}`)}</span>
                     </div>
 
-                    <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-3">
+                    <div className="grid flex-1 grid-cols-1 gap-2 @sm/appearance-pane:grid-cols-3">
                       {/* Tonality */}
                       <div className="space-y-1">
                         <Label className="text-[11px] text-muted-foreground">

@@ -352,7 +352,11 @@ export function ThemeTab() {
 
       <section className="space-y-2">
         <h3 className="text-sm font-medium">{t("colorPresetLabel")}</h3>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {/* Container-, not viewport-driven: this grid lives in the section's
+            detail pane, which is the viewport minus a 320px nav. A `sm:` rule
+            went four-up the moment the window cleared 640px, i.e. while the
+            pane itself was still ~300px and each chip ~70px wide. */}
+        <div className="grid grid-cols-2 gap-2 @lg/appearance-pane:grid-cols-3 @2xl/appearance-pane:grid-cols-4">
           {COLOR_PRESETS.map((preset) => {
             const swatches = PRESET_SWATCHES[preset]
             const active = colorTheme === preset && !activeCustomThemeId && !activePluginThemeId
@@ -444,7 +448,7 @@ export function ThemeTab() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("vscode.search.placeholder")}
-            className="h-8 text-xs sm:max-w-xs"
+            className="h-8 text-xs @md/appearance-pane:max-w-xs"
             aria-label={t("vscode.search.placeholder")}
           />
           <ToggleGroup

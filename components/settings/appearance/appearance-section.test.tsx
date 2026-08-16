@@ -181,6 +181,73 @@ describe("AppearanceSection", () => {
         expect(screen.getAllByTestId("appearance-preview-stub")).toHaveLength(1)
       }
     )
+
+    it("collapses the preview without taking the panel identity with it", async () => {
+      const user = userEvent.setup()
+      render(<AppearanceSection />)
+      await user.click(screen.getByTestId("appearance-preview-toggle"))
+      expect(screen.queryByTestId("appearance-preview-stub")).not.toBeInTheDocument()
+      expect(screen.getByTestId("appearance-panel-title")).toBeInTheDocument()
+    })
+  })
+
+  // Before this, the pane opened with a bare "Live preview" strip and the only
+  // thing naming the current panel on desktop was the highlight in the nav.
+  describe("detail header", () => {
+    it("names the active panel", () => {
+      searchString = "?appearanceTab=cursor"
+      render(<AppearanceSection />)
+      expect(screen.getByTestId("appearance-panel-title")).toHaveTextContent(
+        "nav.items.cursor.label"
+      )
+    })
+
+    it("follows a legacy deep link to the panel it resolves to", () => {
+      searchString = "?appearanceTab=themePack"
+      render(<AppearanceSection />)
+      expect(screen.getByTestId("appearance-panel-title")).toHaveTextContent(
+        "nav.items.library.label"
+      )
+    })
+
+    // The scroll container outlives the panel it holds, so without an explicit
+    // reset you land halfway down a panel you have never scrolled.
+    it("scrolls the panel body back to the top when the panel changes", () => {
+      const setScrollTop = jest.fn()
+      const original = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")
+      Object.defineProperty(Element.prototype, "scrollTop", {
+        configurable: true,
+        get: () => 0,
+        set: setScrollTop,
+      })
+      try {
+        const { rerender } = render(<AppearanceSection />)
+        setScrollTop.mockClear()
+        searchString = "?appearanceTab=a11y"
+        rerender(<AppearanceSection />)
+        expect(setScrollTop).toHaveBeenCalledWith(0)
+      } finally {
+        if (original) Object.defineProperty(Element.prototype, "scrollTop", original)
+      }
+    })
+
+    it("does not reset the scroll on an unrelated re-render", () => {
+      const setScrollTop = jest.fn()
+      const original = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")
+      Object.defineProperty(Element.prototype, "scrollTop", {
+        configurable: true,
+        get: () => 0,
+        set: setScrollTop,
+      })
+      try {
+        const { rerender } = render(<AppearanceSection />)
+        setScrollTop.mockClear()
+        rerender(<AppearanceSection />)
+        expect(setScrollTop).not.toHaveBeenCalled()
+      } finally {
+        if (original) Object.defineProperty(Element.prototype, "scrollTop", original)
+      }
+    })
   })
 
   it("does not render an inline reset button (the shell owns section reset)", () => {

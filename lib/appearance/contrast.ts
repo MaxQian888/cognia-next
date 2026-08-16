@@ -8,7 +8,20 @@ function relLuminance(color: string): number {
   const rgb = toRgb(parse(color))
   if (!rgb) return 0
   const f = (v: number) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
-  return 0.2126 * f(rgb.r ?? 0) + 0.7152 * f(rgb.g ?? 0) + 0.0722 * f(rgb.b ?? 0)
+  return 0.2126 * f(rgb.r) + 0.7152 * f(rgb.g) + 0.0722 * f(rgb.b)
+}
+
+/**
+ * Whether culori can resolve this string to a real color.
+ *
+ * Worth calling before {@link wcagContrast}: an unparsable input does **not**
+ * throw, it silently contributes zero luminance, so a pair of garbage colors
+ * reports a plausible-looking 1:1 rather than an error. Callers that read
+ * colors out of the live cascade (where a var can resolve to something culori
+ * has no parser for) need to tell "unreadable" apart from "unknown".
+ */
+export function isColorParsable(color: string): boolean {
+  return toRgb(parse(color)) !== undefined
 }
 
 export function wcagContrast(fg: string, bg: string): number {
@@ -86,10 +99,8 @@ export function adjustForegroundLightnessToTarget(
   // safely above the actual WCAG threshold.
   const searchTarget = targetRatio + 0.1
 
-  const tryColor = (L: number): string => {
-    const css = formatCss({ ...fgOklch, l: L })
-    return css ?? fg
-  }
+  // `formatCss` is total for an oklch color, and `fgOklch` parsed above.
+  const tryColor = (L: number): string => formatCss({ ...fgOklch, l: L })
 
   // Decide direction based on starting luminance, but flip if the natural
   // direction is unreachable. Mid-gray backgrounds are notoriously hard for
@@ -121,10 +132,10 @@ export function adjustForegroundLightnessToTarget(
   let hi = originalSatisfies && !moveLighter ? fgOklch.l : 1
   // Ensure lo/hi bracket the target so the binary search has a solution.
   if (moveLighter && wcagContrast(tryColor(lo), bg) >= searchTarget) {
-    return formatCss(fgOklch) ?? fg
+    return formatCss(fgOklch)
   }
   if (!moveLighter && wcagContrast(tryColor(hi), bg) >= searchTarget) {
-    return formatCss(fgOklch) ?? fg
+    return formatCss(fgOklch)
   }
   for (let i = 0; i < 18; i++) {
     const mid = (lo + hi) / 2

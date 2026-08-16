@@ -46,10 +46,15 @@ export function ColorTokenRow({
   // picker stays interactive.
   const swatchValue = hexValid ? value : "#888888"
   return (
-    <div className={cn("flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3", className)}>
+    <div
+      className={cn(
+        "flex flex-col gap-1 @sm/appearance-pane:flex-row @sm/appearance-pane:items-center @sm/appearance-pane:gap-3",
+        className
+      )}
+    >
       <Label
         htmlFor={`color-token-${tokenKey}`}
-        className="text-[11px] uppercase tracking-wide sm:w-32"
+        className="text-[11px] uppercase tracking-wide @sm/appearance-pane:w-32"
       >
         {label ?? tokenKey}
       </Label>
@@ -72,7 +77,7 @@ export function ColorTokenRow({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           className={cn(
-            "h-8 flex-1 font-mono text-[11px] sm:max-w-32",
+            "h-8 flex-1 font-mono text-[11px] @sm/appearance-pane:max-w-32",
             !hexValid && "border-destructive text-destructive"
           )}
           aria-label={hexAriaLabel ?? `${label ?? tokenKey} hex`}
@@ -80,7 +85,9 @@ export function ColorTokenRow({
           data-testid={`color-token-${tokenKey}-hex`}
         />
       </div>
-      {hint && <p className="text-[11px] text-muted-foreground sm:ml-32">{hint}</p>}
+      {hint && (
+        <p className="text-[11px] text-muted-foreground @sm/appearance-pane:ml-32">{hint}</p>
+      )}
     </div>
   )
 }

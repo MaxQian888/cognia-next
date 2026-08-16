@@ -95,8 +95,10 @@ export function PresetGrid({
     )
   }
 
+  // Sized off the detail pane, not the window — see the note on the color
+  // preset grid in `theme-tab.tsx`.
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2 @xl/appearance-pane:grid-cols-3 @3xl/appearance-pane:grid-cols-4">
       {items.map((item) => {
         const swatches = synthesizeThemeSwatches(item.colors)
         const active = item.key === activeKey

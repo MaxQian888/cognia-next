@@ -14,6 +14,11 @@
 //     `motion.reduce` and the legacy `settings.reduceMotion` boolean so the
 //     desktop View menu, mobile preferences, and backup stay in agreement, and
 //     it reads whichever source is authoritative (mirrors MotionApplier).
+//
+// The six controls are grouped into the three questions they answer — how
+// strictly contrast is audited, what color layer sits on the theme, and how
+// much the UI moves. Flat, they were six near-identical select blocks separated
+// by unlabelled hairlines, and nothing said which ones belonged together.
 
 import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
@@ -79,131 +84,146 @@ export function A11yTab() {
   const reduceMotionChecked = settings?.motion?.reduce ?? Boolean(settings?.reduceMotion)
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <Label className="text-xs">{t("wcag.targetLabel")}</Label>
-        <Select
+    <div className="space-y-4">
+      <A11yGroup groupKey="contrast" data-testid="a11y-group-contrast">
+        <A11ySelect
+          label={t("wcag.targetLabel")}
+          hint={t("wcag.targetHint")}
           value={a11y.wcagTarget}
-          onValueChange={(value) => {
-            void save({ a11y: { ...a11y, wcagTarget: value as WcagTarget } })
-          }}
-        >
-          <SelectTrigger className={responsiveSelectClass}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {WCAG_TARGETS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {t(opt.labelKey)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[11px] text-muted-foreground">{t("wcag.targetHint")}</p>
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-xs">{t("wcag.enforcementLabel")}</Label>
-        <Select
-          value={a11y.enforcement}
-          onValueChange={(value) => {
-            void save({ a11y: { ...a11y, enforcement: value as WcagEnforcement } })
-          }}
-        >
-          <SelectTrigger className={responsiveSelectClass}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ENFORCEMENTS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {t(opt.labelKey)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[11px] text-muted-foreground">{t("wcag.enforcementHint")}</p>
-      </div>
-
-      <div className="space-y-2 border-t pt-4">
-        <Label className="text-xs">{t("highContrast.label")}</Label>
-        <Select
-          value={a11y.highContrast}
-          onValueChange={(value) => {
-            void save({ a11y: { ...a11y, highContrast: value as HighContrastMode } })
-          }}
-        >
-          <SelectTrigger className={responsiveSelectClass}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {HIGH_CONTRASTS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {t(opt.labelKey)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[11px] text-muted-foreground">{t("highContrast.hint")}</p>
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-xs">{t("colorblind.label")}</Label>
-        <Select
-          value={a11y.colorblindMode}
-          onValueChange={(value) => {
-            void save({ a11y: { ...a11y, colorblindMode: value as ColorblindMode } })
-          }}
-        >
-          <SelectTrigger className={responsiveSelectClass}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {COLORBLIND.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {t(opt.labelKey)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[11px] text-muted-foreground">{t("colorblind.hint")}</p>
-      </div>
-
-      <div className="space-y-2 border-t pt-4">
-        <Label className="text-xs">{t("motion.speedLabel")}</Label>
-        <Select
-          value={String(motion.speed)}
-          onValueChange={(value) => {
-            const speed = Number(value) as MotionSpeed
-            void save({ motion: { ...motion, speed } })
-          }}
-        >
-          <SelectTrigger className={responsiveSelectClass}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {MOTION_SPEEDS.map((opt) => (
-              <SelectItem key={opt.value} value={String(opt.value)}>
-                {t(opt.labelKey)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <Label className="text-sm">{t("motion.reduceLabel")}</Label>
-          <p className="text-xs text-muted-foreground">{t("motion.reduceHint")}</p>
-        </div>
-        <Switch
-          checked={reduceMotionChecked}
-          onCheckedChange={(checked) => {
-            // Keep the legacy boolean in lock-step with the canonical one.
-            void save({ motion: { ...motion, reduce: checked }, reduceMotion: checked })
-          }}
-          aria-label={t("motion.reduceLabel")}
+          options={WCAG_TARGETS}
+          getLabel={(key) => t(key)}
+          onChange={(value) => void save({ a11y: { ...a11y, wcagTarget: value as WcagTarget } })}
         />
+        <A11ySelect
+          label={t("wcag.enforcementLabel")}
+          hint={t("wcag.enforcementHint")}
+          value={a11y.enforcement}
+          options={ENFORCEMENTS}
+          getLabel={(key) => t(key)}
+          onChange={(value) =>
+            void save({ a11y: { ...a11y, enforcement: value as WcagEnforcement } })
+          }
+        />
+      </A11yGroup>
+
+      <A11yGroup groupKey="vision" data-testid="a11y-group-vision">
+        <A11ySelect
+          label={t("highContrast.label")}
+          hint={t("highContrast.hint")}
+          value={a11y.highContrast}
+          options={HIGH_CONTRASTS}
+          getLabel={(key) => t(key)}
+          onChange={(value) =>
+            void save({ a11y: { ...a11y, highContrast: value as HighContrastMode } })
+          }
+        />
+        <A11ySelect
+          label={t("colorblind.label")}
+          hint={t("colorblind.hint")}
+          value={a11y.colorblindMode}
+          options={COLORBLIND}
+          getLabel={(key) => t(key)}
+          onChange={(value) =>
+            void save({ a11y: { ...a11y, colorblindMode: value as ColorblindMode } })
+          }
+        />
+      </A11yGroup>
+
+      <A11yGroup groupKey="motion" data-testid="a11y-group-motion">
+        <A11ySelect
+          label={t("motion.speedLabel")}
+          value={String(motion.speed)}
+          options={MOTION_SPEEDS.map((opt) => ({
+            value: String(opt.value),
+            labelKey: opt.labelKey,
+          }))}
+          getLabel={(key) => t(key)}
+          // Reduced motion pins every duration to zero, so a speed multiplier
+          // under it is a control that provably does nothing.
+          disabled={reduceMotionChecked}
+          hint={reduceMotionChecked ? t("motion.speedDisabledHint") : undefined}
+          onChange={(value) =>
+            void save({ motion: { ...motion, speed: Number(value) as MotionSpeed } })
+          }
+        />
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <Label className="text-xs">{t("motion.reduceLabel")}</Label>
+            <p className="text-[11px] text-muted-foreground">{t("motion.reduceHint")}</p>
+          </div>
+          <Switch
+            checked={reduceMotionChecked}
+            onCheckedChange={(checked) => {
+              // Keep the legacy boolean in lock-step with the canonical one.
+              void save({ motion: { ...motion, reduce: checked }, reduceMotion: checked })
+            }}
+            aria-label={t("motion.reduceLabel")}
+          />
+        </div>
+      </A11yGroup>
+    </div>
+  )
+}
+
+/**
+ * One titled card of related controls. Two-up once the detail pane can afford
+ * it — sized off `@…/appearance-pane` rather than the viewport, since the pane
+ * is the window minus a 320px nav.
+ */
+function A11yGroup({
+  groupKey,
+  children,
+  "data-testid": testId,
+}: {
+  groupKey: "contrast" | "vision" | "motion"
+  children: React.ReactNode
+  "data-testid": string
+}) {
+  const t = useTranslations("settings.appearance.a11y.groups")
+  return (
+    <section className="space-y-3 rounded-lg border p-3" data-testid={testId}>
+      <div className="space-y-0.5">
+        <Label className="text-xs">{t(`${groupKey}.label`)}</Label>
+        <p className="text-[11px] text-muted-foreground">{t(`${groupKey}.hint`)}</p>
       </div>
+      <div className="grid gap-3 @2xl/appearance-pane:grid-cols-2">{children}</div>
+    </section>
+  )
+}
+
+function A11ySelect({
+  label,
+  hint,
+  value,
+  options,
+  getLabel,
+  onChange,
+  disabled,
+}: {
+  label: string
+  hint?: string
+  value: string
+  options: readonly { value: string; labelKey: string }[]
+  getLabel: (labelKey: string) => string
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-[11px] text-muted-foreground">{label}</Label>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger className={responsiveSelectClass} aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {getLabel(opt.labelKey)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   )
 }

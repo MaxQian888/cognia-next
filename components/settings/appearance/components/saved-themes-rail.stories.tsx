@@ -48,10 +48,20 @@ const handlers = {
   onNew: fn(),
 }
 
+// Multi-column layout here sizes off `@container/appearance-pane`, which
+// `appearance-section.tsx` owns in the real app — the decorator stands in for
+// it so this story previews the same layout the settings pane shows.
 const meta = {
   title: "Settings/Appearance/SavedThemesRail",
   component: SavedThemesRail,
   parameters: { layout: "padded" },
+  decorators: [
+    (Story) => (
+      <div className="@container/appearance-pane">
+        <Story />
+      </div>
+    ),
+  ],
   args: { themes, activeId: null, editingId: undefined, labels: LABELS, ...handlers },
 } satisfies Meta<typeof SavedThemesRail>
 

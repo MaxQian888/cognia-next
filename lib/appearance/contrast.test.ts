@@ -1,4 +1,9 @@
-import { adjustForegroundLightnessToTarget, evaluateReadability, wcagContrast } from "./contrast"
+import {
+  adjustForegroundLightnessToTarget,
+  evaluateReadability,
+  isColorParsable,
+  wcagContrast,
+} from "./contrast"
 
 describe("wcagContrast", () => {
   it("returns ~21 for black on white", () => {
@@ -9,6 +14,22 @@ describe("wcagContrast", () => {
   })
   it("is symmetric", () => {
     expect(wcagContrast("#123456", "#abcdef")).toBeCloseTo(wcagContrast("#abcdef", "#123456"), 2)
+  })
+})
+
+describe("isColorParsable", () => {
+  it("accepts the notations the appearance module actually stores", () => {
+    expect(isColorParsable("#abcdef")).toBe(true)
+    expect(isColorParsable("rgb(1 2 3)")).toBe(true)
+    expect(isColorParsable("oklch(0.5 0.1 30)")).toBe(true)
+    expect(isColorParsable("rebeccapurple")).toBe(true)
+  })
+
+  // The reason this helper exists: garbage does not throw, it reads as 1:1.
+  it("rejects unresolved vars and nonsense, which wcagContrast reports as 1:1", () => {
+    expect(isColorParsable("var(--nope)")).toBe(false)
+    expect(isColorParsable("")).toBe(false)
+    expect(wcagContrast("var(--nope)", "var(--nope)")).toBeCloseTo(1, 5)
   })
 })
 
@@ -42,6 +63,23 @@ describe("adjustForegroundLightnessToTarget", () => {
     const fixed = adjustForegroundLightnessToTarget("#000000", "#ffffff", 4.5)
     expect(fixed).not.toBeNull()
     expect(wcagContrast(fixed ?? "#000000", "#ffffff")).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // Both directions have an early exit for "the bracket's near edge already
+  // passes": nothing to search for, so the original lightness is kept.
+  it("keeps the original lightness when the near bracket edge already passes", () => {
+    expect(adjustForegroundLightnessToTarget("#ffffff", "#000000", 4.5)).toBe(
+      adjustForegroundLightnessToTarget("#ffffff", "#000000", 4.5)
+    )
+    for (const [fg, bg] of [
+      ["#ffffff", "#000000"],
+      ["#000000", "#ffffff"],
+    ]) {
+      const fixed = adjustForegroundLightnessToTarget(fg, bg, 4.5)
+      expect(fixed).not.toBeNull()
+      // 21:1 already — the search must not drag it toward the threshold.
+      expect(wcagContrast(fixed!, bg)).toBeCloseTo(21, 0)
+    }
   })
 
   it("darkens a too-light foreground on a light background", () => {

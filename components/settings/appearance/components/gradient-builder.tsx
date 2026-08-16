@@ -100,7 +100,11 @@ export function GradientBuilder({ initial, onCreate }: GradientBuilderProps) {
         </div>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      {/* No breakpoint: this builder only ever renders inside a fixed 320px
+          popover, which portals out of the detail pane's container. A viewport
+          `sm:` rule here fired off the window behind the popover — always true
+          on desktop — so it described nothing real either way. */}
+      <div className="flex items-center gap-2">
         <Input
           placeholder={t("namePlaceholder")}
           value={name}

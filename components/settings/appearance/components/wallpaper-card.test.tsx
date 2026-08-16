@@ -98,6 +98,66 @@ describe("WallpaperCard", () => {
     expect(screen.getByText("!")).toBeInTheDocument()
   })
 
+  describe("fit preview", () => {
+    const imageWp = baseWp({
+      kind: "image",
+      source: {
+        kind: "image",
+        storage: "data-url",
+        dataUrl: "data:image/png;base64,AA==",
+        mime: "image/png",
+        width: 4,
+        height: 3,
+      },
+    })
+
+    it("defaults to a neutral cover thumbnail", async () => {
+      await act(async () => {
+        render(<WallpaperCard wallpaper={imageWp} active={false} onActivate={() => {}} />)
+      })
+      expect(screen.getByTestId("wallpaper-card-preview")).toHaveStyle({
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      })
+    })
+
+    // The active tile answers "what does contain / this focal point look like?"
+    // without making the user hunt for the live app behind the settings pane.
+    it("mirrors the active fit and focal point", async () => {
+      await act(async () => {
+        render(
+          <WallpaperCard
+            wallpaper={imageWp}
+            active
+            onActivate={() => {}}
+            previewFit={{ position: "contain", focalX: 0, focalY: 100 }}
+          />
+        )
+      })
+      expect(screen.getByTestId("wallpaper-card-preview")).toHaveStyle({
+        backgroundSize: "contain",
+        backgroundPosition: "0% 100%",
+        backgroundRepeat: "no-repeat",
+      })
+    })
+
+    it("ignores the fit for sources that have no raster to place", async () => {
+      await act(async () => {
+        render(
+          <WallpaperCard
+            wallpaper={baseWp()}
+            active
+            onActivate={() => {}}
+            previewFit={{ position: "tile" }}
+          />
+        )
+      })
+      expect(screen.getByTestId("wallpaper-card-preview")).toHaveStyle({
+        backgroundPosition: "center",
+      })
+    })
+  })
+
   it("disposes the previously-resolved URL on unmount", async () => {
     storage.resolveSourceToCss.mockResolvedValue("url('blob:mock')")
     const { unmount } = render(

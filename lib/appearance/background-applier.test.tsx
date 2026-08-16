@@ -207,6 +207,65 @@ describe("BackgroundApplier", () => {
     expect(document.body.style.getPropertyValue(__INTERNALS__.VAR_SIZE)).toBe("contain")
   })
 
+  it("stretches both axes when position is fill", async () => {
+    const wp = wallpaper("wp-fill", { kind: "color", value: "#000" })
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("#000")
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "wp-fill",
+        position: "fill",
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.style.getPropertyValue(__INTERNALS__.VAR_SIZE)).toBe("100% 100%")
+  })
+
+  it("anchors a cover crop at the stored focal point", async () => {
+    const wp = wallpaper("wp-focal", { kind: "color", value: "#000" })
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("#000")
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "wp-focal",
+        position: "cover",
+        focalX: 100,
+        focalY: 0,
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.style.getPropertyValue(__INTERNALS__.VAR_POSITION)).toBe("100% 0%")
+  })
+
+  // Rows written before the focal point existed have no focalX/focalY at all.
+  it("centers when the settings row predates the focal point", async () => {
+    const wp = wallpaper("wp-legacy", { kind: "color", value: "#000" })
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("#000")
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "wp-legacy",
+        position: "cover",
+        focalX: undefined,
+        focalY: undefined,
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.style.getPropertyValue(__INTERNALS__.VAR_POSITION)).toBe("50% 50%")
+  })
+
   it("logs and falls back to disabled on resolveSourceToCss errors", async () => {
     const wp = wallpaper("broken", {
       kind: "image",

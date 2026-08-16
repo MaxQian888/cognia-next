@@ -476,7 +476,7 @@ export function CustomThemeTab() {
 
         {/* Saved-themes column (sticky on xl so the rail stays reachable while
             scrolling through token groups) */}
-        <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+        <div className="space-y-4 @4xl/appearance-pane:sticky @4xl/appearance-pane:top-4 @4xl/appearance-pane:self-start">
           <SavedThemesRail
             themes={themes}
             activeId={activeId}

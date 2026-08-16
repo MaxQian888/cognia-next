@@ -38,10 +38,20 @@ function Harness({ overrides }: { overrides: Partial<ThemeColors> }) {
   )
 }
 
+// Multi-column layout here sizes off `@container/appearance-pane`, which
+// `appearance-section.tsx` owns in the real app — the decorator stands in for
+// it so this story previews the same layout the settings pane shows.
 const meta = {
   title: "Settings/Appearance/TokenGroup",
   component: TokenGroup,
   parameters: { layout: "padded" },
+  decorators: [
+    (Story) => (
+      <div className="@container/appearance-pane">
+        <Story />
+      </div>
+    ),
+  ],
   // Full required-args set so the render-based stories below type-check; the
   // Harness supplies its own live values, so these defaults are placeholders.
   args: {

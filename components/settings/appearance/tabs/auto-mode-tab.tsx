@@ -92,7 +92,7 @@ export function AutoModeTab() {
       </div>
 
       {autoMode.trigger === "schedule" && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @md/appearance-pane:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="auto-light-at" className="text-xs">
               {t("schedule.lightAt")}
@@ -134,7 +134,7 @@ export function AutoModeTab() {
           {!geoAvailable && (
             <p className="text-[11px] text-muted-foreground">{t("sunset.unavailable")}</p>
           )}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 @md/appearance-pane:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="auto-lat" className="text-xs">
                 {t("sunset.latitude")}

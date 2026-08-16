@@ -206,7 +206,7 @@ export function SavedThemesRail({
     <aside
       className={cn(
         "flex w-full flex-col gap-2 rounded-md border bg-muted/20 p-2",
-        "xl:max-h-[60vh] xl:min-h-0",
+        "@4xl/appearance-pane:max-h-[60vh] @4xl/appearance-pane:min-h-0",
         className
       )}
       data-testid="saved-themes-rail"
@@ -240,8 +240,9 @@ export function SavedThemesRail({
           className={cn(
             // Mobile / tablet: horizontal strip that wraps.
             "flex flex-wrap gap-2",
-            // xl+: vertical scrolling list.
-            "xl:flex-col xl:flex-nowrap xl:overflow-y-auto"
+            // Once the pane is wide enough for the rail to become a real side
+            // column, a vertical scrolling list.
+            "@4xl/appearance-pane:flex-col @4xl/appearance-pane:flex-nowrap @4xl/appearance-pane:overflow-y-auto"
           )}
           data-testid="saved-themes-rail-list"
         >

@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Wallpaper: better image fitting, a wallpaper-aware theme generator, and a reorganized panel. Adds a `Stretch` fit and a 3×3 focal-point anchor so an over-wide or portrait image keeps its subject through a `cover` crop, and the active gallery tile now previews the real fit instead of a fixed thumbnail. "Generate theme from wallpaper" now works for gradient and solid-color wallpapers (previously image-only, which excluded every built-in preset), extracts a secondary color alongside the accent, tints the neutral surfaces toward the wallpaper instead of leaving them gray, and suggests an opacity/blur pair matched to how busy the image is. The contrast chip measures the sampled wallpaper rather than assuming worst-case noise for every image, and "Auto-fix" now applies the highest opacity that still clears WCAG AA instead of a fixed 40%. The adjustments are grouped into Placement and Readability, the scope picker gained arrow-key navigation, and dragging the blur/opacity sliders previews live without writing to the database on every pointer move.

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 
@@ -24,17 +24,7 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("@/lib/appearance", () => ({
-  withBuiltinPresets: jest.fn((arr: Wallpaper[] | undefined) => [
-    {
-      id: "preset-mock",
-      name: "Mock Preset",
-      kind: "color",
-      builtin: true,
-      createdAt: 0,
-      source: { kind: "color", value: "#abcdef" },
-    },
-    ...(arr ?? []),
-  ]),
+  withBuiltinPresets: jest.fn(),
   saveImage: jest.fn(),
   deleteImage: jest.fn(),
   makeWallpaper: jest.fn((args) => ({
@@ -49,6 +39,13 @@ jest.mock("@/lib/appearance", () => ({
 jest.mock("@/lib/appearance/image-utils", () => ({
   readImageDimensions: jest.fn().mockResolvedValue({ width: 1, height: 1 }),
 }))
+// The generator samples on mount; keep the tab's own tests off the canvas path
+// so they control whether a measured analysis exists.
+jest.mock("@/lib/appearance/wallpaper-theme-generator", () => ({
+  analyzeWallpaperSource: jest.fn(),
+  buildWallpaperTheme: jest.fn(),
+  recommendBackgroundTuning: jest.fn(),
+}))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const appearance = require("@/lib/appearance") as {
@@ -56,6 +53,12 @@ const appearance = require("@/lib/appearance") as {
   saveImage: jest.Mock
   deleteImage: jest.Mock
   makeWallpaper: jest.Mock
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const themeGenerator = require("@/lib/appearance/wallpaper-theme-generator") as {
+  analyzeWallpaperSource: jest.Mock
+  buildWallpaperTheme: jest.Mock
+  recommendBackgroundTuning: jest.Mock
 }
 
 /** A file the real intake accepts, so drop/pick tests exercise validation. */
@@ -104,12 +107,45 @@ import {
   __resetPluginWallpapersForTesting,
 } from "@/lib/plugin/bridge/wallpaper-bridge"
 
+/** The analysis the sampler would return for a flat, fully readable field. */
+const FLAT_ANALYSIS = {
+  accent: "#abcdef",
+  secondary: "#efcdab",
+  dominant: "#ffffff",
+  averageLuminance: 0.95,
+  luminanceSpread: 0,
+  baseVariant: "light" as const,
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS }
   storeState.wallpapers = []
   __resetPluginWallpapersForTesting()
+  // Re-seeded per test: `clearAllMocks` wipes calls but keeps implementations,
+  // so a suite that swaps the gallery would otherwise leak into the next one.
+  appearance.withBuiltinPresets.mockImplementation((arr: Wallpaper[] | undefined) => [
+    {
+      id: "preset-mock",
+      name: "Mock Preset",
+      kind: "color",
+      builtin: true,
+      createdAt: 0,
+      source: { kind: "color", value: "#abcdef" },
+    },
+    ...(arr ?? []),
+  ])
+  // Default: sampling fails, so the readability chip falls back to its blind
+  // estimate. Tests that care about the measured path opt in explicitly.
+  themeGenerator.analyzeWallpaperSource.mockRejectedValue(new Error("unsampled"))
+  themeGenerator.recommendBackgroundTuning.mockReturnValue({ opacity: 0.5, blurPx: 4 })
+  setBackground.mockResolvedValue(undefined)
 })
+
+/** Every `role="radio"` inside the scope picker specifically. */
+function scopeRadios() {
+  return within(screen.getByTestId("wallpaper-scope-group")).getAllByRole("radio")
+}
 
 describe("WallpaperTab", () => {
   it("toggles enabled via setBackground", async () => {
@@ -176,39 +212,135 @@ describe("WallpaperTab", () => {
     expect(screen.queryByText("opacity.fail")).not.toBeInTheDocument()
   })
 
-  it("flips to FAIL on an image wallpaper at high opacity and auto-fix lowers it to 0.4", async () => {
-    appearance.withBuiltinPresets.mockImplementationOnce((arr: Wallpaper[] | undefined) => [
-      {
-        id: "img-mock",
-        name: "Image Mock",
-        kind: "image",
-        builtin: true,
-        createdAt: 0,
-        source: {
+  describe("readability verdict", () => {
+    /** Swap the gallery for a single image wallpaper and render at `opacity`. */
+    async function renderWithImage(opacity: number) {
+      appearance.withBuiltinPresets.mockImplementation((arr: Wallpaper[] | undefined) => [
+        {
+          id: "img-mock",
+          name: "Image Mock",
           kind: "image",
-          storage: "data-url",
-          dataUrl: "data:image/png;base64,iVBORw0KGgo=",
-          mime: "image/png",
-          width: 1,
-          height: 1,
+          builtin: true,
+          createdAt: 0,
+          source: {
+            kind: "image",
+            storage: "data-url",
+            dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+            mime: "image/png",
+            width: 1,
+            height: 1,
+          },
         },
-      },
-      ...(arr ?? []),
-    ])
-    storeState.background = {
-      ...DEFAULT_BACKGROUND_SETTINGS,
-      activeId: "img-mock",
-      opacity: 0.95,
+        ...(arr ?? []),
+      ])
+      storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "img-mock", opacity }
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
     }
-    await act(async () => {
-      render(<WallpaperTab />)
+
+    it("flips to FAIL on an unsampled image at high opacity", async () => {
+      await renderWithImage(0.95)
+
+      const chip = screen.getByTestId("wallpaper-contrast-chip")
+      expect(chip.textContent).toMatch(/^FAIL\s/)
+      expect(chip).toHaveAttribute("data-measured", "false")
+      expect(screen.getByText("opacity.estimated")).toBeInTheDocument()
+      expect(screen.getByTestId("wallpaper-theme-generator")).toBeInTheDocument()
+      expect(screen.getByText("opacity.fail")).toBeInTheDocument()
     })
-    const chip = screen.getByTestId("wallpaper-contrast-chip")
-    expect(chip.textContent).toMatch(/^FAIL\s/)
-    expect(screen.getByTestId("wallpaper-theme-generator")).toBeInTheDocument()
-    expect(screen.getByText("opacity.fail")).toBeInTheDocument()
-    fireEvent.click(screen.getByText("opacity.autoFix"))
-    expect(setBackground).toHaveBeenCalledWith({ opacity: 0.4 })
+
+    // Between AA-large (3:1) and AA-normal (4.5:1): readable at heading size,
+    // not at body size.
+    it("warns in the band between the two AA thresholds", async () => {
+      await renderWithImage(0.87)
+
+      const chip = screen.getByTestId("wallpaper-contrast-chip")
+      expect(chip.textContent).toMatch(/^WARN\s/)
+      expect(screen.getByText("opacity.warn")).toBeInTheDocument()
+      expect(screen.queryByText("opacity.fail")).not.toBeInTheDocument()
+      expect(screen.getByText("opacity.autoFix")).toBeInTheDocument()
+    })
+
+    // The old auto-fix hardcoded 0.4 no matter how bad (or fine) the wallpaper
+    // was; now it solves for the most opacity that still clears AA.
+    it("auto-fix applies the highest opacity that still clears AA", async () => {
+      await renderWithImage(0.95)
+
+      fireEvent.click(screen.getByText("opacity.autoFix"))
+
+      const applied = setBackground.mock.calls.at(-1)?.[0].opacity as number
+      // Black-on-white theme (jsdom default) against the blind 1.5:1 floor.
+      expect(applied).toBeCloseTo(0.84, 2)
+      expect(document.body.style.getPropertyValue("--app-bg-opacity")).toBe(String(applied))
+    })
+
+    it("trusts the sampled wallpaper over the blind estimate once it arrives", async () => {
+      themeGenerator.analyzeWallpaperSource.mockResolvedValue(FLAT_ANALYSIS)
+      await renderWithImage(0.95)
+
+      const chip = await screen.findByTestId("wallpaper-contrast-chip")
+      await waitFor(() => expect(chip).toHaveAttribute("data-measured", "true"))
+      expect(chip.textContent).toMatch(/^OK\s/)
+      expect(screen.getByText("opacity.measured")).toBeInTheDocument()
+      expect(screen.queryByText("opacity.autoFix")).not.toBeInTheDocument()
+    })
+
+    // A measurement belongs to one wallpaper. Carrying it across a switch
+    // would report the previous image's contrast for the new one.
+    it("drops the measurement when the active wallpaper changes", async () => {
+      themeGenerator.analyzeWallpaperSource.mockResolvedValue(FLAT_ANALYSIS)
+      let view: ReturnType<typeof render> | undefined
+      await act(async () => {
+        view = render(<WallpaperTab />)
+      })
+      // `preset-mock` is a color wallpaper, so its sample resolves immediately.
+      storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "preset-mock" }
+      await act(async () => {
+        view!.rerender(<WallpaperTab />)
+      })
+      await waitFor(() =>
+        expect(screen.getByTestId("wallpaper-contrast-chip")).toHaveAttribute(
+          "data-measured",
+          "true"
+        )
+      )
+
+      // Switch to a second wallpaper whose sample never resolves: nothing can
+      // replace the stale reading, so only the id tagging can clear it.
+      themeGenerator.analyzeWallpaperSource.mockReturnValue(new Promise(() => {}))
+      storeState.wallpapers = [
+        {
+          id: "user-1",
+          name: "User One",
+          kind: "gradient",
+          builtin: false,
+          createdAt: 2,
+          source: { kind: "gradient", css: "linear-gradient(#000,#fff)" },
+        },
+      ]
+      storeState.background = { ...storeState.background, activeId: "user-1" }
+      await act(async () => {
+        view!.rerender(<WallpaperTab />)
+      })
+
+      expect(screen.getByTestId("wallpaper-contrast-chip")).toHaveAttribute(
+        "data-measured",
+        "false"
+      )
+    })
+
+    it("applies the sampler's suggested opacity and blur in one action", async () => {
+      themeGenerator.analyzeWallpaperSource.mockResolvedValue(FLAT_ANALYSIS)
+      await renderWithImage(0.95)
+
+      const apply = await screen.findByTestId("wallpaper-apply-tuning")
+      fireEvent.click(apply)
+
+      expect(setBackground).toHaveBeenCalledWith({ opacity: 0.5, blurPx: 4 })
+      expect(document.body.style.getPropertyValue("--app-bg-opacity")).toBe("0.5")
+      expect(document.body.style.getPropertyValue("--app-bg-blur")).toBe("4px")
+    })
   })
 
   describe("scope chips", () => {
@@ -224,14 +356,46 @@ describe("WallpaperTab", () => {
       await act(async () => {
         render(<WallpaperTab />)
       })
-      expect(screen.getAllByRole("radio")).toHaveLength(5)
+      expect(scopeRadios()).toHaveLength(5)
+    })
+
+    // A radiogroup is one tab stop the arrow keys move within, not five.
+    it("keeps a single tab stop on the checked chip", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const tabbable = scopeRadios().filter((el) => el.getAttribute("tabindex") === "0")
+      expect(tabbable).toHaveLength(1)
+      expect(tabbable[0]).toHaveAttribute("data-testid", "wallpaper-scope-all")
+    })
+
+    it("moves the selection with the arrow keys", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const all = screen.getByTestId("wallpaper-scope-all")
+
+      fireEvent.keyDown(all, { key: "ArrowRight" })
+      expect(setBackground).toHaveBeenLastCalledWith({ scope: "global" })
+
+      // ...and wraps backwards off the first chip to the last.
+      fireEvent.keyDown(all, { key: "ArrowLeft" })
+      expect(setBackground).toHaveBeenLastCalledWith({ scope: "sidebar" })
+    })
+
+    it("ignores keys that are not arrows", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      fireEvent.keyDown(screen.getByTestId("wallpaper-scope-all"), { key: "a" })
+      expect(setBackground).not.toHaveBeenCalled()
     })
 
     it("clicking a scope chip calls setBackground({ scope })", async () => {
       await act(async () => {
         render(<WallpaperTab />)
       })
-      fireEvent.click(screen.getByRole("radio", { name: /scope\.chat\.label/i }))
+      fireEvent.click(screen.getByTestId("wallpaper-scope-chat"))
       expect(setBackground).toHaveBeenCalledWith(expect.objectContaining({ scope: "chat" }))
     })
 
@@ -239,7 +403,7 @@ describe("WallpaperTab", () => {
       await act(async () => {
         render(<WallpaperTab />)
       })
-      const chip = screen.getByRole("radio", { name: /scope\.sidebar\.label/i })
+      const chip = screen.getByTestId("wallpaper-scope-sidebar")
       fireEvent.mouseEnter(chip)
       expect(document.documentElement.getAttribute("data-bg-preview")).toBe("sidebar")
       fireEvent.mouseLeave(chip)
@@ -250,7 +414,7 @@ describe("WallpaperTab", () => {
       await act(async () => {
         render(<WallpaperTab />)
       })
-      const chip = screen.getByRole("radio", { name: /scope\.canvas\.label/i })
+      const chip = screen.getByTestId("wallpaper-scope-canvas")
       fireEvent.focus(chip)
       expect(document.documentElement.getAttribute("data-bg-preview")).toBe("canvas")
       fireEvent.blur(chip)
@@ -266,14 +430,8 @@ describe("WallpaperTab", () => {
       await act(async () => {
         render(<WallpaperTab />)
       })
-      expect(screen.getByRole("radio", { name: /scope\.global\.label/i })).toHaveAttribute(
-        "aria-checked",
-        "true"
-      )
-      expect(screen.getByRole("radio", { name: /scope\.chat\.label/i })).toHaveAttribute(
-        "aria-checked",
-        "false"
-      )
+      expect(screen.getByTestId("wallpaper-scope-global")).toHaveAttribute("aria-checked", "true")
+      expect(screen.getByTestId("wallpaper-scope-chat")).toHaveAttribute("aria-checked", "false")
     })
 
     // The nav unmounts this panel on switch; a pinned attribute would survive
@@ -283,10 +441,126 @@ describe("WallpaperTab", () => {
       await act(async () => {
         view = render(<WallpaperTab />)
       })
-      fireEvent.mouseEnter(screen.getByRole("radio", { name: /scope\.chat\.label/i }))
+      fireEvent.mouseEnter(screen.getByTestId("wallpaper-scope-chat"))
       expect(document.documentElement.getAttribute("data-bg-preview")).toBe("chat")
       view!.unmount()
       expect(document.documentElement.getAttribute("data-bg-preview")).toBeNull()
+    })
+  })
+
+  describe("focal point", () => {
+    beforeEach(() => {
+      storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "preset-mock" }
+    })
+
+    it("offers a 3x3 anchor grid with the stored point checked", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const grid = screen.getByTestId("wallpaper-focal-group")
+      expect(within(grid).getAllByRole("radio")).toHaveLength(9)
+      expect(screen.getByTestId("wallpaper-focal-center")).toHaveAttribute("aria-checked", "true")
+    })
+
+    it("persists both coordinates when a cell is picked", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      fireEvent.click(screen.getByTestId("wallpaper-focal-bottomRight"))
+      expect(setBackground).toHaveBeenCalledWith({ focalX: 100, focalY: 100 })
+    })
+
+    // `fill` stretches and `tile` repeats — neither leaves the image anywhere
+    // to move, so the grid says so instead of silently doing nothing.
+    it("disables the grid for fits that cannot honour an anchor", async () => {
+      storeState.background = {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        activeId: "preset-mock",
+        position: "fill",
+      }
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      expect(screen.getByTestId("wallpaper-focal-group")).toHaveAttribute("aria-disabled", "true")
+      expect(screen.getByTestId("wallpaper-focal-center")).toBeDisabled()
+      expect(screen.getByText("focalUnavailable")).toBeInTheDocument()
+    })
+
+    it("marks no cell for a focal point between the presets", async () => {
+      storeState.background = {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        activeId: "preset-mock",
+        focalX: 30,
+        focalY: 70,
+      }
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const grid = screen.getByTestId("wallpaper-focal-group")
+      for (const cell of within(grid).getAllByRole("radio")) {
+        expect(cell).toHaveAttribute("aria-checked", "false")
+      }
+      expect(screen.getByText("30% · 70%")).toBeInTheDocument()
+    })
+  })
+
+  describe("slider commits", () => {
+    beforeEach(() => {
+      storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "preset-mock" }
+    })
+
+    // Persisting every pointer move would write Dexie ~100 times per gesture.
+    it("paints the CSS variable while dragging and persists only on release", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      // Radix puts the aria-label on both the root and the thumb; the thumb is
+      // the one that carries role="slider" and handles the keyboard.
+      const opacity = screen
+        .getAllByRole("slider")
+        .find((el) => el.getAttribute("aria-label") === "opacityLabel")!
+
+      fireEvent.keyDown(opacity, { key: "ArrowLeft" })
+      await waitFor(() =>
+        expect(document.body.style.getPropertyValue("--app-bg-opacity")).toBe("0.99")
+      )
+      expect(setBackground).toHaveBeenCalledWith({ opacity: 0.99 })
+    })
+
+    it("previews and commits the blur slider the same way", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      const blur = screen
+        .getAllByRole("slider")
+        .find((el) => el.getAttribute("aria-label") === "blurLabel")!
+
+      fireEvent.keyDown(blur, { key: "ArrowRight" })
+
+      await waitFor(() => expect(document.body.style.getPropertyValue("--app-bg-blur")).toBe("1px"))
+      expect(setBackground).toHaveBeenCalledWith({ blurPx: 1 })
+    })
+
+    it("restores the persisted values if the panel unmounts mid-drag", async () => {
+      storeState.background = {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        activeId: "preset-mock",
+        opacity: 0.6,
+        blurPx: 12,
+      }
+      let view: ReturnType<typeof render> | undefined
+      await act(async () => {
+        view = render(<WallpaperTab />)
+      })
+      document.body.style.setProperty("--app-bg-opacity", "0.1")
+      document.body.style.setProperty("--app-bg-blur", "30px")
+
+      await act(async () => {
+        view!.unmount()
+      })
+
+      expect(document.body.style.getPropertyValue("--app-bg-opacity")).toBe("0.6")
+      expect(document.body.style.getPropertyValue("--app-bg-blur")).toBe("12px")
     })
   })
 
@@ -405,6 +679,65 @@ describe("WallpaperTab", () => {
       expect(zone).toHaveAttribute("data-drag-over", "true")
       fireEvent.dragLeave(zone)
       expect(zone).toHaveAttribute("data-drag-over", "false")
+    })
+
+    it("surfaces the storage error when saving an accepted file fails", async () => {
+      appearance.saveImage.mockRejectedValue(new Error("disk full"))
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      await act(async () => {
+        fireEvent.drop(screen.getByTestId("wallpaper-gallery-dropzone"), {
+          dataTransfer: { files: [pngFile("dropped.png")] },
+        })
+      })
+      expect(await screen.findByText("disk full")).toBeInTheDocument()
+      expect(setActiveWallpaper).not.toHaveBeenCalled()
+    })
+
+    it("saves a built gradient and activates it", async () => {
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      fireEvent.click(screen.getByTestId("wallpaper-add-gradient"))
+      await screen.findByTestId("gradient-preview")
+
+      fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+        target: { value: "Dusk" },
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByText("save"))
+      })
+
+      expect(addWallpaper).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "Dusk", kind: "gradient" })
+      )
+      expect(setActiveWallpaper).toHaveBeenCalled()
+    })
+
+    it("deletes a user wallpaper's bytes before its row", async () => {
+      storeState.wallpapers = [
+        {
+          id: "user-1",
+          name: "User One",
+          kind: "gradient",
+          builtin: false,
+          createdAt: 2,
+          source: { kind: "gradient", css: "linear-gradient(#000,#fff)" },
+        },
+      ]
+      await act(async () => {
+        render(<WallpaperTab />)
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("wallpaper-delete-button"))
+      })
+
+      expect(appearance.deleteImage).toHaveBeenCalledWith({
+        kind: "gradient",
+        css: "linear-gradient(#000,#fff)",
+      })
+      expect(deleteWallpaper).toHaveBeenCalledWith("user-1")
     })
 
     it("surfaces a rejection instead of saving an unsupported drop", async () => {

@@ -95,4 +95,49 @@ describe("analyzeWallpaperSource", () => {
     )
     expect(storage.disposeUrl).toHaveBeenCalledWith("#fff")
   })
+
+  it("reports a missing 2d context rather than throwing something opaque", async () => {
+    const restoreImage = installImageMock()
+    const getContext = jest
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(null as never)
+
+    await expect(analyzeWallpaperSource(source)).rejects.toThrow(
+      "wallpaper analysis canvas is unavailable"
+    )
+    expect(storage.disposeUrl).toHaveBeenCalled()
+
+    getContext.mockRestore()
+    restoreImage()
+  })
+
+  // A very tall or very wide image must still produce a sane sample box.
+  it("clamps the sample height for extreme aspect ratios", async () => {
+    const restoreImage = installImageMock({ width: 100, height: 10000 })
+    const restoreCanvas = installCanvasMock([10, 20, 30, 255])
+
+    await expect(analyzeWallpaperSource(source)).resolves.toMatchObject({ dominant: "#0a141e" })
+
+    restoreCanvas()
+    restoreImage()
+  })
+
+  // Gradients and colors used to be excluded from theme generation entirely,
+  // which meant the feature was unavailable for every built-in preset.
+  it("analyzes a gradient from its declared stops, without touching storage", async () => {
+    await expect(
+      analyzeWallpaperSource({
+        kind: "gradient",
+        css: "linear-gradient(135deg, #000000 0%, #ffffff 100%)",
+      })
+    ).resolves.toMatchObject({ dominant: "#808080" })
+    expect(storage.resolveSourceToCss).not.toHaveBeenCalled()
+  })
+
+  it("analyzes a solid color as a flat field", async () => {
+    await expect(
+      analyzeWallpaperSource({ kind: "color", value: "#1f2937" })
+    ).resolves.toMatchObject({ dominant: "#1f2937", baseVariant: "dark" })
+    expect(storage.resolveSourceToCss).not.toHaveBeenCalled()
+  })
 })

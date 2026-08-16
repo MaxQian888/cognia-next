@@ -53,7 +53,7 @@ export function VscodeImportTab() {
                 <li
                   key={record.customThemeId}
                   className={cn(
-                    "flex flex-col gap-1 rounded border p-2 text-xs sm:flex-row sm:items-center",
+                    "flex flex-col gap-1 rounded border p-2 text-xs @md/appearance-pane:flex-row @md/appearance-pane:items-center",
                     isActive && "border-primary bg-primary/5"
                   )}
                 >

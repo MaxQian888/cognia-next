@@ -1612,6 +1612,46 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-slot="ai-context"] {
   -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Section 4d — composer scrim.
+ *
+ * The bar behind the chat composer fades the message list into the input box.
+ * It used to be a Tailwind `bg-gradient-to-t from-background …` plus
+ * `data-tonality="glass"`, which cannot work together: the tonality rules in
+ * Section 5 only replace `background-color`, so the opaque gradient
+ * (`background-image`) kept painting over them. With a wallpaper active the
+ * composer therefore sat under a flat slab of `--background` while the message
+ * area a few pixels above showed the image — the seam the two surfaces were
+ * supposed to hide.
+ *
+ * One declaration owns the fade instead, and the wallpaper variant mixes the
+ * same stops down to the glass tonality so the image reads through the whole
+ * bar. `prefers-reduced-transparency` drives the tonality tokens to 100%, which
+ * makes this opaque again on its own — no separate media query needed.
+ * ──────────────────────────────────────────────────────────────────────────*/
+
+.composer-scrim {
+  background-image: linear-gradient(
+    to top,
+    var(--background) 0%,
+    color-mix(in oklch, var(--background) 92%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+/* Every scope whose wallpaper can reach the composer (the composer lives in the
+ * chat surface). `canvas` / `sidebar` scopes leave the chat opaque, so they keep
+ * the solid fade above. */
+body[data-bg-enabled="true"]:not([data-bg-scope="canvas"]):not([data-bg-scope="sidebar"])
+  .composer-scrim {
+  background-image: linear-gradient(
+    to top,
+    color-mix(in oklch, var(--background) var(--surface-tonality-glass), transparent) 0%,
+    color-mix(in oklch, var(--background) calc(var(--surface-tonality-glass) / 2), transparent) 55%,
+    transparent 100%
+  );
+}
+
 /* Section 5 — data-tonality / data-elevation semantic opt-in/opt-out.
  *
  * Run after the auto-rules above so they win on specificity tie. Only
@@ -1714,7 +1754,17 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
    then animate compositor snapshots of the two panels and their divider. This
    keeps responsive chat/dock contents from reflowing on every animation frame.
    The old/new snapshots are cropped from their stable outer edges instead of
-   stretched, so text and controls retain their geometry through the motion. */
+   stretched, so text and controls retain their geometry through the motion.
+
+   The UA sizes every snapshot `inline-size: 100%; block-size: auto` — a box
+   that keeps the snapshot's own aspect ratio and therefore shrinks and grows
+   *proportionally* with the animating group. Under that box `object-fit: cover`
+   never cropped anything: the whole panel — icons, text, controls — scaled with
+   every frame and popped back to 1:1 when the live layout returned. Filling the
+   group and drawing the snapshot at its natural size (`object-fit: none`) is
+   what actually pins the geometry; the anchors below decide which edge stays.
+   The UA's `plus-lighter` crossfade is kept on purpose: a `normal` blend of two
+   opacity ramps dips to 75% coverage mid-motion, which read as a flash. */
 ::view-transition-group(cognia-dock-chat),
 ::view-transition-group(cognia-dock-divider),
 ::view-transition-group(cognia-dock-panel) {
@@ -1726,8 +1776,10 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
 ::view-transition-new(cognia-dock-chat),
 ::view-transition-old(cognia-dock-panel),
 ::view-transition-new(cognia-dock-panel) {
-  object-fit: cover;
-  mix-blend-mode: normal;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: none;
+  overflow: clip;
 }
 
 ::view-transition-old(cognia-dock-chat),
@@ -1979,79 +2031,1257 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-dock-panel) {
   animation: pulse-handle 1.2s ease-out infinite;
 }
 
-/* Mobile boot splash — `<AppSplash>` overlays the first paint on the Capacitor
- * shell, taking over from the static Android 12 system splash. A circular logo
- * sits inside a slowly-rotating conic-gradient ring with a breathing glow, then
- * the whole overlay fades out. The spin/glow keyframes collapse to a static
- * frame under the global reduce-motion guard above; the fade is an opacity
- * transition (not an animation) so it always completes. */
-.app-splash {
-  transition: opacity 450ms ease;
+/* ---------------------------------------------------------------------------
+   Mobile boot screen — `components/mobile/splash/mobile-boot-screen.tsx`.
+
+   Mounted as the Capacitor splash overlay by `<AppSplash>` (taking over from
+   the static Android 12 system splash / iOS launch storyboard, both painted
+   on the same `#01061e`), by the account / onboarding gates on a cold boot,
+   and — in its compact `--route` form — by the routed-page fallback inside
+   the mobile shell.
+
+   Written for Capacitor 8's WebView floor (iOS 15 WKWebView, Android 7
+   System WebView) and for the moment it runs in, which is the busiest the
+   main thread ever is:
+
+     - every loop drives only `transform` / `opacity`, so it lives on the
+       compositor and holds its frame rate while JS hydrates, opens Dexie and
+       registers plugins;
+     - the ambient colour fields are radial gradients that are painted once
+       and then translated — no `filter: blur()`, no `backdrop-filter`;
+     - no `color-mix()` (Safari 16.2+), no `@property`, no `:has()`; alphas are
+       plain `rgb(... / a)`; `mask` is written with the `-webkit-` prefix too;
+     - the few layers that move are promoted with `will-change: transform`
+       and nothing else is, so low-end Android doesn't run out of GPU memory
+       compositing decoration.
+
+   Reduce-motion (see the tier notes near the top of this file): everything
+   here is decorative and is left to the blunt guard. Entrances use
+   `fill-mode: both`, so a 1ms run lands them on their settled frame; loops
+   rest on their base state (halo at rest, arc static, satellites parked,
+   sheen off-screen). The status feedback — the row spinner (`.animate-spin`)
+   and the fill's position — survives on its own.
+
+   Durations route through `--motion-duration-scale` so the speed preference
+   applies here too. */
+
+.mboot {
+  --mboot-accent-a: var(--boot-accent-a, #38bdf8);
+  --mboot-accent-b: var(--boot-accent-b, #3b82f6);
+  --mboot-accent-c: var(--boot-accent-c, #8b5cf6);
+  --mboot-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --mboot-fg: var(--foreground);
+  --mboot-fg-2: var(--muted-foreground);
+  --mboot-line: var(--border);
+  --mboot-track: rgb(127 127 127 / 0.18);
+  --mboot-good: var(--success);
+  --mboot-warn: var(--warning);
+  --mboot-chip-good: rgb(74 222 128 / 0.14);
+  --mboot-chip-warn: rgb(251 191 36 / 0.16);
+  --mboot-chip-muted: rgb(127 127 127 / 0.14);
+  isolation: isolate;
+  overflow: hidden;
+  contain: layout paint style;
+  color: var(--mboot-fg);
 }
 
-.app-splash--leaving {
+/* Positioning lives here, not in utility classes: these rules are unlayered
+   and would win over Tailwind's layered `fixed` / `relative` anyway. */
+.mboot--route {
+  position: relative;
+}
+
+/* The splash canvas: fixed navy, white type, whatever the app theme. */
+.mboot--boot {
+  position: fixed;
+  inset: 0;
+  --mboot-fg: #fff;
+  --mboot-fg-2: rgb(255 255 255 / 0.62);
+  --mboot-line: rgb(255 255 255 / 0.1);
+  --mboot-track: rgb(255 255 255 / 0.12);
+  --mboot-good: #4ade80;
+  --mboot-warn: #fbbf24;
+  background: #01061e;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  transition: opacity calc(450ms * var(--motion-duration-scale, 1)) ease;
+}
+
+/* Exit: the canvas fades while the stage pushes gently forward. */
+.mboot--leaving {
   opacity: 0;
   pointer-events: none;
 }
 
-/* Rotating sweep — a conic gradient masked into a thin rim so only the ring
- * shows around the logo. Cyan→blue→violet echoes the splash illustration's
- * glow frame and the app primary. */
-.app-splash__ring {
-  --ring-thickness: 6px;
+.mboot__stage {
+  position: relative;
+  transition: transform calc(450ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out);
+}
+
+.mboot--leaving .mboot__stage {
+  transform: scale(1.03);
+}
+
+/* Boot layout: a flexible spacer, the coin, then the body. On a tall phone
+   the spacer puts the coin near the vertical centre — where the native splash
+   icon was — and on a short one the timeline still fits above the safe area.
+   The coin's hand-over position is handled by the glide below, not by the
+   grid, so it never has to choose between continuity and fit. */
+.mboot__stage--boot {
+  display: grid;
+  grid-template-rows: minmax(0.75rem, 1fr) auto auto;
+  justify-items: center;
+  height: 100%;
+  width: 100%;
+  padding-inline: 1.5rem;
+}
+
+/* Glide: the overlay's first frame places the coin exactly where the native
+   splash left it (`--mboot-mark-shift`, measured once on mount by the
+   component), and it eases up into its layout slot as the timeline reveals
+   below. Compositor-only; the reduce-motion guard lands it in place. */
+.mboot--intro .mboot__mark--glide {
+  animation: mboot-glide calc(720ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out) both;
+}
+
+@keyframes mboot-glide {
+  from {
+    transform: translate3d(0, var(--mboot-mark-shift, 0px), 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.mboot__stage--route {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 20rem;
+}
+
+/* Ambient fields: two soft discs drifting behind everything. Pre-blurred by
+   their own gradient falloff; only ever translated / scaled. */
+.mboot__aurora {
+  position: absolute;
+  z-index: -1;
+  border-radius: 9999px;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.mboot__aurora--a {
+  top: -22vmax;
+  left: -18vmax;
+  width: 70vmax;
+  height: 70vmax;
+  background: radial-gradient(
+    circle at center,
+    rgb(59 130 246 / 0.28) 0%,
+    rgb(59 130 246 / 0.1) 38%,
+    transparent 66%
+  );
+  animation: mboot-aurora-a calc(16s * var(--motion-duration-scale, 1)) ease-in-out infinite
+    alternate;
+}
+
+.mboot__aurora--b {
+  right: -26vmax;
+  bottom: -20vmax;
+  width: 76vmax;
+  height: 76vmax;
+  background: radial-gradient(
+    circle at center,
+    rgb(139 92 246 / 0.24) 0%,
+    rgb(56 189 248 / 0.08) 42%,
+    transparent 68%
+  );
+  animation: mboot-aurora-b calc(20s * var(--motion-duration-scale, 1)) ease-in-out infinite
+    alternate;
+}
+
+@keyframes mboot-aurora-a {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(9vmax, 6vmax, 0) scale(1.12);
+  }
+}
+
+@keyframes mboot-aurora-b {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.06);
+  }
+  to {
+    transform: translate3d(-8vmax, -7vmax, 0) scale(0.96);
+  }
+}
+
+/* --- Brand mark ---------------------------------------------------------- */
+
+.mboot__mark {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+/* 176px box, 160px coin — the size the Android 12 icon window renders the
+   launcher mark at, so the hand-over is a continuation, not a jump. */
+.mboot__mark--lg {
+  width: 11rem;
+  height: 11rem;
+}
+
+.mboot__mark--sm {
+  width: 4.5rem;
+  height: 4.5rem;
+}
+
+.mboot__logo {
+  position: absolute;
+  inset: 8px;
+  border-radius: 9999px;
+  background-size: cover;
+  background-position: center;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+.mboot__mark--sm .mboot__logo {
+  inset: 5px;
+}
+
+/* Breathing halo. Base state is its resting look, so a reduce-motion run that
+   ends after 1ms leaves a sensible glow in place. */
+.mboot__halo {
+  position: absolute;
+  inset: -2rem;
+  border-radius: 9999px;
+  pointer-events: none;
+  opacity: 0.55;
+  background: radial-gradient(
+    circle at center,
+    rgb(59 130 246 / 0.5) 0%,
+    rgb(56 189 248 / 0.18) 40%,
+    transparent 66%
+  );
+  animation: mboot-halo calc(3.2s * var(--motion-duration-scale, 1)) ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.mboot__mark--sm .mboot__halo {
+  inset: -1rem;
+}
+
+@keyframes mboot-halo {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.08);
+  }
+}
+
+/* Rotating sweep — a conic gradient masked into a thin rim. Cyan → blue →
+   violet, the brand's "booting" motif across all three shells. */
+.mboot__ring {
+  --mboot-rim: 5px;
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
   background: conic-gradient(
     from 0deg,
     transparent 0deg,
-    #38bdf8 70deg,
-    #3b82f6 150deg,
-    #8b5cf6 220deg,
+    var(--mboot-accent-a) 70deg,
+    var(--mboot-accent-b) 150deg,
+    var(--mboot-accent-c) 220deg,
     transparent 320deg
   );
   -webkit-mask: radial-gradient(
     farthest-side,
-    transparent calc(100% - var(--ring-thickness)),
-    #000 calc(100% - var(--ring-thickness))
+    transparent calc(100% - var(--mboot-rim)),
+    #000 calc(100% - var(--mboot-rim))
   );
   mask: radial-gradient(
     farthest-side,
-    transparent calc(100% - var(--ring-thickness)),
-    #000 calc(100% - var(--ring-thickness))
+    transparent calc(100% - var(--mboot-rim)),
+    #000 calc(100% - var(--mboot-rim))
   );
-  animation: app-splash-spin 1.4s linear infinite;
+  animation: mboot-spin calc(1.5s * var(--motion-duration-scale, 1)) linear infinite;
+  transition: opacity calc(360ms * var(--motion-duration-scale, 1)) ease;
+  will-change: transform;
 }
 
-@keyframes app-splash-spin {
+.mboot__mark--sm .mboot__ring {
+  --mboot-rim: 3px;
+}
+
+@keyframes mboot-spin {
   to {
     transform: rotate(1turn);
   }
 }
 
-/* Soft halo behind the logo, breathing in and out. */
-.app-splash__glow {
-  background: radial-gradient(
-    circle at center,
-    color-mix(in srgb, #3b82f6 45%, transparent) 0%,
-    transparent 68%
+/* Once the boot has settled the sweep hands over to a full, still rim and a
+   check badge — the mark itself says "done" before the overlay leaves. */
+.mboot__ring-solid {
+  --mboot-rim: 5px;
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  opacity: 0;
+  transform: scale(0.94);
+  background: conic-gradient(
+    from 0deg,
+    var(--mboot-accent-a),
+    var(--mboot-accent-b),
+    var(--mboot-accent-c),
+    var(--mboot-accent-a)
   );
-  filter: blur(8px);
-  animation: app-splash-glow 2.6s ease-in-out infinite;
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--mboot-rim)),
+    #000 calc(100% - var(--mboot-rim))
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--mboot-rim)),
+    #000 calc(100% - var(--mboot-rim))
+  );
+  transition:
+    opacity calc(360ms * var(--motion-duration-scale, 1)) ease,
+    transform calc(360ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out);
 }
 
-@keyframes app-splash-glow {
+.mboot__mark--sm .mboot__ring-solid {
+  --mboot-rim: 3px;
+}
+
+.mboot__badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  color: #01061e;
+  background: var(--mboot-good);
+  box-shadow: 0 0 0 3px #01061e;
+  opacity: 0;
+  transform: scale(0.4);
+}
+
+.mboot--settled .mboot__ring {
+  opacity: 0;
+}
+
+.mboot--settled .mboot__ring-solid {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.mboot--settled .mboot__badge {
+  animation: mboot-check-pop calc(420ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out)
+    both;
+}
+
+/* Satellites: two orbits, counter-rotating at different speeds, carrying
+   small accent dots — the "devices finding each other" motif. Each orbit is
+   one composited layer; the dots ride it for free. */
+.mboot__orbit {
+  position: absolute;
+  border-radius: 9999px;
+  border: 1px solid rgb(255 255 255 / 0.07);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.mboot__orbit--a {
+  inset: -0.875rem;
+  animation: mboot-spin calc(9s * var(--motion-duration-scale, 1)) linear infinite;
+}
+
+.mboot__orbit--b {
+  inset: -1.75rem;
+  border-color: rgb(255 255 255 / 0.045);
+  animation: mboot-spin-reverse calc(14s * var(--motion-duration-scale, 1)) linear infinite;
+}
+
+@keyframes mboot-spin-reverse {
+  to {
+    transform: rotate(-1turn);
+  }
+}
+
+.mboot__sat {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 9999px;
+  /* Static glow — box-shadow is fine when it never animates. */
+  box-shadow: 0 0 8px 1px currentColor;
+}
+
+/* Each dot is placed by rotating around the orbit's centre then pushing out
+   to the rim. `--r` is half the orbit's box (inset + half the mark). */
+.mboot__orbit--a .mboot__sat {
+  --r: calc(5.5rem + 0.875rem);
+}
+
+.mboot__orbit--b .mboot__sat {
+  --r: calc(5.5rem + 1.75rem);
+}
+
+.mboot__sat--a {
+  color: var(--mboot-accent-a);
+  background: var(--mboot-accent-a);
+  transform: rotate(0deg) translateY(calc(-1 * var(--r)));
+}
+
+.mboot__sat--b {
+  color: var(--mboot-accent-b);
+  background: var(--mboot-accent-b);
+  transform: rotate(120deg) translateY(calc(-1 * var(--r)));
+}
+
+.mboot__sat--c {
+  color: var(--mboot-accent-c);
+  background: var(--mboot-accent-c);
+  transform: rotate(240deg) translateY(calc(-1 * var(--r)));
+}
+
+.mboot__sat--d {
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  color: #fff;
+  background: #fff;
+  transform: rotate(200deg) translateY(calc(-1 * var(--r)));
+}
+
+/* --- Body: wordmark, headline, bar, rows, footer ------------------------- */
+
+.mboot__body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  max-width: 22rem;
+  padding-top: 1.5rem;
+  padding-bottom: 0.75rem;
+  min-height: 0;
+}
+
+.mboot__body--route {
+  padding-top: 0;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.mboot__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mboot__wordmark {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em; /* optical centring against the trailing tracking */
+  line-height: 1;
+  color: var(--mboot-fg);
+}
+
+.mboot__hairline {
+  display: block;
+  width: 3.5rem;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--mboot-accent-a),
+    var(--mboot-accent-c),
+    transparent
+  );
+  transform-origin: center;
+}
+
+.mboot--intro .mboot__hairline {
+  animation: mboot-hairline calc(700ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out) both;
+  animation-delay: calc(240ms * var(--motion-duration-scale, 1));
+}
+
+@keyframes mboot-hairline {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.mboot__headline {
+  margin-top: 0.875rem;
+  text-align: center;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--mboot-fg-2);
+}
+
+.mboot__body--route .mboot__headline {
+  margin-top: 0;
+  font-size: 0.875rem;
+}
+
+/* Live row echoed under the headline — hidden unless the list is. */
+.mboot__active-line {
+  display: none;
+  margin-top: 0.25rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--mboot-fg);
+}
+
+.mboot__progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  width: 100%;
+}
+
+.mboot__body--route .mboot__progress {
+  margin-top: 0;
+}
+
+.mboot__counter {
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--mboot-fg-2);
+}
+
+/* Track + fill. The fill is full-width and translated left by the remaining
+   share so its rounded leading edge stays round at every value. */
+.mboot__bar {
+  position: relative;
+  flex: 1 1 auto;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--mboot-track);
+}
+
+.mboot__bar-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    var(--mboot-accent-a) 0%,
+    var(--mboot-accent-b) 55%,
+    var(--mboot-accent-c) 100%
+  );
+  transform: translate3d(calc(var(--mboot-fill, 0) * 100% - 100%), 0, 0);
+  transition: transform calc(520ms * var(--motion-duration-scale, 1)) cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+/* Highlight sweeping along the fill so the bar reads as alive while it holds.
+   Rests off-screen: under reduced motion the loop collapses to its base state,
+   and a highlight parked on the fill would read as a stuck glitch. */
+.mboot__bar-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.6), transparent);
+  transform: translate3d(-100%, 0, 0);
+  animation: mboot-sheen calc(2.2s * var(--motion-duration-scale, 1)) ease-in-out infinite;
+  animation-delay: calc(600ms * var(--motion-duration-scale, 1));
+}
+
+@keyframes mboot-sheen {
+  from {
+    transform: translate3d(-100%, 0, 0);
+  }
+  to {
+    transform: translate3d(260%, 0, 0);
+  }
+}
+
+/* Rows. */
+.mboot__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 0.625rem;
+  width: 100%;
+  overflow: hidden;
+}
+
+.mboot__row {
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.25rem;
+}
+
+.mboot__row-line {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.mboot__row-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.mboot__row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  color: var(--mboot-fg-2);
+  transition: color calc(300ms * var(--motion-duration-scale, 1)) ease;
+}
+
+.mboot__row[data-status="active"] .mboot__row-label {
+  font-weight: 500;
+  color: var(--mboot-fg);
+}
+
+.mboot__row[data-status="pending"] .mboot__row-label {
+  opacity: 0.55;
+}
+
+.mboot__row-detail {
+  margin-top: 0.125rem;
+  padding-left: 1.875rem;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--mboot-fg-2);
+}
+
+.mboot__dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: var(--mboot-line);
+}
+
+.mboot__spinner {
+  color: var(--mboot-fg);
+}
+
+.mboot__check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 9999px;
+  color: var(--mboot-good);
+  background: var(--mboot-chip-good);
+}
+
+.mboot__check--warn {
+  color: var(--mboot-warn);
+  background: var(--mboot-chip-warn);
+}
+
+.mboot__check--muted {
+  color: var(--mboot-fg-2);
+  background: var(--mboot-chip-muted);
+}
+
+.mboot__check--pop {
+  animation: mboot-check-pop calc(380ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out)
+    both;
+}
+
+@keyframes mboot-check-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.mboot__chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 1.125rem;
+  padding-inline: 0.4375rem;
+  border-radius: 9999px;
+  font-size: 0.625rem;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--mboot-fg);
+  background: var(--mboot-chip-muted);
+  animation: mboot-check-pop calc(380ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out)
+    both;
+}
+
+.mboot__chip[data-tone="good"] {
+  color: var(--mboot-good);
+  background: var(--mboot-chip-good);
+}
+
+.mboot__chip[data-tone="warn"] {
+  color: var(--mboot-warn);
+  background: var(--mboot-chip-warn);
+}
+
+.mboot__chip[data-tone="muted"] {
+  color: var(--mboot-fg-2);
+}
+
+.mboot__duration {
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--mboot-fg-2);
+}
+
+/* Footer: build stamp left, reassurance / reload right, one reserved row. */
+.mboot__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  min-height: 2rem;
+  margin-top: 0.5rem;
+}
+
+.mboot__body--route .mboot__footer {
+  width: 100%;
+  margin-top: 0.25rem;
+  justify-content: center;
+}
+
+.mboot__body--route .mboot__wait {
+  flex: none;
+  text-align: center;
+}
+
+.mboot__build {
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--mboot-fg-2);
+  opacity: 0.8;
+}
+
+.mboot__wait {
+  flex: 1 1 10rem;
+  min-width: 0;
+  text-align: right;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--mboot-fg-2);
+}
+
+/* Wraps under the hint on narrow phones, keeping to the right edge. */
+.mboot__reload {
+  margin-left: auto;
+}
+
+.mboot--boot .mboot__reload {
+  border-color: rgb(255 255 255 / 0.22);
+  background: rgb(255 255 255 / 0.06);
+  color: #fff;
+}
+
+/* --- Entrances ---------------------------------------------------------- */
+
+/* Played once per page load, on the first mount that is actually seen (see
+   `useMobileBoot` for how a gate under the native splash is discounted).
+   Later mounts render settled: `.mboot__enter` without `.mboot--intro` is
+   inert, so nothing re-animates in front of the user at a hand-over. */
+.mboot--intro .mboot__enter {
+  animation: mboot-enter calc(520ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out) both;
+  animation-delay: calc(var(--mboot-i, 0) * 55ms * var(--motion-duration-scale, 1));
+}
+
+@keyframes mboot-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Anything that arrives later (row detail, wait notice, outcome chip). */
+.mboot__appear {
+  animation: mboot-enter calc(360ms * var(--motion-duration-scale, 1)) var(--mboot-ease-out) both;
+}
+
+/* --- Small phones (iPhone SE class) -------------------------------------- */
+
+@media (max-height: 700px) {
+  .mboot__mark--lg {
+    width: 9.5rem;
+    height: 9.5rem;
+  }
+
+  .mboot__orbit--a .mboot__sat {
+    --r: calc(4.75rem + 0.875rem);
+  }
+
+  .mboot__orbit--b .mboot__sat {
+    --r: calc(4.75rem + 1.75rem);
+  }
+
+  .mboot__stage--boot .mboot__body {
+    padding-top: 1rem;
+  }
+
+  .mboot__stage--boot .mboot__brand {
+    display: none;
+  }
+}
+
+/* --- Short viewports (landscape phones) --------------------------------- */
+
+/* Not enough height for the coin and six rows: keep the coin, the bar and
+   the live row; the list is still announced (it stays in the tree) but
+   collapses visually. */
+@media (max-height: 560px) {
+  .mboot__stage--boot .mboot__rows {
+    display: none;
+  }
+
+  .mboot__stage--boot .mboot__active-line {
+    display: block;
+  }
+
+  .mboot__stage--boot .mboot__body {
+    padding-top: 1.25rem;
+  }
+
+  .mboot__stage--boot .mboot__brand {
+    display: none;
+  }
+
+  .mboot__mark--lg {
+    width: 8rem;
+    height: 8rem;
+  }
+
+  .mboot__orbit--a .mboot__sat {
+    --r: calc(4rem + 0.875rem);
+  }
+
+  .mboot__orbit--b .mboot__sat {
+    --r: calc(4rem + 1.75rem);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Workspace boot screen — `components/boot/boot-screen.tsx`.
+
+   The desktop/web counterpart of the mobile splash above, and it borrows the
+   same cyan → blue → violet arc so the brand's "booting" motif is one thing
+   across the three shells. Everything here is written to stay smooth while the
+   main thread is at its busiest (hydration, Dexie open, plugin boot):
+
+     - every looping animation drives only `transform` / `opacity`, so it runs
+       on the compositor and keeps its frame rate when JS stalls;
+     - the progress fill moves with `translateX` inside an overflow-hidden
+       track rather than animating `width`, which would relayout per frame and
+       squash the rounded end;
+     - the ambient backdrop is a soft radial gradient, not `filter: blur()`,
+       which is the one decoration that would have been genuinely expensive.
+
+   Reduce-motion policy (see the tier notes near the top of this file): all of
+   this is DECORATIVE and is deliberately left to the blunt guard. Entrances
+   use `fill-mode: both`, so a 1ms run lands them on their settled frame; the
+   loops rest on their base state. The status feedback — the row spinner
+   (`.animate-spin`) and the fill's position — survives on its own.
+
+   Durations route through `--motion-duration-scale` so the speed preference
+   applies here too. */
+
+:root {
+  --boot-accent-a: #38bdf8;
+  --boot-accent-b: #3b82f6;
+  --boot-accent-c: #8b5cf6;
+  --boot-glow-alpha: 0.32;
+  --boot-ambient-alpha: 0.16;
+  --boot-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dark {
+  --boot-glow-alpha: 0.5;
+  --boot-ambient-alpha: 0.22;
+}
+
+/* Ambient backdrop: two slow-drifting colour fields behind the card. */
+.boot-screen {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.boot-screen::before,
+.boot-screen::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 38rem;
+  height: 38rem;
+  border-radius: 9999px;
+  pointer-events: none;
+  opacity: var(--boot-ambient-alpha);
+  will-change: transform;
+}
+
+.boot-screen::before {
+  top: -14rem;
+  left: -10rem;
+  background: radial-gradient(
+    circle at center,
+    var(--boot-accent-b) 0%,
+    color-mix(in srgb, var(--boot-accent-a) 60%, transparent) 30%,
+    transparent 68%
+  );
+  animation: boot-ambient-a calc(18s * var(--motion-duration-scale, 1)) ease-in-out infinite
+    alternate;
+}
+
+.boot-screen::after {
+  right: -12rem;
+  bottom: -16rem;
+  background: radial-gradient(
+    circle at center,
+    var(--boot-accent-c) 0%,
+    color-mix(in srgb, var(--boot-accent-b) 55%, transparent) 32%,
+    transparent 68%
+  );
+  animation: boot-ambient-b calc(22s * var(--motion-duration-scale, 1)) ease-in-out infinite
+    alternate;
+}
+
+@keyframes boot-ambient-a {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(6rem, 3rem, 0) scale(1.12);
+  }
+}
+
+@keyframes boot-ambient-b {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.08);
+  }
+  to {
+    transform: translate3d(-5rem, -4rem, 0) scale(0.96);
+  }
+}
+
+/* Card entrance — one soft rise, played only on the first mount of a page
+   load (`useBootProgress().playIntro`); hand-overs render settled. */
+.boot-screen__card--intro {
+  animation: boot-card-enter calc(560ms * var(--motion-duration-scale, 1)) var(--boot-ease-out) both;
+}
+
+@keyframes boot-card-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Staggered child entrance. Each child sets `--boot-i` to its position; the
+   delay steps 55ms per index on top of the card's own rise. */
+.boot-screen__card--intro .boot-enter {
+  animation: boot-enter calc(520ms * var(--motion-duration-scale, 1)) var(--boot-ease-out) both;
+  animation-delay: calc((120ms + var(--boot-i, 0) * 55ms) * var(--motion-duration-scale, 1));
+}
+
+@keyframes boot-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Same rise for content that arrives later in the wait (the reassurance line,
+   the reload offer) — not tied to the intro, plays whenever it mounts. */
+.boot-appear {
+  animation: boot-enter calc(360ms * var(--motion-duration-scale, 1)) var(--boot-ease-out) both;
+}
+
+/* Reduced motion: the blunt guard shortens the entrance to 1ms but leaves the
+   stagger delays alone, and `fill-mode: both` holds each child invisible for
+   its delay — a 400ms trickle of content popping in, which is exactly the kind
+   of motion the preference asks to be spared. Drop the delays on all three
+   guard paths (see the tier notes for why every path must be repeated). */
+html.reduce-motion .boot-screen__card--intro .boot-enter,
+html[data-reduce-motion="true"] .boot-screen__card--intro .boot-enter,
+html.reduce-motion .boot-preview__block,
+html[data-reduce-motion="true"] .boot-preview__block {
+  animation-delay: 0ms !important;
+  transition-delay: 0ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion-respect="off"]) .boot-screen__card--intro .boot-enter,
+  html:not([data-motion-respect="off"]) .boot-preview__block {
+    animation-delay: 0ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* Brand mark: a rounded tile inside a thin rim. A conic arc rotates behind
+   the tile (clipped by the rim's overflow) — the same technique as the mobile
+   splash ring, squared off to match the desktop app icon. */
+.boot-mark {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.875rem;
+  padding: 2px;
+  background: var(--border);
+}
+
+.boot-mark::before {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 150deg,
+    var(--boot-accent-a) 205deg,
+    var(--boot-accent-b) 260deg,
+    var(--boot-accent-c) 305deg,
+    transparent 345deg
+  );
+  animation: boot-ring-spin calc(2.8s * var(--motion-duration-scale, 1)) linear infinite;
+  will-change: transform;
+}
+
+.boot-mark__tile {
+  position: relative;
+  border-radius: calc(0.875rem - 2px);
+}
+
+@keyframes boot-ring-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Breathing halo behind the mark. Base state is its resting look, so a
+   reduce-motion run that ends after 1ms leaves a sensible glow in place. */
+.boot-mark__glow {
+  position: absolute;
+  inset: -0.75rem;
+  border-radius: 9999px;
+  pointer-events: none;
+  opacity: 0.6;
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--boot-accent-b) calc(var(--boot-glow-alpha) * 100%), transparent) 0%,
+    transparent 70%
+  );
+  animation: boot-glow calc(3.4s * var(--motion-duration-scale, 1)) ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes boot-glow {
   0%,
   100% {
     opacity: 0.45;
-    transform: scale(0.92);
+    transform: scale(0.94);
   }
   50% {
-    opacity: 0.85;
-    transform: scale(1.06);
+    opacity: 0.9;
+    transform: scale(1.08);
   }
 }
 
-/* Faint inner rim so the circular logo reads as a coin against the backdrop. */
-.app-splash__logo {
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+/* Progress track + fill. The fill is full-width and translated left by the
+   remaining share, so its rounded leading edge stays round at every value.
+   While a step is running the fill "leans in" toward that step's boundary
+   over a long decelerating transition — it visibly moves without ever
+   claiming the step is done — and snaps to the boundary in ~400ms when the
+   step actually completes. */
+.boot-bar {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9999px;
+  height: 0.375rem;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.boot-bar__fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    var(--boot-accent-a) 0%,
+    var(--boot-accent-b) 55%,
+    var(--boot-accent-c) 100%
+  );
+  transform: translate3d(calc(var(--boot-fill, 0) * 100% - 100%), 0, 0);
+  transition: transform calc(420ms * var(--motion-duration-scale, 1)) cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+.boot-bar__fill[data-creep="true"] {
+  transition-duration: calc(6500ms * var(--motion-duration-scale, 1));
+  transition-timing-function: cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+/* Highlight sweeping along the fill so the bar reads as alive even when its
+   position holds still. */
+.boot-bar__fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+  /* Rests off-screen: under reduced motion the loop collapses to its base
+     state, and a highlight parked on the fill would read as a stuck glitch. */
+  transform: translate3d(-100%, 0, 0);
+  animation: boot-sheen calc(2.2s * var(--motion-duration-scale, 1)) ease-in-out infinite;
+  animation-delay: calc(600ms * var(--motion-duration-scale, 1));
+  will-change: transform;
+}
+
+@keyframes boot-sheen {
+  from {
+    transform: translate3d(-100%, 0, 0);
+  }
+  to {
+    transform: translate3d(260%, 0, 0);
+  }
+}
+
+/* Row check-mark: pops in the moment a step completes. */
+.boot-check {
+  animation: boot-check-pop calc(380ms * var(--motion-duration-scale, 1)) var(--boot-ease-out) both;
+}
+
+@keyframes boot-check-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Preview mock: an app-shaped skeleton that assembles as milestones complete.
+   Each block flips between a ghosted and a settled look; the flip is a plain
+   opacity/transform transition, staggered by `--boot-i`, so it lands as a
+   soft cascade rather than a cut. A slow diagonal sheen crosses the frame. */
+.boot-preview__block {
+  transition:
+    opacity calc(480ms * var(--motion-duration-scale, 1)) var(--boot-ease-out),
+    transform calc(480ms * var(--motion-duration-scale, 1)) var(--boot-ease-out),
+    background-color calc(480ms * var(--motion-duration-scale, 1)) ease;
+  transition-delay: calc(var(--boot-i, 0) * 45ms * var(--motion-duration-scale, 1));
+}
+
+.boot-preview__block[data-settled="false"] {
+  opacity: 0.35;
+  transform: translate3d(0, 3px, 0);
+}
+
+.boot-preview__block[data-settled="true"] {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+.boot-preview__frame {
+  position: relative;
+  overflow: hidden;
+}
+
+.boot-preview__frame::after {
+  content: "";
+  position: absolute;
+  top: -40%;
+  bottom: -40%;
+  left: 0;
+  width: 45%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in srgb, var(--foreground) 5%, transparent) 50%,
+    transparent 100%
+  );
+  transform: translate3d(-120%, 0, 0);
+  animation: boot-preview-sweep calc(4.2s * var(--motion-duration-scale, 1)) ease-in-out infinite;
+  animation-delay: calc(1.2s * var(--motion-duration-scale, 1));
+  will-change: transform;
+}
+
+@keyframes boot-preview-sweep {
+  from {
+    transform: translate3d(-120%, 0, 0);
+  }
+  to {
+    transform: translate3d(320%, 0, 0);
+  }
 }
 
 /* In-app browser: indeterminate top progress bar. A short segment sweeps left
@@ -2176,6 +3406,13 @@ select {
   }
 }
 
+/* ADR-0127 — `messageDisplay.bodyFont: "serif"` switches the message prose
+ * (and typeset headings) to the serif stack; code keeps `--font-mono`. */
+[data-body-font="serif"] .typeset {
+  font-family: var(--font-serif);
+  --typeset-font-heading: var(--font-serif);
+}
+
 /* Message-level rich-content controls share one visibility policy across
  * finalized Markdown and the streaming renderer. Keyboard focus remains a
  * reveal path for hover mode through each control group's focus-within rule. */
@@ -2186,10 +3423,3 @@ select {
 [data-rich-controls="always"] [data-message-rich-control] {
   opacity: 1 !important;
 }
-/* ADR-0127 — `messageDisplay.bodyFont: "serif"` switches the message prose
- * (and typeset headings) to the serif stack; code keeps `--font-mono`. */
-[data-body-font="serif"] .typeset {
-  font-family: var(--font-serif);
-  --typeset-font-heading: var(--font-serif);
-}
-

@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import { useSettingsStore } from "@/stores/settings"
 import { applyUserCss } from "@/lib/appearance/custom-css/apply"
 import { disposeUrl, resolveSourceToCss } from "@/lib/appearance/wallpaper-storage"
+import { BG_VARS, resolveBackgroundFit } from "@/lib/appearance/background-fit"
 import { withBuiltinPresets } from "@/lib/appearance/presets"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
@@ -14,12 +15,12 @@ const ATTR_SCOPE = "data-bg-scope"
 const ATTR_SCRIM = "data-bg-scrim"
 
 /** CSS variables the body::before pseudo-element reads. */
-const VAR_IMAGE = "--app-bg-image"
-const VAR_BLUR = "--app-bg-blur"
-const VAR_OPACITY = "--app-bg-opacity"
-const VAR_POSITION = "--app-bg-position"
-const VAR_SIZE = "--app-bg-size"
-const VAR_REPEAT = "--app-bg-repeat"
+const VAR_IMAGE = BG_VARS.image
+const VAR_BLUR = BG_VARS.blur
+const VAR_OPACITY = BG_VARS.opacity
+const VAR_POSITION = BG_VARS.position
+const VAR_SIZE = BG_VARS.size
+const VAR_REPEAT = BG_VARS.repeat
 
 /**
  * Mounts at the root layout and keeps the document in sync with the user's
@@ -133,21 +134,14 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   body.style.setProperty(VAR_BLUR, `${background.blurPx}px`)
   body.style.setProperty(VAR_OPACITY, `${background.opacity}`)
   // Image kinds need explicit sizing/positioning; gradients and colors
-  // take the same vars but ignore them — we still write cover/no-repeat
-  // for predictability.
+  // take the same vars but ignore them — we still write the resolved fit
+  // for predictability. `background-fit.ts` owns the mapping so the gallery
+  // preview tile renders exactly what the live layer will.
   const isImageSource = wallpaper.source.kind === "image"
-  body.style.setProperty(VAR_POSITION, "center")
-  body.style.setProperty(
-    VAR_SIZE,
-    background.position === "tile"
-      ? "auto"
-      : background.position === "contain"
-        ? "contain"
-        : background.position === "center"
-          ? "auto"
-          : "cover"
-  )
-  body.style.setProperty(VAR_REPEAT, background.position === "tile" ? "repeat" : "no-repeat")
+  const fit = resolveBackgroundFit(background.position, background.focalX, background.focalY)
+  body.style.setProperty(VAR_POSITION, fit.position)
+  body.style.setProperty(VAR_SIZE, fit.size)
+  body.style.setProperty(VAR_REPEAT, fit.repeat)
   body.setAttribute(ATTR_ENABLED, "true")
   body.setAttribute(ATTR_SCOPE, background.scope)
   // Tag whether the active source produces a real raster image so CSS can

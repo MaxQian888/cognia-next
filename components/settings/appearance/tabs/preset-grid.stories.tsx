@@ -41,10 +41,20 @@ const items: PresetItem[] = [
   },
 ]
 
+// Multi-column layout here sizes off `@container/appearance-pane`, which
+// `appearance-section.tsx` owns in the real app — the decorator stands in for
+// it so this story previews the same layout the settings pane shows.
 const meta = {
   title: "Settings/Appearance/Tabs/PresetGrid",
   component: PresetGrid,
   parameters: { layout: "padded" },
+  decorators: [
+    (Story) => (
+      <div className="@container/appearance-pane">
+        <Story />
+      </div>
+    ),
+  ],
   args: {
     items,
     activeKey: "builtin-dark",

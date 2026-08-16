@@ -7,10 +7,20 @@ import { makeAppSettings } from "@/lib/storybook/fixtures/settings-system"
 
 // Appearance → Accessibility tab: reduced motion, high-contrast, and related
 // a11y toggles. Reads the settings store.
+// Multi-column layout here sizes off `@container/appearance-pane`, which
+// `appearance-section.tsx` owns in the real app — the decorator stands in for
+// it so this story previews the same layout the settings pane shows.
 const meta = {
   title: "Settings/Appearance/Tabs/A11yTab",
   component: A11yTab,
   parameters: { layout: "padded" },
+  decorators: [
+    (Story) => (
+      <div className="@container/appearance-pane">
+        <Story />
+      </div>
+    ),
+  ],
   beforeEach: () => {
     resetStore(useSettingsStore)
     seedStore(useSettingsStore, { loaded: true, settings: makeAppSettings() })

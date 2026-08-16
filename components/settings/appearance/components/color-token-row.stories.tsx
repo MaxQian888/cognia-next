@@ -16,10 +16,20 @@ function Harness({ initial }: { initial: string }) {
   )
 }
 
+// Multi-column layout here sizes off `@container/appearance-pane`, which
+// `appearance-section.tsx` owns in the real app — the decorator stands in for
+// it so this story previews the same layout the settings pane shows.
 const meta = {
   title: "Settings/Appearance/ColorTokenRow",
   component: ColorTokenRow,
   parameters: { layout: "padded" },
+  decorators: [
+    (Story) => (
+      <div className="@container/appearance-pane">
+        <Story />
+      </div>
+    ),
+  ],
   args: { tokenKey: "primary", label: "Primary", value: "#7c4dff", onChange: fn() },
 } satisfies Meta<typeof ColorTokenRow>
 

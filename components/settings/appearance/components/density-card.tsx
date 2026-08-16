@@ -65,7 +65,7 @@ export function DensityCard() {
       <div className="space-y-2 rounded border p-3">
         <Label className="text-xs">{t("density.overrideLabel")}</Label>
         <p className="text-[11px] text-muted-foreground">{t("density.overrideHint")}</p>
-        <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 pt-2 @sm/appearance-pane:grid-cols-3">
           {SURFACES.map((surface) => {
             const current = density[surface.key]
             return (

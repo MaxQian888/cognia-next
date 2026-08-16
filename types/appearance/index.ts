@@ -6,7 +6,19 @@
 export * from "./cursor"
 import { DEFAULT_CURSOR, type CursorSettings } from "./cursor"
 
-export type WallpaperPosition = "cover" | "contain" | "tile" | "center"
+/**
+ * How the wallpaper raster is fitted into its surface.
+ *
+ * - `cover`   — fill the surface, cropping whatever overflows (default)
+ * - `contain` — fit entirely inside, letterboxing whatever is left
+ * - `fill`    — stretch both axes to the surface, ignoring aspect ratio
+ * - `center`  — draw at natural size, no scaling
+ * - `tile`    — draw at natural size and repeat
+ *
+ * `cover` / `contain` / `center` honour {@link BackgroundSettings.focalX} /
+ * `focalY`; `fill` and `tile` leave no freedom to anchor, so they ignore it.
+ */
+export type WallpaperPosition = "cover" | "contain" | "fill" | "tile" | "center"
 
 /** User-CSS injection scope: limited to the app shell (`#app`) or document-wide. */
 export type CustomCssScope = "app" | "global"
@@ -23,6 +35,15 @@ export interface BackgroundSettings {
   /** 0..1. Applied as `opacity: N` on the body::before pseudo. */
   opacity: number
   position: WallpaperPosition
+  /**
+   * Horizontal anchor, 0..100 (%). Decides which part of an over-wide image
+   * survives a `cover` crop — the subject of a photo is rarely dead centre.
+   * Optional so settings rows written before this field keep loading; the
+   * applier and the UI both fall back to 50.
+   */
+  focalX?: number
+  /** Vertical anchor, 0..100 (%). See {@link BackgroundSettings.focalX}. */
+  focalY?: number
 }
 
 export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {
@@ -32,6 +53,8 @@ export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {
   blurPx: 0,
   opacity: 1,
   position: "cover",
+  focalX: 50,
+  focalY: 50,
 }
 
 /** Discriminated union — exactly one of these shapes per wallpaper. */
@@ -381,29 +404,6 @@ export interface MessageDisplayMetadataOptions {
   finishState: MessageMetadataPlacement
 }
 
-export interface MessageDisplayOverrides {
-  layout?: MessageDisplayLayout
-  metadata?: Partial<MessageDisplayMetadataOptions>
-  actions?: MessageActionVisibility
-  agentFlowMode?: AgentFlowMode
-  reasoning?: MessagePartVisibility
-  tools?: MessagePartVisibility
-  sources?: MessagePartVisibility
-  richControls?: MessageRichControls
-  motion?: MessageMotion
-}
-
-export interface MessageDisplayPreferences {
-  preset: MessageDisplayPreset
-  overrides?: MessageDisplayOverrides
-}
-
-// ----------------------------------------------------------------------------
-// Usage / consumption statistics display mode
-//
-// Controls the information density of the usage & consumption surfaces (the
-// Subscription → Usage dashboard, the composer context read-out, the agent-team
-// runtime tile, and the mobile today-stats card). Progressive density, mirroring
 /** Body-copy font family for message prose (ADR-0127). `serif` reads `--font-serif`. */
 export type MessageBodyFont = "sans" | "serif"
 export type MessageMathFontScale = 0.8 | 1 | 1.2
@@ -433,16 +433,16 @@ export interface MessageMarkdownOptions {
   mathCopy: boolean
 }
 
-// {@link AgentFlowMode}:
-//   - simplified — headline stat tiles + current-window gauges only; charts and
-//                  tables collapse to a summary.
-//   - standard   — the full dashboard (charts + model/session tables).
-//   - detailed   — everything expanded, with extra columns (cache-write tokens,
-//                  per-session detail) and the raw snapshot table open.
-// ----------------------------------------------------------------------------
-
-export type UsageDisplayMode = "simplified" | "standard" | "detailed"
-
+export interface MessageDisplayOverrides {
+  layout?: MessageDisplayLayout
+  metadata?: Partial<MessageDisplayMetadataOptions>
+  actions?: MessageActionVisibility
+  agentFlowMode?: AgentFlowMode
+  reasoning?: MessagePartVisibility
+  tools?: MessagePartVisibility
+  sources?: MessagePartVisibility
+  richControls?: MessageRichControls
+  motion?: MessageMotion
   markdown?: Partial<MessageMarkdownOptions>
   bodyFont?: MessageBodyFont
 }
@@ -457,6 +457,29 @@ export function isMessageMathFontScale(value: unknown): value is MessageMathFont
 }
 export function isMessageMathAlign(value: unknown): value is MessageMathAlign {
   return value === "center" || value === "left"
+}
+
+export interface MessageDisplayPreferences {
+  preset: MessageDisplayPreset
+  overrides?: MessageDisplayOverrides
+}
+
+// ----------------------------------------------------------------------------
+// Usage / consumption statistics display mode
+//
+// Controls the information density of the usage & consumption surfaces (the
+// Subscription → Usage dashboard, the composer context read-out, the agent-team
+// runtime tile, and the mobile today-stats card). Progressive density, mirroring
+// {@link AgentFlowMode}:
+//   - simplified — headline stat tiles + current-window gauges only; charts and
+//                  tables collapse to a summary.
+//   - standard   — the full dashboard (charts + model/session tables).
+//   - detailed   — everything expanded, with extra columns (cache-write tokens,
+//                  per-session detail) and the raw snapshot table open.
+// ----------------------------------------------------------------------------
+
+export type UsageDisplayMode = "simplified" | "standard" | "detailed"
+
 export interface UsageDisplaySettings {
   mode: UsageDisplayMode
 }

@@ -7,10 +7,11 @@
 // `appearance` is a member of the shell's `FILL_HEIGHT_SECTIONS`, so this
 // component owns its own scroll and fills the frame.
 //
-// The detail header mounts the section's *only* `AppearancePreview`. Panels
-// don't ship previews of their own; the custom-theme editor drives this one
-// through `preview-draft-context`, which is why a draft you haven't saved
-// still shows up here.
+// The detail header names the panel you are in (icon + label + description,
+// read from the same `nav.items.*` keys the nav renders) and mounts the
+// section's *only* `AppearancePreview`. Panels don't ship previews of their
+// own; the custom-theme editor drives this one through `preview-draft-context`,
+// which is why a draft you haven't saved still shows up here.
 //
 // "Reset" is intentionally NOT rendered here: the settings shell already
 // mounts a shared `SectionResetButton` for every section (see
@@ -19,7 +20,7 @@
 // `lib/settings/section-keys.ts` `RESET_EXCLUDE`). Whole-config export/import
 // (the `AppearanceConfigToolbar`) is a separate, additive affordance.
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ChevronDownIcon, MenuIcon, PaletteIcon } from "lucide-react"
@@ -45,13 +46,19 @@ import { AppearanceTypographyPanel } from "./panels/typography-panel"
 import { AppearanceNav } from "./components/appearance-nav"
 import { AppearancePreview } from "./components/appearance-preview"
 import { AppearanceConfigToolbar } from "./components/appearance-config-toolbar"
-import { APPEARANCE_NAV_GROUPS, resolveAppearancePanel, type AppearancePanelId } from "./nav-config"
+import {
+  APPEARANCE_NAV_GROUPS,
+  APPEARANCE_PANEL_ICONS,
+  resolveAppearancePanel,
+  type AppearancePanelId,
+} from "./nav-config"
 import {
   AppearancePreviewDraftProvider,
   createPreviewDraftStore,
   usePreviewDraft,
 } from "./preview-draft-context"
 import { PersonalizationCard } from "../personalization-card"
+import { cn } from "@/lib/utils"
 
 // Unchanged from the tabbed layout, so pre-merge deep links keep resolving
 // (`nav-config.ts` maps the retired values).
@@ -88,26 +95,67 @@ function renderPanel(panel: AppearancePanelId) {
 
 /**
  * The section's single preview. Subscribes to the draft on its own so a
- * keystroke in the custom-theme editor re-renders this and nothing else.
- * Collapsible because it now sits above every panel rather than only in the
- * `xl` rail, and an always-open preview would crowd a short viewport.
+ * keystroke in the custom-theme editor re-renders this and nothing else — the
+ * panel identity beside it is deliberately outside this component for the same
+ * reason.
  */
-function AppearancePreviewRail() {
+function AppearancePreviewBody() {
   const t = useTranslations("settings.appearance.preview")
   const draft = usePreviewDraft()
   return (
-    <Collapsible defaultOpen data-testid="appearance-preview-rail">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground">{t("title")}</p>
+    <>
+      <AppearancePreview colors={draft?.colors} isDark={draft?.isDark} />
+      <p className="mt-1 text-[11px] text-muted-foreground">{t("hint")}</p>
+    </>
+  )
+}
+
+/**
+ * The detail pane's header: which panel you are in, and the live preview.
+ *
+ * The two belong in one block rather than stacked. Before, the pane opened with
+ * a bare "Live preview" strip and the panel itself carried no title, so on
+ * desktop the only thing naming the current panel was the highlight in the nav.
+ * The preview stays collapsible — it is the tallest thing in the header and
+ * means little on, say, the Custom CSS panel.
+ */
+function AppearanceDetailHeader({ panel }: { panel: AppearancePanelId }) {
+  const t = useTranslations("settings.appearance")
+  const tPreview = useTranslations("settings.appearance.preview")
+  const [previewOpen, setPreviewOpen] = useState(true)
+  const Icon = APPEARANCE_PANEL_ICONS[panel]
+  return (
+    <Collapsible
+      open={previewOpen}
+      onOpenChange={setPreviewOpen}
+      data-testid="appearance-preview-rail"
+    >
+      <div className="flex items-start gap-2">
+        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium" data-testid="appearance-panel-title">
+            {t(`nav.items.${panel}.label`)}
+          </p>
+          <p className="truncate text-[11px] text-muted-foreground">
+            {t(`nav.items.${panel}.description`)}
+          </p>
+        </div>
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-6 px-2" aria-label={t("title")}>
-            <ChevronDownIcon className="size-4 transition-transform data-[state=open]:rotate-180" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
+            data-testid="appearance-preview-toggle"
+          >
+            {tPreview("title")}
+            <ChevronDownIcon
+              className={cn("size-3.5 transition-transform", previewOpen && "rotate-180")}
+            />
           </Button>
         </CollapsibleTrigger>
       </div>
       <CollapsibleContent className="pt-2">
-        <AppearancePreview colors={draft?.colors} isDark={draft?.isDark} />
-        <p className="mt-1 text-[11px] text-muted-foreground">{t("hint")}</p>
+        <AppearancePreviewBody />
       </CollapsibleContent>
     </Collapsible>
   )
@@ -127,6 +175,15 @@ export function AppearanceSection() {
     searchParams.get(APPEARANCE_TAB_PARAM),
     pluginsAvailable
   )
+
+  // The scroll container outlives the panel it holds, so switching panels used
+  // to keep the previous panel's offset — leaving you halfway down a panel you
+  // had never scrolled. Assigning `scrollTop` rather than calling `scrollTo`
+  // keeps this working under jsdom, which does not implement the method.
+  const bodyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0
+  }, [activePanel])
 
   const onSelect = (id: AppearancePanelId) => {
     const next = new URLSearchParams(searchParams.toString())
@@ -164,14 +221,16 @@ export function AppearanceSection() {
             {navNode}
           </div>
 
-          {/* Below md the nav lives in a Sheet; the bar shows where you are. */}
+          {/* Below md the nav lives in a Sheet. The active panel is named by
+              the detail header directly below, so the trigger stands alone
+              rather than repeating that label a second time. */}
           <div className="flex items-center gap-2 md:hidden">
             <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
               <SheetTrigger asChild>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 gap-1.5"
+                  className="w-full justify-start gap-1.5"
                   data-testid="appearance-mobile-nav-trigger"
                 >
                   <MenuIcon className="size-4" />
@@ -185,9 +244,6 @@ export function AppearanceSection() {
                 {navNode}
               </SheetContent>
             </Sheet>
-            <p className="min-w-0 flex-1 truncate text-sm font-medium">
-              {t(`nav.items.${activePanel}.label`)}
-            </p>
           </div>
 
           {/* Detail: pinned preview header + the scrolling panel body. A
@@ -195,13 +251,14 @@ export function AppearanceSection() {
               result, no interaction with the overflow/min-h-0 chain. */}
           <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
             <div className="shrink-0 border-b p-3">
-              <AppearancePreviewRail />
+              <AppearanceDetailHeader panel={activePanel} />
             </div>
             {/* `@container/appearance-pane`: panels are now ~700px wide
                 regardless of viewport, so any multi-column layout inside them
                 must size off this box, not the window. Same idea as
                 `hooks-section.tsx`'s `@container/hooks-pane`. */}
             <div
+              ref={bodyRef}
               className="min-h-0 flex-1 overflow-y-auto p-3 @container/appearance-pane"
               data-testid="appearance-panel-body"
             >

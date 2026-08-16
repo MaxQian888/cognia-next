@@ -87,6 +87,15 @@ const PANEL_IDS = new Set<string>(
 )
 
 /**
+ * Panel id → icon, derived from the groups above rather than declared twice.
+ * The detail header renders the active panel's icon beside its label, and it
+ * must be the same glyph the nav entry shows or the two read as unrelated.
+ */
+export const APPEARANCE_PANEL_ICONS = Object.fromEntries(
+  APPEARANCE_NAV_GROUPS.flatMap((group) => group.items.map((item) => [item.id, item.icon]))
+) as Record<AppearancePanelId, ComponentType<{ className?: string }>>
+
+/**
  * Old `?appearanceTab=` values that no longer name a panel. Deep links from
  * before the merge keep working; the URL is left as-is rather than rewritten,
  * which would cost an effect and a history entry for no user-visible gain.

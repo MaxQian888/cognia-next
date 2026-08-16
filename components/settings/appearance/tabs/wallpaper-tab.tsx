@@ -7,13 +7,19 @@
 //   2. the gallery: built-ins + plugin + user-saved, with the two "add"
 //      affordances as trailing "+" tiles rather than the two always-expanded
 //      blocks they used to be. The grid itself is the drop target.
-//   3. the adjustments (scope / position / blur / opacity), disabled until
-//      something is actually selected to adjust.
+//   3. the adjustments, disabled until something is actually selected to
+//      adjust, and split into the two questions they answer:
+//        · Placement — where the image goes (scope, fit, focal point)
+//        · Readability — what it does to text (blur, opacity, contrast)
+//   4. the sampler, which feeds both the generated theme and the honest
+//      contrast reading in (3).
 //
-// Persists everything via the appearance setters — no component-level state
-// survives unmount.
+// Persists everything via the appearance setters. The only local state is the
+// in-flight slider drag: committing every pointer move would write Dexie a
+// hundred times per gesture, so the drag paints the live CSS variables directly
+// and only the released value is persisted.
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { ImagePlusIcon, PaletteIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -32,7 +38,16 @@ import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 import { withBuiltinPresets, saveImage, deleteImage, makeWallpaper } from "@/lib/appearance"
 import { intakeWallpaperFile } from "@/lib/appearance/wallpaper-intake"
-import { wcagContrast } from "@/lib/appearance/contrast"
+import {
+  BG_VARS,
+  FOCAL_PRESETS,
+  WALLPAPER_POSITIONS,
+  clampFocal,
+  focalPresetId,
+  supportsFocalPoint,
+} from "@/lib/appearance/background-fit"
+import { computeOpacityVerdict } from "@/lib/appearance/wallpaper-readability"
+import type { WallpaperThemeAnalysis } from "@/lib/appearance/wallpaper-theme-generator"
 import type {
   BackgroundScope,
   Wallpaper,
@@ -42,15 +57,16 @@ import type {
 import { cn, responsiveSelectClass } from "@/lib/utils"
 import { WallpaperCard } from "../components/wallpaper-card"
 import { WallpaperUploader, type UploadedWallpaper } from "../components/wallpaper-uploader"
-import { WallpaperThemeGenerator } from "../components/wallpaper-theme-generator"
+import {
+  WallpaperThemeGenerator,
+  type WallpaperTuning,
+} from "../components/wallpaper-theme-generator"
 import { GradientBuilder } from "../components/gradient-builder"
 import {
   listPluginWallpapers,
   subscribePluginWallpapers,
   type RegisteredPluginWallpaper,
 } from "@/lib/plugin/bridge/wallpaper-bridge"
-
-const POSITIONS: WallpaperPosition[] = ["cover", "contain", "tile", "center"]
 
 // Stable identity for the SSR / pre-hydration snapshot — a fresh array each
 // render would trip useSyncExternalStore's "snapshot should be cached" guard.
@@ -106,12 +122,12 @@ function ScopeMockup({
   className,
 }: {
   highlight: ScopeCardSpec["highlight"]
-  className?: string
+  className: string
 }) {
   return (
     <svg
       viewBox="0 0 100 60"
-      className={cn("block rounded border border-border", className ?? "h-12 w-full")}
+      className={cn("block rounded border border-border", className)}
       aria-hidden="true"
     >
       <rect width="100" height="60" fill="var(--muted)" />
@@ -129,7 +145,7 @@ function ScopeMockup({
 
 // Hovering/focusing a scope control previews that region in the live app via
 // a `<html>` attribute the background applier watches. Module-scope helpers so
-// the four call sites below don't each re-do the SSR guard.
+// the call sites below don't each re-do the SSR guard.
 const BG_PREVIEW_ATTR = "data-bg-preview"
 
 function setBgPreview(scope: BackgroundScope): void {
@@ -142,64 +158,39 @@ function clearBgPreview(): void {
   document.documentElement.removeAttribute(BG_PREVIEW_ATTR)
 }
 
+/** Paint a wallpaper CSS variable without persisting — used during a drag. */
+function previewBackgroundVar(name: string, value: string): void {
+  if (typeof document === "undefined") return
+  document.body.style.setProperty(name, value)
+}
+
 const POSITION_LABEL_KEY: Record<WallpaperPosition, string> = {
   cover: "positionCover",
   contain: "positionContain",
+  fill: "positionFill",
   tile: "positionTile",
   center: "positionCenter",
 }
 
+/** Arrow keys that move focus inside the scope radiogroup, and by how much. */
+const ROVING_KEYS: Record<string, number> = {
+  ArrowRight: 1,
+  ArrowDown: 1,
+  ArrowLeft: -1,
+  ArrowUp: -1,
+}
+
+/**
+ * Radix emits one entry per thumb and these sliders have exactly one, so the
+ * read is asserted rather than defaulted — a fallback here would be an
+ * unreachable branch fired on every pointer move.
+ */
+function sliderValue(values: number[]): number {
+  return values[0]!
+}
+
 function nanoId(): string {
   return `wp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-}
-
-/**
- * Model the contrast loss caused by the wallpaper layer. Image-kind wallpapers
- * are treated as worst-case noise (asymptote toward 1.5:1 at full opacity)
- * because we don't sample dominant colours at runtime; gradient/colour
- * wallpapers get a gentler half-strength penalty since their tone is at least
- * mostly uniform.
- */
-export function effectiveContrast(staticRatio: number, opacity: number, isImage: boolean): number {
-  const clamped = Math.max(0, Math.min(1, opacity))
-  if (isImage) {
-    const worst = 1.5
-    return staticRatio * (1 - clamped) + worst * clamped
-  }
-  return staticRatio * (1 - clamped * 0.5)
-}
-
-function bandRatio(ratio: number): "ok" | "warn" | "fail" {
-  if (ratio >= 4.5) return "ok"
-  if (ratio >= 3) return "warn"
-  return "fail"
-}
-
-/**
- * Compute the live readability verdict for the wallpaper opacity guard. Reads
- * `--foreground` and `--background` from `<html>` directly because the
- * effective text colour depends on the active theme, which lives in CSS-only
- * state. Returns null on SSR.
- */
-export function computeOpacityVerdict(
-  activeKind: "image" | "gradient" | "color" | null,
-  opacity: number
-): { level: "ok" | "warn" | "fail"; ratio: number } | null {
-  if (typeof window === "undefined") return null
-  const cs = getComputedStyle(document.documentElement)
-  const fg = cs.getPropertyValue("--foreground").trim() || "#000000"
-  const bg = cs.getPropertyValue("--background").trim() || "#ffffff"
-  let baseRatio: number
-  try {
-    baseRatio = wcagContrast(fg, bg)
-  } catch {
-    // culori may not parse a CSS variable that resolves to e.g. "oklch(...)"
-    // in some test environments; fall back to a high static ratio so we
-    // don't flash a fail chip when the theme itself is fine.
-    baseRatio = 21
-  }
-  const ratio = effectiveContrast(baseRatio, opacity, activeKind === "image")
-  return { level: bandRatio(ratio), ratio }
 }
 
 export function WallpaperTab() {
@@ -213,6 +204,15 @@ export function WallpaperTab() {
   const setActiveWallpaper = useSettingsStore((s) => s.setActiveWallpaper)
   const [busyError, setBusyError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  // Tagged with the wallpaper it came from: switching wallpapers must not let
+  // the readability chip keep reporting the previous image's measurement while
+  // the new sample is still in flight.
+  const [analysis, setAnalysis] = useState<{
+    id: string
+    value: WallpaperThemeAnalysis | null
+  } | null>(null)
+  // In-flight slider value. Null between gestures, so the persisted value wins.
+  const [drag, setDrag] = useState<{ key: "opacity" | "blurPx"; value: number } | null>(null)
 
   // Plugin-contributed wallpapers (ADR-0029) live in an in-memory registry —
   // never in the user's settings row — so they merge into the gallery here
@@ -232,13 +232,42 @@ export function WallpaperTab() {
     [pluginWallpapers]
   )
   const activeWallpaper = gallery.find((w) => w.id === background.activeId) ?? null
-  const verdict = computeOpacityVerdict(activeWallpaper?.kind ?? null, background.opacity)
   // Nothing selected means nothing to tune — every adjustment below is inert.
   const hasActive = activeWallpaper !== null
+
+  const opacity = drag?.key === "opacity" ? drag.value : background.opacity
+  const blurPx = drag?.key === "blurPx" ? drag.value : background.blurPx
+  const focalX = clampFocal(background.focalX)
+  const focalY = clampFocal(background.focalY)
+  const focalEnabled = supportsFocalPoint(background.position)
+  const activeFocalPreset = focalPresetId(focalX, focalY)
+
+  const activeAnalysis = analysis?.id === activeWallpaper?.id ? (analysis?.value ?? null) : null
+  const verdict = computeOpacityVerdict({
+    kind: activeWallpaper?.kind ?? null,
+    opacity,
+    analysis: activeAnalysis,
+  })
+  const suggestedOpacity = verdict?.suggestedOpacity ?? null
 
   // The nav can unmount this panel mid-hover, which would pin a scope preview
   // onto <html> for the rest of the session.
   useEffect(() => clearBgPreview, [])
+
+  // Same hazard for the live-preview variables: unmounting mid-drag would leave
+  // the wallpaper stuck at a value that was never persisted. Restore whatever
+  // the store actually holds on the way out.
+  const persistedRef = useRef(background)
+  useEffect(() => {
+    persistedRef.current = background
+  }, [background])
+  useEffect(
+    () => () => {
+      previewBackgroundVar(BG_VARS.opacity, String(persistedRef.current.opacity))
+      previewBackgroundVar(BG_VARS.blur, `${persistedRef.current.blurPx}px`)
+    },
+    []
+  )
 
   const handleUpload = async (file: UploadedWallpaper) => {
     try {
@@ -292,6 +321,37 @@ export function WallpaperTab() {
     await handleUpload(result.file)
   }
 
+  /**
+   * Persist a released slider, then drop the drag override. Clearing only after
+   * the store write resolves keeps the value from flashing back to its previous
+   * one for a frame between the release and the store update.
+   */
+  const commitDrag = async (key: "opacity" | "blurPx", value: number) => {
+    await setBackground({ [key]: value })
+    setDrag(null)
+  }
+
+  const applyTuning = useCallback(
+    (tuning: WallpaperTuning) => {
+      previewBackgroundVar(BG_VARS.opacity, String(tuning.opacity))
+      previewBackgroundVar(BG_VARS.blur, `${tuning.blurPx}px`)
+      void setBackground({ opacity: tuning.opacity, blurPx: tuning.blurPx })
+    },
+    [setBackground]
+  )
+
+  // Roving focus across the scope radiogroup: a `role="radio"` set is expected
+  // to be one tab stop that arrow keys move within, not five separate ones.
+  const scopeRefs = useRef<Partial<Record<BackgroundScope, HTMLButtonElement | null>>>({})
+  const handleScopeKeyDown = (event: React.KeyboardEvent, index: number) => {
+    const delta = ROVING_KEYS[event.key]
+    if (!delta) return
+    event.preventDefault()
+    const next = SCOPE_CARDS[(index + delta + SCOPE_CARDS.length) % SCOPE_CARDS.length]
+    void setBackground({ scope: next.scope })
+    scopeRefs.current[next.scope]?.focus()
+  }
+
   return (
     <div className="space-y-4">
       {/* 1. Header — the master switch belongs with the title, not stacked
@@ -340,12 +400,16 @@ export function WallpaperTab() {
           style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}
         >
           {gallery.map((wp) => {
+            const isActive = background.activeId === wp.id
             const card = (
               <WallpaperCard
                 wallpaper={wp}
-                active={background.activeId === wp.id}
+                active={isActive}
                 onActivate={() => void setActiveWallpaper(wp.id)}
                 onDelete={!wp.builtin ? () => void handleDelete(wp) : undefined}
+                previewFit={
+                  isActive ? { position: background.position, focalX, focalY } : undefined
+                }
               />
             )
             if (!pluginWallpaperIds.has(wp.id)) {
@@ -395,129 +459,233 @@ export function WallpaperTab() {
       >
         {!hasActive && <p className="text-xs text-muted-foreground">{t("noActive")}</p>}
 
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("scopeLabel")}</Label>
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t("scope.legend")}>
-            {SCOPE_CARDS.map((card) => {
-              const active = background.scope === card.scope
-              return (
-                <Button
-                  key={card.scope}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  role="radio"
-                  aria-checked={active}
-                  aria-label={t(card.labelKey)}
-                  title={t(card.descriptionKey)}
-                  data-active={active}
-                  data-testid={`wallpaper-scope-${card.scope}`}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs transition",
-                    "data-[active=true]:border-primary data-[active=true]:bg-primary/5",
-                    "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  )}
-                  onClick={() => void setBackground({ scope: card.scope })}
-                  onMouseEnter={() => setBgPreview(card.scope)}
-                  onMouseLeave={clearBgPreview}
-                  onFocus={() => setBgPreview(card.scope)}
-                  onBlur={clearBgPreview}
-                >
-                  <ScopeMockup highlight={card.highlight} className="h-4 w-7 shrink-0" />
-                  {t(card.labelKey)}
-                </Button>
-              )
-            })}
+        {/* 3a. Placement — the three "where" controls, which used to be spread
+                across a chip row and an unrelated 3-up grid. */}
+        <section className="space-y-3 rounded-lg border p-3" data-testid="wallpaper-placement">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("placementTitle")}</Label>
+            <p className="text-[11px] text-muted-foreground">{t("placementHint")}</p>
           </div>
-        </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
           <div className="space-y-1.5">
-            <Label className="text-xs">{t("positionLabel")}</Label>
-            <Select
-              value={background.position}
-              disabled={!hasActive}
-              onValueChange={(v) => void setBackground({ position: v as WallpaperPosition })}
+            <Label className="text-[11px] text-muted-foreground">{t("scopeLabel")}</Label>
+            <div
+              className="flex flex-wrap gap-1.5"
+              role="radiogroup"
+              aria-label={t("scope.legend")}
+              data-testid="wallpaper-scope-group"
             >
-              <SelectTrigger className={responsiveSelectClass}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {POSITIONS.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {t(POSITION_LABEL_KEY[p])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {SCOPE_CARDS.map((card, index) => {
+                const active = background.scope === card.scope
+                return (
+                  <Button
+                    key={card.scope}
+                    ref={(node) => {
+                      scopeRefs.current[card.scope] = node
+                    }}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    role="radio"
+                    aria-checked={active}
+                    aria-label={t(card.labelKey)}
+                    title={t(card.descriptionKey)}
+                    tabIndex={active ? 0 : -1}
+                    data-active={active}
+                    data-testid={`wallpaper-scope-${card.scope}`}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs transition",
+                      "data-[active=true]:border-primary data-[active=true]:bg-primary/5",
+                      "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    )}
+                    onClick={() => void setBackground({ scope: card.scope })}
+                    onKeyDown={(e) => handleScopeKeyDown(e, index)}
+                    onMouseEnter={() => setBgPreview(card.scope)}
+                    onMouseLeave={clearBgPreview}
+                    onFocus={() => setBgPreview(card.scope)}
+                    onBlur={clearBgPreview}
+                  >
+                    <ScopeMockup highlight={card.highlight} className="h-4 w-7 shrink-0" />
+                    {t(card.labelKey)}
+                  </Button>
+                )
+              })}
+            </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs">
-              {t("blurLabel")} · {background.blurPx}px
-            </Label>
-            <Slider
-              value={[background.blurPx]}
-              min={0}
-              max={32}
-              step={1}
-              disabled={!hasActive}
-              onValueChange={(v) => void setBackground({ blurPx: v[0] ?? 0 })}
-              aria-label={t("blurLabel")}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs">
-              {t("opacityLabel")} · {Math.round(background.opacity * 100)}%
-            </Label>
-            <Slider
-              value={[Math.round(background.opacity * 100)]}
-              min={0}
-              max={100}
-              step={1}
-              disabled={!hasActive}
-              onValueChange={(v) => void setBackground({ opacity: (v[0] ?? 0) / 100 })}
-              aria-label={t("opacityLabel")}
-            />
-          </div>
-        </div>
-
-        {verdict && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge
-              variant={
-                verdict.level === "ok"
-                  ? "default"
-                  : verdict.level === "warn"
-                    ? "outline"
-                    : "destructive"
-              }
-              aria-label={t("opacity.contrastLabel")}
-              data-testid="wallpaper-contrast-chip"
-            >
-              {verdict.level.toUpperCase()} {verdict.ratio.toFixed(1)}:1
-            </Badge>
-            {verdict.level !== "ok" && (
-              <span className="text-xs text-muted-foreground">
-                {verdict.level === "warn" ? t("opacity.warn") : t("opacity.fail")}
-              </span>
-            )}
-            {verdict.level === "fail" && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  void setBackground({ opacity: 0.4 })
-                }}
+          {/* Fit and focal point are one decision in two halves: the fit says
+              how much of the image survives, the focal point says which part. */}
+          <div className="grid gap-3 @md/appearance-pane:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] text-muted-foreground">{t("positionLabel")}</Label>
+              <Select
+                value={background.position}
+                disabled={!hasActive}
+                onValueChange={(v) => void setBackground({ position: v as WallpaperPosition })}
               >
-                {t("opacity.autoFix")}
-              </Button>
-            )}
-          </div>
-        )}
+                <SelectTrigger className={responsiveSelectClass}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WALLPAPER_POSITIONS.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {t(POSITION_LABEL_KEY[p])}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                {t(`positionHint.${background.position}`)}
+              </p>
+            </div>
 
-        <WallpaperThemeGenerator key={activeWallpaper?.id} wallpaper={activeWallpaper} />
+            <div className="space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <Label className="text-[11px] text-muted-foreground">{t("focalLabel")}</Label>
+                <span className="text-[10px] tabular-nums text-muted-foreground">
+                  {focalX}% · {focalY}%
+                </span>
+              </div>
+              <div
+                role="radiogroup"
+                aria-label={t("focalLabel")}
+                aria-disabled={!focalEnabled}
+                data-testid="wallpaper-focal-group"
+                className={cn(
+                  "grid w-fit grid-cols-3 gap-1 rounded-md border p-1",
+                  !focalEnabled && "pointer-events-none opacity-50"
+                )}
+              >
+                {FOCAL_PRESETS.map((preset) => {
+                  const selected = activeFocalPreset === preset.id
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-label={t(`focal.${preset.id}`)}
+                      title={t(`focal.${preset.id}`)}
+                      disabled={!hasActive || !focalEnabled}
+                      data-testid={`wallpaper-focal-${preset.id}`}
+                      className={cn(
+                        "size-5 rounded-sm border transition",
+                        "hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        selected ? "border-primary bg-primary/20" : "border-transparent bg-muted"
+                      )}
+                      onClick={() => void setBackground({ focalX: preset.x, focalY: preset.y })}
+                    />
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {focalEnabled ? t("focalHint") : t("focalUnavailable")}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* 3b. Readability — the two sliders and the verdict they produce,
+                together, because neither number means anything alone. */}
+        <section className="space-y-3 rounded-lg border p-3" data-testid="wallpaper-readability">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("readabilityTitle")}</Label>
+            <p className="text-[11px] text-muted-foreground">{t("readabilityHint")}</p>
+          </div>
+
+          <div className="grid gap-3 @md/appearance-pane:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] text-muted-foreground">
+                {t("blurLabel")} · {blurPx}px
+              </Label>
+              <Slider
+                value={[blurPx]}
+                min={0}
+                max={32}
+                step={1}
+                disabled={!hasActive}
+                onValueChange={(v) => {
+                  const next = sliderValue(v)
+                  setDrag({ key: "blurPx", value: next })
+                  previewBackgroundVar(BG_VARS.blur, `${next}px`)
+                }}
+                onValueCommit={(v) => void commitDrag("blurPx", sliderValue(v))}
+                aria-label={t("blurLabel")}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[11px] text-muted-foreground">
+                {t("opacityLabel")} · {Math.round(opacity * 100)}%
+              </Label>
+              <Slider
+                value={[Math.round(opacity * 100)]}
+                min={0}
+                max={100}
+                step={1}
+                disabled={!hasActive}
+                onValueChange={(v) => {
+                  const next = sliderValue(v) / 100
+                  setDrag({ key: "opacity", value: next })
+                  previewBackgroundVar(BG_VARS.opacity, String(next))
+                }}
+                onValueCommit={(v) => void commitDrag("opacity", sliderValue(v) / 100)}
+                aria-label={t("opacityLabel")}
+              />
+            </div>
+          </div>
+
+          {verdict && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant={
+                  verdict.level === "ok"
+                    ? "default"
+                    : verdict.level === "warn"
+                      ? "outline"
+                      : "destructive"
+                }
+                aria-label={t("opacity.contrastLabel")}
+                data-testid="wallpaper-contrast-chip"
+                data-measured={verdict.measured}
+              >
+                {verdict.level.toUpperCase()} {verdict.ratio.toFixed(1)}:1
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                {verdict.measured ? t("opacity.measured") : t("opacity.estimated")}
+              </span>
+              {verdict.level !== "ok" && (
+                <span className="text-xs text-muted-foreground">
+                  {verdict.level === "warn" ? t("opacity.warn") : t("opacity.fail")}
+                </span>
+              )}
+              {/* Solve for the highest opacity that still clears AA rather than
+                  dropping to a hardcoded 0.4 — on a flat wallpaper that used to
+                  throw away most of the image for no readability gain. */}
+              {suggestedOpacity !== null && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    previewBackgroundVar(BG_VARS.opacity, String(suggestedOpacity))
+                    void setBackground({ opacity: suggestedOpacity })
+                  }}
+                >
+                  {t("opacity.autoFix")}
+                </Button>
+              )}
+            </div>
+          )}
+        </section>
+
+        <WallpaperThemeGenerator
+          key={activeWallpaper?.id}
+          wallpaper={activeWallpaper}
+          onAnalyzed={(value) => {
+            if (activeWallpaper) setAnalysis({ id: activeWallpaper.id, value })
+          }}
+          onApplyTuning={applyTuning}
+        />
       </fieldset>
     </div>
   )

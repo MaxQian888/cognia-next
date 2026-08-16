@@ -11,7 +11,8 @@ import { CheckIcon, Trash2Icon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { resolveSourceToCss, disposeUrl } from "@/lib/appearance/wallpaper-storage"
-import type { Wallpaper } from "@/types/appearance"
+import { backgroundFitStyle } from "@/lib/appearance/background-fit"
+import type { Wallpaper, WallpaperPosition } from "@/types/appearance"
 
 export interface WallpaperCardProps {
   wallpaper: Wallpaper
@@ -20,6 +21,13 @@ export interface WallpaperCardProps {
   onDelete?: () => void
   /** Optional aria label override (i18n hook). */
   ariaLabel?: string
+  /**
+   * Fit to preview inside the tile. Passed for the active wallpaper only, so
+   * the gallery answers "what does contain look like?" without the user having
+   * to squint at the live app behind the settings sheet. Everything else keeps
+   * the neutral `cover` thumbnail.
+   */
+  previewFit?: { position: WallpaperPosition; focalX?: number; focalY?: number }
 }
 
 export function WallpaperCard({
@@ -28,6 +36,7 @@ export function WallpaperCard({
   onActivate,
   onDelete,
   ariaLabel,
+  previewFit,
 }: WallpaperCardProps) {
   const tAria = useTranslations("settings.appearance.wallpaper.aria")
   const [css, setCss] = useState<string | null>(null)
@@ -59,6 +68,13 @@ export function WallpaperCard({
 
   const isImage = wallpaper.source.kind === "image"
   const showDelete = !wallpaper.builtin && onDelete
+  // Only image sources have a fit to preview — a gradient or solid color fills
+  // the tile either way, and `tile`/`center` at thumbnail scale would just
+  // render a misleading crop of them.
+  const fit =
+    isImage && previewFit
+      ? backgroundFitStyle(previewFit.position, previewFit.focalX, previewFit.focalY)
+      : { backgroundSize: isImage ? "cover" : undefined, backgroundPosition: "center" }
 
   return (
     <div className="group relative">
@@ -75,12 +91,11 @@ export function WallpaperCard({
       >
         <div
           className="absolute inset-0"
+          data-testid="wallpaper-card-preview"
           style={{
             backgroundColor: wallpaper.source.kind === "color" ? wallpaper.source.value : undefined,
-            backgroundImage:
-              css && wallpaper.source.kind !== "color" ? (isImage ? css : css) : undefined,
-            backgroundSize: isImage ? "cover" : undefined,
-            backgroundPosition: "center",
+            backgroundImage: css && wallpaper.source.kind !== "color" ? css : undefined,
+            ...fit,
           }}
         />
         {error && (

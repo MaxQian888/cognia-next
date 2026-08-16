@@ -8,19 +8,23 @@ jest.mock("next-intl", () => ({
 }))
 
 import { AppearanceNav } from "./appearance-nav"
-import { APPEARANCE_NAV_GROUPS } from "../nav-config"
+import { APPEARANCE_NAV_GROUPS, type AppearancePanelId } from "../nav-config"
 
 function renderNav(overrides: Partial<React.ComponentProps<typeof AppearanceNav>> = {}) {
   const onSelect = jest.fn()
-  render(
-    <AppearanceNav
-      groups={APPEARANCE_NAV_GROUPS}
-      activeId="theme"
-      onSelect={onSelect}
-      {...overrides}
-    />
-  )
-  return { onSelect }
+  const props = {
+    groups: APPEARANCE_NAV_GROUPS,
+    activeId: "theme" as AppearancePanelId,
+    onSelect,
+    ...overrides,
+  }
+  const view = render(<AppearanceNav {...props} />)
+  return {
+    onSelect,
+    /** Re-render with a different active panel, as a URL change would. */
+    rerender: (activeId: AppearancePanelId) =>
+      view.rerender(<AppearanceNav {...props} activeId={activeId} />),
+  }
 }
 
 describe("AppearanceNav", () => {
@@ -62,5 +66,89 @@ describe("AppearanceNav", () => {
     renderNav({ hiddenIds: ["a11y", "advanced", "plugins"] })
     expect(screen.queryByTestId("appearance-nav-group-advancedGroup")).not.toBeInTheDocument()
     expect(screen.getByTestId("appearance-nav-group-themeGroup")).toBeInTheDocument()
+  })
+
+  // Twelve entries would otherwise be twelve tab stops between the section
+  // header and the panel the user came here to edit.
+  describe("roving focus", () => {
+    it("gives the tab stop to the active entry alone", () => {
+      renderNav({ activeId: "cursor" })
+      expect(screen.getByTestId("appearance-nav-item-cursor")).toHaveAttribute("tabindex", "0")
+      for (const id of ["theme", "auto", "advanced"]) {
+        expect(screen.getByTestId(`appearance-nav-item-${id}`)).toHaveAttribute("tabindex", "-1")
+      }
+    })
+
+    it("moves focus to the next entry on ArrowDown", () => {
+      renderNav()
+      const theme = screen.getByTestId("appearance-nav-item-theme")
+      theme.focus()
+      fireEvent.keyDown(theme, { key: "ArrowDown" })
+      expect(screen.getByTestId("appearance-nav-item-auto")).toHaveFocus()
+    })
+
+    // The groups are a visual grouping, not separate widgets.
+    it("crosses a group boundary", () => {
+      renderNav()
+      const library = screen.getByTestId("appearance-nav-item-library")
+      library.focus()
+      fireEvent.keyDown(library, { key: "ArrowDown" })
+      expect(screen.getByTestId("appearance-nav-item-wallpaper")).toHaveFocus()
+    })
+
+    it("wraps from the first entry to the last on ArrowUp", () => {
+      renderNav()
+      const theme = screen.getByTestId("appearance-nav-item-theme")
+      theme.focus()
+      fireEvent.keyDown(theme, { key: "ArrowUp" })
+      expect(screen.getByTestId("appearance-nav-item-plugins")).toHaveFocus()
+    })
+
+    it("skips hidden entries when wrapping", () => {
+      renderNav({ hiddenIds: ["plugins"] })
+      const theme = screen.getByTestId("appearance-nav-item-theme")
+      theme.focus()
+      fireEvent.keyDown(theme, { key: "ArrowUp" })
+      expect(screen.getByTestId("appearance-nav-item-advanced")).toHaveFocus()
+    })
+
+    it("jumps to the ends with Home and End", () => {
+      renderNav({ activeId: "wallpaper" })
+      const wallpaper = screen.getByTestId("appearance-nav-item-wallpaper")
+      wallpaper.focus()
+      fireEvent.keyDown(wallpaper, { key: "End" })
+      expect(screen.getByTestId("appearance-nav-item-plugins")).toHaveFocus()
+      fireEvent.keyDown(screen.getByTestId("appearance-nav-item-plugins"), { key: "Home" })
+      expect(screen.getByTestId("appearance-nav-item-theme")).toHaveFocus()
+    })
+
+    // Activation is manual: each selection swaps the whole detail panel and
+    // rewrites the URL, which is too much to fire on an arrow key.
+    it("does not select the entry focus lands on", () => {
+      const { onSelect } = renderNav()
+      const theme = screen.getByTestId("appearance-nav-item-theme")
+      theme.focus()
+      fireEvent.keyDown(theme, { key: "ArrowDown" })
+      expect(onSelect).not.toHaveBeenCalled()
+    })
+
+    it("hands the tab stop back to the active entry once selection moves", () => {
+      const { rerender } = renderNav()
+      const theme = screen.getByTestId("appearance-nav-item-theme")
+      theme.focus()
+      fireEvent.keyDown(theme, { key: "ArrowDown" })
+      expect(screen.getByTestId("appearance-nav-item-auto")).toHaveAttribute("tabindex", "0")
+      rerender("cursor")
+      expect(screen.getByTestId("appearance-nav-item-cursor")).toHaveAttribute("tabindex", "0")
+      expect(screen.getByTestId("appearance-nav-item-auto")).toHaveAttribute("tabindex", "-1")
+    })
+
+    it("ignores keys it does not own", () => {
+      renderNav()
+      const theme = screen.getByTestId("appearance-nav-item-theme")
+      theme.focus()
+      fireEvent.keyDown(theme, { key: "a" })
+      expect(theme).toHaveFocus()
+    })
   })
 })
