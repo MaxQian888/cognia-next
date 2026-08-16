@@ -1,0 +1,4 @@
+interface:
+  display_name: "需求动线建模"
+  short_description: "将原始需求拆成可追踪、可验证、跨系统的完整 Requirement Flow"
+  default_prompt: "Use $map-requirement-flow to turn this raw requirement into a complete, traceable end-to-end Requirement Flow."
