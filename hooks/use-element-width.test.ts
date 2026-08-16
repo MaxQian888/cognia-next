@@ -102,4 +102,76 @@ describe("useElementWidth", () => {
     })
     expect(result.current).toBe(400)
   })
+
+  it("starts observing an element that attaches after the first commit", () => {
+    // `if (!mounted) return null` components hand the hook a `null` ref on
+    // their first commit and only attach the element on the next render.
+    const { el, geometry } = setup(312)
+    const { result, rerender } = renderHook(
+      ({ attached }: { attached: boolean }) => {
+        const ref = useRef<HTMLElement | null>(null)
+        ref.current = attached ? el : null
+        return useElementWidth(ref)
+      },
+      { initialProps: { attached: false } }
+    )
+    expect(result.current).toBe(0)
+    expect(MockResizeObserver.instances).toHaveLength(0)
+
+    rerender({ attached: true })
+    expect(result.current).toBe(312)
+    expect(MockResizeObserver.instances).toHaveLength(1)
+    expect(MockResizeObserver.instances[0]?.observed).toEqual([el])
+
+    act(() => {
+      geometry.width = 200
+      MockResizeObserver.instances[0]?.trigger()
+    })
+    expect(result.current).toBe(200)
+  })
+
+  it("keeps one observer across re-renders and rebinds only when the element changes", () => {
+    const a = setup(100)
+    const b = setup(180)
+    const { result, rerender } = renderHook(
+      ({ target }: { target: HTMLElement }) => {
+        const ref = useRef<HTMLElement | null>(null)
+        ref.current = target
+        return useElementWidth(ref)
+      },
+      { initialProps: { target: a.el } }
+    )
+    expect(result.current).toBe(100)
+    rerender({ target: a.el })
+    rerender({ target: a.el })
+    expect(MockResizeObserver.instances).toHaveLength(1)
+
+    rerender({ target: b.el })
+    expect(result.current).toBe(180)
+    expect(MockResizeObserver.instances).toHaveLength(2)
+    // The first observer was released when the element changed.
+    expect(MockResizeObserver.instances[0]?.observed).toEqual([])
+    expect(MockResizeObserver.instances[1]?.observed).toEqual([b.el])
+  })
+
+  it("drops back to 0 and releases the observer when the element detaches", () => {
+    const { el } = setup(240)
+    const { result, rerender, unmount } = renderHook(
+      ({ attached }: { attached: boolean }) => {
+        const ref = useRef<HTMLElement | null>(null)
+        ref.current = attached ? el : null
+        return useElementWidth(ref)
+      },
+      { initialProps: { attached: true } }
+    )
+    expect(result.current).toBe(240)
+    rerender({ attached: false })
+    expect(result.current).toBe(0)
+    expect(MockResizeObserver.instances[0]?.observed).toEqual([])
+
+    rerender({ attached: true })
+    expect(result.current).toBe(240)
+    unmount()
+    expect(MockResizeObserver.instances.at(-1)?.observed).toEqual([])
+  })
 })
