@@ -1,0 +1,298 @@
+% !TEX program = xelatex
+% High-fidelity A3 resume template reconstructed from the supplied reference.
+% Compile with: tectonic high-fidelity-resume-template.tex
+\documentclass[12pt,a3paper,fontset=none]{ctexart}
+
+\usepackage[a3paper,left=15mm,right=15mm,top=14mm,bottom=12mm]{geometry}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usepackage{fontawesome5}
+\usepackage[normalem]{ulem}
+\usepackage{hyperref}
+\usepackage{needspace}
+\usepackage{ragged2e}
+
+% The reference uses PingFang SC + EB Garamond. Portable fallbacks are provided.
+\IfFileExists{/Users/bytedance/Library/Fonts/EBGaramond12-Regular.otf}{
+  \setmainfont{EBGaramond12-Regular.otf}[
+    Path=/Users/bytedance/Library/Fonts/,
+    ItalicFont=EBGaramond12-Italic.otf,
+    BoldFont=EBGaramond12-Regular.otf,
+    BoldFeatures={FakeBold=2}
+  ]
+}{
+  \IfFontExistsTF{EB Garamond}{
+    \setmainfont{EB Garamond}[AutoFakeBold=2]
+  }{
+    \setmainfont{Palatino}[AutoFakeBold=2]
+  }
+}
+\IfFontExistsTF{PingFang SC}{
+  \setCJKmainfont{PingFang SC}[BoldFont=PingFang SC Semibold]
+}{
+  \setCJKmainfont{Hiragino Sans GB}[AutoFakeBold=2]
+}
+\setmonofont{Menlo}
+
+\definecolor{Ink}{RGB}{17,17,17}
+\definecolor{SectionBlue}{RGB}{29,78,216}
+\definecolor{TitleBlue}{RGB}{30,58,138}
+\definecolor{LinkBlue}{RGB}{37,99,235}
+\definecolor{BrightBlue}{RGB}{59,130,246}
+\definecolor{SoftGray}{RGB}{245,245,245}
+\definecolor{SoftRed}{RGB}{255,242,240}
+\definecolor{SoftBlue}{RGB}{239,247,255}
+\definecolor{Muted}{RGB}{107,114,128}
+\definecolor{Coral}{RGB}{248,113,113}
+
+\hypersetup{colorlinks=true,urlcolor=LinkBlue,linkcolor=LinkBlue}
+\urlstyle{same}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\setlength{\emergencystretch}{2em}
+\setlength{\fboxsep}{0pt}
+\color{Ink}
+% ctex defaults to a loose Chinese line spread; the reference uses a 15 pt grid.
+\linespread{1}
+\AtBeginDocument{\fontsize{12pt}{15pt}\selectfont}
+
+\newcommand{\tighturl}[2]{\href{#1}{\uline{#2}}}
+\newcommand{\code}[1]{\texttt{\fontsize{10.8pt}{12pt}\selectfont #1}}
+
+% Identity block: four compact lines beneath the name.
+\newcommand{\ResumeHeader}[9]{%
+  {\fontsize{22.5pt}{26pt}\selectfont\bfseries #1}\par
+  \vspace{1.7mm}
+  \faPhone*\hspace{1.8mm}#2\quad\textbar\quad
+  \faEnvelope\hspace{1.8mm}\href{mailto:#3}{#3}\quad\textbar\quad
+  \faWeixin\hspace{1.8mm}#4\par
+  \vspace{0.65mm}
+  \faUser\hspace{1.8mm}{\bfseries #5}\par
+  \vspace{0.65mm}
+  \faGithub\hspace{1.8mm}{\bfseries\href{#6}{#7}}\par
+  \vspace{0.65mm}
+  \faGraduationCap\hspace{1.8mm}#8\quad\textbar\quad #9\par
+}
+
+% Blue section title with the same full-width rule used by the reference.
+\newcommand{\ResumeSection}[1]{%
+  \vspace{1.4mm}
+  {\color{SectionBlue}\fontsize{18pt}{21pt}\selectfont\bfseries #1}\par
+  \vspace{0.8mm}
+  {\color{BrightBlue}\hrule height 1.5pt}
+  \vspace{1.4mm}
+}
+
+\newcommand{\ResumeSectionSmall}[1]{%
+  \vspace{1.2mm}
+  {\color{SectionBlue}\fontsize{15pt}{18pt}\selectfont\bfseries #1}\par
+  \vspace{0.6mm}
+  {\color{BrightBlue}\hrule height 1.5pt}
+  \vspace{1.2mm}
+}
+
+\newcommand{\LeadText}[1]{%
+  {\color{TitleBlue}\bfseries #1}\par\vspace{1.2mm}
+}
+
+% Repository row with a compact ranking badge aligned to the right.
+\newcommand{\RepoRow}[2]{%
+  \noindent
+  \begin{minipage}[c]{0.76\linewidth}
+    {\color{LinkBlue}\fontsize{13.5pt}{16pt}\selectfont\bfseries
+      \tighturl{#1}{#2}}
+  \end{minipage}%
+  \hfill
+  \begin{tikzpicture}[baseline=(current bounding box.center)]
+    \node[draw=violet!65,rounded corners=2mm,inner xsep=3mm,inner ysep=1.2mm,
+      text=TitleBlue,font=\bfseries\fontsize{7pt}{7pt}\selectfont]
+      {\faBolt\quad \#1 Repository Of The Day};
+  \end{tikzpicture}\par
+  \vspace{1.4mm}
+}
+
+% Organization bar: rounded tinted strip, 30 pt brand badge, and optional link.
+\newcommand{\OrgBar}[6][SoftGray]{%
+  \vspace{1.2mm}
+  \begin{tcolorbox}[
+    enhanced,colback=#1,colframe=#1,boxrule=0pt,arc=2mm,
+    left=2mm,right=2mm,top=1.45mm,bottom=1.45mm,
+    before skip=0pt,after skip=1mm]
+    \tikz[baseline=(b.base)]\node[rounded corners=1.8mm,fill=#2,
+      text=white,minimum width=8mm,minimum height=8mm,
+      inner sep=0pt,font=\bfseries\fontsize{9pt}{9pt}\selectfont] (b) {#3};
+    \hspace{2.2mm}{\bfseries #4}%
+    \if\relax\detokenize{#5}\relax\else
+      \hfill{\fontsize{10.5pt}{12pt}\selectfont\color{Muted}
+        业务需求详细内容 $\rightarrow$ \href{#5}{\nolinkurl{#6}}}
+    \fi
+  \end{tcolorbox}
+}
+
+\newcommand{\ProjectTitle}[1]{%
+  \needspace{2\baselineskip}
+  {\color{TitleBlue}\fontsize{13.5pt}{16pt}\selectfont\bfseries #1}\par
+  \vspace{0.2mm}
+}
+
+\setlist[itemize,1]{
+  leftmargin=5mm,labelsep=1.6mm,label=\textbullet,
+  itemsep=0pt,topsep=0.1mm,parsep=0pt,partopsep=0pt
+}
+\setlist[itemize,2]{
+  leftmargin=5mm,labelsep=1.5mm,label=\raisebox{0.16ex}{\scriptsize$\circ$},
+  itemsep=0pt,topsep=0pt,parsep=0pt,partopsep=0pt
+}
+\setlist[itemize,3]{
+  leftmargin=5mm,labelsep=1.5mm,label=\raisebox{0.45ex}{\rule{3.75pt}{3.75pt}},
+  itemsep=0pt,topsep=0pt,parsep=0pt,partopsep=0pt
+}
+
+\begin{document}
+
+% ==================== PAGE 1 ====================
+\ResumeHeader
+  {林芮瑭}
+  {15307128607}
+  {lofisuchat@gmail.com}
+  {susususuyuyu66}
+  {20 years old · Full-Stack AI Agent Developer · Open to opportunities}
+  {https://github.com/LofiSu}
+  {github.com/LofiSu（Apache Fory Committer｜Maintainer of ByteDance/DeerFlow）}
+  {中南民族大学（中央部委院校）威斯康星州立大学合办软件工程创新人才实验班}
+  {2023年-2026年（本科跳级毕业）}
+
+\ResumeSection{实习经历}
+
+\LeadText{实习期间多篇论文解析及技术文章产出到内部论坛，多次登上公司《LLM技术周刊》与部门团队号优秀征文榜单，荣登ByteTech首页文章周榜13次，ByteTech作者等级LV8，2025年字节跳动优秀技术创作者榜第13名。}
+
+\RepoRow{https://github.com/bytedance/deer-flow}{github.com/bytedance/deer-flow \faStar\ stars 76k · forks 10.3k}
+
+\begin{itemize}
+  \item \textbf{项目简介：}字节排名第一的开源 \textbf{Long-Horizon Agent Harness} 项目，能够研究、编码与创作，内置 AIOSandBox 沙箱化执行环境、可插拔 Skill 体系、跨会话长期记忆、动态 Sub-agent 调度与系统性 Context Engineering，可处理多层级 long-horizon 任务。
+  \item \textbf{我的职责：作为项目 owner 核心作者之一，主导 1.0 到 2.0 的架构升级与迭代}
+  \begin{itemize}
+    \item \textbf{1.0（Multi-Agent + ReAct 风格子 Agent）：}Coordinator（意图识别）$\rightarrow$ Planner $\rightarrow$ Research Team（Researcher / Coder 支持 MCP 动态扩展外部工具）$\rightarrow$ Reporter（汇总上下文生成最终报告）；Prompt 由 OpenAI Meta Prompt 生成。
+    \item \textbf{2.0（Agent Teams Harness + Middleware Chain + Skill System + Context Engineering）：}
+    \begin{itemize}
+      \item \textbf{Agent Teams Harness：}相比 1.0 五节点固定流水线，2.0 改为单一 Lead Agent 统一决策；system\_prompt \textbf{动态写入}——按当前启用的 Skill 列表、跨会话持久化记忆、Sub-agent 并发规则组装；Lead Agent 通过 \code{task} 工具触发 \textbf{SubagentExecutor} 新起独立 Agent 实例；\textbf{调度与执行双线程池分离，最多 3 并发 / 单任务超时 900s}；Sub-agent 继承父线程目录 + 复用父沙箱，每步实时推流至前端，完成后压缩摘要回传 Lead Agent。
+      \item \textbf{Middleware Chain：}1.0 上下文压缩 / 沙箱 / 记忆逻辑散落各处，改一处要动多处；2.0 抽成 \textbf{11 层有序流水线}，新增或修改能力只动对应层，Agent 推理代码零改动（ThreadData $\rightarrow$ Uploads $\rightarrow$ Sandbox $\rightarrow$ DanglingToolCall $\rightarrow$ Summarization $\rightarrow$ Todo $\rightarrow$ Title $\rightarrow$ Memory $\rightarrow$ ViewImage $\rightarrow$ SubagentLimit $\rightarrow$ Clarification）。
+      \item \textbf{Skill System：}每个 Skill 是一个目录，内含 \code{SKILL.md}；system\_prompt 只注入索引，Agent 按需 \code{read\_file} 渐进加载，避免全量注入 token 爆炸；支持自定义 Skill，\code{custom/} 下新增目录即可扩展。
+      \item \textbf{Context Engineering：Write}——中间结果写入文件系统，索引 / 规则每轮注入 system\_prompt；\textbf{Select}——按 token 预算从 \code{memory.json} 裁剪注入记忆，Skill 按需读全文；\textbf{Compress}——超限调轻量 LLM 压缩历史 + 异步提炼持久化记忆；\textbf{Isolate}——Sub-agent 仅见任务描述，结果摘要回传，沙箱按 thread\_id 隔离。
+    \end{itemize}
+  \end{itemize}
+\end{itemize}
+
+\OrgBar[SoftGray]{black}{抖}{抖音AI基建-AI4SE基座算法\&Infra --- 2025.12 - 2026.4}{}{}
+
+\ProjectTitle{AgentScaling for SFT \& RL ｜ MultiModel Relay + Multi-Scaffold Diverse Trajectory Synthesis Pipeline}
+\begin{itemize}
+  \item \textbf{背景与目标：}
+  \begin{itemize}
+    \item 单一模型轨迹风格单一易过拟合——借鉴「Mix Diverse GPTs」，引入多种 scaffold 提供风格不同的轨迹，artifacts 生成任务上混合训练已验证有显著收益；\textbf{目标：规模化合成覆盖多 scaffold 的高质量多样化轨迹}。
+    \item 针对 \textbf{Claude Opus 4.6} 连续失败 3 次以上的难题，用接力和定位策略提升通过率，降低重复推理成本；\textbf{目标：提升难题通过率，降低重复推理成本}。
+  \end{itemize}
+  \item \textbf{我的职责：项目 owner，完全负责从 0 到 1 设计并落地以下系统架构与技术链路（CLI：\code{relay run $\rightarrow$ export}）：}
+  \begin{itemize}
+    \item \textbf{多 scaffold 统一适配：}统一 Agent 接口接入 10+ scaffold（codex / claude\_code / cline 等），新增 scaffold 实现统一 run / get\_answer 接口即可接入。
+    \item \textbf{relay run 执行引擎：}同一 Docker 容器内多 LLM 顺序接力，共享代码现场。切换策略为三阶段交接：规则压缩历史为约 12k 结构化文本 $\rightarrow$ LLM 以 \textbf{gold patch} 为隐形顾问生成 \textbf{RFC（复盘）+ Plan A/B/C} $\rightarrow$ 裁剪对话为 [首条任务描述 + handoff 消息] 作为下一模型输入；可选每轮 \textbf{Test-in-Loop} 提取 patch 评测，通过则提前退出，失败则注入失败报告给下一模型。续跑时从 checkpoint 恢复仓库 patch 与对话，从上一模型继续。针对反复失败的难题，复现 SWE-Replay 论文并提升策略：维护历史轨迹 Archive，从关键中间步骤分叉、apply git diff 恢复现场后重试，避免全量重跑。\textbf{Benchmark 指标：}SWE-Bench 系列难题通过率较全量重跑提升约 25\%+，单任务推理成本（API 与时长）降低约 30\%+，多 scaffold 混合轨迹覆盖 10+ 种风格。
+    \item \textbf{上下文压缩 + Checkpoint 续跑：}超 180k 触发 Micro compact，超 250k 触发 LLM 兜底；每轮 checkpoint，中断后可从上次模型续跑。
+  \end{itemize}
+\end{itemize}
+
+\ProjectTitle{Agent Tracer Evaluation for SFT \& RL ｜ Trajectory Diagnosis + Rubric Eval and Wash Pipeline}
+\begin{itemize}
+  \item \textbf{背景与目标：}
+  \begin{itemize}
+    \item 多模型 MultiSWEBench 完成率接近，但 Agentic 能力（规划 / 工具链效率 / 错误恢复 / patch 质量）参差不齐；\textbf{目标：用 Rubric 评判标准逐 check 打分，筛选高质量轨迹片段用于 SFT / RL 训练}。
+  \end{itemize}
+  \item \textbf{我的职责：项目 owner，完全负责从 0 到 1 设计并落地以下系统架构与技术链路（CLI：\code{evaluate run $\rightarrow$ wash $\rightarrow$ export}）：}
+  \begin{itemize}
+    \item \textbf{LLM-as-Judge 评估引擎：}按 check 类型分组 batch 减少 API 调用，规则类 check 零 LLM 直接判断，失败时回退逐条补全；支持多模型投票；遇 429 自动退避重试，并发数与请求频率双重限流。
+    \item \textbf{Failure Onset 定位：}Agent 失败根因是能定位相关代码证据但无法正确解读并转化为行动（\textbf{Evidence-to-Action Gap}）；通过将 Rubric check 逐步骤打分定位到具体轮次，自动识别 failure onset（首次出现错误决策的步骤），过滤 onset 后的级联失败片段，只保留 onset 前的高质量决策轨迹用于训练。
+    \item \textbf{轨迹压缩：}逐轮按内容类型差异化截断；超 180k token 触发 micro\_compact；超 250k 触发 LLM 总结兜底，保留首条 USER 消息与失败报告。
+    \item \textbf{增量续跑 + wash / export：}自动增量补全未完成 check；按 CSR / ISR / Score / Effective Action Ratio（有效工具调用占比）多维 Top-K 筛选 + 早期质量评估，导出 pkl 格式。\textbf{Benchmark 指标：Agentic Rubric 模型区分度 35\%}，Failure Onset 定位后高质量决策片段占比提升，用于 SFT/RL 的轨迹通过率与 patch 质量显著优于未筛选基线。
+  \end{itemize}
+\end{itemize}
+
+\ProjectTitle{SWE等系列Benchmark 评测服务化改造 ｜ 接入字节云 AIPaaS 容器平台}
+\begin{itemize}
+  \item \textbf{我的职责：}项目 owner，将分散的本地评测接入 AIPaaS 云容器统一入口：spec 配置 $\rightarrow$ CreateSession 申请隔离容器 $\rightarrow$ 还原仓库 $\rightarrow$ Agent 修复 $\rightarrow$ diff 送测 $\rightarrow$ 异步轮询 $\rightarrow$ 返回结构化结果，供全业务按需调用。
+\end{itemize}
+
+\newpage
+\newgeometry{a3paper,left=15mm,right=15mm,top=10mm,bottom=12mm}
+
+% ==================== PAGE 2 ====================
+\OrgBar[SoftRed]{Coral}{抖}{抖音电商-营销\&互动玩法 --- 2025.5 - 2025.9｜产运Agent｜B端研发平台\&C端互动玩法频道页}{https://github.com/LofiSu/ecom}{github.com/LofiSu/ecom}
+
+\ProjectTitle{EC-Monica 电商产运Agent}
+\begin{itemize}
+  \item \textbf{背景：}为产品、运营、研发提供电商业务 Agent，支持数据分析与报告生成、业务归因与需求文档解析等任务，提高业务理解效率与文档编写效率。
+  \item \textbf{指标与效果：}上线后服务产运、产品、研发等多角色；\textbf{调用量月均 600+ 次，报告类任务占比约 55\%，需求/归因解析类约 45\%}；单次分析报告生成从人工 1-2 小时缩短至 5-15 分钟；业务范文 Few-shot 注入后，输出风格与内部模板对齐率提升，复购与主动推荐率持续增长。
+  \item \textbf{我的职责：项目 owner，完全负责产品从 0 到 1 设计并落地以下内容}
+  \begin{itemize}
+    \item \textbf{Agentic Workflow：}意图识别 $\rightarrow$ 条件路由（需工具 / 直接生成）$\rightarrow$ cfg.json 动态注册 FunctionSchema 的 Tool Registry 选工具循环执行 $\rightarrow$ 数据预处理计算同比 / 环比指标后注入 Context $\rightarrow$ LLM 生成子结论 $\rightarrow$ 循环直至完成后汇总报告；工具层封装超时重试与错误分类，失败时 Fallback 直接生成。
+    \item \textbf{Context Engineering：}注入业务范文与运营分析模板作为 Few-shot 样例强化风格对齐；多轮推理中对 Observation 做摘要压缩 + 滑动窗口截断，携带压缩后的前轮结论滚动输入。
+  \end{itemize}
+\end{itemize}
+
+\OrgBar[SoftGray]{black}{抖}{抖音直播中台 --- 2025.1 - 2025.5｜AI智能搭建｜C端直播玩法开发\&B端平台权限体系}{https://github.com/LofiSu/live_stream}{github.com/LofiSu/live\_stream}
+
+\ProjectTitle{直播 AI 智能搭建平台 — Agentic Workflow 搭建}
+\begin{itemize}
+  \item \textbf{背景：}基于 GenUI 平台，为直播搭建团队打造 AI 驱动的低代码智能建站能力，实现“自然语言$\rightarrow$页面/流程”的端到端自动化搭建，显著降低页面搭建门槛与人力成本。\textbf{使用率与效果：}上线后 AI 搭建能力在直播搭建场景中的使用率占新建/改版页面的约 40\%+，单页搭建耗时从人工 2-4 小时降至 15-30 分钟，团队采纳率与复购率持续提升。
+  \item \textbf{我的职责：项目 owner，完全负责产品从 0 到 1 设计并落地以下内容}
+  \begin{itemize}
+    \item 设计并实现多条 Agentic Workflow 链路与 Prompt 工程设计：
+    \begin{itemize}
+      \item \textbf{Prompt 工程：}覆盖意图分析、任务拆分（new\_page / new\_section / update\_section / new\_flow / bind 等 8 种动作）、数据源缺失检测等完整推理链路。
+      \item \textbf{主流水线：}负责意图分析，将用户输入与页面 UIDL 传入 Claude3.5\_v2，输出结构化 taskList（含 UI / Flow / Bind 三类任务）。
+      \item \textbf{Controller：}按优先级并行调度各子任务，通过 Promise.allSettled 实现多任务并发执行；封装 XML Patch 服务实现 UIDL 差量更新。
+      \item \textbf{UI 生成链路：}支持文生/图生双模式，经 JSX$\rightarrow$XML$\rightarrow$UIDL 多级 IR 转换渲染页面。
+      \item \textbf{Flow 生成链路：}将 AI 输出的 IRFlow 转换为可执行的流程结构，完成节点与边的构建。
+      \item \textbf{Bind 链路：}负责将 UI 组件与 Flow 按事件类型（onClick / onMount 等）绑定到 UIDL flowMap。
+    \end{itemize}
+    \item 一期向 AI 喂入 54 个基础组件的 Schema/DSL 定义完成模型训练，为后续接入 Semi / Arco Design 组件库奠定基础。
+  \end{itemize}
+\end{itemize}
+
+\OrgBar[SoftBlue]{BrightBlue}{哔}{哔哩哔哩-OGV技术部 --- 2024.8 - 11｜微前端低代码流程工作台｜B/C端业务开发}{https://github.com/LofiSu/bilibili}{github.com/LofiSu/bilibili}
+
+\ResumeSectionSmall{AI Startup兼职\&开源项目\&AI黑客松比赛：\quad\mdseries\tighturl{https://github.com/LofiSu/Awards}{github.com/LofiSu/Awards}}
+
+\ProjectTitle{Thumbnail AI · Mountex}
+\begin{itemize}
+  \item \textbf{背景：}基于 MkSaaS、Next.js 搭建的多平台封面图生成 AI 工具（\tighturl{https://thumbnail-ai.com}{thumbnail-ai.com}），面向 YouTube、Instagram、Facebook、X、LinkedIn、TikTok 等多平台内容创作者，支持选择平台尺寸、风格参考与主体上传，三步内完成专业封面图生成，帮助创作者提升点击率。
+  \item \textbf{产品与链路：}前端：Next.js + 响应式多端适配，支持平台预设尺寸一键选择、本地上传/URL 主体、风格参考图；AI 链路：主体与风格图输入 $\rightarrow$ 提示词编排（平台场景 + 风格关键词）$\rightarrow$ 调用图像生成 API 生成多尺寸封面 $\rightarrow$ 预览与下载；支持免费额度 + 订阅付费，付费用户可解锁高清导出与批量生成。
+  \item \textbf{数据与指标：}累计注册用户 2000+，付费用户 200+；月活 500+，月生成封面 1500+ 张；付费转化率约 38\%；用户从上传到出图平均时长 $<$ 2 分钟。
+  \item \textbf{我的职责：}项目 owner，从 0 到 1 负责前端工程（Next.js、支付与订阅流程、多平台尺寸与风格配置）、AI 封面生成链路设计与对接（提示词工程、多尺寸批量生成、降本与体验优化）。
+\end{itemize}
+
+\ProjectTitle{Krene-Art}
+\begin{itemize}
+  \item \textbf{背景：}面向游戏/二次元角色设计师的 AI 创作平台（\tighturl{https://krene.com}{krene.com}），通过 Agent 完成意图解析、参考图检索、视觉特征提取与 Prompt 生成，输出带设计说明的角色卡片（含核心设定、概念整合与角色立绘），缩短从脑洞到成图的设计周期。
+  \item \textbf{ReAct Workflow 与链路：}
+  \begin{itemize}
+    \item \textbf{search：}根据用户意图生成检索关键词 $\rightarrow$ 爬取 Bing 图搜解析高清链接 $\rightarrow$ LLM 按游戏角色维度（造型、配色、气质等）打分筛选，单次聚合约 300 张参考。
+    \item \textbf{design：GPT-4o Vision} 对参考图做五维视觉特征提取 $\rightarrow$ 与用户设定拼接成结构化 Prompt $\rightarrow$ \textbf{NovelAI nai-diffusion-3} 生成约 10 张角色图。
+    \item \textbf{evaluate：}按设计师设定维度打分，低分时 ReAct 触发重新 design（调整 Prompt 或参考集），直至达标后输出结构化角色卡片。
+  \end{itemize}
+  \item \textbf{数据与指标：}累计用户 1200+，付费用户 150+；月生成角色卡 400+ 张；付费转化率约 42\%；单角色从输入意图到出卡平均 6-8 分钟。
+  \item \textbf{我的职责：}项目 owner，从 0 到 1 负责前端工程与 AI 角色设计 ReAct Workflow（意图解析、search/design/evaluate 三阶段编排、Vision 特征提取与 NovelAI 对接、角色卡片结构化输出与展示）。
+\end{itemize}
+
+\vspace{1mm}
+\begin{itemize}
+  \item \textbf{开源：}持续半年 Apache 社区贡献，\tighturl{https://github.com/LofiSu}{18 岁成为全球最年轻 Apache Committer}；深度参与 \textbf{ByteDance/DeerFlow、Apache Fory、Spring AI Alibaba、Ant Design X} 等社区开发与维护；\textbf{2024 阿里天池云原生全球编程挑战赛 issue 解决数第一}，技术文章荣获天池赛最佳质量奖；\textbf{2024 腾讯犀牛鸟开源大赛课题实战奖 \& Issue 实战奖；2024 OSPP 中科院开源之夏}（ByteDance/VisActor 组件开发）。
+  \item \textbf{AdventureX AI 黑客松：}开发全球首个 Apple Vision Pro Agent，斩获 Kimi For Vibe Coding 奖、空间智能赛道第二名及 Injective \$1000。
+  \item \textbf{AI Startup 好朋友：}帮多家真格、红杉、蓝驰、奇绩等知名 VC 被投 AI Startup 实现 Agent 业务落地；与千问、Kimi、智谱 GLM、MiniMax、豆包、Trae、灵光、阿福等多家大模型 / AI 产品深度合作，参与官方评测与 Demo 制作，产出技术文章、评测笔记与 Demo 视频，为产品宣传与迭代提供反馈。
+  \item 高中时期做过 Live2D/3D 数字人，二次元平台产品经理，对二次元文化有深入了解。
+\end{itemize}
+
+\end{document}
