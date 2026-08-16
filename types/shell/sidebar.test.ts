@@ -35,8 +35,13 @@ describe("sidebar nav meta", () => {
     }
   })
 
-  it("pins the three work-arrives-here entries, in rail order", () => {
-    expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(["inbox", "workflows", "agent-teams"])
+  it("pins the four work-arrives-here entries, in rail order", () => {
+    // `issues` joined the shipped pins when the tracker landed: it is the
+    // surface work is *filed* into, which is the same criterion the other
+    // three meet (an inbox that fills up, workflows you re-run, teams you hand
+    // tasks to). Its two management siblings — /projects and /workspace — are
+    // configure-occasionally and stay in "More".
+    expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(["issues", "inbox", "workflows", "agent-teams"])
   })
 
   it("leaves the remaining features to the More popover", () => {

@@ -56,6 +56,14 @@ jest.mock("@/components/desktop/job-center-panel", () => ({
   JobCenterPanel: () => <button data-testid="status-job-center">Jobs</button>,
 }))
 
+// Covered by components/agent/agent-thread-browser.test.tsx. Stubbed to render
+// nothing because that IS its default state — the segment returns `null` until
+// a subagent session exists — and the chrome-budget assertion below measures
+// the default bar. (Its own suite pins the null-when-empty rule.)
+jest.mock("@/components/agent/agent-thread-browser", () => ({
+  AgentThreadBrowser: () => null,
+}))
+
 // Covered by components/attention/attention-panel.test.tsx; stubbed here so
 // the status-bar test does not attach the real aggregation store.
 jest.mock("@/components/attention/attention-panel", () => ({

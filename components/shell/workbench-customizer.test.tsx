@@ -135,4 +135,37 @@ describe("WorkbenchCustomizer", () => {
       expect(patch).not.toHaveProperty("workbenchRail")
     })
   })
+
+  /**
+   * Working Rule 7's third axis for the two customizations that are modelled
+   * and persisted but have no reader: `WorkbenchRailLayout.groups` and
+   * `AppSettings.workbenchRailPerProject`. The types say so and these rows say
+   * so; without the rows the dormancy is documented only where a user never
+   * looks, which is the failure mode the rule names.
+   */
+  describe("planned-but-dormant customizations", () => {
+    it("names panel groups as planned rather than leaving them invisible", () => {
+      renderCustomizer()
+      const row = screen.getByTestId("workbench-planned-groups")
+      expect(row).toHaveTextContent("plannedBadge")
+      expect(row).toHaveTextContent("groupsPlannedReason")
+    })
+
+    it("names the per-project layout as planned", () => {
+      renderCustomizer()
+      const row = screen.getByTestId("workbench-planned-per-project")
+      expect(row).toHaveTextContent("plannedBadge")
+      expect(row).toHaveTextContent("perProjectPlannedReason")
+    })
+
+    it("offers no control the user could act on", () => {
+      renderCustomizer()
+      for (const id of ["workbench-planned-groups", "workbench-planned-per-project"]) {
+        const toggle = screen.getByTestId(id).querySelector("button")
+        expect(toggle).toBeDisabled()
+      }
+      // A disabled switch that still wrote settings would be worse than none.
+      expect(saveMock).not.toHaveBeenCalled()
+    })
+  })
 })

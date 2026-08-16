@@ -37,6 +37,7 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   { id: "twin", route: "/twin", i18nKey: "twin", group: "feature" },
   { id: "discover", route: "/discover", i18nKey: "discover", group: "feature" },
   { id: "templates", route: "/templates", i18nKey: "templates", group: "feature" },
+  { id: "issues", route: "/issues", i18nKey: "issues", group: "feature" },
   { id: "skills", route: "/skills", i18nKey: "skills", group: "feature" },
   { id: "plugins", route: "/plugins", i18nKey: "plugins", group: "feature" },
   { id: "agent-teams", route: "/agent-teams", i18nKey: "agentTeams", group: "feature" },
@@ -52,6 +53,16 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     group: "auxiliary",
   },
   { id: "agent-runs", route: "/agent-runs", i18nKey: "agentRuns", group: "auxiliary" },
+  // The tracker's low-frequency management surfaces. `issues` is the daily
+  // entry point and is pinned by default; these two live in "More" until the
+  // user pins them, rather than tripling the rail for everyone.
+  { id: "issue-projects", route: "/projects", i18nKey: "issueProjects", group: "auxiliary" },
+  { id: "workspace", route: "/workspace", i18nKey: "workspace", group: "auxiliary" },
+  // Reachable from the Go menu (`src-tauri/src/menu.rs`) long before they were
+  // reachable from the navigation — the menubar could go somewhere the rail
+  // could not. In "More" by default, like every other auxiliary surface.
+  { id: "sites", route: "/sites", i18nKey: "sites", group: "auxiliary" },
+  { id: "a2ui", route: "/a2ui", i18nKey: "a2ui", group: "auxiliary" },
   { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary" },
   { id: "observability", route: "/observability", i18nKey: "observability", group: "auxiliary" },
   { id: "servers", route: "/servers", i18nKey: "servers", group: "auxiliary" },
@@ -125,9 +136,9 @@ export const GUILD_RAIL_WIDTH_PX = 56
  *
  * Order matters: it is the render order on the rail.
  */
-export const DEFAULT_PINNED_IDS = ["inbox", "workflows", "agent-teams"] as const
+export const DEFAULT_PINNED_IDS = ["issues", "inbox", "workflows", "agent-teams"] as const
 
-/** Default: the three ids above pinned, everything else in "More", nothing hidden. */
+/** Default: the four ids above pinned, everything else in "More", nothing hidden. */
 export const DEFAULT_SIDEBAR_LAYOUT: SidebarLayout = {
   pinned: [...DEFAULT_PINNED_IDS],
   hidden: [],

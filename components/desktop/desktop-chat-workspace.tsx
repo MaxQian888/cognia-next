@@ -30,8 +30,6 @@ import { MemberList } from "@/components/shell/member-list"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { CanvasShell } from "@/components/canvas/canvas-shell"
-import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
-import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle } from "@/components/chat/composer"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
@@ -45,6 +43,7 @@ import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
+import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
 import { updateSession, setSessionOrder } from "@/lib/db/sessions"
@@ -101,6 +100,7 @@ export function DesktopChatWorkspace() {
     createFolder,
     renameFolder,
     deleteFolder,
+    reorderFolders,
     assignToFolder,
   } = useSessions({ crossWorkspace: sidebarGroupBy === "workspace" })
   const directChat = useClaudeChat()
@@ -110,15 +110,32 @@ export function DesktopChatWorkspace() {
   const activeSessionEpoch = useChatStore((s) => s.activeSessionEpoch)
 
   const loadSettings = useSettingsStore((s) => s.load)
+  // Which edge the conversation sidebar takes. The nav rail already follows
+  // this preference (`desktop-app-shell.tsx`); the sidebar sits beside it, so
+  // both chat columns stay on the chosen side instead of the navigation
+  // jumping to the other one whenever the user lands on `/`.
+  const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
   const selectedGuild = useUIStore((s) => s.selectedGuild)
   const selectedGuildEpoch = useUIStore((s) => s.selectedGuildEpoch)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
 
+  // The sidebar may list every workspace, but guild reconciliation must only
+  // resume conversations from the workspace that owns the chat pane. Otherwise
+  // an absent foreign active id is selected again on every navigation-epoch
+  // update, producing a maximum-update-depth loop.
+  const guildSessions = useMemo(
+    () =>
+      activeProjectId
+        ? sessions.filter((session) => !session.projectId || session.projectId === activeProjectId)
+        : sessions,
+    [sessions, activeProjectId]
+  )
+
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
-  const [onboardingOpen, setOnboardingOpen] = useState(false)
 
   const composerRef = useRef<ComposerHandle | null>(null)
 
@@ -142,21 +159,6 @@ export function DesktopChatWorkspace() {
     })
   }, [activeSessionId])
 
-  useEffect(() => {
-    if (!mounted) return
-    const settings = useSettingsStore.getState().settings
-    if (!settings) return
-    let cancelled = false
-    void shouldShowOnboarding(settings, sessions.length).then((show) => {
-      if (cancelled || !show) return
-      log.info("onboarding shown")
-      setOnboardingOpen(true)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [mounted, sessions.length])
-
   // Keep the active chat session in lockstep with the selected guild. The two
   // live in separate stores (guild in useUIStore, session in useChatStore), so
   // when they disagree we reconcile by navigation epoch: whichever the user
@@ -175,7 +177,7 @@ export function DesktopChatWorkspace() {
       // (eventually-consistent) list, so a conversation that was just created
       // reconciles as itself instead of looking deleted for a render.
       activeSessionPending: activeSessionState === "pending",
-      sessions,
+      sessions: guildSessions,
     })
     switch (action.type) {
       case "none":
@@ -197,7 +199,7 @@ export function DesktopChatWorkspace() {
     selectedGuild,
     selectedGuildEpoch,
     activeSessionEpoch,
-    sessions,
+    guildSessions,
     activeSession,
     activeSessionState,
     select,
@@ -392,9 +394,12 @@ export function DesktopChatWorkspace() {
     [rename]
   )
 
-  const handleReorderSessions = useCallback((ids: string[], sectionKey: string) => {
-    void setSessionOrder(ids, sectionKey)
-  }, [])
+  // Returned (not `void`ed) so the sidebar can drop its optimistic projection
+  // of the new order if the write fails.
+  const handleReorderSessions = useCallback(
+    (ids: string[], sectionKey: string) => setSessionOrder(ids, sectionKey),
+    []
+  )
 
   // `useTranslations` returns a fresh function reference on each render. Hold
   // it in a ref so the bulk callbacks (consumed by ChannelList) stay
@@ -507,27 +512,6 @@ export function DesktopChatWorkspace() {
     [create, select, setSelectedGuild]
   )
 
-  const handleOnboardingOpenChange = useCallback((open: boolean) => {
-    setOnboardingOpen(open)
-    if (!open) {
-      log.info("onboarding dismissed")
-    }
-  }, [])
-
-  const handleOnboardingPickCharacter = useCallback(
-    async (c: Character) => {
-      log.info("onboarding pick-character", { characterId: c.id })
-      const s = await create({
-        title: `Chat with ${c.name}`,
-        kind: "direct",
-        characterId: c.id,
-      })
-      select(s.id)
-      setSelectedGuild({ kind: "dm" })
-    },
-    [create, select, setSelectedGuild]
-  )
-
   // Inline pane gates carry approvals for both kinds; team approvals arrive
   // tagged with the member sub-session id, so route them to useTeamChat.
   const handleApprovalRespond = useCallback(
@@ -536,6 +520,36 @@ export function DesktopChatWorkspace() {
         ? teamChat.respondToApproval(approval, decision)
         : directChat.respondToApproval(approval, decision),
     [teamChat, directChat]
+  )
+
+  // The conversation sidebar takes the same edge as the nav rail
+  // (`settings.sidebarSide`), so the two chat columns stay together. Built
+  // once and placed on whichever side, rather than duplicated.
+  const channelList = (
+    <ChannelList
+      sessions={sessions}
+      loading={isLoadingSessions}
+      activeSessionId={activeSessionId}
+      onSelect={handleSwitchToSession}
+      onNewDirect={handleChannelNewDirect}
+      onNewTeamConversation={handleChannelNewTeam}
+      onDelete={handleChannelDelete}
+      onRename={handleChannelRename}
+      onTogglePinned={handleChannelTogglePinned}
+      onArchive={archive}
+      onUnarchive={unarchive}
+      onBulkDelete={handleChannelBulkDelete}
+      onBulkSetPinned={handleChannelBulkSetPinned}
+      onBulkArchive={handleChannelBulkArchive}
+      onBulkUnarchive={handleChannelBulkUnarchive}
+      folders={folders}
+      onCreateFolder={createFolder}
+      onRenameFolder={renameFolder}
+      onDeleteFolder={deleteFolder}
+      onReorderFolders={reorderFolders}
+      onAssignToFolder={assignToFolder}
+      onReorderSessions={handleReorderSessions}
+    />
   )
 
   return (
@@ -556,29 +570,7 @@ export function DesktopChatWorkspace() {
               is restored from the chat-header toggle. State is the single
               `sidebarCollapsed` store field shared with the title/status bars,
               View menu, and ⌘B. */}
-          <ChannelList
-            sessions={sessions}
-            loading={isLoadingSessions}
-            activeSessionId={activeSessionId}
-            onSelect={handleSwitchToSession}
-            onNewDirect={handleChannelNewDirect}
-            onNewTeamConversation={handleChannelNewTeam}
-            onDelete={handleChannelDelete}
-            onRename={handleChannelRename}
-            onTogglePinned={handleChannelTogglePinned}
-            onArchive={archive}
-            onUnarchive={unarchive}
-            onBulkDelete={handleChannelBulkDelete}
-            onBulkSetPinned={handleChannelBulkSetPinned}
-            onBulkArchive={handleChannelBulkArchive}
-            onBulkUnarchive={handleChannelBulkUnarchive}
-            folders={folders}
-            onCreateFolder={createFolder}
-            onRenameFolder={renameFolder}
-            onDeleteFolder={deleteFolder}
-            onAssignToFolder={assignToFolder}
-            onReorderSessions={handleReorderSessions}
-          />
+          {sidebarSide === "left" ? channelList : null}
 
           <ArtifactWorkspaceDock>
             <main
@@ -664,6 +656,7 @@ export function DesktopChatWorkspace() {
               onMention={handleMemberMention}
             />
           )}
+          {sidebarSide === "right" ? channelList : null}
         </TitleBarProjectionScope>
       )}
 
@@ -671,12 +664,6 @@ export function DesktopChatWorkspace() {
         open={characterPickerOpen}
         onOpenChange={setCharacterPickerOpen}
         onPick={handleCharacterPick}
-      />
-
-      <OnboardingDialog
-        open={onboardingOpen}
-        onOpenChange={handleOnboardingOpenChange}
-        onPickCharacter={handleOnboardingPickCharacter}
       />
     </>
   )

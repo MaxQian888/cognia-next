@@ -66,12 +66,13 @@ describe("resolveBarLayout", () => {
       "notifications",
       "attention",
       "jobs",
+      "agentThreads",
       "usage",
       "accountStatus",
       "runStatus",
     ])
     expect(ids(resolved.zones.center)).toEqual([])
-    expect(ids(resolved.hidden)).toEqual(["perf"])
+    expect(ids(resolved.hidden)).toEqual(["terminal", "perf"])
   })
 
   it("honours a user reorder inside a zone", () => {
@@ -79,7 +80,7 @@ describe("resolveBarLayout", () => {
       order: ["sync", "branch", "connectivity", ...DEFAULT_STATUS_BAR_LAYOUT.order],
       hidden: [],
     })
-    expect(ids(resolved.zones.start)).toEqual(["sync", "branch", "connectivity"])
+    expect(ids(resolved.zones.start)).toEqual(["sync", "branch", "connectivity", "terminal"])
   })
 
   it("normalises a cross-zone drag back into the item's own zone", () => {
@@ -89,7 +90,7 @@ describe("resolveBarLayout", () => {
       order: ["runStatus", ...DEFAULT_STATUS_BAR_LAYOUT.order.filter((id) => id !== "runStatus")],
       hidden: [],
     })
-    expect(ids(resolved.zones.start)).toEqual(["connectivity", "branch", "sync"])
+    expect(ids(resolved.zones.start)).toEqual(["connectivity", "branch", "sync", "terminal"])
     expect(ids(resolved.zones.end)[0]).toBe("runStatus")
     // …and the customizer list reads in exactly the render sequence.
     expect(ids(resolved.order)).toEqual([...ids(resolved.zones.start), ...ids(resolved.zones.end)])
@@ -101,7 +102,7 @@ describe("resolveBarLayout", () => {
       hidden: ["branch"],
     })
     expect(ids(resolved.order)).toContain("branch")
-    expect(ids(resolved.zones.start)).toEqual(["connectivity", "sync"])
+    expect(ids(resolved.zones.start)).toEqual(["connectivity", "sync", "terminal"])
   })
 
   it("surfaces a catalog item the stored order never mentioned", () => {
@@ -178,7 +179,9 @@ describe("migrateLegacyBarItems", () => {
 
   it("carries a legacy opt-out over as a hidden id", () => {
     const migrated = migrateLegacyBarItems("status", { usage: false, perf: false })
-    expect(migrated?.hidden.sort()).toEqual(["perf", "usage"])
+    // `terminal` ships hidden and the legacy map is silent about it, so it
+    // stays hidden alongside the two explicit opt-outs.
+    expect(migrated?.hidden.sort()).toEqual(["perf", "terminal", "usage"])
   })
 
   it("lets an explicit legacy opt-in beat a hidden-by-default item", () => {

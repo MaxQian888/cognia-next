@@ -37,11 +37,47 @@ function DrawerOverlay({
   )
 }
 
+/**
+ * The real, draggable vaul handle.
+ *
+ * vaul ships default styling for `[data-vaul-handle]` — including a 2.75rem
+ * hit area on the inner `[data-vaul-handle-hitarea]` span, which is where a
+ * bottom drawer gets its touch target from — but it hardcodes
+ * `background:#e2e2e4`, a light-mode grey that is invisible against a dark
+ * surface. The token override is `!` because vaul injects that rule from JS at
+ * module load and equal-specificity ordering against the Tailwind sheet is not
+ * something to leave to chance.
+ *
+ * Only `handleOnly` drawers strictly need this (there, the handle is the sole
+ * drag surface), but any drawer benefits: `DrawerContent`'s built-in bar is
+ * decorative markup with no drag behaviour of its own.
+ */
+function DrawerHandle({
+  className,
+  ...props
+}: React.ComponentProps<typeof DrawerPrimitive.Handle>) {
+  return (
+    <DrawerPrimitive.Handle
+      data-slot="drawer-handle"
+      className={cn("my-2 bg-muted-foreground/30!", className)}
+      {...props}
+    />
+  )
+}
+
 function DrawerContent({
   className,
   children,
+  showHandle = true,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  /**
+   * Draw the built-in decorative grab bar. Set `false` when the caller renders
+   * its own `<DrawerHandle />` — two bars stacked is the only thing this
+   * guards against.
+   */
+  showHandle?: boolean
+}) {
   return (
     <DrawerPortal data-slot="drawer-portal">
       <DrawerOverlay />
@@ -57,7 +93,9 @@ function DrawerContent({
         )}
         {...props}
       >
-        <div className="mx-auto mt-4 hidden h-2 w-[100px] shrink-0 rounded-full bg-muted group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
+        {showHandle ? (
+          <div className="mx-auto mt-4 hidden h-2 w-[100px] shrink-0 rounded-full bg-muted group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
+        ) : null}
         {children}
       </DrawerPrimitive.Content>
     </DrawerPortal>
@@ -117,6 +155,7 @@ export {
   DrawerTrigger,
   DrawerClose,
   DrawerContent,
+  DrawerHandle,
   DrawerHeader,
   DrawerFooter,
   DrawerTitle,

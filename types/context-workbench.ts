@@ -5,6 +5,24 @@ export type ContextWorkbenchPlacement = "adjacent-editor" | "chat-dock" | "mobil
 export type ContextPanelRetention = "stateful" | "ephemeral"
 export type ContextPanelMode = Exclude<ContextWorkbenchMode, "collapsed">
 /**
+ * Snap heights for the mobile drawer, as fractions of the viewport.
+ *
+ * Two, not three. `0.92` is the full-height surface the Sheet this replaced
+ * always forced; `0.55` is the half-open state a phone never had — the point of
+ * it is that the conversation above stays legible while a preview, a diff or
+ * the comments list is open beneath it.
+ *
+ * Lives in this pure module because both ends need it and neither may import
+ * the other: the drawer (a component) hands the value to vaul, and
+ * `artifactDockLayoutStore` needs the same number as the default for the snap
+ * point it persists.
+ */
+export const CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS: readonly number[] = [0.55, 0.92]
+
+/** The snap a drawer opens at when the user has expressed no preference. */
+export const CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP =
+  CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS.length - 1]
+/**
  * What a resource affords, resolved per resource in
  * `lib/context-workbench/capabilities.ts`.
  *

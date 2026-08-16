@@ -111,7 +111,13 @@ jest.mock("@/stores/settings/settings-store", () => ({
     selector(settingsStateRef),
 }))
 
+const toggleSidebarAction = jest.fn()
+jest.mock("@/lib/desktop/menu-actions", () => ({
+  toggleSidebarAction: () => toggleSidebarAction(),
+}))
+
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
+import { getAppRegistration, __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
 import { DesktopAppShell, isShellBypassRoute } from "./desktop-app-shell"
 
 beforeEach(() => {
@@ -125,6 +131,44 @@ beforeEach(() => {
   uiStateRef.statusBarCollapsed = false
   act(() => useShellColumnsStore.setState({ sidebarHostsNav: false }))
   settingsStateRef.settings = undefined
+  toggleSidebarAction.mockReset()
+  __resetAppRuntimeForTesting()
+})
+
+test("registers the ⌘B sidebar toggle as an app shortcut that fires the menu action", () => {
+  render(
+    <DesktopAppShell>
+      <div />
+    </DesktopAppShell>
+  )
+  const registration = getAppRegistration("shell.sidebar.toggle")
+  expect(registration).toBeDefined()
+  // Same behaviour as VS Code: the chord works while the composer has focus.
+  expect(registration?.allowInEditable).toBe(true)
+  // The catalog gate keeps the DOM binding off under Tauri (native accelerator)
+  // and inside Canvas (its rail owns the chord).
+  expect(registration?.when).toBe("!view.canvas && !platform.tauri")
+  registration?.handler(new KeyboardEvent("keydown", { key: "b", ctrlKey: true }))
+  expect(toggleSidebarAction).toHaveBeenCalledTimes(1)
+})
+
+test("does not register the sidebar toggle on mobile or on bypass routes", () => {
+  platformValue = "mobile"
+  const { unmount } = render(
+    <DesktopAppShell>
+      <div />
+    </DesktopAppShell>
+  )
+  expect(getAppRegistration("shell.sidebar.toggle")).toBeUndefined()
+  unmount()
+  platformValue = "web"
+  pathname = "/share-target"
+  render(
+    <DesktopAppShell>
+      <div />
+    </DesktopAppShell>
+  )
+  expect(getAppRegistration("shell.sidebar.toggle")).toBeUndefined()
 })
 
 test("renders TitleBar, StatusBar, GuildRail, CommandPalette, and resize edges", () => {

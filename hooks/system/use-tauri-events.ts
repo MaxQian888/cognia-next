@@ -244,6 +244,9 @@ export function useTauriEvents(): void {
         void openDocs().catch((err) => console.warn("tray open-docs failed", err))
       })
       const trayReportIssue = await listen<null>("tray://report-issue", () => {
+        // Every window loads this layout; only the main window should mount
+        // the report dialog (the pet overlay / island would open it invisibly).
+        if (!isMainAppWindow()) return
         void reportIssue().catch((err) => console.warn("tray report-issue failed", err))
       })
       const trayCheckUpdates = await listen<null>("tray://check-updates", () => {

@@ -84,7 +84,10 @@ describe("SidebarFooter", () => {
     render(<SidebarFooter />)
     expect(screen.getByTestId("slot-sidebar.left.bottom")).toBeInTheDocument()
     const settings = screen.getByTestId("sidebar-footer-settings")
-    expect(settings).toHaveAttribute("aria-label", "openSettings")
+    // The visible label is the accessible name (WCAG 2.5.3): no "Open
+    // settings" override on a row that reads "Settings".
+    expect(settings).not.toHaveAttribute("aria-label")
+    expect(settings).toHaveTextContent("settings")
     expect(settings).not.toHaveAttribute("aria-current")
     fireEvent.click(settings)
     expect(routerPush).toHaveBeenCalledWith("/settings")

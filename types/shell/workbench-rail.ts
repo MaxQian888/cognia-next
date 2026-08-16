@@ -30,6 +30,19 @@ export const WORKBENCH_RAIL_WIDTH_PX = 48
  * Clicking the group shows a tab strip in the panel body to switch between its
  * member panels. The group's id is used in `order`/`hidden` exactly like a
  * canonical activity id.
+ *
+ * **Intentionally dormant.** Nothing reads `WorkbenchRailLayout.groups` and
+ * nothing writes it: the rail sorts by `workbenchRailIndex` over `order` alone,
+ * and the customizer edits only `{ order, hidden }`. The shape is kept because
+ * it is the extension point the panel-level customization in
+ * `lib/shell/workbench-panels.ts` will grow into, and retiring it would strand
+ * any layout already carrying one.
+ *
+ * Per Working Rule 7 the dormancy is also stated in the UI —
+ * `components/shell/workbench-customizer.tsx` renders a disabled "planned" row —
+ * and pinned by `workbench-customizer.test.tsx`. The one live obligation is that
+ * mutators must *spread* the layout rather than rebuild it, or they delete this
+ * field behind the user's back; `use-workbench-rail-layout.test.ts` holds that.
  */
 export interface WorkbenchRailGroup {
   /** Unique group id, prefixed `group:` to avoid colliding with activity ids. */

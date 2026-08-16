@@ -41,6 +41,8 @@ import { TerminalDockMoveProvider } from "@/components/terminal/terminal-dock-mo
 import { TerminalDockRegion } from "@/components/terminal/terminal-dock-region"
 import { TerminalToggleShortcut } from "@/components/terminal/terminal-toggle-shortcut"
 import { useWorkbenchActivityShortcuts } from "@/hooks/context-workbench/use-workbench-activity-shortcuts"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
+import { toggleSidebarAction } from "@/lib/desktop/menu-actions"
 import { PanelQuickSwitch } from "@/components/context-workbench/panel-quick-switch"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
@@ -51,7 +53,6 @@ import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
-import { AgentThreadBrowser } from "@/components/agent/agent-thread-browser"
 import { AgentExecutionHandleProvider } from "@/components/providers/agent-execution-handle-provider"
 
 const log = loggers.shell
@@ -116,6 +117,18 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // per host would put several handlers on one keystroke.
   useWorkbenchActivityShortcuts()
 
+  // ⌘B / Ctrl+B → conversation sidebar. Under Tauri this is a native menu
+  // accelerator (`menu.rs` → `useMenuEventRouter` → the same action), which
+  // the catalog's `when` clause keeps in charge there; this DOM binding is
+  // what makes the chord the View menu and the shortcuts dialog advertise
+  // real in the web shell too. Fires while the composer has focus, like VS
+  // Code's, so a writer can hide the list without leaving the editor.
+  useAppShortcut("shell.sidebar.toggle", toggleSidebarAction, {
+    enabled: !isMobile && !bypass,
+    allowInEditable: true,
+    preventDefault: true,
+  })
+
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -145,7 +158,14 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // desktop chrome — so they keep returning children. For ordinary routes,
   // cover the boot/hydration gap with a neutral loader instead of a
   // half-painted shell (the static-export HTML shows this until JS mounts).
-  if (!mounted) return bypass ? <>{children}</> : <PageLoading variant="workspace" allowReload />
+  // The loader stands for the boot screen's `interface` step, so the timeline
+  // it shows continues from the gates above rather than restarting.
+  if (!mounted)
+    return bypass ? (
+      <>{children}</>
+    ) : (
+      <PageLoading variant="workspace" milestone="interface" allowReload />
+    )
   if (isMobile || bypass) return <>{children}</>
 
   const handleCreateTeam = () => {
@@ -180,32 +200,31 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
         {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
           edge drop zones it paints during a drag are `fixed`, so the row's
           child order (which the rail-placement tests pin) is unchanged. */}
-      <TerminalDockMoveProvider>
-        <div className="flex flex-1 overflow-hidden">
-          {sidebarSide === "left" ? guildRail : null}
-          <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-            <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
-              <AgentExecutionHandleProvider>{children}</AgentExecutionHandleProvider>
+        <TerminalDockMoveProvider>
+          <div className="flex flex-1 overflow-hidden">
+            {sidebarSide === "left" ? guildRail : null}
+            <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+              <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
+                <AgentExecutionHandleProvider>{children}</AgentExecutionHandleProvider>
+              </div>
+              <TerminalDockRegion slot="bottom" />
             </div>
-            <TerminalDockRegion slot="bottom" />
-          </div>
-          {/* Right-docked terminal. Sits inboard of the extension host bar and
+            {/* Right-docked terminal. Sits inboard of the extension host bar and
               the rail so those stay pinned to the window edge. */}
-          <TerminalDockRegion slot="right" />
-          {/*
-           * VS Code extension host bar — hosts webviews + terminals from
-           * any activated extension. Returns `null` until an extension
-           * registers a surface, so the layout is unchanged in the
-           * default case. Phase A4 of the LSP reuse work.
-           */}
-          <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
-          {sidebarSide === "right" ? guildRail : null}
-        </div>
-      </TerminalDockMoveProvider>
-      {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
-      {mounted && <AgentThreadBrowser />}
-      <FindBar />
-      {/* Global, like the palette beside it. It used to live inside the terminal
+            <TerminalDockRegion slot="right" />
+            {/*
+             * VS Code extension host bar — hosts webviews + terminals from
+             * any activated extension. Returns `null` until an extension
+             * registers a surface, so the layout is unchanged in the
+             * default case. Phase A4 of the LSP reuse work.
+             */}
+            <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
+            {sidebarSide === "right" ? guildRail : null}
+          </div>
+        </TerminalDockMoveProvider>
+        {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
+        <FindBar />
+        {/* Global, like the palette beside it. It used to live inside the terminal
           dock, which renders only while that panel is open — so clicking a file
           reference in chat with the terminal closed wrote to the store and showed
           nothing at all. */}

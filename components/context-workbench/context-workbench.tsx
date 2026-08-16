@@ -1147,8 +1147,10 @@ export function ContextWorkbench({
     } else if (splitActive && secondaryPanelId === panel.id) {
       // Already on screen, in the second pane. `reveal` turns this into a swap,
       // so the visible set is unchanged: no lifecycle, no width hint, no mode
-      // hint — only the navigation, which the history effect records.
+      // hint — only the navigation. Claiming `lastActivePanelRef` silences the
+      // navigation effect, so the history entry has to be recorded here.
       lastActivePanelRef.current.set(scopeKey, panel.id)
+      pushPanelHistory(scopeKey, panel.id)
       navigatePanel(scopeKey, panel.id, panel.preferredMode ?? "narrow")
       return
     }
@@ -1160,6 +1162,12 @@ export function ContextWorkbench({
     const phase = seen.has(panel.id) ? "restore" : "first"
     seen.add(panel.id)
     lastActivePanelRef.current.set(scopeKey, panel.id)
+    // The claim above keeps the navigation effect quiet, so it will not record
+    // this navigation either — push the history entry imperatively. The push
+    // is a no-op when the panel is already the current entry (a rail re-open of
+    // the panel that was last in front), so the stack does not fill with
+    // duplicates.
+    pushPanelHistory(scopeKey, panel.id)
     // Claim the visible set this navigation will produce, for the same reason
     // `lastActivePanelRef` is claimed above: the callback fires imperatively
     // here, so the effect must see no change and stay quiet. A second pane that

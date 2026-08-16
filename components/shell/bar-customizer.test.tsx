@@ -102,7 +102,7 @@ describe("BarCustomizer", () => {
   it("adds a hidden segment back", () => {
     renderCustomizer("status")
     fireEvent.click(screen.getByTestId("bar-customizer-status-list-show-perf"))
-    expect(lastSaved("statusBarLayout").hidden).toEqual([])
+    expect(lastSaved("statusBarLayout").hidden).toEqual(["terminal"])
   })
 
   it("keeps the title bar and the status bar on separate settings keys", () => {
@@ -180,7 +180,7 @@ describe("BarCustomizer", () => {
     expect(saved.order.slice(0, 3)).toEqual(["sync", "connectivity", "branch"])
     // …and the hidden `perf` kept the slot it already held.
     expect(saved.order.indexOf("perf")).toBe(DEFAULT_STATUS_BAR_LAYOUT.order.indexOf("perf"))
-    expect(saved.hidden).toEqual(["perf"])
+    expect(saved.hidden).toEqual(["terminal", "perf"])
   })
 
   it("ignores a drop that lands on nothing", () => {

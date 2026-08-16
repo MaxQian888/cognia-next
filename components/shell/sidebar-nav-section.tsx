@@ -43,6 +43,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
+import { useSidebarRowRoving } from "./sidebar-row-roving"
 import { useShellNav } from "./use-shell-nav"
 
 /** One highlight travels between every row of the expanded sidebar. */
@@ -91,11 +92,25 @@ export function SidebarRow({
   testId,
   ...rest
 }: SidebarRowProps) {
+  // One tab stop for the whole sidebar, arrows between rows — but only inside
+  // a `SidebarRowsScope`; elsewhere (the icon column, the mobile Sheet) this
+  // reports `inScope: false` and the row keeps its plain behaviour.
+  const roving = useSidebarRowRoving(testId, active)
   return (
     <Button
       type="button"
       variant="ghost"
       {...rest}
+      {...roving.rowProps}
+      tabIndex={rest.tabIndex ?? roving.tabIndex}
+      onKeyDown={(event) => {
+        rest.onKeyDown?.(event)
+        if (!event.defaultPrevented) roving.onKeyDown?.(event)
+      }}
+      onFocus={(event) => {
+        rest.onFocus?.(event)
+        roving.onFocus?.()
+      }}
       onClick={onClick}
       aria-current={active && current ? "page" : undefined}
       data-active={active || undefined}
@@ -157,7 +172,13 @@ export function SidebarNavSection({ className }: { className?: string }) {
       data-testid="sidebar-nav"
       className={cn("flex shrink-0 flex-col gap-px px-2 pt-2 pb-1", className)}
     >
-      <PluginExtensionSlot point="sidebar.left.top" className="flex flex-col gap-px empty:hidden" />
+      {/* Declared form factor is `icon` (`lib/plugin/contracts/plugin-points.ts`)
+          — square controls with no room for a label — so contributions get an
+          icon strip here too, not a column of label rows they never sized for. */}
+      <PluginExtensionSlot
+        point="sidebar.left.top"
+        className="flex flex-wrap items-center gap-1 pb-1 empty:hidden"
+      />
       <SidebarRow
         active={isCanvasActive}
         onClick={switchToCanvas}

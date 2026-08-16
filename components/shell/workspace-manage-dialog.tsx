@@ -26,12 +26,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
 import { WorkspaceKnowledgeSection } from "@/components/shell/workspace-knowledge-section"
+import { WorkspaceFolderPicker } from "@/components/shell/workspace-folder-picker"
 import { normalizeRoots } from "@/lib/workspace/roots"
 import {
   isWorkspaceTrusted,
@@ -82,9 +82,11 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
   const [name, setName] = useState("")
   const [roots, setRoots] = useState<WorkspaceRoot[]>([])
   const [manualDir, setManualDir] = useState("")
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   // path → trusted? (only meaningful on desktop). Undefined while loading.
   const [trustMap, setTrustMap] = useState<Record<string, boolean>>({})
+  const desktop = isTauri()
 
   const sorted = useMemo(
     () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
@@ -173,6 +175,14 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
     setManualDir("")
   }
 
+  const handleWebAdd = () => {
+    if (manualDir.trim()) {
+      handleAddManual()
+      return
+    }
+    setFolderPickerOpen(true)
+  }
+
   const setPrimary = (id: string) => {
     setRoots((prev) => prev.map((r) => ({ ...r, isPrimary: r.id === id })))
   }
@@ -214,31 +224,34 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="h-[calc(100dvh-1rem)] max-h-[48rem] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:h-[min(48rem,calc(100dvh-2rem))] sm:max-w-5xl">
+        <DialogHeader className="border-b px-5 py-5 pr-12 sm:px-6">
           <DialogTitle>{t("title")}</DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
+          <DialogDescription className="max-w-3xl leading-relaxed">
+            {t("description")}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-[minmax(0,11rem)_1fr] gap-4">
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[15rem_minmax(0,1fr)] md:grid-rows-1">
           {/* List */}
-          <div className="flex flex-col gap-2">
+          <aside className="flex min-h-0 flex-col gap-3 border-b bg-muted/20 p-4 md:border-r md:border-b-0">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={handleNew}
-              className="justify-start gap-2"
+              className="w-full justify-start gap-2 shadow-none"
               data-testid="workspace-new"
             >
               <PlusIcon className="size-4" />
               {t("newWorkspace")}
             </Button>
-            <Separator />
-            <ScrollArea className="h-72">
+            <ScrollArea className="max-h-28 md:max-h-none md:min-h-0 md:flex-1">
               <ul className="flex flex-col gap-1 pr-2" aria-label={t("listLabel")}>
                 {sorted.length === 0 && (
-                  <li className="px-2 py-1.5 text-xs text-muted-foreground">{t("empty")}</li>
+                  <li className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+                    {t("empty")}
+                  </li>
                 )}
                 {sorted.map((p) => (
                   <li key={p.id}>
@@ -247,14 +260,20 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
                       onClick={() => setEditingId(p.id)}
                       data-testid={`workspace-row-${p.id}`}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent",
-                        editingId === p.id && "bg-primary/10 text-foreground"
+                        "group flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                        editingId === p.id &&
+                          "bg-background text-foreground shadow-sm ring-1 ring-border"
                       )}
                     >
-                      <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <FolderIcon
+                        className={cn(
+                          "size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground",
+                          editingId === p.id && "text-primary"
+                        )}
+                      />
                       <span className="flex-1 truncate">{p.name}</span>
                       {activeProjectId === p.id && (
-                        <span className="rounded bg-primary/15 px-1 text-[10px] font-medium uppercase text-primary">
+                        <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
                           {t("activeBadge")}
                         </span>
                       )}
@@ -263,155 +282,174 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
                 ))}
               </ul>
             </ScrollArea>
-          </div>
+          </aside>
 
           {/* Editor */}
-          <div className="min-w-0">
+          <div className="min-h-0 min-w-0">
             {!editing ? (
-              <div className="flex h-full items-center justify-center rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                {t("selectHint")}
+              <div className="flex h-full min-h-60 items-center justify-center p-6">
+                <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-dashed bg-muted/10 px-8 py-10 text-center text-sm text-muted-foreground">
+                  <FolderPlusIcon className="size-8 text-muted-foreground/60" />
+                  {t("selectHint")}
+                </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="workspace-name">{t("nameLabel")}</Label>
-                  <Input
-                    id="workspace-name"
-                    value={name}
-                    placeholder={t("namePlaceholder")}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </div>
+              <div className="flex h-full min-h-0 flex-col">
+                <ScrollArea className="min-h-0 flex-1">
+                  <div className="grid gap-5 p-5 lg:grid-cols-2 lg:items-start lg:p-6">
+                    <section className="space-y-5 rounded-xl border bg-card/40 p-4 shadow-xs sm:p-5">
+                      <div className="space-y-2">
+                        <Label htmlFor="workspace-name">{t("nameLabel")}</Label>
+                        <Input
+                          id="workspace-name"
+                          value={name}
+                          placeholder={t("namePlaceholder")}
+                          onChange={(e) => setName(e.target.value)}
+                        />
+                      </div>
 
-                <div className="space-y-2">
-                  <Label>{t("rootsLabel")}</Label>
-                  <p className="text-xs text-muted-foreground">{t("rootsHint")}</p>
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <Label>{t("rootsLabel")}</Label>
+                          <p className="text-xs leading-relaxed text-muted-foreground">
+                            {t("rootsHint")}
+                          </p>
+                        </div>
 
-                  {roots.length > 0 && (
-                    <ul className="flex flex-col gap-2">
-                      {roots.map((r) => {
-                        const trusted = trustMap[r.path]
-                        return (
-                          <li
-                            key={r.id}
-                            className="flex flex-col gap-1 rounded-md border bg-muted/30 p-2"
-                          >
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                aria-label={t("setPrimary")}
-                                aria-pressed={r.isPrimary ?? false}
-                                onClick={() => setPrimary(r.id)}
-                                className={cn(
-                                  "flex size-5 shrink-0 items-center justify-center rounded-full border",
-                                  r.isPrimary
-                                    ? "border-primary bg-primary text-primary-foreground"
-                                    : "border-muted-foreground/40 text-transparent"
-                                )}
-                              >
-                                <CheckIcon className="size-3" />
-                              </button>
-                              <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                                {r.path}
-                              </span>
-                              {r.isPrimary && (
-                                <span className="rounded bg-primary/15 px-1 text-[10px] font-medium uppercase text-primary">
-                                  {t("primaryBadge")}
-                                </span>
-                              )}
-                              <button
-                                type="button"
-                                aria-label={t("removeRoot")}
-                                onClick={() => removeRoot(r.id)}
-                                className="text-muted-foreground hover:text-foreground"
-                              >
-                                <Trash2Icon className="size-3.5" />
-                              </button>
-                            </div>
-                            <div className="flex items-center gap-2 pl-7">
-                              <Input
-                                value={r.label ?? ""}
-                                placeholder={t("rootLabelPlaceholder")}
-                                aria-label={t("rootLabelPlaceholder")}
-                                onChange={(e) => setLabel(r.id, e.target.value)}
-                                className="h-7 text-xs"
-                              />
-                              {isTauri() &&
-                                (trusted ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 shrink-0 gap-1 text-emerald-600"
-                                    onClick={() => void handleRevoke(r.path)}
-                                  >
-                                    <ShieldCheckIcon className="size-3.5" />
-                                    {t("trustedBadge")}
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-7 shrink-0 gap-1"
-                                    onClick={() => void handleTrust(r.path)}
-                                  >
-                                    <ShieldAlertIcon className="size-3.5 text-amber-500" />
-                                    {t("trustRoot")}
-                                  </Button>
-                                ))}
-                            </div>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )}
+                        {roots.length === 0 ? (
+                          <div className="flex items-center gap-3 rounded-lg border border-dashed bg-muted/10 px-3 py-4 text-xs text-muted-foreground">
+                            <FolderPlusIcon className="size-5 shrink-0" />
+                            {t("rootsEmpty")}
+                          </div>
+                        ) : (
+                          <ul className="flex flex-col gap-2">
+                            {roots.map((r) => {
+                              const trusted = trustMap[r.path]
+                              return (
+                                <li
+                                  key={r.id}
+                                  className="flex flex-col gap-2 rounded-lg border bg-background p-3 shadow-xs"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      aria-label={t("setPrimary")}
+                                      aria-pressed={r.isPrimary ?? false}
+                                      onClick={() => setPrimary(r.id)}
+                                      className={cn(
+                                        "flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                        r.isPrimary
+                                          ? "border-primary bg-primary text-primary-foreground"
+                                          : "border-muted-foreground/40 text-transparent hover:border-primary/70"
+                                      )}
+                                    >
+                                      <CheckIcon className="size-3" />
+                                    </button>
+                                    <span
+                                      className="min-w-0 flex-1 truncate font-mono text-xs"
+                                      title={r.path}
+                                    >
+                                      {r.path}
+                                    </span>
+                                    {r.isPrimary && (
+                                      <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                                        {t("primaryBadge")}
+                                      </span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      aria-label={t("removeRoot")}
+                                      onClick={() => removeRoot(r.id)}
+                                      className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    >
+                                      <Trash2Icon className="size-3.5" />
+                                    </button>
+                                  </div>
+                                  <div className="flex items-center gap-2 pl-7">
+                                    <Input
+                                      value={r.label ?? ""}
+                                      placeholder={t("rootLabelPlaceholder")}
+                                      aria-label={t("rootLabelPlaceholder")}
+                                      onChange={(e) => setLabel(r.id, e.target.value)}
+                                      className="h-8 text-xs"
+                                    />
+                                    {desktop &&
+                                      (trusted ? (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-8 shrink-0 gap-1 text-emerald-600"
+                                          onClick={() => void handleRevoke(r.path)}
+                                        >
+                                          <ShieldCheckIcon className="size-3.5" />
+                                          {t("trustedBadge")}
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-8 shrink-0 gap-1"
+                                          onClick={() => void handleTrust(r.path)}
+                                        >
+                                          <ShieldAlertIcon className="size-3.5 text-amber-500" />
+                                          {t("trustRoot")}
+                                        </Button>
+                                      ))}
+                                  </div>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        )}
 
-                  <div className="flex gap-2">
-                    <Input
-                      value={manualDir}
-                      placeholder={t("addRootManual")}
-                      onChange={(e) => setManualDir(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault()
-                          handleAddManual()
-                        }
-                      }}
-                    />
-                    {isTauri() ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handlePickRoots}
-                        className="shrink-0 gap-1"
-                        aria-label={t("pickDir")}
-                      >
-                        <FolderPlusIcon className="size-4" />
-                        {t("addRoot")}
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAddManual}
-                        className="shrink-0"
-                      >
-                        {t("addRoot")}
-                      </Button>
-                    )}
+                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                          <Input
+                            value={manualDir}
+                            placeholder={t("addRootManual")}
+                            onChange={(e) => setManualDir(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault()
+                                handleAddManual()
+                              }
+                            }}
+                          />
+                          {desktop ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handlePickRoots}
+                              className="gap-1.5"
+                              aria-label={t("pickDir")}
+                            >
+                              <FolderPlusIcon className="size-4" />
+                              {t("addRoot")}
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleWebAdd}
+                              className="gap-1.5"
+                              aria-label={!manualDir.trim() ? t("browseServer") : undefined}
+                            >
+                              {!manualDir.trim() && <FolderPlusIcon className="size-4" />}
+                              {!manualDir.trim() ? t("browseServer") : t("addRoot")}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="rounded-xl border bg-card/40 p-4 shadow-xs sm:p-5">
+                      <WorkspaceKnowledgeSection project={editing} />
+                    </section>
                   </div>
-                </div>
+                </ScrollArea>
 
-                <Separator />
-
-                <WorkspaceKnowledgeSection project={editing} />
-
-                <Separator />
-
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-col-reverse gap-3 border-t bg-background/95 px-5 py-4 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between lg:px-6">
                   <div className="flex gap-2">
                     {activeProjectId !== editing.id && (
                       <Button
@@ -435,7 +473,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
                       {confirmingDelete ? t("confirmDelete") : t("delete")}
                     </Button>
                   </div>
-                  <Button type="button" size="sm" onClick={handleSave} data-testid="workspace-save">
+                  <Button type="button" onClick={handleSave} data-testid="workspace-save">
                     {t("save")}
                   </Button>
                 </div>
@@ -444,6 +482,12 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
           </div>
         </div>
       </DialogContent>
+      <WorkspaceFolderPicker
+        open={folderPickerOpen}
+        onOpenChange={setFolderPickerOpen}
+        initialPath={roots.find((root) => root.isPrimary)?.path ?? roots[0]?.path}
+        onSelect={addRoot}
+      />
     </Dialog>
   )
 }

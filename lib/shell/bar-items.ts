@@ -10,6 +10,7 @@
 import {
   ActivityIcon,
   BellIcon,
+  BotIcon,
   ChevronsLeftRightIcon,
   CircleDotIcon,
   CommandIcon,
@@ -65,6 +66,7 @@ export const BAR_ITEM_ICONS: Record<string, LucideIcon> = {
   notifications: BellIcon,
   attention: TriangleAlertIcon,
   jobs: ListChecksIcon,
+  agentThreads: BotIcon,
   perf: GaugeIcon,
   usage: ActivityIcon,
   accountStatus: UserRoundIcon,

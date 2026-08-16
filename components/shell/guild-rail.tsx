@@ -19,8 +19,14 @@ import { listTeams } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
+import {
+  markGuildRead,
+  useGuildUnread,
+  type GuildUnreadTarget,
+} from "@/hooks/shell/use-guild-unread"
 import type { Team } from "@cognia/agent-config-types"
 import {
+  CheckCheckIcon,
   EllipsisIcon,
   EyeOffIcon,
   MailIcon,
@@ -37,8 +43,11 @@ import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
+import { useRouter } from "next/navigation"
 import { useShellNav } from "./use-shell-nav"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
+import { TEAM_SETTINGS_ROUTE } from "./sidebar-guild-sections"
+import { startGuildConversation } from "@/lib/shell/start-guild-conversation"
 import { WorkspaceSwitcher } from "./workspace-switcher"
 import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
 import type { SidebarSide } from "@/types/shell/sidebar"
@@ -100,6 +109,7 @@ interface Props {
  */
 export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Props) {
   const t = useTranslations("desktop.guildRail")
+  const listT = useTranslations("desktop.channelList")
   const pluginT = useTranslations()
   const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
   const {
@@ -120,6 +130,28 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
   } = useShellNav()
   const [moreOpen, setMoreOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
+  // An icon column has no room for the conversation rows, so each guild button
+  // carries the count its section holds — the same aggregate the expanded
+  // sidebar's closed rows show (`hooks/shell/use-guild-unread.ts`).
+  const unread = useGuildUnread()
+  const router = useRouter()
+  /** "3 unread" — folded into each guild button's accessible name. */
+  const unreadLabel = (count: number) => t("unreadCount", { count })
+  // The rail is mounted on every route, where no chat workspace exists to
+  // hand it creation handlers — so its menus go through the shared starter,
+  // which selects the guild, creates the session and brings the user home.
+  const startConversation = (teamId: string | null) => {
+    if (teamId) {
+      void startGuildConversation({
+        teamId,
+        teamTitle: listT("newConversation"),
+        navigate: router.push,
+        pathname,
+      })
+      return
+    }
+    void startGuildConversation({ teamId: null, navigate: router.push, pathname })
+  }
   // The title bar sizes its start / end outlets from the rail's rendered
   // width — measured, not assumed, so a hidden rail (below `md`, or while the
   // sidebar hosts the navigation) counts as 0 without a second flag.
@@ -182,14 +214,23 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
             />
             <WorkspaceSwitcher />
             <Separator className="my-1 w-8" aria-label={t("workspacesGroup")} />
-            <RailButton
-              active={isDmActive}
-              ariaLabel={t("directMessages")}
-              tooltip={t("directMessages")}
-              onClick={switchToDm}
+            <GuildContextMenu
+              target={{ kind: "dm" }}
+              unread={unread.dm}
+              onNewConversation={() => startConversation(null)}
             >
-              <MailIcon className="size-5" />
-            </RailButton>
+              <RailButton
+                active={isDmActive}
+                ariaLabel={t("directMessages")}
+                tooltip={t("directMessages")}
+                onClick={switchToDm}
+                badge={unread.dm}
+                badgeLabel={unreadLabel}
+                testId="guild-dm"
+              >
+                <MailIcon className="size-5" />
+              </RailButton>
+            </GuildContextMenu>
 
             <RailButton
               active={isCanvasActive}
@@ -318,11 +359,19 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
             <ul className="flex flex-col items-center gap-2">
               {(teams ?? []).map((team) => (
                 <li key={team.id}>
-                  <TeamButton
-                    team={team}
-                    active={isTeamActive(team.id)}
-                    onSelect={() => switchToTeam(team.id)}
-                  />
+                  <GuildContextMenu
+                    target={{ kind: "team", teamId: team.id }}
+                    unread={unread.teams.get(team.id) ?? 0}
+                    onNewConversation={() => startConversation(team.id)}
+                  >
+                    <TeamButton
+                      team={team}
+                      active={isTeamActive(team.id)}
+                      onSelect={() => switchToTeam(team.id)}
+                      unread={unread.teams.get(team.id) ?? 0}
+                      unreadLabel={unreadLabel}
+                    />
+                  </GuildContextMenu>
                 </li>
               ))}
               <li>
@@ -436,6 +485,13 @@ interface RailButtonProps {
   className?: string
   style?: React.CSSProperties
   testId?: string
+  /**
+   * Unread conversations behind this button. Drawn as a corner badge, and
+   * folded into the accessible name — a screen reader gets "Alpha, 3 unread",
+   * not a decorative pill it cannot see.
+   */
+  badge?: number
+  badgeLabel?: (count: number) => string
 }
 
 function RailButton({
@@ -447,15 +503,18 @@ function RailButton({
   className,
   style,
   testId,
+  badge = 0,
+  badgeLabel,
 }: RailButtonProps) {
   const overlaySide = useContext(OverlaySideContext)
+  const showBadge = badge > 0
   return (
     <Tooltip delayDuration={300}>
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
-          aria-label={ariaLabel}
+          aria-label={showBadge && badgeLabel ? `${ariaLabel}, ${badgeLabel(badge)}` : ariaLabel}
           aria-current={active ? "page" : undefined}
           onClick={onClick}
           style={style}
@@ -476,6 +535,18 @@ function RailButton({
             className="absolute inset-0 rounded-xl bg-primary/10"
           />
           <span className="relative flex items-center justify-center">{children}</span>
+          {showBadge ? (
+            // Corner pill, outside the icon's optical square so it never sits
+            // over the avatar's initial. `aria-hidden`: the count is already
+            // in the button's accessible name above.
+            <span
+              aria-hidden
+              data-testid={testId ? `${testId}-unread` : undefined}
+              className="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-primary px-1 py-px text-[9px] leading-[14px] font-medium text-primary-foreground tabular-nums"
+            >
+              {badge > 99 ? "99+" : badge}
+            </span>
+          ) : null}
         </Button>
       </TooltipTrigger>
       <TooltipContent side={overlaySide}>{tooltip}</TooltipContent>
@@ -487,10 +558,14 @@ function TeamButton({
   team,
   active,
   onSelect,
+  unread = 0,
+  unreadLabel,
 }: {
   team: Team
   active: boolean
   onSelect: () => void
+  unread?: number
+  unreadLabel?: (count: number) => string
 }) {
   return (
     <RailButton
@@ -498,10 +573,88 @@ function TeamButton({
       ariaLabel={team.name}
       tooltip={team.name}
       onClick={onSelect}
+      badge={unread}
+      badgeLabel={unreadLabel}
+      testId={`guild-team-${team.id}`}
       className="text-base"
       style={active ? { boxShadow: `inset 0 0 0 2px ${avatarColor(team)}` } : undefined}
     >
       <AvatarBadge subject={team} size={28} textClassName="text-sm" />
     </RailButton>
+  )
+}
+
+/**
+ * Right-click menu for a guild button — the icon column's equivalent of the
+ * expanded sidebar's guild-row menu (`sidebar-guild-sections.tsx`), so the
+ * same three actions are one gesture away in either state: start a
+ * conversation there, mark the section read, manage teams.
+ *
+ * Wrapped in a `div` so the trigger has one ref-forwarding child around the
+ * tooltip-wrapped button, the same shape `NavRailButton` uses.
+ */
+function GuildContextMenu({
+  target,
+  unread,
+  onNewConversation,
+  children,
+}: {
+  target: GuildUnreadTarget
+  unread: number
+  onNewConversation?: () => void
+  children: React.ReactNode
+}) {
+  const t = useTranslations("desktop.guildRail")
+  const listT = useTranslations("desktop.channelList")
+  const router = useRouter()
+  const isDm = target.kind === "dm"
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div>{children}</div>
+      </ContextMenuTrigger>
+      <ContextMenuContent data-testid={`guild-menu-${isDm ? "dm" : target.teamId}`}>
+        {onNewConversation ? (
+          <ContextMenuItem
+            onSelect={() => {
+              log.info("guild new conversation via rail menu", target)
+              onNewConversation()
+            }}
+            data-testid={`guild-menu-new-${isDm ? "dm" : target.teamId}`}
+          >
+            <PlusIcon className="size-4" />
+            {isDm ? listT("newChat") : listT("newConversation")}
+          </ContextMenuItem>
+        ) : null}
+        <ContextMenuItem
+          disabled={unread === 0}
+          onSelect={() => {
+            log.info("guild mark read", target)
+            void markGuildRead(target).catch((error: unknown) => {
+              log.warn("guild mark read failed", { error: String(error) })
+            })
+          }}
+          data-testid={`guild-menu-mark-read-${isDm ? "dm" : target.teamId}`}
+        >
+          <CheckCheckIcon className="size-4" />
+          {t("markAllRead")}
+        </ContextMenuItem>
+        {isDm ? null : (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onSelect={() => {
+                log.info("guild manage teams")
+                router.push(TEAM_SETTINGS_ROUTE)
+              }}
+              data-testid={`guild-menu-manage-${target.teamId}`}
+            >
+              <SettingsIcon className="size-4" />
+              {t("manageTeams")}
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

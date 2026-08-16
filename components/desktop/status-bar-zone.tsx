@@ -11,6 +11,7 @@
  */
 
 import type { BarCatalogItem } from "@/lib/shell/bar-items"
+import { AgentThreadBrowser } from "@/components/agent/agent-thread-browser"
 import { AccountBarButton } from "@/components/account/account-bar-button"
 import { AttentionPanel } from "@/components/attention/attention-panel"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
@@ -54,6 +55,8 @@ function StatusBarSegment({ id }: { id: string }) {
       return <AttentionPanel />
     case "jobs":
       return <JobCenterPanel />
+    case "agentThreads":
+      return <AgentThreadBrowser />
     case "perf":
       return <StatusBarPerf />
     case "usage":

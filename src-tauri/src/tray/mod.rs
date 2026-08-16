@@ -341,6 +341,8 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
             let _ = app.emit("tray://open-docs", serde_json::Value::Null);
         }
         "report-issue" => {
+            // The renderer opens the in-app report dialog; make sure it is visible.
+            window_utils::bring_main_window_to_front(app);
             let _ = app.emit("tray://report-issue", serde_json::Value::Null);
         }
         "check-updates" => {

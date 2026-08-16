@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
   ArchiveIcon,
@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
 import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
+import { useConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
 import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { listCharacters } from "@/lib/db/characters"
@@ -36,12 +37,17 @@ import { useUIStore, type ChannelListView } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import {
+  ConversationFilterChips,
+  ConversationFilterMenu,
+} from "@/components/chat/conversation-filter-controls"
 import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
 import type {
   Character,
   ChatSession,
   ConversationSidebarDensity,
+  ConversationSidebarSettings,
   SessionFolder,
 } from "@cognia/agent-config-types"
 
@@ -91,6 +97,8 @@ export function MobileChannelList({
   const exposedSessions = useMemo(() => filterExposedSessions(sessions, "main-list"), [sessions])
   const t = useTranslations("mobile.home")
   const tShell = useTranslations("mobile.shell")
+  // Filter vocabulary shared with the desktop sidebar.
+  const tFilters = useTranslations("conversationFilters")
   // Search box: keep the field value immediate but debounce the value fed to
   // the grouping model so typing doesn't re-bucket on every keystroke (mirrors
   // the desktop sidebar). buildConversationSections is O(n log n) over all
@@ -127,31 +135,33 @@ export function MobileChannelList({
     [setPersistedView]
   )
 
+  // Straight from the store, like the desktop sidebar (`channel-list.tsx`): a
+  // local mirror seeded once could not see the other surface collapse a
+  // folder, and wrote its stale copy back over it.
   const persistedCollapsed = useUIStore((s) => s.collapsedFolderIds)
-  const setPersistedCollapsed = useUIStore((s) => s.setCollapsedFolders)
-  const [collapsedFolderIds, setCollapsedFolderIds] = useState<ReadonlySet<string>>(
-    () => new Set(persistedCollapsed)
+  const toggleCollapsedFolder = useUIStore((s) => s.toggleCollapsedFolder)
+  const collapsedFolderIds = useMemo<ReadonlySet<string>>(
+    () => new Set(persistedCollapsed),
+    [persistedCollapsed]
   )
-  const toggleFolder = useCallback((id: string) => {
-    setCollapsedFolderIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
-  useEffect(() => {
-    setPersistedCollapsed([...collapsedFolderIds])
-  }, [collapsedFolderIds, setPersistedCollapsed])
+  const toggleFolder = toggleCollapsedFolder
 
   // Behavior preferences (Settings → Conversation → sidebar), shared with the
   // desktop sidebar. Absent settings fall back to today's defaults.
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  const saveSettings = useSettingsStore((s) => s.save)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
   const groupBy = resolveConversationGroupBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges !== false
   const contentScope = sidebarSettings?.searchScope === "titleAndContent"
+  // The mobile list has no optimistic save queue: merge the patch into the
+  // settings the store currently holds and write straight through.
+  const saveSidebarSettings = useCallback(
+    (patch: Partial<ConversationSidebarSettings>) =>
+      void saveSettings({ conversationSidebar: { ...sidebarSettings, ...patch } }),
+    [saveSettings, sidebarSettings]
+  )
 
   // Wave 4 / ADR-0026 — Dexie-first read so the chip list survives a
   // server drop; `table: "characters"` kicks the sync orchestrator on
@@ -169,6 +179,14 @@ export function MobileChannelList({
   }, [characters])
 
   const sessionStates = useClientLiveQuery(() => listSessionStates(), [], [])
+  // `unreadIds` feeds the unread filter/sort and must stay independent of the
+  // badge display setting — hiding a badge is a display choice, not a claim
+  // that nothing is unread.
+  const unreadIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const s of sessionStates ?? []) if (s.unreadCount > 0) ids.add(s.sessionId)
+    return ids
+  }, [sessionStates])
   const unreadById = useMemo(() => {
     const map = new Map<string, number>()
     if (!showUnreadBadges) return map
@@ -207,15 +225,41 @@ export function MobileChannelList({
   const groupCollapseOverrides = useUIStore((s) => s.groupCollapseOverrides)
   const setGroupCollapsed = useUIStore((s) => s.setGroupCollapsed)
 
+  // Sort, quick filters and saved presets are shared with the desktop sidebar —
+  // one controller over the same settings blob and UI-store slice — so a phone
+  // and a desktop looking at the same profile agree about which conversations
+  // exist and in what order.
+  const viewSessions = useMemo(
+    () =>
+      exposedSessions.filter((s) =>
+        view === "archived" ? s.archivedAt != null : s.archivedAt == null
+      ),
+    [exposedSessions, view]
+  )
+  const filterController = useConversationFilterController({
+    sessions: viewSessions,
+    workspaces: workspaceGroups,
+    folders,
+    characters: characters ?? undefined,
+    sidebarSettings,
+    saveSidebarSettings,
+  })
+  const { filters, activeFilters, sortBy, filterContext } = filterController
+  const resetConversationFilters = filterController.actions.reset
+
   // Shared grouping model: pinned → folders → the chosen axis, or a flat result
   // list while searching (mirrors the desktop sidebar via the same headless hook).
-  const { sections, filteredCount } = useConversationListModel({
+  const { sections, total, filteredCount } = useConversationListModel({
     sessions: exposedSessions,
     folders: view === "archived" ? undefined : folders,
     query,
     view,
     collapsedFolderIds,
     groupBy,
+    sortBy,
+    filters,
+    unreadIds,
+    filterContext,
     workspaces: workspaceGroups,
     agents: agentGroups,
     activeWorkspaceId: activeProjectId,
@@ -299,6 +343,7 @@ export function MobileChannelList({
             </Button>
           ) : null}
         </div>
+        <ConversationFilterMenu model={filterController} testId="mobile-channel-filter" />
         <Button
           type="button"
           size="icon"
@@ -323,6 +368,14 @@ export function MobileChannelList({
         </Button>
       </div>
 
+      <ConversationFilterChips
+        model={filterController}
+        shown={filteredCount}
+        total={total}
+        className="border-b border-border px-3 py-1.5"
+        testId="mobile-channel-filter-chips"
+      />
+
       <div className="flex-1 overflow-y-auto">
         {contentTruncated && query.trim().length > 0 ? (
           <p
@@ -334,16 +387,30 @@ export function MobileChannelList({
           </p>
         ) : null}
         {filteredCount === 0 ? (
-          <p
-            className="px-4 py-8 text-center text-xs text-muted-foreground"
-            data-testid="mobile-channel-empty"
-          >
-            {query.trim().length > 0
-              ? t("emptyFiltered", { query })
-              : archived
-                ? t("emptyArchived")
-                : t("emptyChats")}
-          </p>
+          <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+            <p className="text-xs text-muted-foreground" data-testid="mobile-channel-empty">
+              {query.trim().length > 0
+                ? t("emptyFiltered", { query })
+                : activeFilters > 0
+                  ? // Distinct from "you have no chats": the exit here is
+                    // dropping a filter, not starting a conversation.
+                    t("emptyFilters", { count: activeFilters })
+                  : archived
+                    ? t("emptyArchived")
+                    : t("emptyChats")}
+            </p>
+            {activeFilters > 0 && query.trim().length === 0 ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={resetConversationFilters}
+                data-testid="mobile-channel-clear-filters"
+              >
+                {tFilters("clearAll")}
+              </Button>
+            ) : null}
+          </div>
         ) : null}
 
         {sections.map((section) => {

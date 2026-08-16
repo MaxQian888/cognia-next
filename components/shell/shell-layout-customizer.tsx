@@ -23,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BarCustomizer } from "./bar-customizer"
 import { SidebarCustomizer } from "./sidebar-customizer"
 import { WorkbenchCustomizer } from "./workbench-customizer"
+import { WorkbenchPanelCustomizer } from "./workbench-panel-customizer"
 
 /** Which surface a customizer entry point should open on. */
 export type ShellSurface = "sidebar" | "workbench" | "title" | "status"
@@ -72,6 +73,11 @@ export function ShellLayoutCustomizer({
       <TabsContent value="workbench" className="mt-4 space-y-3">
         <p className="text-xs text-muted-foreground">{t("description.workbench")}</p>
         <WorkbenchCustomizer />
+        {/* The two levels of the same surface, in the order the user meets
+            them: the icon column, then the tabs inside whichever icon is in
+            front. A separate tab for the panels would have made the user guess
+            which of two entry points owned "the workbench". */}
+        <WorkbenchPanelCustomizer />
       </TabsContent>
       <TabsContent value="title" className="mt-4 space-y-3">
         <p className="text-xs text-muted-foreground">{t("description.title")}</p>

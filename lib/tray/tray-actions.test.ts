@@ -17,16 +17,14 @@ jest.mock("./autostart-control", () => ({
 import {
   checkUpdates,
   copyDiagnostics,
-  formatDiagnostics,
-  gatherDiagnostics,
   openDataFolder,
   openDocs,
   reportIssue,
   toggleAutostartAction,
-  type DiagnosticsFacts,
 } from "./tray-actions"
-import { DOCS_URL, ISSUES_URL } from "@/lib/constants/external-urls"
-import { APP_VERSION } from "@/lib/app-version"
+import { DOCS_URL } from "@/lib/constants/external-urls"
+import { useUIStore } from "@/stores/ui"
+import type { DiagnosticsFacts } from "@/lib/support-report/app-facts"
 
 beforeEach(() => {
   openExternalMock.mockClear()
@@ -49,23 +47,6 @@ function facts(overrides: Partial<DiagnosticsFacts> = {}): DiagnosticsFacts {
     ...overrides,
   }
 }
-
-describe("formatDiagnostics", () => {
-  it("renders a labelled block with the header line", () => {
-    const text = formatDiagnostics(facts())
-    expect(text.split("\n")[0]).toBe("Cognia 1.2.3 (stable)")
-    expect(text).toContain("Commit:   abc1234")
-    expect(text).toContain("Tauri:    2.9.0")
-    expect(text).toContain("Engine:   Chromium 130")
-  })
-
-  it("substitutes an em-dash for empty / null fields", () => {
-    const text = formatDiagnostics(facts({ commit: "", tauri: null, engine: null }))
-    expect(text).toContain("Commit:   —")
-    expect(text).toContain("Tauri:    —")
-    expect(text).toContain("Engine:   —")
-  })
-})
 
 describe("openDataFolder", () => {
   it("reveals the resolved app-data directory", async () => {
@@ -94,10 +75,20 @@ describe("outbound links", () => {
     expect(openExternal).toHaveBeenCalledWith(DOCS_URL)
   })
 
-  it("reportIssue → ISSUES_URL", async () => {
+  it("reportIssue → the injected report request, never a bare tracker link", async () => {
+    const requestReport = jest.fn()
     const openExternal = jest.fn().mockResolvedValue(undefined)
-    await reportIssue({ openExternal })
-    expect(openExternal).toHaveBeenCalledWith(ISSUES_URL)
+    await reportIssue({ requestReport, openExternal })
+    expect(requestReport).toHaveBeenCalledTimes(1)
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it("reportIssue with no deps raises the tray report request on the UI store", async () => {
+    await reportIssue()
+    expect(useUIStore.getState().pendingReportRequest).toEqual({
+      context: { surface: "tray" },
+      nonce: 1,
+    })
   })
 
   it("checkUpdates → 'available' when the injected check finds a newer release", async () => {
@@ -129,20 +120,6 @@ describe("toggleAutostartAction", () => {
   })
 })
 
-describe("gatherDiagnostics (live)", () => {
-  it("collects the running app facts from app-metadata", async () => {
-    const facts = await gatherDiagnostics()
-    expect(facts.name).toBe("Cognia")
-    expect(facts.version).toBe(APP_VERSION)
-    // Web/jsdom test env: not Tauri, so the Tauri version resolves to null.
-    expect(facts.tauri).toBeNull()
-    expect(typeof facts.react).toBe("string")
-    expect(typeof facts.platform).toBe("string")
-    // The gathered facts must render without throwing.
-    expect(formatDiagnostics(facts)).toContain(`Cognia ${APP_VERSION}`)
-  })
-})
-
 describe("default IO paths", () => {
   it("copyDiagnostics with no deps gathers live facts and writes the clipboard", async () => {
     const text = await copyDiagnostics()
@@ -163,8 +140,6 @@ describe("default IO paths", () => {
   it("falls back to the real opener / autostart when no deps are passed", async () => {
     await openDocs()
     expect(openExternalMock).toHaveBeenCalledWith(DOCS_URL)
-    await reportIssue()
-    expect(openExternalMock).toHaveBeenCalledWith(ISSUES_URL)
     // No deps → real checkForUpdate, which no-ops to `null` off the desktop
     // shell (jsdom is not Tauri), so the tray reports "up to date".
     await expect(checkUpdates()).resolves.toEqual({ kind: "upToDate" })

@@ -55,6 +55,7 @@ import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layo
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useUIStore } from "@/stores/ui/ui-store"
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
 
 const log = loggers.ui
@@ -128,6 +129,12 @@ export function TitleBarLayoutControls({
 
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
+  // While the expanded conversation sidebar hosts the navigation rows the icon
+  // column is folded into it (`DesktopAppShell`), so this preference has no
+  // visible effect until the sidebar collapses or the route changes. The
+  // checkbox keeps reporting the *preference*; the hint says why the rail is
+  // not on screen right now.
+  const sidebarHostsNav = useShellColumnsStore((s) => s.sidebarHostsNav)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const [customizeOpen, setCustomizeOpen] = React.useState(false)
@@ -250,8 +257,17 @@ export function TitleBarLayoutControls({
             <DropdownMenuCheckboxItem
               checked={guildRailOn}
               onCheckedChange={() => toggleGuildRailAction()}
+              data-testid="views-toggle-guild-rail"
             >
               {t("toggleGuildRail")}
+              {sidebarHostsNav ? (
+                <span
+                  className="ml-auto pl-2 text-xs text-muted-foreground"
+                  data-testid="views-guild-rail-folded"
+                >
+                  {t("guildRailFolded")}
+                </span>
+              ) : null}
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={sidebarOn} onCheckedChange={() => toggleSidebar()}>
               {t("toggleSidebar")}

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -181,9 +181,11 @@ jest.mock("@/lib/tauri/webview-zoom", () => {
   return { ...actual, applyZoom: (n: number) => mockApplyZoom(n) }
 })
 
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { TitleBarLayoutControls } from "./title-bar-layout-controls"
 
 beforeEach(() => {
+  act(() => useShellColumnsStore.setState({ sidebarHostsNav: false, sidebarNavHostCount: 0 }))
   mockUiState.sidebarCollapsed = false
   mockUiState.guildRailCollapsed = false
   mockUiState.statusBarCollapsed = false
@@ -264,6 +266,20 @@ describe("TitleBarLayoutControls", () => {
     expect(railItem).toHaveAttribute("aria-checked", "false")
     const sidebarItem = screen.getByText("toggleSidebar").closest('[role="menuitemcheckbox"]')
     expect(sidebarItem).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("says the rail is folded into the sidebar while that hosts the navigation", () => {
+    act(() => useShellColumnsStore.setState({ sidebarHostsNav: true }))
+    render(<TitleBarLayoutControls />)
+    // The checkbox still reports the preference (rail on)…
+    const railItem = screen.getByTestId("views-toggle-guild-rail")
+    expect(railItem).toHaveAttribute("aria-checked", "true")
+    // …and says why no rail is drawn right now.
+    expect(screen.getByTestId("views-guild-rail-folded")).toHaveTextContent("guildRailFolded")
+    // The toggle keeps working — it is the preference for when the rail is
+    // back (sidebar collapsed, or any other route).
+    fireEvent.click(railItem)
+    expect(mockToggleGuildRail).toHaveBeenCalled()
   })
 
   it("no longer lists the per-segment checkboxes", () => {

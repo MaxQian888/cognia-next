@@ -21,7 +21,17 @@ export interface SurfaceContract {
  */
 export const SURFACE_CONTRACTS = [
   { id: "chat", route: "/", standalone: "full", companion: "remote", offline: "cached-read" },
-  { id: "welcome", route: "/welcome", standalone: "full", companion: "full", offline: "local" },
+  // The standalone/paired mode chooser that used to live at `/welcome` is now
+  // the first-run flow's welcome step (ADR-0122). Same runtime classification:
+  // it must work with no companion and no network, because choosing how the
+  // device runs is a precondition for either.
+  {
+    id: "onboarding",
+    route: "/onboarding",
+    standalone: "full",
+    companion: "full",
+    offline: "local",
+  },
   { id: "pair", route: "/pair", standalone: "full", companion: "full", offline: "local" },
   { id: "a2ui", route: "/a2ui", standalone: "full", companion: "remote", offline: "cached-read" },
   {
@@ -183,6 +193,30 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
+    id: "issue-projects",
+    route: "/projects",
+    navigation: true,
+    standalone: "full",
+    companion: "remote",
+    offline: "cached-read",
+  },
+  {
+    id: "workspace",
+    route: "/workspace",
+    navigation: true,
+    standalone: "full",
+    companion: "remote",
+    offline: "cached-read",
+  },
+  {
+    id: "issues",
+    route: "/issues",
+    navigation: true,
+    standalone: "full",
+    companion: "remote",
+    offline: "cached-read",
+  },
+  {
     id: "memory",
     route: "/memory",
     navigation: true,
@@ -205,6 +239,16 @@ export const SURFACE_CONTRACTS = [
     standalone: "full",
     companion: "full",
     offline: "cached-read",
+  },
+  {
+    // Developer-mode only (ADR-0117). Deliberately not `navigation: true`: the
+    // rail is the same for every user, and Creator is gated on a per-user
+    // setting, so its entry point is the devtools panel behind the same gate.
+    id: "creator",
+    route: "/creator",
+    standalone: "full",
+    companion: "remote",
+    offline: "local",
   },
   {
     id: "eval",

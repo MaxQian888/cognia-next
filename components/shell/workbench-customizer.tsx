@@ -14,11 +14,19 @@
  * It exists because the two icon columns now sit side by side on the right
  * edge, and one of them being reorderable while the other was a hardcoded
  * constant read as a bug rather than a design.
+ *
+ * Two further customizations are modelled and persisted but have no reader yet
+ * — `WorkbenchRailLayout.groups` and `AppSettings.workbenchRailPerProject`. Both
+ * are surfaced here as disabled rows carrying a "planned" badge and a reason,
+ * following `components/settings/external-bridge/panels/scopes-panel.tsx`:
+ * documenting dormancy at the type while the UI stays silent is exactly the
+ * shape Working Rule 7 exists to prevent. Pinned by the test beside this file.
  */
 
 import * as React from "react"
 import { useTranslations } from "next-intl"
 
+import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings/settings-store"
@@ -26,6 +34,37 @@ import { CustomizerLists, type CustomizerItem } from "./customizer-list"
 import { useWorkbenchRailLayout, useWorkbenchRailPersistent } from "./use-workbench-rail-layout"
 import { mergeVisibleOrder } from "@/lib/shell/bar-items"
 import type { WorkbenchRailCatalogItem } from "@/lib/shell/workbench-rail"
+
+/** A modelled-but-unbuilt customization: disabled control, badge, and a reason. */
+function PlannedRow({
+  id,
+  label,
+  reason,
+  badge,
+}: {
+  id: string
+  label: string
+  reason: string
+  badge: string
+}): React.ReactElement {
+  return (
+    <div
+      className="flex items-start justify-between gap-3 rounded-md border border-dashed bg-muted/30 p-3"
+      data-testid={`workbench-planned-${id}`}
+    >
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Label className="text-sm">{label}</Label>
+          <Badge variant="outline" className="text-[10px]">
+            {badge}
+          </Badge>
+        </div>
+        <p className="text-xs text-muted-foreground">{reason}</p>
+      </div>
+      <Switch checked={false} disabled aria-label={label} />
+    </div>
+  )
+}
 
 export function WorkbenchCustomizer(): React.ReactElement {
   const t = useTranslations("contextWorkbench.customize")
@@ -81,6 +120,21 @@ export function WorkbenchCustomizer(): React.ReactElement {
         onHide={(id) => void hide(id)}
         onShow={(id) => void show(id)}
         onReset={() => void reset()}
+      />
+      {/* Below the editor, not above it: these are not settings the user can
+          act on, and putting them first would push the working control off the
+          first screen of a 60vh dialog. */}
+      <PlannedRow
+        id="groups"
+        label={t("groups")}
+        reason={t("groupsPlannedReason")}
+        badge={t("plannedBadge")}
+      />
+      <PlannedRow
+        id="per-project"
+        label={t("perProject")}
+        reason={t("perProjectPlannedReason")}
+        badge={t("plannedBadge")}
       />
     </div>
   )

@@ -137,11 +137,26 @@ export const CHROME_BUDGET = {
   chatHeader: 3,
   /**
    * `components/chat/composer/bottom-toolbar.tsx` — wide (non-compact) branch.
-   * Six intentionally includes the Agent runtime selector: model + runtime are
-   * the two execution-shape choices users need before sending, while detailed
-   * Agent mode and external-agent configuration remain in the overflow.
+   *
+   * Seven, and the count went UP by one while the row got simpler, which is the
+   * one shape of increase this band accepts. The "⋯" overflow left (−1) along
+   * with the separate external-agent selector it hid; the Agent-mode chip (+1)
+   * and the sandbox indicator (+1) took its place on the row. Two of the three
+   * are the same controls as before, now readable without a click, and the
+   * external agent is no longer a second control at all — the runtime chip
+   * lists the agents itself.
+   *
+   * The metric rewards moving a control into a closed dropdown, so a band can
+   * "improve" by hiding state the user needs on every turn (which mode is
+   * active, is this turn sandboxed). That is what happened here, and undoing it
+   * costs a control. Don't spend the seventh slot on something new.
+   *
+   * 7 → 8: the live cost badge moved here from the chat header when that
+   * header became title-bar chrome (the preset pill and the no-credential
+   * badge came with it, but both self-hide in the default state). Not a new
+   * control — the same one, one band down; `chatHeader` did not grow.
    */
-  composerToolbar: 6,
+  composerToolbar: 8,
   /**
    * `components/inbox/conversation-header.tsx`, desktop branch. Five of these
    * are the strip proper — platform badge, mode switcher, `⋯` overflow,

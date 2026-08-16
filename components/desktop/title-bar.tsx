@@ -193,6 +193,10 @@ export function TitleBar() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
+  // The icon column folds into the expanded conversation sidebar while that
+  // hosts the navigation rows; the View menu's checkbox keeps reporting the
+  // preference and says so, instead of claiming a rail that is not drawn.
+  const sidebarHostsNav = useShellColumnsStore((s) => s.sidebarHostsNav)
 
   // Segment order + visibility, per zone. Edited in the customizer, persisted
   // in settings; see `components/shell/use-bar-layout.ts`.
@@ -328,12 +332,19 @@ export function TitleBar() {
   const railPx = guildRailCollapsed ? 0 : measuredRailPx
   const railLeftPx = sidebarSide === "left" ? railPx : 0
   const railRightPx = sidebarSide === "right" ? railPx : 0
+  // The conversation sidebar follows the same edge as the nav rail. On the
+  // right it keeps its own header (the start zone is the *leading* column's,
+  // and the bar has one of each), so it projects nothing — but it still sits
+  // under the end zone, which has to span it the way it already spans the rail.
+  const sidebarRightPx = sidebarSide === "right" && !projected.start ? sidebarPx : 0
   // Must match the header's `pl-20` / `pl-2` below.
   const barPaddingLeftPx = isMac ? 80 : 8
   const startOutletPx = projected.start
     ? Math.max(0, railLeftPx + sidebarPx - barPaddingLeftPx - leftChromePx)
     : 0
-  const endOutletPx = projected.end ? Math.max(0, railRightPx + dockPx - rightChromePx) : 0
+  const endOutletPx = projected.end
+    ? Math.max(0, railRightPx + sidebarRightPx + dockPx - rightChromePx)
+    : 0
   // With the conversation rail's header in the bar the Windows/Linux menubar
   // would sit over that column and push its header off its own rail, so the
   // menus fold into the hamburger whenever the start zone is projected — the
@@ -753,6 +764,9 @@ export function TitleBar() {
                     onCheckedChange={handleToggleGuildRail}
                   >
                     {tMenu("view.toggleGuildRail")}
+                    {sidebarHostsNav ? (
+                      <DropdownMenuShortcut>{tMenu("view.guildRailFolded")}</DropdownMenuShortcut>
+                    ) : null}
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuCheckboxItem
                     checked={!statusBarCollapsed}
@@ -1059,6 +1073,9 @@ export function TitleBar() {
                       onCheckedChange={handleToggleGuildRail}
                     >
                       {tMenu("view.toggleGuildRail")}
+                      {sidebarHostsNav ? (
+                        <MenubarShortcut>{tMenu("view.guildRailFolded")}</MenubarShortcut>
+                      ) : null}
                     </MenubarCheckboxItem>
                     <MenubarCheckboxItem
                       checked={!statusBarCollapsed}

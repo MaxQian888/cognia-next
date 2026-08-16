@@ -38,7 +38,7 @@ describe("useBarLayout — resolution", () => {
   it("resolves the shipped default when settings hold no layout", () => {
     const { result } = renderHook(() => useBarLayout("status"))
     expect(ids(result.current.resolved.zones.start)).toEqual(["connectivity", "branch", "sync"])
-    expect(ids(result.current.resolved.hidden)).toEqual(["perf"])
+    expect(ids(result.current.resolved.hidden)).toEqual(["terminal", "perf"])
     expect(result.current.isDefault).toBe(true)
   })
 
@@ -49,7 +49,7 @@ describe("useBarLayout — resolution", () => {
       } as never,
     })
     const { result } = renderHook(() => useBarLayout("status"))
-    expect(ids(result.current.resolved.zones.start)).toEqual(["branch", "sync"])
+    expect(ids(result.current.resolved.zones.start)).toEqual(["branch", "sync", "terminal"])
     expect(ids(result.current.resolved.hidden)).toEqual(["connectivity"])
     expect(result.current.isDefault).toBe(false)
   })
@@ -73,7 +73,7 @@ describe("useBarLayout — resolution", () => {
     expect(ids(title.result.current.resolved.hidden)).toContain("search")
     // The status bar is untouched by the title bar's layout.
     const status = renderHook(() => useBarLayout("status"))
-    expect(ids(status.result.current.resolved.hidden)).toEqual(["perf"])
+    expect(ids(status.result.current.resolved.hidden)).toEqual(["terminal", "perf"])
   })
 
   it("does not recompute layout/callbacks when an unrelated setting changes", () => {
@@ -97,14 +97,15 @@ describe("useBarLayout — legacy migration", () => {
   it("carries a legacy opt-out into the first resolved layout", () => {
     useUIStore.setState({ barItems: { ...DEFAULT_BAR_ITEMS, usage: false } })
     const { result } = renderHook(() => useBarLayout("status"))
-    expect(ids(result.current.resolved.hidden).sort()).toEqual(["perf", "usage"])
+    // `terminal` is not a legacy id; it stays on its shipped (hidden) default.
+    expect(ids(result.current.resolved.hidden).sort()).toEqual(["perf", "terminal", "usage"])
     expect(result.current.isDefault).toBe(false)
   })
 
   it("carries a legacy opt-in for a hidden-by-default segment", () => {
     useUIStore.setState({ barItems: { ...DEFAULT_BAR_ITEMS, perf: true } })
     const { result } = renderHook(() => useBarLayout("status"))
-    expect(ids(result.current.resolved.hidden)).toEqual([])
+    expect(ids(result.current.resolved.hidden)).toEqual(["terminal"])
   })
 
   it("migrates a fresh install to exactly the shipped default", () => {
@@ -160,7 +161,7 @@ describe("useBarLayout — mutations", () => {
     await act(async () => {
       await result.current.hide("perf")
     })
-    expect(lastSaved("statusBarLayout").hidden).toEqual(["perf"])
+    expect(lastSaved("statusBarLayout").hidden).toEqual(["terminal", "perf"])
   })
 
   it("shows a hidden item", async () => {
@@ -168,7 +169,7 @@ describe("useBarLayout — mutations", () => {
     await act(async () => {
       await result.current.show("perf")
     })
-    expect(lastSaved("statusBarLayout").hidden).toEqual([])
+    expect(lastSaved("statusBarLayout").hidden).toEqual(["terminal"])
   })
 
   it("reorders, dropping ids that are not in the catalog", async () => {

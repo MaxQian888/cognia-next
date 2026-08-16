@@ -59,6 +59,12 @@ export function workbenchRailLayoutOf(
   return {
     order: stored.order ?? DEFAULT_WORKBENCH_RAIL_LAYOUT.order,
     hidden: stored.hidden ?? DEFAULT_WORKBENCH_RAIL_LAYOUT.hidden,
+    // Carried through even though nothing reads it. This is the *read* half of
+    // the same trap `hide` had on the write half: every mutator derives its
+    // patch from this object, so dropping `groups` here would delete a stored
+    // group on the next pin, hide or reorder no matter how carefully the
+    // mutators spread. Dormant has to mean "not used yet", not "quietly erased".
+    groups: stored.groups ?? DEFAULT_WORKBENCH_RAIL_LAYOUT.groups,
   }
 }
 
@@ -84,6 +90,21 @@ export function useWorkbenchRailPersistent(): boolean {
   )
 }
 
+/**
+ * @param projectId Resolve against `settings.workbenchRailPerProject[projectId]`
+ *   before the global layout.
+ *
+ *   **Intentionally dormant.** No caller passes it — `WorkbenchCustomizer` is
+ *   the only consumer and it edits the global layout — so `isProjectScoped` is
+ *   permanently `false` and the per-project branch of `commit`/`reset` is
+ *   unreachable in the running app. The parameter and the settings key are kept
+ *   because the resolution order (project → global → default) is the part that
+ *   is hard to retrofit, and because `AppSettings.workbenchRailPerProject` is
+ *   already in the settings contract and the section-reset registry.
+ *
+ *   Per Working Rule 7 this is stated in the UI as well — the customizer draws a
+ *   disabled "planned" row — and pinned by the test beside this file.
+ */
 export function useWorkbenchRailLayout(projectId?: string | null): UseWorkbenchRailLayout {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
@@ -137,6 +158,13 @@ export function useWorkbenchRailLayout(projectId?: string | null): UseWorkbenchR
   const hide = useCallback(
     (id: string) =>
       commit({
+        // Spread, don't rebuild. `WorkbenchRailLayout` carries a third field —
+        // `groups` — and constructing a fresh object dropped it on every hide
+        // while `show` below spread it and kept it. The asymmetry is harmless
+        // only while `groups` is always empty; the moment it is not, hiding one
+        // activity would silently delete every user-defined panel group. This
+        // is the same trap `types/shell/sidebar.ts` documents for `sidebarSide`.
+        ...layout,
         order: layout.order.includes(id) ? layout.order : [...layout.order, id],
         hidden: layout.hidden.includes(id) ? layout.hidden : [...layout.hidden, id],
       }),

@@ -38,6 +38,7 @@ describe("workbenchRailLayoutOf", () => {
     expect(workbenchRailLayoutOf({ hidden: ["ai"] })).toEqual({
       order: DEFAULT_WORKBENCH_RAIL_LAYOUT.order,
       hidden: ["ai"],
+      groups: DEFAULT_WORKBENCH_RAIL_LAYOUT.groups,
     })
   })
 })
@@ -117,6 +118,23 @@ describe("useWorkbenchRailLayout", () => {
     expect(lastSaved().order).toEqual([...CONTEXT_ACTIVITY_RAIL_ORDER])
   })
 
+  /**
+   * `groups` is dormant — nothing reads or writes it — but `hide` used to
+   * rebuild `{ order, hidden }` from scratch while `show` spread the layout, so
+   * hiding one activity silently deleted it. Harmless only while the field is
+   * always empty; the day it is not, that is a user's panel groups gone. Kept
+   * pinned so the dormancy stays a deferral rather than a data-loss bug.
+   */
+  it("preserves the dormant groups field when hiding an activity", async () => {
+    const groups = [{ id: "group:a", label: "A", icon: "Rows3", panelIds: ["comments"] }]
+    setStored({ order: [...CONTEXT_ACTIVITY_RAIL_ORDER], hidden: [], groups })
+    const { result } = renderHook(() => useWorkbenchRailLayout())
+    await act(async () => {
+      await result.current.hide("review")
+    })
+    expect(lastSaved().groups).toEqual(groups)
+  })
+
   it("shows a hidden activity", async () => {
     setStored({ order: [...CONTEXT_ACTIVITY_RAIL_ORDER], hidden: ["review", "ai"] })
     const { result } = renderHook(() => useWorkbenchRailLayout())
@@ -184,6 +202,7 @@ describe("useWorkbenchRailLayout — partial and repeat writes", () => {
     expect(workbenchRailLayoutOf({ order: ["ai"] })).toEqual({
       order: ["ai"],
       hidden: DEFAULT_WORKBENCH_RAIL_LAYOUT.hidden,
+      groups: DEFAULT_WORKBENCH_RAIL_LAYOUT.groups,
     })
   })
 

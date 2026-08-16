@@ -9,72 +9,17 @@
 
 "use client"
 
+import { DOCS_URL } from "@/lib/constants/external-urls"
 import {
-  APP_NAME,
-  APP_VERSION,
-  getBuildInfo,
-  getReleaseChannel,
-  getRuntimeVersions,
-} from "@/lib/app-metadata"
-import { DOCS_URL, ISSUES_URL } from "@/lib/constants/external-urls"
+  gatherDiagnostics,
+  formatDiagnostics,
+  type DiagnosticsFacts,
+} from "@/lib/support-report/app-facts"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { openExternal, revealInExplorer } from "@/lib/tauri/opener"
 import { checkForUpdate, type AvailableUpdate } from "@/lib/tauri/updater"
 
 import { toggleTrayAutostart } from "./autostart-control"
-
-/** Flat, serialisable facts that go into the copied diagnostics blob. */
-export interface DiagnosticsFacts {
-  name: string
-  version: string
-  channel: string
-  commit: string
-  buildTime: string
-  tauri: string | null
-  react: string
-  engine: string | null
-  platform: string
-}
-
-/**
- * Render the diagnostics facts as a clipboard-friendly block. Pure — the
- * single most-tested unit in this module. Empty/unknown fields are shown as
- * "—" so a pasted report is never silently missing a line.
- */
-export function formatDiagnostics(f: DiagnosticsFacts): string {
-  const dash = (v: string | null | undefined) => (v && v.length ? v : "—")
-  return [
-    `${f.name} ${f.version} (${f.channel})`,
-    `Commit:   ${dash(f.commit)}`,
-    `Built:    ${dash(f.buildTime)}`,
-    `Platform: ${dash(f.platform)}`,
-    `Tauri:    ${dash(f.tauri)}`,
-    `React:    ${dash(f.react)}`,
-    `Engine:   ${dash(f.engine)}`,
-  ].join("\n")
-}
-
-/** Read `navigator.platform` defensively (absent in node / SSR). */
-function readPlatform(): string {
-  return typeof navigator !== "undefined" && navigator.platform ? navigator.platform : ""
-}
-
-/** Gather the live diagnostics facts from the app-metadata helpers. */
-export async function gatherDiagnostics(): Promise<DiagnosticsFacts> {
-  const build = getBuildInfo()
-  const runtime = await getRuntimeVersions()
-  return {
-    name: APP_NAME,
-    version: APP_VERSION,
-    channel: getReleaseChannel(),
-    commit: build.commit,
-    buildTime: build.buildTime,
-    tauri: runtime.tauri,
-    react: runtime.react,
-    engine: runtime.engine,
-    platform: readPlatform(),
-  }
-}
 
 /** Resolve the OS-level app-data directory (where Dexie / keyring live). */
 async function defaultAppDataDir(): Promise<string> {
@@ -90,6 +35,7 @@ export interface TrayActionDeps {
   gather?: () => Promise<DiagnosticsFacts>
   toggleAutostart?: () => Promise<boolean>
   check?: () => Promise<AvailableUpdate | null>
+  requestReport?: () => void
 }
 
 /**
@@ -119,9 +65,23 @@ export async function openDocs(deps: TrayActionDeps = {}): Promise<void> {
   await (deps.openExternal ?? openExternal)(DOCS_URL)
 }
 
-/** Open the GitHub issue tracker. */
+/** Open the in-app "Report a problem" dialog (Rust brings the main window forward first). */
+async function defaultRequestReport(): Promise<void> {
+  const { useUIStore } = await import("@/stores/ui")
+  useUIStore.getState().requestReportProblem({ surface: "tray" })
+}
+
+/**
+ * "Report issue" — opens the unified report dialog rather than a bare tracker
+ * link, so a tray-initiated report carries the same redacted sections and
+ * pre-filled issue as every other surface.
+ */
 export async function reportIssue(deps: TrayActionDeps = {}): Promise<void> {
-  await (deps.openExternal ?? openExternal)(ISSUES_URL)
+  if (deps.requestReport) {
+    deps.requestReport()
+    return
+  }
+  await defaultRequestReport()
 }
 
 /**

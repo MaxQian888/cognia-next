@@ -77,6 +77,17 @@ jest.mock("@/hooks/data", () => ({
     teamsRef.current as unknown as T,
 }))
 
+let guildUnread = { dm: 0, teams: new Map<string, number>(), total: 0 }
+const markGuildRead = jest.fn(async (_target: unknown) => 1)
+jest.mock("@/hooks/shell/use-guild-unread", () => ({
+  useGuildUnread: () => guildUnread,
+  markGuildRead: (target: unknown) => markGuildRead(target as never),
+}))
+const startGuildConversation = jest.fn(async (_options: unknown) => ({}) as never)
+jest.mock("@/lib/shell/start-guild-conversation", () => ({
+  startGuildConversation: (options: unknown) => startGuildConversation(options as never),
+}))
+
 let selectedGuild: SelectedGuild = { kind: "dm" }
 const setSelectedGuild = jest.fn((g: SelectedGuild) => {
   selectedGuild = g
@@ -116,6 +127,9 @@ beforeEach(() => {
   })
   selectedGuild = { kind: "dm" }
   teamsRef.current = []
+  guildUnread = { dm: 0, teams: new Map(), total: 0 }
+  markGuildRead.mockClear()
+  startGuildConversation.mockClear()
   pathname = "/"
   platformValue = "tauri"
   // Default layout: 9 features pinned, 5 auxiliary items in "More".
@@ -374,6 +388,79 @@ test("renders one button per team and selecting one switches guild", async () =>
   await user.click(screen.getByLabelText("Alpha"))
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "team", teamId: "t-1" })
   expect(logInfo).toHaveBeenCalledWith("guild switch team", { teamId: "t-1" })
+})
+
+const TWO_TEAMS = [
+  {
+    id: "t-1",
+    name: "Alpha",
+    members: [],
+    orchestration: "round_robin",
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  {
+    id: "t-2",
+    name: "Beta",
+    members: [],
+    orchestration: "round_robin",
+    createdAt: 0,
+    updatedAt: 0,
+  },
+] as unknown as Team[]
+
+test("guild buttons carry their unread count, in the badge and in the accessible name", () => {
+  teamsRef.current = TWO_TEAMS
+  guildUnread = { dm: 3, teams: new Map([["t-1", 120]]), total: 123 }
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.getByTestId("guild-dm-unread")).toHaveTextContent("3")
+  expect(screen.getByTestId("guild-team-t-1-unread")).toHaveTextContent("99+")
+  // Beta has nothing unread — no badge at all, not a zero.
+  expect(screen.queryByTestId("guild-team-t-2-unread")).toBeNull()
+  // A screen reader gets the count too; the pill itself is aria-hidden.
+  expect(screen.getByTestId("guild-dm")).toHaveAttribute(
+    "aria-label",
+    "directMessages, unreadCount"
+  )
+  expect(screen.getByTestId("guild-team-t-2")).toHaveAttribute("aria-label", "Beta")
+  expect(screen.getByTestId("guild-dm-unread")).toHaveAttribute("aria-hidden")
+})
+
+test("right-click on a team button starts a conversation, marks read, or manages teams", () => {
+  teamsRef.current = TWO_TEAMS
+  guildUnread = { dm: 0, teams: new Map([["t-1", 2]]), total: 2 }
+  pathname = "/inbox"
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+
+  fireEvent.contextMenu(screen.getByTestId("guild-team-t-1"))
+  fireEvent.click(screen.getByTestId("guild-menu-new-t-1"))
+  // The rail is mounted on every route, so it starts the conversation through
+  // the shared starter (which selects the guild and brings the user home).
+  expect(startGuildConversation).toHaveBeenCalledWith(
+    expect.objectContaining({
+      teamId: "t-1",
+      teamTitle: "newConversation",
+      pathname: "/inbox",
+    })
+  )
+
+  fireEvent.contextMenu(screen.getByTestId("guild-team-t-1"))
+  fireEvent.click(screen.getByTestId("guild-menu-mark-read-t-1"))
+  expect(markGuildRead).toHaveBeenCalledWith({ kind: "team", teamId: "t-1" })
+
+  fireEvent.contextMenu(screen.getByTestId("guild-team-t-2"))
+  // Nothing unread there — the item is present but inert.
+  expect(screen.getByTestId("guild-menu-mark-read-t-2")).toHaveAttribute("data-disabled")
+  fireEvent.click(screen.getByTestId("guild-menu-manage-t-2"))
+  expect(routerPush).toHaveBeenCalledWith("/settings?section=teams")
+})
+
+test("right-click on Direct Messages starts a direct conversation and offers no team management", () => {
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  fireEvent.contextMenu(screen.getByTestId("guild-dm"))
+  expect(screen.queryByTestId("guild-menu-manage-dm")).toBeNull()
+  fireEvent.click(screen.getByTestId("guild-menu-new-dm"))
+  expect(startGuildConversation).toHaveBeenCalledWith(expect.objectContaining({ teamId: null }))
 })
 
 test("clicking Create team and Settings invoke the props and log", async () => {

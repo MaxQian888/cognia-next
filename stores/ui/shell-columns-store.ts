@@ -33,7 +33,16 @@ export interface ShellColumnsState {
   setColumnWidth: (column: ShellColumn, px: number) => void
   /** True while the expanded sidebar is rendering the shell navigation rows. */
   sidebarHostsNav: boolean
-  setSidebarHostsNav: (hosts: boolean) => void
+  /**
+   * How many sidebars currently claim to host the navigation. A count, not a
+   * flag: during a route transition (or an Offscreen / StrictMode remount) an
+   * outgoing sidebar's cleanup can run *after* the incoming one registered,
+   * and a plain boolean would then flash the icon column back for a frame.
+   * `sidebarHostsNav` is `count > 0`.
+   */
+  sidebarNavHostCount: number
+  /** Claim the navigation for a sidebar; returns the release. */
+  registerSidebarNavHost: () => () => void
 }
 
 export const useShellColumnsStore = create<ShellColumnsState>()((set) => ({
@@ -45,6 +54,21 @@ export const useShellColumnsStore = create<ShellColumnsState>()((set) => ({
       return { widths: { ...state.widths, [column]: next } }
     }),
   sidebarHostsNav: false,
-  setSidebarHostsNav: (hosts) =>
-    set((state) => (state.sidebarHostsNav === hosts ? state : { sidebarHostsNav: hosts })),
+  sidebarNavHostCount: 0,
+  registerSidebarNavHost: () => {
+    let released = false
+    set((state) => {
+      const count = state.sidebarNavHostCount + 1
+      return { sidebarNavHostCount: count, sidebarHostsNav: true }
+    })
+    return () => {
+      // A release runs once, however many times React calls the cleanup.
+      if (released) return
+      released = true
+      set((state) => {
+        const count = Math.max(0, state.sidebarNavHostCount - 1)
+        return { sidebarNavHostCount: count, sidebarHostsNav: count > 0 }
+      })
+    }
+  },
 }))

@@ -132,6 +132,10 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
   //   - The A2UI mini-apps hub + workspace (`/a2ui`): the hub wraps its body in
   //     a `ScrollArea h-full` and the workspace stacks header/toolbar over a
   //     flex-1 preview/tab region.
+  //   - The first-run flow (`/onboarding`): `StepShell` is `h-full` so it can
+  //     share one sizing rule with the desktop shell (where it fills the
+  //     chrome's content slot); its rail, scroll body and sticky footer all
+  //     hang off that height.
   // A bare `min-h-[100dvh]` is NOT a *definite* height, so those `h-full`
   // chains resolve to `auto` and collapse to 0 — the page renders as a blank
   // strip below the top bar. Give just those routes a definite flex-column
@@ -142,7 +146,9 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     pathname.startsWith("/workflows/") ||
     pathname === "/a2ui" ||
     pathname.startsWith("/a2ui/") ||
-    pathname === "/me/terminal"
+    pathname === "/me/terminal" ||
+    pathname === "/onboarding" ||
+    pathname.startsWith("/onboarding/")
 
   return (
     <div

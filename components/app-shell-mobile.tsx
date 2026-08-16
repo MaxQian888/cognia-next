@@ -49,8 +49,6 @@ import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { MemberList } from "@/components/shell/member-list"
-import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
-import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
@@ -129,7 +127,6 @@ export function AppShellMobile() {
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
-  const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
 
@@ -160,22 +157,6 @@ export function AppShellMobile() {
       })
     })
   }, [activeSessionId])
-
-  // Onboarding nudge — same trigger as desktop.
-  useEffect(() => {
-    if (!mounted) return
-    const settings = useSettingsStore.getState().settings
-    if (!settings) return
-    let cancelled = false
-    void shouldShowOnboarding(settings, sessions.length).then((show) => {
-      if (cancelled || !show) return
-      log.info("onboarding shown (mobile)")
-      setOnboardingOpen(true)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [mounted, sessions.length])
 
   // Auto-select most recent session matching the current guild.
   useEffect(() => {
@@ -663,22 +644,6 @@ export function AppShellMobile() {
         open={characterPickerOpen}
         onOpenChange={setCharacterPickerOpen}
         onPick={async (c) => {
-          const s = await create({
-            title: tShell("directSessionTitle", { name: c.name }),
-            kind: "direct",
-            characterId: c.id,
-          })
-          select(s.id)
-          setSelectedGuild({ kind: "dm" })
-        }}
-      />
-
-      <OnboardingDialog
-        open={onboardingOpen}
-        onOpenChange={(open) => {
-          setOnboardingOpen(open)
-        }}
-        onPickCharacter={async (c) => {
           const s = await create({
             title: tShell("directSessionTitle", { name: c.name }),
             kind: "direct",

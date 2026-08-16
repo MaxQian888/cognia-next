@@ -427,6 +427,24 @@ describe("<MobileShellWrapper />", () => {
     expect(screen.getByTestId("mobile-tab-bar")).toBeInTheDocument()
   })
 
+  it("gives the first-run flow a definite full-viewport height with the tab bar hidden", () => {
+    pathnameMock.mockReturnValue("/onboarding")
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>onboarding</div>
+      </MobileShellWrapper>
+    )
+    const wrapper = screen.getByTestId("mobile-shell-wrapper")
+    expect(wrapper).toHaveAttribute("data-full-viewport", "true")
+    expect(wrapper).toHaveAttribute("data-tab-bar-visible", "false")
+    // `StepShell` is `h-full` (it fills the desktop chrome's content slot);
+    // on mobile that chain only resolves against a definite-height column.
+    const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
+    expect(inner?.className).toContain("h-[100dvh]")
+    expect(inner?.className).not.toContain("min-h-[100dvh]")
+    expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
+  })
+
   it("keeps the document-scroll min-height on the /workflows list (not full-viewport)", () => {
     pathnameMock.mockReturnValue("/workflows")
     const { container } = render(

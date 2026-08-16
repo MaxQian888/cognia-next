@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { EMPTY_CONVERSATION_FILTERS } from "@/lib/chat/conversation-filters"
 import { act, renderHook } from "@testing-library/react"
 import { DEFAULT_BAR_ITEMS, useMemberStatus, useUIStore, type SelectedGuild } from "./ui-store"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
@@ -194,6 +195,23 @@ describe("useUIStore", () => {
       })
     })
 
+    it("requestReportProblem stores the context and bumps the nonce; clear resets", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.pendingReportRequest).toBeNull()
+      act(() => result.current.requestReportProblem({ surface: "tray" }))
+      expect(result.current.pendingReportRequest).toEqual({
+        context: { surface: "tray" },
+        nonce: 1,
+      })
+      act(() => result.current.requestReportProblem({ surface: "chat", sessionId: "s1" }))
+      expect(result.current.pendingReportRequest).toEqual({
+        context: { surface: "chat", sessionId: "s1" },
+        nonce: 2,
+      })
+      act(() => result.current.clearPendingReport())
+      expect(result.current.pendingReportRequest).toBeNull()
+    })
+
     it("clearPendingSettings resets the request to null", () => {
       const { result } = renderHook(() => useUIStore())
       act(() => result.current.requestOpenSettings("data"))
@@ -209,7 +227,7 @@ describe("useUIStore", () => {
         result.current.setSelectedGuild({ kind: "team", teamId: "t1" })
         result.current.setShowMemberList(false)
         result.current.setScratchpadCollapsed("ts1", true)
-        result.current.setGuildRailCollapsed(true)
+        result.current.toggleGuildRail()
         result.current.setStatusBarCollapsed(true)
         // Transient fields — must NOT appear in localStorage
         result.current.setMemberStatus("ts1", "a", "thinking")
@@ -229,6 +247,7 @@ describe("useUIStore", () => {
         channelListView: "active",
         collapsedFolderIds: [],
         groupCollapseOverrides: {},
+        conversationFilters: EMPTY_CONVERSATION_FILTERS,
         guildRailCollapsed: true,
         statusBarCollapsed: true,
         barItems: { ...DEFAULT_BAR_ITEMS },
@@ -319,12 +338,11 @@ describe("useUIStore", () => {
       expect(result.current.guildRailCollapsed).toBe(false)
     })
 
-    it("setGuildRailCollapsed sets the state directly", () => {
+    it("has no absolute setter — the View menu and the layout dropdown both toggle", () => {
       const { result } = renderHook(() => useUIStore())
-      act(() => result.current.setGuildRailCollapsed(true))
-      expect(result.current.guildRailCollapsed).toBe(true)
-      act(() => result.current.setGuildRailCollapsed(false))
-      expect(result.current.guildRailCollapsed).toBe(false)
+      expect(
+        (result.current as unknown as Record<string, unknown>).setGuildRailCollapsed
+      ).toBeUndefined()
     })
   })
 
@@ -374,10 +392,17 @@ describe("useUIStore", () => {
         .filter(([, on]) => !on)
         .map(([id]) => id)
         .sort()
+      // Only over the ids the legacy map knows about: segments added after the
+      // map was frozen (`terminal`) are not legacy ids at all — the migration
+      // leaves them on their shipped default, which `lib/shell/bar-items.test.ts`
+      // pins ("leaves unmentioned ids on their shipped default").
+      const legacyIds = new Set(Object.keys(DEFAULT_BAR_ITEMS))
       const shippedHidden = [
         ...DEFAULT_TITLE_BAR_LAYOUT.hidden,
         ...DEFAULT_STATUS_BAR_LAYOUT.hidden,
-      ].sort()
+      ]
+        .filter((id) => legacyIds.has(id))
+        .sort()
       expect(legacyOff).toEqual(shippedHidden)
     })
 
@@ -477,6 +502,58 @@ describe("useUIStore", () => {
       const before = useUIStore.getState().groupCollapseOverrides
       act(() => useUIStore.getState().setGroupCollapsed("agent:a1", true))
       expect(useUIStore.getState().groupCollapseOverrides).toBe(before)
+    })
+  })
+
+  describe("conversationFilters", () => {
+    it("starts unfiltered", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.conversationFilters).toEqual(EMPTY_CONVERSATION_FILTERS)
+    })
+
+    it("normalizes a partial write into the complete shape", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setConversationFilters({ unread: true }))
+      expect(result.current.conversationFilters).toEqual({
+        ...EMPTY_CONVERSATION_FILTERS,
+        unread: true,
+      })
+    })
+
+    it("degrades an unknown kind to 'all' rather than hiding every row", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() =>
+        result.current.setConversationFilters({
+          kind: "nonsense",
+        } as unknown as Parameters<typeof result.current.setConversationFilters>[0])
+      )
+      expect(result.current.conversationFilters.kind).toBe("all")
+    })
+
+    it("resetConversationFilters clears every facet", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setConversationFilters({ unread: true, pinned: true, kind: "team" }))
+      act(() => result.current.resetConversationFilters())
+      expect(result.current.conversationFilters).toEqual(EMPTY_CONVERSATION_FILTERS)
+    })
+
+    it("normalizes a corrupt persisted blob on rehydrate", async () => {
+      window.localStorage.setItem(
+        "cognia-ui",
+        JSON.stringify({
+          state: { conversationFilters: { unread: "yes", kind: "team" } },
+          version: 3,
+        })
+      )
+      await act(async () => {
+        await useUIStore.persist.rehydrate()
+      })
+      expect(useUIStore.getState().conversationFilters).toEqual({
+        ...EMPTY_CONVERSATION_FILTERS,
+        // A non-boolean is not "on" — a filter nobody set must not hide rows.
+        unread: false,
+        kind: "team",
+      })
     })
   })
 

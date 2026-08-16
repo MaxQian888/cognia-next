@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -62,6 +62,12 @@ jest.mock("next-intl", () => ({
       renameAria: "Rename",
       emptyChats: "Empty",
       emptyFiltered: `No "${vars?.query ?? ""}"`,
+      emptyFilters: `No match for ${vars?.count ?? 0} filters`,
+      // Shared `conversationFilters` namespace (the filter menu + chips).
+      clearAll: "Clear filters",
+      label: "Filter and sort",
+      labelActive: `Filter and sort (${vars?.count ?? 0})`,
+      count: `${vars?.shown ?? 0} / ${vars?.total ?? 0}`,
       swipePin: "Pin",
       swipeUnpin: "Unpin",
       swipeDelete: "Delete",
@@ -85,25 +91,67 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 // Static UI-store mock: view/collapse are mirrored to local state in the
 // component, so no-op setters are enough (spies let us assert persistence).
 const setChannelListView = jest.fn()
-const setCollapsedFolders = jest.fn()
+// Folder collapse now lives in the store itself (no local mirror), so the mock
+// has to be a real (if tiny) reactive store: the collapse assertions below
+// drive it through the UI and expect the list to re-render.
+let collapsedFolderIds: string[] = []
+const uiListeners = new Set<() => void>()
+const emitUiChange = () => uiListeners.forEach((listener) => listener())
+const setCollapsedFolders = jest.fn((ids: string[]) => {
+  collapsedFolderIds = ids
+  emitUiChange()
+})
+const toggleCollapsedFolder = jest.fn((id: string) => {
+  collapsedFolderIds = collapsedFolderIds.includes(id)
+    ? collapsedFolderIds.filter((f) => f !== id)
+    : [...collapsedFolderIds, id]
+  emitUiChange()
+})
 const setGroupCollapsed = jest.fn()
+// Quick filters are shared with the desktop sidebar; default to unfiltered so
+// the existing assertions hold.
+let conversationFilters: Record<string, unknown> = {
+  unread: false,
+  pinned: false,
+  branched: false,
+  kind: "all",
+}
+const setConversationFilters = jest.fn()
+const resetConversationFilters = jest.fn()
 jest.mock("@/stores/ui", () => ({
-  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
-    selector({
+  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T => {
+    const react = jest.requireActual<typeof import("react")>("react")
+    const [, force] = react.useReducer((n: number) => n + 1, 0)
+    react.useEffect(() => {
+      uiListeners.add(force)
+      return () => {
+        uiListeners.delete(force)
+      }
+    }, [force])
+    return selector({
       channelListView: "active",
       setChannelListView,
-      collapsedFolderIds: [],
+      collapsedFolderIds,
       setCollapsedFolders,
+      toggleCollapsedFolder,
       groupCollapseOverrides: {},
       setGroupCollapsed,
-    }),
+      conversationFilters,
+      setConversationFilters,
+      resetConversationFilters,
+    })
+  },
 }))
 
 // Behavior prefs default to today's behavior; tests override as needed.
 let conversationSidebar: Record<string, unknown> | null = null
+const saveSettings = jest.fn()
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T =>
-    selector({ settings: conversationSidebar ? { conversationSidebar } : null }),
+  useSettingsStore: <T,>(selector: (s: { settings: unknown; save: typeof saveSettings }) => T): T =>
+    selector({
+      settings: conversationSidebar ? { conversationSidebar } : null,
+      save: saveSettings,
+    }),
 }))
 
 const useChatHistorySearch = jest.fn()
@@ -141,8 +189,14 @@ describe("<MobileChannelList />", () => {
     charactersRef.value = []
     sessionStatesRef.value = []
     setChannelListView.mockReset()
-    setCollapsedFolders.mockReset()
+    collapsedFolderIds = []
+    setCollapsedFolders.mockClear()
+    toggleCollapsedFolder.mockClear()
     setGroupCollapsed.mockReset()
+    setConversationFilters.mockReset()
+    resetConversationFilters.mockReset()
+    saveSettings.mockReset()
+    conversationFilters = { unread: false, pinned: false, branched: false, kind: "all" }
     useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
     conversationSidebar = null
     historySearchState = {
@@ -672,5 +726,83 @@ describe("<MobileChannelList />", () => {
       expect(screen.getByTestId("mobile-channel-row-s3")).toBeInTheDocument()
     )
     expect(screen.queryByTestId("mobile-channel-row-s2")).not.toBeInTheDocument()
+  })
+
+  describe("filters and sorting", () => {
+    const renderList = (list: ChatSession[] = sessions) =>
+      render(
+        <MobileChannelList
+          sessions={list}
+          activeSessionId={null}
+          onSelect={jest.fn()}
+          onNewDirect={jest.fn()}
+          onDelete={jest.fn()}
+          onRename={jest.fn()}
+          onArchive={jest.fn()}
+          onUnarchive={jest.fn()}
+        />
+      )
+
+    it("hides the chip row while the list is in its default state", () => {
+      renderList()
+      expect(screen.queryByTestId("mobile-channel-filter-chips")).toBeNull()
+    })
+
+    it("applies the shared pinned filter", () => {
+      // Same UI-store slice the desktop sidebar reads, so a phone and a desktop
+      // never disagree about which conversations exist.
+      conversationFilters = { unread: false, pinned: true, branched: false, kind: "all" }
+      renderList()
+      expect(screen.getByTestId("mobile-channel-row-s1")).toBeInTheDocument()
+      expect(screen.queryByTestId("mobile-channel-row-s2")).toBeNull()
+      expect(screen.getByTestId("mobile-channel-filter-chips-count")).toHaveTextContent("1 / 3")
+    })
+
+    it("applies the shared sort preference", () => {
+      conversationSidebar = { groupBy: "none", sortBy: "title" }
+      renderList([
+        baseSession("s-z", { title: "Zulu", updatedAt: 300 }),
+        baseSession("s-a", { title: "Alpha", updatedAt: 100 }),
+      ])
+      const rows = screen.getAllByTestId(/^mobile-channel-row-/)
+      expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
+        "mobile-channel-row-s-a",
+        "mobile-channel-row-s-z",
+      ])
+    })
+
+    it("persists a sort choice through the settings store", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await user.click(screen.getByTestId("mobile-channel-filter"))
+      // jsdom reports the desktop breakpoint, so the menu is the dropdown with
+      // hover submenus; items are activated with fireEvent (see
+      // conversation-filter-controls.test.tsx for why not `user.click`).
+      await user.hover(await screen.findByTestId("mobile-channel-filter-section-sort"))
+      fireEvent.click(await screen.findByRole("menuitemradio", { name: "sort.options.oldest" }))
+      expect(saveSettings).toHaveBeenCalledWith({ conversationSidebar: { sortBy: "oldest" } })
+    })
+
+    it("clears filters from the empty state when they hide everything", async () => {
+      conversationFilters = { unread: true, pinned: false, branched: false, kind: "all" }
+      const user = userEvent.setup()
+      renderList()
+      expect(screen.getByTestId("mobile-channel-empty")).toHaveTextContent("No match for 1 filters")
+      await user.click(screen.getByTestId("mobile-channel-clear-filters"))
+      expect(resetConversationFilters).toHaveBeenCalled()
+    })
+
+    it("keeps the search empty state when a query is what emptied the list", async () => {
+      conversationFilters = { unread: true, pinned: false, branched: false, kind: "all" }
+      const user = userEvent.setup()
+      renderList()
+      await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
+      // A query is the more specific cause — offering "clear filters" here would
+      // point at the wrong lever.
+      await waitFor(() =>
+        expect(screen.getByTestId("mobile-channel-empty")).toHaveTextContent('No "zzz"')
+      )
+      expect(screen.queryByTestId("mobile-channel-clear-filters")).toBeNull()
+    })
   })
 })

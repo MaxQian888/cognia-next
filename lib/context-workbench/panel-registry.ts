@@ -1,4 +1,8 @@
-import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
+import type {
+  ContextActivity,
+  ContextPanelDefinition,
+  ContextResource,
+} from "@/types/context-workbench"
 
 export interface ContextPanelRegistry {
   register: (definition: ContextPanelDefinition) => () => void
@@ -36,6 +40,25 @@ export interface ContextPanelRegistry {
    * for ordering/hiding regardless of which resource is currently in view.
    */
   listActivities: () => string[]
+  /**
+   * Every registered panel's identity, unfiltered by resource.
+   *
+   * The panel-level complement of {@link listActivities}, and unfiltered for the
+   * same reason: the customizer offers panels for ordering and hiding while no
+   * particular resource is in view (it is reachable from Settings), so filtering
+   * by the active one would make the list change under the user.
+   *
+   * Identity only — no renderer, no predicates. A caller that wants to *mount* a
+   * panel goes through `resolve`, which applies the capability and permission
+   * gates this deliberately skips.
+   */
+  listPanels: () => Array<{
+    id: string
+    activity: ContextActivity
+    labelKey: string
+    label?: string
+    pluginId?: string
+  }>
   subscribe: (listener: () => void) => () => void
   getRevision: () => number
   refresh: () => void
@@ -117,6 +140,15 @@ export function createContextPanelRegistry(): ContextPanelRegistry {
         activities.add(definition.activity)
       }
       return [...activities]
+    },
+    listPanels() {
+      return [...definitions.values()].map((definition) => ({
+        id: definition.id,
+        activity: definition.activity,
+        labelKey: definition.labelKey,
+        label: definition.label,
+        pluginId: definition.pluginId,
+      }))
     },
     subscribe(listener) {
       listeners.add(listener)

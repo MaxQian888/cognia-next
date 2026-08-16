@@ -32,4 +32,16 @@ describe("useSidebarNavHost", () => {
     rerender(<Host active={false} />)
     expect(hosts()).toBe(false)
   })
+
+  it("keeps the claim while two hosts overlap (outgoing cleanup after incoming mount)", () => {
+    const outgoing = render(<Host active />)
+    const incoming = render(<Host active />)
+    expect(hosts()).toBe(true)
+    // The old sidebar leaves after the new one has registered — the icon
+    // column must not flash back in between.
+    outgoing.unmount()
+    expect(hosts()).toBe(true)
+    incoming.unmount()
+    expect(hosts()).toBe(false)
+  })
 })

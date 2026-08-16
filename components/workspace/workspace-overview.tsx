@@ -1,0 +1,200 @@
+"use client"
+
+/**
+ * `/workspace` — the current workspace at a glance.
+ *
+ * "Workspace" here is the repo's existing `Project` entity (`lib/db/projects.ts`,
+ * user-facing label "Workspace"), NOT a new container and NOT the tracker's
+ * `IssueProject`. This page exists to give that entity a real home: its
+ * delivery containers, its issue totals, and the roots it has mounted.
+ *
+ * Hard constraint: this must not become a SECOND place that edits workspace
+ * roots. `components/shell/workspace-manage-dialog.tsx` already owns those
+ * mutations, so this surface links to it rather than duplicating the controls —
+ * two editors over one row is the "double entry point" defect this repo keeps
+ * re-learning.
+ */
+
+import { useMemo } from "react"
+import { useTranslations } from "next-intl"
+import { FolderIcon, SettingsIcon } from "lucide-react"
+import Link from "next/link"
+
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { useClientLiveQuery } from "@/hooks/data"
+import { listIssues } from "@/lib/db/issues"
+import { listIssueProjects } from "@/lib/db/issue-projects"
+import { ISSUE_STATUSES, statusCategoryOf } from "@/types/issues"
+import type { IssueProject, IssueStatus } from "@/types/issues"
+import { useProjectStore } from "@/stores/project/project-store"
+import { IssueStatusIcon } from "@/components/issues/issue-glyphs"
+
+export function WorkspaceOverview() {
+  const t = useTranslations("issues")
+  const workspaceId = useProjectStore((s) => s.activeProjectId)
+  const workspaces = useProjectStore((s) => s.projects)
+  const workspace = workspaces.find((candidate) => candidate.id === workspaceId)
+
+  const projects = useClientLiveQuery(
+    () => (workspaceId ? listIssueProjects({ projectId: workspaceId }) : Promise.resolve([])),
+    [workspaceId],
+    [] as IssueProject[]
+  )
+  const issues = useClientLiveQuery(
+    () => (workspaceId ? listIssues({ projectId: workspaceId }) : Promise.resolve([])),
+    [workspaceId],
+    []
+  )
+
+  const counts = useMemo(() => {
+    const byStatus = Object.fromEntries(ISSUE_STATUSES.map((status) => [status, 0])) as Record<
+      IssueStatus,
+      number
+    >
+    let open = 0
+    for (const issue of issues ?? []) {
+      byStatus[issue.status] += 1
+      const category = statusCategoryOf(issue.status)
+      if (category === "unstarted" || category === "started") open += 1
+    }
+    return { byStatus, open }
+  }, [issues])
+
+  return (
+    <FeaturePageShell
+      storageId="workspace"
+      header={
+        <FeaturePageHeader
+          variant="management"
+          title={workspace?.name ?? t("workspace.title")}
+          summary={t("workspace.overview")}
+        />
+      }
+    >
+      <div className="flex flex-col gap-6 p-4" data-testid="workspace-overview">
+        <section className="grid gap-3 sm:grid-cols-3">
+          <StatTile
+            label={t("workspace.openIssues")}
+            value={counts.open}
+            testId="workspace-open-issues"
+          />
+          <StatTile
+            label={t("workspace.projectSummary")}
+            value={(projects ?? []).length}
+            testId="workspace-project-count"
+          />
+          <StatTile
+            label={t("workspace.agentsWorking")}
+            value={0}
+            testId="workspace-agents-working"
+          />
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("workspace.issueSummary")}
+          </h2>
+          <ul className="flex flex-wrap gap-2" data-testid="workspace-status-breakdown">
+            {ISSUE_STATUSES.map((status) => (
+              <li
+                key={status}
+                className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs"
+                data-testid={`workspace-status-${status}`}
+              >
+                <IssueStatusIcon status={status} />
+                <span>{t(`status.${status}`)}</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {counts.byStatus[status]}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("projects.title")}
+          </h2>
+          {(projects ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground" data-testid="workspace-no-projects">
+              {t("workspace.noProjects")}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {(projects ?? []).map((project) => (
+                <li key={project.id}>
+                  <Link
+                    href={`/projects?id=${encodeURIComponent(project.id)}`}
+                    className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-accent/50"
+                    data-testid={`workspace-project-${project.id}`}
+                  >
+                    <span aria-hidden>{project.icon ?? "📁"}</span>
+                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                    <Badge variant="outline" className="font-mono text-[10px]">
+                      {project.key}
+                    </Badge>
+                    <Badge variant="secondary" className="font-normal">
+                      {t(`projects.status.${project.status}`)}
+                    </Badge>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("workspace.resources")}
+            </h2>
+            <span className="flex-1" />
+            {/*
+              Deliberately a link to the existing manager rather than inline
+              root editing: workspace roots have exactly one editor, and the
+              trust gate lives on that path.
+            */}
+            <Button size="sm" variant="ghost" asChild data-testid="workspace-manage-link">
+              <Link href="/settings">
+                <SettingsIcon className="size-4" />
+                {t("workspace.manage")}
+              </Link>
+            </Button>
+          </div>
+          {workspace?.roots?.length ? (
+            <ul className="flex flex-col gap-1" data-testid="workspace-roots">
+              {workspace.roots.map((root) => (
+                <li
+                  key={root.id}
+                  className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+                >
+                  <FolderIcon aria-hidden className="size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate font-mono">{root.path}</span>
+                  {root.isPrimary ? (
+                    <Badge variant="secondary" className="text-[10px] font-normal">
+                      1
+                    </Badge>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t("projects.directoryHint")}</p>
+          )}
+        </section>
+      </div>
+    </FeaturePageShell>
+  )
+}
+
+function StatTile({ label, value, testId }: { label: string; value: number; testId: string }) {
+  return (
+    <div className="flex flex-col gap-1 rounded-xl border bg-card p-4" data-testid={testId}>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-2xl font-semibold tabular-nums">{value}</span>
+    </div>
+  )
+}

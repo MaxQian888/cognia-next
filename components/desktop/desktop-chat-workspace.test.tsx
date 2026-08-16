@@ -95,10 +95,17 @@ let activeSessionId: string | null = null
 let navCounter = 0
 let selectedGuildEpoch = 0
 let activeSessionEpoch = 0
+let mockActiveProjectIdForSessions: string | null = null
 jest.mock("@/hooks/chat", () => ({
-  useSessions: () => {
-    const activeSession =
+  useSessions: ({ crossWorkspace = false }: { crossWorkspace?: boolean } = {}) => {
+    const listedActiveSession =
       sessionsRef.current.find((session) => session.id === activeSessionId) ?? null
+    const activeSession =
+      crossWorkspace &&
+      listedActiveSession?.projectId &&
+      listedActiveSession.projectId !== mockActiveProjectIdForSessions
+        ? null
+        : listedActiveSession
     return {
       sessions: sessionsRef.current,
       activeSessionId,
@@ -270,10 +277,6 @@ jest.mock("@/components/artifacts/artifact-workspace-dock", () => ({
 jest.mock("@/components/canvas/canvas-shell", () => ({
   CanvasShell: () => <div data-testid="canvas-shell" />,
 }))
-jest.mock("@/components/shell/onboarding-dialog", () => ({
-  OnboardingDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="onboarding" /> : null,
-}))
 jest.mock("@/components/chat/tool-approval-dialog", () => ({
   ToolApprovalDialog: () => null,
 }))
@@ -307,6 +310,7 @@ beforeEach(() => {
   navCounter = 0
   selectedGuildEpoch = 0
   activeSessionEpoch = 0
+  mockActiveProjectIdForSessions = null
   selectedGuild = { kind: "dm" }
   errorMessageRef.current = null
   pendingSettingsRequestRef.current = null
@@ -414,6 +418,33 @@ test("selecting a conversation in the current workspace leaves the workspace alo
   expect(setActiveProject).not.toHaveBeenCalled()
   expect(useProjectStore.getState().activeProjectId).toBe("project-a")
   setActiveProject.mockRestore()
+})
+
+test("does not auto-select a foreign active conversation from the cross-workspace list", async () => {
+  mockActiveProjectIdForSessions = "project-a"
+  useProjectStore.setState({ activeProjectId: "project-a", loaded: true })
+  sessionsRef.current = [
+    {
+      id: "foreign",
+      title: "other workspace",
+      kind: "direct",
+      projectId: "project-b",
+      createdAt: 0,
+      updatedAt: 9,
+    } as unknown as ChatSession,
+  ]
+  // The persisted active id belongs to another workspace, so useSessions
+  // correctly resolves it as absent even though the cross-workspace sidebar
+  // still lists the row. Re-selecting that same id bumps activeSessionEpoch and
+  // makes this effect dispatch forever in the real Zustand-backed component.
+  activeSessionId = "foreign"
+  activeSessionEpoch = 9
+  selectedGuildEpoch = 1
+
+  render(<DesktopChatWorkspace />)
+
+  await waitFor(() => expect(screen.getByTestId("chat-pane-group")).toBeInTheDocument())
+  expect(select).not.toHaveBeenCalled()
 })
 
 test("clicking a team (guild chosen most recently) resumes its latest conversation", async () => {

@@ -9,18 +9,22 @@
  * `useShellColumnsStore.sidebarHostsNav` to decide which of the two is on
  * screen. The sidebar — the only component that knows whether it is really
  * rendering those rows (desktop branch, not collapsed, a chat guild rather
- * than a plugin view) — calls this with that condition; the flag clears on
- * unmount and whenever the condition drops.
+ * than a plugin view) — calls this with that condition; the claim is released
+ * on unmount and whenever the condition drops.
+ *
+ * A layout effect, deliberately: the sidebar commits its collapse / expand
+ * width in a layout effect too (`channel-list.tsx`), and a passive effect here
+ * would let the browser paint one frame with the rail at 0 *and* the icon
+ * column still hidden (collapse), or both columns on screen (expand).
  */
 
-import { useEffect } from "react"
+import { useLayoutEffect } from "react"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 
 export function useSidebarNavHost(active: boolean): void {
-  const setSidebarHostsNav = useShellColumnsStore((s) => s.setSidebarHostsNav)
-  useEffect(() => {
+  const registerSidebarNavHost = useShellColumnsStore((s) => s.registerSidebarNavHost)
+  useLayoutEffect(() => {
     if (!active) return
-    setSidebarHostsNav(true)
-    return () => setSidebarHostsNav(false)
-  }, [active, setSidebarHostsNav])
+    return registerSidebarNavHost()
+  }, [active, registerSidebarNavHost])
 }

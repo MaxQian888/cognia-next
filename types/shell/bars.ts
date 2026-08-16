@@ -143,6 +143,12 @@ export const STATUS_BAR_ITEMS: readonly BarItemMeta[] = [
   { id: "notifications", bar: "status", zone: "end", i18nKey: "notifications" },
   { id: "attention", bar: "status", zone: "end", i18nKey: "attention" },
   { id: "jobs", bar: "status", zone: "end", i18nKey: "jobs" },
+  // ADR-0108 global agent thread browser: hidden subagent sessions under their
+  // parent lineage. Beside `jobs` because it is the same kind of ambient,
+  // cross-project state. Not `defaultHidden` — the segment renders nothing
+  // until at least one subagent session exists (like `terminal` with no
+  // sessions), so it costs the default bar no width.
+  { id: "agentThreads", bar: "status", zone: "end", i18nKey: "agentThreads" },
   {
     id: "perf",
     bar: "status",

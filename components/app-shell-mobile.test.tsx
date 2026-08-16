@@ -232,10 +232,6 @@ jest.mock("@/components/chat/character-picker", () => ({
   CharacterPicker: ({ open }: { open: boolean }) =>
     open ? <div data-testid="char-picker" /> : null,
 }))
-jest.mock("@/components/shell/onboarding-dialog", () => ({
-  OnboardingDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="onboarding" /> : null,
-}))
 jest.mock("@/components/chat/tool-approval-dialog", () => ({
   ToolApprovalDialog: () => null,
 }))

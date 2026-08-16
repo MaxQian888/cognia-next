@@ -70,6 +70,12 @@ jest.mock("@/lib/plugin/context-keys/context-key-store", () => ({
   getContextKeyRevision: () => 0,
   evaluateContextWhen: () => true,
 }))
+let guildUnread = { dm: 0, teams: new Map<string, number>(), total: 0 }
+const markGuildRead = jest.fn(async () => 1)
+jest.mock("@/hooks/shell/use-guild-unread", () => ({
+  useGuildUnread: () => guildUnread,
+  markGuildRead: (target: unknown) => markGuildRead(target as never),
+}))
 jest.mock("@/components/desktop/avatar-badge", () => ({
   AvatarBadge: ({ subject }: { subject: { name: string } }) => (
     <span data-testid={`avatar-${subject.name}`} />
@@ -92,6 +98,8 @@ beforeEach(() => {
   setSelectedGuild.mockClear()
   selectedGuild = { kind: "dm" }
   pathname = "/"
+  guildUnread = { dm: 0, teams: new Map(), total: 0 }
+  markGuildRead.mockClear()
   act(() => {
     useSettingsStore.setState({
       settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT } } as never,
@@ -182,6 +190,84 @@ describe("SidebarGuildSectionRows", () => {
     expect(screen.getByTestId("sidebar-guild-team-t-1")).toHaveClass("font-medium")
     expect(screen.getByTestId("sidebar-guild-team-t-1").querySelector(".rotate-90")).not.toBeNull()
     expect(screen.getByTestId("sidebar-guild-dm").querySelector(".rotate-90")).toBeNull()
+  })
+
+  it("carries the unread count on closed rows only, and names the row for truncated labels", () => {
+    guildUnread = {
+      dm: 4,
+      teams: new Map([
+        ["t-1", 2],
+        ["t-2", 120],
+      ]),
+      total: 126,
+    }
+    const { before, after } = splitGuildSections(teams, { kind: "team", teamId: "t-1" })
+    render(
+      <>
+        <SidebarGuildSectionRows rows={before} openKey="t-1" />
+        <SidebarGuildSectionRows rows={after} openKey="t-1" />
+      </>
+    )
+    // Closed DM and closed Beta show their pills; the open Alpha shows its
+    // list instead (which carries per-row badges), so no pill there.
+    expect(screen.getByTestId("sidebar-guild-unread-dm")).toHaveTextContent("4")
+    expect(screen.getByTestId("sidebar-guild-unread-t-2")).toHaveTextContent("99+")
+    expect(screen.queryByTestId("sidebar-guild-unread-t-1")).toBeNull()
+    // The full name is one hover away even when the row truncates it.
+    expect(screen.getByTestId("sidebar-guild-team-t-2")).toHaveAttribute("title", "Beta")
+    expect(screen.getByTestId("sidebar-guild-dm")).toHaveAttribute("title", "directMessages")
+  })
+
+  it("draws no pill for a closed row without unread", () => {
+    const { after } = splitGuildSections(teams, { kind: "dm" })
+    render(<SidebarGuildSectionRows rows={after} openKey="dm" />)
+    expect(screen.queryByTestId("sidebar-guild-unread-t-1")).toBeNull()
+  })
+
+  it("right-click: start a conversation in a closed section without opening it", () => {
+    const onNewConversation = jest.fn()
+    const { after } = splitGuildSections(teams, { kind: "dm" })
+    render(
+      <SidebarGuildSectionRows rows={after} openKey="dm" onNewConversation={onNewConversation} />
+    )
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-2"))
+    fireEvent.click(screen.getByTestId("sidebar-guild-menu-new-t-2"))
+    expect(onNewConversation).toHaveBeenCalledWith("t-2")
+    // The section did not have to open first.
+    expect(setSelectedGuild).not.toHaveBeenCalled()
+  })
+
+  it("right-click on Direct Messages offers a new chat (null team) and no team management", () => {
+    const onNewConversation = jest.fn()
+    render(
+      <SidebarGuildSectionRows
+        rows={[{ key: "dm" }]}
+        openKey="dm"
+        onNewConversation={onNewConversation}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-dm"))
+    expect(screen.queryByTestId("sidebar-guild-menu-manage-dm")).toBeNull()
+    fireEvent.click(screen.getByTestId("sidebar-guild-menu-new-dm"))
+    expect(onNewConversation).toHaveBeenCalledWith(null)
+  })
+
+  it("right-click: mark a section read (only when it has unread) and manage teams", () => {
+    guildUnread = { dm: 0, teams: new Map([["t-1", 3]]), total: 3 }
+    const { after } = splitGuildSections(teams, { kind: "dm" })
+    render(<SidebarGuildSectionRows rows={after} openKey="dm" />)
+    // No "new" item without a handler (the mobile Sheet has none to give).
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-2"))
+    expect(screen.queryByTestId("sidebar-guild-menu-new-t-2")).toBeNull()
+    expect(screen.getByTestId("sidebar-guild-menu-mark-read-t-2")).toHaveAttribute("data-disabled")
+    fireEvent.click(screen.getByTestId("sidebar-guild-menu-manage-t-2"))
+    expect(routerPush).toHaveBeenCalledWith("/settings?section=teams")
+
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-1"))
+    const markRead = screen.getByTestId("sidebar-guild-menu-mark-read-t-1")
+    expect(markRead).not.toHaveAttribute("data-disabled")
+    fireEvent.click(markRead)
+    expect(markGuildRead).toHaveBeenCalledWith({ kind: "team", teamId: "t-1" })
   })
 
   it("renders nothing for an empty run", () => {

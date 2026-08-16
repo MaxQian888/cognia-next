@@ -20,11 +20,11 @@ import { PerfCaptureShellStatus } from "@/components/performance/perf-capture-sh
  * VSCode-style status bar mounted at the bottom of the desktop shell.
  *
  * Ambient status only: connectivity, sync, git branch, notifications, running
- * jobs, plan usage, account, and the turn's run state. Controls that merely had
- * a second home here — the sidebar toggle, the permission picker, the account
- * button's twin in the title bar — moved to their single owner, and the
- * low-frequency preferences (theme / zoom / locale) live in the title bar's
- * Views menu and the native View menu.
+ * jobs, hidden agent threads, plan usage, account, and the turn's run state.
+ * Controls that merely had a second home here — the sidebar toggle, the
+ * permission picker, the account button's twin in the title bar — moved to
+ * their single owner, and the low-frequency preferences (theme / zoom /
+ * locale) live in the title bar's Views menu and the native View menu.
  *
  * Which segments appear, and in what order, is user customization persisted on
  * `AppSettings.statusBarLayout` and resolved by `useBarLayout("status")` — the

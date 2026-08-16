@@ -6,6 +6,7 @@ beforeEach(() => {
     useShellColumnsStore.setState({
       widths: { rail: 0, sidebar: 0, dock: 0 },
       sidebarHostsNav: false,
+      sidebarNavHostCount: 0,
     })
   )
 })
@@ -38,14 +39,31 @@ describe("useShellColumnsStore", () => {
     expect(useShellColumnsStore.getState()).toBe(before)
   })
 
-  it("records whether the expanded sidebar is hosting the navigation, identity-stable", () => {
-    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
-    act(() => useShellColumnsStore.getState().setSidebarHostsNav(true))
-    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(true)
-    const before = useShellColumnsStore.getState()
-    act(() => useShellColumnsStore.getState().setSidebarHostsNav(true))
-    expect(useShellColumnsStore.getState()).toBe(before)
-    act(() => useShellColumnsStore.getState().setSidebarHostsNav(false))
-    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
+  it("records whether the expanded sidebar is hosting the navigation, as a refcount", () => {
+    const state = () => useShellColumnsStore.getState()
+    expect(state().sidebarHostsNav).toBe(false)
+    const releaseA = state().registerSidebarNavHost()
+    expect(state().sidebarHostsNav).toBe(true)
+    expect(state().sidebarNavHostCount).toBe(1)
+    // A second sidebar (route transition, remount) overlaps the first: the
+    // navigation stays hosted until the *last* claim is released, whatever
+    // order the cleanups run in.
+    const releaseB = state().registerSidebarNavHost()
+    expect(state().sidebarNavHostCount).toBe(2)
+    releaseA()
+    expect(state().sidebarHostsNav).toBe(true)
+    releaseB()
+    expect(state().sidebarHostsNav).toBe(false)
+    expect(state().sidebarNavHostCount).toBe(0)
+  })
+
+  it("releases a claim once, however many times its disposer is called", () => {
+    const state = () => useShellColumnsStore.getState()
+    const releaseA = state().registerSidebarNavHost()
+    state().registerSidebarNavHost()
+    releaseA()
+    releaseA()
+    expect(state().sidebarNavHostCount).toBe(1)
+    expect(state().sidebarHostsNav).toBe(true)
   })
 })

@@ -11,7 +11,7 @@ import {
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
-import { ContextWorkbenchMobileSheet } from "@/components/context-workbench/context-workbench"
+import { ContextWorkbenchMobileDrawer } from "@/components/context-workbench/context-workbench"
 import type { OpenFile } from "./use-project-editor"
 import type {
   ContextPanelDefinition,
@@ -368,7 +368,7 @@ function ProjectContextWorkbenchHost({
   }
 
   return mobile ? (
-    <ContextWorkbenchMobileSheet
+    <ContextWorkbenchMobileDrawer
       open={mobile.open}
       onOpenChange={mobile.onOpenChange}
       workbenchInstanceId={workbenchInstanceId}

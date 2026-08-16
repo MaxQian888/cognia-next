@@ -46,6 +46,12 @@ const config: CapacitorConfig = {
       // native→web handoff shows no flash of unstyled content either way.
       launchShowDuration: process.env.COGNIA_MOBILE_DEV ? 1500 : 3000,
       launchAutoHide: true,
+      // Android 12+ routes the splash through the system SplashScreen API,
+      // which ignores `hide({ fadeOutDuration })` — this is the only knob that
+      // fades the native → web hand-over there instead of cutting. Same 300ms
+      // the boot provider passes to hide() for iOS / legacy Android, so both
+      // paths dissolve into the web <MobileBootScreen> at the same pace.
+      launchFadeOutDuration: 300,
       // Deep-navy to match the splash illustration + @color/splash_background.
       // Only the legacy (pre-Android-12 / fallback) ImageView path reads this;
       // Android 12+ uses the theme's windowSplashScreenBackground.

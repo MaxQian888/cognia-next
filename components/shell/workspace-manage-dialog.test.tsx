@@ -1,19 +1,26 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-const isTauriMock = jest.fn(() => true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+
+jest.mock("@/lib/claude/ipc", () => ({
+  defaultExportDir: jest.fn(),
+}))
+
+jest.mock("@/lib/files/workspace-fs", () => ({
+  listWorkspaceDir: jest.fn(),
+}))
 
 const openDialogMock = jest.fn()
 jest.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => openDialogMock(...a) }))
 
-const isTrustedMock = jest.fn(async () => false)
+const isTrustedMock = jest.fn(() => new Promise<boolean>(() => {}))
 const trustMock = jest.fn(async () => undefined)
 const revokeMock = jest.fn(async () => undefined)
 jest.mock("@/lib/db/trusted-workspaces", () => ({
@@ -23,8 +30,12 @@ jest.mock("@/lib/db/trusted-workspaces", () => ({
 }))
 
 const toastSuccess = jest.fn()
+const toastError = jest.fn()
 jest.mock("sonner", () => ({
-  toast: { success: (...a: unknown[]) => toastSuccess(...a), error: jest.fn() },
+  toast: {
+    success: (...a: unknown[]) => toastSuccess(...a),
+    error: (...a: unknown[]) => toastError(...a),
+  },
 }))
 
 jest.mock("@cognia/logging", () => ({
@@ -56,10 +67,21 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 import { WorkspaceManageDialog } from "./workspace-manage-dialog"
 import { useProjectStore } from "@/stores/project/project-store"
 
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
+const defaultExportDirMock = (
+  jest.requireMock("@/lib/claude/ipc") as { defaultExportDir: jest.Mock }
+).defaultExportDir
+const listWorkspaceDirMock = (
+  jest.requireMock("@/lib/files/workspace-fs") as { listWorkspaceDir: jest.Mock }
+).listWorkspaceDir
+
 beforeEach(() => {
   isTauriMock.mockReturnValue(true)
+  defaultExportDirMock.mockReset()
+  listWorkspaceDirMock.mockReset()
   openDialogMock.mockReset()
   toastSuccess.mockReset()
+  toastError.mockReset()
   act(() => {
     useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   })
@@ -131,6 +153,48 @@ describe("WorkspaceManageDialog", () => {
     fireEvent.change(manual, { target: { value: "/web/dir" } })
     fireEvent.click(screen.getByText("addRoot"))
     expect(screen.getByText("/web/dir")).toBeInTheDocument()
+  })
+
+  it("opens the server folder picker on web before backend readiness is known", () => {
+    isTauriMock.mockReturnValue(false)
+    defaultExportDirMock.mockImplementation(() => new Promise<string>(() => {}))
+
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    fireEvent.click(screen.getByRole("button", { name: "browseServer" }))
+
+    expect(screen.getByRole("dialog", { name: "title" })).toBeInTheDocument()
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("browses the paired Headless filesystem and adds the selected folder on web", async () => {
+    isTauriMock.mockReturnValue(false)
+    defaultExportDirMock.mockResolvedValue("/srv")
+    listWorkspaceDirMock
+      .mockResolvedValueOnce([
+        {
+          relPath: "projects",
+          absolutePath: "/srv/projects",
+          isDir: true,
+          size: 0,
+          mtimeMs: null,
+        },
+      ])
+      .mockResolvedValueOnce([])
+
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    fireEvent.click(screen.getByRole("button", { name: "browseServer" }))
+
+    await waitFor(() => expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv"))
+    fireEvent.click(screen.getByRole("button", { name: "openFolder" }))
+    await waitFor(() => expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv/projects"))
+    await waitFor(() => expect(screen.getByLabelText("pathLabel")).toHaveValue("/srv/projects"))
+    fireEvent.click(screen.getByRole("button", { name: "chooseCurrent" }))
+
+    await waitFor(() => expect(screen.getByText("/srv/projects")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("workspace-save"))
+    expect(useProjectStore.getState().projects[0].rootDir).toBe("/srv/projects")
   })
 
   it("switches the primary root", () => {
