@@ -1,0 +1,98 @@
+# Cognia SDK profile: cognia-sdk-workspace
+#
+# Same transport and spine as host.sdk-readonly.yml, with authority raised to
+# `workspace-write` and an execution surface added.
+#
+# This profile is NOT the default. The SDK wire cannot ask for approval mid-turn
+# (server->client requests are a dead capability upstream), so everything this
+# profile is permitted to do is granted at launch and cannot be revoked from the
+# UI once the turn is running. Cognia gates it behind an explicit pre-approved
+# tool set derived from the session's permission ceiling; see
+# lib/ai/agent/external/permission-cascade.ts and tool-preapproval.ts.
+#
+# Platform note: composing dsh-subprocess-local pulls node-pty, which upstream
+# ships prebuilds for on darwin-{arm64,x64} and win32-{arm64,x64} but NOT on
+# Linux. On Linux this profile requires a node-gyp toolchain; `doctor` checks
+# for it and reports a fix rather than failing at spawn time.
+
+# ── transport ───────────────────────────────────────────────────────────────
+
+- id: sdk-jsonrpc-server
+  name: "@deepseek-ai/dsh-sdk-jsonrpc-server"
+  config:
+    maxTokensAsSuccess: false
+
+# ── model route ─────────────────────────────────────────────────────────────
+
+- id: llm-deepseek
+  name: "@deepseek-ai/dsh-llm-deepseek"
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    models:
+      - id: !!js process.env.COGNIA_DSH_MODEL ?? 'deepseek-v4-flash'
+        contextWindow: !!js Number(process.env.COGNIA_DSH_CONTEXT_WINDOW ?? 1000000)
+
+# ── sandbox ─────────────────────────────────────────────────────────────────
+
+# `workspace-write` allows a mutation only when the target canonicalizes under a
+# writable root: the workspace root plus platform temp areas. The fs fence and
+# the bash runner derive that set from the same `writableRoots` function, so the
+# two families cannot confine to different roots.
+- id: sandbox
+  name: "@deepseek-ai/dsh-sandbox-local"
+
+- id: sandbox-policy
+  name: "@deepseek-ai/dsh-sandbox-policy"
+  config:
+    mode: workspace-write
+    workspaceRoot: !!js process.env.COGNIA_DSH_WORKSPACE ?? process.cwd()
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+- id: fs-sandboxed
+  name: "@deepseek-ai/dsh-fs-sandbox"
+  config:
+    cwd: !!js process.env.COGNIA_DSH_WORKSPACE ?? process.cwd()
+
+- id: tool-fs
+  name: "@deepseek-ai/dsh-tool-fs"
+
+# ── execution ───────────────────────────────────────────────────────────────
+
+- id: subprocess
+  name: "@deepseek-ai/dsh-subprocess-local"
+
+- id: pty
+  name: "@deepseek-ai/dsh-terminal"
+
+- id: terminal-bash
+  name: "@deepseek-ai/dsh-terminal-bash"
+  config:
+    timeoutMs: 300000
+
+- id: persistent-bash
+  name: "@deepseek-ai/dsh-tool-bash-persistent"
+  config:
+    timeoutMs: 300000
+
+# ── agent spine ─────────────────────────────────────────────────────────────
+
+- id: agent-spine
+  name: "@deepseek-ai/dsh-agent-spine-demo"
+  config:
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
+    persona: !!js process.env.COGNIA_DSH_PERSONA ?? 'You are a helpful software engineering assistant.'
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+
+# ── persistence ─────────────────────────────────────────────────────────────
+
+- id: sessions
+  name: "@deepseek-ai/dsh-session-persistence-jsonl"
+  config:
+    root: !!js process.env.COGNIA_DSH_SESSION_ROOT ?? './.sessions'
+    compression: none

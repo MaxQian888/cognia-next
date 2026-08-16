@@ -504,6 +504,140 @@ describe("getDb", () => {
     expect(db.hostStateMeta.schema.primKey.name).toBe("id")
   })
 
+  it("v169 opens the work submission ledger and its frozen payload stores", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(169)
+    expect(db.workSubmissions.schema.primKey.name).toBe("id")
+    expect(db.workSubmissions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "accountId",
+        "[accountId+idempotencyKey]",
+        "dispatchState",
+        // The sweep that retries backed-off work reads this compound index; a
+        // missing entry here makes deferred submissions invisible to it.
+        "[dispatchState+nextAttemptAt]",
+        "runId",
+        "sessionId",
+      ])
+    )
+    // Idempotency is enforced by the index, not by application code.
+    expect(
+      db.workSubmissions.schema.indexes.find((index) => index.name === "[accountId+idempotencyKey]")
+        ?.unique
+    ).toBe(true)
+
+    for (const table of [db.workInputBatches, db.executionContextBundles]) {
+      expect(table.schema.primKey.name).toBe("id")
+      expect(table.schema.indexes.map((index) => index.name)).toEqual(
+        expect.arrayContaining(["submissionId", "expiresAt"])
+      )
+      // One frozen payload per submission — a second would make "which input
+      // does a retry replay?" ambiguous.
+      expect(table.schema.indexes.find((index) => index.name === "submissionId")?.unique).toBe(true)
+    }
+  })
+
+  it("v170 opens the issue tracker tables with the indexes its queries need", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(170)
+
+    expect(db.issues.schema.primKey.name).toBe("id")
+    expect(db.issues.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "projectId",
+        "issueProjectId",
+        "status",
+        // "Assigned to me" / per-agent views read this compound index.
+        // IndexedDB cannot index the nested `assignee` blob, which is why the
+        // row carries mirrored `assigneeKind` / `assigneeId` scalars at all.
+        "[assigneeKind+assigneeId]",
+        "[issueProjectId+status]",
+        "labelIds",
+      ])
+    )
+    // Printed identifiers are shared into commits and chat; a duplicate would
+    // make `MERC-2` ambiguous, so uniqueness is enforced by the index.
+    expect(db.issues.schema.indexes.find((index) => index.name === "identifier")?.unique).toBe(true)
+    expect(db.issues.schema.indexes.find((index) => index.name === "labelIds")?.multi).toBe(true)
+
+    expect(db.issueProjects.schema.primKey.name).toBe("id")
+    expect(db.issueProjects.schema.indexes.find((index) => index.name === "key")?.unique).toBe(true)
+
+    // Activity trail shape matches chatGoalEvents / agentPlanEvents / loopEvents.
+    expect(db.issueEvents.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["issueId", "[issueId+ts]", "kind", "ts"])
+    )
+
+    expect(db.issueCounters.schema.primKey.name).toBe("scopeId")
+  })
+
+  it("v170 migrates the conversation label catalogue into `labels` preserving ids", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.labels.schema.primKey.name).toBe("id")
+    expect(db.labels.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["scope", "[scope+name]"])
+    )
+
+    // Id preservation is the whole point of the migration: the referencing
+    // rows (`conversationOverrides.labelIds[]`, `cannedResponses.labelIds[]`)
+    // are never rewritten, so a changed id would silently orphan every tag.
+    await db.labels.put({
+      id: "lbl-migrated",
+      scope: "conversation",
+      name: "Follow-up",
+      sortOrder: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.conversationOverrides.put({
+      id: "ov-label-ref",
+      conversationKey: "k-label-ref",
+      sessionId: "s-label-ref",
+      labelIds: ["lbl-migrated"],
+      createdAt: 1,
+      updatedAt: 1,
+    } as Parameters<typeof db.conversationOverrides.put>[0])
+
+    const tagged = await db.conversationOverrides.where("labelIds").equals("lbl-migrated").toArray()
+    expect(tagged.map((row) => row.id)).toEqual(["ov-label-ref"])
+
+    // The two scopes share one table but never see each other's rows.
+    await db.labels.put({
+      id: "lbl-issue",
+      scope: "issue",
+      name: "bug",
+      sortOrder: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const conversationScoped = await db.labels.where("scope").equals("conversation").toArray()
+    expect(conversationScoped.map((row) => row.id)).toContain("lbl-migrated")
+    expect(conversationScoped.map((row) => row.id)).not.toContain("lbl-issue")
+  })
+
+  it("v171 opens the GitHub issue mirror with its natural key", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(171)
+    expect(db.githubIssueMirror.schema.primKey.name).toBe("id")
+    expect(db.githubIssueMirror.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["repoFullName", "[repoFullName+number]", "issueProjectId", "state"])
+    )
+    // A webhook or a re-fetch addresses a row by (repo, number); two rows for
+    // one issue would silently double it on the board.
+    expect(
+      db.githubIssueMirror.schema.indexes.find((index) => index.name === "[repoFullName+number]")
+        ?.unique
+    ).toBe(true)
+  })
+
   it("v123 opens the certification projection table", async () => {
     const db = getDb()
     await db.open()
@@ -2381,6 +2515,9 @@ describe("getDb", () => {
 
     await db.conversationLabels.put({
       id: "lbl-vip",
+      // v170 moved the catalogue into the shared, scope-discriminated table;
+      // the row shape gained a required `scope`.
+      scope: "conversation",
       name: "VIP",
       color: "#f00",
       sortOrder: 0,

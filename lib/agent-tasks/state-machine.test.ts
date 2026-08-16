@@ -1,8 +1,4 @@
-import {
-  allowedAgentTaskMoves,
-  deriveDependencyStatus,
-  guardAgentTaskMove,
-} from "./state-machine"
+import { allowedAgentTaskMoves, deriveDependencyStatus, guardAgentTaskMove } from "./state-machine"
 
 describe("single-Agent task state machine", () => {
   it("keeps dependency blocking machine-owned", () => {

@@ -23,6 +23,37 @@ import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execut
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import { commitHostStateAction, markHostStateBroadcast } from "./host-state-store"
 
+const acceptHostStateChatTurnMock = jest.fn().mockResolvedValue(null)
+const bindHostStateChatTurnContextMock = jest.fn().mockResolvedValue(false)
+const claimHostStateChatTurnForDispatchMock = jest.fn().mockResolvedValue("legacy")
+const markHostStateChatTurnStartedMock = jest.fn().mockResolvedValue(false)
+jest.mock("@/lib/work-submission/host-adapter", () => ({
+  acceptHostStateChatTurn: (...args: unknown[]) => acceptHostStateChatTurnMock(...args),
+  bindHostStateChatTurnContext: (...args: unknown[]) => bindHostStateChatTurnContextMock(...args),
+  claimHostStateChatTurnForDispatch: (...args: unknown[]) =>
+    claimHostStateChatTurnForDispatchMock(...args),
+  markHostStateChatTurnStarted: (...args: unknown[]) => markHostStateChatTurnStartedMock(...args),
+}))
+
+const stopLeaseHeartbeatMock = jest.fn()
+const startLeaseHeartbeatMock = jest.fn(
+  (_submissionId: string, _leaseOwner: string) => stopLeaseHeartbeatMock
+)
+jest.mock("@/lib/work-submission/lease-heartbeat", () => ({
+  startWorkSubmissionLeaseHeartbeat: (submissionId: string, leaseOwner: string) =>
+    startLeaseHeartbeatMock(submissionId, leaseOwner),
+}))
+
+const buildSendOptionsMock = jest.fn().mockResolvedValue({ model: "sonnet" })
+jest.mock("@/hooks/chat/claude-chat-send-options", () => ({
+  buildSendOptions: (...args: unknown[]) => buildSendOptionsMock(...args),
+}))
+
+const sendPromptMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/claude/ipc", () => ({
+  sendPrompt: (...args: unknown[]) => sendPromptMock(...args),
+}))
+
 /** Let the `applying` chain, its recovery, and the Dexie writes settle. */
 async function flush(): Promise<void> {
   for (let tick = 0; tick < 20; tick++) {
@@ -644,6 +675,33 @@ describe("HostStateService", () => {
 })
 
 describe("HostState Agent RPC dispatcher", () => {
+  beforeEach(async () => {
+    activateAccountDatabase(scope.accountId, scope.runtimeTargetId)
+    await getDb().delete()
+    __resetDbForTesting()
+    activateAccountDatabase(scope.accountId, scope.runtimeTargetId)
+    await getDb().sessions.put({
+      id: "session-1",
+      title: "Direct",
+      kind: "direct",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    acceptHostStateChatTurnMock.mockReset().mockResolvedValue(null)
+    bindHostStateChatTurnContextMock.mockReset().mockResolvedValue(false)
+    claimHostStateChatTurnForDispatchMock.mockReset().mockResolvedValue("legacy")
+    markHostStateChatTurnStartedMock.mockReset().mockResolvedValue(false)
+    startLeaseHeartbeatMock.mockClear()
+    stopLeaseHeartbeatMock.mockClear()
+    buildSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet" })
+    sendPromptMock.mockReset().mockResolvedValue(undefined)
+  })
+
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
   it("reuses the action id for every idempotent runtime command", async () => {
     const sendMessage = jest.fn(async () => undefined)
     const steer = jest.fn(async () => undefined)
@@ -681,5 +739,67 @@ describe("HostState Agent RPC dispatcher", () => {
     expect(abort).toHaveBeenCalledWith("session-1", "action-3")
     expect(resolveApproval).toHaveBeenCalledWith("session-1", "approval-1", "allow", "action-4")
     expect(resolveElicitation).toHaveBeenCalledWith("session-1", "ask-1", { answer: "yes" })
+  })
+
+  it("binds the final send options and marks a durable direct handoff", async () => {
+    acceptHostStateChatTurnMock.mockResolvedValueOnce({ submissionId: "work:action-1" })
+    claimHostStateChatTurnForDispatchMock.mockResolvedValueOnce("claimed")
+    bindHostStateChatTurnContextMock.mockResolvedValueOnce(true)
+    const queued = action({
+      kind: "message.enqueue",
+      messageId: "m-1",
+      text: "hello",
+      attachments: [],
+    })
+
+    await createAgentRpcHostStateDispatcher()(queued)
+
+    expect(bindHostStateChatTurnContextMock).toHaveBeenCalledWith(queued, { model: "sonnet" })
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "session-1",
+      "hello",
+      { model: "sonnet" },
+      {
+        commandId: "action-1",
+      }
+    )
+    expect(markHostStateChatTurnStartedMock).toHaveBeenCalledWith("action-1")
+    expect(startLeaseHeartbeatMock).toHaveBeenCalledWith("work:action-1", "host-state")
+    expect(stopLeaseHeartbeatMock).not.toHaveBeenCalled()
+    expect(bindHostStateChatTurnContextMock.mock.invocationCallOrder[0]).toBeLessThan(
+      sendPromptMock.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("does not dispatch when another runner owns the accepted HostState turn", async () => {
+    acceptHostStateChatTurnMock.mockResolvedValueOnce({ submissionId: "work:action-1" })
+    claimHostStateChatTurnForDispatchMock.mockResolvedValueOnce("owned_elsewhere")
+
+    await createAgentRpcHostStateDispatcher()(
+      action({ kind: "message.enqueue", messageId: "m-1", text: "hello", attachments: [] })
+    )
+
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(bindHostStateChatTurnContextMock).not.toHaveBeenCalled()
+    expect(markHostStateChatTurnStartedMock).not.toHaveBeenCalled()
+  })
+
+  it("falls back to direct dispatch when durable acceptance fails", async () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+    acceptHostStateChatTurnMock.mockRejectedValueOnce(new Error("ledger unavailable"))
+    const queued = action({
+      kind: "message.enqueue",
+      messageId: "m-1",
+      text: "hello",
+      attachments: [],
+    })
+
+    await createAgentRpcHostStateDispatcher()(queued)
+
+    expect(sendPromptMock).toHaveBeenCalled()
+    expect(bindHostStateChatTurnContextMock).not.toHaveBeenCalled()
+    expect(markHostStateChatTurnStartedMock).not.toHaveBeenCalled()
+    expect(consoleError).toHaveBeenCalledWith("acceptHostStateChatTurn failed", expect.any(Error))
+    consoleError.mockRestore()
   })
 })

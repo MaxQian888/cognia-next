@@ -1,6 +1,7 @@
 import type { KeyringStore } from "@/lib/credentials/keyring-store"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import { isTauri } from "@/lib/tauri"
 
 const AES_KEY_BYTES = 32
@@ -10,7 +11,29 @@ const PBKDF2_ITERATIONS = 600_000
 const ENVELOPE_AAD = new TextEncoder().encode("cognia-eval-artifact/v1")
 const WEB_DATA_KEY_SECRET = "evaluation-artifact-data-key"
 
-export type AccountArtifactDomain = "evaluation" | "performance"
+export type AccountArtifactDomain = "evaluation" | "performance" | "work-submission"
+
+/**
+ * Per-domain key locations. Kept as literals rather than derived from the
+ * domain name because these strings address key material already written to
+ * users' keyrings and vaults — deriving them would silently orphan every
+ * existing ciphertext the day the naming scheme changed.
+ */
+const ARTIFACT_KEY_LOCATIONS: Record<
+  Exclude<AccountArtifactDomain, "evaluation">,
+  { keyringNamespace: string; keyIdSuffix: string; vaultSecretName: string }
+> = {
+  performance: {
+    keyringNamespace: "performance-artifacts",
+    keyIdSuffix: "performance-data-key",
+    vaultSecretName: "performance-artifact-data-key",
+  },
+  "work-submission": {
+    keyringNamespace: "work-submission-artifacts",
+    keyIdSuffix: "work-submission-data-key",
+    vaultSecretName: "work-submission-artifact-data-key",
+  },
+}
 
 export interface AccountArtifactEncryptedEnvelope {
   version: "cognia-account-artifact/v1"
@@ -33,6 +56,18 @@ export interface EvalWrappedDataKey extends EvalEncryptedEnvelope {
     iterations: number
     salt: string
   }
+}
+
+/**
+ * Which secure boundary holds this host's key material.
+ *
+ * The headless brain is not Tauri, but it *does* have a real secret store
+ * (`createKeyringStore` routes it to the same backend). Treating it as "web"
+ * sends it to the Browser Vault, which does not exist there — so key
+ * provisioning threw instead of using the store that was available all along.
+ */
+function resolveArtifactPlatform(): "desktop" | "web" {
+  return isTauri() || isHeadlessHost() ? "desktop" : "web"
 }
 
 function subtle(): SubtleCrypto {
@@ -246,10 +281,11 @@ export async function loadOrCreateAccountArtifactKey(
 ): Promise<Uint8Array> {
   if (!accountId) throw new Error("An account id is required for artifact encryption")
   if (domain === "evaluation") return loadOrCreateEvalArtifactKey(accountId, dependencies)
-  const platform = dependencies.platform ?? (isTauri() ? "desktop" : "web")
+  const location = ARTIFACT_KEY_LOCATIONS[domain]
+  const platform = dependencies.platform ?? resolveArtifactPlatform()
   if (platform === "desktop") {
-    const store = dependencies.keyringStore ?? createKeyringStore("performance-artifacts")
-    const keyId = `account:${accountId}:performance-data-key`
+    const store = dependencies.keyringStore ?? createKeyringStore(location.keyringNamespace)
+    const keyId = `account:${accountId}:${location.keyIdSuffix}`
     const existing = await store.load(keyId)
     if (existing) return decodeBase64(existing)
     const created = randomBytes(AES_KEY_BYTES)
@@ -258,13 +294,12 @@ export async function loadOrCreateAccountArtifactKey(
   }
   const vault = (dependencies.getBrowserVault ?? getActiveBrowserVault)()
   if (!vault || vault.accountId !== accountId) {
-    throw new Error("An unlocked account vault is required for performance encryption")
+    throw new Error(`An unlocked account vault is required for ${domain} encryption`)
   }
-  const secretName = "performance-artifact-data-key"
-  const existing = await vault.loadSecret(secretName)
+  const existing = await vault.loadSecret(location.vaultSecretName)
   if (existing) return decodeBase64(existing)
   const created = randomBytes(AES_KEY_BYTES)
-  await vault.storeSecret(secretName, encodeBase64(created))
+  await vault.storeSecret(location.vaultSecretName, encodeBase64(created))
   return created
 }
 
@@ -279,7 +314,7 @@ export async function loadOrCreateEvalArtifactKey(
   dependencies: EvalArtifactKeyDependencies = {}
 ): Promise<Uint8Array> {
   if (!accountId) throw new Error("An account id is required for evaluation encryption")
-  const platform = dependencies.platform ?? (isTauri() ? "desktop" : "web")
+  const platform = dependencies.platform ?? resolveArtifactPlatform()
   if (platform === "desktop") {
     return loadOrCreateDesktopEvalKey(
       accountId,

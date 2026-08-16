@@ -9,21 +9,19 @@
  * append-only event trail get their own tables.
  */
 
-/** A reusable conversation label/tag (Chatwoot-style). */
-export interface ConversationLabelRow {
-  id: string
-  /** Display name, unique by convention (the CRUD layer enforces it). */
-  name: string
-  /** Optional oklch/hex color token for the chip. */
-  color?: string
-  description?: string
-  /** Seeded built-in labels (e.g. "follow-up", "vip") cannot be deleted. */
-  builtin?: boolean
-  /** Manual ordering in the label manager. */
-  sortOrder: number
-  createdAt: number
-  updatedAt: number
-}
+import type { LabelRow } from "@/types/labels"
+
+/**
+ * A reusable conversation label/tag (Chatwoot-style).
+ *
+ * As of schema v170 this is an alias of the shared `LabelRow` catalogue
+ * (`types/labels`): the rows moved from the `conversationLabels` table into
+ * the scope-discriminated `labels` table with their ids preserved, so
+ * `ConversationOverrideRow.labelIds[]` and `CannedResponseRow.labelIds[]` keep
+ * resolving untouched. The alias is kept so every existing import of
+ * `ConversationLabelRow` still compiles; new code should import `LabelRow`.
+ */
+export type ConversationLabelRow = LabelRow
 
 /** Discriminator for the append-only conversation event trail. */
 export type AssignmentEventKind =

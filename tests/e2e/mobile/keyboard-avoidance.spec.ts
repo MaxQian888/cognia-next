@@ -7,7 +7,7 @@ import { injectCapacitor } from "../helpers/inject-capacitor"
 test.describe("mobile — keyboard avoidance", () => {
   test.beforeEach(async ({ page }) => {
     await injectCapacitor(page, { platform: "ios" })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "standalone")
   })
 

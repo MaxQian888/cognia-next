@@ -149,7 +149,7 @@ test.describe("mobile — terminal command history", () => {
       network: { connected: true, connectionType: "wifi" },
       secureStorage: companionConfigSecureStorage(companionConfig),
     })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "paired")
 
     await page.goto("/me/command-history", { waitUntil: "domcontentloaded" })

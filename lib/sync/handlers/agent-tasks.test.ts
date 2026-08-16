@@ -6,7 +6,11 @@ import { syncAgentTaskAttempts, syncAgentTasks } from "./agent-tasks"
 
 function transport(rows: unknown[]): Transport {
   return {
-    call: jest.fn(async () => ({ rows, deleted_ids: [], next_since: 10 })) as unknown as Transport["call"],
+    call: jest.fn(async () => ({
+      rows,
+      deleted_ids: [],
+      next_since: 10,
+    })) as unknown as Transport["call"],
     subscribe: jest.fn(() => () => {}) as unknown as Transport["subscribe"],
   }
 }
@@ -26,7 +30,9 @@ it("mirrors portable Agent task cards", async () => {
 
 it("mirrors immutable attempt history", async () => {
   await syncAgentTaskAttempts(
-    transport([{ id: "attempt-1", taskId: "task-1", agentId: "agent-1", status: "failed", updatedAt: 10 }]),
+    transport([
+      { id: "attempt-1", taskId: "task-1", agentId: "agent-1", status: "failed", updatedAt: 10 },
+    ]),
     { since: 0 }
   )
   expect((await getDb().agentTaskAttempts.get("attempt-1"))?.status).toBe("failed")

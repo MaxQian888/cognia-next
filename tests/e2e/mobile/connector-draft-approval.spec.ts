@@ -124,7 +124,7 @@ test.describe("mobile — connector draft approval", () => {
       network: { connected: false, connectionType: "none" },
       secureStorage: companionConfigSecureStorage(companionConfig),
     })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "paired")
     await expect(page.getByTestId("mobile-inbox-trigger")).toBeVisible({ timeout: 15_000 })
   })

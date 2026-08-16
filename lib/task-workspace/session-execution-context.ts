@@ -102,9 +102,7 @@ export function canBypassEnvironmentSetup(surface: "interactive" | "scheduled"):
 }
 
 /** Resolve only an explicitly available device-local root; never guess one. */
-export function resolveSessionWorkspaceRoot(
-  context: SessionExecutionContext
-): string | undefined {
+export function resolveSessionWorkspaceRoot(context: SessionExecutionContext): string | undefined {
   if (context.workspaceBinding?.kind !== "managed") return context.projectRoot || undefined
   return context.managedWorkspace?.availability === "available"
     ? context.managedWorkspace.localRoot

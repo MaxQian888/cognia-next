@@ -33,7 +33,7 @@ test.describe("mobile — Network settings", () => {
       network: { connected: true, connectionType: "wifi" },
       secureStorage: companionConfigSecureStorage(companionConfig),
     })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "paired")
 
     await page.goto("/me/network", { waitUntil: "domcontentloaded" })
@@ -84,7 +84,7 @@ test.describe("mobile — Network settings", () => {
 
   test("keeps Network settings gated in standalone mode", async ({ page }) => {
     await injectCapacitor(page, { platform: "android" })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "standalone")
 
     await page.goto("/me/network", { waitUntil: "domcontentloaded" })

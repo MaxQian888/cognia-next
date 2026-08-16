@@ -1,0 +1,109 @@
+# Cognia SDK profile: cognia-sdk-readonly (DEFAULT)
+#
+# Host-plane composition for the DeepSeek Harness SDK transport, restricted to
+# observation. This is the profile Cognia's primary DSH channel runs on.
+#
+# Deliberately absent, and why:
+#   - No subprocess/PTY provider  -> no shell, and node-pty (no Linux prebuild)
+#                                    never enters the install.
+#   - No bash / terminal tools    -> nothing in this profile can execute.
+#   - No web / network tools      -> no outbound reach from the agent.
+#   - No stdout logger            -> stdout is reserved for JSON-RPC frames.
+#                                    Diagnostics belong on stderr.
+#
+# The SDK wire has no server->client request capability, so there is no way to
+# ask the user for approval mid-turn. Authority is therefore decided entirely
+# here, before the process starts.
+#
+# INVARIANT — DO NOT COMPOSE AN APPROVAL PROVIDER IN THIS PROFILE.
+#
+# DSH tools expose a model-invokable escalation: the model may retry a denied
+# call with `sandbox_permissions: "workspace-write"` plus a justification, and
+# `ctx.approval` decides. Verified behaviour of this composition, from a live
+# run against deepseek-v4-flash asked to write a file:
+#
+#   1. write denied -> "[sandbox: file access denied under read-only mode]"
+#   2. model retried with sandbox_permissions: "workspace-write"
+#   3. escalation refused -- no approval service composed -> fails closed
+#   4. no file created
+#
+# Step 3 is the whole guarantee. `read-only` alone does NOT make this profile
+# read-only; it is read-only because the escalation path terminates in a missing
+# service. Composing any `ctx.approval` provider here would hand the model a
+# self-service route to workspace-write, because on this transport there is no
+# client to route the question to. This is pinned by a test.
+
+# ── transport ───────────────────────────────────────────────────────────────
+
+# `inject: ['agents']`. Streams every durable fact as `session.event` and every
+# whole-agent lifecycle transition as `session.status`.
+- id: sdk-jsonrpc-server
+  name: "@deepseek-ai/dsh-sdk-jsonrpc-server"
+  config:
+    maxTokensAsSuccess: false
+
+# ── model route ─────────────────────────────────────────────────────────────
+
+# The API key is read from the environment. The launcher builds that environment
+# from a scrubbed allowlist, so DEEPSEEK_API_KEY is the only credential present.
+- id: llm-deepseek
+  name: "@deepseek-ai/dsh-llm-deepseek"
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    models:
+      - id: !!js process.env.COGNIA_DSH_MODEL ?? 'deepseek-v4-flash'
+        contextWindow: !!js Number(process.env.COGNIA_DSH_CONTEXT_WINDOW ?? 1000000)
+
+# ── sandbox ─────────────────────────────────────────────────────────────────
+
+# `read-only` denies every mutation with a structured FS_SANDBOX_DENIED. It is
+# also dsh-sandbox-policy's own fail-safe default; it is restated here so the
+# profile's authority is readable without consulting upstream defaults.
+- id: sandbox
+  name: "@deepseek-ai/dsh-sandbox-local"
+
+- id: sandbox-policy
+  name: "@deepseek-ai/dsh-sandbox-policy"
+  config:
+    mode: read-only
+    workspaceRoot: !!js process.env.COGNIA_DSH_WORKSPACE ?? process.cwd()
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+# SandboxedFileSystem extends LocalFileSystem and registers as ctx.fs, adding a
+# per-call mode fence on writeText/editText. Loading it INSTEAD OF dsh-fs-local
+# is the whole swap. Reads pass through in every mode.
+- id: fs-sandboxed
+  name: "@deepseek-ai/dsh-fs-sandbox"
+  config:
+    cwd: !!js process.env.COGNIA_DSH_WORKSPACE ?? process.cwd()
+
+# Read/write/edit tool surface. Writes are refused by the fence above; the tools
+# are still registered so the model receives a coherent, self-describing catalog
+# and a structured denial rather than an unknown-tool error.
+- id: tool-fs
+  name: "@deepseek-ai/dsh-tool-fs"
+
+# ── agent spine ─────────────────────────────────────────────────────────────
+
+# Provides the `agents` service the SDK server injects.
+- id: agent-spine
+  name: "@deepseek-ai/dsh-agent-spine-demo"
+  config:
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
+    persona: !!js process.env.COGNIA_DSH_PERSONA ?? 'You are a helpful software engineering assistant operating in read-only mode. You can read and search files but cannot modify them or run commands.'
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+
+# ── persistence ─────────────────────────────────────────────────────────────
+
+# Session roots live under the Cognia-owned runtime home, never under $HOME.
+- id: sessions
+  name: "@deepseek-ai/dsh-session-persistence-jsonl"
+  config:
+    root: !!js process.env.COGNIA_DSH_SESSION_ROOT ?? './.sessions'
+    compression: none

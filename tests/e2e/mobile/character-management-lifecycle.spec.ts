@@ -120,7 +120,7 @@ test.describe("mobile — paired character management", () => {
       network: { connected: true, connectionType: "wifi" },
       secureStorage: companionConfigSecureStorage(companionConfig),
     })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "paired")
 
     await page.goto("/discover?category=characters", { waitUntil: "domcontentloaded" })

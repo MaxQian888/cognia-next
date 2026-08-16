@@ -117,7 +117,7 @@ test.describe("mobile — MCP server settings", () => {
       network: { connected: true, connectionType: "wifi" },
       secureStorage: companionConfigSecureStorage(companionConfig),
     })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "paired")
 
     await page.goto("/me/mcp", { waitUntil: "domcontentloaded" })
@@ -187,7 +187,7 @@ test.describe("mobile — MCP server settings", () => {
 
   test("keeps MCP settings gated when the mobile runtime is standalone", async ({ page }) => {
     await injectCapacitor(page, { platform: "android" })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "standalone")
 
     await page.goto("/me/mcp", { waitUntil: "domcontentloaded" })

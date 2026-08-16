@@ -130,6 +130,9 @@ import type {
   ConversationAssignmentEventRow,
   CannedResponseRow,
 } from "./crm-types"
+import type { LabelRow } from "@/types/labels"
+import type { Issue, IssueCounter, IssueEvent, IssueProject } from "@/types/issues"
+import type { GithubIssueMirrorRow } from "./github-issue-mirror-types"
 import type {
   WorkflowRow,
   WorkflowRunRow,
@@ -165,6 +168,11 @@ import type {
   HostStateChannelRow,
   HostStateMetaRow,
 } from "@/lib/sync/host-state-store"
+import type {
+  ExecutionContextBundleRow,
+  WorkInputBatchRow,
+  WorkSubmissionRow,
+} from "./work-submissions"
 import type { SharedLinkRow } from "./shared-links"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { PetModelRow, PetModelFileRow } from "./pet-models"
@@ -500,6 +508,8 @@ export class CogniaDB extends Dexie {
   connectorAudit!: Table<ConnectorAuditRow, string>
   connectorDrafts!: Table<ConnectorDraftRow, string>
   // v83 — Connector CRM (Chatwoot-style). Row types in `./crm-types.ts`.
+  // SUPERSEDED at v170 by the shared `labels` table below; retained per the
+  // append-only rule and no longer written to. See `lib/db/labels.ts`.
   conversationLabels!: Table<ConversationLabelRow, string>
   conversationAssignmentEvents!: Table<ConversationAssignmentEventRow, string>
   cannedResponses!: Table<CannedResponseRow, string>
@@ -633,6 +643,14 @@ export class CogniaDB extends Dexie {
   hostStateChannels!: Table<HostStateChannelRow, string>
   hostStateActions!: Table<HostStateActionRow, [number, string]>
   hostStateMeta!: Table<HostStateMetaRow, "singleton">
+  // v169 — durable work submission (ADR-0123). `workSubmissions` owns dispatch
+  // responsibility only; `ExecutionRun.status` stays the user-visible lifecycle
+  // authority. The two payload stores hold the frozen input and execution
+  // context a retry must replay verbatim, encrypted at rest and never synced.
+  // See `lib/db/work-submissions.ts`.
+  workSubmissions!: Table<WorkSubmissionRow, string>
+  workInputBatches!: Table<WorkInputBatchRow, string>
+  executionContextBundles!: Table<ExecutionContextBundleRow, string>
   // v26 — Per-session unsent composer text (chat drafts). Pure additive, no
   // upgrade hook. Primary key `sessionId` makes upserts trivial; `updatedAt`
   // is indexed so debug surfaces can sort newest-first.
@@ -4047,6 +4065,61 @@ export class CogniaDB extends Dexie {
       hostStateMeta: "&id, hostGeneration, leaseExpiresAt, migrationStage, updatedAt",
     })
 
+    // v169 — durable work submission (ADR-0123). Purely additive: the three
+    // stores record dispatch responsibility and the frozen input/context a
+    // retry must replay, while messages/sessions/executionRuns keep owning
+    // everything the user sees. Host-local by design — none of them sync.
+    this.version(169).stores({
+      workSubmissions:
+        "&id, accountId, &[accountId+idempotencyKey], runId, sessionId, projectId, sourceKind, dispatchState, [dispatchState+nextAttemptAt], leaseExpiresAt, createdAt, updatedAt",
+      workInputBatches: "&id, &submissionId, digest, expiresAt",
+      executionContextBundles: "&id, &submissionId, projectId, digest, expiresAt",
+    })
+
+    // v170 — Issue tracker (issues / delivery containers / activity trail /
+    // identifier counters) plus the shared label catalogue.
+    //
+    // `labels` generalises the v83 connector CRM catalogue rather than adding
+    // a second coloured-label system. The upgrade copies every
+    // `conversationLabels` row across WITH ITS ID PRESERVED, which is what
+    // lets `ConversationOverrideRow.labelIds[]` and
+    // `CannedResponseRow.labelIds[]` keep resolving with no migration of
+    // their own. `conversationLabels` is left in place (append-only rule) and
+    // simply stops being written.
+    //
+    // `[assigneeKind+assigneeId]` backs the "Assigned to me" / per-agent
+    // views; IndexedDB cannot index the nested `assignee` blob, hence the two
+    // mirrored scalars on the row.
+    this.version(170)
+      .stores({
+        issues:
+          "&id, projectId, issueProjectId, status, statusCategory, assigneeKind, assigneeId, [assigneeKind+assigneeId], [issueProjectId+status], &identifier, updatedAt, createdAt, *labelIds",
+        issueProjects: "&id, projectId, &key, status, updatedAt",
+        issueEvents: "&id, issueId, [issueId+ts], kind, ts",
+        issueCounters: "&scopeId",
+        labels: "&id, scope, [scope+name], name, builtin, sortOrder, updatedAt",
+      })
+      .upgrade(async (tx) => {
+        // Idempotent: re-running finds the rows already present and skips.
+        const legacy = await tx.table("conversationLabels").toArray()
+        if (legacy.length === 0) return
+        const target = tx.table("labels")
+        const migrated = []
+        for (const row of legacy) {
+          if (await target.get(row.id)) continue
+          migrated.push({ ...row, scope: "conversation" })
+        }
+        if (migrated.length > 0) await target.bulkAdd(migrated)
+      })
+
+    // v171 — GitHub issue mirror. `[repoFullName+number]` is the natural key a
+    // webhook or a re-fetch addresses a row by; `etag` rides on the row so a
+    // conditional re-fetch can revalidate without a second store.
+    this.version(171).stores({
+      githubIssueMirror:
+        "&id, repoFullName, &[repoFullName+number], issueProjectId, state, updatedAt, syncedAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -4073,6 +4146,24 @@ export class CogniaDB extends Dexie {
   hostSyncCursors!: Table<SyncCursorRow, [string, string]>
   // v62 — Workspaces (project model persistence). See `lib/db/projects.ts`.
   projects!: Table<Project, string>
+  // v170 — Issue tracker. NAMING: `projects` above is the WORKSPACE entity;
+  // `issueProjects` below is the tracker's delivery container, referenced by
+  // `Issue.issueProjectId`. They are not the same thing — see the invariant
+  // block in `types/issues/index.ts`. CRUD in `lib/db/issue{s,-projects,
+  // -events,-counters}.ts`.
+  issues!: Table<Issue, string>
+  issueProjects!: Table<IssueProject, string>
+  issueEvents!: Table<IssueEvent, string>
+  issueCounters!: Table<IssueCounter, string>
+  // v170 — Shared coloured-label catalogue, scope-discriminated. Supersedes
+  // `conversationLabels` (ids preserved by the v170 upgrade, so existing
+  // `labelIds[]` references keep resolving). See `lib/db/labels.ts`.
+  labels!: Table<LabelRow, string>
+  // v171 — GitHub issue mirror (slice ②). A REBUILDABLE read-through cache,
+  // not a source of truth: rows are projected onto the board as read-only
+  // federated items and are deliberately excluded from companion sync, since
+  // re-fetching is cheaper than reconciling a cache that can drift.
+  githubIssueMirror!: Table<GithubIssueMirrorRow, string>
   // v100 — Project-scoped RAG chunks (workspace knowledge base). See
   // `lib/db/project-chunks.ts` and `@/types/project-knowledge`.
   projectChunks!: Table<ProjectChunk, string>

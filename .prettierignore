@@ -31,6 +31,14 @@ crates/cognia-cli/assets/plugin-convert.cjs
 docs/api/mobile-companion-api.openapi.yaml
 docs/api/headless-service-api.openapi.yaml
 crates/cognia-cli/assets/host-command-catalog.json
+# The same generator writes these three, and they were missed when the block
+# above was written — so every commit reformatted them and `companion-api:check`
+# reported drift on a tree whose sources and outputs were both clean. The drift
+# was pure whitespace (identical once minified), which is exactly why it went
+# unfixed: it looked like noise rather than a broken gate.
+protocol/companion-request-schemas.json
+cli/src/serve/headless-contract-identity.ts
+cli/src/serve/fixtures/bridge-frames.json
 # Generated i18n message bundles — built from the per-namespace split sources
 # by `pnpm i18n:build`. Prettier collapses the build's expanded arrays, which
 # desyncs the committed bundle from `i18n:build:check`; the codegen owns format.

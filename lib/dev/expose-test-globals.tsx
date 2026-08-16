@@ -184,7 +184,7 @@ declare global {
       connect(opts: {
         signalingUrl: string
         rendezvousId: string
-        signalingRoomDescriptor: import("@/lib/signaling/v2-crypto").RoomDescriptorV2
+        signalingRoomDescriptor: import("@/lib/signaling/crypto").RoomDescriptor
         signalingPrivateKeyJwk: JsonWebKey
         deviceId: string
         /** Loopback harness → host candidates suffice; default no STUN. */
@@ -224,13 +224,13 @@ export function ExposeTestGlobals(): null {
       // only smoke test from opening a DataChannel.
       {
         const { TransportRtc } = await import("@/lib/tauri/transport-rtc")
-        const { importV2SigningPrivateKey } = await import("@/lib/signaling/v2-crypto")
+        const { importSigningPrivateKey } = await import("@/lib/signaling/crypto")
         let rtc: InstanceType<typeof TransportRtc> | null = null
         window.__cogniaE2EWebRtcEvents = {}
         window.__cogniaE2EWebRtc = {
           async connect(opts) {
             rtc?.close()
-            const signalingPrivateKey = await importV2SigningPrivateKey(opts.signalingPrivateKeyJwk)
+            const signalingPrivateKey = await importSigningPrivateKey(opts.signalingPrivateKeyJwk)
             rtc = new TransportRtc({
               signalingUrl: opts.signalingUrl,
               rendezvousId: opts.rendezvousId,

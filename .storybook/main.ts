@@ -62,6 +62,10 @@ const config: StorybookConfig = {
   addons: ["@storybook/addon-docs", "@storybook/addon-mcp"],
   // Co-located stories. Pilot is limited to components/ (not app/hooks/lib).
   stories: ["../components/**/*.stories.@(tsx|ts)"],
+  // Serve `public/` at the root like Next does, so stories that reference
+  // static assets by absolute path (`/icons/icon-512.png` in the mobile boot
+  // screen, brand marks, fixtures) render them instead of a broken image.
+  staticDirs: ["../public"],
   // react-docgen recurses infinitely on some store modules pulled into the
   // graph (e.g. lib/platform/viewport-store.ts); preview doesn't need prop tables.
   typescript: { reactDocgen: false },

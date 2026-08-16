@@ -102,9 +102,10 @@ describe("single-Agent task persistence", () => {
     const attempt = await beginAgentTaskAttempt("task", { id: "attempt-1", now: 10 })
     await linkAgentTaskAttemptExecution(attempt.id, "execution-1", 11)
 
-    await reconcileAgentTaskAttempts(async (executionId) =>
-      executionId === "execution-1" ? null : null
-    , 20)
+    await reconcileAgentTaskAttempts(
+      async (executionId) => (executionId === "execution-1" ? null : null),
+      20
+    )
 
     expect((await listAgentTaskAttempts("task"))[0]).toEqual(
       expect.objectContaining({ status: "interrupted", errorCode: "execution_missing" })

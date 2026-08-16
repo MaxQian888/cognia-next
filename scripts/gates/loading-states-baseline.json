@@ -15,7 +15,6 @@
     "components/a2ui/quick-app-builder/flash-app-tab.tsx",
     "components/a2ui/workspace/a2ui-toolbar.tsx",
     "components/agent/external-agent/plan.tsx",
-    "components/agent/external-agent/selector.tsx",
     "components/agent/mode/custom-mode-editor/index.tsx",
     "components/agent/workspace/auto-compose-dialog.tsx",
     "components/agent/workspace/chat.tsx",

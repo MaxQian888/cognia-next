@@ -49,6 +49,39 @@ fn parse_node_major(version_output: &str) -> Option<u32> {
     without_v.split('.').next()?.parse::<u32>().ok()
 }
 
+/// Hand the sidecar the confinement wrapper for `run_code` children, when this
+/// host has one.
+///
+/// Deliberately infallible and silent-on-absence: a host without a sandbox
+/// backend is a normal, supported configuration (Windows today, Linux without
+/// `bwrap`). Failing the sidecar spawn over it would break chat entirely to
+/// disable one optional mode. The consequence of the variable being unset is
+/// that Code fails closed, which is the whole point.
+fn apply_code_sandbox_env(cmd: &mut Command, node_executable: &Path, sidecar_root: &Path) {
+    use crate::claude::code_sandbox::{
+        code_sandbox_scope, encode_launcher, render_code_sandbox_launcher,
+        CODE_SANDBOX_LAUNCHER_ENV,
+    };
+
+    let scratch = std::env::temp_dir().join("cognia-code-sandbox");
+    if let Err(error) = std::fs::create_dir_all(&scratch) {
+        log::warn!("code sandbox scratch dir unavailable, Code mode disabled: {error}");
+        return;
+    }
+
+    let node_root = node_executable.parent().unwrap_or(node_executable);
+    let scope = code_sandbox_scope(&scratch, node_root, sidecar_root);
+
+    match render_code_sandbox_launcher(&scope).and_then(|prefix| encode_launcher(&prefix)) {
+        Some(encoded) => {
+            cmd.env(CODE_SANDBOX_LAUNCHER_ENV, encoded);
+        }
+        None => {
+            log::info!("no OS sandbox backend on this host; Code tool presentation stays disabled")
+        }
+    }
+}
+
 fn apply_managed_proxy_env(
     cmd: &mut Command,
     proxy_cfg: &crate::proxy_config::ProxyConfig,
@@ -447,6 +480,13 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
     // the global undici dispatcher.
     let proxy_cfg = crate::proxy_config::current().map_err(|error| error.to_string())?;
     apply_managed_proxy_env(&mut cmd, &proxy_cfg)?;
+
+    // Code tool presentation (ADR-0117 Phase 4). The sidecar itself runs
+    // unconfined — it needs egress to reach the model — so it cannot confine
+    // the `run_code` children it forks. We hand it the OS confinement wrapper
+    // to exec through instead. When this host has no backend the variable stays
+    // unset, and the sidecar then refuses to register `run_code` at all.
+    apply_code_sandbox_env(&mut cmd, &node_executable, &cwd);
 
     // On Windows, prevent a console window from popping up when the parent app
     // has no console (e.g. a release build). tokio::process::Command exposes

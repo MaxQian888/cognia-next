@@ -2,8 +2,7 @@ import type { AgentTaskStatus } from "@/types/agent/agent-task"
 
 export type AgentTaskMoveDenial = "dependency-owned" | "runtime-owned" | "illegal-transition"
 export type AgentTaskMoveVerdict =
-  | { allowed: true }
-  | { allowed: false; reason: AgentTaskMoveDenial }
+  { allowed: true } | { allowed: false; reason: AgentTaskMoveDenial }
 
 const HUMAN_MOVES: Readonly<Record<AgentTaskStatus, readonly AgentTaskStatus[]>> = {
   pending: ["cancelled"],

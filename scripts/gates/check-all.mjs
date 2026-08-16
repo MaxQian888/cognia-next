@@ -106,6 +106,11 @@ const REGISTRY = [
   // were hand-maintained and had drifted (dead keys, fields writable up but
   // never mirrored down, transport config classified backwards).
   { script: "settings-sync:check", group: "artifacts" },
+  // The bundled Pi extension is pinned by SHA-256 and refused when the digest
+  // does not match, so a forgotten re-pin ships an extension that blocks every
+  // Pi session on the user's machine. Its own docstring said this had to fail
+  // in CI; until now nothing ran it (ADR-0119).
+  { script: "pi:extension:pin:check", group: "artifacts" },
   { script: "companion-api:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },
@@ -145,6 +150,21 @@ const REGISTRY = [
   { script: "audit:pii-boundaries", group: "audit" },
   { script: "audit:command-parity", group: "audit" },
   { script: "audit:companion-command-manifest", group: "audit" },
+  // The manifest gate above compares NAME SETS only — its whole schema check is
+  // `if (!command.inputSchema)`. So a dispatch arm could drop half its
+  // command's arguments and stay green (it did: `custom_headers`,
+  // `command_id`, `helper_path`). This one parses the `#[tauri::command]`
+  // signatures themselves — the artifact no generator in this repo reads — and
+  // holds the RPC arms and the enforced contract schemas to them.
+  { script: "audit:rpc-semantic-parity", group: "audit" },
+  // Every gate above asks "does the same command exist, with the same
+  // payload". None asks "can this host actually reach it" — a command can be
+  // registered, manifested and semantically faithful and still 503 on one
+  // host. This one inventories the headless↔desktop capability gap: seam
+  // bypasses, host-keyed UI, one-sided dispatch arms, and capability tables
+  // that disagree with the manifest. Report-only until the first paydown
+  // batch lands (ADR-0059).
+  { script: "audit:host-parity", group: "audit" },
   { script: "audit:e2e-governance", group: "audit" },
   { script: "audit:docs-links", group: "audit" },
   { script: "audit:adr-catalog", group: "audit" },

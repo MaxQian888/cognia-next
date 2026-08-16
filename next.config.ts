@@ -162,6 +162,12 @@ const NODE_ONLY_MODULES = [
 // (see vercel/next.js#56477). Production export behavior is unchanged.
 const nextConfig: NextConfig = {
   output: isProd ? "export" : undefined,
+  // Next 16.3's Turbopack dev runtime can attach more than ten `drain`
+  // listeners to one Gzip stream while concurrent RSC responses are under
+  // backpressure, producing MaxListenersExceededWarning. Production emits a
+  // static export and is unaffected; disable only the development server's
+  // built-in compression so each response streams directly to the browser.
+  compress: isProd,
   // AI SDK 7 is ESM-only (`"type": "module"`, no CJS dist). Listing the packages
   // here is what lets `next/jest` transform them under Jest's CommonJS runtime:
   // next/jest PREPENDS its own `transformIgnorePatterns` built from this list,

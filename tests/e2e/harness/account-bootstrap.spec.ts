@@ -11,6 +11,6 @@ test("@smoke @critical account bootstrap persists the active unlocked account", 
   page,
 }) => {
   await injectCapacitor(page, { platform: "android" })
-  await page.goto("/welcome", { waitUntil: "domcontentloaded" })
+  await page.goto("/onboarding", { waitUntil: "domcontentloaded" })
   await expect(ensureCogniaAccount(page)).resolves.toBe(ACCOUNT_ID)
 })

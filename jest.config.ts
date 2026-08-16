@@ -211,6 +211,32 @@ const projectCommon: Config = {
     // build that the CommonJS runtime can execute.
     "^cheerio$": "<rootDir>/node_modules/cheerio/dist/commonjs/index.js",
 
+    // marked@18 is ESM-only (`"type": "module"`) and its `exports` map offers
+    // only `./lib/marked.esm.js`, so Jest's CJS loader trips on `export` in
+    // every suite reaching `cli/src/tui/markdown/tokenize.ts`. It still ships a
+    // UMD build, whose wrapper takes the `module.exports = f()` branch under
+    // Jest's CJS wrapper and exposes the full namespace including `lexer` —
+    // same "map to the executable build" fix as cheerio above, NOT a hand-
+    // written mock: the TUI markdown tests assert on real block-lexer output
+    // (GFM table header/rows/align, task-list checked flags, nested lists), so
+    // a stub would silently drop rendering fidelity. Untransformed on purpose —
+    // the UMD is already CommonJS-compatible, so `marked` must stay OUT of the
+    // transformIgnorePatterns alternation below.
+    //
+    // Jest-only: the CLI bundles with esbuild `format: "esm"` +
+    // `packages: "external"`, so at runtime `marked` resolves to the real ESM
+    // build. Both paths are the same marked@18 source.
+    //
+    // NB this rewrites the *request*, so it pins every `marked` importer to
+    // v18. Four other versions sit in the store (monaco-editor→14, mermaid→16,
+    // streamdown→17, plus a stray 4.3.0), but none can reach this mapping:
+    // `streamdown` is mocked just below, and `mermaid`/`monaco-editor` are
+    // ESM-only and deliberately absent from the transformIgnorePatterns
+    // allowlist, so Jest cannot execute them at all. If one of those is ever
+    // added to that allowlist, it would silently start resolving marked@18 —
+    // give it its own mapping to its own version at that point.
+    "^marked$": "<rootDir>/node_modules/marked/lib/marked.umd.js",
+
     // streamdown 2.5 exposes only an ESM `import` condition and its bundled
     // output remains ESM after next/jest's node_modules handling. Tests assert
     // our wrappers, so use a small rendering-compatible CJS boundary.

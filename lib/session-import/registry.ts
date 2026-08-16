@@ -10,6 +10,7 @@ import { codexSessionSource } from "./adapters/codex"
 import { continueDevSessionSource } from "./adapters/continue-dev"
 import { geminiCliSessionSource } from "./adapters/gemini-cli"
 import { opencodeSessionSource } from "./adapters/opencode"
+import { piSessionSource } from "./adapters/pi"
 import type { VendorRoots } from "@/lib/agent-roots"
 import type { AgentSessionSourceAdapter, PickedSessionFile } from "./types"
 
@@ -21,6 +22,7 @@ const STATIC_SOURCES: AgentSessionSourceAdapter[] = [
   geminiCliSessionSource,
   continueDevSessionSource,
   aiderSessionSource,
+  piSessionSource,
 ]
 
 interface RegisteredSource {

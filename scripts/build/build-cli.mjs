@@ -142,4 +142,21 @@ if (!fs.existsSync(workspaceHelperSource)) {
 fs.copyFileSync(workspaceHelperSource, path.join(outdir, workspaceHelperName))
 if (process.platform !== "win32") fs.chmodSync(path.join(outdir, workspaceHelperName), 0o755)
 
+// The bundled Pi extension (ADR-0119) and its digest. Staged into `dist/` so
+// the published package ships it under the existing `files: ["dist"]` entry,
+// and so `resolvePiExtensionScript`'s walk-up finds it on the first hop from
+// the bundle directory. Without it every Pi session on an installed CLI fails
+// closed with `extension_handshake_failed` — the extension is what enforces
+// Pi's native-tool permission matrix, so it is required, not optional.
+const piExtensionDir = path.join(root, "sidecar", "pi-extension")
+const piExtensionOut = path.join(outdir, "sidecar", "pi-extension")
+fs.mkdirSync(piExtensionOut, { recursive: true })
+for (const asset of ["cognia-pi-extension.ts", "integrity.json"]) {
+  const source = path.join(piExtensionDir, asset)
+  if (!fs.existsSync(source)) {
+    throw new Error(`build-cli: missing ${path.relative(root, source)}`)
+  }
+  fs.copyFileSync(source, path.join(piExtensionOut, asset))
+}
+
 console.log(`build-cli: wrote ${path.relative(root, outdir)}/cognia-agent.js`)

@@ -93,18 +93,65 @@ export function createAgentRpcHostStateDispatcher(
     if (!sessionId) throw new Error("host_state_session_id_required")
     switch (action.action.kind) {
       case "message.enqueue": {
-        if (dependencies.sendMessage) {
-          await dependencies.sendMessage(sessionId, action.action.text, action.actionId)
-        } else {
-          const [{ getSession }, { buildSendOptions }, { sendPrompt }] = await Promise.all([
-            import("@/lib/db/sessions"),
-            import("@/hooks/chat/claude-chat-send-options"),
-            import("@/lib/claude/ipc"),
-          ])
-          const session = await getSession(sessionId)
-          if (!session) throw new Error("host_state_session_not_found")
-          const options = await buildSendOptions(session, action.action.text)
-          await sendPrompt(sessionId, action.action.text, options, { commandId: action.actionId })
+        // Durably accept before dispatching (ADR-0123). An attached client does
+        // not run the chat controller, so this is the only point at which its
+        // turn becomes recoverable. Non-fatal by construction: a ledger failure
+        // must not swallow a message the user already sent.
+        const workSubmissionAdapter = await import("@/lib/work-submission/host-adapter")
+        const receipt = await workSubmissionAdapter
+          .acceptHostStateChatTurn(action)
+          .catch((error) => {
+            console.error("acceptHostStateChatTurn failed", error)
+            return null
+          })
+        let stopAssemblyHeartbeat = () => {}
+        let durableLeaseLost = false
+        if (receipt) {
+          const claim = await workSubmissionAdapter.claimHostStateChatTurnForDispatch(
+            action.actionId
+          )
+          if (claim === "owned_elsewhere") return
+          if (claim === "claimed") {
+            const { startWorkSubmissionLeaseHeartbeat } =
+              await import("@/lib/work-submission/lease-heartbeat")
+            stopAssemblyHeartbeat = startWorkSubmissionLeaseHeartbeat(
+              receipt.submissionId,
+              "host-state",
+              {
+                onError: (error) => console.error("HostState work lease renewal failed", error),
+                onLeaseLost: () => {
+                  durableLeaseLost = true
+                },
+              }
+            )
+          }
+        }
+        let handedOff = false
+        try {
+          if (durableLeaseLost) return
+          if (dependencies.sendMessage) {
+            await dependencies.sendMessage(sessionId, action.action.text, action.actionId)
+          } else {
+            const [{ getSession }, { buildSendOptions }, { sendPrompt }] = await Promise.all([
+              import("@/lib/db/sessions"),
+              import("@/hooks/chat/claude-chat-send-options"),
+              import("@/lib/claude/ipc"),
+            ])
+            const session = await getSession(sessionId)
+            if (!session) throw new Error("host_state_session_not_found")
+            const options = await buildSendOptions(session, action.action.text)
+            if (receipt) {
+              await workSubmissionAdapter.bindHostStateChatTurnContext(action, options)
+            }
+            await sendPrompt(sessionId, action.action.text, options, { commandId: action.actionId })
+          }
+          if (durableLeaseLost) return
+          if (receipt) {
+            await workSubmissionAdapter.markHostStateChatTurnStarted(action.actionId)
+          }
+          handedOff = true
+        } finally {
+          if (!handedOff) stopAssemblyHeartbeat()
         }
         break
       }

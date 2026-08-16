@@ -18,7 +18,7 @@ import { injectCapacitor } from "../helpers/inject-capacitor"
 test.describe("mobile — Storage cleanup", () => {
   test("clears the selected skill category without deleting settings", async ({ page }) => {
     await injectCapacitor(page, { platform: "android" })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "standalone")
     await waitForTestGlobals(page, 30_000)
 

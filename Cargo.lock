@@ -2121,6 +2121,7 @@ name = "cognia-external-agent"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
  "bollard",
  "futures-util",
  "k8s-openapi",
@@ -2131,6 +2132,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tempfile",
  "tokio",

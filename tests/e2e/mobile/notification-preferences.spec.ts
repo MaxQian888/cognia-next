@@ -36,7 +36,7 @@ interface QueueRow {
 test.describe("mobile — Notification preferences", () => {
   test("persists portable preferences and queues desktop synchronization", async ({ page }) => {
     await injectCapacitor(page, { platform: "android" })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "standalone")
 
     await page.goto("/me/notifications", { waitUntil: "domcontentloaded" })

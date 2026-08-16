@@ -56,7 +56,8 @@ export const ROOT_LOADING_RULES = [
   {
     file: "lib/scheduler/task-scheduler.ts",
     forbidden: ["@/lib/plugin"],
-    reason: "Import lifecycle hooks directly; the plugin barrel exports every runtime API namespace.",
+    reason:
+      "Import lifecycle hooks directly; the plugin barrel exports every runtime API namespace.",
   },
   {
     file: "lib/tauri/canvas.ts",
@@ -71,12 +72,14 @@ export const ROOT_LOADING_RULES = [
   {
     file: "components/plugins/plugin-extension-slot.tsx",
     forbidden: ["@/lib/plugin/api"],
-    reason: "Import the extension registry directly; the API barrel exports every plugin namespace.",
+    reason:
+      "Import the extension registry directly; the API barrel exports every plugin namespace.",
   },
   {
     file: "components/plugins/plugin-extension-slot-with-overflow.tsx",
     forbidden: ["@/lib/plugin/api"],
-    reason: "Import the extension registry directly; the API barrel exports every plugin namespace.",
+    reason:
+      "Import the extension registry directly; the API barrel exports every plugin namespace.",
   },
   {
     file: "lib/claude/build-options.ts",
@@ -115,7 +118,10 @@ export function extractStaticImports(source, fileName = "source.ts") {
   return imports
 }
 
-export function findRootLoadingBoundaryViolations(repoRoot = REPO_ROOT, rules = ROOT_LOADING_RULES) {
+export function findRootLoadingBoundaryViolations(
+  repoRoot = REPO_ROOT,
+  rules = ROOT_LOADING_RULES
+) {
   const violations = []
   for (const rule of rules) {
     const imports = extractStaticImports(readFileSync(join(repoRoot, rule.file), "utf8"), rule.file)
@@ -130,7 +136,9 @@ export function findRootLoadingBoundaryViolations(repoRoot = REPO_ROOT, rules = 
 export function main() {
   const violations = findRootLoadingBoundaryViolations()
   if (violations.length === 0) {
-    console.log(`[root-loading] OK: ${ROOT_LOADING_RULES.length} high-fan-out boundaries preserved.`)
+    console.log(
+      `[root-loading] OK: ${ROOT_LOADING_RULES.length} high-fan-out boundaries preserved.`
+    )
     return 0
   }
   console.error(`[root-loading] ${violations.length} boundary violation(s):`)

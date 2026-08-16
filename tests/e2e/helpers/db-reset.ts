@@ -287,7 +287,11 @@ export async function bootstrapCogniaMobile(
   await ensureCogniaAccount(page)
   await installMobileBootstrapMode(page, mode, settingsPatch)
   const appUrl = new URL("/", page.url()).toString()
-  const welcomeUrl = new URL("/welcome", page.url()).toString()
+  // The standalone/paired mode chooser moved from `/welcome` into the
+  // first-run flow (ADR-0122). Any onboarding-prefixed route works here —
+  // this navigation only exists to let the bootstrap script run before the
+  // app shell boots and reads the settings row.
+  const welcomeUrl = new URL("/onboarding", page.url()).toString()
   await page.goto("about:blank")
   await page.goto(welcomeUrl, { waitUntil: "domcontentloaded" })
   await page.waitForFunction(

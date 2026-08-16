@@ -102,7 +102,7 @@ test.describe("mobile — remote session control", () => {
       network: { connected: true, connectionType: "wifi" },
       secureStorage: companionConfigSecureStorage(companionConfig),
     })
-    await page.goto("/welcome")
+    await page.goto("/onboarding")
     await bootstrapCogniaMobile(page, "paired")
 
     await page.goto("/remote-sessions", { waitUntil: "domcontentloaded" })

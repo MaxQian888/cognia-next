@@ -125,6 +125,7 @@ export const CORE_TABLE_NAMES = [
   "evalSamples",
   "evalScores",
   "evalTasks",
+  "executionContextBundles",
   "executionRunBindings",
   "executionRunEvents",
   "executionRunInterrupts",
@@ -134,6 +135,7 @@ export const CORE_TABLE_NAMES = [
   "feishuTenants",
   "fleetSessions",
   "gatewayRequestLog",
+  "githubIssueMirror",
   "governanceConflicts",
   "governanceDecisionEvents",
   "governanceDecisions",
@@ -154,11 +156,16 @@ export const CORE_TABLE_NAMES = [
   "integrationAudit",
   "integrationEvents",
   "integrationSubscriptions",
+  "issueCounters",
+  "issueEvents",
+  "issueProjects",
+  "issues",
   "knowledgeBaseChunks",
   "knowledgeBaseIngestJobs",
   "knowledgeBaseSources",
   "knowledgeBases",
   "knowledgeNotes",
+  "labels",
   "larkChatSurfaces",
   "larkEntryContexts",
   "larkMessageImports",
@@ -300,6 +307,8 @@ export const CORE_TABLE_NAMES = [
   "wikiSectionsStaging",
   "workflowDeployments",
   "workflowFanoutSubscriptions",
+  "workInputBatches",
+  "workSubmissions",
   "workflowFolders",
   "workflowInvocations",
   "workflowProposalHistory",
@@ -425,6 +434,7 @@ const CACHE_TABLES = new Set<CoreTableName>([
   "chatSearchState",
   "chatSearchText",
   "chatTranscriptIndexState",
+  "githubIssueMirror",
   "hostSyncCursors",
   "knowledgeBaseChunks",
   "modelsDevCatalog",
@@ -474,6 +484,7 @@ const QUICK_CLEANUP_TABLES = new Set<CoreTableName>([
   "chatSearchState",
   "chatSearchText",
   "chatTranscriptIndexState",
+  "githubIssueMirror",
   "knowledgeBaseChunks",
   "modelsDevCatalog",
   "mcpCapabilityCache",
@@ -542,8 +553,21 @@ const QUEUE_TABLES = new Set<CoreTableName>(
   )
 )
 QUEUE_TABLES.add("matrixPendingEncryptedEvents")
+// Named for the work it carries rather than the queue it is, so the suffix
+// heuristic above misses it. The row tracks dispatch responsibility only.
+QUEUE_TABLES.add("workSubmissions")
 
 const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
+
+/** Stores whose rows hold encrypted user content rather than ids and metadata. */
+const CONFIDENTIAL_TABLES = new Set<CoreTableName>([
+  "githubIssueMirror",
+  "issueEvents",
+  "issues",
+  "matrixPendingEncryptedEvents",
+  "workInputBatches",
+  "executionContextBundles",
+])
 
 const GLOBAL_TABLES = new Set<CoreTableName>([
   "modelsDevCatalog",
@@ -590,6 +614,7 @@ const LARGE_TABLES = new Set<CoreTableName>([
   "evalSamples",
   "evalScores",
   "integrationEvents",
+  "issueEvents",
   "mcpAuditLog",
   "messageMedia",
   "sessionUsage",
@@ -718,6 +743,22 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     executorId: "ocrResults",
     reason: "The storage retention sweeper prunes cached OCR output through the createdAt index.",
   },
+  workInputBatches: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "workSubmissions",
+    reason:
+      "Frozen model-side input carries expiresAt and is removed by the central work-submission sweep once a replay is no longer possible.",
+  },
+  executionContextBundles: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "workSubmissions",
+    reason:
+      "Frozen execution context carries expiresAt and is removed by the central work-submission sweep alongside its input batch.",
+  },
   terminalHistory: {
     mode: "cap",
     maxRows: 5_000,
@@ -792,7 +833,7 @@ function createEntry(name: CoreTableName): DataTableCatalogEntry {
     role,
     sensitivity: SECRET_TABLES.has(name)
       ? "secret"
-      : name === "matrixPendingEncryptedEvents"
+      : CONFIDENTIAL_TABLES.has(name)
         ? "confidential"
         : /messages|Drafts|Sources|Evidence|ContentObjects/.test(name)
           ? "confidential"

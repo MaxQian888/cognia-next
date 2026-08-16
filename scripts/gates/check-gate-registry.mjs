@@ -71,6 +71,12 @@ export const EXEMPTIONS = {
   "audit:loading-states:baseline": "writer — regenerates the loading-state baseline",
   "audit:unreachable-components:baseline":
     "writer — regenerates the unreachable-component baseline",
+  "audit:rpc-semantic-parity:baseline": "writer — regenerates the RPC semantic-parity baseline",
+  "audit:rpc-semantic-parity:report":
+    "reporter — prints every finding including the ungated ones (opaque response schemas, desktop-dead arms); the gated half is `audit:rpc-semantic-parity`",
+  "audit:host-parity:baseline": "writer — regenerates the host-parity baseline",
+  "audit:host-parity:report":
+    "reporter — prints the full headless↔desktop inventory including the ungated class-D subsystem census; the gated half is `audit:host-parity`",
   "rust:clippy:baseline": "writer — regenerates the clippy baseline",
   "check:sdk-surface:write": "writer — re-triages the Agent SDK surface manifest after a bump",
   "i18n:sort": "writer — the check half is i18n:sort:check",
@@ -118,6 +124,8 @@ export const EXEMPTIONS = {
   "check:all:test": "covered by scripts:test:gates",
   "audit:command-parity:test": "covered by scripts:test:gates",
   "audit:companion-command-manifest:test": "covered by scripts:test:gates",
+  "audit:rpc-semantic-parity:test": "covered by scripts:test:gates",
+  "audit:host-parity:test": "covered by scripts:test:gates",
   "audit:e2e-governance:test": "covered by scripts:test:gates",
   "audit:pii-boundaries:test": "covered by scripts:test:gates",
   "audit:silent-flags:test": "covered by scripts:test:gates",

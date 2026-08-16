@@ -1,8 +1,10 @@
 /**
  * Support Agent vertical contract:
  * standalone mobile home → choose immutable Cognia Support → send one real
- * provider-backed turn → Support-only controls and an editable feedback draft
- * are reachable, while diagnostics remain off until explicit consent.
+ * provider-backed turn → the Support strip's consent chip defaults to off, and
+ * the unified "Report a problem" dialog carries the live conversation as a
+ * redacted section with a GitHub-issue channel — nothing leaves the device
+ * until a channel is chosen.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
@@ -42,9 +44,14 @@ test.describe("mobile — Cognia Support Agent", () => {
 
     const supportPanel = page.getByTestId("support-agent-panel")
     await expect(supportPanel).toBeVisible()
+    await expect(supportPanel.getByTestId("support-diagnostics-chip")).toHaveText(
+      /Diagnostics off/i
+    )
+    await supportPanel.getByTestId("support-diagnostics-chip").click()
     await expect(
-      supportPanel.getByRole("switch", { name: /Allow redacted local diagnostics/i })
+      page.getByRole("switch", { name: /Allow redacted local diagnostics/i })
     ).not.toBeChecked()
+    await page.keyboard.press("Escape")
 
     const composer = page.getByRole("textbox", { name: /message/i }).first()
     await composer.fill("diagnose the sidecar support e2e")
@@ -52,15 +59,16 @@ test.describe("mobile — Cognia Support Agent", () => {
     await expect(
       page.getByText(/mock-anthropic-echo.*diagnose the sidecar support e2e/i).first()
     ).toBeVisible({ timeout: 30_000 })
-    await expect(
-      supportPanel.getByRole("link", { name: /Open Cognia issue/i })
-    ).toHaveAttribute("href", "https://github.com/MaxQian888/cognia-next/issues/new")
 
-    await supportPanel
-      .getByRole("button", { name: /Generate redacted support feedback/i })
-      .click()
-    const summary = page.getByRole("textbox", { name: /Feedback description/i })
-    await expect(summary).toHaveValue(/diagnose the sidecar support e2e/i)
-    await expect(summary).toHaveValue(/mock-anthropic-echo/i)
+    await supportPanel.getByRole("button", { name: /Report a problem/i }).click()
+    const dialog = page.getByTestId("report-problem-dialog")
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole("checkbox", { name: /Support conversation/i })).toBeChecked()
+    await expect(dialog.getByTestId("report-problem-channel-issue")).toBeVisible()
+
+    await dialog.getByRole("button", { name: /Preview report/i }).click()
+    const preview = dialog.getByTestId("report-problem-preview")
+    await expect(preview).toContainText(/diagnose the sidecar support e2e/i)
+    await expect(preview).toContainText(/mock-anthropic-echo/i)
   })
 })
