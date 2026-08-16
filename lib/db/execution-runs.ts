@@ -137,6 +137,27 @@ export async function getExecutionRunSnapshot(
   return (await getExecutionRun(runId))?.latestSnapshot
 }
 
+/**
+ * Append a run event using the caller's already-open transaction.
+ *
+ * {@link runEventJournal.append} cannot be used from inside another
+ * transaction: it wraps itself in `withDbReopenRetry` + a fresh
+ * `db.transaction(...)`, and the retry wrapper breaks out of Dexie's
+ * transaction zone. Callers that must journal atomically alongside other
+ * writes — the work-submission acceptance transaction, for one — take this
+ * entry point instead and supply the `db` bound to their transaction.
+ *
+ * The caller's transaction scope must already include `executionRuns` and
+ * `executionRunEvents`.
+ */
+export function appendRunEventInsideTransaction(
+  db: ReturnType<typeof getDb>,
+  runId: string,
+  input: AppendRunEventInput
+): Promise<RunEvent> {
+  return appendInsideTransaction(db, runId, input)
+}
+
 function appendInsideTransaction(
   db: ReturnType<typeof getDb>,
   runId: string,
