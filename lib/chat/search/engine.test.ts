@@ -485,4 +485,47 @@ describe("searchChatHistory", () => {
     )
     expect(outcome.results).toHaveLength(1)
   })
+  it("filters by author role and widens the over-fetch while doing so", async () => {
+    const rows = [
+      row("needle from the user", { role: "user" }),
+      row("needle from the assistant", { role: "assistant" }),
+      row("needle from a tool", { role: "tool" }),
+    ]
+    const users = await searchChatHistory(
+      { query: "needle", roles: ["user"] },
+      deps(rows, [session()])
+    )
+    expect(users.results.map((r) => r.role)).toEqual(["user"])
+    const both = await searchChatHistory(
+      { query: "needle", roles: ["user", "assistant"] },
+      deps(rows, [session()])
+    )
+    expect(both.results.map((r) => r.role).sort()).toEqual(["assistant", "user"])
+    // An empty role list is "no filter", not "nothing".
+    const all = await searchChatHistory({ query: "needle", roles: [] }, deps(rows, [session()]))
+    expect(all.results).toHaveLength(3)
+  })
+
+  it("filters by created-at bounds: after is inclusive, before exclusive", async () => {
+    const rows = [
+      row("needle old", { createdAt: 1_000 }),
+      row("needle mid", { createdAt: 2_000 }),
+      row("needle new", { createdAt: 3_000 }),
+    ]
+    const after = await searchChatHistory(
+      { query: "needle", after: 2_000 },
+      deps(rows, [session()])
+    )
+    expect(after.results.map((r) => r.createdAt).sort()).toEqual([2_000, 3_000])
+    const before = await searchChatHistory(
+      { query: "needle", before: 2_000 },
+      deps(rows, [session()])
+    )
+    expect(before.results.map((r) => r.createdAt)).toEqual([1_000])
+    const window = await searchChatHistory(
+      { query: "needle", after: 1_500, before: 2_500 },
+      deps(rows, [session()])
+    )
+    expect(window.results.map((r) => r.createdAt)).toEqual([2_000])
+  })
 })

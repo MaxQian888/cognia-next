@@ -93,6 +93,12 @@ export interface ChatSearchQuery {
   includeArchived?: boolean
   /** Return only the highest-ranked message hit from each conversation. */
   collapseBySession?: boolean
+  /** Keep only hits authored by one of these roles (`user`, `assistant`, …). */
+  roles?: readonly string[]
+  /** Keep only hits created at or after this epoch-ms instant. */
+  after?: number
+  /** Keep only hits created strictly before this epoch-ms instant. */
+  before?: number
 }
 
 export interface ChatSearchDeps {
@@ -274,6 +280,9 @@ export async function searchChatHistory(
     projectId,
     includeArchived = false,
     collapseBySession = false,
+    roles,
+    after,
+    before,
   }: ChatSearchQuery,
   overrides: Partial<ChatSearchDeps> & ScoreOptions = {}
 ): Promise<ChatSearchOutcome> {
@@ -284,7 +293,12 @@ export async function searchChatHistory(
   }
 
   const indexIncomplete = !(await deps.isIndexComplete())
-  const want = limit * OVERFETCH
+  // Role / date filters reject candidates after the corpus produced them, the
+  // same way exposure and archive do — so widen the over-fetch when one is on,
+  // or a page of assistant-only hits would starve a `from:user` query.
+  const roleSet = roles && roles.length > 0 ? new Set(roles) : null
+  const hasRowFilter = roleSet !== null || after !== undefined || before !== undefined
+  const want = limit * OVERFETCH * (hasRowFilter ? OVERFETCH : 1)
 
   const corpus = await deps.loadCorpus()
   // Pending rows first: the message that just streamed in is the one a user is
@@ -330,6 +344,9 @@ export async function searchChatHistory(
   }
 
   const scorable = hits.flatMap((hit) => {
+    if (roleSet && !roleSet.has(hit.row.role)) return []
+    if (after !== undefined && hit.row.createdAt < after) return []
+    if (before !== undefined && hit.row.createdAt >= before) return []
     const session = sessions.get(hit.row.sessionId)
     // A hit whose session is gone is a stale projection, not a result.
     if (!session) return []
