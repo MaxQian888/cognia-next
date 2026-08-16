@@ -28,6 +28,15 @@ export interface ChatHeaderPresetPillProps {
   onSelectPreset: (preset: SystemPromptPreset) => void
   /** Where the "Manage all presets…" footer link points. */
   manageHref?: string
+  disabled?: boolean
+  /**
+   * Trigger styling from the host. The composer's status line hands over its
+   * quiet chip so the pill matches the model / permission chips beside it;
+   * without it the pill wears the secondary pill it was born with.
+   */
+  triggerClassName?: string
+  /** Popover alignment against the trigger — `start` on the composer row. */
+  align?: "start" | "center" | "end"
 }
 
 /**
@@ -54,6 +63,9 @@ export function ChatHeaderPresetPill({
   presets,
   onSelectPreset,
   manageHref = "/settings?section=presets",
+  disabled = false,
+  triggerClassName,
+  align = "end",
 }: ChatHeaderPresetPillProps) {
   const t = useTranslations("chat.header.presetPill")
   const tGroups = useTranslations("chat.header.groups")
@@ -98,15 +110,16 @@ export function ChatHeaderPresetPill({
         <Button
           variant="secondary"
           size="sm"
-          className="h-7 gap-1.5 px-2 text-xs"
+          className={cn("h-7 gap-1.5 px-2 text-xs", triggerClassName)}
           aria-label={t("ariaLabel")}
           data-testid="chat-header-preset-pill"
+          disabled={disabled}
         >
           <SparklesIcon className="size-3" />
           <span className="max-w-[14ch] truncate">{activePreset?.name ?? t("none")}</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(22rem,calc(100vw-1rem))] p-0">
+      <PopoverContent align={align} className="w-[min(22rem,calc(100vw-1rem))] p-0">
         <div className="border-b p-2">
           <Input
             value={query}
