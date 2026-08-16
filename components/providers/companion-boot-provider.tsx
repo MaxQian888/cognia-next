@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
@@ -14,6 +14,15 @@ import { getLaunchRoute, subscribe as subscribeDeeplink } from "@/lib/capacitor/
 import { dispatchRoute, makeRouterNavigators } from "@/lib/capacitor/deeplink-router"
 import { registerNativePlugins } from "@/lib/capacitor/register-plugins"
 import { hide as hideSplash } from "@/lib/capacitor/splash-screen"
+import {
+  beginMobileBootStage,
+  endMobileBootStage,
+  getMobileBootSnapshot,
+  getServerMobileBootSnapshot,
+  markMobileBootSettled,
+  skipMobileBootStagesAfter,
+  subscribeMobileBoot,
+} from "@/lib/boot/mobile-boot-stages"
 import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
 import { syncWithTheme as syncNavBar } from "@/lib/capacitor/navigation-bar"
 import {
@@ -67,7 +76,13 @@ import {
 
 // Onboarding routes where the boot provider must NOT redirect (the chooser /
 // pair / oauth flows own navigation there).
-const ONBOARDING_PREFIXES = ["/welcome", "/pair", "/oauth"]
+// `/onboarding` replaced the standalone `/welcome` mode chooser (ADR-0122):
+// the standalone-vs-paired fork is now the first-run flow's welcome step,
+// so the boot provider must recognise it as an onboarding surface or it
+// would redirect the user straight back out of the flow.
+import { ONBOARDING_ROUTE } from "@/lib/onboarding/route"
+
+const ONBOARDING_PREFIXES = ["/onboarding", "/pair", "/oauth"]
 
 const log = loggers.shell
 
@@ -118,6 +133,14 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   // used to race registration and no-op as `unsupported`, leaving the
   // status/nav bars unpainted until the next theme change).
   const [pluginsReady, setPluginsReady] = useState(platform !== "mobile")
+  // While the boot splash overlay covers the app it paints the status / nav
+  // bars to its own canvas (see `AppSplash`); the theme sync below stands
+  // aside until it starts leaving, then repaints for the app theme.
+  const splashOverlayVisible = useSyncExternalStore(
+    subscribeMobileBoot,
+    () => getMobileBootSnapshot().overlayVisible,
+    () => getServerMobileBootSnapshot().overlayVisible
+  )
   const reportPushForActiveHostRef = useRef<() => Promise<void>>(async () => undefined)
 
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
@@ -137,7 +160,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   // not just light/dark. Falls back to safe defaults when the palette
   // can't be resolved.
   useEffect(() => {
-    if (platform !== "mobile" || !pluginsReady) return
+    if (platform !== "mobile" || !pluginsReady || splashOverlayVisible) return
     const shellColors = getShellColors(
       {
         colorTheme: appearanceColorTheme,
@@ -152,6 +175,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   }, [
     platform,
     pluginsReady,
+    splashOverlayVisible,
     resolvedTheme,
     appearanceColorTheme,
     appearanceActiveCustomThemeId,
@@ -236,6 +260,11 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       }
       reportPushForActiveHostRef.current = registerAndReportPush
 
+      // Boot timeline (`lib/boot/mobile-boot-stages`): the pairing read starts
+      // here; every early return below records how it ended so the splash can
+      // show the outcome and dismiss on it rather than on a stopwatch.
+      beginMobileBootStage("companion")
+
       await adoptMobileCompanionHosts()
       if (isStale()) return
       const activeHost = await companionCredentialBook().getActive(DEFAULT_LOCAL_ACCOUNT_ID)
@@ -260,17 +289,30 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       if (isStale()) return
       const mode = (await getSettings().catch(() => null))?.mobileRuntimeMode
       if (isStale()) return
-      if (mode === "standalone") return
+      if (mode === "standalone") {
+        endMobileBootStage("companion", { detail: "standalone" })
+        skipMobileBootStagesAfter("companion")
+        markMobileBootSettled()
+        return
+      }
 
       if (!config) {
+        endMobileBootStage("companion", { detail: "unpaired" })
+        skipMobileBootStagesAfter("companion")
+        markMobileBootSettled()
         setRuntimeSnapshot({ target: null, vaultState: "unavailable", connectionState: "offline" })
         const onOnboarding = ONBOARDING_PREFIXES.some((prefix) =>
           pathnameRef.current.startsWith(prefix)
         )
-        if (!onOnboarding) routerRef.current.replace(mode === "paired" ? "/pair" : "/welcome")
+        // A paired phone that lost its config needs re-pairing, not onboarding.
+        // An unset mode means the fork was never answered — that is the
+        // first-run flow's welcome step now.
+        if (!onOnboarding) routerRef.current.replace(mode === "paired" ? "/pair" : ONBOARDING_ROUTE)
         return
       }
 
+      endMobileBootStage("companion", { detail: "paired" })
+      beginMobileBootStage("host")
       const registeredTarget = await registerCompanionRuntimeTarget({
         ...config,
         accountId: DEFAULT_LOCAL_ACCOUNT_ID,
@@ -278,6 +320,9 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       })
       if (isStale()) return
       if (!registeredTarget) {
+        endMobileBootStage("host", { status: "failed", detail: "offline" })
+        skipMobileBootStagesAfter("host")
+        markMobileBootSettled()
         updateRuntimeSnapshot({ connectionState: "offline" })
         return
       }
@@ -292,6 +337,9 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         })
         updateRuntimeSnapshot({ host })
         if (!host.compatible) {
+          endMobileBootStage("host", { status: "failed", detail: "incompatible" })
+          skipMobileBootStagesAfter("host")
+          markMobileBootSettled()
           updateRuntimeSnapshot({ connectionState: "offline" })
           return
         }
@@ -315,6 +363,9 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         }
       } catch (error) {
         if (!isStale()) {
+          endMobileBootStage("host", { status: "failed", detail: "offline" })
+          skipMobileBootStagesAfter("host")
+          markMobileBootSettled()
           updateRuntimeSnapshot({ connectionState: "offline", host: undefined })
           log.warn("companion: host manifest unavailable", {
             error: error instanceof Error ? error.message : String(error),
@@ -328,10 +379,17 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
           await runSyncDown()
         })
       )
+      // The host is linked: that is the outcome the splash waits for. The
+      // first sync is shown live but never holds the overlay — see `AppSplash`.
+      endMobileBootStage("host", { detail: "linked" })
+      markMobileBootSettled()
+      beginMobileBootStage("sync")
       try {
         await runSyncDown()
         if (!isStale()) updateRuntimeSnapshot({ connectionState: "online" })
+        endMobileBootStage("sync", { detail: "synced" })
       } catch (error) {
+        endMobileBootStage("sync", { status: "failed", detail: "syncFailed" })
         log.warn("companion: initial sync-down failed", {
           error: error instanceof Error ? error.message : String(error),
         })
@@ -392,7 +450,14 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       // injects only the transport bridge — without this every lib/capacitor/*
       // wrapper (splash, haptics, camera, openSettings, …) silently no-ops.
       // Must run before any other native call below. Best-effort + self-logs.
-      await registerNativePlugins()
+      beginMobileBootStage("bridge")
+      const bridge = await registerNativePlugins()
+      endMobileBootStage(
+        "bridge",
+        bridge.kind === "unavailable"
+          ? { status: "failed", detail: "unavailable" }
+          : { detail: "registered" }
+      )
       // Unblock the theme-sync effect now that the plugin proxies exist
       // (best-effort even when registration reported unavailable — the
       // wrappers degrade to `unsupported` on their own).

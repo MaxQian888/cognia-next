@@ -256,3 +256,18 @@ registerHeadlessRuntime({
     await usage.pruneSessionUsageOlderThan(RETENTION_DAYS).catch(() => {})
   },
 })
+
+// ── ADR-0123: durable work submission recovery ──────────────────────────────
+//
+// The brain previously had NO stranded-run reconciliation: the renderer mounts
+// `recoverStaleDirectChatExecutionRuns` in two initializers, and nothing
+// mirrored it here. A headless host that died mid-turn left its work untouched.
+
+registerHeadlessRuntime({
+  name: "work-submission-outbox",
+  hosts: ["brain"],
+  start: async () => {
+    const { startHeadlessWorkOutbox } = await import("@/lib/work-submission/bootstrap")
+    return startHeadlessWorkOutbox()
+  },
+})

@@ -8,12 +8,19 @@
 // rather than a code-review hope.
 //
 // Reused by handoff-envelope.ts (parent→child delegation), canonical-session.ts,
-// action-review.ts (ADR-0102), and thread-handoff.ts (ADR-0103).
+// action-review.ts (ADR-0102), thread-handoff.ts (ADR-0103), host-state.ts
+// (ADR-0116), and work-submission.ts (ADR-0123).
 //
 // Zero-dependency hand-written guards, matching the rest of this package.
 
-/** Secret-shaped values that must never appear in a ref position. */
-const SECRET_SHAPE = /sk-[A-Za-z0-9]|api[_-]?key|bearer\s|(^|[^a-z])token[=:]/i
+/**
+ * Secret-shaped values that must never appear in a ref position.
+ *
+ * `sk-` is boundary-guarded the same way `token` is: unanchored, it fires on
+ * any id that merely *contains* the letters — `task-1`, `risk-report`,
+ * `disk-cache` — which rejects ordinary refs rather than credentials.
+ */
+const SECRET_SHAPE = /(^|[^a-z])sk-[A-Za-z0-9]|api[_-]?key|bearer\s|(^|[^a-z])token[=:]/i
 /** URL-shaped values — endpoints resolve from the deployment profile, not here. */
 const URL_SHAPE = /^[a-z][a-z0-9+.-]*:\/\//i
 /** POSIX (`/srv/x`) and Windows (`C:\x`, `C:/x`) absolute paths. */
@@ -21,6 +28,28 @@ const ABSOLUTE_PATH_SHAPE = /^(?:\/|[A-Za-z]:[\\/])/
 
 export function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0
+}
+
+/** A plain JSON object — not null, not an array. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Closed-schema check: reject any key the contract does not declare.
+ *
+ * This is what makes a guard *closed* rather than merely structural. An open
+ * guard silently forwards unknown fields across the boundary, which is how a
+ * newer peer's payload smuggles data past an older peer's validation.
+ */
+export function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const allow = new Set(allowed)
+  return Object.keys(value).every((key) => allow.has(key))
+}
+
+/** A safe non-negative integer — the shape every revision/sequence/epoch uses. */
+export function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 }
 
 /**

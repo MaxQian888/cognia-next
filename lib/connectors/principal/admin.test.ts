@@ -8,6 +8,7 @@ import {
   getFeishuTenant,
   upsertFeishuTenant,
 } from "@/lib/db/feishu-principals"
+import { getWebSession, touchWebSession } from "@/lib/db/lark-entry"
 import type { AuditEntry } from "@/types/connectors/audit"
 import {
   approveFeishuBind,
@@ -196,6 +197,73 @@ describe("principal admin", () => {
     const stored = await getDb().feishuPrincipals.get(principal.id)
     expect(stored?.status).toBe("disabled")
     expect(stored?.version).toBe(2)
+  })
+
+  it("stamps the principal's web sessions when they leave active, and not when they return", async () => {
+    const { rows, deps } = auditSpy()
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
+    const principal = await createFeishuPrincipal({
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      openId: "ou_sess",
+      cogniaAccountId: "acct_a",
+      cogniaUserId: "acct_a",
+    })
+    await touchWebSession({
+      jtiHash: "ws_admin",
+      adapterId: "lark-1",
+      openIdHash: "hash_a",
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      principalId: principal.id,
+      issuedAt: NOW,
+      expiresAt: NOW + 3_600_000,
+      now: NOW,
+    })
+
+    // Disabling is what actually cuts this person off (every entry intent
+    // re-resolves the principal); the ledger stamp records when.
+    await setFeishuPrincipalEnabled(
+      { adapterId: "lark-1", principalId: principal.id, status: "disabled" },
+      deps
+    )
+    expect((await getWebSession("ws_admin"))?.revokedAt).toBe(NOW)
+    expect(rows.find((r) => r.kind === "principal.status_changed")?.fields).toMatchObject({
+      revokedSessions: 1,
+    })
+
+    // Re-enabling does not resurrect the row — the session it referred to is
+    // long gone; the person simply signs in again.
+    await setFeishuPrincipalEnabled(
+      { adapterId: "lark-1", principalId: principal.id, status: "active" },
+      deps
+    )
+    expect((await getWebSession("ws_admin"))?.revokedAt).toBe(NOW)
+    const backToActive = rows.filter((r) => r.kind === "principal.status_changed").at(-1)
+    expect(backToActive?.fields).toMatchObject({ to: "active", revokedSessions: 0 })
+  })
+
+  it("does not fail a status change when the session ledger is unavailable", async () => {
+    const { deps } = auditSpy()
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
+    const principal = await createFeishuPrincipal({
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      openId: "ou_ledgerless",
+      cogniaAccountId: "acct_a",
+      cogniaUserId: "acct_a",
+    })
+    const stored = await setFeishuPrincipalEnabled(
+      { adapterId: "lark-1", principalId: principal.id, status: "unlinked" },
+      {
+        ...deps,
+        revokeSessions: async () => {
+          throw new Error("ledger unavailable")
+        },
+      }
+    )
+    expect(stored.status).toBe("unlinked")
+    expect((await getDb().feishuPrincipals.get(principal.id))?.status).toBe("unlinked")
   })
 
   it("rebinds identity linkage and audits only the field names", async () => {

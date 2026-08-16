@@ -147,17 +147,31 @@ pub async fn enforce(
     response
 }
 
+/// `https://…`, or `http://` on a loopback host. The transport predicate every
+/// operator-supplied base URL in the companion is held to: a plaintext origin
+/// is only ever acceptable when the bytes never leave the machine.
+///
+/// Shared with `lark_entry`'s `COGNIA_LARK_*` base validation so the two cannot
+/// drift on what counts as loopback (`localhost`, `127.0.0.0/8`, `::1`).
+pub(crate) fn is_secure_or_loopback(url: &url::Url) -> bool {
+    if url.scheme() == "https" {
+        return true;
+    }
+    if url.scheme() != "http" {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain(host)) => host == "localhost",
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
+
 fn normalize_allowed_origin(raw: &str) -> Option<String> {
     let value = raw.trim().trim_end_matches('/');
     let url = url::Url::parse(value).ok()?;
-    let secure_or_loopback = url.scheme() == "https"
-        || (url.scheme() == "http"
-            && match url.host()? {
-                url::Host::Domain(host) => host == "localhost",
-                url::Host::Ipv4(address) => address.is_loopback(),
-                url::Host::Ipv6(address) => address.is_loopback(),
-            });
-    if !secure_or_loopback
+    if !is_secure_or_loopback(&url)
         || url.host_str().is_none()
         || url.path() != "/"
         || url.query().is_some()
@@ -259,6 +273,35 @@ mod tests {
             policy.evaluate(&headers(Some("https://web.example.evil"), "brain.example")),
             OriginDecision::Denied
         );
+    }
+
+    #[test]
+    fn secure_or_loopback_admits_https_and_only_loopback_http() {
+        for secure in [
+            "https://web.example",
+            "https://web.example:8443",
+            "http://localhost:3000",
+            "http://127.0.0.1:27890",
+            "http://[::1]:27890",
+        ] {
+            assert!(
+                is_secure_or_loopback(&url::Url::parse(secure).unwrap()),
+                "{secure} should be accepted"
+            );
+        }
+        for insecure in [
+            "http://web.example",
+            // `localhost.evil.example` must not pass as loopback by suffix.
+            "http://localhost.evil.example",
+            "http://10.0.0.1",
+            "ftp://web.example",
+            "file:///etc/passwd",
+        ] {
+            assert!(
+                !is_secure_or_loopback(&url::Url::parse(insecure).unwrap()),
+                "{insecure} should be rejected"
+            );
+        }
     }
 
     #[test]

@@ -266,6 +266,7 @@ async fn execute_inner(
         &request.command,
         &request.args,
         cognia_headless_contract::ContractDirection::Input,
+        contract_plane_for(&request.principal.scope),
     )?;
 
     if request.principal.scope != "service" {
@@ -290,6 +291,7 @@ async fn execute_inner(
             &request.command,
             &result,
             cognia_headless_contract::ContractDirection::Output,
+            contract_plane_for(&request.principal.scope),
         )?;
         return Ok(ExecutionOutcome::Completed {
             request_id: request.request_id,
@@ -358,6 +360,7 @@ async fn execute_inner(
                 &request.command,
                 &result,
                 cognia_headless_contract::ContractDirection::Output,
+                contract_plane_for(&request.principal.scope),
             ) {
                 let receipt = json!({
                     "httpStatus": error.status.as_u16(),
@@ -425,11 +428,27 @@ async fn execute_inner(
     }
 }
 
+/// Which contract plane a request scope maps to.
+///
+/// `prepare_remote_args` (rpc/source_control.rs) rewrites device-scope
+/// arguments from workspace-relative coordinates into real paths and leaves
+/// service-scope arguments untouched, so the two planes accept different — and
+/// both correct — request shapes. Validating everything against the service
+/// shape rejected every device `git_*` request with 422 before dispatch.
+fn contract_plane_for(scope: &str) -> cognia_headless_contract::ContractPlane {
+    if scope == "service" {
+        cognia_headless_contract::ContractPlane::Service
+    } else {
+        cognia_headless_contract::ContractPlane::Device
+    }
+}
+
 fn validate_contract_value(
     request_id: &str,
     command: &str,
     value: &Value,
     direction: cognia_headless_contract::ContractDirection,
+    plane: cognia_headless_contract::ContractPlane,
 ) -> Result<(), ExecutionError> {
     if !super::command_manifest::headless_contract_enforced() {
         return Ok(());
@@ -446,7 +465,7 @@ fn validate_contract_value(
     })?;
     let validation = match direction {
         cognia_headless_contract::ContractDirection::Input => {
-            contract.validate_input(command, value)
+            contract.validate_input_on(plane, command, value)
         }
         cognia_headless_contract::ContractDirection::Output => {
             contract.validate_output(command, value)
@@ -1080,6 +1099,7 @@ mod tests {
                 "unexpected": "do-not-leak-this-value",
             }),
             cognia_headless_contract::ContractDirection::Input,
+            cognia_headless_contract::ContractPlane::Device,
         )
         .unwrap_err();
 
@@ -1090,6 +1110,87 @@ mod tests {
         assert!(!error.details.to_string().contains("do-not-leak-this-value"));
     }
 
+    /// The payloads real companion clients put on the wire must pass the
+    /// enforced input contract.
+    ///
+    /// Every existing contract test asserts a payload the TEST author chose.
+    /// None assert a payload a CLIENT actually sends, and the two had drifted:
+    /// `CompanionTransport.call` does `JSON.stringify(args)` with no casing
+    /// conversion, so whatever `lib/**` passes is exactly what is validated.
+    /// A schema that disagrees with the caller rejects every request with 422
+    /// before dispatch is ever reached — invisible to the dispatch-arm tests,
+    /// which call the arms directly.
+    ///
+    /// Each case below is copied from the real call site named in the comment.
+    /// Update them by re-reading that call site, never by relaxing the schema.
+    #[test]
+    fn real_client_payloads_pass_the_enforced_input_contract() {
+        // lib/claude/ipc.ts:80 — sendPrompt
+        let cases: &[(&str, Value)] = &[
+            (
+                "claude_send",
+                json!({ "sessionId": "session-a", "prompt": "hello", "options": {} }),
+            ),
+            // lib/claude/ipc.ts:672 — approveTool
+            (
+                "claude_approve",
+                json!({
+                    "sessionId": "session-a",
+                    "requestId": "request-a",
+                    "decision": "allow",
+                    "remoteExecutionContext": {
+                        "hostId": "host-a",
+                        "originDeviceId": "device-a",
+                        "sessionId": "session-a",
+                        "generation": 1,
+                        "requestId": "request-a",
+                        "issuedAt": 0,
+                        "expiresAt": 0,
+                    },
+                }),
+            ),
+            // lib/git/commands.ts:62 — prepareGitTransportArgs, remote shape.
+            // `adminLease` is appended at commands.ts:123 because git_clone is
+            // `approval: interactive`.
+            (
+                "git_clone",
+                json!({
+                    "remoteUrl": "https://example.invalid/a.git",
+                    "workspaceId": "workspace-a",
+                    "destinationRelativePath": "a",
+                    "adminLease": "lease-a",
+                }),
+            ),
+            // lib/git/target.ts:46 — gitTargetArgs, the shape every other
+            // git_* command carries on the device plane.
+            (
+                "git_status",
+                json!({ "workspaceId": "workspace-a", "relativePath": "repo" }),
+            ),
+        ];
+
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(command, payload)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    payload,
+                    cognia_headless_contract::ContractDirection::Input,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .err()
+                .map(|error| format!("{command}: {} {}", error.code, error.details))
+            })
+            .collect();
+
+        assert!(
+            failures.is_empty(),
+            "real client payloads rejected by the enforced contract:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
     #[test]
     fn workflow_approval_list_output_contract_accepts_the_runtime_envelope() {
         validate_contract_value(
@@ -1097,8 +1198,560 @@ mod tests {
             "workflow_approval_list",
             &json!({ "approvals": [] }),
             cognia_headless_contract::ContractDirection::Output,
+            cognia_headless_contract::ContractPlane::Service,
         )
         .expect("workflow approval list uses an object envelope on every host");
+    }
+
+    /// Response schemas are typed from the dispatch arm's return expression,
+    /// not from the `#[tauri::command]` signature — the two differ, and that is
+    /// the whole reason this ratchet is per-command rather than mechanical.
+    ///
+    /// Serializing the REAL Rust value is what makes tightening a schema safe.
+    /// Output validation is enforced at `:293` and `:362`, so a schema that
+    /// disagrees with the struct turns a working command into an error
+    /// response. Because these schemas are closed (`additionalProperties:
+    /// false`), adding a field to one of these structs would break the command
+    /// at runtime with no other signal — this test is that signal, and it goes
+    /// red at compile time for a rename and at assert time for an addition.
+    #[test]
+    fn terminal_responses_match_their_enforced_output_contracts() {
+        use cognia_terminal::complete::PathCandidate;
+        use cognia_terminal::exec::TerminalExecResult;
+        use cognia_terminal::host::{HostReplayBounds, HostSessionInfo, IntegrationCapabilities};
+        use cognia_terminal::session::SessionOrigin;
+
+        let session = HostSessionInfo {
+            id: "session-a".to_string(),
+            host_id: "host-a".to_string(),
+            kind: cognia_terminal::host::SessionKind::LocalPty,
+            profile_id: "profile-a".to_string(),
+            project_id: Some("project-a".to_string()),
+            extension_id: None,
+            origin: SessionOrigin::Remote,
+            shell: "/bin/zsh".to_string(),
+            created_at: 1,
+            last_activity_at: 2,
+            current_controller: Some("device-a".to_string()),
+            attached_clients: 1,
+            alive: true,
+            sandboxed: false,
+            integration_capabilities: IntegrationCapabilities {
+                osc633: true,
+                command_status: true,
+                cwd_tracking: true,
+                degraded_reason: None,
+            },
+            replay: HostReplayBounds {
+                first_sequence: 0,
+                last_sequence: 9,
+                retained_bytes: 4096,
+                truncated: false,
+            },
+            // Skipped by serde when None, present when Some — both spellings
+            // have to satisfy the same schema, so the list below sends one of
+            // each rather than only the populated shape.
+            ssh_host_key_status: Some("trusted".to_string()),
+            ssh_host_key_fingerprint: Some("SHA256:abc".to_string()),
+        };
+        let mut local_session = session.clone();
+        local_session.kind = cognia_terminal::host::SessionKind::Ssh;
+        local_session.origin = SessionOrigin::Local;
+        local_session.project_id = None;
+        local_session.current_controller = None;
+        local_session.ssh_host_key_status = None;
+        local_session.ssh_host_key_fingerprint = None;
+
+        let exec_ok = TerminalExecResult {
+            stdout: "ok\n".to_string(),
+            stderr: String::new(),
+            exit_code: Some(0),
+            timed_out: false,
+        };
+        // A timeout kill leaves no exit code. `exitCode: null` is a SUCCESSFUL
+        // response, so the schema has to admit it.
+        let exec_timeout = TerminalExecResult {
+            stdout: String::new(),
+            stderr: "timed out".to_string(),
+            exit_code: None,
+            timed_out: true,
+        };
+
+        let cases: Vec<(&str, Value)> = vec![
+            (
+                "terminal_list_all",
+                serde_json::to_value(vec![session.clone(), local_session.clone()]).unwrap(),
+            ),
+            (
+                "terminal_list_for_project",
+                serde_json::to_value(vec![session]).unwrap(),
+            ),
+            // An empty list is the common case on a host with no sessions.
+            (
+                "terminal_list_all",
+                serde_json::to_value(Vec::<HostSessionInfo>::new()).unwrap(),
+            ),
+            ("terminal_exec", serde_json::to_value(exec_ok).unwrap()),
+            ("terminal_exec", serde_json::to_value(exec_timeout).unwrap()),
+            (
+                "terminal_complete_paths",
+                serde_json::to_value(vec![
+                    PathCandidate {
+                        name: "src".to_string(),
+                        is_dir: true,
+                    },
+                    PathCandidate {
+                        name: "Cargo.toml".to_string(),
+                        is_dir: false,
+                    },
+                ])
+                .unwrap(),
+            ),
+            // `terminal_kill_port` returns the PIDs it signalled, and returning
+            // none is a success, not an error.
+            (
+                "terminal_kill_port",
+                serde_json::to_value(vec![4242u32]).unwrap(),
+            ),
+            (
+                "terminal_kill_port",
+                serde_json::to_value(Vec::<u32>::new()).unwrap(),
+            ),
+            // The one arm in this submodule that really does return null.
+            ("terminal_kill", Value::Null),
+        ];
+
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .err()
+                .map(|error| format!("{command}: {} {}", error.code, error.details))
+            })
+            .collect();
+
+        assert!(
+            failures.is_empty(),
+            "real terminal responses rejected by the enforced output contract:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    /// The companion assertion to the one above: the tightened schemas must
+    /// still REJECT a wrong shape. A schema that accepts everything passes the
+    /// test above too, so without this the ratchet could be satisfied by
+    /// writing `properties` that constrain nothing.
+    #[test]
+    fn tightened_terminal_contracts_still_reject_wrong_shapes() {
+        let rejected: Vec<(&str, Value)> = vec![
+            // Was `LegacyList` — any array at all used to pass.
+            ("terminal_list_all", json!([{ "id": "session-a" }])),
+            // Was `LegacyResult` — a bare string used to pass.
+            ("terminal_exec", json!("ok")),
+            // exitCode is an integer or null, never a string.
+            (
+                "terminal_exec",
+                json!({ "stdout": "", "stderr": "", "exitCode": "0", "timedOut": false }),
+            ),
+            ("terminal_complete_paths", json!([{ "name": "src" }])),
+            ("terminal_kill_port", json!(["4242"])),
+        ];
+
+        let accepted: Vec<&str> = rejected
+            .iter()
+            .filter(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .is_ok()
+            })
+            .map(|(command, _)| *command)
+            .collect();
+
+        assert!(
+            accepted.is_empty(),
+            "these malformed responses still pass — the schema is not actually tightened: {accepted:?}"
+        );
+    }
+
+    /// `secret_store_get` and its `keyring_secret_get` alias were declared
+    /// `LegacyRecord` — `{"type":"object"}`. The arm returns
+    /// `to_json(Option<String>)`, so every SUCCESSFUL read put a bare string
+    /// (or null, for an absent key) on the wire and the enforced output
+    /// contract rejected it with `contract_output_violation`. Reading a secret
+    /// from any remote or mobile client could not succeed.
+    ///
+    /// The bug hid inside the "vacuous response schema" pile because
+    /// `LegacyRecord` reads like a catch-all. It is not one: it constrains the
+    /// root to an object, and these two commands never return an object.
+    #[test]
+    fn secret_reads_put_a_bare_string_or_null_on_the_wire() {
+        for command in ["secret_store_get", "keyring_secret_get"] {
+            for value in [json!("s3cret"), Value::Null] {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    &value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{command} rejected {value}: {} {}",
+                        error.code, error.details
+                    )
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn chat_submodule_responses_match_their_enforced_output_contracts() {
+        use crate::agents::commands::{AgentReadResult, AgentWriteResult};
+        use crate::claude::commands::SidecarStatus;
+
+        let read_ok = AgentReadResult {
+            path: Some("/home/a/.claude/settings.json".to_string()),
+            exists: true,
+            writable: true,
+            format: "json".to_string(),
+            raw: "{}".to_string(),
+            parsed: json!({ "model": "opus" }),
+            parse_error: None,
+        };
+        // The agent isn't supported on this OS: path is null and raw is empty.
+        let read_absent = AgentReadResult {
+            path: None,
+            exists: false,
+            writable: false,
+            format: "toml".to_string(),
+            raw: String::new(),
+            parsed: Value::Null,
+            parse_error: None,
+        };
+        // The file existed but would not parse — the only shape that carries
+        // `parseError`, which serde omits entirely in the other two.
+        let read_broken = AgentReadResult {
+            path: Some("/home/a/.codex/config.toml".to_string()),
+            exists: true,
+            writable: true,
+            format: "toml".to_string(),
+            raw: "{{{".to_string(),
+            parsed: Value::Null,
+            parse_error: Some("expected a table".to_string()),
+        };
+
+        let cases: Vec<(&str, Value)> = vec![
+            (
+                "claude_sidecar_status",
+                serde_json::to_value(SidecarStatus { ready: true }).unwrap(),
+            ),
+            ("read_agent_config", serde_json::to_value(read_ok).unwrap()),
+            (
+                "read_agent_config",
+                serde_json::to_value(read_absent).unwrap(),
+            ),
+            (
+                "read_agent_config",
+                serde_json::to_value(read_broken).unwrap(),
+            ),
+            (
+                "write_agent_config",
+                serde_json::to_value(AgentWriteResult {
+                    path: "/home/a/.claude/settings.json".to_string(),
+                    backup_path: Some("/home/a/.claude/settings.json.bak".to_string()),
+                })
+                .unwrap(),
+            ),
+            (
+                "write_agent_config",
+                serde_json::to_value(AgentWriteResult {
+                    path: "/home/a/.claude/settings.json".to_string(),
+                    backup_path: None,
+                })
+                .unwrap(),
+            ),
+            // Same arm, same `Ok(Value::Null)`, four command names. The two
+            // aliases were declared LegacyResult while their canonical twins
+            // were already NullResult.
+            ("secret_store_set", Value::Null),
+            ("keyring_secret_set", Value::Null),
+            ("secret_store_delete", Value::Null),
+            ("keyring_secret_clear", Value::Null),
+        ];
+
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .err()
+                .map(|error| format!("{command}: {} {}", error.code, error.details))
+            })
+            .collect();
+
+        assert!(
+            failures.is_empty(),
+            "real chat-submodule responses rejected by the enforced output contract:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn tightened_chat_contracts_still_reject_wrong_shapes() {
+        let rejected: Vec<(&str, Value)> = vec![
+            // AgentReadResult carries no rename_all, so the wire keys are
+            // snake_case. A camelCase payload is a different, wrong shape.
+            (
+                "read_agent_config",
+                json!({
+                    "path": null, "exists": false, "writable": false,
+                    "format": "json", "raw": "", "parsed": null,
+                    "parseError": 42
+                }),
+            ),
+            // `format` is one of exactly three vendor formats.
+            (
+                "read_agent_config",
+                json!({
+                    "path": null, "exists": false, "writable": false,
+                    "format": "yaml", "raw": "", "parsed": null
+                }),
+            ),
+            ("claude_sidecar_status", json!({ "ready": "yes" })),
+            ("write_agent_config", json!({})),
+            // A secret is a string or null — never a wrapper object.
+            ("secret_store_get", json!({ "value": "s3cret" })),
+        ];
+
+        let accepted: Vec<&str> = rejected
+            .iter()
+            .filter(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .is_ok()
+            })
+            .map(|(command, _)| *command)
+            .collect();
+
+        assert!(
+            accepted.is_empty(),
+            "these malformed responses still pass — the schema is not actually tightened: {accepted:?}"
+        );
+    }
+
+    /// `fleet_get_snapshot` was declared `LegacyList` — `{"type":"array"}` —
+    /// while its arm serializes `FleetSnapshot`, a struct, which is always a
+    /// JSON object. Every snapshot request failed enforced output validation,
+    /// so no remote or mobile client could load the Agent Fleet view at all.
+    ///
+    /// The contradiction was already written down beside the arm: the
+    /// `fleet_event_payload` helper immediately above it calls
+    /// `as_object_mut()` and errors with "fleet snapshot must serialize as an
+    /// object". Nothing compared that to the declared response schema.
+    #[test]
+    fn fleet_snapshot_is_an_object_not_an_array() {
+        let snapshot =
+            serde_json::to_value(crate::fleet::registry::FleetRegistry::new().snapshot(0)).unwrap();
+        assert!(
+            snapshot.is_object(),
+            "FleetSnapshot must serialize as an object: {snapshot}"
+        );
+
+        validate_contract_value(
+            "request-a",
+            "fleet_get_snapshot",
+            &snapshot,
+            cognia_headless_contract::ContractDirection::Output,
+            cognia_headless_contract::ContractPlane::Device,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "fleet_get_snapshot rejected a real snapshot: {} {}",
+                error.code, error.details
+            )
+        });
+    }
+
+    #[test]
+    fn diagnostics_submodule_responses_match_their_enforced_output_contracts() {
+        let cases: Vec<(&str, Value)> = vec![
+            // An empty log directory still returns the full envelope.
+            (
+                "logs_query",
+                json!({
+                    "entries": [],
+                    "fileSize": 0,
+                    "scannedBytes": 0,
+                    "truncated": false,
+                    "path": "/var/log/cognia/cognia.jsonl"
+                }),
+            ),
+            // A populated entry, plus one where serde skips epochMs and fields.
+            (
+                "logs_query",
+                json!({
+                    "entries": [
+                        {
+                            "timestamp": "2026-08-15T00:00:00Z",
+                            "epochMs": 1_755_216_000_000i64,
+                            "level": "INFO",
+                            "target": "cognia::companion",
+                            "message": "listening",
+                            "fields": { "port": 8765 }
+                        },
+                        {
+                            "timestamp": "2026-08-15T00:00:01Z",
+                            "level": "WARN",
+                            "target": "cognia::fleet",
+                            "message": "slow"
+                        }
+                    ],
+                    "fileSize": 4096,
+                    "scannedBytes": 4096,
+                    "truncated": true,
+                    "path": "/var/log/cognia/cognia.jsonl"
+                }),
+            ),
+            ("logs_list_files", json!([])),
+            (
+                "logs_list_files",
+                json!([
+                    { "name": "cognia.jsonl", "size": 10, "modifiedMs": 1 },
+                    { "name": "cognia.log", "size": 0 }
+                ]),
+            ),
+            (
+                "fleet_worker_enrollment_create",
+                json!({
+                    "enrollment": "enroll-a",
+                    "expiresAtMs": 1_755_216_600_000i64,
+                    "baseUrl": "https://worker.example",
+                    "fingerprint": "sha256:abc",
+                    "tenantId": "tenant-a"
+                }),
+            ),
+            ("fleet_worker_list", json!([])),
+            // serde(flatten): DeviceSummary's fields sit BESIDE hostRef, not
+            // nested under a `device` key.
+            (
+                "fleet_worker_list",
+                json!([{
+                    "deviceId": "device-a",
+                    "displayName": "Worker A",
+                    "role": "worker",
+                    "status": "active",
+                    "createdAt": 1,
+                    "updatedAt": 2,
+                    "capabilities": ["agent.worker"],
+                    "hostRef": "host-a"
+                }]),
+            ),
+            // Every one of these arms returns a bare bool.
+            ("fleet_permission_respond", json!(true)),
+            ("fleet_question_respond", json!(false)),
+            ("fleet_question_reject", json!(true)),
+            // Result<String, _>.
+            ("fleet_opencode_send_message", json!("message-a")),
+            // `.map(|()| Value::Null)` — provably null, but spelled differently
+            // from the `Ok(Value::Null)` the other null arms use.
+            ("fleet_focus_terminal", Value::Null),
+            ("fleet_interrupt_session", Value::Null),
+            // kind=entry carries jti+expiresAt; kind=surface carries neither.
+            (
+                "lark_entry_issue",
+                json!({ "token": "t", "jti": "j", "expiresAt": 1_000 }),
+            ),
+            ("lark_entry_issue", json!({ "token": "t" })),
+            ("lark_result_complete", json!({ "accepted": true })),
+            ("lark_metrics_record", json!({ "ok": true })),
+        ];
+
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .err()
+                .map(|error| format!("{command}: {} {}", error.code, error.details))
+            })
+            .collect();
+
+        assert!(
+            failures.is_empty(),
+            "real diagnostics responses rejected by the enforced output contract:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn tightened_diagnostics_contracts_still_reject_wrong_shapes() {
+        let rejected: Vec<(&str, Value)> = vec![
+            // The bug this batch fixed, asserted from the other direction.
+            ("fleet_get_snapshot", json!([])),
+            ("logs_query", json!([])),
+            // `entries` is required even when empty.
+            (
+                "logs_query",
+                json!({ "fileSize": 0, "scannedBytes": 0, "truncated": false, "path": "/p" }),
+            ),
+            // The pre-flatten shape, which would nest the device fields.
+            (
+                "fleet_worker_list",
+                json!([{ "device": { "deviceId": "device-a" }, "hostRef": "host-a" }]),
+            ),
+            ("fleet_permission_respond", json!("true")),
+            ("fleet_opencode_send_message", json!({ "id": "message-a" })),
+            // `ok` is literal true — a false here would mean the arm returned
+            // success for an unknown metric, which it never does.
+            ("lark_metrics_record", json!({ "ok": false })),
+            ("lark_entry_issue", json!({ "jti": "j" })),
+        ];
+
+        let accepted: Vec<&str> = rejected
+            .iter()
+            .filter(|(command, value)| {
+                validate_contract_value(
+                    "request-a",
+                    command,
+                    value,
+                    cognia_headless_contract::ContractDirection::Output,
+                    cognia_headless_contract::ContractPlane::Device,
+                )
+                .is_ok()
+            })
+            .map(|(command, _)| *command)
+            .collect();
+
+        assert!(
+            accepted.is_empty(),
+            "these malformed responses still pass — the schema is not actually tightened: {accepted:?}"
+        );
     }
 
     #[test]

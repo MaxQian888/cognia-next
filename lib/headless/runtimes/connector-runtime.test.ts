@@ -110,6 +110,7 @@ describe("connector-runtime (headless)", () => {
     expect(mockCall).toHaveBeenCalledWith("connectors_runtime_lease_acquire", {
       ownerId: expect.any(String),
       ttlMs: 15_000,
+      handoffAware: true,
     })
 
     controller.abort()

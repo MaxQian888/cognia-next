@@ -15,7 +15,7 @@
  * a pushed event.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen } from "@/lib/connectors/events"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
@@ -119,10 +119,10 @@ export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTranspor
     handleId = id
     attempts = 0
     failedConnects = 0
-    unlistenMessage = await listen<string>(`connectors://ws/${id}/message`, (e) =>
+    unlistenMessage = await connectorListen<string>(`connectors://ws/${id}/message`, (e) =>
       routeFrame(e.payload)
     )
-    unlistenClose = await listen<void>(`connectors://ws/${id}/close`, () => {
+    unlistenClose = await connectorListen<void>(`connectors://ws/${id}/close`, () => {
       handleId = null
       handlers?.onClose()
       void scheduleReconnect()

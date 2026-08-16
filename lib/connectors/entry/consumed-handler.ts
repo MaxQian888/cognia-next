@@ -30,13 +30,13 @@
 import { buildConversationKey } from "@/types/connectors/event"
 import { transport } from "@/lib/tauri"
 import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
-import { markEntryContextConsumed } from "@/lib/db/lark-entry"
+import { markEntryContextConsumed, touchWebSession } from "@/lib/db/lark-entry"
 import { appendAudit } from "@/lib/connectors/audit"
 import { larkTenantRequest, type LarkCredentials } from "@/lib/connectors/adapters/lark/http"
 import { importLarkMessages } from "@/lib/connectors/adapters/lark/message-import"
 import { handlePlusCreate } from "@/lib/connectors/adapters/lark/plus-create"
 import { runPrincipalAdminIntent } from "@/lib/connectors/principal/admin-intent"
-import { resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
+import { hashOpenId, resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 
 export const LARK_INTENT_TOPIC = "connectors://lark-intent"
@@ -55,12 +55,22 @@ export interface LarkIntentFrame {
   messageIds?: string[]
   triggerId?: string
   verifiedIdentity?: { openId?: string; tenantKey?: string; appId?: string }
+  /**
+   * Ledger projection of the web session that authorized this intent —
+   * `idHash` is a SHA-256 prefix of the session jti, never the jti itself.
+   * Absent on `entry_consumed` (no session involved) and on frames from a
+   * companion older than the ledger wiring, which is why every consumer
+   * treats it as optional rather than malformed.
+   */
+  session?: { idHash?: string; issuedAt?: number; expiresAt?: number }
   /** `principal_admin` only. */
   op?: string
   code?: string
   principalId?: string
   status?: string
   cogniaUserId?: string
+  /** `principal_admin` / `oauth-begin` only. */
+  redirectUri?: string
 }
 
 export interface LarkIntentDependencies {
@@ -68,6 +78,8 @@ export interface LarkIntentDependencies {
   keyringGet: (adapterId: string, credential: string) => Promise<string | null>
   tenantRequest: typeof larkTenantRequest
   markConsumed: typeof markEntryContextConsumed
+  touchSession: typeof touchWebSession
+  hashIdentity: typeof hashOpenId
   audit: typeof appendAudit
   importMessages: typeof importLarkMessages
   plusCreate: typeof handlePlusCreate
@@ -124,6 +136,42 @@ export async function isChatMember(
   return false
 }
 
+/**
+ * Record a sighting of the web session that authorized this intent.
+ *
+ * Enforcement stays in the companion (HMAC + TTL); this is the durable ops
+ * view — which identities hold a live session, on which tenant, and when they
+ * were last seen — and it is the only place that information is queryable
+ * after the fact, since the companion keeps sessions stateless by design.
+ *
+ * Best-effort on purpose: an intent must never fail because its audit row
+ * could not be written. A companion that does not send `session` (older
+ * build, or `entry_consumed`, which carries none) simply records nothing.
+ */
+async function recordSessionSighting(
+  frame: LarkIntentFrame,
+  deps: LarkIntentDependencies,
+  principalId?: string
+): Promise<void> {
+  const idHash = frame.session?.idHash
+  const openId = frame.verifiedIdentity?.openId
+  if (!idHash || !openId || !frame.adapterId) return
+  try {
+    await deps.touchSession({
+      jtiHash: idHash,
+      adapterId: frame.adapterId,
+      openIdHash: await deps.hashIdentity(openId),
+      tenantKey: frame.verifiedIdentity?.tenantKey ?? "",
+      appId: frame.verifiedIdentity?.appId ?? "",
+      principalId,
+      issuedAt: frame.session?.issuedAt ?? Date.now(),
+      expiresAt: frame.session?.expiresAt ?? Date.now(),
+    })
+  } catch {
+    // Ledger write failures are not the intent's problem.
+  }
+}
+
 /** Handle one intent frame. Exported for tests. */
 export async function handleLarkIntentFrame(
   frame: LarkIntentFrame,
@@ -168,6 +216,13 @@ export async function handleLarkIntentFrame(
           appId: frame.verifiedIdentity?.appId,
         },
       })
+      // Sighting BEFORE the outcome branch: a denied open is exactly the
+      // event an operator goes to the ledger to explain.
+      await recordSessionSighting(
+        frame,
+        deps,
+        resolution.status === "resolved" ? resolution.principal.id : undefined
+      )
       if (resolution.status !== "resolved" && resolution.status !== "legacy") {
         await deps
           .audit({
@@ -227,6 +282,7 @@ export async function handleLarkIntentFrame(
         principalId: frame.principalId,
         status: frame.status,
         cogniaUserId: frame.cogniaUserId,
+        redirectUri: frame.redirectUri,
       })
       await deps.call(
         "lark_result_complete",
@@ -261,6 +317,10 @@ export async function handleLarkIntentFrame(
         fields: { tenantKey: verifiedIdentity.tenantKey, intent: frame.kind },
       })
       .catch(() => undefined)
+    // The principal is resolved inside importMessages / plusCreate, so the
+    // row lands without one; `touchWebSession` preserves whatever a later
+    // resolve_surface sighting attaches.
+    await recordSessionSighting(frame, deps)
     const isMember = (memberAdapterId: string, chatId: string, memberOpenId: string) =>
       isChatMember(deps, memberAdapterId, chatId, memberOpenId)
     try {
@@ -335,6 +395,8 @@ export function installLarkIntentHandler(
     keyringGet: connectorsKeyringGet,
     tenantRequest: larkTenantRequest,
     markConsumed: markEntryContextConsumed,
+    touchSession: touchWebSession,
+    hashIdentity: hashOpenId,
     audit: appendAudit,
     importMessages: importLarkMessages,
     plusCreate: handlePlusCreate,

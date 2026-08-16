@@ -297,21 +297,17 @@ describe("openMcpClient", () => {
     const guardedFetch = jest.fn()
     const closeGuard = jest.fn(async () => undefined)
     const createEgressGuard = jest.fn(async () => ({ fetch: guardedFetch, close: closeGuard }))
-    const opened = await openMcpClient(
-      srv("http", { url: "https://rebinding.example/mcp" }),
-      {},
-      {
-        load: async () => ({
-          Client: class {
-            constructor() {
-              return client as never
-            }
-          } as never,
-          ctors,
-        }),
-        createEgressGuard,
-      } as never
-    )
+    const opened = await openMcpClient(srv("http", { url: "https://rebinding.example/mcp" }), {}, {
+      load: async () => ({
+        Client: class {
+          constructor() {
+            return client as never
+          }
+        } as never,
+        ctors,
+      }),
+      createEgressGuard,
+    } as never)
 
     expect(createEgressGuard).toHaveBeenCalledWith(false)
     expect(calls[0].args[1]).toEqual(expect.objectContaining({ fetch: guardedFetch }))

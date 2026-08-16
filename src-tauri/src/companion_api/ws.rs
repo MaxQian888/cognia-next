@@ -6,8 +6,11 @@
 //!    the loopback headless brain uses `/internal/events?token=<service-jwt>`.
 //! 2. If `since` is too old, the server sends `{"type":"resync_required"}` and
 //!    closes the connection immediately.
-//! 3. Any buffered frames with `seq > since` are replayed in order.
-//! 4. New frames are forwarded as JSON text frames as they arrive.
+//! 3. Any buffered frames with `seq > since` are replayed in order (grouped
+//!    into same-channel `event_batch` envelopes — see `event_batcher`).
+//! 4. New frames are forwarded as JSON text frames as they arrive. Consecutive
+//!    same-channel frames inside a 50 ms window travel as one `event_batch`
+//!    frame (ADR-0127 §2); a lone frame keeps its plain shape.
 //! 5. A `{"type":"ping"}` heartbeat is sent every 25 seconds.
 //! 6. The server closes the connection if no frame is received from the client
 //!    within 90 seconds (idle timeout).
@@ -25,7 +28,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::time::{interval, Duration, Instant};
 
-use super::{event_bus::SubscribeResult, SharedState};
+use super::{
+    event_batcher::{chunk_replay, encode_ws_batch, EventBatcher},
+    event_bus::{EventFrame, SubscribeResult},
+    event_channels::{ConnectionScope, EventSubscription, SubscribeRequest},
+    SharedState,
+};
 
 // ---------------------------------------------------------------------------
 // Timing constants
@@ -96,6 +104,7 @@ pub async fn ws_handler(
         params.since,
         Some(identity.tenant_id),
         identity.device_id,
+        ConnectionScope::Device,
         state,
     )
 }
@@ -139,6 +148,7 @@ pub async fn internal_ws_handler(
         params.since,
         Some(context.account_id),
         context.device_id,
+        ConnectionScope::from_claim(&context.scope),
         state,
     )
 }
@@ -148,6 +158,7 @@ fn upgrade_events_ws(
     since: Option<u64>,
     tenant_id: Option<String>,
     device_id: String,
+    scope: ConnectionScope,
     state: SharedState,
 ) -> Response {
     // Bound inbound frame allocation (DoS guard). The events channel only ever
@@ -157,7 +168,7 @@ fn upgrade_events_ws(
     const MAX_WS_FRAME_BYTES: usize = 64 * 1024;
     ws.max_message_size(MAX_WS_FRAME_BYTES)
         .max_frame_size(MAX_WS_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_socket(socket, since, tenant_id, device_id, state))
+        .on_upgrade(move |socket| handle_socket(socket, since, tenant_id, device_id, scope, state))
 }
 
 // ---------------------------------------------------------------------------
@@ -170,8 +181,15 @@ async fn handle_socket(
     since: Option<u64>,
     tenant_id: Option<String>,
     device_id: String,
+    scope: ConnectionScope,
     state: SharedState,
 ) {
+    // Channels this connection receives. Starts at the catalog's `default_on`
+    // set — i.e. exactly what reached clients before subscriptions existed, so
+    // a client that never sends a `subscribe` frame sees no change — and is
+    // widened or narrowed by `subscribe` frames from here on.
+    let mut subscription = EventSubscription::defaults_for(scope);
+
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -211,20 +229,18 @@ async fn handle_socket(
         device_id: device_id.clone(),
     };
 
-    // 2. Send replay frames.
-    for frame in replay {
-        if !frame.visible_to(&device_id) || !frame_visible_to_tenant(&frame, tenant_id.as_deref()) {
-            continue;
-        }
-        match serde_json::to_string(&frame) {
-            Ok(text) => {
-                if socket.send(Message::Text(text.into())).await.is_err() {
-                    return;
-                }
-            }
-            Err(e) => {
-                log::warn!("companion-api ws: failed to serialize replay frame: {e}");
-            }
+    // 2. Send replay frames, grouped into same-channel batches.
+    let visible_replay: Vec<EventFrame> = replay
+        .into_iter()
+        .filter(|frame| {
+            frame.visible_to(&device_id)
+                && frame_visible_to_tenant(frame, tenant_id.as_deref())
+                && subscription.allows(&frame.event_type)
+        })
+        .collect();
+    for batch in chunk_replay(visible_replay) {
+        if !send_ws_batch(&mut socket, &batch, "replay").await {
+            return;
         }
     }
 
@@ -245,9 +261,20 @@ async fn handle_socket(
     let mut hb_ticker = interval(heartbeat_interval);
     hb_ticker.tick().await; // consume the immediate first tick
     let mut last_client_activity = Instant::now();
+    // ADR-0127 §2: per-subscriber batching lives here, in the send loop.
+    let mut batcher = EventBatcher::new();
 
     loop {
         tokio::select! {
+            // Batch window expired — flush what accumulated.
+            _ = batch_window(batcher.deadline()) => {
+                if let Some(batch) = batcher.take_due(Instant::now()) {
+                    if !send_ws_batch(&mut socket, &batch, "live").await {
+                        return;
+                    }
+                }
+            }
+
             // New live frame from the bus.
             result = receiver.recv() => {
                 match result {
@@ -273,19 +300,27 @@ async fn handle_socket(
                             // never part of another device's event stream.
                             continue;
                         }
-                        match serde_json::to_string(&frame) {
-                            Ok(text) => {
-                                if socket.send(Message::Text(text.into())).await.is_err() {
-                                    return;
-                                }
-                            }
-                            Err(e) => {
-                                log::warn!("companion-api ws: failed to serialize live frame: {e}");
+                        // Deliberately after the revocation branch: that channel
+                        // is not in the catalog because it is never *delivered*
+                        // — it closes the socket. Filtering first would drop the
+                        // frame before it could do its job.
+                        if !subscription.allows(&frame.event_type) {
+                            continue;
+                        }
+                        for batch in batcher.push(frame, Instant::now()) {
+                            if !send_ws_batch(&mut socket, &batch, "live").await {
+                                return;
                             }
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         log::warn!("companion-api ws: subscriber lagged by {n} frames; closing");
+                        // Frames already pulled off the bus and batched are not
+                        // lost with the socket — deliver them, then let the client
+                        // resync from a later cursor.
+                        if let Some(batch) = batcher.drain() {
+                            let _ = send_ws_batch(&mut socket, &batch, "live").await;
+                        }
                         return;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -300,9 +335,23 @@ async fn handle_socket(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         last_client_activity = Instant::now();
-                        // Accept pong responses (or any text) to reset the idle timer.
-                        // We don't need to act on the content beyond updating the timer.
-                        let _ = text; // suppress unused-variable warning
+                        // The only inbound frame with meaning is `subscribe`;
+                        // anything else (pongs, keep-alives) just resets the
+                        // idle timer above.
+                        if let Some(reply) =
+                            apply_subscribe_frame(&text, &mut subscription)
+                        {
+                            // Control frames flush pending batches first so the
+                            // stream the client sees stays ordered.
+                            if let Some(batch) = batcher.drain() {
+                                if !send_ws_batch(&mut socket, &batch, "live").await {
+                                    return;
+                                }
+                            }
+                            if socket.send(Message::Text(reply.into())).await.is_err() {
+                                return;
+                            }
+                        }
                     }
                     Some(Ok(Message::Ping(data))) => {
                         last_client_activity = Instant::now();
@@ -335,6 +384,11 @@ async fn handle_socket(
                     return;
                 }
 
+                if let Some(batch) = batcher.drain() {
+                    if !send_ws_batch(&mut socket, &batch, "live").await {
+                        return;
+                    }
+                }
                 let ping = serde_json::to_string(&json!({ "type": "ping" }))
                     .unwrap_or_else(|_| r#"{"type":"ping"}"#.to_owned());
                 if socket.send(Message::Text(ping.into())).await.is_err() {
@@ -343,6 +397,63 @@ async fn handle_socket(
             }
         }
     }
+}
+
+/// Sleep until the batch window closes; pends forever while the batcher is
+/// idle so the `select!` arm never fires spuriously.
+async fn batch_window(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// Encode + send one batch (a lone frame keeps its plain shape). Returns
+/// `false` when the socket is gone and the handler must return.
+async fn send_ws_batch(socket: &mut WebSocket, batch: &[EventFrame], phase: &str) -> bool {
+    match encode_ws_batch(batch) {
+        Ok(text) => socket.send(Message::Text(text.into())).await.is_ok(),
+        Err(e) => {
+            log::warn!("companion-api ws: failed to serialize {phase} frame(s): {e}");
+            true
+        }
+    }
+}
+
+/// Interpret one inbound text frame as a `subscribe` control frame.
+///
+/// Returns the reply to send, or `None` when the frame is not a subscription
+/// request (a pong, a keep-alive, anything else the client sends).
+///
+/// A malformed `subscribe` frame is answered rather than ignored. Silence here
+/// would leave the client believing it had widened its stream while the host
+/// kept sending the default set — the same "success, then nothing" failure the
+/// subscription exists to remove.
+fn apply_subscribe_frame(text: &str, subscription: &mut EventSubscription) -> Option<String> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("subscribe") {
+        return None;
+    }
+
+    let reply = match serde_json::from_value::<SubscribeRequest>(value) {
+        Ok(request) => {
+            let outcome = subscription.apply(&request);
+            json!({
+                "type": "subscribed",
+                "channels": outcome.channels,
+                "rejected": outcome.rejected,
+            })
+        }
+        Err(error) => json!({
+            "type": "subscribe_error",
+            "message": error.to_string(),
+            "channels": subscription.channels(),
+        }),
+    };
+
+    Some(serde_json::to_string(&reply).unwrap_or_else(|_| {
+        r#"{"type":"subscribe_error","message":"reply encode failed"}"#.to_owned()
+    }))
 }
 
 fn stream_ready_text(cursor: u64) -> String {

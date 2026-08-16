@@ -41,11 +41,13 @@ import {
   type RebindFeishuPrincipalPatch,
 } from "@/lib/db/feishu-principals"
 import { getActiveRuntimeAccountId, hashOpenId } from "./resolve"
+import { revokeWebSessionsForPrincipal } from "@/lib/db/lark-entry"
 
 export interface PrincipalAdminDependencies {
   audit: typeof appendAudit
   now: () => number
   activeAccountId: () => string
+  revokeSessions: typeof revokeWebSessionsForPrincipal
 }
 
 function withDefaults(
@@ -55,6 +57,7 @@ function withDefaults(
     audit: appendAudit,
     now: Date.now,
     activeAccountId: getActiveRuntimeAccountId,
+    revokeSessions: revokeWebSessionsForPrincipal,
     ...overrides,
   }
 }
@@ -304,6 +307,11 @@ export async function setFeishuPrincipalEnabled(
   }
   if (current.status === input.status) return current
   await setFeishuPrincipalStatus(input.principalId, input.status, now)
+  // Leaving `active` is what actually cuts this person off — every entry
+  // intent re-resolves the principal and fails closed. Stamp their session
+  // ledger rows so the ops view stops showing them as live.
+  const revokedSessions =
+    input.status === "active" ? 0 : await deps.revokeSessions(input.principalId, now).catch(() => 0)
   await deps.audit({
     adapterId: input.adapterId,
     kind: "principal.status_changed",
@@ -316,6 +324,7 @@ export async function setFeishuPrincipalEnabled(
       openIdHash: await hashOpenId(current.openId),
       from: current.status,
       to: input.status,
+      revokedSessions,
     },
   })
   return { ...current, status: input.status, updatedAt: now, version: current.version + 1 }

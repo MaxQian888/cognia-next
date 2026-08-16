@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { createHash } from "node:crypto"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -15,6 +15,8 @@ const PUBLIC_SPEC_PATH = "docs/api/mobile-companion-api.openapi.yaml"
 const HEADLESS_SPEC_PATH = "docs/api/headless-service-api.openapi.yaml"
 const HEADLESS_ASYNCAPI_SPEC_PATH = "docs/api/headless-service-api.asyncapi.yaml"
 const HOST_COMMAND_CATALOG_PATH = "crates/cognia-cli/assets/host-command-catalog.json"
+const DEVICE_PLANE_OVERRIDES_PATH =
+  "crates/cognia-headless-contract/assets/device-plane-overrides.json"
 const HEADLESS_CONTRACT_IDENTITY_PATH = "cli/src/serve/headless-contract-identity.ts"
 const BRIDGE_FIXTURE_PATH = "cli/src/serve/fixtures/bridge-frames.json"
 const BRIDGE_PROTOCOL_VERSION = 3
@@ -71,13 +73,35 @@ const headlessDispositionsSchema = z.object({
     z.object({
       disposition: z.enum([
         "local-only",
+        // Client-owned but still remotely dispatchable: the command is
+        // implemented by the Node brain and reaches it through the bridge arm
+        // in rpc/data_sync.rs, so it IS in KNOWN_COMMANDS. These were filed
+        // under `local-only`, whose reason reads "depends on renderer / local
+        // window / desktop state / hardware / OS-local gesture" — plainly
+        // untrue of `sync_pull`, `message_send` and `session_list`, the core
+        // mobile data plane. Same exclusion from a native Headless
+        // implementation, opposite reason, and the label now says which.
+        "brain-owned-bridged",
         "covered-by-headless",
         "runtime-internal",
         "separate-design-required",
+        // Triaged and found to have NO local dependency and NO covering
+        // surface. The audit's rule was that an unreasoned absence counts as a
+        // defect; this is the label for one, so the ledger records a known gap
+        // instead of implying a decision nobody made. Entries here are
+        // candidates for exposure, not settled exclusions, and each one names
+        // the sibling command that establishes the pattern it would follow.
+        "unexposed-gap",
         "in-progress",
       ]),
       reason: z.string().min(1),
       commands: z.array(z.string().min(1)),
+      /**
+       * Per-command reasons. The group `reason` is one sentence covering as
+       * many as 510 commands, which cannot be falsified for any single one;
+       * an entry here says why THIS command is excluded.
+       */
+      commandReasons: z.record(z.string(), z.string().min(1)).optional(),
     })
   ),
 })
@@ -93,8 +117,16 @@ function flattenHeadlessDispositions(catalog, manifest) {
       }
       dispositions.set(name, {
         disposition: group.disposition,
-        reason: group.reason,
+        reason: group.commandReasons?.[name] ?? group.reason,
+        specificReason: group.commandReasons?.[name] !== undefined,
       })
+    }
+    for (const name of Object.keys(group.commandReasons ?? {})) {
+      if (!group.commands.includes(name)) {
+        errors.push(
+          `Headless disposition reason for a command not in its group: ${group.disposition}.${name}`
+        )
+      }
     }
   }
   const byName = new Map(manifest.commands.map((command) => [command.name, command]))
@@ -157,6 +189,115 @@ export function validateCommandCoverage(manifest, dispatchNames) {
 
 function clone(value) {
   return structuredClone(value)
+}
+
+/**
+ * Every `<command> → [primary, alias]` pair declared by a `*_aliased` read.
+ *
+ * The dispatch arms accept two spellings for a field on purpose: the headless
+ * brain's acp-client sends the desktop Tauri arg shape (camelCase), while the
+ * arms parse snake_case (see `required_aliased`'s doc comment in rpc.rs).
+ * The request schemas never learned about that, so they declared one spelling
+ * and — under `additionalProperties: false` — rejected the other outright.
+ *
+ * @param {string} source one dispatch submodule's Rust text
+ * @returns {Map<string, Array<[string, string, boolean]>>} name → [primary, alias, required]
+ */
+export function extractCommandArgumentAliases(source) {
+  const dispatchStart = source.indexOf("pub(super) async fn dispatch(")
+  if (dispatchStart < 0) return new Map()
+  const matchStart = source.indexOf("match name {", dispatchStart)
+  if (matchStart < 0) return new Map()
+  const lines = source.slice(matchStart).split(/\r?\n/)
+  const aliases = new Map()
+  let current = null
+
+  const finish = () => {
+    if (!current) return
+    const body = current.body.join("\n")
+    const found = [
+      ...body.matchAll(
+        /\b(required_aliased|optional_aliased)\s*(?:::<[^>]*>)?\s*\(\s*&args\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"/g
+      ),
+    ].map(([, helper, primary, alias]) => [primary, alias, helper.startsWith("required")])
+    if (found.length > 0) for (const name of current.names) aliases.set(name, found)
+    current = null
+  }
+
+  for (const line of lines.slice(1)) {
+    const isArmStart = /^ {8}"[a-z][a-z0-9_]*"/.test(line)
+    const isContinuation = /^ {8}\| "[a-z][a-z0-9_]*"/.test(line)
+    if (/^ {8}_\s*=>/.test(line)) {
+      finish()
+      break
+    }
+    const namesOn = (text) => {
+      const arrow = text.indexOf("=>")
+      const pattern = arrow >= 0 ? text.slice(0, arrow) : text
+      return [...pattern.matchAll(/"([a-z][a-z0-9_]*)"/g)].map((m) => m[1])
+    }
+    if (isArmStart && (!current || current.hasArrow)) {
+      finish()
+      current = { names: namesOn(line), hasArrow: line.includes("=>"), body: [line] }
+      continue
+    }
+    if (current && !current.hasArrow) {
+      if (isArmStart || isContinuation) current.names.push(...namesOn(line))
+      current.hasArrow ||= line.includes("=>")
+      current.body.push(line)
+      continue
+    }
+    if (current) current.body.push(line)
+  }
+  finish()
+  return aliases
+}
+
+/**
+ * Widen a request schema so it accepts every spelling its dispatch arm does.
+ *
+ * Without this the enforced contract is stricter than the code it fronts, and
+ * `additionalProperties: false` turns the difference into a hard 422 before
+ * dispatch runs — which is what made `claude_send`, `claude_approve` and the
+ * whole `git_*` family unreachable from every companion transport.
+ *
+ * A required aliased field becomes an `anyOf` over the two spellings rather
+ * than a plain `required` entry, mirroring `required_aliased`'s
+ * "primary or alias" semantics exactly.
+ *
+ * @param {unknown} schema
+ * @param {Array<[string, string, boolean]>} pairs
+ * @returns {unknown}
+ */
+export function applyArgumentAliases(schema, pairs) {
+  if (!pairs?.length || !schema || typeof schema !== "object") return schema
+  const next = clone(schema)
+  if (next.properties === undefined) return next
+  next.properties = { ...next.properties }
+  const required = new Set(next.required ?? [])
+  const eitherOf = []
+
+  for (const [primary, alias, isRequired] of pairs) {
+    const known = next.properties[primary] ?? next.properties[alias]
+    // Only widen fields the schema already models. Inventing a property the
+    // author never described would paper over a genuine truncation.
+    if (known === undefined) continue
+    next.properties[primary] ??= clone(known)
+    next.properties[alias] ??= clone(known)
+    const wasRequired = isRequired || required.has(primary) || required.has(alias)
+    required.delete(primary)
+    required.delete(alias)
+    if (wasRequired) {
+      eitherOf.push({ anyOf: [{ required: [primary] }, { required: [alias] }] })
+    }
+  }
+
+  if (required.size > 0) next.required = [...required].sort()
+  else delete next.required
+  if (eitherOf.length > 0) {
+    next.allOf = [...(next.allOf ?? []), ...eitherOf]
+  }
+  return next
 }
 
 function rewriteRemoteGitRequestSchema(name, schema, descriptor) {
@@ -506,6 +647,62 @@ export function buildHostCommandCatalog(manifest, remoteNames, headlessSpec) {
 
 function renderHostCommandCatalog(catalog) {
   return `${JSON.stringify(catalog, null, 2)}\n`
+}
+
+/**
+ * Commands whose request shape differs by PLANE, with the device-plane schema.
+ *
+ * `prepare_remote_args` (rpc/source_control.rs:62) passes service-scope args
+ * through untouched but rewrites device-scope args from workspace-relative
+ * coordinates into real paths. So `/internal/_rpc/git_clone` legitimately
+ * takes `destination` while `/api/_rpc/git_clone` legitimately takes
+ * `workspaceId` + `destinationRelativePath` — two correct shapes, one command.
+ *
+ * The generator has always known this (it builds the two specs from different
+ * schema maps), but only ONE catalog was emitted, and the runtime validated
+ * every request against it regardless of scope. Device requests were therefore
+ * checked against the service shape and rejected 422 before dispatch: 63 of 64
+ * `git_*` commands were unreachable from every companion transport.
+ *
+ * Emitting the divergence as its own artifact makes the fork reviewable
+ * instead of implicit, and lets the runtime pick the right plane.
+ *
+ * @param {object} publicSpec
+ * @param {object} headlessSpec
+ * @returns {object}
+ */
+export function buildDevicePlaneOverrides(publicSpec, headlessSpec) {
+  const commands = {}
+  for (const [path, item] of Object.entries(publicSpec.paths ?? {})) {
+    const name = path.startsWith("/api/_rpc/") ? path.slice("/api/_rpc/".length) : null
+    if (!name) continue
+    const devicePost = item.post
+    const servicePost = headlessSpec.paths?.[`/internal/_rpc/${name}`]?.post
+    if (!devicePost || !servicePost) continue
+    const deviceSchema = devicePost.requestBody?.content?.["application/json"]?.schema
+    const serviceSchema = servicePost.requestBody?.content?.["application/json"]?.schema
+    if (deviceSchema === undefined || serviceSchema === undefined) continue
+    if (JSON.stringify(deviceSchema) === JSON.stringify(serviceSchema)) continue
+    commands[name] = {
+      inputSchemaSource: devicePost["x-cognia-request-schema-source"] ?? null,
+      inputSchema: deviceSchema,
+    }
+  }
+  return {
+    schemaVersion: 1,
+    note:
+      "Device-plane (/api/_rpc) request schemas for commands whose shape differs " +
+      "from the service plane (/internal/_rpc). Generated by " +
+      "scripts/build/gen-companion-api.mjs — do not edit. The runtime selects by " +
+      "request scope; see validate_contract_value in companion_api/remote_execution.rs.",
+    commands: Object.fromEntries(
+      Object.entries(commands).sort(([left], [right]) => left.localeCompare(right))
+    ),
+  }
+}
+
+function renderDevicePlaneOverrides(overrides) {
+  return `${JSON.stringify(overrides, null, 2)}\n`
 }
 
 function renderHeadlessContractIdentity(catalog) {
@@ -2531,6 +2728,9 @@ function buildHeadlessAsyncApi(contract, catalog) {
           streamReady: { $ref: "#/components/messages/StreamReadyFrame" },
           resyncRequired: { $ref: "#/components/messages/ResyncRequiredFrame" },
           ping: { $ref: "#/components/messages/EventPingFrame" },
+          subscribe: { $ref: "#/components/messages/SubscribeFrame" },
+          subscribed: { $ref: "#/components/messages/SubscribedFrame" },
+          subscribeError: { $ref: "#/components/messages/SubscribeErrorFrame" },
         },
       },
       headlessBridge: {
@@ -2555,7 +2755,14 @@ function buildHeadlessAsyncApi(contract, catalog) {
           { $ref: "#/channels/headlessEvents/messages/streamReady" },
           { $ref: "#/channels/headlessEvents/messages/resyncRequired" },
           { $ref: "#/channels/headlessEvents/messages/ping" },
+          { $ref: "#/channels/headlessEvents/messages/subscribed" },
+          { $ref: "#/channels/headlessEvents/messages/subscribeError" },
         ],
+      },
+      sendHeadlessEventControl: {
+        action: "send",
+        channel: { $ref: "#/channels/headlessEvents" },
+        messages: [{ $ref: "#/channels/headlessEvents/messages/subscribe" }],
       },
       sendBridgeFrames: {
         action: "send",
@@ -2619,6 +2826,53 @@ function buildHeadlessAsyncApi(contract, catalog) {
           properties: {
             type: { type: "string", const: "ping" },
             ts: { type: "integer", format: "int64" },
+          },
+        }),
+        // Client → server. The brain starts on the catalog's default channel
+        // set and names the extra channels it wants; see
+        // `src-tauri/src/companion_api/event_channels.rs` for the catalog and
+        // which entries a service-scope connection may take.
+        SubscribeFrame: message("SubscribeFrame", {
+          type: "object",
+          required: ["type", "channels"],
+          additionalProperties: false,
+          properties: {
+            type: { type: "string", const: "subscribe" },
+            mode: { type: "string", enum: ["replace", "add", "remove"], default: "replace" },
+            channels: { type: "array", items: { type: "string" } },
+          },
+        }),
+        SubscribedFrame: message("SubscribedFrame", {
+          type: "object",
+          required: ["type", "channels", "rejected"],
+          additionalProperties: false,
+          properties: {
+            type: { type: "string", const: "subscribed" },
+            channels: { type: "array", items: { type: "string" } },
+            // Refusals are named, never silently dropped: a client that asked
+            // for a channel it cannot have must not be left waiting on it.
+            rejected: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["channel", "reason"],
+                additionalProperties: false,
+                properties: {
+                  channel: { type: "string" },
+                  reason: { type: "string", enum: ["unknown_channel", "scope_forbidden"] },
+                },
+              },
+            },
+          },
+        }),
+        SubscribeErrorFrame: message("SubscribeErrorFrame", {
+          type: "object",
+          required: ["type", "message", "channels"],
+          additionalProperties: false,
+          properties: {
+            type: { type: "string", const: "subscribe_error" },
+            message: { type: "string" },
+            channels: { type: "array", items: { type: "string" } },
           },
         }),
         BridgeHelloFrame: message("BridgeHelloFrame", {
@@ -2755,6 +3009,12 @@ export function inspectCommittedContract() {
   } catch {
     // The first generator run creates the embedded CLI catalog.
   }
+  let devicePlaneOverridesSource = ""
+  try {
+    devicePlaneOverridesSource = readRepo(DEVICE_PLANE_OVERRIDES_PATH)
+  } catch {
+    // The first generator run creates the device-plane override catalog.
+  }
   let headlessContractIdentitySource = ""
   try {
     headlessContractIdentitySource = readRepo(HEADLESS_CONTRACT_IDENTITY_PATH)
@@ -2782,24 +3042,37 @@ export function inspectCommittedContract() {
       additionalProperties: false,
     })
   }
+  // What each arm actually accepts. Applied LAST to every schema regardless of
+  // provenance (inferred, hand-written contract, or Zod), because the arm is
+  // the thing the request really meets at runtime — a hand-written schema that
+  // knows only one spelling is not more authoritative than the code, it is
+  // just wrong in a way `additionalProperties: false` turns into a 422.
+  const argumentAliases = new Map(
+    RPC_DISPATCH_SOURCE_PATHS.flatMap((sourcePath) => [
+      ...extractCommandArgumentAliases(readRepo(sourcePath)),
+    ])
+  )
+  const withAliases = (name, schema) =>
+    applyArgumentAliases(schema, argumentAliases.get(name) ?? [])
+
   const argumentSchemas = new Map(
     [...inferredArgumentSchemas].map(([name, schema]) => [
       name,
       {
         source: "runtime-inferred",
-        schema: rewriteRemoteGitRequestSchema(name, schema, byName.get(name)),
+        schema: withAliases(name, rewriteRemoteGitRequestSchema(name, schema, byName.get(name))),
       },
     ])
   )
   for (const [name, schema] of Object.entries(requestSchemaCatalog.commands)) {
     argumentSchemas.set(name, {
       source: "contract",
-      schema: rewriteRemoteGitRequestSchema(name, schema, byName.get(name)),
+      schema: withAliases(name, rewriteRemoteGitRequestSchema(name, schema, byName.get(name))),
     })
   }
   const zodRequestSchemas = buildCompanionRequestSchemaContracts()
   for (const [name, schema] of zodRequestSchemas) {
-    argumentSchemas.set(name, { source: "zod-contract", schema })
+    argumentSchemas.set(name, { source: "zod-contract", schema: withAliases(name, schema) })
   }
   const headlessArgumentSchemas = new Map(argumentSchemas)
   for (const [name, schema] of inferredArgumentSchemas) {
@@ -2857,6 +3130,9 @@ export function inspectCommittedContract() {
     desiredHeadlessSpec,
   )
   const desiredHostCommandCatalogSource = renderHostCommandCatalog(desiredHostCommandCatalog)
+  const desiredDevicePlaneOverridesSource = renderDevicePlaneOverrides(
+    buildDevicePlaneOverrides(desiredPublicSpec, desiredHeadlessSpec),
+  )
   const desiredHeadlessAsyncApiSource = renderSpec(
     buildHeadlessAsyncApi(contract, desiredHostCommandCatalog),
   )
@@ -2936,6 +3212,7 @@ export function inspectCommittedContract() {
     desiredHeadlessAsyncApiSource,
     desiredHostCommandCatalog,
     desiredHostCommandCatalogSource,
+    desiredDevicePlaneOverridesSource,
     desiredHeadlessContractIdentitySource,
     desiredRequestSchemaCatalogSource,
     desiredBridgeFixtureSource,
@@ -2944,6 +3221,7 @@ export function inspectCommittedContract() {
     headlessDrift: headlessSource !== desiredHeadlessSource,
     headlessAsyncApiDrift: headlessAsyncApiSource !== desiredHeadlessAsyncApiSource,
     hostCommandCatalogDrift: hostCommandCatalogSource !== desiredHostCommandCatalogSource,
+    devicePlaneOverridesDrift: devicePlaneOverridesSource !== desiredDevicePlaneOverridesSource,
     headlessContractIdentityDrift:
       headlessContractIdentitySource !== desiredHeadlessContractIdentitySource,
     requestSchemaCatalogDrift:
@@ -2972,6 +3250,7 @@ async function main(argv = process.argv.slice(2)) {
       inspected.headlessDrift ||
       inspected.headlessAsyncApiDrift ||
       inspected.hostCommandCatalogDrift ||
+      inspected.devicePlaneOverridesDrift ||
       inspected.headlessContractIdentityDrift ||
       inspected.requestSchemaCatalogDrift ||
       inspected.bridgeFixtureDrift)
@@ -2981,6 +3260,7 @@ async function main(argv = process.argv.slice(2)) {
       inspected.headlessDrift ? HEADLESS_SPEC_PATH : null,
       inspected.headlessAsyncApiDrift ? HEADLESS_ASYNCAPI_SPEC_PATH : null,
       inspected.hostCommandCatalogDrift ? HOST_COMMAND_CATALOG_PATH : null,
+      inspected.devicePlaneOverridesDrift ? DEVICE_PLANE_OVERRIDES_PATH : null,
       inspected.headlessContractIdentityDrift ? HEADLESS_CONTRACT_IDENTITY_PATH : null,
       inspected.requestSchemaCatalogDrift ? REQUEST_SCHEMA_CATALOG_PATH : null,
       inspected.bridgeFixtureDrift ? BRIDGE_FIXTURE_PATH : null,
@@ -2997,6 +3277,11 @@ async function main(argv = process.argv.slice(2)) {
     writeFileSync(
       resolve(repoRoot, HOST_COMMAND_CATALOG_PATH),
       inspected.desiredHostCommandCatalogSource,
+    )
+    mkdirSync(resolve(repoRoot, dirname(DEVICE_PLANE_OVERRIDES_PATH)), { recursive: true })
+    writeFileSync(
+      resolve(repoRoot, DEVICE_PLANE_OVERRIDES_PATH),
+      inspected.desiredDevicePlaneOverridesSource,
     )
     writeFileSync(
       resolve(repoRoot, HEADLESS_CONTRACT_IDENTITY_PATH),

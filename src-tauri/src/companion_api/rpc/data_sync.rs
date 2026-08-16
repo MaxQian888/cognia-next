@@ -192,7 +192,7 @@ pub(super) async fn dispatch(
 
         "remote_notification_publish" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let title: String = required(&args, "title")?;
             let body: String = required(&args, "body")?;
             let level: Option<String> = optional(&args, "level")?;

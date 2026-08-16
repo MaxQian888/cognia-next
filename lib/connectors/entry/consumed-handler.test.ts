@@ -17,15 +17,34 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
     ),
     tenantRequest: jest.fn(async () => ({ data: { items: [] } })),
     markConsumed: jest.fn(async () => undefined),
+    touchSession: jest.fn(async () => ({}) as never),
+    // Opaque on purpose: a mock that embeds its input would make the
+    // "raw open id never reaches the ledger" assertion below vacuous.
+    hashIdentity: jest.fn(async (_value: string) => "0123456789ab"),
     audit: jest.fn(async (_e: unknown) => ({}) as never),
-    importMessages: jest.fn(async () => ({
-      ok: true as const,
-      sessionId: "sess_i",
-      conversationKey: "lark:lk-1:oc_1",
-      imported: 2,
-      skipped: [],
-      replay: false,
-    })),
+    // Exercises the membership checker the handler hands down, the way the
+    // real importer does — otherwise that closure is never invoked by any
+    // test and a broken `isMember` wiring would pass unnoticed.
+    importMessages: jest.fn(
+      async (
+        input: { adapterId: string; chatId: string; verifiedIdentity: { openId: string } },
+        ports: {
+          isMember: (adapterId: string, chatId: string, openId: string) => Promise<boolean>
+        }
+      ) => {
+        await ports
+          .isMember(input.adapterId, input.chatId, input.verifiedIdentity.openId)
+          .catch(() => false)
+        return {
+          ok: true as const,
+          sessionId: "sess_i",
+          conversationKey: "lark:lk-1:oc_1",
+          imported: 2,
+          skipped: [],
+          replay: false,
+        }
+      }
+    ),
     plusCreate: jest.fn(async () => ({
       ok: true as const,
       conversationKey: "lark:lk-1:oc_1",
@@ -40,6 +59,8 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
     keyringGet: jest.Mock
     tenantRequest: jest.Mock
     markConsumed: jest.Mock
+    touchSession: jest.Mock
+    hashIdentity: jest.Mock
     audit: jest.Mock
     importMessages: jest.Mock
     plusCreate: jest.Mock
@@ -81,6 +102,128 @@ describe("handleLarkIntentFrame", () => {
     expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
       requestId: "req_1",
       result: { conversationKey: "lark:lk-1:oc_9", surface: "chat_tab" },
+    })
+  })
+
+  it("records a session sighting with the principal once resolve_surface resolves it", async () => {
+    const deps = makeDeps({
+      tenantRequest: jest.fn(async () => ({
+        data: { items: [{ member_id: "ou_alice" }], has_more: false },
+      })) as never,
+      resolvePrincipal: jest.fn(async () => ({
+        status: "resolved" as const,
+        principal: { id: "fp_1" },
+        tenant: {},
+        accountId: "acct_a",
+      })) as never,
+    })
+    await handleLarkIntentFrame(
+      {
+        kind: "resolve_surface",
+        requestId: "req_s1",
+        adapterId: "lk-1",
+        chatId: "oc_9",
+        surface: "chat_tab",
+        verifiedIdentity: { openId: "ou_alice", tenantKey: "tk_a", appId: "cli_1" },
+        session: { idHash: "abc123def456", issuedAt: 1000, expiresAt: 5000 },
+      },
+      deps
+    )
+    expect(deps.touchSession).toHaveBeenCalledWith({
+      jtiHash: "abc123def456",
+      adapterId: "lk-1",
+      openIdHash: "0123456789ab",
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      principalId: "fp_1",
+      issuedAt: 1000,
+      expiresAt: 5000,
+    })
+    // The raw open id is hashed on the way in and never reaches the ledger.
+    expect(deps.hashIdentity).toHaveBeenCalledWith("ou_alice")
+    expect(JSON.stringify(deps.touchSession.mock.calls[0][0])).not.toContain("ou_alice")
+  })
+
+  it("still records the sighting when the principal is refused", async () => {
+    const deps = makeDeps({
+      resolvePrincipal: jest.fn(async () => ({
+        status: "principal_disabled" as const,
+        principal: { id: "fp_1" },
+      })) as never,
+    })
+    await handleLarkIntentFrame(
+      {
+        kind: "resolve_surface",
+        requestId: "req_s2",
+        adapterId: "lk-1",
+        chatId: "oc_9",
+        verifiedIdentity: { openId: "ou_alice" },
+        session: { idHash: "deniedhash1", issuedAt: 1, expiresAt: 2 },
+      },
+      deps
+    )
+    // A denied open is exactly what an operator goes to the ledger to explain,
+    // so it is recorded — without a principal, which was not resolved.
+    expect(deps.touchSession).toHaveBeenCalledTimes(1)
+    expect(deps.touchSession.mock.calls[0][0]).toMatchObject({
+      jtiHash: "deniedhash1",
+      principalId: undefined,
+      tenantKey: "",
+      appId: "",
+    })
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_s2",
+      error: "principal_principal_disabled",
+    })
+  })
+
+  it("records a sighting for import_messages and never fails the intent on a ledger error", async () => {
+    const deps = makeDeps({
+      touchSession: jest.fn(async () => {
+        throw new Error("dexie is closed")
+      }) as never,
+    })
+    await handleLarkIntentFrame(
+      {
+        kind: "import_messages",
+        requestId: "req_s3",
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        messageIds: ["om_1"],
+        verifiedIdentity: { openId: "ou_alice", tenantKey: "tk_a", appId: "cli_1" },
+        session: { idHash: "importhash1", issuedAt: 7, expiresAt: 8 },
+      },
+      deps
+    )
+    expect(deps.touchSession).toHaveBeenCalledTimes(1)
+    expect(deps.importMessages).toHaveBeenCalled()
+    expect(deps.call).toHaveBeenCalledWith(
+      "lark_result_complete",
+      expect.objectContaining({ requestId: "req_s3" })
+    )
+  })
+
+  it("records nothing when the companion sends no session block", async () => {
+    // A companion older than the ledger wiring is not a malformed frame.
+    const deps = makeDeps({
+      tenantRequest: jest.fn(async () => ({
+        data: { items: [{ member_id: "ou_alice" }], has_more: false },
+      })) as never,
+    })
+    await handleLarkIntentFrame(
+      {
+        kind: "resolve_surface",
+        requestId: "req_s4",
+        adapterId: "lk-1",
+        chatId: "oc_9",
+        verifiedIdentity: { openId: "ou_alice" },
+      },
+      deps
+    )
+    expect(deps.touchSession).not.toHaveBeenCalled()
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_s4",
+      result: { conversationKey: "lark:lk-1:oc_9", surface: undefined },
     })
   })
 

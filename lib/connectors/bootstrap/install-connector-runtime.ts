@@ -52,6 +52,9 @@ import { installUsagePresenceHandlers } from "@/lib/connectors/presence/usage-st
 import {
   connectorsRegisterAdapter,
   connectorsResetAllWs,
+  connectorsRuntimeLeaseAcquire,
+  connectorsRuntimeLeaseRelease,
+  connectorsRuntimeLeaseRenew,
   connectorsStartServer,
   connectorsStopServer,
   connectorsUnregisterAdapter,
@@ -97,6 +100,7 @@ import {
   type ResumeReconnectHandle,
 } from "@/lib/connectors/bootstrap/resume-reconnect"
 import { liveQuery } from "dexie"
+import { createConnectorRuntimeLease } from "@/lib/connectors/runtime-lease"
 import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
 
 export type ConnectorRuntimeLogLevel = "info" | "warn" | "error"
@@ -170,7 +174,7 @@ export const CONNECTOR_RUNTIME_LOCK = "cognia-connector-runtime"
  * request fails for any reason other than our own abort — no guard, but boot
  * must not be blocked.
  */
-function defaultAcquireRuntimeLock(signal: AbortSignal): Promise<boolean> {
+function acquireWebLock(signal: AbortSignal): Promise<boolean> {
   const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks
   if (!locks?.request) return Promise.resolve(true)
   if (signal.aborted) return Promise.resolve(false)
@@ -197,6 +201,62 @@ function defaultAcquireRuntimeLock(signal: AbortSignal): Promise<boolean> {
         resolveAcquired(!(err instanceof Error && err.name === "AbortError"))
       })
   })
+}
+
+/**
+ * The desktop's default guard: the Web Lock first, then the Rust runtime
+ * lease. Both are required, and they cover different collisions — the lock
+ * sees this app's other webviews and nothing else; the lease sees every other
+ * process bound to this app's `ConnectorsState`, which is how a brain running
+ * against this desktop's companion gets arbitrated instead of quietly booting
+ * a second copy of every bot.
+ *
+ * The lease FAILS OPEN here (`onUnavailable: "proceed"`). The desktop's
+ * companion surface is optional and the lease arms are ordinary Tauri
+ * commands, but an install where the call errors for any reason must keep
+ * booting exactly as it did before this guard existed — the Web Lock still
+ * holds, only cross-process arbitration is lost, and that is strictly no worse
+ * than the previous behaviour.
+ *
+ * Order matters: taking the lease first would leave it held by a webview that
+ * then loses the Web Lock and never boots.
+ */
+function makeDefaultAcquireRuntimeLock(
+  log: (level: ConnectorRuntimeLogLevel, message: string) => void,
+  onLeaseLost: () => void | Promise<void>
+): (signal: AbortSignal) => Promise<boolean> {
+  return async (signal) => {
+    if (signal.aborted) return false
+    const webLockAbort = new AbortController()
+    const releaseWebLock = () => webLockAbort.abort()
+    signal.addEventListener("abort", releaseWebLock, { once: true })
+    if (signal.aborted) {
+      releaseWebLock()
+      return false
+    }
+
+    const won = await acquireWebLock(webLockAbort.signal)
+    if (!won) return false
+    const acquired = await createConnectorRuntimeLease({
+      ownerClass: "desktop",
+      ports: {
+        acquire: connectorsRuntimeLeaseAcquire,
+        renew: connectorsRuntimeLeaseRenew,
+        release: connectorsRuntimeLeaseRelease,
+      },
+      log,
+      onLeaseLost: async () => {
+        try {
+          await onLeaseLost()
+        } finally {
+          releaseWebLock()
+        }
+      },
+      onUnavailable: "proceed",
+    })(signal)
+    if (!acquired) releaseWebLock()
+    return acquired
+  }
 }
 
 /**
@@ -237,11 +297,17 @@ export function adapterRuntimeFingerprint(row: AdapterInstanceRow): string {
  * detached (exactly like the provider effect it was extracted from) and the
  * returned teardown is safe to call at any point, including mid-boot.
  */
-export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {}): () => void {
-  if (!opts.skipHostGate && !isTauri()) return () => undefined
+export function installConnectorRuntime(
+  opts: InstallConnectorRuntimeOptions = {}
+): () => Promise<void> {
+  if (!opts.skipHostGate && !isTauri()) return async () => undefined
   const log = opts.log ?? consoleLog
 
   const ac = new AbortController()
+  // Runtime cancellation and ownership release are intentionally separate.
+  // Adapter/server teardown starts by aborting `ac`; only after it settles do
+  // we abort this controller and release Web Lock + Rust lease ownership.
+  const lockAc = new AbortController()
   let cancelled = false
   // True only after this window wins the single-runtime lock. The teardown
   // gates every shared-resource release on it — a non-owner window closing
@@ -259,6 +325,7 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   let stopWorkflowExecutionBridge: (() => void) | null = null
   let stopExecutionRunPresentationRunner: (() => void) | null = null
   let disposeExecutionRunControlHandlers: (() => void) | null = null
+  let teardownPromise: Promise<void> | null = null
 
   /**
    * Boot a single adapter through the full lifecycle: build its
@@ -361,14 +428,57 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     return observed === "running" || observed === "starting" || observed === "degraded"
   }
 
+  const teardownRuntime = (): Promise<void> => {
+    if (teardownPromise) return teardownPromise
+    teardownPromise = (async () => {
+      cancelled = true
+      ac.abort()
+      larkSurfaceSweep?.dispose()
+      larkSurfaceSweep = null
+      larkBindRequestSweep?.dispose()
+      larkBindRequestSweep = null
+      heartbeatSweep?.dispose()
+      heartbeatSweep = null
+      resumeReconnect?.dispose()
+      resumeReconnect = null
+      stopWorkflowExecutionBridge?.()
+      stopWorkflowExecutionBridge = null
+      stopExecutionRunPresentationRunner?.()
+      stopExecutionRunPresentationRunner = null
+      disposeExecutionRunControlHandlers?.()
+      disposeExecutionRunControlHandlers = null
+      // A window that never acquired the singleton runtime owns none of the
+      // shared adapter transports below.
+      if (!ownsRuntime) return
+      // Plugin adapters are contribution-owned, but must stop while a remote
+      // brain owns connector routing to avoid double-dial. Suspend them first
+      // so their restart closures survive the local runtime teardown.
+      suspendRunningAdaptersByOwner("plugin")
+      const removals = Array.from(managedAdapterIds, (adapterId) => {
+        runtimeRows.delete(adapterId)
+        return supervisor.removeDefinition(adapterId, "runtime_teardown")
+      })
+      managedAdapterIds.clear()
+      // Preserve the supervisor's stop → Rust unregister order, then stop the
+      // shared inbound server before ownership can move to another runtime.
+      await Promise.allSettled(removals)
+      serverAdapterIds.clear()
+      await connectorsStopServer().catch(() => undefined)
+    })()
+    return teardownPromise
+  }
+
   void (async () => {
     // Single-runtime guard: the entire runtime assumes exactly one main-role
     // webview owns it. If another already holds the lock, do NOT boot a second
     // instance (it would double-send outbound, double-fire schedules, and
     // cross-reap the first's WS sockets). Runs before the WS reap for the same
     // reason — a second webview must not reap the owner's live sockets.
-    const acquire = opts.acquireRuntimeLock ?? defaultAcquireRuntimeLock
-    const owns = await acquire(ac.signal)
+    // Losing the lease mid-run means another process took ownership; tear
+    // this runtime down the same way an unmount would, so the two never
+    // answer the same message.
+    const acquire = opts.acquireRuntimeLock ?? makeDefaultAcquireRuntimeLock(log, teardownRuntime)
+    const owns = await acquire(lockAc.signal)
     if (cancelled) return
     if (!owns) {
       log(
@@ -763,41 +873,8 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     )
   })
 
-  return () => {
-    cancelled = true
-    ac.abort()
-    larkSurfaceSweep?.dispose()
-    larkSurfaceSweep = null
-    larkBindRequestSweep?.dispose()
-    larkBindRequestSweep = null
-    heartbeatSweep?.dispose()
-    heartbeatSweep = null
-    resumeReconnect?.dispose()
-    resumeReconnect = null
-    stopWorkflowExecutionBridge?.()
-    stopWorkflowExecutionBridge = null
-    stopExecutionRunPresentationRunner?.()
-    stopExecutionRunPresentationRunner = null
-    disposeExecutionRunControlHandlers?.()
-    disposeExecutionRunControlHandlers = null
-    // A window that never acquired the singleton runtime owns none of the
-    // shared adapter transports below.
-    if (!ownsRuntime) return
-    // Plugin adapters are contribution-owned, but must stop while a remote
-    // brain owns connector routing to avoid double-dial. Suspend them first so
-    // their restart closures survive the local runtime teardown.
-    suspendRunningAdaptersByOwner("plugin")
-    const removals = Array.from(managedAdapterIds, (adapterId) => {
-      runtimeRows.delete(adapterId)
-      return supervisor.removeDefinition(adapterId, "runtime_teardown")
-    })
-    managedAdapterIds.clear()
-    // Preserve the supervisor's stop → Rust unregister order on teardown.
-    // The public disposer remains synchronous, but server shutdown is chained
-    // after every adapter lane has completed its cleanup attempt.
-    void Promise.allSettled(removals).then(async () => {
-      serverAdapterIds.clear()
-      await connectorsStopServer().catch(() => undefined)
-    })
+  return async () => {
+    await teardownRuntime()
+    lockAc.abort()
   }
 }

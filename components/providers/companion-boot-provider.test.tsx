@@ -6,6 +6,11 @@ import { render, waitFor } from "@testing-library/react"
 
 import { CompanionBootProvider } from "./companion-boot-provider"
 import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import {
+  __resetMobileBootForTesting,
+  getMobileBootSnapshot,
+  setMobileBootOverlayVisible,
+} from "@/lib/boot/mobile-boot-stages"
 
 // ── Navigation mocks ─────────────────────────────────────────────────────────
 const replaceMock = jest.fn()
@@ -18,45 +23,76 @@ jest.mock("next/navigation", () => ({
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 const hydrateMock = jest.fn()
+const loadCompanionConfigMock = jest.fn((): { deviceId?: string } | null => null)
 jest.mock("@/lib/tauri/transport-companion", () => ({
   hydrateCompanionConfig: () => hydrateMock(),
+  loadCompanionConfig: () => loadCompanionConfigMock(),
+}))
+const remoteStepServerOptionsMock = jest.fn()
+jest.mock("@/lib/companion/remote-step-server", () => ({
+  installRemoteStepServer: (options: unknown) => {
+    remoteStepServerOptionsMock(options)
+    return () => {}
+  },
 }))
 
 jest.mock("@/lib/accounts/active-account-id", () => ({ DEFAULT_LOCAL_ACCOUNT_ID: "local_acct_a" }))
+const adoptHostsMock = jest.fn(async (): Promise<void> => undefined)
 jest.mock("@/lib/companion/mobile-host-adoption", () => ({
-  adoptMobileCompanionHosts: jest.fn().mockResolvedValue(undefined),
+  adoptMobileCompanionHosts: () => adoptHostsMock(),
 }))
+const getActiveHostMock = jest.fn(async (): Promise<unknown> => null)
 jest.mock("@/lib/companion/credential-book", () => ({
-  companionCredentialBook: () => ({ getActive: jest.fn().mockResolvedValue(null) }),
+  companionCredentialBook: () => ({ getActive: () => getActiveHostMock() }),
 }))
-jest.mock("@/lib/db/schema", () => ({ activateAccountDatabase: jest.fn() }))
+const activateAccountDatabaseMock = jest.fn()
+jest.mock("@/lib/db/schema", () => ({
+  activateAccountDatabase: (...args: unknown[]) => activateAccountDatabaseMock(...args),
+}))
+const setActiveRuntimeTargetContextMock = jest.fn()
 jest.mock("@/lib/runtime/runtime-target-context", () => ({
-  setActiveRuntimeTargetContext: jest.fn(),
+  setActiveRuntimeTargetContext: (...args: unknown[]) => setActiveRuntimeTargetContextMock(...args),
 }))
 const registerCompanionRuntimeTargetMock = jest.fn().mockResolvedValue({ id: "host-a" })
 jest.mock("@/lib/runtime/account-runtime-target", () => ({
   registerCompanionRuntimeTarget: (...args: unknown[]) =>
     registerCompanionRuntimeTargetMock(...args),
 }))
+const hostSnapshotMock = jest.fn(() => ({
+  compatible: true,
+  operations: ["claude_send"],
+  grants: ["claude.chat"],
+}))
+const setRuntimeSnapshotMock = jest.fn()
 jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
-  runtimeHostSnapshotFromManifest: () => ({
-    compatible: true,
-    operations: ["claude_send"],
-    grants: ["claude.chat"],
-  }),
-  setRuntimeSnapshot: jest.fn(),
+  runtimeHostSnapshotFromManifest: () => hostSnapshotMock(),
+  setRuntimeSnapshot: (...args: unknown[]) => setRuntimeSnapshotMock(...args),
   updateRuntimeSnapshot: jest.fn(),
 }))
 jest.mock("@/lib/runtime/runtime-target-lifecycle", () => ({
   registerRuntimeTargetSubscriptionStopper: () => jest.fn(),
 }))
-jest.mock("@/lib/connectivity/lan-classify", () => ({ classifyWsHost: () => "ws-lan" }))
+const classifyWsHostMock = jest.fn((): string => "ws-lan")
+jest.mock("@/lib/connectivity/lan-classify", () => ({
+  classifyWsHost: (url: string) => classifyWsHostMock(url),
+}))
 const transportCallMock = jest.fn().mockResolvedValue({ schemaVersion: 2 })
+// Optional members are attached per test (see the capability-reporter case);
+// they must be absent by default so the reporter branch stays off.
+const mockTransport: Record<string, unknown> = {
+  call: (...args: unknown[]) => transportCallMock(...args),
+  subscribe: jest.fn().mockReturnValue(() => {}),
+}
 jest.mock("@/lib/tauri/transport-instance", () => ({
-  transport: {
-    call: (...args: unknown[]) => transportCallMock(...args),
-    subscribe: jest.fn().mockReturnValue(() => {}),
+  // Getter, not a value: the factory is hoisted above `mockTransport`'s
+  // initialisation, so a direct reference would hit the TDZ.
+  get transport() {
+    return mockTransport
   },
+}))
+const installCapabilityReporterMock = jest.fn(() => jest.fn())
+jest.mock("@/lib/companion/capability-reporter", () => ({
+  installCapabilityReporter: (...args: unknown[]) => installCapabilityReporterMock(...args),
 }))
 
 const hostStateStopMock = jest.fn()
@@ -134,11 +170,17 @@ jest.mock("@/lib/capacitor/deeplink", () => ({
   subscribe: (handler: unknown) => deeplinkSubscribeMock(handler),
   getLaunchRoute: () => getLaunchRouteMock(),
 }))
-const registerNativePluginsMock = jest.fn(async () => ({
-  kind: "registered" as const,
-  registered: [] as string[],
-  available: [] as string[],
-}))
+const registerNativePluginsMock = jest.fn(
+  async (): Promise<{
+    kind: "registered" | "unavailable" | "skipped"
+    registered: string[]
+    available: string[]
+  }> => ({
+    kind: "registered",
+    registered: [],
+    available: [],
+  })
+)
 jest.mock("@/lib/capacitor/register-plugins", () => ({
   registerNativePlugins: () => registerNativePluginsMock(),
 }))
@@ -217,6 +259,23 @@ beforeEach(() => {
   installHostStateSyncMock.mockClear()
   hostStateStopMock.mockClear()
   hostStateResyncMock.mockClear()
+  hostSnapshotMock.mockReset().mockReturnValue({
+    compatible: true,
+    operations: ["claude_send"],
+    grants: ["claude.chat"],
+  })
+  getActiveHostMock.mockReset().mockResolvedValue(null)
+  adoptHostsMock.mockReset().mockResolvedValue(undefined)
+  classifyWsHostMock.mockReset().mockReturnValue("ws-lan")
+  remoteStepServerOptionsMock.mockClear()
+  loadCompanionConfigMock.mockReset().mockReturnValue(null)
+  activateAccountDatabaseMock.mockClear()
+  setActiveRuntimeTargetContextMock.mockClear()
+  setRuntimeSnapshotMock.mockClear()
+  installCapabilityReporterMock.mockClear()
+  delete mockTransport.getConnectionState
+  delete mockTransport.onConnectionStateChange
+  __resetMobileBootForTesting()
   delete (window as { Capacitor?: unknown }).Capacitor
   delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
 })
@@ -405,7 +464,7 @@ describe("<CompanionBootProvider /> — cold-start deeplink replay", () => {
 })
 
 describe("<CompanionBootProvider /> — unpaired", () => {
-  it("redirects to /welcome when unpaired and no mode chosen", async () => {
+  it("redirects to the first-run flow when unpaired and no mode chosen", async () => {
     setMobile()
     hydrateMock.mockResolvedValueOnce(null)
     getSettingsMock.mockResolvedValueOnce({}) // no mobileRuntimeMode yet
@@ -416,7 +475,9 @@ describe("<CompanionBootProvider /> — unpaired", () => {
       </CompanionBootProvider>
     )
 
-    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/welcome"))
+    // The standalone/paired fork moved into the first-run flow (ADR-0122);
+    // an unset mode means that fork was never answered.
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/onboarding"))
     // Native plugin proxies are registered on every mobile boot, even unpaired.
     expect(registerNativePluginsMock).toHaveBeenCalled()
     // Sync + push should NOT run when there's no pairing.
@@ -481,9 +542,9 @@ describe("<CompanionBootProvider /> — unpaired", () => {
     expect(registerPushMock).not.toHaveBeenCalled()
   })
 
-  it("does not redirect when already on an onboarding route (/welcome)", async () => {
+  it("does not redirect when already on an onboarding route (/onboarding)", async () => {
     setMobile()
-    pathnameMock.mockReturnValue("/welcome")
+    pathnameMock.mockReturnValue("/onboarding")
     hydrateMock.mockResolvedValueOnce(null)
 
     render(
@@ -752,5 +813,398 @@ describe("<CompanionBootProvider /> — paired", () => {
       </CompanionBootProvider>
     )
     expect(hydrateMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("<CompanionBootProvider /> — boot timeline (lib/boot/mobile-boot-stages)", () => {
+  const stages = () => {
+    const snap = getMobileBootSnapshot()
+    return {
+      settled: snap.settled,
+      bridge: `${snap.stages.bridge.status}:${snap.stages.bridge.detail}`,
+      companion: `${snap.stages.companion.status}:${snap.stages.companion.detail}`,
+      host: `${snap.stages.host.status}:${snap.stages.host.detail}`,
+      sync: `${snap.stages.sync.status}:${snap.stages.sync.detail}`,
+    }
+  }
+
+  function mount() {
+    return render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+  }
+
+  it("records the whole happy path: bridge → paired → linked → synced, settled before the sync", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    let releaseSync: (() => void) | undefined
+    runSyncDownMock.mockImplementationOnce(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          releaseSync = () => resolve([])
+        })
+    )
+    mount()
+
+    await waitFor(() => expect(stages().sync).toBe("active:null"))
+    expect(stages()).toMatchObject({
+      settled: true,
+      bridge: "done:registered",
+      companion: "done:paired",
+      host: "done:linked",
+    })
+    expect(getMobileBootSnapshot().active).toBe("sync")
+
+    releaseSync?.()
+    await waitFor(() => expect(stages().sync).toBe("done:synced"))
+    expect(getMobileBootSnapshot().active).toBeNull()
+  })
+
+  it("marks the sync failed but keeps the boot settled when the first sync-down throws", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    runSyncDownMock.mockRejectedValueOnce(new Error("boom"))
+    mount()
+    await waitFor(() => expect(stages().sync).toBe("failed:syncFailed"))
+    expect(stages().settled).toBe(true)
+    expect(stages().host).toBe("done:linked")
+  })
+
+  it("standalone: pairing resolves standalone, host and sync are not needed, settled", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(null)
+    getSettingsMock.mockResolvedValue({ mobileRuntimeMode: "standalone" })
+    mount()
+    await waitFor(() => expect(stages().settled).toBe(true))
+    expect(stages()).toEqual({
+      settled: true,
+      bridge: "done:registered",
+      companion: "done:standalone",
+      host: "skipped:notNeeded",
+      sync: "skipped:notNeeded",
+    })
+    expect(registerCompanionRuntimeTargetMock).not.toHaveBeenCalled()
+  })
+
+  it("unpaired: pairing resolves unpaired, later stages not needed, settled", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(null)
+    getSettingsMock.mockResolvedValue({ mobileRuntimeMode: "paired" })
+    mount()
+    await waitFor(() => expect(stages().settled).toBe(true))
+    expect(stages().companion).toBe("done:unpaired")
+    expect(stages().host).toBe("skipped:notNeeded")
+    expect(stages().sync).toBe("skipped:notNeeded")
+  })
+
+  it("host offline: no runtime target → host failed, sync not needed, settled", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    registerCompanionRuntimeTargetMock.mockResolvedValue(null)
+    mount()
+    await waitFor(() => expect(stages().settled).toBe(true))
+    expect(stages().companion).toBe("done:paired")
+    expect(stages().host).toBe("failed:offline")
+    expect(stages().sync).toBe("skipped:notNeeded")
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+  })
+
+  it("host offline: manifest call throws → host failed, settled", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    transportCallMock.mockRejectedValue(new Error("unreachable"))
+    mount()
+    await waitFor(() => expect(stages().settled).toBe(true))
+    expect(stages().host).toBe("failed:offline")
+    expect(stages().sync).toBe("skipped:notNeeded")
+  })
+
+  it("host incompatible: manifest negotiated but rejected → host failed:incompatible, settled", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    hostSnapshotMock.mockReturnValue({ compatible: false, operations: [], grants: [] })
+    mount()
+    await waitFor(() => expect(stages().settled).toBe(true))
+    expect(stages().host).toBe("failed:incompatible")
+    expect(stages().sync).toBe("skipped:notNeeded")
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+  })
+
+  it("a native bridge that exposes no plugins is recorded as unavailable", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(null)
+    getSettingsMock.mockResolvedValue({ mobileRuntimeMode: "standalone" })
+    registerNativePluginsMock.mockResolvedValueOnce({
+      kind: "unavailable",
+      registered: [],
+      available: [],
+    })
+    mount()
+    await waitFor(() => expect(stages().bridge).toBe("failed:unavailable"))
+  })
+
+  it("stands aside from status/nav bar theme sync while the splash overlay is up, then repaints", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(null)
+    getSettingsMock.mockResolvedValue({ mobileRuntimeMode: "standalone" })
+    setMobileBootOverlayVisible(true)
+    mount()
+    await waitFor(() => expect(stages().settled).toBe(true))
+    // Plugins are registered, but the overlay owns the chrome for now.
+    expect(syncStatusBarMock).not.toHaveBeenCalled()
+    expect(syncNavBarMock).not.toHaveBeenCalled()
+
+    setMobileBootOverlayVisible(false)
+    await waitFor(() => expect(syncStatusBarMock).toHaveBeenCalled())
+    expect(syncNavBarMock).toHaveBeenCalled()
+  })
+})
+
+describe("<CompanionBootProvider /> — host bindings detail", () => {
+  function mount() {
+    return render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+  }
+
+  it("restores the active companion host before hydrating: database, target context, connecting snapshot", async () => {
+    setMobile()
+    getActiveHostMock.mockResolvedValue({
+      hostId: "host-a",
+      endpoints: { baseUrl: "ws://192.168.1.10:7890" },
+    })
+    hydrateMock.mockResolvedValue(pairedConfig)
+    mount()
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalled())
+    expect(activateAccountDatabaseMock).toHaveBeenCalledWith("local_acct_a", "host-a")
+    expect(setActiveRuntimeTargetContextMock).toHaveBeenCalledWith("local_acct_a", "host-a")
+    expect(setRuntimeSnapshotMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({ id: "host-a", kind: "companion", hostKind: "desktop" }),
+        vaultState: "unlocked",
+        connectionState: "connecting",
+      })
+    )
+  })
+
+  it("routes remote resync requests: host-state to the host-state sync, everything else to a sync-down", async () => {
+    const { remoteEventResyncCoordinator } = await import("@/lib/tauri/resync-coordinator")
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    transportCallMock.mockResolvedValue(
+      buildLocalHostFeatureManifest({ platform: "tauri", hostId: "host-a" })
+    )
+    const view = mount()
+    await waitFor(() => expect(installHostStateSyncMock).toHaveBeenCalled())
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalledTimes(1))
+
+    await remoteEventResyncCoordinator.resolve(["host-state"])
+    expect(hostStateResyncMock).toHaveBeenCalledTimes(1)
+    await remoteEventResyncCoordinator.resolve(["session"])
+    expect(runSyncDownMock).toHaveBeenCalledTimes(2)
+
+    // Both resolvers are host cleanups: gone with the bindings.
+    view.unmount()
+    await waitFor(() => expect(hostStateStopMock).toHaveBeenCalled())
+    expect(remoteEventResyncCoordinator.hasResolverForEvent("host-state:changed")).toBe(false)
+  })
+
+  it("installs the capability reporter only when the transport can report connection state", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    mockTransport.getConnectionState = () => "connected"
+    mockTransport.onConnectionStateChange = () => () => {}
+    mount()
+    await waitFor(() => expect(installCapabilityReporterMock).toHaveBeenCalledTimes(1))
+  })
+
+  it("restarts host bindings when the companion config changes, and survives a restart failure", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    mount()
+    await waitFor(() => expect(hydrateMock).toHaveBeenCalledTimes(1))
+
+    window.dispatchEvent(new Event("cognia:companion-config-changed"))
+    await waitFor(() => expect(hydrateMock).toHaveBeenCalledTimes(2))
+  })
+
+  it("logs, and keeps running, when a config-change restart of the host bindings fails", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    mount()
+    await waitFor(() => expect(hydrateMock).toHaveBeenCalledTimes(1))
+
+    adoptHostsMock.mockRejectedValueOnce(new Error("adoption exploded"))
+    window.dispatchEvent(new Event("cognia:companion-config-changed"))
+    await waitFor(() =>
+      expect(logWarn).toHaveBeenCalledWith(
+        "companion: failed to restart Host bindings",
+        expect.objectContaining({ error: "adoption exploded" })
+      )
+    )
+  })
+
+  it("logs when a permission-triggered push registration rejects", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    mount()
+    await waitFor(() => expect(registerPushMock).toHaveBeenCalled())
+    expect(notificationPermissionHandler).not.toBeNull()
+
+    registerPushMock.mockRejectedValueOnce(new Error("apns down"))
+    notificationPermissionHandler?.()
+    await waitFor(() =>
+      expect(logWarn).toHaveBeenCalledWith(
+        "companion: permission-triggered push registration failed",
+        expect.objectContaining({ error: "apns down" })
+      )
+    )
+  })
+
+  it("stops a host-state sync that resolves after the bindings were torn down", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    transportCallMock.mockResolvedValue(
+      buildLocalHostFeatureManifest({ platform: "tauri", hostId: "host-a" })
+    )
+    let releaseInstall: (() => void) | undefined
+    installHostStateSyncMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseInstall = () =>
+            resolve({
+              status: { migrationStage: "host-authoritative" },
+              stop: hostStateStopMock,
+              resync: hostStateResyncMock,
+            })
+        })
+    )
+    const view = mount()
+    await waitFor(() => expect(installHostStateSyncMock).toHaveBeenCalled())
+    view.unmount()
+    releaseInstall?.()
+    await waitFor(() => expect(hostStateStopMock).toHaveBeenCalledTimes(1))
+    // Never installed as a binding: no sync-down, no listeners.
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+  })
+
+  it("tolerates a native cleanup that throws on unmount", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(null)
+    getSettingsMock.mockResolvedValue({ mobileRuntimeMode: "standalone" })
+    deeplinkUnsubMock.mockImplementationOnce(() => {
+      throw new Error("already gone")
+    })
+    const view = mount()
+    await waitFor(() => expect(deeplinkSubscribeMock).toHaveBeenCalled())
+    expect(() => view.unmount()).not.toThrow()
+    expect(deeplinkUnsubMock).toHaveBeenCalled()
+  })
+
+  it("classifies a tunnelled host as cloud, and hands the remote step server a live device id", async () => {
+    setMobile()
+    classifyWsHostMock.mockReturnValue("wss-tunnel")
+    getActiveHostMock.mockResolvedValue({
+      hostId: "host-b",
+      endpoints: { baseUrl: "wss://relay.example/ws" },
+    })
+    hydrateMock.mockResolvedValue(pairedConfig)
+    loadCompanionConfigMock.mockReturnValue({ deviceId: "dev-42" })
+    mount()
+    await waitFor(() => expect(remoteStepServerOptionsMock).toHaveBeenCalled())
+    expect(setRuntimeSnapshotMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: expect.objectContaining({ hostKind: "cloud" }) })
+    )
+    const options = remoteStepServerOptionsMock.mock.calls[0][0] as { getDeviceId: () => unknown }
+    expect(options.getDeviceId()).toBe("dev-42")
+    loadCompanionConfigMock.mockReturnValue(null)
+    expect(options.getDeviceId()).toBeUndefined()
+  })
+
+  it("registers push once: a later permission grant is a no-op after success, and de-dupes a concurrent grant", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    let releasePush: (() => void) | undefined
+    registerPushMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releasePush = () => resolve({ kind: "registered", token: "tok-1", platform: "ios" })
+        })
+    )
+    mount()
+    await waitFor(() => expect(registerPushMock).toHaveBeenCalledTimes(1))
+    // A grant while the first attempt is still in flight joins it.
+    notificationPermissionHandler?.()
+    expect(registerPushMock).toHaveBeenCalledTimes(1)
+
+    releasePush?.()
+    await waitFor(() => expect(reportPushTokenMock).toHaveBeenCalledWith("tok-1", "ios"))
+    // Registered: a later grant has nothing to do.
+    notificationPermissionHandler?.()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(registerPushMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("stringifies non-Error failures in its warnings", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    transportCallMock.mockRejectedValueOnce("manifest-nope")
+    mount()
+    await waitFor(() =>
+      expect(logWarn).toHaveBeenCalledWith(
+        "companion: host manifest unavailable",
+        expect.objectContaining({ error: "manifest-nope" })
+      )
+    )
+    adoptHostsMock.mockRejectedValueOnce("restart-nope")
+    window.dispatchEvent(new Event("cognia:companion-config-changed"))
+    await waitFor(() =>
+      expect(logWarn).toHaveBeenCalledWith(
+        "companion: failed to restart Host bindings",
+        expect.objectContaining({ error: "restart-nope" })
+      )
+    )
+  })
+
+  it("stringifies a non-Error sync-down failure and a non-Error push failure", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    runSyncDownMock.mockRejectedValueOnce("sync-nope")
+    mount()
+    await waitFor(() =>
+      expect(logWarn).toHaveBeenCalledWith(
+        "companion: initial sync-down failed",
+        expect.objectContaining({ error: "sync-nope" })
+      )
+    )
+    await waitFor(() => expect(registerPushMock).toHaveBeenCalled())
+    registerPushMock.mockRejectedValueOnce("push-nope")
+    notificationPermissionHandler?.()
+    await waitFor(() =>
+      expect(logWarn).toHaveBeenCalledWith(
+        "companion: permission-triggered push registration failed",
+        expect.objectContaining({ error: "push-nope" })
+      )
+    )
+  })
+
+  it("ignores foreground pushes and pushes without a session id", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(null)
+    getSettingsMock.mockResolvedValue({ mobileRuntimeMode: "standalone" })
+    let pushObserver: ((d: unknown) => void) | null = null
+    installPushBridgeMock.mockImplementationOnce((observer: (d: unknown) => void) => {
+      pushObserver = observer
+      return Promise.resolve(uninstallPushBridgeMock)
+    })
+    mount()
+    await waitFor(() => expect(pushObserver).not.toBeNull())
+    pushObserver!({ data: {}, foreground: false })
+    pushObserver!({ data: { sessionId: "s-1" }, foreground: true })
+    expect(pushMock).not.toHaveBeenCalled()
   })
 })

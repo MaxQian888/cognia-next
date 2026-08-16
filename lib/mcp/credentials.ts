@@ -114,9 +114,7 @@ export function redactMcpServerForExport(server: McpServer): McpExportRedactionR
   if (Array.isArray(config.args)) {
     const sensitiveIndexes = sensitiveArgumentValueIndexes(config.args)
     config.args = config.args.map((value, index) =>
-      isMcpSecretRef(value) || sensitiveIndexes.has(index)
-        ? redact(`args/${index}`, value)
-        : value
+      isMcpSecretRef(value) || sensitiveIndexes.has(index) ? redact(`args/${index}`, value) : value
     )
   }
   if (

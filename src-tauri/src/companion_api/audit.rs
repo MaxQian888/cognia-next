@@ -78,8 +78,7 @@ pub(crate) fn install_at_for_testing(path: Option<PathBuf>) {
 /// threads in parallel — will happily point the log at another test's temp file,
 /// or clear it entirely, midway through a test that is about to assert a record
 /// was written. Whichever loses the race reads an empty log and fails, or worse
-/// passes because it asserted absence. Mirrors
-/// [`super::control_allow_list::test_guard`], which exists for the same reason.
+/// passes because it asserted absence.
 ///
 /// Hold it for the whole test body.
 #[cfg(test)]

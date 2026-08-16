@@ -28,11 +28,13 @@ import { setConnectorListen, type ConnectorListenFn } from "@/lib/connectors/eve
 import { installConnectorRuntime } from "@/lib/connectors/bootstrap/install-connector-runtime"
 import { installLarkIntentHandler } from "@/lib/connectors/entry/consumed-handler"
 
+import {
+  createConnectorRuntimeLease,
+  type RuntimeLeaseAcquireResult,
+} from "@/lib/connectors/runtime-lease"
 import { registerHeadlessRuntime } from "../registry"
 
 const LARK_OAUTH_CALLBACK_TOPIC = "connectors://lark-oauth/callback"
-const CONNECTOR_RUNTIME_LEASE_TTL_MS = 15_000
-const CONNECTOR_RUNTIME_LEASE_RENEW_MS = 5_000
 
 interface LarkOAuthCallbackPayload {
   code?: unknown
@@ -147,90 +149,37 @@ export const headlessConnectorListen: ConnectorListenFn = async (event, handler)
   transport.subscribe(event, (payload) => handler({ payload: payload as never }))
 
 /**
- * Build the server-backed singleton guard used by a brain process. The Rust
- * front door owns the lease, so independent Node processes contend on the
- * same state instead of each relying on their process-local Web Locks API.
+ * Build the server-backed singleton guard used by a brain process.
+ *
+ * Delegates to the shared lease (`lib/connectors/runtime-lease.ts`) so the
+ * brain and the desktop contend on one implementation and one Rust slot. The
+ * brain declines to boot when the lease is unreachable: it talks to its
+ * companion for everything else, so a failure there means it would be an
+ * unarbitrated second owner.
  */
 export function createHeadlessConnectorRuntimeLease(
   log: (level: "info" | "warn" | "error", message: string) => void,
-  onLeaseLost: () => void,
+  onLeaseLost: () => void | Promise<void>,
   onLeaseAcquired: () => void
 ): (signal: AbortSignal) => Promise<boolean> {
-  const ownerId = `brain:${crypto.randomUUID()}`
-
-  return async (signal) => {
-    if (signal.aborted) return false
-    let acquired = false
-    try {
-      acquired = await headlessConnectorInvoker<boolean>("connectors_runtime_lease_acquire", {
-        ownerId,
-        ttlMs: CONNECTOR_RUNTIME_LEASE_TTL_MS,
-      })
-    } catch (error) {
-      log(
-        "error",
-        `[connector-bus] Runtime lease acquisition failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      )
-      return false
-    }
-    if (!acquired || signal.aborted) {
-      if (acquired) {
-        void headlessConnectorInvoker("connectors_runtime_lease_release", { ownerId })
-      }
-      return false
-    }
-    onLeaseAcquired()
-
-    let stopped = false
-    let renewing = false
-    const stopLease = () => {
-      if (stopped) return
-      stopped = true
-      clearInterval(renewTimer)
-      void headlessConnectorInvoker("connectors_runtime_lease_release", { ownerId }).catch(
-        (error) => {
-          log(
-            "warn",
-            `[connector-bus] Runtime lease release failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          )
-        }
-      )
-    }
-    const renewTimer = setInterval(() => {
-      if (renewing || stopped) return
-      renewing = true
-      void headlessConnectorInvoker<boolean>("connectors_runtime_lease_renew", {
-        ownerId,
-        ttlMs: CONNECTOR_RUNTIME_LEASE_TTL_MS,
-      })
-        .then((renewed) => {
-          if (renewed || stopped) return
-          log("error", "[connector-bus] Runtime lease was lost; stopping connector transports")
-          stopLease()
-          onLeaseLost()
-        })
-        .catch((error) => {
-          if (stopped) return
-          log(
-            "error",
-            `[connector-bus] Runtime lease renewal failed; stopping connector transports: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          )
-          stopLease()
-          onLeaseLost()
-        })
-        .finally(() => {
-          renewing = false
-        })
-    }, CONNECTOR_RUNTIME_LEASE_RENEW_MS)
-    signal.addEventListener("abort", stopLease, { once: true })
-    return true
-  }
+  return createConnectorRuntimeLease({
+    ownerClass: "brain",
+    ports: {
+      acquire: (ownerId, ttlMs) =>
+        headlessConnectorInvoker<RuntimeLeaseAcquireResult | boolean>(
+          "connectors_runtime_lease_acquire",
+          { ownerId, ttlMs, handoffAware: true }
+        ),
+      renew: (ownerId, ttlMs) =>
+        headlessConnectorInvoker<boolean>("connectors_runtime_lease_renew", { ownerId, ttlMs }),
+      release: (ownerId) =>
+        headlessConnectorInvoker<boolean>("connectors_runtime_lease_release", { ownerId }),
+    },
+    log,
+    onLeaseLost,
+    onLeaseAcquired,
+    onUnavailable: "block",
+  })
 }
 
 registerHeadlessRuntime({
@@ -239,7 +188,7 @@ registerHeadlessRuntime({
   start: (ctx) => {
     const prevInvoker = setConnectorCommandInvoker(headlessConnectorInvoker)
     const prevListen = setConnectorListen(headlessConnectorListen)
-    let dispose: () => void = () => undefined
+    let dispose: () => Promise<void> = async () => undefined
     let disposeLarkOAuth: () => void = () => undefined
     const acquireRuntimeLock = createHeadlessConnectorRuntimeLease(
       ctx.log,
@@ -258,10 +207,10 @@ registerHeadlessRuntime({
     // door parks surface resolves / consumption reports on the event bus;
     // this brain-side handler answers them (membership checks + ledger).
     const disposeLarkIntents = installLarkIntentHandler(headlessConnectorListen)
-    return () => {
+    return async () => {
       disposeLarkOAuth()
       disposeLarkIntents()
-      dispose()
+      await dispose()
       setConnectorCommandInvoker(prevInvoker)
       setConnectorListen(prevListen)
     }

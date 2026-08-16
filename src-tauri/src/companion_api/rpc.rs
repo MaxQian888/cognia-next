@@ -123,14 +123,31 @@ impl crate::external_agent::exec_backend::AgentEventEmitter for BusAgentEmitter 
 pub struct RpcError {
     pub code: String,
     pub message: String,
+    /// Whether the caller may safely repeat this request unchanged.
+    ///
+    /// `CommandError` (crates/cognia-core) exists to carry exactly this, but
+    /// the RPC envelope dropped it, so `transport-companion.ts` re-derived it
+    /// from the HTTP status — which cannot distinguish "the host is booting,
+    /// try again" from "this host will never serve that command", both 503.
+    /// Each constructor below states the answer instead of leaving it to be
+    /// guessed downstream.
+    pub retryable: bool,
 }
 
 impl RpcError {
+    /// Non-retryable by default: most RPC failures are contract or capability
+    /// problems that repeating verbatim cannot fix. Transient cases opt in.
     fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
+            retryable: false,
         }
+    }
+
+    fn retryable(mut self) -> Self {
+        self.retryable = true;
+        self
     }
 
     fn unknown_command(name: &str) -> (StatusCode, Json<Self>) {
@@ -153,7 +170,7 @@ impl RpcError {
     fn service_unavailable(detail: String) -> (StatusCode, Json<Self>) {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(Self::new("service_unavailable", detail)),
+            Json(Self::new("service_unavailable", detail).retryable()),
         )
     }
 
@@ -174,6 +191,29 @@ impl RpcError {
             Json(Self::new(
                 "headless_unsupported",
                 format!("RPC command '{name}' is not available on a headless server (requires the desktop app)"),
+            )),
+        )
+    }
+
+    /// The mirror image of [`Self::headless_unsupported`]: the command is
+    /// implemented by the headless service container and this process is a
+    /// desktop-hosted companion server, which has none.
+    ///
+    /// These two were the same error for a long time, and 99 arms — every
+    /// `host.headless().ok_or_else(...)` — reported the desktop case with the
+    /// headless case's message, telling operators to "use the desktop app"
+    /// while running on the desktop app. Only one command is genuinely
+    /// desktop-only (`companion_endpoints`), so the reversed message was the
+    /// overwhelmingly common one.
+    pub(super) fn headless_host_required(name: &str) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(Self::new(
+                "headless_host_required",
+                format!(
+                    "RPC command '{name}' is served by the headless host services and this process \
+                     is a desktop-hosted companion server (run it against a `cognia-server` host)"
+                ),
             )),
         )
     }
@@ -231,12 +271,15 @@ impl RpcError {
     fn rate_limited(retry_after_secs: u64) -> (StatusCode, Json<Self>) {
         (
             StatusCode::TOO_MANY_REQUESTS,
-            Json(Self::new(
-                "rate_limited",
-                format!(
+            Json(
+                Self::new(
+                    "rate_limited",
+                    format!(
                     "device exceeded the per-minute quota; retry_after_seconds={retry_after_secs}"
                 ),
-            )),
+                )
+                .retryable(),
+            ),
         )
     }
 
@@ -270,7 +313,7 @@ fn map_desktop_write_bridge_error(command: &str, detail: String) -> (StatusCode,
     RpcError::internal(detail)
 }
 
-fn terminal_rpc_authorization(
+pub(super) fn terminal_rpc_authorization(
     device_id: &str,
     host_remote_access_enabled: bool,
     has_terminal_capability: bool,
@@ -1149,9 +1192,11 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 // ---------------------------------------------------------------------------
 
 /// Commands that require the elevated **remote-control** capability — the
-/// device must be present in [`super::control_allow_list`]. These attach to
-/// and steer host-owned agent sessions, control host goal loops, or resolve
-/// host computer-use consent.
+/// device must hold the capabilities
+/// [`super::device_grants::GrantKind::Control`] maps onto, checked against the
+/// SecurityStore by [`super::remote_execution::authorize_capability`]. These
+/// attach to and steer host-owned agent sessions, control host goal loops, or
+/// resolve host computer-use consent.
 ///
 /// Baseline paired chat (`claude_send` / `claude_interrupt` /
 /// `claude_approve`) is deliberately **absent**: that is the phone's own chat
@@ -1592,12 +1637,13 @@ fn inject_caller_device_grants(
 #[cfg(test)]
 const SERVICE_ONLY_COMMANDS: &[&str] = &[
     // ADR-0059 R12 — the brain manages the public webhook ingress registry.
+    // The runtime-lease arms are deliberately NOT here: the lease arbitrates
+    // between every runtime attached to this companion, so a desktop webview
+    // (which holds a device JWT, never a service token) has to be able to
+    // contend for it. See `agent.run` in the command manifest.
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
-    "connectors_runtime_lease_acquire",
-    "connectors_runtime_lease_renew",
-    "connectors_runtime_lease_release",
     "integration_ingress_register",
     "integration_ingress_unregister",
     "integration_ingress_get_url",

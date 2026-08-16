@@ -114,6 +114,27 @@ pub fn security_store() -> Option<Arc<SecurityStore>> {
     INSTALLED_STORE.read().clone()
 }
 
+/// Serializes every test that installs the process-global store.
+///
+/// `install_security_store` REPLACES the slot, so `cargo test` — one binary,
+/// threads in parallel — will happily swap another test's store out from under
+/// it mid-body. A capability test that reads "not granted" because its store
+/// was replaced is a false green on a permission gate, which is exactly the
+/// class of bug the caller is usually testing for.
+///
+/// Hold it for the whole test body.
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static STORE_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    // Poisoning only means an earlier test panicked while holding the guard;
+    // every test installs its own store on entry, so the state is still usable
+    // and failing all subsequent tests would bury the original failure.
+    STORE_TEST_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 impl SecurityStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Arc<Self>, SecurityStoreError> {
         let mut conn = Connection::open(path)?;
@@ -625,19 +646,15 @@ impl SecurityStore {
         if already_applied {
             return Ok(false);
         }
+        // Mapping comes from `GrantKind` so the import, the desktop toggles,
+        // and the `cognia-server devices` CLI cannot grant different sets.
         for (devices, capabilities) in [
-            (
-                control,
-                &[
-                    "workspace.read",
-                    "workspace.write",
-                    "git.write",
-                    "workflow.run",
-                ][..],
-            ),
-            (agent_control, &["agent.run", "process.spawn"][..]),
-            (terminal, &["terminal.open"][..]),
-        ] {
+            (control, super::device_grants::GrantKind::Control),
+            (agent_control, super::device_grants::GrantKind::AgentControl),
+            (terminal, super::device_grants::GrantKind::Terminal),
+        ]
+        .map(|(devices, kind)| (devices, kind.capabilities()))
+        {
             for device_id in devices {
                 let tenant: Option<String> = tx
                     .query_row(
@@ -1415,7 +1432,12 @@ fn insert_default_grants(
     Ok(())
 }
 
-fn is_assignable_device_capability(capability: &str) -> bool {
+/// Whether `capability` is one the store will accept as a per-device grant.
+///
+/// `pub(crate)` so [`super::device_grants`] can pin its grant→capability
+/// mapping against it: a toggle that writes a capability this rejects would be
+/// a switch whose grant no gate can ever match.
+pub(crate) fn is_assignable_device_capability(capability: &str) -> bool {
     matches!(
         capability,
         "host.observe"

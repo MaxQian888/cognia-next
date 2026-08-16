@@ -16,7 +16,7 @@
  * Returns AsyncGenerator<LarkEventEnvelope> — same shape the adapter expects.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen, type ConnectorUnlistenFn } from "@/lib/connectors/events"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import { connectorsLarkWsOpen, connectorsLarkWsClose } from "@/lib/connectors/tauri/commands"
 import { loggers } from "@cognia/logging"
@@ -95,25 +95,6 @@ export async function* startLarkLongConn(
     let wakeResolve: (() => void) | null = null
     let ended = false
 
-    const unlistenEvent = await listen<string>(
-      `connectors://lark-ws/${handleId}/event`,
-      (event) => {
-        try {
-          queue.push(JSON.parse(event.payload) as LarkEventEnvelope)
-        } catch {
-          return
-        }
-        wakeResolve?.()
-        wakeResolve = null
-      }
-    )
-
-    const unlistenClose = await listen<void>(`connectors://lark-ws/${handleId}/close`, () => {
-      ended = true
-      wakeResolve?.()
-      wakeResolve = null
-    })
-
     // Only wakes the consume loop so it re-checks `signal.aborted`; the
     // handle is always closed in `finally` (idempotent on the Rust side),
     // which avoids a race where an abort lands before this handler is wired.
@@ -122,9 +103,36 @@ export async function* startLarkLongConn(
       wakeResolve?.()
       wakeResolve = null
     }
-    opts.signal.addEventListener("abort", abortHandler)
+
+    // Subscribing happens INSIDE the try whose `finally` releases the handle.
+    // It used to sit outside: a rejected `listen` then left an open, fully
+    // authenticated, self-reconnecting Feishu socket in Rust with no consumer
+    // on the TS side and no path that would ever close it.
+    let unlistenEvent: ConnectorUnlistenFn | undefined
+    let unlistenClose: ConnectorUnlistenFn | undefined
 
     try {
+      unlistenEvent = await connectorListen<string>(
+        `connectors://lark-ws/${handleId}/event`,
+        (event) => {
+          try {
+            queue.push(JSON.parse(event.payload) as LarkEventEnvelope)
+          } catch {
+            return
+          }
+          wakeResolve?.()
+          wakeResolve = null
+        }
+      )
+
+      unlistenClose = await connectorListen<void>(`connectors://lark-ws/${handleId}/close`, () => {
+        ended = true
+        wakeResolve?.()
+        wakeResolve = null
+      })
+
+      opts.signal.addEventListener("abort", abortHandler)
+
       while (!ended && !opts.signal.aborted) {
         if (queue.length === 0) {
           await new Promise<void>((r) => {
@@ -138,8 +146,8 @@ export async function* startLarkLongConn(
       }
     } finally {
       opts.signal.removeEventListener("abort", abortHandler)
-      unlistenEvent()
-      unlistenClose()
+      unlistenEvent?.()
+      unlistenClose?.()
       // Always release the Rust handle. `connectors_lark_ws_close` is a no-op
       // when the handle is already gone (terminal /close, double close).
       void connectorsLarkWsClose(handleId).catch(() => {})

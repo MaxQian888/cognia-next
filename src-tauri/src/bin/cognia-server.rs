@@ -38,6 +38,7 @@ use app_lib::companion_api::{
     device_grants::{DeviceGrantStore, FileDeviceGrantStore, GrantKind},
     event_bus::EventBus,
     idempotency::IdempotencyCache,
+    lark_entry,
     push::PushTokenRegistry,
     push_creds::{self, FilePushCredStore},
     rate_limit::RateLimiter,
@@ -287,6 +288,31 @@ fn resolve_advertise_url(flag: Option<String>, port: u16) -> String {
     flag.or_else(|| std::env::var("COGNIA_PUBLIC_URL").ok())
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| format!("https://127.0.0.1:{port}"))
+}
+
+/// Print the Lark entry environment report, refusing to start when any issue
+/// is fatal.
+///
+/// Warnings are printed and startup continues — they describe a configuration
+/// that works but not for the deployment it looks like (a loopback public
+/// base, a web base with no companion behind it). A fatal issue is a value
+/// that cannot work at all, and letting the server start with one only moves
+/// the discovery to a user inside a Feishu client.
+fn report_lark_env(
+    out: &mut impl std::io::Write,
+    issues: &[lark_entry::LarkEnvIssue],
+) -> Result<(), String> {
+    for issue in issues {
+        let level = if issue.fatal { "error" } else { "warning" };
+        let _ = writeln!(out, "[cognia-server] lark {level}: {}", issue.message);
+    }
+    let fatal = issues.iter().filter(|issue| issue.fatal).count();
+    if fatal == 0 {
+        return Ok(());
+    }
+    Err(format!(
+        "{fatal} invalid COGNIA_LARK_* value(s); fix them or unset them to disable the Lark entry surfaces"
+    ))
 }
 
 fn data_dir() -> PathBuf {
@@ -641,17 +667,10 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
     }
 }
 
+/// Delegates to the shared mapping so this CLI and the desktop paired-devices
+/// toggles cannot grant different capability sets for the same named grant.
 fn grant_kind_capabilities(kind: GrantKind) -> &'static [&'static str] {
-    match kind {
-        GrantKind::Control => &[
-            "workspace.read",
-            "workspace.write",
-            "git.write",
-            "workflow.run",
-        ],
-        GrantKind::AgentControl => &["agent.run", "process.spawn"],
-        GrantKind::Terminal => &["terminal.open"],
-    }
+    kind.capabilities()
 }
 
 fn run_gateway_admin(command: GatewayCommand) -> Result<(), Box<dyn std::error::Error>> {
@@ -867,6 +886,13 @@ async fn run_serve(
     advertise_url: Option<String>,
     bind_loopback: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Config validation BEFORE anything is installed: a typo'd Lark base
+    // would otherwise only surface as a 503 to a user inside a Feishu client.
+    report_lark_env(
+        &mut std::io::stderr(),
+        &lark_entry::lark_env_issues(|var| std::env::var(var).ok()),
+    )?;
+
     // Install the headless AppStore — the DEGRADED data plane, serving only
     // while no brain is connected (ADR-0059 D3/R4).
     install_headless_store(Some(store.clone() as Arc<dyn AppStore>));
@@ -1172,8 +1198,8 @@ async fn run_serve(
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_session_store_path, encode_pair_invitation_payload, plugin_storage_dir, Cli,
-        CliCommand,
+        agent_session_store_path, encode_pair_invitation_payload, lark_entry, plugin_storage_dir,
+        report_lark_env, Cli, CliCommand,
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use clap::Parser;
@@ -1209,6 +1235,43 @@ mod tests {
             app_lib::provider_profiles::headless_store_path(data),
             from_plugin_parent
         );
+    }
+
+    #[test]
+    fn lark_env_report_warns_but_only_refuses_to_start_on_a_fatal_value() {
+        let mut quiet = Vec::new();
+        assert!(report_lark_env(&mut quiet, &[]).is_ok());
+        assert!(quiet.is_empty());
+
+        let mut warned = Vec::new();
+        let warning = lark_entry::LarkEnvIssue {
+            var: lark_entry::ENV_PUBLIC_BASE,
+            fatal: false,
+            message: "points at loopback".into(),
+        };
+        assert!(report_lark_env(&mut warned, std::slice::from_ref(&warning)).is_ok());
+        let text = String::from_utf8(warned).unwrap();
+        assert!(text.contains("lark warning: points at loopback"), "{text}");
+
+        let mut failed = Vec::new();
+        let error = report_lark_env(
+            &mut failed,
+            &[
+                warning,
+                lark_entry::LarkEnvIssue {
+                    var: lark_entry::ENV_WEB_BASE,
+                    fatal: true,
+                    message: "COGNIA_LARK_WEB_BASE is set but must be https://".into(),
+                },
+            ],
+        )
+        .expect_err("a fatal issue must abort startup");
+        assert!(error.contains('1'), "{error}");
+        // Both lines are printed even though only one is fatal — an operator
+        // fixing the refusal should see the warning in the same output.
+        let text = String::from_utf8(failed).unwrap();
+        assert!(text.contains("lark warning:"), "{text}");
+        assert!(text.contains("lark error:"), "{text}");
     }
 
     #[test]

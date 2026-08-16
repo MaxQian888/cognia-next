@@ -39,7 +39,11 @@ import {
 const log = loggers.shell
 
 // The pair flow owns navigation on these routes — never redirect from them.
-const ONBOARDING_PREFIXES = ["/welcome", "/pair", "/oauth"]
+// `/onboarding` replaced the standalone `/welcome` mode chooser (ADR-0122):
+// the standalone-vs-paired fork is now the first-run flow's welcome step,
+// so the boot provider must recognise it as an onboarding surface or it
+// would redirect the user straight back out of the flow.
+const ONBOARDING_PREFIXES = ["/onboarding", "/pair", "/oauth"]
 const RECOVERY_BACKOFF_MS = [250, 1_000, 4_000, 16_000, 30_000] as const
 
 /**

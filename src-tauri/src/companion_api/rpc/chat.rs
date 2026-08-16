@@ -124,10 +124,20 @@ pub(super) async fn dispatch(
         "claude_set_mode" => {
             let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             let mode: String = required(&args, "mode")?;
-            claude_commands::claude_set_mode_impl(&host.sidecar_state(), session_id, mode)
-                .await
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+            // `claude_set_mode_impl` is a thin wrapper that passes `None` for
+            // the correlation id, so remote callers structurally could not
+            // match the sidecar's ack to their request — the desktop command
+            // takes `command_id` for exactly that. Forward it.
+            let command_id: Option<String> = optional_aliased(&args, "command_id", "commandId")?;
+            claude_commands::claude_set_mode_impl_with_id(
+                &host.sidecar_state(),
+                session_id,
+                mode,
+                command_id,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
         }
 
         "claude_approve" => {
@@ -296,7 +306,19 @@ pub(super) async fn dispatch(
         "claude_set_provider_env" => {
             let api_key: Option<String> = optional(&args, "api_key")?;
             let base_url: Option<String> = optional(&args, "base_url")?;
-            host.api_keys().set_provider(api_key, base_url).await;
+            // Ordered `[name, value]` pairs forwarded as
+            // `ANTHROPIC_CUSTOM_HEADER_*` at spawn. The arm used to stop at
+            // `base_url`, so a remote caller could set a provider but never the
+            // headers that gate 1M context behind `anthropic-beta` — the
+            // desktop command's third parameter had no wire path at all.
+            // `None` leaves the existing set untouched; `Some([])` clears it.
+            let custom_headers: Option<Vec<(String, String)>> =
+                optional_aliased(&args, "custom_headers", "customHeaders")?;
+            let keys = host.api_keys();
+            keys.set_provider(api_key, base_url).await;
+            if let Some(headers) = custom_headers {
+                keys.set_custom_headers(headers).await;
+            }
             Ok(Value::Null)
         }
 
@@ -342,7 +364,7 @@ pub(super) async fn dispatch(
         // ── Generic server secret store ──────────────────────────────────────
         "secret_store_get" | "keyring_secret_get" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
             let value = tokio::task::spawn_blocking(move || {
                 crate::keyring_secrets::get(&input.namespace, &input.key)
@@ -355,7 +377,7 @@ pub(super) async fn dispatch(
 
         "secret_store_set" | "keyring_secret_set" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
             let value = input
                 .value
@@ -372,7 +394,7 @@ pub(super) async fn dispatch(
 
         "secret_store_delete" | "keyring_secret_clear" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
             tokio::task::spawn_blocking(move || {
                 crate::keyring_secrets::clear(&input.namespace, &input.key)

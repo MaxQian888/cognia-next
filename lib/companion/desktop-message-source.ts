@@ -215,7 +215,11 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
   }
 }
 
-async function respondValue(requestId: string, result: unknown, bridge: TauriBridge): Promise<void> {
+async function respondValue(
+  requestId: string,
+  result: unknown,
+  bridge: TauriBridge
+): Promise<void> {
   await bridge.invoke(RESPONSE_COMMAND, { requestId, result, error: null })
 }
 
@@ -275,7 +279,8 @@ async function expandLegacyMediaRefs(row: StoredMessage): Promise<StoredMessage>
   const parts = await Promise.all(
     row.parts.map(async (part) => {
       const file = part as { type?: unknown; url?: unknown }
-      const hash = file.type === "file" && typeof file.url === "string" ? parseMediaRef(file.url) : null
+      const hash =
+        file.type === "file" && typeof file.url === "string" ? parseMediaRef(file.url) : null
       if (!hash) return part
       const media = await getMessageMedia(hash)
       if (!media) return part
@@ -699,10 +704,7 @@ export async function readTranscriptTurnMessages(
   request: SessionTurnMessagesRequest
 ): Promise<SessionTurnMessagesPage> {
   const session = await transcriptRevision(request.sessionId)
-  if (
-    session.revision !== request.revision ||
-    session.revision !== request.detailRevision
-  ) {
+  if (session.revision !== request.revision || session.revision !== request.detailRevision) {
     throw transcriptError("TRANSCRIPT_STALE")
   }
   let position = 0
@@ -735,7 +737,8 @@ export async function readTranscriptTurnMessages(
     if (page.length >= limit) break
     const message = toTranscriptMessage(row)
     const messageBytes = new TextEncoder().encode(JSON.stringify(message)).byteLength + 1
-    if (page.length > 0 && approximateBytes + messageBytes > TRANSCRIPT_DETAIL_PAGE_BYTE_LIMIT) break
+    if (page.length > 0 && approximateBytes + messageBytes > TRANSCRIPT_DETAIL_PAGE_BYTE_LIMIT)
+      break
     if (page.length === 0 && messageBytes > TRANSCRIPT_DETAIL_PAGE_BYTE_LIMIT) {
       throw transcriptError("INVALID_PARAMS")
     }

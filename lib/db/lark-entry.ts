@@ -104,3 +104,53 @@ export async function revokeWebSession(jtiHash: string, now?: number): Promise<v
 export async function getWebSession(jtiHash: string): Promise<LarkWebSessionRow | undefined> {
   return getDb().larkWebSessions.get(jtiHash)
 }
+
+/**
+ * Sessions seen for one adapter, newest sighting first — the ops view's read
+ * side. Revoked and expired rows are included: an operator asking "who had a
+ * session when this happened" needs them.
+ */
+export async function listWebSessions(adapterId: string): Promise<LarkWebSessionRow[]> {
+  const rows = await getDb().larkWebSessions.where("adapterId").equals(adapterId).toArray()
+  return rows.sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+}
+
+/**
+ * Mark every session held by one principal as revoked.
+ *
+ * The companion keeps sessions stateless (HMAC + TTL), so this does NOT tear
+ * a token down — what actually cuts the person off is the principal itself
+ * going non-active, which `resolveConnectorPrincipal` fails closed on for
+ * every entry intent. The stamp records WHEN that took effect, so the ledger
+ * does not keep showing a session as live after the account behind it stopped
+ * being served. Returns the number of rows stamped.
+ */
+export async function revokeWebSessionsForPrincipal(
+  principalId: string,
+  now?: number
+): Promise<number> {
+  const at = now ?? Date.now()
+  const rows = await getDb()
+    .larkWebSessions.where("principalId")
+    .equals(principalId)
+    .filter((row) => row.revokedAt === undefined)
+    .toArray()
+  await getDb().larkWebSessions.bulkPut(rows.map((row) => ({ ...row, revokedAt: at })))
+  return rows.length
+}
+
+/**
+ * Drop ledger rows whose session expired more than `retentionMs` ago
+ * (default 30 days). Expiry alone is not enough — a just-expired session is
+ * still the interesting one when investigating something that happened
+ * minutes earlier. Returns the number deleted.
+ */
+export async function pruneExpiredWebSessions(
+  retentionMs = 30 * 24 * 60 * 60 * 1000,
+  now?: number
+): Promise<number> {
+  const cutoff = (now ?? Date.now()) - retentionMs
+  const stale = await getDb().larkWebSessions.where("expiresAt").below(cutoff).toArray()
+  await getDb().larkWebSessions.bulkDelete(stale.map((row) => row.id))
+  return stale.length
+}

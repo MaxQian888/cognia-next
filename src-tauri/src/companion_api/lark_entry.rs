@@ -254,6 +254,34 @@ fn expect_scope(actual: &str, expected: &str) -> Result<(), String> {
     }
 }
 
+/// First 12 hex chars of the SHA-256 digest — the identifier-hashing
+/// convention the brain's ledgers already use (`hashOpenId` in
+/// `lib/connectors/principal/resolve.ts`). Kept byte-identical so a Rust-side
+/// hash and a brain-side hash of the same value collate.
+fn hash12(value: &str) -> String {
+    Sha256::digest(value.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+        .chars()
+        .take(12)
+        .collect()
+}
+
+/// The ledger projection of a verified web session, attached to every intent
+/// frame so the brain can keep `larkWebSessions` (Dexie v126) current.
+///
+/// The jti is hashed, not forwarded: the ops view needs a stable key to
+/// collate sightings under, and nothing more. Timestamps are converted to
+/// milliseconds because every brain-side ledger stores `Date.now()`.
+fn session_ledger(session: &WebSessionClaims) -> Value {
+    json!({
+        "idHash": hash12(&session.jti),
+        "issuedAt": session.iat.saturating_mul(1_000),
+        "expiresAt": session.exp.saturating_mul(1_000),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Process-global single-use / pending state
 // ---------------------------------------------------------------------------
@@ -377,24 +405,159 @@ pub fn complete_intent(request_id: &str, result: Result<Value, String>) -> bool 
 // Environment configuration
 // ---------------------------------------------------------------------------
 
-/// Public base URL of THIS companion server (scheme + host[:port]) as
-/// reachable from the user's browser — used for the OAuth redirect_uri.
+/// Public base URL of THIS companion server as reachable from the user's
+/// browser — hosts `/integrations/lark/*` and supplies the OAuth
+/// `redirect_uri`. Unset ⇒ every SSO entry point answers
+/// `sso_public_base_unconfigured`.
+pub const ENV_PUBLIC_BASE: &str = "COGNIA_LARK_PUBLIC_BASE";
+/// Base URL of the web app the SSO flow bounces back to. Falls back to
+/// [`ENV_PUBLIC_BASE`] — single-origin deployments serve both.
+pub const ENV_WEB_BASE: &str = "COGNIA_LARK_WEB_BASE";
+
+/// Why a configured `COGNIA_LARK_*` base URL was refused.
+///
+/// A refused value is treated as **unset** rather than passed through: the
+/// alternative is stamping garbage into the Feishu `redirect_uri`, which the
+/// platform rejects with a console-side error that names neither the variable
+/// nor the deployment that produced it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LarkBaseRejection {
+    /// Not parseable as an absolute URL — a bare host (`cognia.example`) is
+    /// the common miss, since it looks right in an `.env` file.
+    NotAbsoluteUrl,
+    /// Neither `https://` nor loopback `http://`. Feishu refuses to redirect
+    /// to a plaintext public URL, so this can never work in a real tenant.
+    InsecureScheme,
+    /// Carries a query string or fragment. Both would be silently dropped or
+    /// duplicated once a path is appended.
+    NotAPathOnlyBase,
+    /// Embeds userinfo (`https://user:pw@host`) — credentials in a
+    /// redirect_uri leak into the platform's console and audit logs.
+    HasCredentials,
+}
+
+impl LarkBaseRejection {
+    /// Operator-facing reason, phrased as what is wrong with the value.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NotAbsoluteUrl => "must be an absolute URL including the scheme",
+            Self::InsecureScheme => "must be https:// (or http:// on loopback for local dev)",
+            Self::NotAPathOnlyBase => "must not carry a query string or fragment",
+            Self::HasCredentials => "must not embed userinfo credentials",
+        }
+    }
+}
+
+/// Normalize an operator-supplied Lark base URL: trailing slashes trimmed, an
+/// optional path prefix preserved (deployments that mount the companion under
+/// a sub-path behind a stripping proxy are legitimate), everything else held
+/// to the same transport rule as the CORS allowlist.
+pub fn normalize_lark_base(raw: &str) -> Result<String, LarkBaseRejection> {
+    let value = raw.trim().trim_end_matches('/');
+    let url = url::Url::parse(value).map_err(|_| LarkBaseRejection::NotAbsoluteUrl)?;
+    if url.host_str().is_none() {
+        return Err(LarkBaseRejection::NotAbsoluteUrl);
+    }
+    if !super::web_origin::is_secure_or_loopback(&url) {
+        return Err(LarkBaseRejection::InsecureScheme);
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(LarkBaseRejection::HasCredentials);
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(LarkBaseRejection::NotAPathOnlyBase);
+    }
+    Ok(value.to_string())
+}
+
+/// Read + normalize one base variable. `None` covers unset, empty, and
+/// refused — the handlers treat all three identically.
+fn base_from(get: &impl Fn(&str) -> Option<String>, var: &str) -> Option<String> {
+    get(var)
+        .filter(|s| !s.trim().is_empty())
+        .and_then(|raw| normalize_lark_base(&raw).ok())
+}
+
+/// Public base URL of THIS companion server (see [`ENV_PUBLIC_BASE`]).
 fn public_base() -> Option<String> {
-    std::env::var("COGNIA_LARK_PUBLIC_BASE")
-        .ok()
-        .map(|s| s.trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
+    base_from(&|var| std::env::var(var).ok(), ENV_PUBLIC_BASE)
 }
 
 /// Base URL of the web app the SSO flow bounces back to. Falls back to the
 /// public base (single-origin deployments serve both).
 fn web_base() -> String {
-    std::env::var("COGNIA_LARK_WEB_BASE")
-        .ok()
-        .map(|s| s.trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
+    base_from(&|var| std::env::var(var).ok(), ENV_WEB_BASE)
         .or_else(public_base)
         .unwrap_or_default()
+}
+
+/// One startup complaint about the `COGNIA_LARK_*` environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LarkEnvIssue {
+    /// The variable at fault.
+    pub var: &'static str,
+    /// `true` ⇒ the value cannot work and the process should refuse to start.
+    /// `false` ⇒ it will work, but not for the deployment it looks like.
+    pub fatal: bool,
+    /// Operator-facing explanation, already suffixed with the fix.
+    pub message: String,
+}
+
+/// Validate the Lark entry environment at startup.
+///
+/// Without this, a typo'd base is only discovered by an end user inside a
+/// Feishu client: `login_handler` 503s with `sso_public_base_unconfigured`
+/// and nothing in the server log ties that back to the variable. Takes a
+/// lookup rather than reading the process environment so the rules are
+/// testable (same shape as [`super::oidc::OidcAuthenticator::from_vars`]).
+pub fn lark_env_issues(get: impl Fn(&str) -> Option<String>) -> Vec<LarkEnvIssue> {
+    let mut issues = Vec::new();
+    let mut normalized: [Option<String>; 2] = [None, None];
+
+    for (index, var) in [ENV_PUBLIC_BASE, ENV_WEB_BASE].into_iter().enumerate() {
+        let Some(raw) = get(var).filter(|s| !s.trim().is_empty()) else {
+            continue;
+        };
+        match normalize_lark_base(&raw) {
+            Ok(value) => normalized[index] = Some(value),
+            Err(rejection) => issues.push(LarkEnvIssue {
+                var,
+                fatal: true,
+                message: format!("{var} is set but {}", rejection.reason()),
+            }),
+        }
+    }
+
+    let [public, web] = normalized;
+    // A web base without a public base is the shape a half-migrated
+    // deployment lands in: the entry links resolve to a web app whose SSO,
+    // entry-resolve and JSSDK calls all 503.
+    if public.is_none() && web.is_some() {
+        issues.push(LarkEnvIssue {
+            var: ENV_PUBLIC_BASE,
+            fatal: false,
+            message: format!(
+                "{ENV_WEB_BASE} is set but {ENV_PUBLIC_BASE} is not — Lark web SSO, \
+                 entry resolve and JSSDK signing will answer 503"
+            ),
+        });
+    }
+    // Loopback parses and is right for local development, but a Feishu client
+    // on a phone cannot reach it, and the console will not accept it as a
+    // redirect URL.
+    if let Some(value) = public.as_deref() {
+        if value.starts_with("http://") {
+            issues.push(LarkEnvIssue {
+                var: ENV_PUBLIC_BASE,
+                fatal: false,
+                message: format!(
+                    "{ENV_PUBLIC_BASE} points at loopback ({value}) — usable for local \
+                     development only; real Feishu clients require a public https origin"
+                ),
+            });
+        }
+    }
+    issues
 }
 
 // ---------------------------------------------------------------------------
@@ -769,6 +932,7 @@ pub async fn resolve_handler(
                     "tenantKey": session.tk,
                     "appId": session.app,
                 },
+                "session": session_ledger(&session),
             }),
         );
         return (
@@ -889,6 +1053,7 @@ pub async fn shortcut_import_handler(
                 "tenantKey": session.tk,
                 "appId": session.app,
             },
+            "session": session_ledger(&session),
         }),
     );
     (
@@ -935,6 +1100,7 @@ pub async fn plus_create_handler(
                 "tenantKey": session.tk,
                 "appId": session.app,
             },
+            "session": session_ledger(&session),
         }),
     );
     (
@@ -1101,6 +1267,11 @@ pub struct AdminBody {
     pub status: Option<String>,
     #[serde(default, rename = "cogniaUserId")]
     pub cognia_user_id: Option<String>,
+    /// `oauth-begin` only: the exact `redirect_uri` to register with Feishu.
+    /// Optional — the brain derives it from the deployment's ingress base when
+    /// absent, which is the normal case for a self-hosted install.
+    #[serde(default, rename = "redirectUri")]
+    pub redirect_uri: Option<String>,
 }
 
 /// Operations the brain's `principal_admin` intent branch accepts. Rejecting
@@ -1114,6 +1285,10 @@ const ADMIN_OPS: &[&str] = &[
     "register-tenant",
     "set-tenant-status",
     "sweep",
+    // Send-as-user OAuth, driven entirely by the brain: it mints state + PKCE
+    // and returns an authorize URL for the operator to open. A headless
+    // install has no settings dialog, so this is its only authorize path.
+    "oauth-begin",
 ];
 
 pub async fn admin_handler(
@@ -1141,6 +1316,7 @@ pub async fn admin_handler(
             "principalId": body.principal_id,
             "status": body.status,
             "cogniaUserId": body.cognia_user_id,
+            "redirectUri": body.redirect_uri,
         }),
     );
     (
@@ -1355,6 +1531,7 @@ mod tests {
                 principal_id: None,
                 status: None,
                 cognia_user_id: None,
+                redirect_uri: None,
             }),
         )
         .await;
@@ -1370,6 +1547,10 @@ mod tests {
         }
         assert!(ADMIN_OPS.contains(&"approve"));
         assert!(ADMIN_OPS.contains(&"set-principal-status"));
+        // The headless authorize path — without it `cognia-agent lark
+        // authorize` is refused at the front door before the brain ever sees
+        // it, and a self-hosted install has no other way to connect a user.
+        assert!(ADMIN_OPS.contains(&"oauth-begin"));
         assert!(!ADMIN_OPS.contains(&"delete"));
     }
 
@@ -1806,5 +1987,158 @@ mod tests {
         prune_sso(now_ms());
         assert!(SSO_PENDING.lock().len() <= SSO_PENDING_MAX);
         SSO_PENDING.lock().clear();
+    }
+
+    // ── COGNIA_LARK_* base validation ──────────────────────────────────────
+
+    // No `+ '_`: the closure clones every pair into `owned`, so it borrows
+    // nothing from `pairs` and outlives it. Claiming an anonymous lifetime made
+    // the whole crate's test target fail to compile (E0106) because `&[(&str,
+    // &str)]` has three of them and none is the right answer.
+    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let owned: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        move |key: &str| owned.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn lark_base_accepts_https_and_a_sub_path_prefix() {
+        assert_eq!(
+            normalize_lark_base("https://cognia.example/"),
+            Ok("https://cognia.example".into())
+        );
+        assert_eq!(
+            normalize_lark_base("  https://cognia.example:8443///  "),
+            Ok("https://cognia.example:8443".into())
+        );
+        // A stripping proxy mounting the companion under a prefix is a real
+        // deployment; the callback becomes `{base}/integrations/lark/...`.
+        assert_eq!(
+            normalize_lark_base("https://corp.example/cognia"),
+            Ok("https://corp.example/cognia".into())
+        );
+        assert_eq!(
+            normalize_lark_base("http://localhost:27890"),
+            Ok("http://localhost:27890".into())
+        );
+    }
+
+    #[test]
+    fn lark_base_rejects_each_way_it_can_be_wrong() {
+        // The failure that motivated this: a bare host looks correct in a
+        // `.env` file and produces `redirect_uri=cognia.example/integrations/...`.
+        assert_eq!(
+            normalize_lark_base("cognia.example"),
+            Err(LarkBaseRejection::NotAbsoluteUrl)
+        );
+        assert_eq!(
+            normalize_lark_base("https://"),
+            Err(LarkBaseRejection::NotAbsoluteUrl)
+        );
+        assert_eq!(
+            normalize_lark_base("http://cognia.example"),
+            Err(LarkBaseRejection::InsecureScheme)
+        );
+        assert_eq!(
+            normalize_lark_base("ftp://cognia.example"),
+            Err(LarkBaseRejection::InsecureScheme)
+        );
+        assert_eq!(
+            normalize_lark_base("https://user:pw@cognia.example"),
+            Err(LarkBaseRejection::HasCredentials)
+        );
+        assert_eq!(
+            normalize_lark_base("https://cognia.example?tenant=a"),
+            Err(LarkBaseRejection::NotAPathOnlyBase)
+        );
+        assert_eq!(
+            normalize_lark_base("https://cognia.example#frag"),
+            Err(LarkBaseRejection::NotAPathOnlyBase)
+        );
+    }
+
+    #[test]
+    fn lark_env_is_silent_when_nothing_is_configured() {
+        // Most deployments never touch Lark; validation must not editorialize.
+        assert!(lark_env_issues(vars(&[])).is_empty());
+        assert!(lark_env_issues(vars(&[(ENV_PUBLIC_BASE, "   ")])).is_empty());
+    }
+
+    #[test]
+    fn lark_env_is_silent_on_a_correct_single_origin_deployment() {
+        assert!(lark_env_issues(vars(&[(ENV_PUBLIC_BASE, "https://cognia.example")])).is_empty());
+        assert!(lark_env_issues(vars(&[
+            (ENV_PUBLIC_BASE, "https://api.cognia.example"),
+            (ENV_WEB_BASE, "https://app.cognia.example"),
+        ]))
+        .is_empty());
+    }
+
+    #[test]
+    fn lark_env_reports_a_malformed_value_as_fatal_naming_the_variable() {
+        let issues = lark_env_issues(vars(&[
+            (ENV_PUBLIC_BASE, "cognia.example"),
+            (ENV_WEB_BASE, "http://app.example"),
+        ]));
+        assert_eq!(issues.len(), 2);
+        assert!(issues.iter().all(|issue| issue.fatal));
+        assert!(issues[0].message.starts_with(ENV_PUBLIC_BASE));
+        assert!(issues[0].message.contains("absolute URL"));
+        assert!(issues[1].message.starts_with(ENV_WEB_BASE));
+        assert!(issues[1].message.contains("https://"));
+    }
+
+    #[test]
+    fn lark_env_warns_when_the_web_base_has_no_companion_to_call() {
+        let issues = lark_env_issues(vars(&[(ENV_WEB_BASE, "https://app.cognia.example")]));
+        assert_eq!(issues.len(), 1);
+        assert!(!issues[0].fatal);
+        assert_eq!(issues[0].var, ENV_PUBLIC_BASE);
+        assert!(issues[0].message.contains("503"));
+    }
+
+    #[test]
+    fn lark_env_warns_that_a_loopback_public_base_is_dev_only() {
+        // Parses, works locally, and can never work in a real tenant — so it
+        // is a warning, not a refusal.
+        let issues = lark_env_issues(vars(&[(ENV_PUBLIC_BASE, "http://127.0.0.1:27890")]));
+        assert_eq!(issues.len(), 1);
+        assert!(!issues[0].fatal);
+        assert!(issues[0].message.contains("local"));
+    }
+
+    #[test]
+    fn session_ledger_hashes_the_jti_and_reports_milliseconds() {
+        let claims = WebSessionClaims {
+            scope: SCOPE_WEB.into(),
+            iat: 1_700_000_000,
+            exp: 1_700_003_600,
+            jti: "0e2a4f1c-0000-4000-8000-000000000001".into(),
+            oid: "ou_x".into(),
+            tk: "tk_a".into(),
+            app: "cli_1".into(),
+            adapter_id: "lk-1".into(),
+            uid: None,
+        };
+        let ledger = session_ledger(&claims);
+        // The ops view must never receive a replayable session identifier.
+        let id_hash = ledger["idHash"].as_str().expect("idHash");
+        assert_eq!(id_hash.len(), 12);
+        assert_ne!(id_hash, claims.jti);
+        assert!(!claims.jti.contains(id_hash));
+        assert_eq!(id_hash, hash12(&claims.jti));
+        // Brain ledgers store Date.now() milliseconds; the claims are seconds.
+        assert_eq!(ledger["issuedAt"], json!(1_700_000_000_000i64));
+        assert_eq!(ledger["expiresAt"], json!(1_700_003_600_000i64));
+    }
+
+    #[test]
+    fn hash12_matches_the_brain_hash_open_id_convention() {
+        // sha256("ou_x") — first 12 hex chars. Pinned so a change to either
+        // side of the ledger key is a failing test, not a silent split.
+        assert_eq!(hash12("ou_x"), "b32db0568bd1");
+        assert_eq!(hash12("").len(), 12);
     }
 }

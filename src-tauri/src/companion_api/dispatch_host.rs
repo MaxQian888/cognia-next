@@ -179,6 +179,192 @@ impl DispatchHost {
             Self::Headless(_) => "headless",
         }
     }
+
+    // ── External-agent execution plane ──────────────────────────────────────
+    //
+    // `spawn/send/kill/get_status_external_agent` are `target=execution` over
+    // http/websocket/webrtc, so a paired phone addresses them on EITHER host.
+    // They used to be implemented against `host.headless()` alone, which meant
+    // a phone paired to a DESKTOP got a 503 whose message said the command
+    // "requires the desktop app" — the exact opposite of the truth, and the
+    // reason remote agent control worked only against a cloud deployment.
+    //
+    // The desktop already owns an `ExecBackend` (`ExternalAgentState::backend`,
+    // whose own doc comment claims "one code path with the headless RPC arms"),
+    // so the fix is an accessor, not a second implementation.
+
+    /// The process/exec backend that owns external agents on this host.
+    pub fn exec_backend(&self) -> Arc<dyn crate::external_agent::exec_backend::ExecBackend> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::external_agent::commands::ExternalAgentState>()
+                    .backend()
+            }
+            Self::Headless(services) => Arc::clone(&services.exec),
+        }
+    }
+
+    /// Where agent lifecycle events are published for this host: the Tauri
+    /// event channels the desktop UI already listens on, or the companion
+    /// EventBus a remote client reads through `/ws/events`.
+    pub fn agent_event_emitter(
+        &self,
+    ) -> Arc<dyn crate::external_agent::exec_backend::AgentEventEmitter> {
+        match self {
+            Self::Tauri(app) => {
+                Arc::new(crate::external_agent::commands::TauriAgentEmitter { app: app.clone() })
+            }
+            Self::Headless(services) => {
+                Arc::new(super::rpc::BusAgentEmitter(Arc::clone(&services.event_bus)))
+            }
+        }
+    }
+
+    /// The spawn policy this host applies to a REMOTE spawn request.
+    ///
+    /// Deliberately the strict `SpawnPolicy` on both hosts, never the desktop's
+    /// laxer `validate_desktop`: that relaxation exists because a local Tauri
+    /// `invoke` implies a human sitting at the machine, which is exactly the
+    /// premise a network-reachable arm does not get to assume. Remote spawn is
+    /// RCE-grade on a desktop for the same reason it is in the cloud.
+    pub fn remote_spawn_policy(
+        &self,
+    ) -> Result<crate::external_agent::presets::SpawnPolicy, String> {
+        match self {
+            Self::Tauri(app) => {
+                let data_root = crate::external_agent::dsh_runtime::host_data_root(app)?;
+                Ok(crate::external_agent::presets::SpawnPolicy::from_env(
+                    &data_root,
+                ))
+            }
+            Self::Headless(services) => Ok(services.spawn_policy.clone()),
+        }
+    }
+
+    // ── Plugin runtimes ─────────────────────────────────────────────────────
+    //
+    // Both hosts own these outright — the desktop `.manage()`s the very same
+    // state types at boot (`lib.rs`), and the underlying helpers are already
+    // written as `*_for_state(state, …)`. The arms were nonetheless reachable
+    // only on headless, so a paired phone could grant a plugin permission or
+    // invoke a plugin API against a cloud host and not against the desktop it
+    // was actually paired to.
+
+    // Plain reference accessors, not combinators: Tauri's `State::inner()`
+    // hands back `&'r T` whose lifetime comes from the manager borrow rather
+    // than from the temporary `State` value, so both arms can yield a
+    // reference tied to `&self`. (The generic-future combinator this replaced
+    // could not express "the returned future borrows the argument" and failed
+    // to compile.) Returning an owned `Arc` is not an option either —
+    // `PluginRuntimeState` is not `Clone`, and a clone would be a different
+    // registry even if it were.
+
+    /// Native plugin install/permission/snapshot service this host owns.
+    pub fn plugin_runtime(&self) -> &crate::plugin_api::PluginRuntimeState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::plugin_api::PluginRuntimeState>().inner()
+            }
+            Self::Headless(services) => services.plugin_runtime.as_ref(),
+        }
+    }
+
+    /// VS Code extension sidecar registry — what the system LSP host arms need.
+    pub fn vscode_plugins(&self) -> &crate::plugin_api::vscode::VscodeExtensionState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::plugin_api::vscode::VscodeExtensionState>()
+                    .inner()
+            }
+            Self::Headless(services) => services.vscode_plugins.as_ref(),
+        }
+    }
+
+    /// Connector adapter registry + the single-owner runtime lease.
+    ///
+    /// Both hosts own one: the desktop as Tauri managed state, the headless
+    /// container inside `HeadlessServices`. Host-neutral because the lease is
+    /// the arbiter between EVERY runtime attached to this companion — the
+    /// desktop's own webview and any brain process pointed at it — and an arm
+    /// that only exists on one host cannot arbitrate between two.
+    pub fn connectors_state(&self) -> &crate::connectors::ConnectorsState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::connectors::ConnectorsState>().inner()
+            }
+            Self::Headless(services) => &services.connectors,
+        }
+    }
+
+    /// Native OCR backend registry this host owns.
+    ///
+    /// Async because the headless registry installs its compiled backends
+    /// lazily on first use; the desktop's is built at startup. Returns an
+    /// owned clone — `NativeOcrRegistry` is `Clone` and the desktop's Tauri
+    /// `State` borrow cannot outlive the call.
+    pub async fn ocr_registry(&self) -> crate::ocr::NativeOcrRegistry {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::ocr::NativeOcrRegistry>().inner().clone()
+            }
+            Self::Headless(services) => services.ocr_registry().await.clone(),
+        }
+    }
+
+    /// Where `ocr://download-progress` is published.
+    ///
+    /// The desktop emits on the Tauri event channel its UI listens to; the
+    /// headless host publishes to the companion `EventBus`, which a remote
+    /// client reads through `/ws/events`. Same topic name either way, so a
+    /// paired device sees model-download progress on both hosts.
+    pub fn ocr_progress_emitter(
+        &self,
+    ) -> std::sync::Arc<dyn Fn(crate::ocr::DownloadProgressEvent) + Send + Sync> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Emitter as _;
+                let app = app.clone();
+                std::sync::Arc::new(move |event| {
+                    let _ = app.emit("ocr://download-progress", event);
+                })
+            }
+            Self::Headless(services) => {
+                let bus = std::sync::Arc::clone(&services.event_bus);
+                std::sync::Arc::new(move |event| {
+                    // A progress frame that will not serialize is dropped, not
+                    // fatal — the download itself is unaffected.
+                    if let Ok(payload) = serde_json::to_value(event) {
+                        bus.publish("ocr://download-progress".to_string(), payload);
+                    }
+                })
+            }
+        }
+    }
+
+    /// Apply this host's OS confinement to an already policy-validated spawn.
+    ///
+    /// The desktop wraps children in its sandbox host (the local Tauri command
+    /// does the same); the headless container relies on the `ExecBackend` it
+    /// was configured with (local / bollard / kube) for isolation, so there is
+    /// nothing to wrap.
+    pub fn harden_spawn_config(
+        &self,
+        config: crate::external_agent::process::ExternalAgentSpawnConfig,
+    ) -> Result<crate::external_agent::process::ExternalAgentSpawnConfig, String> {
+        match self {
+            Self::Tauri(_) => crate::external_agent::sandbox::wrap_with_sandbox(
+                config,
+                &crate::external_agent::sandbox::DesktopSandboxHost,
+            )
+            .map_err(|error| error.to_string()),
+            Self::Headless(_) => Ok(config),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -222,5 +408,31 @@ mod tests {
 
         // Process services stay available without a Tauri AppHandle.
         assert!(!host.mcp_server_status().running);
+    }
+
+    /// The accessors behind the `target=execution` arms must hand back the very
+    /// instance the host owns, not a copy. A copy compiles, passes a smoke
+    /// test, and then silently spawns agents into a registry that `kill` and
+    /// `status` cannot see.
+    #[test]
+    fn execution_accessors_yield_the_host_owned_instance() {
+        let services = HeadlessServices::stub_for_tests();
+        let host = DispatchHost::Headless(Arc::clone(&services));
+
+        assert!(Arc::ptr_eq(&host.exec_backend(), &services.exec));
+        assert!(std::ptr::eq(
+            host.plugin_runtime(),
+            services.plugin_runtime.as_ref()
+        ));
+        assert!(std::ptr::eq(
+            host.vscode_plugins(),
+            services.vscode_plugins.as_ref()
+        ));
+    }
+
+    #[test]
+    fn headless_remote_spawn_policy_is_the_registry_policy() {
+        let host = headless_host();
+        assert!(host.remote_spawn_policy().is_ok());
     }
 }

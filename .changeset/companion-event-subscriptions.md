@@ -1,0 +1,7 @@
+---
+"cognia-next": minor
+---
+
+Companion event streams are now per-client subscriptions instead of a single fan-out. Remote clients (phone, companion browser, WebRTC peer, and the headless brain) can widen or narrow which event channels they receive with a `subscribe` control frame, and the host answers with the resulting set — naming anything it refused rather than silently ignoring it. With that in place the forwardable channel list grew from 18 to a 70-entry catalog, so command families whose results previously went nowhere over a remote connection — the embedded browser, code-server, the Python plugin bridge, external agents, computer-use events, background jobs, and workflow triggers — can now stream their results to a client that asks for them. Existing clients are unaffected: the default set is exactly what was delivered before, so a client that never sends a `subscribe` frame sees the same stream it always did.
+
+Two channels changed audience as part of this. `gateway://decide` and the other provider-gateway channels are now restricted to the local headless brain; `gateway://decide` carries the user's prompt verbatim and was previously delivered to every paired device. Event channels that are host-local by design — the tray, the desktop pet, the selection toolbar, and the skill recorder, the last two of which carry selected text and keystrokes — are now structurally undeliverable to a remote client rather than merely unlisted.

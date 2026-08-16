@@ -1375,6 +1375,87 @@ describe("subscribe() — ping / pong", () => {
 })
 
 // ---------------------------------------------------------------------------
+// subscribe() — subscribe control frames (non-default channels)
+// ---------------------------------------------------------------------------
+
+describe("subscribe() — subscribe control frames", () => {
+  beforeEach(() => setConfig())
+
+  it("widens the server subscription to every handled channel on open, then per new channel", () => {
+    transport = new CompanionTransport()
+    transport.subscribe("workflow:trigger", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    // A real socket is CONNECTING (0) until onopen; nothing may be sent yet.
+    ws.readyState = 0
+    transport.subscribe("claude://message", jest.fn())
+    expect(ws.sent.filter((m) => m.includes('"subscribe"'))).toEqual([])
+    ws.readyState = MockWebSocket.OPEN
+    ws.triggerOpen()
+    expect(ws.sent).toContain(
+      JSON.stringify({
+        type: "subscribe",
+        mode: "add",
+        channels: ["workflow:trigger", "claude://message"],
+      })
+    )
+    // A channel added while open is sent as its own add frame; a second
+    // handler on an existing channel is not.
+    transport.subscribe("scheduler:task-due", jest.fn())
+    transport.subscribe("scheduler:task-due", jest.fn())
+    expect(ws.sent.filter((m) => m.includes("scheduler:task-due"))).toEqual([
+      JSON.stringify({ type: "subscribe", mode: "add", channels: ["scheduler:task-due"] }),
+    ])
+  })
+
+  it("sends a remove frame when the last handler of a channel unsubscribes", () => {
+    transport = new CompanionTransport()
+    const stopA = transport.subscribe("workflow:trigger", jest.fn())
+    const stopB = transport.subscribe("workflow:trigger", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    stopA()
+    expect(ws.sent.filter((m) => m.includes('"remove"'))).toEqual([])
+    stopB()
+    expect(ws.sent).toContain(
+      JSON.stringify({ type: "subscribe", mode: "remove", channels: ["workflow:trigger"] })
+    )
+  })
+
+  it("records subscribed / subscribe_error acknowledgements for diagnostics", () => {
+    transport = new CompanionTransport()
+    transport.subscribe("workflow:trigger", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    ws.triggerMessage(
+      JSON.stringify({
+        type: "subscribed",
+        channels: ["workflow:trigger"],
+        rejected: [{ channel: "bogus:*", reason: "unknown_channel" }, "not-an-object"],
+      })
+    )
+    expect(transport.subscriptionDiagnostics()).toEqual({
+      channels: ["workflow:trigger"],
+      rejectedChannels: ["bogus:*"],
+      lastError: null,
+    })
+    ws.triggerMessage(JSON.stringify({ type: "subscribe_error", message: "bad frame" }))
+    expect(transport.subscriptionDiagnostics().lastError).toBe("bad frame")
+    ws.triggerMessage(JSON.stringify({ type: "subscribe_error" }))
+    expect(transport.subscriptionDiagnostics().lastError).toBe("subscribe_error")
+  })
+
+  it("tolerates a socket that throws on send", () => {
+    transport = new CompanionTransport()
+    transport.subscribe("workflow:trigger", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    ws.send = () => {
+      throw new Error("closed")
+    }
+    expect(() => ws.triggerOpen()).not.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // subscribe() — resync_required
 // ---------------------------------------------------------------------------
 

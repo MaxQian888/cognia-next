@@ -1,33 +1,32 @@
-//! Persisted per-device capability grants for hosts with no renderer.
+//! The elevated-grant vocabulary, plus the reader for the retired
+//! `device-grants.json` projection.
 //!
-//! # Why this exists
+//! # What this module is now
 //!
-//! [`super::control_allow_list`] is an in-memory set consulted on the RPC hot
-//! path, and its own docs say the persisted truth is Dexie's
-//! `pairedDevices.allowRemoteControl`, mirrored in by `companion_seed_remote_control`
-//! *at desktop boot*. That is a Tauri command invoked from the renderer.
+//! [`GrantKind`] is the shared vocabulary for the three elevated grants a
+//! paired device can hold, and [`GrantKind::capabilities`] is the **single**
+//! mapping from a grant to the canonical SecurityStore capabilities that the
+//! request-path gates actually check. Three call sites consume it — the desktop
+//! toggles ([`super::commands::companion_set_remote_terminal`] and its two
+//! siblings), the `cognia-server devices grant/revoke` CLI, and the one-time
+//! import in [`super::security_store::SecurityStore::migrate_legacy_device_grants`]
+//! — so a capability added to a grant lands on every host type at once.
 //!
-//! A headless `cognia-server` has no renderer, no Dexie, and no equivalent
-//! command — so nothing ever populated the list and it stayed empty for the
-//! process lifetime. Every CONTROL-tier RPC (`fs_write`, `git_commit`,
-//! `git_push`, session steering) was therefore unreachable with a paired device on
-//! exactly the host type ADR-0082 exists to drive: you could pair a desktop to a
-//! cloud server, see the capability boundary documented in the UI, and have no
-//! way anywhere to grant it.
+//! # Why the JSON file is read-only
 //!
-//! This module is the missing half: a JSON file next to the other headless
-//! credential files ([`super::push_creds::FilePushCredStore`] is the same
-//! shape), read at boot to seed both allow lists, and mutated by the
-//! `cognia-server devices` subcommands.
+//! This module once owned a JSON file that was the persisted truth for a
+//! headless host, projected at boot onto a set of process-global in-memory
+//! allow lists. That design is retired: authorization is now the SecurityStore's
+//! `capability_grants` table, checked on the request path by
+//! [`super::remote_execution::authorize_capability`] and by the two direct
+//! `has_capability` gates in [`super::rpc`] and [`super::ws_terminal`].
 //!
-//! # Consistency model
-//!
-//! The file is the truth; the in-memory lists are a boot-time projection. A
-//! grant made while the server is running takes effect at its next start —
-//! the CLI says so. That matches `rotate-master-key`, which likewise asks the
-//! operator to restart. Watching the file would make the grant live at the cost
-//! of a filesystem watcher on a security-relevant path, which is not a trade
-//! worth making for an operation performed a handful of times per host.
+//! What remains is the reader. `cognia-server` loads the file once at boot and
+//! hands it to `migrate_legacy_device_grants`, which imports it behind a
+//! committed SQLite marker so a grant revoked after the import can never be
+//! resurrected by re-reading the same file. Nothing writes it any more — a
+//! grant made today goes straight into the SecurityStore, and takes effect on
+//! the next request rather than the next restart.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -38,11 +37,18 @@ use serde::{Deserialize, Serialize};
 const GRANTS_FILE: &str = "device-grants.json";
 
 /// Which elevated capability a grant refers to.
+///
+/// Deliberately three kinds rather than one flag with sub-bits. Remote control
+/// means steering work this host already decided to run; agent control means
+/// launching a new process; terminal means an interactive shell. Granting
+/// someone the ability to write files must not silently also grant process
+/// execution, and a single switch labelled "remote control" would do exactly
+/// that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrantKind {
-    /// Steer sessions, write files, push commits — [`super::control_allow_list::global`].
+    /// Steer sessions, write files, push commits.
     Control,
-    /// Start and drive external agents — [`super::control_allow_list::agent_control_global`].
+    /// Start and drive external agents.
     AgentControl,
     /// Create, attach to, and control interactive terminal sessions.
     Terminal,
@@ -55,6 +61,37 @@ impl GrantKind {
             GrantKind::AgentControl => "agent-control",
             GrantKind::Terminal => "terminal",
         }
+    }
+
+    /// The canonical SecurityStore capabilities this grant maps onto.
+    ///
+    /// This is the only place the mapping exists. The desktop toggles, the
+    /// `cognia-server devices` CLI, and the legacy-grant import all route
+    /// through it, so none of the three can drift into granting a capability
+    /// the others do not — which is how a toggle ends up writing something no
+    /// gate reads.
+    pub fn capabilities(self) -> &'static [&'static str] {
+        match self {
+            GrantKind::Control => &[
+                "agent.run",
+                "workspace.read",
+                "workspace.write",
+                "git.write",
+                "workflow.run",
+            ],
+            GrantKind::AgentControl => &["process.spawn"],
+            GrantKind::Terminal => &["terminal.open"],
+        }
+    }
+
+    /// Every kind, so callers can project a whole capability snapshot without
+    /// restating the list (and silently forgetting one when a kind is added).
+    pub fn all() -> [GrantKind; 3] {
+        [
+            GrantKind::Control,
+            GrantKind::AgentControl,
+            GrantKind::Terminal,
+        ]
     }
 
     pub fn parse(raw: &str) -> Option<Self> {
@@ -79,21 +116,10 @@ pub struct PersistedGrants {
     pub terminal: BTreeSet<String>,
 }
 
-impl PersistedGrants {
-    fn set_mut(&mut self, kind: GrantKind) -> &mut BTreeSet<String> {
-        match kind {
-            GrantKind::Control => &mut self.control,
-            GrantKind::AgentControl => &mut self.agent_control,
-            GrantKind::Terminal => &mut self.terminal,
-        }
-    }
-}
-
-/// Storage seam, so the CLI paths and the boot path are testable without a
-/// real data directory.
+/// Storage seam, so the boot-time import is testable without a real data
+/// directory.
 pub trait DeviceGrantStore: Send + Sync {
     fn load(&self) -> Result<PersistedGrants, String>;
-    fn save(&self, grants: &PersistedGrants) -> Result<(), String>;
 }
 
 pub struct FileDeviceGrantStore {
@@ -122,108 +148,11 @@ impl DeviceGrantStore for FileDeviceGrantStore {
             Err(err) => Err(format!("{}: {err}", self.path.display())),
         }
     }
-
-    fn save(&self, grants: &PersistedGrants) -> Result<(), String> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-        }
-        let raw = serde_json::to_string_pretty(grants).map_err(|e| format!("serialize: {e}"))?;
-        std::fs::write(&self.path, raw).map_err(|e| format!("{}: {e}", self.path.display()))
-    }
-}
-
-/// Project the persisted grants onto the in-memory allow lists the RPC hot path
-/// reads. Returns `(control, agent_control, terminal)` counts for the boot log.
-///
-/// Uses `reseed` (replace, not union) so a grant revoked while the server was
-/// down does not survive the restart.
-pub fn seed_allow_lists(store: &dyn DeviceGrantStore) -> Result<(usize, usize, usize), String> {
-    seed_allow_lists_into(
-        store,
-        super::control_allow_list::global(),
-        super::control_allow_list::agent_control_global(),
-        super::control_allow_list::terminal_global(),
-    )
-}
-
-/// Seed a specific set of capability lists.
-///
-/// Split out so the replace-not-union contract can be tested against lists the
-/// test owns. The two globals are shared by every test in this binary and
-/// `reseed` REPLACES, so seeding them from a test wipes whatever a concurrently
-/// running RPC gate test had just granted itself — and a permission test that
-/// passes because the grant vanished is worse than one that fails.
-pub fn seed_allow_lists_into(
-    store: &dyn DeviceGrantStore,
-    control_list: &super::control_allow_list::ControlAllowList,
-    agent_control_list: &super::control_allow_list::ControlAllowList,
-    terminal_list: &super::control_allow_list::ControlAllowList,
-) -> Result<(usize, usize, usize), String> {
-    let grants = store.load()?;
-    let control: Vec<String> = grants.control.iter().cloned().collect();
-    let agent: Vec<String> = grants.agent_control.iter().cloned().collect();
-    let terminal: Vec<String> = grants.terminal.iter().cloned().collect();
-    let counts = (control.len(), agent.len(), terminal.len());
-    control_list.reseed(control);
-    agent_control_list.reseed(agent);
-    terminal_list.reseed(terminal);
-    Ok(counts)
-}
-
-/// Grant `device_id` a capability. Returns `true` when this changed anything.
-pub fn grant(
-    store: &dyn DeviceGrantStore,
-    device_id: &str,
-    kind: GrantKind,
-) -> Result<bool, String> {
-    if device_id.trim().is_empty() {
-        return Err("device id must not be empty".to_string());
-    }
-    let mut grants = store.load()?;
-    let changed = grants.set_mut(kind).insert(device_id.to_string());
-    if changed {
-        store.save(&grants)?;
-    }
-    Ok(changed)
-}
-
-/// Revoke a capability. Returns `true` when this changed anything.
-pub fn revoke(
-    store: &dyn DeviceGrantStore,
-    device_id: &str,
-    kind: GrantKind,
-) -> Result<bool, String> {
-    let mut grants = store.load()?;
-    let changed = grants.set_mut(kind).remove(device_id);
-    if changed {
-        store.save(&grants)?;
-    }
-    Ok(changed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    #[derive(Default)]
-    struct MemStore {
-        inner: Mutex<PersistedGrants>,
-        fail_save: bool,
-    }
-
-    impl DeviceGrantStore for MemStore {
-        fn load(&self) -> Result<PersistedGrants, String> {
-            Ok(self.inner.lock().unwrap().clone())
-        }
-        fn save(&self, grants: &PersistedGrants) -> Result<(), String> {
-            if self.fail_save {
-                return Err("disk full".to_string());
-            }
-            *self.inner.lock().unwrap() = grants.clone();
-            Ok(())
-        }
-    }
 
     #[test]
     fn grant_kind_round_trips_through_its_wire_name() {
@@ -243,102 +172,67 @@ mod tests {
     }
 
     #[test]
-    fn granting_control_does_not_grant_agent_control() {
-        // The whole reason these are two lists: letting a device write files
-        // must not silently let it start processes.
-        let store = MemStore::default();
-        assert!(grant(&store, "dev-1", GrantKind::Control).unwrap());
-        let grants = store.load().unwrap();
-        assert!(grants.control.contains("dev-1"));
-        assert!(grants.agent_control.is_empty());
-        assert!(grants.terminal.is_empty());
+    fn each_grant_maps_onto_capabilities_the_request_path_actually_checks() {
+        // Every capability a toggle can write must be one `has_capability` can
+        // be asked for — i.e. one the SecurityStore will accept as an
+        // assignable device capability. A typo here is exactly the failure
+        // this module exists to prevent: a switch that writes a grant no gate
+        // will ever match.
+        for kind in GrantKind::all() {
+            assert!(
+                !kind.capabilities().is_empty(),
+                "{} grants nothing",
+                kind.as_str()
+            );
+            for capability in kind.capabilities() {
+                assert!(
+                    super::super::security_store::is_assignable_device_capability(capability),
+                    "{capability} is not an assignable device capability"
+                );
+            }
+        }
     }
 
     #[test]
-    fn grant_is_idempotent_and_only_writes_when_it_changes_something() {
-        let store = MemStore::default();
-        assert!(grant(&store, "dev-1", GrantKind::AgentControl).unwrap());
-        assert!(!grant(&store, "dev-1", GrantKind::AgentControl).unwrap());
+    fn the_three_grants_do_not_overlap() {
+        // Letting a device write files must not silently also let it start
+        // processes or open a shell, so no capability may appear under two
+        // kinds — revoking one grant would otherwise leave the other's
+        // capability behind.
+        for (a, b) in [
+            (GrantKind::Control, GrantKind::AgentControl),
+            (GrantKind::Control, GrantKind::Terminal),
+            (GrantKind::AgentControl, GrantKind::Terminal),
+        ] {
+            for capability in a.capabilities() {
+                assert!(
+                    !b.capabilities().contains(capability),
+                    "{capability} is in both {} and {}",
+                    a.as_str(),
+                    b.as_str()
+                );
+            }
+        }
     }
 
     #[test]
-    fn revoke_reports_whether_it_removed_anything() {
-        let store = MemStore::default();
-        grant(&store, "dev-1", GrantKind::Control).unwrap();
-        assert!(revoke(&store, "dev-1", GrantKind::Control).unwrap());
-        assert!(!revoke(&store, "dev-1", GrantKind::Control).unwrap());
+    fn terminal_access_is_exactly_the_capability_the_terminal_gates_read() {
+        // `rpc::ensure_terminal_rpc_authorized` and `ws_terminal` both ask for
+        // "terminal.open" and nothing else. If this drifts, the terminal
+        // toggle stops controlling terminal access.
+        assert_eq!(GrantKind::Terminal.capabilities(), &["terminal.open"]);
     }
 
     #[test]
-    fn an_empty_device_id_is_refused_rather_than_stored() {
-        // An empty id would match the empty `device_id` an unauthenticated or
-        // malformed context carries, which would grant everyone.
-        let store = MemStore::default();
-        assert!(grant(&store, "   ", GrantKind::Control).is_err());
-        assert!(store.load().unwrap().control.is_empty());
-    }
-
-    #[test]
-    fn a_failed_write_surfaces_instead_of_silently_dropping_the_grant() {
-        let store = MemStore {
-            fail_save: true,
-            ..Default::default()
-        };
-        assert!(grant(&store, "dev-1", GrantKind::Control).is_err());
-    }
-
-    #[test]
-    fn seeding_replaces_rather_than_unions_so_revocations_survive_a_restart() {
-        // Seeded into lists this test owns. Reseeding the process-global pair
-        // from here would wipe whatever the RPC gate tests in `rpc.rs` and
-        // terminal WebSocket tests had granted themselves — same binary, threads
-        // in parallel — and a permission test passing because the grant
-        // vanished is a false green, not a flake.
-        let control = super::super::control_allow_list::ControlAllowList::new();
-        let agent = super::super::control_allow_list::ControlAllowList::new();
-        let terminal = super::super::control_allow_list::ControlAllowList::new();
-        let store = MemStore::default();
-        grant(&store, "dev-1", GrantKind::Control).unwrap();
-        grant(&store, "dev-2", GrantKind::AgentControl).unwrap();
-        grant(&store, "dev-3", GrantKind::Terminal).unwrap();
-        assert_eq!(
-            seed_allow_lists_into(&store, &control, &agent, &terminal).unwrap(),
-            (1, 1, 1)
-        );
-        assert!(control.is_allowed("dev-1"));
-        assert!(agent.is_allowed("dev-2"));
-        assert!(terminal.is_allowed("dev-3"));
-        // A device granted control is NOT thereby allowed to run agents.
-        assert!(!agent.is_allowed("dev-1"));
-        assert!(!terminal.is_allowed("dev-1"));
-
-        revoke(&store, "dev-1", GrantKind::Control).unwrap();
-        assert_eq!(
-            seed_allow_lists_into(&store, &control, &agent, &terminal).unwrap(),
-            (0, 1, 1)
-        );
-        assert!(!control.is_allowed("dev-1"));
-    }
-
-    #[test]
-    fn seed_allow_lists_projects_onto_the_process_globals() {
-        // The injectable form above is the contract test; this one proves the
-        // production entry point still targets the lists the RPC hot path
-        // reads. Takes the shared guard because it reseeds them.
-        let _guard = super::super::control_allow_list::test_guard();
-        let store = MemStore::default();
-        grant(&store, "seeded-control", GrantKind::Control).unwrap();
-        grant(&store, "seeded-agent", GrantKind::AgentControl).unwrap();
-        grant(&store, "seeded-terminal", GrantKind::Terminal).unwrap();
-        assert_eq!(seed_allow_lists(&store).unwrap(), (1, 1, 1));
-        assert!(super::super::control_allow_list::global().is_allowed("seeded-control"));
-        assert!(super::super::control_allow_list::agent_control_global().is_allowed("seeded-agent"));
-        assert!(super::super::control_allow_list::terminal_global().is_allowed("seeded-terminal"));
-
-        // Leave the process-global lists clean for other tests.
-        super::super::control_allow_list::global().clear();
-        super::super::control_allow_list::agent_control_global().clear();
-        super::super::control_allow_list::terminal_global().clear();
+    fn remote_control_can_steer_agent_owned_work_without_granting_process_spawn() {
+        // Remote-control commands such as `browser_navigate` and
+        // `claude_restore` are classified as `agent.run` in the shared command
+        // manifest. The remote-control switch must therefore carry that
+        // capability, while process creation remains exclusive to the
+        // separately-labelled Agent Control grant.
+        assert!(GrantKind::Control.capabilities().contains(&"agent.run"));
+        assert!(!GrantKind::Control.capabilities().contains(&"process.spawn"));
+        assert_eq!(GrantKind::AgentControl.capabilities(), &["process.spawn"]);
     }
 
     #[test]
@@ -350,23 +244,48 @@ mod tests {
     }
 
     #[test]
-    fn file_store_round_trips_through_disk() {
+    fn a_file_written_by_an_older_build_still_reads() {
+        // The file is retired but not extinct: an upgrading host still has one
+        // on disk, and losing the ability to read it would silently drop every
+        // grant made before the migration.
         let dir = std::env::temp_dir().join(format!(
             "cognia-grants-rt-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        let store = FileDeviceGrantStore::new(&dir);
-        grant(store.as_ref(), "dev-a", GrantKind::AgentControl).unwrap();
-        grant(store.as_ref(), "dev-b", GrantKind::Control).unwrap();
-        grant(store.as_ref(), "dev-c", GrantKind::Terminal).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(GRANTS_FILE),
+            r#"{"control":["dev-b"],"agent_control":["dev-a"],"terminal":["dev-c"]}"#,
+        )
+        .unwrap();
 
-        let reopened = FileDeviceGrantStore::new(&dir);
-        let grants = reopened.load().unwrap();
+        let grants = FileDeviceGrantStore::new(&dir).load().unwrap();
         assert!(grants.agent_control.contains("dev-a"));
         assert!(grants.control.contains("dev-b"));
         assert!(grants.terminal.contains("dev-c"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_missing_a_section_reads_as_nothing_granted_for_it() {
+        // `terminal` postdates the other two, so a file written before it
+        // existed has no such key. Failing to parse would strand the host's
+        // remaining grants rather than importing them.
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-grants-partial-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(GRANTS_FILE), r#"{"control":["dev-b"]}"#).unwrap();
+
+        let grants = FileDeviceGrantStore::new(&dir).load().unwrap();
+        assert!(grants.control.contains("dev-b"));
+        assert!(grants.terminal.is_empty());
+        assert!(grants.agent_control.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

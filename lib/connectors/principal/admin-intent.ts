@@ -18,6 +18,12 @@
 
 import type { FeishuPrincipalStatus } from "@/lib/db/connector-types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import { beginLarkOAuth } from "@/lib/connectors/adapters/lark/oauth-begin"
+import {
+  LARK_OAUTH_RELAY_PATH,
+  resolveConnectorsIngressBase,
+} from "@/lib/connectors/server-transport"
+import { isTauri } from "@/lib/tauri"
 import {
   approveFeishuBind,
   listFeishuBindRequests,
@@ -37,6 +43,8 @@ export interface PrincipalAdminIntent {
   principalId?: string
   status?: string
   cogniaUserId?: string
+  /** `oauth-begin` only; derived from the deployment when omitted. */
+  redirectUri?: string
 }
 
 export type PrincipalAdminOutcome =
@@ -44,6 +52,10 @@ export type PrincipalAdminOutcome =
 
 export interface PrincipalAdminIntentDependencies {
   getAdapter: typeof getAdapterInstance
+  beginOAuth: typeof beginLarkOAuth
+  /** Public origin of this deployment — `COGNIA_LARK_PUBLIC_BASE` by default. */
+  publicBase: () => string | undefined
+  isDesktop: () => boolean
 }
 
 const PRINCIPAL_STATUSES: readonly FeishuPrincipalStatus[] = ["active", "disabled", "unlinked"]
@@ -73,6 +85,9 @@ export async function runPrincipalAdminIntent(
 ): Promise<PrincipalAdminOutcome> {
   const deps: PrincipalAdminIntentDependencies = {
     getAdapter: getAdapterInstance,
+    beginOAuth: beginLarkOAuth,
+    publicBase: () => process.env.COGNIA_LARK_PUBLIC_BASE,
+    isDesktop: isTauri,
     ...overrides,
   }
   const { adapterId, op } = intent
@@ -180,6 +195,35 @@ export async function runPrincipalAdminIntent(
       case "sweep": {
         const expired = await sweepStaleFeishuBindRequests()
         return { ok: true, result: { expired } }
+      }
+
+      case "oauth-begin": {
+        // A self-hosted install serves the relay on its own origin under the
+        // `/connectors` nest, so the redirect is derivable and an operator
+        // should not have to retype it; an explicit value still wins, which is
+        // what a split-origin or reverse-proxied deployment needs.
+        const redirectUri =
+          intent.redirectUri?.trim() ||
+          (() => {
+            const base = resolveConnectorsIngressBase({
+              isDesktop: deps.isDesktop(),
+              publicBase: deps.publicBase(),
+            })
+            return base ? `${base}${LARK_OAUTH_RELAY_PATH}` : ""
+          })()
+        if (!redirectUri) return { ok: false, error: "redirect_uri_unresolved" }
+        const begun = await deps.beginOAuth({ adapterId, redirectUri })
+        // The URL is the deliverable: the operator opens it in a browser that
+        // can reach Feishu, and the brain completes the exchange when the
+        // relay hands the code back to this same process.
+        return {
+          ok: true,
+          result: {
+            authorizeUrl: begun.authorizeUrl,
+            redirectUri: begun.redirectUri,
+            state: begun.state,
+          },
+        }
       }
 
       default:

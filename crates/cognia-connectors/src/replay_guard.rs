@@ -11,8 +11,7 @@
 //! `"<platform>:<adapter_id>:<event_id>"`. FIFO eviction is acceptable here
 //! because the freshness window is the primary bound: an event old enough to
 //! have been evicted from this cache is already rejected by the timestamp
-//! check. Mirrors the singleton style of `control_allow_list` /
-//! `ws_terminal::WS_TERMINAL_REGISTRY`.
+//! check. Mirrors the singleton style of `ws_terminal::WS_TERMINAL_REGISTRY`.
 
 use std::collections::{HashSet, VecDeque};
 

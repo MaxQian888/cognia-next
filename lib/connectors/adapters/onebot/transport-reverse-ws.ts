@@ -16,7 +16,7 @@
  * `connectors_onebot_send` command back over the WS.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen } from "@/lib/connectors/events"
 import { connectorsOnebotSend } from "@/lib/connectors/tauri/commands"
 import type { SerializedOneBotCall } from "./serialize"
 import type { OneBotTransport, OneBotTransportHandlers } from "./transport"
@@ -51,7 +51,7 @@ export async function subscribeOneBotEvents(
 ): Promise<UnlistenFn> {
   const eventName = `connectors://onebot/${adapterId}/event`
 
-  const unlisten = await listen<string>(eventName, (tauriEvent) => {
+  const unlisten = await connectorListen<string>(eventName, (tauriEvent) => {
     try {
       const parsed: unknown = JSON.parse(tauriEvent.payload)
       onEvent(parsed)
@@ -71,7 +71,7 @@ export async function subscribeOneBotOpen(
   adapterId: string,
   onOpen: () => void
 ): Promise<UnlistenFn> {
-  return listen<void>(`connectors://onebot/${adapterId}/open`, () => {
+  return connectorListen<void>(`connectors://onebot/${adapterId}/open`, () => {
     onOpen()
   })
 }
@@ -84,7 +84,7 @@ export async function subscribeOneBotClose(
   adapterId: string,
   onClose: () => void
 ): Promise<UnlistenFn> {
-  return listen<void>(`connectors://onebot/${adapterId}/close`, () => {
+  return connectorListen<void>(`connectors://onebot/${adapterId}/close`, () => {
     onClose()
   })
 }
@@ -104,7 +104,7 @@ const pendingRpcs = new Map<string, (response: OneBotRpcResponse) => void>()
  */
 export async function subscribeOneBotResponses(adapterId: string): Promise<UnlistenFn> {
   const responseTopic = `connectors://onebot/${adapterId}/response`
-  return listen<string>(responseTopic, (tauriEvent) => {
+  return connectorListen<string>(responseTopic, (tauriEvent) => {
     try {
       const resp = JSON.parse(tauriEvent.payload) as OneBotRpcResponse
       const resolve = pendingRpcs.get(resp.echo)

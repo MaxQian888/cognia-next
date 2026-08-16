@@ -20,7 +20,7 @@
  * plain callback.
  */
 
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import { connectorListen, type ConnectorUnlistenFn } from "@/lib/connectors/events"
 import { getBus } from "@/lib/connectors/bus"
 import { parseDiscordInteraction, type DiscordDispatch } from "./parse"
 
@@ -44,7 +44,7 @@ export async function startWebhookTransport(
 ): Promise<WebhookTransportHandle> {
   const { adapterId, selfId } = opts
 
-  const unlisten: UnlistenFn = await listen<unknown>(
+  const unlisten: ConnectorUnlistenFn = await connectorListen<unknown>(
     `connectors://webhook/${adapterId}`,
     (event) => {
       const interaction = event.payload

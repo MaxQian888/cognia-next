@@ -1,7 +1,11 @@
 /**
- * connectorListen seam — default Tauri delegation, swap, restore.
+ * connectorListen seam — default Tauri delegation, swap, restore, and the
+ * structural guarantee that transports actually go through it.
  */
 
+import { execFileSync } from "node:child_process"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { listen } from "@tauri-apps/api/event"
 import { connectorListen, setConnectorListen, type ConnectorListenFn } from "./events"
 
@@ -75,5 +79,36 @@ describe("connectorListen", () => {
     await ref("connectors://webhook/tg-2", jest.fn())
 
     expect(custom).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("seam adoption", () => {
+  /**
+   * A behavioural test cannot catch this. Jest's module mock for
+   * `@tauri-apps/api/event` sits UNDER the seam's own default delegation, so a
+   * transport that bypasses `connectorListen` and imports Tauri's `listen`
+   * directly still passes every mocked test — while throwing on the headless
+   * brain, which has no `__TAURI_INTERNALS__`. That is precisely how Discord,
+   * OneBot, WeCom, DingTalk and Lark's long connection came to be silently
+   * dead on cloud installs. The invariant is structural, so the check is too.
+   */
+  it("is the only connector module importing Tauri's event API", () => {
+    const repoRoot = join(__dirname, "..", "..")
+    const tracked = execFileSync("git", ["ls-files", "lib/connectors"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      maxBuffer: 16e6,
+    })
+      .split("\n")
+      .filter((p) => /\.tsx?$/.test(p) && !/\.(test|spec|stories)\.tsx?$/.test(p))
+
+    const offenders = tracked.filter((path) => {
+      if (path === "lib/connectors/events.ts") return false
+      return /from\s+["']@tauri-apps\/api\/event["']/.test(
+        readFileSync(join(repoRoot, path), "utf8")
+      )
+    })
+
+    expect(offenders).toEqual([])
   })
 })

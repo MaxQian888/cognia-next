@@ -85,9 +85,7 @@ pub(super) async fn dispatch(
         // is written to the audit log. The spawn request must clear the
         // SpawnPolicy preset allowlist before it touches the exec backend.
         "spawn_external_agent" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let policy = host.remote_spawn_policy().map_err(RpcError::internal)?;
             let config: crate::external_agent::process::ExternalAgentSpawnConfig =
                 required(&args, "config")?;
             let summary = serde_json::json!({
@@ -95,7 +93,7 @@ pub(super) async fn dispatch(
                 "command": config.command,
                 "args": config.args,
             });
-            match services.spawn_policy.validate(config) {
+            match policy.validate(config) {
                 Err(violation) => {
                     let mut fields = summary;
                     fields["reason"] = Value::String(violation.to_string());
@@ -124,15 +122,16 @@ pub(super) async fn dispatch(
                         fields,
                     )
                     .await;
-                    let emitter: std::sync::Arc<
-                        dyn crate::external_agent::exec_backend::AgentEventEmitter,
-                    > = std::sync::Arc::new(BusAgentEmitter(std::sync::Arc::clone(
-                        &services.event_bus,
-                    )));
+                    // Confinement is the host's business: the desktop wraps the
+                    // child in its sandbox host exactly as the local Tauri
+                    // command does; the container relies on its ExecBackend.
+                    let hardened = host
+                        .harden_spawn_config(validated.config)
+                        .map_err(RpcError::internal)?;
                     crate::external_agent::exec_backend::spawn_with_events(
-                        services.exec.as_ref(),
-                        emitter,
-                        validated.config,
+                        host.exec_backend().as_ref(),
+                        host.agent_event_emitter(),
+                        hardened,
                     )
                     .await
                     .map(Value::String)
@@ -142,9 +141,6 @@ pub(super) async fn dispatch(
         }
 
         "send_to_external_agent" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
             let message: String = required(&args, "message")?;
             super::super::audit::record_async(
@@ -155,8 +151,7 @@ pub(super) async fn dispatch(
                 serde_json::json!({ "agent_id": agent_id, "bytes": message.len() }),
             )
             .await;
-            services
-                .exec
+            host.exec_backend()
                 .send(&agent_id, &message)
                 .await
                 .map(|_| Value::Null)
@@ -164,9 +159,6 @@ pub(super) async fn dispatch(
         }
 
         "kill_external_agent" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
             super::super::audit::record_async(
                 "external_agent_kill",
@@ -176,8 +168,7 @@ pub(super) async fn dispatch(
                 serde_json::json!({ "agent_id": agent_id }),
             )
             .await;
-            services
-                .exec
+            host.exec_backend()
                 .kill(&agent_id)
                 .await
                 .map(|_| Value::Null)
@@ -185,11 +176,8 @@ pub(super) async fn dispatch(
         }
 
         "get_external_agent_status" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
-            match services.exec.status(&agent_id).await {
+            match host.exec_backend().status(&agent_id).await {
                 Some(status) => Ok(Value::String(format!("{status:?}"))),
                 None => Err(RpcError::internal(format!("Agent {agent_id} not found"))),
             }
@@ -201,7 +189,7 @@ pub(super) async fn dispatch(
         "connectors_register" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required(&args, "adapter_id")?;
             let adapter_type: String = required(&args, "adapter_type")?;
             services.connectors.inner.lock().registered_adapters.insert(
@@ -218,7 +206,7 @@ pub(super) async fn dispatch(
         "connectors_unregister" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required(&args, "adapter_id")?;
             services
                 .connectors
@@ -232,7 +220,7 @@ pub(super) async fn dispatch(
         "connectors_list_adapters" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapters: Vec<Value> = services
                 .connectors
                 .inner
@@ -250,38 +238,41 @@ pub(super) async fn dispatch(
         }
 
         "connectors_runtime_lease_acquire" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let owner_id: String = required_aliased(&args, "owner_id", "ownerId")?;
             let ttl_ms: u64 = required_aliased(&args, "ttl_ms", "ttlMs")?;
-            let acquired = services
-                .connectors
-                .acquire_runtime_lease(&owner_id, ttl_ms)
-                .map_err(RpcError::validation_failed)?;
-            Ok(Value::Bool(acquired))
+            let handoff_aware: bool =
+                optional_aliased(&args, "handoff_aware", "handoffAware")?.unwrap_or(false);
+            if handoff_aware {
+                let outcome = host
+                    .connectors_state()
+                    .acquire_runtime_lease_outcome(&owner_id, ttl_ms)
+                    .map_err(RpcError::validation_failed)?;
+                Ok(Value::String(outcome.as_str().to_string()))
+            } else {
+                // Legacy callers cannot acknowledge a handoff, so their
+                // boolean claim is non-preemptive and side-effect free while
+                // another owner is live.
+                host.connectors_state()
+                    .acquire_runtime_lease(&owner_id, ttl_ms)
+                    .map(Value::Bool)
+                    .map_err(RpcError::validation_failed)
+            }
         }
 
         "connectors_runtime_lease_renew" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let owner_id: String = required_aliased(&args, "owner_id", "ownerId")?;
             let ttl_ms: u64 = required_aliased(&args, "ttl_ms", "ttlMs")?;
-            let renewed = services
-                .connectors
+            let renewed = host
+                .connectors_state()
                 .renew_runtime_lease(&owner_id, ttl_ms)
                 .map_err(RpcError::validation_failed)?;
             Ok(Value::Bool(renewed))
         }
 
         "connectors_runtime_lease_release" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let owner_id: String = required_aliased(&args, "owner_id", "ownerId")?;
-            let released = services
-                .connectors
+            let released = host
+                .connectors_state()
                 .release_runtime_lease(&owner_id)
                 .map_err(RpcError::validation_failed)?;
             Ok(Value::Bool(released))
@@ -524,7 +515,7 @@ pub(super) async fn dispatch(
         "provider_profiles_list" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let profiles = std::sync::Arc::clone(&services.profiles);
             tokio::task::spawn_blocking(move || profiles.export_redacted())
                 .await
@@ -535,7 +526,7 @@ pub(super) async fn dispatch(
         "provider_profiles_import" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let payload = args
                 .get("payload")
                 .cloned()
@@ -551,7 +542,7 @@ pub(super) async fn dispatch(
         "provider_profiles_version" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let profiles = std::sync::Arc::clone(&services.profiles);
             let version = tokio::task::spawn_blocking(move || profiles.profile_version())
                 .await
@@ -563,7 +554,7 @@ pub(super) async fn dispatch(
         "provider_catalog_status" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let profiles = std::sync::Arc::clone(&services.profiles);
             let status = tokio::task::spawn_blocking(move || profiles.catalog_status())
                 .await
@@ -576,7 +567,7 @@ pub(super) async fn dispatch(
         "provider_catalog_search" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let query = args
                 .get("query")
                 .and_then(Value::as_str)
@@ -605,7 +596,7 @@ pub(super) async fn dispatch(
         "provider_catalog_refresh" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let payload = args
                 .get("payload")
                 .cloned()
@@ -632,7 +623,7 @@ pub(super) async fn dispatch(
         "connectors_health" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let count = services.connectors.inner.lock().registered_adapters.len();
             // On the headless front door the `/connectors` ingress router is
             // mounted by the companion server itself — there is no separately
@@ -646,7 +637,7 @@ pub(super) async fn dispatch(
 
         "connectors_keyring_set" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             let value: String = required(&args, "value")?;
@@ -661,7 +652,7 @@ pub(super) async fn dispatch(
 
         "connectors_keyring_get" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             let value = tokio::task::spawn_blocking(move || {
@@ -675,7 +666,7 @@ pub(super) async fn dispatch(
 
         "connectors_keyring_delete" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             tokio::task::spawn_blocking(move || {
@@ -689,7 +680,7 @@ pub(super) async fn dispatch(
 
         "connectors_keyring_list" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let accounts: Vec<String> = required(&args, "accounts")?;
             let present = tokio::task::spawn_blocking(move || {
@@ -703,7 +694,7 @@ pub(super) async fn dispatch(
 
         "connectors_http_request" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::types::TauriHttpRequest = required(&args, "req")?;
             let resp = crate::connectors::http_client::http_request(req)
                 .await
@@ -714,7 +705,7 @@ pub(super) async fn dispatch(
         "connectors_ws_open" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let url: String = required(&args, "url")?;
             let headers: Option<std::collections::HashMap<String, String>> =
                 optional(&args, "headers")?;
@@ -729,7 +720,7 @@ pub(super) async fn dispatch(
 
         "connectors_ws_send" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
             let data: String = required(&args, "data")?;
             crate::connectors::ws_client::ws_send(&handle_id, data)
@@ -740,7 +731,7 @@ pub(super) async fn dispatch(
 
         "connectors_ws_close" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
             crate::connectors::ws_client::ws_close(&handle_id)
                 .await
@@ -750,7 +741,7 @@ pub(super) async fn dispatch(
 
         "connectors_onebot_send" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let call_json: String = required_aliased(&args, "call_json", "callJson")?;
             crate::connectors::ws_server::send(&adapter_id, call_json)
@@ -762,7 +753,7 @@ pub(super) async fn dispatch(
         "connectors_lark_ws_open" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let emitter = std::sync::Arc::new(super::super::event_bus::ConnectorEventEmitter(
                 std::sync::Arc::clone(&services.event_bus),
@@ -775,7 +766,7 @@ pub(super) async fn dispatch(
 
         "connectors_lark_ws_close" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
             crate::connectors::lark_ws::close(&handle_id)
                 .await
@@ -785,7 +776,7 @@ pub(super) async fn dispatch(
 
         "connectors_reset_all_ws" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let count = crate::connectors::commands::connectors_reset_all_ws()
                 .await
                 .map_err(RpcError::internal)?;
@@ -794,7 +785,7 @@ pub(super) async fn dispatch(
 
         "connectors_attachment_fetch" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let remote_ref: String = required_aliased(&args, "remote_ref", "remoteRef")?;
             let source_url: String = required_aliased(&args, "source_url", "sourceUrl")?;
@@ -810,7 +801,7 @@ pub(super) async fn dispatch(
 
         "connectors_attachment_read" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let remote_ref: String = required_aliased(&args, "remote_ref", "remoteRef")?;
             let max_bytes: u64 = required_aliased(&args, "max_bytes", "maxBytes")?;
@@ -825,7 +816,7 @@ pub(super) async fn dispatch(
 
         "connectors_media_upload" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::types::ConnectorMediaUploadRequest =
                 required(&args, "req")?;
             let uri = crate::connectors::media_upload::upload_media(req)
@@ -836,7 +827,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_init" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::matrix_crypto::MatrixCryptoInitRequest =
                 required(&args, "req")?;
             crate::connectors::matrix_crypto::matrix_crypto_init(req)
@@ -847,7 +838,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_close" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             crate::connectors::matrix_crypto::matrix_crypto_close(&adapter_id)
                 .await
@@ -857,7 +848,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_outgoing_requests" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let requests =
                 crate::connectors::matrix_crypto::matrix_crypto_outgoing_requests(adapter_id)
@@ -868,7 +859,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_mark_request_sent" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::matrix_crypto::MatrixCryptoMarkSentRequest =
                 required(&args, "req")?;
             crate::connectors::matrix_crypto::matrix_crypto_mark_request_sent(req)
@@ -879,7 +870,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_receive_sync_changes" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::matrix_crypto::MatrixCryptoReceiveSyncRequest =
                 required(&args, "req")?;
             crate::connectors::matrix_crypto::matrix_crypto_receive_sync_changes(req)
@@ -890,7 +881,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_decrypt_event" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::matrix_crypto::MatrixCryptoDecryptRequest =
                 required(&args, "req")?;
             let response = crate::connectors::matrix_crypto::matrix_crypto_decrypt_event(req)
@@ -901,7 +892,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_encrypt_event" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::matrix_crypto::MatrixCryptoEncryptRequest =
                 required(&args, "req")?;
             let response = crate::connectors::matrix_crypto::matrix_crypto_encrypt_event(req)
@@ -912,7 +903,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_share_room_key" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::matrix_crypto::MatrixCryptoShareRoomKeyRequest =
                 required(&args, "req")?;
             let requests = crate::connectors::matrix_crypto::matrix_crypto_share_room_key(req)
@@ -923,7 +914,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_update_tracked_users" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::matrix_crypto::MatrixCryptoTrackUsersRequest =
                 required(&args, "req")?;
             crate::connectors::matrix_crypto::matrix_crypto_update_tracked_users(req)
@@ -934,7 +925,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_crypto_get_missing_sessions" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::matrix_crypto::MatrixCryptoMissingSessionsRequest =
                 required(&args, "req")?;
             let requests =
@@ -946,7 +937,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_encrypted_media_upload" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::types::MatrixEncryptedMediaUploadRequest =
                 required(&args, "req")?;
             let response = crate::connectors::media_upload::upload_matrix_encrypted_media(req)
@@ -957,7 +948,7 @@ pub(super) async fn dispatch(
 
         "connectors_matrix_encrypted_media_fetch" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let req: crate::connectors::types::MatrixEncryptedMediaFetchRequest =
                 required(&args, "req")?;
             let response = crate::connectors::attachments::fetch_matrix_encrypted_attachment(req)
@@ -968,7 +959,7 @@ pub(super) async fn dispatch(
 
         "connectors_lark_upload_file" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let access_token: String = required_aliased(&args, "access_token", "accessToken")?;
             let source_url: String = required_aliased(&args, "source_url", "sourceUrl")?;
             let file_type: String = required_aliased(&args, "file_type", "fileType")?;
@@ -991,7 +982,7 @@ pub(super) async fn dispatch(
 
         "connectors_lark_upload_image" => {
             host.headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let access_token: String = required_aliased(&args, "access_token", "accessToken")?;
             let source_url: String = required_aliased(&args, "source_url", "sourceUrl")?;
             let image_type: Option<String> = match optional(&args, "image_type")? {

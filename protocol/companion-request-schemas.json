@@ -3,20 +3,29 @@
   "commands": {
     "adapter_update_policy": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string"
         },
         "defaultMode": {
           "type": "string",
-          "enum": ["auto", "manual", "draft"]
+          "enum": [
+            "auto",
+            "manual",
+            "draft"
+          ]
         },
         "muted": {
           "type": "boolean"
         },
         "quietHours": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "properties": {
             "from": {
               "type": "string"
@@ -34,7 +43,10 @@
     },
     "agent_task_cancel": {
       "type": "object",
-      "required": ["agentId", "taskId"],
+      "required": [
+        "agentId",
+        "taskId"
+      ],
       "properties": {
         "agentId": {
           "type": "string",
@@ -51,7 +63,10 @@
       "allOf": [
         {
           "type": "object",
-          "required": ["agentId", "taskId"],
+          "required": [
+            "agentId",
+            "taskId"
+          ],
           "properties": {
             "agentId": {
               "type": "string",
@@ -66,7 +81,9 @@
         },
         {
           "type": "object",
-          "required": ["text"],
+          "required": [
+            "text"
+          ],
           "properties": {
             "text": {
               "type": "string",
@@ -82,7 +99,10 @@
       "allOf": [
         {
           "type": "object",
-          "required": ["agentId", "taskId"],
+          "required": [
+            "agentId",
+            "taskId"
+          ],
           "properties": {
             "agentId": {
               "type": "string",
@@ -97,11 +117,19 @@
         },
         {
           "type": "object",
-          "required": ["to"],
+          "required": [
+            "to"
+          ],
           "properties": {
             "to": {
               "type": "string",
-              "enum": ["pending", "paused", "completed", "failed", "cancelled"]
+              "enum": [
+                "pending",
+                "paused",
+                "completed",
+                "failed",
+                "cancelled"
+              ]
             }
           },
           "additionalProperties": false
@@ -110,7 +138,10 @@
     },
     "agent_task_pause": {
       "type": "object",
-      "required": ["agentId", "taskId"],
+      "required": [
+        "agentId",
+        "taskId"
+      ],
       "properties": {
         "agentId": {
           "type": "string",
@@ -125,7 +156,10 @@
     },
     "agent_task_resume": {
       "type": "object",
-      "required": ["agentId", "taskId"],
+      "required": [
+        "agentId",
+        "taskId"
+      ],
       "properties": {
         "agentId": {
           "type": "string",
@@ -140,7 +174,10 @@
     },
     "agent_task_start": {
       "type": "object",
-      "required": ["agentId", "taskId"],
+      "required": [
+        "agentId",
+        "taskId"
+      ],
       "properties": {
         "agentId": {
           "type": "string",
@@ -155,7 +192,9 @@
     },
     "app_settings_update": {
       "type": "object",
-      "required": ["patch"],
+      "required": [
+        "patch"
+      ],
       "properties": {
         "patch": {
           "type": "object",
@@ -239,7 +278,10 @@
     },
     "automation_consent_respond": {
       "type": "object",
-      "required": ["id", "allow"],
+      "required": [
+        "id",
+        "allow"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -292,7 +334,9 @@
     },
     "backup_import": {
       "type": "object",
-      "required": ["package"],
+      "required": [
+        "package"
+      ],
       "properties": {
         "package": {
           "type": "object",
@@ -303,7 +347,11 @@
           "properties": {
             "mergeStrategy": {
               "type": "string",
-              "enum": ["skip", "overwrite", "duplicate"]
+              "enum": [
+                "skip",
+                "overwrite",
+                "duplicate"
+              ]
             },
             "includeSessions": {
               "type": "boolean"
@@ -326,13 +374,18 @@
     },
     "character_bind_twin": {
       "type": "object",
-      "required": ["characterId"],
+      "required": [
+        "characterId"
+      ],
       "properties": {
         "characterId": {
           "type": "string"
         },
         "twinId": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Twin id to bind, or null to unbind."
         }
       },
@@ -340,7 +393,9 @@
     },
     "character_delete": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -350,7 +405,9 @@
     },
     "character_upsert": {
       "type": "object",
-      "required": ["draft"],
+      "required": [
+        "draft"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -366,7 +423,12 @@
     },
     "claude_approve": {
       "type": "object",
-      "required": ["session_id", "request_id", "decision"],
+      "required": [
+        "session_id",
+        "request_id",
+        "decision",
+        "remote_execution_context"
+      ],
       "properties": {
         "session_id": {
           "type": "string"
@@ -377,7 +439,11 @@
         },
         "decision": {
           "type": "string",
-          "enum": ["allow", "allow_always", "deny"],
+          "enum": [
+            "allow",
+            "allow_always",
+            "deny"
+          ],
           "description": "`allow` proceeds once; `allow_always` proceeds and persists a standing\npermission for this tool/rule for the session; `deny` rejects with the\noptional `message` shown to the model. To edit-and-allow, send\n`decision: allow` together with `updated_input` (the substituted tool\narguments) — there is no separate `edit` decision value.\n"
         },
         "message": {
@@ -395,13 +461,55 @@
               "type": "null"
             }
           ]
+        },
+        "remote_execution_context": {
+          "type": "object",
+          "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+          "required": [
+            "hostId",
+            "originDeviceId",
+            "sessionId",
+            "generation",
+            "requestId",
+            "issuedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "hostId": {
+              "type": "string"
+            },
+            "originDeviceId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "issuedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "expiresAt": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
     },
     "claude_close_session": {
       "type": "object",
-      "required": ["session_id"],
+      "required": [
+        "session_id"
+      ],
       "properties": {
         "session_id": {
           "type": "string"
@@ -411,7 +519,9 @@
     },
     "claude_compact": {
       "type": "object",
-      "required": ["session_id"],
+      "required": [
+        "session_id"
+      ],
       "properties": {
         "session_id": {
           "type": "string"
@@ -432,7 +542,9 @@
     },
     "claude_interrupt": {
       "type": "object",
-      "required": ["session_id"],
+      "required": [
+        "session_id"
+      ],
       "properties": {
         "session_id": {
           "type": "string"
@@ -442,7 +554,11 @@
     },
     "claude_plugin_tool_response": {
       "type": "object",
-      "required": ["sessionId", "toolUseId"],
+      "required": [
+        "sessionId",
+        "toolUseId",
+        "remote_execution_context"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
@@ -453,17 +569,104 @@
         "result": {},
         "error": {
           "type": "string"
+        },
+        "remote_execution_context": {
+          "type": "object",
+          "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+          "required": [
+            "hostId",
+            "originDeviceId",
+            "sessionId",
+            "generation",
+            "requestId",
+            "issuedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "hostId": {
+              "type": "string"
+            },
+            "originDeviceId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "issuedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "expiresAt": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
     },
     "claude_protocol_adapter_message": {
       "type": "object",
-      "required": ["message"],
+      "required": [
+        "message",
+        "remote_execution_context",
+        "session_id"
+      ],
       "properties": {
         "message": {
           "type": "object",
           "additionalProperties": true
+        },
+        "remote_execution_context": {
+          "type": "object",
+          "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+          "required": [
+            "hostId",
+            "originDeviceId",
+            "sessionId",
+            "generation",
+            "requestId",
+            "issuedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "hostId": {
+              "type": "string"
+            },
+            "originDeviceId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "issuedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "expiresAt": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "session_id": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -473,7 +676,10 @@
     },
     "claude_restore": {
       "type": "object",
-      "required": ["sessionId", "messages"],
+      "required": [
+        "sessionId",
+        "messages"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
@@ -484,7 +690,10 @@
     },
     "claude_send": {
       "type": "object",
-      "required": ["session_id", "prompt"],
+      "required": [
+        "session_id",
+        "prompt"
+      ],
       "properties": {
         "session_id": {
           "type": "string",
@@ -571,7 +780,11 @@
               "type": "array",
               "items": {
                 "type": "string",
-                "enum": ["user", "project", "local"]
+                "enum": [
+                  "user",
+                  "project",
+                  "local"
+                ]
               }
             },
             "agents": {
@@ -585,7 +798,13 @@
             },
             "effort": {
               "type": "string",
-              "enum": ["low", "medium", "high", "xhigh", "max"]
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
             },
             "resumeSessionId": {
               "type": "string",
@@ -611,7 +830,13 @@
                 },
                 "protocol": {
                   "type": "string",
-                  "enum": ["openai", "anthropic", "google", "mistral", "cohere"],
+                  "enum": [
+                    "openai",
+                    "anthropic",
+                    "google",
+                    "mistral",
+                    "cohere"
+                  ],
                   "description": "AI SDK protocol family (required for custom provider ids)."
                 }
               }
@@ -649,14 +874,28 @@
     },
     "claude_set_mode": {
       "type": "object",
-      "required": ["sessionId", "mode"],
+      "required": [
+        "sessionId",
+        "mode"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
         },
         "mode": {
           "type": "string",
-          "enum": ["default", "plan", "acceptEdits", "bypassPermissions", "dontAsk", "auto"]
+          "enum": [
+            "default",
+            "plan",
+            "acceptEdits",
+            "bypassPermissions",
+            "dontAsk",
+            "auto"
+          ]
+        },
+        "command_id": {
+          "type": "string",
+          "description": "Correlation id echoed on the sidecar ack, so the caller can match the response to this request."
         }
       },
       "additionalProperties": false
@@ -700,6 +939,25 @@
               "type": "null"
             }
           ]
+        },
+        "custom_headers": {
+          "description": "Ordered `[name, value]` pairs forwarded as ANTHROPIC_CUSTOM_HEADER_* at sidecar spawn. Omit to leave the existing set untouched; send [] to clear it.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -710,7 +968,11 @@
     },
     "claude_tool_result_decision": {
       "type": "object",
-      "required": ["sessionId", "reviewId"],
+      "required": [
+        "sessionId",
+        "reviewId",
+        "remote_execution_context"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
@@ -718,13 +980,55 @@
         "reviewId": {
           "type": "string"
         },
-        "updatedToolOutput": {}
+        "updatedToolOutput": {},
+        "remote_execution_context": {
+          "type": "object",
+          "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+          "required": [
+            "hostId",
+            "originDeviceId",
+            "sessionId",
+            "generation",
+            "requestId",
+            "issuedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "hostId": {
+              "type": "string"
+            },
+            "originDeviceId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "issuedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "expiresAt": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
     "codeserver_activate_proxy": {
       "type": "object",
-      "required": ["artifact"],
+      "required": [
+        "artifact"
+      ],
       "properties": {
         "artifact": {
           "type": "object",
@@ -735,7 +1039,11 @@
     },
     "codeserver_broker_notify": {
       "type": "object",
-      "required": ["root", "generation", "params"],
+      "required": [
+        "root",
+        "generation",
+        "params"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -754,7 +1062,11 @@
     },
     "codeserver_broker_respond": {
       "type": "object",
-      "required": ["root", "generation", "id"],
+      "required": [
+        "root",
+        "generation",
+        "id"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -778,7 +1090,10 @@
     },
     "codeserver_broker_validate_paths": {
       "type": "object",
-      "required": ["root", "paths"],
+      "required": [
+        "root",
+        "paths"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -794,7 +1109,9 @@
     },
     "codeserver_build_proxy": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
@@ -805,14 +1122,19 @@
     },
     "codeserver_ensure": {
       "type": "object",
-      "required": ["root"],
+      "required": [
+        "root"
+      ],
       "properties": {
         "root": {
           "type": "string"
         },
         "profile": {
           "type": "string",
-          "enum": ["managed", "native"]
+          "enum": [
+            "managed",
+            "native"
+          ]
         }
       },
       "additionalProperties": false
@@ -822,7 +1144,9 @@
     },
     "codeserver_status": {
       "type": "object",
-      "required": ["root"],
+      "required": [
+        "root"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -832,7 +1156,9 @@
     },
     "codeserver_stop": {
       "type": "object",
-      "required": ["root"],
+      "required": [
+        "root"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -848,11 +1174,15 @@
     },
     "codex_app_inventory": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
-          "required": ["cwd"],
+          "required": [
+            "cwd"
+          ],
           "properties": {
             "cwd": {
               "type": "string",
@@ -878,11 +1208,16 @@
     },
     "codex_app_task_create": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
-          "required": ["cwd", "input"],
+          "required": [
+            "cwd",
+            "input"
+          ],
           "properties": {
             "cwd": {
               "type": "string",
@@ -893,7 +1228,9 @@
               "minItems": 1,
               "items": {
                 "type": "object",
-                "required": ["type"],
+                "required": [
+                  "type"
+                ],
                 "properties": {
                   "type": {
                     "type": "string",
@@ -921,7 +1258,12 @@
                   },
                   "detail": {
                     "type": "string",
-                    "enum": ["auto", "low", "high", "original"]
+                    "enum": [
+                      "auto",
+                      "low",
+                      "high",
+                      "original"
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -939,11 +1281,16 @@
     },
     "codex_app_task_interrupt": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
-          "required": ["threadId", "turnId"],
+          "required": [
+            "threadId",
+            "turnId"
+          ],
           "properties": {
             "threadId": {
               "type": "string",
@@ -961,11 +1308,15 @@
     },
     "codex_app_task_list": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
-          "required": ["cwd"],
+          "required": [
+            "cwd"
+          ],
           "properties": {
             "cursor": {
               "type": "string",
@@ -995,7 +1346,9 @@
     },
     "codex_app_task_open": {
       "type": "object",
-      "required": ["threadId"],
+      "required": [
+        "threadId"
+      ],
       "properties": {
         "threadId": {
           "type": "string",
@@ -1006,11 +1359,15 @@
     },
     "codex_app_task_read": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
-          "required": ["threadId"],
+          "required": [
+            "threadId"
+          ],
           "properties": {
             "threadId": {
               "type": "string",
@@ -1027,11 +1384,16 @@
     },
     "codex_app_task_send": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
-          "required": ["threadId", "input"],
+          "required": [
+            "threadId",
+            "input"
+          ],
           "properties": {
             "threadId": {
               "type": "string",
@@ -1044,7 +1406,10 @@
                 "oneOf": [
                   {
                     "type": "object",
-                    "required": ["type", "text"],
+                    "required": [
+                      "type",
+                      "text"
+                    ],
                     "properties": {
                       "type": {
                         "const": "text"
@@ -1058,7 +1423,10 @@
                   },
                   {
                     "type": "object",
-                    "required": ["type", "url"],
+                    "required": [
+                      "type",
+                      "url"
+                    ],
                     "properties": {
                       "type": {
                         "const": "image"
@@ -1069,14 +1437,22 @@
                       },
                       "detail": {
                         "type": "string",
-                        "enum": ["auto", "low", "high", "original"]
+                        "enum": [
+                          "auto",
+                          "low",
+                          "high",
+                          "original"
+                        ]
                       }
                     },
                     "additionalProperties": false
                   },
                   {
                     "type": "object",
-                    "required": ["type", "path"],
+                    "required": [
+                      "type",
+                      "path"
+                    ],
                     "properties": {
                       "type": {
                         "const": "localImage"
@@ -1087,14 +1463,22 @@
                       },
                       "detail": {
                         "type": "string",
-                        "enum": ["auto", "low", "high", "original"]
+                        "enum": [
+                          "auto",
+                          "low",
+                          "high",
+                          "original"
+                        ]
                       }
                     },
                     "additionalProperties": false
                   },
                   {
                     "type": "object",
-                    "required": ["type", "url"],
+                    "required": [
+                      "type",
+                      "url"
+                    ],
                     "properties": {
                       "type": {
                         "const": "audio"
@@ -1108,7 +1492,10 @@
                   },
                   {
                     "type": "object",
-                    "required": ["type", "path"],
+                    "required": [
+                      "type",
+                      "path"
+                    ],
                     "properties": {
                       "type": {
                         "const": "localAudio"
@@ -1122,7 +1509,11 @@
                   },
                   {
                     "type": "object",
-                    "required": ["type", "name", "path"],
+                    "required": [
+                      "type",
+                      "name",
+                      "path"
+                    ],
                     "properties": {
                       "type": {
                         "const": "skill"
@@ -1140,7 +1531,11 @@
                   },
                   {
                     "type": "object",
-                    "required": ["type", "name", "path"],
+                    "required": [
+                      "type",
+                      "name",
+                      "path"
+                    ],
                     "properties": {
                       "type": {
                         "const": "mention"
@@ -1179,7 +1574,9 @@
     },
     "connector_approve_draft": {
       "type": "object",
-      "required": ["draftId"],
+      "required": [
+        "draftId"
+      ],
       "properties": {
         "draftId": {
           "type": "string"
@@ -1189,7 +1586,9 @@
     },
     "connector_reject_draft": {
       "type": "object",
-      "required": ["draftId"],
+      "required": [
+        "draftId"
+      ],
       "properties": {
         "draftId": {
           "type": "string"
@@ -1199,7 +1598,10 @@
     },
     "connector_send": {
       "type": "object",
-      "required": ["sessionId", "segments"],
+      "required": [
+        "sessionId",
+        "segments"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
@@ -1225,7 +1627,11 @@
     },
     "connectors_attachment_fetch": {
       "type": "object",
-      "required": ["adapterId", "remoteRef", "sourceUrl"],
+      "required": [
+        "adapterId",
+        "remoteRef",
+        "sourceUrl"
+      ],
       "properties": {
         "adapterId": {
           "type": "string"
@@ -1247,7 +1653,11 @@
     },
     "connectors_attachment_read": {
       "type": "object",
-      "required": ["adapterId", "remoteRef", "maxBytes"],
+      "required": [
+        "adapterId",
+        "remoteRef",
+        "maxBytes"
+      ],
       "properties": {
         "adapterId": {
           "type": "string"
@@ -1266,11 +1676,16 @@
     },
     "connectors_http_request": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
-          "required": ["url", "method"],
+          "required": [
+            "url",
+            "method"
+          ],
           "properties": {
             "url": {
               "type": "string"
@@ -1298,7 +1713,10 @@
     },
     "connectors_keyring_delete": {
       "type": "object",
-      "required": ["adapterId", "credential"],
+      "required": [
+        "adapterId",
+        "credential"
+      ],
       "properties": {
         "adapterId": {
           "type": "string"
@@ -1311,7 +1729,10 @@
     },
     "connectors_keyring_get": {
       "type": "object",
-      "required": ["adapterId", "credential"],
+      "required": [
+        "adapterId",
+        "credential"
+      ],
       "properties": {
         "adapterId": {
           "type": "string"
@@ -1324,7 +1745,10 @@
     },
     "connectors_keyring_list": {
       "type": "object",
-      "required": ["adapterId", "accounts"],
+      "required": [
+        "adapterId",
+        "accounts"
+      ],
       "properties": {
         "adapterId": {
           "type": "string"
@@ -1340,7 +1764,11 @@
     },
     "connectors_keyring_set": {
       "type": "object",
-      "required": ["adapterId", "credential", "value"],
+      "required": [
+        "adapterId",
+        "credential",
+        "value"
+      ],
       "properties": {
         "adapterId": {
           "type": "string"
@@ -1356,7 +1784,12 @@
     },
     "connectors_lark_upload_file": {
       "type": "object",
-      "required": ["accessToken", "sourceUrl", "fileType", "fileName"],
+      "required": [
+        "accessToken",
+        "sourceUrl",
+        "fileType",
+        "fileName"
+      ],
       "properties": {
         "accessToken": {
           "type": "string"
@@ -1378,7 +1811,10 @@
     },
     "connectors_lark_upload_image": {
       "type": "object",
-      "required": ["accessToken", "sourceUrl"],
+      "required": [
+        "accessToken",
+        "sourceUrl"
+      ],
       "properties": {
         "accessToken": {
           "type": "string"
@@ -1388,14 +1824,19 @@
         },
         "imageType": {
           "type": "string",
-          "enum": ["message", "avatar"]
+          "enum": [
+            "message",
+            "avatar"
+          ]
         }
       },
       "additionalProperties": false
     },
     "connectors_lark_ws_close": {
       "type": "object",
-      "required": ["handleId"],
+      "required": [
+        "handleId"
+      ],
       "properties": {
         "handleId": {
           "type": "string"
@@ -1405,7 +1846,9 @@
     },
     "connectors_lark_ws_open": {
       "type": "object",
-      "required": ["adapterId"],
+      "required": [
+        "adapterId"
+      ],
       "properties": {
         "adapterId": {
           "type": "string"
@@ -1418,7 +1861,9 @@
     },
     "connectors_matrix_crypto_close": {
       "type": "object",
-      "required": ["adapter_id"],
+      "required": [
+        "adapter_id"
+      ],
       "properties": {
         "adapter_id": {
           "type": "string",
@@ -1430,7 +1875,9 @@
     },
     "connectors_matrix_crypto_decrypt_event": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1442,7 +1889,9 @@
     },
     "connectors_matrix_crypto_encrypt_event": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1454,7 +1903,9 @@
     },
     "connectors_matrix_crypto_get_missing_sessions": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1466,7 +1917,9 @@
     },
     "connectors_matrix_crypto_init": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1478,7 +1931,9 @@
     },
     "connectors_matrix_crypto_mark_request_sent": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1490,7 +1945,9 @@
     },
     "connectors_matrix_crypto_outgoing_requests": {
       "type": "object",
-      "required": ["adapter_id"],
+      "required": [
+        "adapter_id"
+      ],
       "properties": {
         "adapter_id": {
           "type": "string",
@@ -1502,7 +1959,9 @@
     },
     "connectors_matrix_crypto_receive_sync_changes": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1514,7 +1973,9 @@
     },
     "connectors_matrix_crypto_share_room_key": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1526,7 +1987,9 @@
     },
     "connectors_matrix_crypto_update_tracked_users": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1538,7 +2001,9 @@
     },
     "connectors_matrix_encrypted_media_fetch": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1550,7 +2015,9 @@
     },
     "connectors_matrix_encrypted_media_upload": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
@@ -1562,11 +2029,15 @@
     },
     "connectors_media_upload": {
       "type": "object",
-      "required": ["req"],
+      "required": [
+        "req"
+      ],
       "properties": {
         "req": {
           "type": "object",
-          "required": ["uploadUrl"],
+          "required": [
+            "uploadUrl"
+          ],
           "properties": {
             "uploadUrl": {
               "type": "string"
@@ -1594,7 +2065,10 @@
     },
     "connectors_onebot_send": {
       "type": "object",
-      "required": ["adapterId", "callJson"],
+      "required": [
+        "adapterId",
+        "callJson"
+      ],
       "properties": {
         "adapterId": {
           "type": "string"
@@ -1607,14 +2081,23 @@
     },
     "connectors_register": {
       "type": "object",
-      "required": ["adapter_id", "adapter_type"],
+      "required": [
+        "adapter_id",
+        "adapter_type"
+      ],
       "properties": {
         "adapter_id": {
           "type": "string"
         },
         "adapter_type": {
           "type": "string",
-          "enum": ["telegram", "slack", "discord", "lark", "wechat-oa"]
+          "enum": [
+            "telegram",
+            "slack",
+            "discord",
+            "lark",
+            "wechat-oa"
+          ]
         }
       },
       "additionalProperties": false
@@ -1624,7 +2107,10 @@
     },
     "connectors_runtime_lease_acquire": {
       "type": "object",
-      "required": ["owner_id", "ttl_ms"],
+      "required": [
+        "owner_id",
+        "ttl_ms"
+      ],
       "properties": {
         "owner_id": {
           "type": "string",
@@ -1637,13 +2123,20 @@
           "minimum": 0,
           "example": 0,
           "description": "Also accepted as `ttlMs`."
+        },
+        "handoff_aware": {
+          "type": "boolean",
+          "example": false,
+          "description": "Also accepted as `handoffAware`."
         }
       },
       "additionalProperties": false
     },
     "connectors_runtime_lease_release": {
       "type": "object",
-      "required": ["owner_id"],
+      "required": [
+        "owner_id"
+      ],
       "properties": {
         "owner_id": {
           "type": "string",
@@ -1655,7 +2148,10 @@
     },
     "connectors_runtime_lease_renew": {
       "type": "object",
-      "required": ["owner_id", "ttl_ms"],
+      "required": [
+        "owner_id",
+        "ttl_ms"
+      ],
       "properties": {
         "owner_id": {
           "type": "string",
@@ -1674,7 +2170,9 @@
     },
     "connectors_unregister": {
       "type": "object",
-      "required": ["adapter_id"],
+      "required": [
+        "adapter_id"
+      ],
       "properties": {
         "adapter_id": {
           "type": "string"
@@ -1684,7 +2182,9 @@
     },
     "connectors_ws_close": {
       "type": "object",
-      "required": ["handleId"],
+      "required": [
+        "handleId"
+      ],
       "properties": {
         "handleId": {
           "type": "string"
@@ -1694,7 +2194,9 @@
     },
     "connectors_ws_open": {
       "type": "object",
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "properties": {
         "url": {
           "type": "string",
@@ -1711,7 +2213,10 @@
     },
     "connectors_ws_send": {
       "type": "object",
-      "required": ["handleId", "data"],
+      "required": [
+        "handleId",
+        "data"
+      ],
       "properties": {
         "handleId": {
           "type": "string"
@@ -1724,7 +2229,9 @@
     },
     "conversation_overrides_update": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
@@ -1738,7 +2245,9 @@
     },
     "device_capabilities_report": {
       "type": "object",
-      "required": ["capabilities"],
+      "required": [
+        "capabilities"
+      ],
       "properties": {
         "capabilities": {
           "type": "array",
@@ -1753,7 +2262,9 @@
     },
     "ensure_dir": {
       "type": "object",
-      "required": ["path"],
+      "required": [
+        "path"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -1763,7 +2274,10 @@
     },
     "ensure_dir_confined": {
       "type": "object",
-      "required": ["path", "allowedRoots"],
+      "required": [
+        "path",
+        "allowedRoots"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -1786,7 +2300,10 @@
     },
     "external_agent_update": {
       "type": "object",
-      "required": ["id", "patch"],
+      "required": [
+        "id",
+        "patch"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -1799,7 +2316,13 @@
             },
             "defaultPermissionMode": {
               "type": "string",
-              "enum": ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"]
+              "enum": [
+                "default",
+                "acceptEdits",
+                "bypassPermissions",
+                "plan",
+                "dontAsk"
+              ]
             }
           },
           "additionalProperties": false
@@ -1809,7 +2332,10 @@
     },
     "external_bridge_client_create": {
       "type": "object",
-      "required": ["name", "scopes"],
+      "required": [
+        "name",
+        "scopes"
+      ],
       "properties": {
         "name": {
           "type": "string",
@@ -1838,7 +2364,9 @@
     },
     "external_bridge_client_revoke": {
       "type": "object",
-      "required": ["client_id"],
+      "required": [
+        "client_id"
+      ],
       "properties": {
         "client_id": {
           "type": "string",
@@ -1850,7 +2378,9 @@
     },
     "external_bridge_client_rotate": {
       "type": "object",
-      "required": ["client_id"],
+      "required": [
+        "client_id"
+      ],
       "properties": {
         "client_id": {
           "type": "string",
@@ -1867,7 +2397,9 @@
     },
     "external_bridge_config_update": {
       "type": "object",
-      "required": ["update"],
+      "required": [
+        "update"
+      ],
       "properties": {
         "update": {
           "type": "object",
@@ -1904,7 +2436,10 @@
     },
     "fleet_focus_terminal": {
       "type": "object",
-      "required": ["agent", "sessionId"],
+      "required": [
+        "agent",
+        "sessionId"
+      ],
       "properties": {
         "agent": {
           "type": "string"
@@ -1922,7 +2457,10 @@
     },
     "fleet_interrupt_session": {
       "type": "object",
-      "required": ["agent", "sessionId"],
+      "required": [
+        "agent",
+        "sessionId"
+      ],
       "properties": {
         "agent": {
           "type": "string"
@@ -1935,7 +2473,10 @@
     },
     "fleet_opencode_send_message": {
       "type": "object",
-      "required": ["sessionId", "text"],
+      "required": [
+        "sessionId",
+        "text"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
@@ -1948,21 +2489,29 @@
     },
     "fleet_permission_respond": {
       "type": "object",
-      "required": ["requestId", "behavior"],
+      "required": [
+        "requestId",
+        "behavior"
+      ],
       "properties": {
         "requestId": {
           "type": "string"
         },
         "behavior": {
           "type": "string",
-          "enum": ["allow", "deny"]
+          "enum": [
+            "allow",
+            "deny"
+          ]
         }
       },
       "additionalProperties": false
     },
     "fleet_project_managed_session": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
@@ -2032,13 +2581,18 @@
     },
     "fleet_project_worker_load": {
       "type": "object",
-      "required": ["loads"],
+      "required": [
+        "loads"
+      ],
       "properties": {
         "loads": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["hostRef", "usedSlots"],
+            "required": [
+              "hostRef",
+              "usedSlots"
+            ],
             "properties": {
               "hostRef": {
                 "type": "string",
@@ -2057,7 +2611,9 @@
     },
     "fleet_question_reject": {
       "type": "object",
-      "required": ["requestId"],
+      "required": [
+        "requestId"
+      ],
       "properties": {
         "requestId": {
           "type": "string",
@@ -2068,7 +2624,10 @@
     },
     "fleet_question_respond": {
       "type": "object",
-      "required": ["requestId", "selections"],
+      "required": [
+        "requestId",
+        "selections"
+      ],
       "properties": {
         "requestId": {
           "type": "string"
@@ -2088,7 +2647,9 @@
     },
     "fleet_remove_managed_session": {
       "type": "object",
-      "required": ["sessionId"],
+      "required": [
+        "sessionId"
+      ],
       "properties": {
         "sessionId": {
           "type": "string",
@@ -2099,7 +2660,10 @@
     },
     "fleet_worker_enrollment_create": {
       "type": "object",
-      "required": ["baseUrl", "fingerprint"],
+      "required": [
+        "baseUrl",
+        "fingerprint"
+      ],
       "properties": {
         "baseUrl": {
           "type": "string",
@@ -2118,7 +2682,10 @@
     },
     "fleet_worker_set": {
       "type": "object",
-      "required": ["deviceId", "allowed"],
+      "required": [
+        "deviceId",
+        "allowed"
+      ],
       "properties": {
         "deviceId": {
           "type": "string",
@@ -2132,7 +2699,11 @@
     },
     "fs_copy_workspace_entry": {
       "type": "object",
-      "required": ["root", "fromRelPath", "toRelPath"],
+      "required": [
+        "root",
+        "fromRelPath",
+        "toRelPath"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2151,7 +2722,10 @@
     },
     "fs_create_workspace_dir": {
       "type": "object",
-      "required": ["root", "relPath"],
+      "required": [
+        "root",
+        "relPath"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2164,7 +2738,10 @@
     },
     "fs_delete_workspace_entry": {
       "type": "object",
-      "required": ["root", "relPath"],
+      "required": [
+        "root",
+        "relPath"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2180,7 +2757,9 @@
     },
     "fs_list_workspace_dir": {
       "type": "object",
-      "required": ["root"],
+      "required": [
+        "root"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2196,7 +2775,10 @@
     },
     "fs_read_workspace_file": {
       "type": "object",
-      "required": ["root", "relPath"],
+      "required": [
+        "root",
+        "relPath"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2212,7 +2794,11 @@
     },
     "fs_rename_workspace_entry": {
       "type": "object",
-      "required": ["root", "fromRelPath", "toRelPath"],
+      "required": [
+        "root",
+        "fromRelPath",
+        "toRelPath"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2228,7 +2814,9 @@
     },
     "fs_search_content_workspace": {
       "type": "object",
-      "required": ["root"],
+      "required": [
+        "root"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2250,7 +2838,9 @@
     },
     "fs_search_workspace": {
       "type": "object",
-      "required": ["root"],
+      "required": [
+        "root"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2266,7 +2856,10 @@
     },
     "fs_stat_workspace_file": {
       "type": "object",
-      "required": ["root", "relPath"],
+      "required": [
+        "root",
+        "relPath"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2279,7 +2872,11 @@
     },
     "fs_write_workspace_file": {
       "type": "object",
-      "required": ["root", "relPath", "content"],
+      "required": [
+        "root",
+        "relPath",
+        "content"
+      ],
       "properties": {
         "root": {
           "type": "string"
@@ -2295,7 +2892,9 @@
     },
     "get_external_agent_status": {
       "type": "object",
-      "required": ["agent_id"],
+      "required": [
+        "agent_id"
+      ],
       "properties": {
         "agent_id": {
           "type": "string"
@@ -2305,7 +2904,10 @@
     },
     "git_blame": {
       "type": "object",
-      "required": ["path", "workspaceId"],
+      "required": [
+        "path",
+        "workspaceId"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -2326,7 +2928,9 @@
     },
     "git_branches": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -2340,7 +2944,11 @@
     },
     "git_checkout_branch": {
       "type": "object",
-      "required": ["name", "workspaceId", "adminLease"],
+      "required": [
+        "name",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -2361,7 +2969,11 @@
     },
     "git_cherry_pick": {
       "type": "object",
-      "required": ["sha", "workspaceId", "adminLease"],
+      "required": [
+        "sha",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "sha": {
           "type": "string"
@@ -2382,7 +2994,12 @@
     },
     "git_clone": {
       "type": "object",
-      "required": ["remoteUrl", "workspaceId", "destinationRelativePath", "adminLease"],
+      "required": [
+        "remoteUrl",
+        "workspaceId",
+        "destinationRelativePath",
+        "adminLease"
+      ],
       "properties": {
         "remoteUrl": {
           "type": "string"
@@ -2404,7 +3021,13 @@
     },
     "git_commit": {
       "type": "object",
-      "required": ["message", "amend", "signoff", "workspaceId", "adminLease"],
+      "required": [
+        "message",
+        "amend",
+        "signoff",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "message": {
           "type": "string"
@@ -2431,7 +3054,10 @@
     },
     "git_commit_files": {
       "type": "object",
-      "required": ["sha", "workspaceId"],
+      "required": [
+        "sha",
+        "workspaceId"
+      ],
       "properties": {
         "sha": {
           "type": "string"
@@ -2448,7 +3074,9 @@
     },
     "git_conflicts": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -2462,7 +3090,12 @@
     },
     "git_create_branch": {
       "type": "object",
-      "required": ["name", "checkout", "workspaceId", "adminLease"],
+      "required": [
+        "name",
+        "checkout",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -2490,7 +3123,11 @@
     },
     "git_create_tag": {
       "type": "object",
-      "required": ["name", "workspaceId", "adminLease"],
+      "required": [
+        "name",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -2519,7 +3156,12 @@
     },
     "git_delete_branch": {
       "type": "object",
-      "required": ["name", "force", "workspaceId", "adminLease"],
+      "required": [
+        "name",
+        "force",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -2543,7 +3185,11 @@
     },
     "git_delete_tag": {
       "type": "object",
-      "required": ["name", "workspaceId", "adminLease"],
+      "required": [
+        "name",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -2564,7 +3210,11 @@
     },
     "git_diff_commit": {
       "type": "object",
-      "required": ["sha", "path", "workspaceId"],
+      "required": [
+        "sha",
+        "path",
+        "workspaceId"
+      ],
       "properties": {
         "sha": {
           "type": "string"
@@ -2584,7 +3234,11 @@
     },
     "git_diff_file": {
       "type": "object",
-      "required": ["path", "staged", "workspaceId"],
+      "required": [
+        "path",
+        "staged",
+        "workspaceId"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -2604,7 +3258,12 @@
     },
     "git_diff_refs_file": {
       "type": "object",
-      "required": ["base", "target", "path", "workspaceId"],
+      "required": [
+        "base",
+        "target",
+        "path",
+        "workspaceId"
+      ],
       "properties": {
         "base": {
           "type": "string"
@@ -2627,7 +3286,11 @@
     },
     "git_diff_refs_files": {
       "type": "object",
-      "required": ["base", "target", "workspaceId"],
+      "required": [
+        "base",
+        "target",
+        "workspaceId"
+      ],
       "properties": {
         "base": {
           "type": "string"
@@ -2647,7 +3310,9 @@
     },
     "git_diff_staged_all": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -2661,7 +3326,9 @@
     },
     "git_diff_stat": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -2675,7 +3342,11 @@
     },
     "git_discard": {
       "type": "object",
-      "required": ["paths", "workspaceId", "adminLease"],
+      "required": [
+        "paths",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "paths": {
           "type": "array",
@@ -2703,7 +3374,11 @@
     },
     "git_discard_all": {
       "type": "object",
-      "required": ["includeUntracked", "workspaceId", "adminLease"],
+      "required": [
+        "includeUntracked",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "includeUntracked": {
           "type": "boolean"
@@ -2724,7 +3399,10 @@
     },
     "git_fetch": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "remote": {
           "type": "string",
@@ -2749,7 +3427,11 @@
     },
     "git_file_history": {
       "type": "object",
-      "required": ["path", "maxCount", "workspaceId"],
+      "required": [
+        "path",
+        "maxCount",
+        "workspaceId"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -2769,7 +3451,9 @@
     },
     "git_identity": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -2783,7 +3467,11 @@
     },
     "git_ignore_add": {
       "type": "object",
-      "required": ["pattern", "workspaceId", "adminLease"],
+      "required": [
+        "pattern",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "pattern": {
           "type": "string"
@@ -2804,7 +3492,10 @@
     },
     "git_init": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -2822,7 +3513,12 @@
     },
     "git_interactive_rebase": {
       "type": "object",
-      "required": ["base", "entries", "workspaceId", "adminLease"],
+      "required": [
+        "base",
+        "entries",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "base": {
           "type": "string"
@@ -2850,7 +3546,9 @@
     },
     "git_is_repo": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -2864,7 +3562,11 @@
     },
     "git_log": {
       "type": "object",
-      "required": ["maxCount", "skip", "workspaceId"],
+      "required": [
+        "maxCount",
+        "skip",
+        "workspaceId"
+      ],
       "properties": {
         "maxCount": {
           "type": "integer"
@@ -2884,7 +3586,11 @@
     },
     "git_merge": {
       "type": "object",
-      "required": ["branch", "workspaceId", "adminLease"],
+      "required": [
+        "branch",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "branch": {
           "type": "string"
@@ -2905,7 +3611,10 @@
     },
     "git_merge_abort": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -2923,7 +3632,10 @@
     },
     "git_pull": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "remote": {
           "type": "string",
@@ -2952,7 +3664,10 @@
     },
     "git_push": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "remote": {
           "type": "string",
@@ -2984,7 +3699,12 @@
     },
     "git_push_tag": {
       "type": "object",
-      "required": ["remote", "name", "workspaceId", "adminLease"],
+      "required": [
+        "remote",
+        "name",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "remote": {
           "type": "string"
@@ -3008,7 +3728,11 @@
     },
     "git_rebase": {
       "type": "object",
-      "required": ["onto", "workspaceId", "adminLease"],
+      "required": [
+        "onto",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "onto": {
           "type": "string"
@@ -3029,7 +3753,10 @@
     },
     "git_rebase_commits": {
       "type": "object",
-      "required": ["base", "workspaceId"],
+      "required": [
+        "base",
+        "workspaceId"
+      ],
       "properties": {
         "base": {
           "type": "string"
@@ -3046,7 +3773,9 @@
     },
     "git_refs": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3060,7 +3789,12 @@
     },
     "git_remote_add": {
       "type": "object",
-      "required": ["name", "url", "workspaceId", "adminLease"],
+      "required": [
+        "name",
+        "url",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -3084,7 +3818,11 @@
     },
     "git_remote_remove": {
       "type": "object",
-      "required": ["name", "workspaceId", "adminLease"],
+      "required": [
+        "name",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -3105,7 +3843,9 @@
     },
     "git_remotes": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3119,7 +3859,11 @@
     },
     "git_rename_branch": {
       "type": "object",
-      "required": ["newName", "workspaceId", "adminLease"],
+      "required": [
+        "newName",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "newName": {
           "type": "string"
@@ -3144,7 +3888,9 @@
     },
     "git_repo_state": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3158,7 +3904,12 @@
     },
     "git_reset": {
       "type": "object",
-      "required": ["mode", "target", "workspaceId", "adminLease"],
+      "required": [
+        "mode",
+        "target",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "mode": {
           "type": "string"
@@ -3182,7 +3933,11 @@
     },
     "git_resolve_conflict": {
       "type": "object",
-      "required": ["path", "workspaceId", "adminLease"],
+      "required": [
+        "path",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -3193,7 +3948,10 @@
         },
         "side": {
           "type": "string",
-          "enum": ["ours", "theirs"],
+          "enum": [
+            "ours",
+            "theirs"
+          ],
           "nullable": true
         },
         "workspaceId": {
@@ -3212,7 +3970,12 @@
     },
     "git_restore": {
       "type": "object",
-      "required": ["paths", "staged", "workspaceId", "adminLease"],
+      "required": [
+        "paths",
+        "staged",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "paths": {
           "type": "array",
@@ -3243,7 +4006,11 @@
     },
     "git_revert": {
       "type": "object",
-      "required": ["sha", "workspaceId", "adminLease"],
+      "required": [
+        "sha",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "sha": {
           "type": "string"
@@ -3264,7 +4031,10 @@
     },
     "git_sequencer_abort": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3282,7 +4052,10 @@
     },
     "git_sequencer_continue": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3300,7 +4073,13 @@
     },
     "git_set_identity": {
       "type": "object",
-      "required": ["name", "email", "global", "workspaceId", "adminLease"],
+      "required": [
+        "name",
+        "email",
+        "global",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -3328,7 +4107,11 @@
     },
     "git_stage": {
       "type": "object",
-      "required": ["paths", "workspaceId", "adminLease"],
+      "required": [
+        "paths",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "paths": {
           "type": "array",
@@ -3356,7 +4139,11 @@
     },
     "git_stash_apply": {
       "type": "object",
-      "required": ["index", "workspaceId", "adminLease"],
+      "required": [
+        "index",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "index": {
           "type": "integer"
@@ -3377,7 +4164,11 @@
     },
     "git_stash_drop": {
       "type": "object",
-      "required": ["index", "workspaceId", "adminLease"],
+      "required": [
+        "index",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "index": {
           "type": "integer"
@@ -3398,7 +4189,9 @@
     },
     "git_stash_list": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3412,7 +4205,11 @@
     },
     "git_stash_pop": {
       "type": "object",
-      "required": ["index", "workspaceId", "adminLease"],
+      "required": [
+        "index",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "index": {
           "type": "integer"
@@ -3433,7 +4230,10 @@
     },
     "git_stash_push": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "message": {
           "type": "string",
@@ -3461,7 +4261,9 @@
     },
     "git_status": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3475,7 +4277,10 @@
     },
     "git_sync": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3493,7 +4298,9 @@
     },
     "git_tags": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3507,7 +4314,11 @@
     },
     "git_unstage": {
       "type": "object",
-      "required": ["paths", "workspaceId", "adminLease"],
+      "required": [
+        "paths",
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "paths": {
           "type": "array",
@@ -3540,7 +4351,12 @@
     },
     "git_worktree_add": {
       "type": "object",
-      "required": ["branch", "workspaceId", "destinationRelativePath", "adminLease"],
+      "required": [
+        "branch",
+        "workspaceId",
+        "destinationRelativePath",
+        "adminLease"
+      ],
       "properties": {
         "branch": {
           "type": "string"
@@ -3569,7 +4385,12 @@
     },
     "git_worktree_commit": {
       "type": "object",
-      "required": ["message", "workspaceId", "worktreeRelativePath", "adminLease"],
+      "required": [
+        "message",
+        "workspaceId",
+        "worktreeRelativePath",
+        "adminLease"
+      ],
       "properties": {
         "message": {
           "type": "string"
@@ -3591,7 +4412,9 @@
     },
     "git_worktree_list": {
       "type": "object",
-      "required": ["workspaceId"],
+      "required": [
+        "workspaceId"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3605,7 +4428,10 @@
     },
     "git_worktree_prune": {
       "type": "object",
-      "required": ["workspaceId", "adminLease"],
+      "required": [
+        "workspaceId",
+        "adminLease"
+      ],
       "properties": {
         "workspaceId": {
           "type": "string",
@@ -3623,7 +4449,12 @@
     },
     "git_worktree_remove": {
       "type": "object",
-      "required": ["force", "workspaceId", "worktreeRelativePath", "adminLease"],
+      "required": [
+        "force",
+        "workspaceId",
+        "worktreeRelativePath",
+        "adminLease"
+      ],
       "properties": {
         "force": {
           "type": "boolean"
@@ -3652,7 +4483,9 @@
     },
     "github_workspace_clone": {
       "type": "object",
-      "required": ["args"],
+      "required": [
+        "args"
+      ],
       "properties": {
         "args": {
           "type": "object",
@@ -3664,7 +4497,9 @@
     },
     "github_workspace_commit_and_push": {
       "type": "object",
-      "required": ["args"],
+      "required": [
+        "args"
+      ],
       "properties": {
         "args": {
           "type": "object",
@@ -3676,7 +4511,9 @@
     },
     "github_workspace_remove": {
       "type": "object",
-      "required": ["path"],
+      "required": [
+        "path"
+      ],
       "properties": {
         "path": {
           "type": "string",
@@ -3687,7 +4524,9 @@
     },
     "github_workspace_stat": {
       "type": "object",
-      "required": ["path"],
+      "required": [
+        "path"
+      ],
       "properties": {
         "path": {
           "type": "string",
@@ -3698,7 +4537,10 @@
     },
     "goal_create": {
       "type": "object",
-      "required": ["sessionId", "rawObjective"],
+      "required": [
+        "sessionId",
+        "rawObjective"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
@@ -3721,7 +4563,9 @@
     },
     "goal_pause": {
       "type": "object",
-      "required": ["goalId"],
+      "required": [
+        "goalId"
+      ],
       "properties": {
         "goalId": {
           "type": "string"
@@ -3731,7 +4575,9 @@
     },
     "goal_resume": {
       "type": "object",
-      "required": ["goalId"],
+      "required": [
+        "goalId"
+      ],
       "properties": {
         "goalId": {
           "type": "string"
@@ -3753,7 +4599,9 @@
     },
     "goal_stop": {
       "type": "object",
-      "required": ["goalId"],
+      "required": [
+        "goalId"
+      ],
       "properties": {
         "goalId": {
           "type": "string"
@@ -3763,7 +4611,9 @@
     },
     "goal_update": {
       "type": "object",
-      "required": ["goalId"],
+      "required": [
+        "goalId"
+      ],
       "properties": {
         "goalId": {
           "type": "string"
@@ -3780,7 +4630,10 @@
     },
     "host_admin_lease_issue": {
       "type": "object",
-      "required": ["operations", "confirmed"],
+      "required": [
+        "operations",
+        "confirmed"
+      ],
       "properties": {
         "operations": {
           "type": "array",
@@ -3809,7 +4662,12 @@
     },
     "host_state_snapshot": {
       "type": "object",
-      "required": ["protocolVersion", "accountId", "runtimeTargetId", "channel"],
+      "required": [
+        "protocolVersion",
+        "accountId",
+        "runtimeTargetId",
+        "channel"
+      ],
       "properties": {
         "protocolVersion": {
           "type": "integer",
@@ -3832,7 +4690,11 @@
     },
     "host_state_status": {
       "type": "object",
-      "required": ["protocolVersion", "accountId", "runtimeTargetId"],
+      "required": [
+        "protocolVersion",
+        "accountId",
+        "runtimeTargetId"
+      ],
       "properties": {
         "protocolVersion": {
           "type": "integer",
@@ -3851,7 +4713,12 @@
     },
     "host_state_submit": {
       "type": "object",
-      "required": ["protocolVersion", "accountId", "runtimeTargetId", "actions"],
+      "required": [
+        "protocolVersion",
+        "accountId",
+        "runtimeTargetId",
+        "actions"
+      ],
       "properties": {
         "protocolVersion": {
           "type": "integer",
@@ -3935,7 +4802,9 @@
               },
               "action": {
                 "type": "object",
-                "required": ["kind"],
+                "required": [
+                  "kind"
+                ],
                 "additionalProperties": true
               }
             },
@@ -3947,7 +4816,10 @@
     },
     "integration_ingress_ack": {
       "type": "object",
-      "required": ["route_id", "delivery_id"],
+      "required": [
+        "route_id",
+        "delivery_id"
+      ],
       "properties": {
         "route_id": {
           "type": "string",
@@ -3964,7 +4836,10 @@
     },
     "integration_ingress_deadletter": {
       "type": "object",
-      "required": ["route_id", "delivery_id"],
+      "required": [
+        "route_id",
+        "delivery_id"
+      ],
       "properties": {
         "route_id": {
           "type": "string",
@@ -3992,7 +4867,9 @@
     },
     "integration_ingress_get_url": {
       "type": "object",
-      "required": ["route_id"],
+      "required": [
+        "route_id"
+      ],
       "properties": {
         "route_id": {
           "type": "string",
@@ -4015,7 +4892,9 @@
     },
     "integration_ingress_register": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
@@ -4027,7 +4906,10 @@
     },
     "integration_ingress_requeue": {
       "type": "object",
-      "required": ["route_id", "delivery_id"],
+      "required": [
+        "route_id",
+        "delivery_id"
+      ],
       "properties": {
         "route_id": {
           "type": "string",
@@ -4044,7 +4926,9 @@
     },
     "integration_ingress_unregister": {
       "type": "object",
-      "required": ["route_id"],
+      "required": [
+        "route_id"
+      ],
       "properties": {
         "route_id": {
           "type": "string",
@@ -4056,11 +4940,16 @@
     },
     "keyring_secret_clear": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
-          "required": ["namespace", "key"],
+          "required": [
+            "namespace",
+            "key"
+          ],
           "properties": {
             "namespace": {
               "type": "string",
@@ -4078,11 +4967,16 @@
     },
     "keyring_secret_get": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
-          "required": ["namespace", "key"],
+          "required": [
+            "namespace",
+            "key"
+          ],
           "properties": {
             "namespace": {
               "type": "string",
@@ -4100,11 +4994,17 @@
     },
     "keyring_secret_set": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
-          "required": ["namespace", "key", "value"],
+          "required": [
+            "namespace",
+            "key",
+            "value"
+          ],
           "properties": {
             "namespace": {
               "type": "string",
@@ -4125,7 +5025,9 @@
     },
     "kill_external_agent": {
       "type": "object",
-      "required": ["agent_id"],
+      "required": [
+        "agent_id"
+      ],
       "properties": {
         "agent_id": {
           "type": "string"
@@ -4135,11 +5037,16 @@
     },
     "lark_entry_issue": {
       "type": "object",
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["entry", "surface"]
+          "enum": [
+            "entry",
+            "surface"
+          ]
         },
         "principalId": {
           "type": "string"
@@ -4173,7 +5080,10 @@
         },
         "surface": {
           "type": "string",
-          "enum": ["chat_tab", "group_menu"]
+          "enum": [
+            "chat_tab",
+            "group_menu"
+          ]
         },
         "urlVersion": {
           "type": "integer"
@@ -4183,7 +5093,9 @@
     },
     "lark_metrics_record": {
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -4193,7 +5105,9 @@
     },
     "lark_result_complete": {
       "type": "object",
-      "required": ["requestId"],
+      "required": [
+        "requestId"
+      ],
       "properties": {
         "requestId": {
           "type": "string"
@@ -4221,12 +5135,21 @@
           "properties": {
             "file": {
               "type": "string",
-              "enum": ["structured", "plain"],
+              "enum": [
+                "structured",
+                "plain"
+              ],
               "default": "structured"
             },
             "minLevel": {
               "type": "string",
-              "enum": ["trace", "debug", "info", "warn", "error"]
+              "enum": [
+                "trace",
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ]
             },
             "target": {
               "type": "string",
@@ -4258,7 +5181,10 @@
     },
     "lsp_host_request": {
       "type": "object",
-      "required": ["method", "payloadJson"],
+      "required": [
+        "method",
+        "payloadJson"
+      ],
       "properties": {
         "method": {
           "type": "string",
@@ -4273,7 +5199,10 @@
     },
     "mcp_oauth_authenticate": {
       "type": "object",
-      "required": ["serverName", "server"],
+      "required": [
+        "serverName",
+        "server"
+      ],
       "properties": {
         "serverName": {
           "type": "string",
@@ -4282,15 +5211,23 @@
         },
         "server": {
           "type": "object",
-          "required": ["transport", "config"],
+          "required": [
+            "transport",
+            "config"
+          ],
           "properties": {
             "transport": {
               "type": "string",
-              "enum": ["http", "sse"]
+              "enum": [
+                "http",
+                "sse"
+              ]
             },
             "config": {
               "type": "object",
-              "required": ["url"],
+              "required": [
+                "url"
+              ],
               "properties": {
                 "url": {
                   "type": "string",
@@ -4323,7 +5260,9 @@
     },
     "mcp_oauth_clear": {
       "type": "object",
-      "required": ["serverName"],
+      "required": [
+        "serverName"
+      ],
       "properties": {
         "serverName": {
           "type": "string",
@@ -4335,7 +5274,9 @@
     },
     "mcp_oauth_load_entry": {
       "type": "object",
-      "required": ["serverName"],
+      "required": [
+        "serverName"
+      ],
       "properties": {
         "serverName": {
           "type": "string",
@@ -4347,7 +5288,10 @@
     },
     "mcp_oauth_refresh": {
       "type": "object",
-      "required": ["serverName", "server"],
+      "required": [
+        "serverName",
+        "server"
+      ],
       "properties": {
         "serverName": {
           "type": "string",
@@ -4356,15 +5300,23 @@
         },
         "server": {
           "type": "object",
-          "required": ["transport", "config"],
+          "required": [
+            "transport",
+            "config"
+          ],
           "properties": {
             "transport": {
               "type": "string",
-              "enum": ["http", "sse"]
+              "enum": [
+                "http",
+                "sse"
+              ]
             },
             "config": {
               "type": "object",
-              "required": ["url"],
+              "required": [
+                "url"
+              ],
               "properties": {
                 "url": {
                   "type": "string",
@@ -4397,7 +5349,9 @@
     },
     "mcp_oauth_status": {
       "type": "object",
-      "required": ["serverName"],
+      "required": [
+        "serverName"
+      ],
       "properties": {
         "serverName": {
           "type": "string",
@@ -4409,7 +5363,11 @@
     },
     "mcp_server_restart": {
       "type": "object",
-      "required": ["port", "token", "settingsJson"],
+      "required": [
+        "port",
+        "token",
+        "settingsJson"
+      ],
       "additionalProperties": false,
       "properties": {
         "port": {
@@ -4434,7 +5392,11 @@
     },
     "mcp_server_start": {
       "type": "object",
-      "required": ["port", "token", "settingsJson"],
+      "required": [
+        "port",
+        "token",
+        "settingsJson"
+      ],
       "additionalProperties": false,
       "properties": {
         "port": {
@@ -4465,7 +5427,9 @@
     },
     "memory_forget": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -4478,11 +5442,18 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["semantic", "episodic", "procedural"]
+          "enum": [
+            "semantic",
+            "episodic",
+            "procedural"
+          ]
         },
         "scope": {
           "type": "string",
-          "enum": ["global", "character"]
+          "enum": [
+            "global",
+            "character"
+          ]
         },
         "limit": {
           "type": "integer",
@@ -4494,7 +5465,9 @@
     },
     "memory_search": {
       "type": "object",
-      "required": ["query"],
+      "required": [
+        "query"
+      ],
       "properties": {
         "query": {
           "type": "string"
@@ -4508,7 +5481,11 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["semantic", "episodic", "procedural"]
+            "enum": [
+              "semantic",
+              "episodic",
+              "procedural"
+            ]
           }
         },
         "characterId": {
@@ -4519,7 +5496,9 @@
     },
     "memory_store": {
       "type": "object",
-      "required": ["text"],
+      "required": [
+        "text"
+      ],
       "properties": {
         "text": {
           "type": "string",
@@ -4527,11 +5506,17 @@
         },
         "type": {
           "type": "string",
-          "enum": ["semantic", "episodic"]
+          "enum": [
+            "semantic",
+            "episodic"
+          ]
         },
         "scope": {
           "type": "string",
-          "enum": ["global", "character"]
+          "enum": [
+            "global",
+            "character"
+          ]
         },
         "characterId": {
           "type": "string"
@@ -4555,7 +5540,9 @@
     },
     "memory_update": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -4583,7 +5570,10 @@
     },
     "message_delete": {
       "type": "object",
-      "required": ["session_id", "message_id"],
+      "required": [
+        "session_id",
+        "message_id"
+      ],
       "properties": {
         "session_id": {
           "type": "string"
@@ -4596,7 +5586,9 @@
     },
     "message_get_by_session": {
       "type": "object",
-      "required": ["session_id"],
+      "required": [
+        "session_id"
+      ],
       "properties": {
         "session_id": {
           "type": "string"
@@ -4614,7 +5606,10 @@
     },
     "message_send": {
       "type": "object",
-      "required": ["session_id", "content"],
+      "required": [
+        "session_id",
+        "content"
+      ],
       "properties": {
         "session_id": {
           "type": "string"
@@ -4631,7 +5626,11 @@
     },
     "message_update": {
       "type": "object",
-      "required": ["session_id", "message_id", "updates"],
+      "required": [
+        "session_id",
+        "message_id",
+        "updates"
+      ],
       "properties": {
         "session_id": {
           "type": "string"
@@ -4661,41 +5660,63 @@
       },
       "anyOf": [
         {
-          "required": ["requestId"]
+          "required": [
+            "requestId"
+          ]
         },
         {
-          "required": ["request_id"]
+          "required": [
+            "request_id"
+          ]
         }
       ],
       "additionalProperties": false
     },
     "ocr_download_model": {
       "type": "object",
-      "required": ["backend"],
+      "required": [
+        "backend"
+      ],
       "properties": {
         "backend": {
           "type": "string",
           "minLength": 1
         },
         "variant": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "requestId": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "request_id": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
     },
     "ocr_extract_native": {
       "type": "object",
-      "required": ["payload"],
+      "required": [
+        "payload"
+      ],
       "properties": {
         "payload": {
           "type": "object",
-          "required": ["backend", "bytes", "mime_type", "languages"],
+          "required": [
+            "backend",
+            "bytes",
+            "mime_type",
+            "languages"
+          ],
           "properties": {
             "backend": {
               "type": "string",
@@ -4721,7 +5742,10 @@
               }
             },
             "model_variant": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "additionalProperties": false
@@ -4737,21 +5761,28 @@
     },
     "ocr_model_status": {
       "type": "object",
-      "required": ["backend"],
+      "required": [
+        "backend"
+      ],
       "properties": {
         "backend": {
           "type": "string",
           "minLength": 1
         },
         "variant": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
     },
     "perf_close_lease": {
       "type": "object",
-      "required": ["leaseId"],
+      "required": [
+        "leaseId"
+      ],
       "properties": {
         "leaseId": {
           "type": "string",
@@ -4767,7 +5798,9 @@
     },
     "perf_lease_snapshot": {
       "type": "object",
-      "required": ["leaseId"],
+      "required": [
+        "leaseId"
+      ],
       "properties": {
         "leaseId": {
           "type": "string",
@@ -4783,7 +5816,9 @@
     },
     "perf_open_lease": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
@@ -4814,7 +5849,10 @@
             },
             "purpose": {
               "type": "string",
-              "enum": ["live", "capture"]
+              "enum": [
+                "live",
+                "capture"
+              ]
             },
             "requestedCadenceMs": {
               "type": "integer",
@@ -4833,7 +5871,9 @@
     },
     "perf_read_observations": {
       "type": "object",
-      "required": ["leaseId"],
+      "required": [
+        "leaseId"
+      ],
       "properties": {
         "leaseId": {
           "type": "string",
@@ -4848,7 +5888,9 @@
     },
     "perf_renew_lease": {
       "type": "object",
-      "required": ["leaseId"],
+      "required": [
+        "leaseId"
+      ],
       "properties": {
         "leaseId": {
           "type": "string",
@@ -4864,7 +5906,9 @@
     },
     "perf_trace_close": {
       "type": "object",
-      "required": ["handleId"],
+      "required": [
+        "handleId"
+      ],
       "properties": {
         "handleId": {
           "type": "string",
@@ -4875,7 +5919,9 @@
     },
     "perf_trace_open": {
       "type": "object",
-      "required": ["traceId"],
+      "required": [
+        "traceId"
+      ],
       "properties": {
         "traceId": {
           "type": "string",
@@ -4886,7 +5932,10 @@
     },
     "perf_trace_read_chunk": {
       "type": "object",
-      "required": ["handleId", "offset"],
+      "required": [
+        "handleId",
+        "offset"
+      ],
       "properties": {
         "handleId": {
           "type": "string",
@@ -4906,7 +5955,11 @@
     },
     "plugin_activate_vscode": {
       "type": "object",
-      "required": ["pluginId", "configJson", "generation"],
+      "required": [
+        "pluginId",
+        "configJson",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -4922,12 +5975,18 @@
     },
     "plugin_api_batch_invoke": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "additionalProperties": false,
       "properties": {
         "request": {
           "type": "object",
-          "required": ["sdkVersion", "pluginId", "requests"],
+          "required": [
+            "sdkVersion",
+            "pluginId",
+            "requests"
+          ],
           "additionalProperties": false,
           "properties": {
             "sdkVersion": {
@@ -4938,13 +5997,20 @@
             },
             "strategy": {
               "type": "string",
-              "enum": ["continueOnError", "abortOnError"]
+              "enum": [
+                "continueOnError",
+                "abortOnError"
+              ]
             },
             "requests": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["requestId", "api", "payload"],
+                "required": [
+                  "requestId",
+                  "api",
+                  "payload"
+                ],
                 "additionalProperties": false,
                 "properties": {
                   "requestId": {
@@ -4969,12 +6035,20 @@
     },
     "plugin_api_invoke": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "additionalProperties": false,
       "properties": {
         "request": {
           "type": "object",
-          "required": ["sdkVersion", "pluginId", "requestId", "api", "payload"],
+          "required": [
+            "sdkVersion",
+            "pluginId",
+            "requestId",
+            "api",
+            "payload"
+          ],
           "additionalProperties": false,
           "properties": {
             "sdkVersion": {
@@ -5002,7 +6076,9 @@
     },
     "plugin_backup_create": {
       "type": "object",
-      "required": ["pluginId"],
+      "required": [
+        "pluginId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5016,7 +6092,10 @@
     },
     "plugin_backup_delete": {
       "type": "object",
-      "required": ["pluginId", "backupId"],
+      "required": [
+        "pluginId",
+        "backupId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5029,7 +6108,10 @@
     },
     "plugin_backup_restore": {
       "type": "object",
-      "required": ["pluginId", "backupId"],
+      "required": [
+        "pluginId",
+        "backupId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5042,7 +6124,10 @@
     },
     "plugin_commit_staged_update": {
       "type": "object",
-      "required": ["pluginId", "transactionId"],
+      "required": [
+        "pluginId",
+        "transactionId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5055,7 +6140,12 @@
     },
     "plugin_deactivate_js": {
       "type": "object",
-      "required": ["plugin_id", "plugin_path", "entry", "generation"],
+      "required": [
+        "plugin_id",
+        "plugin_path",
+        "entry",
+        "generation"
+      ],
       "properties": {
         "plugin_id": {
           "type": "string",
@@ -5080,7 +6170,10 @@
     },
     "plugin_deactivate_vscode": {
       "type": "object",
-      "required": ["pluginId", "generation"],
+      "required": [
+        "pluginId",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5093,7 +6186,10 @@
     },
     "plugin_discard_staged_update": {
       "type": "object",
-      "required": ["pluginId", "transactionId"],
+      "required": [
+        "pluginId",
+        "transactionId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5106,7 +6202,10 @@
     },
     "plugin_finalize_staged_update": {
       "type": "object",
-      "required": ["pluginId", "transactionId"],
+      "required": [
+        "pluginId",
+        "transactionId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5122,7 +6221,11 @@
     },
     "plugin_install": {
       "type": "object",
-      "required": ["pluginId", "source", "payload"],
+      "required": [
+        "pluginId",
+        "source",
+        "payload"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5132,7 +6235,9 @@
         },
         "payload": {
           "type": "object",
-          "required": ["manifestJson"],
+          "required": [
+            "manifestJson"
+          ],
           "properties": {
             "manifestJson": {
               "type": "string",
@@ -5146,7 +6251,9 @@
     },
     "plugin_install_from_github": {
       "type": "object",
-      "required": ["repo"],
+      "required": [
+        "repo"
+      ],
       "properties": {
         "repo": {
           "type": "string"
@@ -5164,7 +6271,14 @@
     },
     "plugin_invoke_js_callback": {
       "type": "object",
-      "required": ["plugin_id", "plugin_path", "entry", "callback_id", "args", "generation"],
+      "required": [
+        "plugin_id",
+        "plugin_path",
+        "entry",
+        "callback_id",
+        "args",
+        "generation"
+      ],
       "properties": {
         "plugin_id": {
           "type": "string",
@@ -5195,7 +6309,12 @@
     },
     "plugin_invoke_vscode_rpc": {
       "type": "object",
-      "required": ["pluginId", "method", "payloadJson", "generation"],
+      "required": [
+        "pluginId",
+        "method",
+        "payloadJson",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5214,7 +6333,10 @@
     },
     "plugin_js_status": {
       "type": "object",
-      "required": ["plugin_id", "generation"],
+      "required": [
+        "plugin_id",
+        "generation"
+      ],
       "properties": {
         "plugin_id": {
           "type": "string",
@@ -5230,7 +6352,11 @@
     },
     "plugin_launch_js": {
       "type": "object",
-      "required": ["plugin_id", "plugin_path", "entry"],
+      "required": [
+        "plugin_id",
+        "plugin_path",
+        "entry"
+      ],
       "properties": {
         "plugin_id": {
           "type": "string",
@@ -5260,7 +6386,11 @@
     },
     "plugin_load_vscode": {
       "type": "object",
-      "required": ["pluginId", "manifestJson", "pluginPath"],
+      "required": [
+        "pluginId",
+        "manifestJson",
+        "pluginPath"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5277,7 +6407,11 @@
     },
     "plugin_permission_grant": {
       "type": "object",
-      "required": ["pluginId", "permission", "grantedBy"],
+      "required": [
+        "pluginId",
+        "permission",
+        "grantedBy"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5289,7 +6423,10 @@
           "type": "string"
         },
         "expiresAt": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "format": "date-time"
         }
       },
@@ -5297,7 +6434,9 @@
     },
     "plugin_permission_list": {
       "type": "object",
-      "required": ["pluginId"],
+      "required": [
+        "pluginId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5307,7 +6446,10 @@
     },
     "plugin_permission_revoke": {
       "type": "object",
-      "required": ["pluginId", "permission"],
+      "required": [
+        "pluginId",
+        "permission"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5320,7 +6462,12 @@
     },
     "plugin_python_call": {
       "type": "object",
-      "required": ["pluginId", "functionName", "args", "generation"],
+      "required": [
+        "pluginId",
+        "functionName",
+        "args",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5340,7 +6487,13 @@
     },
     "plugin_python_call_hook": {
       "type": "object",
-      "required": ["pluginId", "event", "name", "payload", "generation"],
+      "required": [
+        "pluginId",
+        "event",
+        "name",
+        "payload",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5360,7 +6513,12 @@
     },
     "plugin_python_call_tool": {
       "type": "object",
-      "required": ["pluginId", "toolName", "args", "generation"],
+      "required": [
+        "pluginId",
+        "toolName",
+        "args",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5380,7 +6538,11 @@
     },
     "plugin_python_eval": {
       "type": "object",
-      "required": ["pluginId", "code", "generation"],
+      "required": [
+        "pluginId",
+        "code",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5389,7 +6551,10 @@
           "type": "string"
         },
         "locals": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": true
         },
         "generation": {
@@ -5400,7 +6565,10 @@
     },
     "plugin_python_get_info": {
       "type": "object",
-      "required": ["pluginId", "generation"],
+      "required": [
+        "pluginId",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5413,7 +6581,10 @@
     },
     "plugin_python_get_tools": {
       "type": "object",
-      "required": ["pluginId", "generation"],
+      "required": [
+        "pluginId",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5426,7 +6597,11 @@
     },
     "plugin_python_import": {
       "type": "object",
-      "required": ["pluginId", "moduleName", "generation"],
+      "required": [
+        "pluginId",
+        "moduleName",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5444,14 +6619,20 @@
       "type": "object",
       "properties": {
         "pythonPath": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
     },
     "plugin_python_install_deps": {
       "type": "object",
-      "required": ["pluginId", "dependencies"],
+      "required": [
+        "pluginId",
+        "dependencies"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5467,7 +6648,10 @@
     },
     "plugin_python_is_initialized": {
       "type": "object",
-      "required": ["pluginId", "generation"],
+      "required": [
+        "pluginId",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5483,7 +6667,11 @@
     },
     "plugin_python_load": {
       "type": "object",
-      "required": ["pluginId", "pluginPath", "mainModule"],
+      "required": [
+        "pluginId",
+        "pluginPath",
+        "mainModule"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5495,17 +6683,26 @@
           "type": "string"
         },
         "dependencies": {
-          "type": ["array", "null"],
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
             "type": "string"
           }
         },
         "config": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": true
         },
         "hostSettings": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": true
         }
       },
@@ -5513,7 +6710,13 @@
     },
     "plugin_python_module_call": {
       "type": "object",
-      "required": ["pluginId", "moduleName", "functionName", "args", "generation"],
+      "required": [
+        "pluginId",
+        "moduleName",
+        "functionName",
+        "args",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5536,7 +6739,12 @@
     },
     "plugin_python_module_getattr": {
       "type": "object",
-      "required": ["pluginId", "moduleName", "attrName", "generation"],
+      "required": [
+        "pluginId",
+        "moduleName",
+        "attrName",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5555,7 +6763,11 @@
     },
     "plugin_python_push_config": {
       "type": "object",
-      "required": ["pluginId", "config", "generation"],
+      "required": [
+        "pluginId",
+        "config",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5575,7 +6787,10 @@
     },
     "plugin_python_unload": {
       "type": "object",
-      "required": ["pluginId", "generation"],
+      "required": [
+        "pluginId",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5588,7 +6803,9 @@
     },
     "plugin_runtime_snapshot": {
       "type": "object",
-      "required": ["pluginId"],
+      "required": [
+        "pluginId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5598,7 +6815,10 @@
     },
     "plugin_set_enabled": {
       "type": "object",
-      "required": ["id", "enabled"],
+      "required": [
+        "id",
+        "enabled"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -5611,7 +6831,10 @@
     },
     "plugin_set_network_allowlist": {
       "type": "object",
-      "required": ["pluginId", "domains"],
+      "required": [
+        "pluginId",
+        "domains"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5627,7 +6850,10 @@
     },
     "plugin_set_shell_allowlist": {
       "type": "object",
-      "required": ["pluginId", "commands"],
+      "required": [
+        "pluginId",
+        "commands"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5643,7 +6869,10 @@
     },
     "plugin_set_status": {
       "type": "object",
-      "required": ["plugin_id", "status"],
+      "required": [
+        "plugin_id",
+        "status"
+      ],
       "properties": {
         "plugin_id": {
           "type": "string",
@@ -5659,7 +6888,11 @@
     },
     "plugin_stage_version": {
       "type": "object",
-      "required": ["pluginId", "version", "downloadUrl"],
+      "required": [
+        "pluginId",
+        "version",
+        "downloadUrl"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5688,7 +6921,10 @@
     },
     "plugin_stop_js": {
       "type": "object",
-      "required": ["plugin_id", "generation"],
+      "required": [
+        "plugin_id",
+        "generation"
+      ],
       "properties": {
         "plugin_id": {
           "type": "string",
@@ -5704,7 +6940,9 @@
     },
     "plugin_uninstall": {
       "type": "object",
-      "required": ["pluginId"],
+      "required": [
+        "pluginId"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5714,7 +6952,10 @@
     },
     "plugin_unload_vscode": {
       "type": "object",
-      "required": ["pluginId", "generation"],
+      "required": [
+        "pluginId",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5727,7 +6968,11 @@
     },
     "plugin_vscode_send_response": {
       "type": "object",
-      "required": ["pluginId", "responseJson", "generation"],
+      "required": [
+        "pluginId",
+        "responseJson",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5743,7 +6988,11 @@
     },
     "plugin_wasm_activate": {
       "type": "object",
-      "required": ["pluginId", "configJson", "generation"],
+      "required": [
+        "pluginId",
+        "configJson",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5759,7 +7008,12 @@
     },
     "plugin_wasm_call": {
       "type": "object",
-      "required": ["pluginId", "exportName", "payloadJson", "generation"],
+      "required": [
+        "pluginId",
+        "exportName",
+        "payloadJson",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5778,7 +7032,10 @@
     },
     "plugin_wasm_deactivate": {
       "type": "object",
-      "required": ["pluginId", "generation"],
+      "required": [
+        "pluginId",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5794,7 +7051,11 @@
     },
     "plugin_wasm_load": {
       "type": "object",
-      "required": ["pluginId", "manifestJson", "pluginPath"],
+      "required": [
+        "pluginId",
+        "manifestJson",
+        "pluginPath"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5810,7 +7071,10 @@
     },
     "plugin_wasm_unload": {
       "type": "object",
-      "required": ["pluginId", "generation"],
+      "required": [
+        "pluginId",
+        "generation"
+      ],
       "properties": {
         "pluginId": {
           "type": "string"
@@ -5823,7 +7087,10 @@
     },
     "project_environment_execute": {
       "type": "object",
-      "required": ["script", "cwd"],
+      "required": [
+        "script",
+        "cwd"
+      ],
       "properties": {
         "script": {
           "oneOf": [
@@ -5832,7 +7099,9 @@
             },
             {
               "type": "object",
-              "required": ["default"],
+              "required": [
+                "default"
+              ],
               "properties": {
                 "default": {
                   "type": "string"
@@ -5861,7 +7130,10 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["variable", "keyringRef"],
+            "required": [
+              "variable",
+              "keyringRef"
+            ],
             "properties": {
               "variable": {
                 "type": "string"
@@ -5893,7 +7165,11 @@
             },
             "network": {
               "type": "string",
-              "enum": ["off", "allowlist", "on"]
+              "enum": [
+                "off",
+                "allowlist",
+                "on"
+              ]
             },
             "cacheKey": {
               "type": "string"
@@ -5911,7 +7187,9 @@
     },
     "provider_catalog_refresh": {
       "type": "object",
-      "required": ["payload"],
+      "required": [
+        "payload"
+      ],
       "properties": {
         "payload": {}
       },
@@ -5932,7 +7210,9 @@
     },
     "provider_profiles_import": {
       "type": "object",
-      "required": ["payload"],
+      "required": [
+        "payload"
+      ],
       "properties": {
         "payload": {
           "type": "object",
@@ -5949,7 +7229,9 @@
     },
     "read_agent_config": {
       "type": "object",
-      "required": ["agent"],
+      "required": [
+        "agent"
+      ],
       "properties": {
         "agent": {
           "type": "string",
@@ -5960,7 +7242,9 @@
     },
     "read_text_file": {
       "type": "object",
-      "required": ["path"],
+      "required": [
+        "path"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -5970,11 +7254,17 @@
     },
     "register_push_token": {
       "type": "object",
-      "required": ["provider", "token"],
+      "required": [
+        "provider",
+        "token"
+      ],
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["fcm", "apns"]
+          "enum": [
+            "fcm",
+            "apns"
+          ]
         },
         "token": {
           "type": "string"
@@ -5990,7 +7280,10 @@
     },
     "remote_notification_publish": {
       "type": "object",
-      "required": ["title", "body"],
+      "required": [
+        "title",
+        "body"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -6009,7 +7302,12 @@
         },
         "level": {
           "type": "string",
-          "enum": ["info", "success", "warning", "error"]
+          "enum": [
+            "info",
+            "success",
+            "warning",
+            "error"
+          ]
         },
         "href": {
           "type": "string",
@@ -6020,7 +7318,10 @@
     },
     "retrieval_profile_dek_export": {
       "type": "object",
-      "required": ["profileId", "contentProtocolVersion"],
+      "required": [
+        "profileId",
+        "contentProtocolVersion"
+      ],
       "properties": {
         "profileId": {
           "type": "string",
@@ -6038,11 +7339,16 @@
     },
     "secret_store_delete": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
-          "required": ["namespace", "key"],
+          "required": [
+            "namespace",
+            "key"
+          ],
           "properties": {
             "namespace": {
               "type": "string",
@@ -6060,11 +7366,16 @@
     },
     "secret_store_get": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
-          "required": ["namespace", "key"],
+          "required": [
+            "namespace",
+            "key"
+          ],
           "properties": {
             "namespace": {
               "type": "string",
@@ -6082,11 +7393,17 @@
     },
     "secret_store_set": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
-          "required": ["namespace", "key", "value"],
+          "required": [
+            "namespace",
+            "key",
+            "value"
+          ],
           "properties": {
             "namespace": {
               "type": "string",
@@ -6108,7 +7425,10 @@
     },
     "send_to_external_agent": {
       "type": "object",
-      "required": ["agent_id", "message"],
+      "required": [
+        "agent_id",
+        "message"
+      ],
       "properties": {
         "agent_id": {
           "type": "string"
@@ -6121,7 +7441,10 @@
     },
     "session_attach": {
       "type": "object",
-      "required": ["sessionId", "deviceId"],
+      "required": [
+        "sessionId",
+        "deviceId"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
@@ -6135,7 +7458,10 @@
     },
     "session_detach": {
       "type": "object",
-      "required": ["sessionId", "deviceId"],
+      "required": [
+        "sessionId",
+        "deviceId"
+      ],
       "properties": {
         "sessionId": {
           "type": "string"
@@ -6148,7 +7474,10 @@
     },
     "session_list": {
       "type": "object",
-      "required": ["limit", "offset"],
+      "required": [
+        "limit",
+        "offset"
+      ],
       "properties": {
         "limit": {
           "type": "integer",
@@ -6167,7 +7496,9 @@
     },
     "session_timeline": {
       "type": "object",
-      "required": ["session_id"],
+      "required": [
+        "session_id"
+      ],
       "properties": {
         "session_id": {
           "type": "string",
@@ -6189,7 +7520,12 @@
     },
     "session_turn_messages": {
       "type": "object",
-      "required": ["session_id", "turn_key", "revision", "detail_revision"],
+      "required": [
+        "session_id",
+        "turn_key",
+        "revision",
+        "detail_revision"
+      ],
       "properties": {
         "session_id": {
           "type": "string",
@@ -6224,7 +7560,10 @@
     },
     "skill_set_enabled": {
       "type": "object",
-      "required": ["id", "enabled"],
+      "required": [
+        "id",
+        "enabled"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -6237,7 +7576,9 @@
     },
     "skills_bundle_upload_abort": {
       "type": "object",
-      "required": ["handle_id"],
+      "required": [
+        "handle_id"
+      ],
       "properties": {
         "handle_id": {
           "type": "string",
@@ -6249,7 +7590,9 @@
     },
     "skills_bundle_upload_commit": {
       "type": "object",
-      "required": ["handle_id"],
+      "required": [
+        "handle_id"
+      ],
       "properties": {
         "handle_id": {
           "type": "string",
@@ -6261,7 +7604,9 @@
     },
     "skills_bundle_upload_open": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
@@ -6273,7 +7618,12 @@
     },
     "skills_bundle_upload_write": {
       "type": "object",
-      "required": ["handle_id", "offset", "data_base64", "chunk_hash"],
+      "required": [
+        "handle_id",
+        "offset",
+        "data_base64",
+        "chunk_hash"
+      ],
       "properties": {
         "handle_id": {
           "type": "string",
@@ -6306,7 +7656,9 @@
     },
     "skills_install_atomic": {
       "type": "object",
-      "required": ["handle_id"],
+      "required": [
+        "handle_id"
+      ],
       "properties": {
         "handle_id": {
           "type": "string",
@@ -6318,11 +7670,18 @@
     },
     "skills_install_native": {
       "type": "object",
-      "required": ["request"],
+      "required": [
+        "request"
+      ],
       "properties": {
         "request": {
           "type": "object",
-          "required": ["dirName", "content", "resources", "clean"],
+          "required": [
+            "dirName",
+            "content",
+            "resources",
+            "clean"
+          ],
           "additionalProperties": false,
           "properties": {
             "dirName": {
@@ -6336,12 +7695,23 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["kind", "path", "name", "content", "encoding", "size"],
+                "required": [
+                  "kind",
+                  "path",
+                  "name",
+                  "content",
+                  "encoding",
+                  "size"
+                ],
                 "additionalProperties": false,
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["script", "reference", "asset"]
+                    "enum": [
+                      "script",
+                      "reference",
+                      "asset"
+                    ]
                   },
                   "path": {
                     "type": "string",
@@ -6356,7 +7726,10 @@
                   },
                   "encoding": {
                     "type": "string",
-                    "enum": ["utf-8", "base64"]
+                    "enum": [
+                      "utf-8",
+                      "base64"
+                    ]
                   },
                   "mimeType": {
                     "type": "string"
@@ -6385,7 +7758,10 @@
     },
     "skills_uninstall": {
       "type": "object",
-      "required": ["target", "dir_name"],
+      "required": [
+        "target",
+        "dir_name"
+      ],
       "properties": {
         "target": {
           "type": "object",
@@ -6402,7 +7778,9 @@
     },
     "skills_uninstall_native": {
       "type": "object",
-      "required": ["dir_name"],
+      "required": [
+        "dir_name"
+      ],
       "properties": {
         "dir_name": {
           "type": "string",
@@ -6413,11 +7791,16 @@
     },
     "spawn_external_agent": {
       "type": "object",
-      "required": ["config"],
+      "required": [
+        "config"
+      ],
       "properties": {
         "config": {
           "type": "object",
-          "required": ["id", "command"],
+          "required": [
+            "id",
+            "command"
+          ],
           "properties": {
             "id": {
               "type": "string"
@@ -6438,7 +7821,10 @@
               }
             },
             "cwd": {
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "additionalProperties": false
@@ -6451,7 +7837,9 @@
     },
     "sync_pull": {
       "type": "object",
-      "required": ["table"],
+      "required": [
+        "table"
+      ],
       "properties": {
         "table": {
           "type": "string",
@@ -6492,7 +7880,9 @@
     },
     "task_resource_download_close": {
       "type": "object",
-      "required": ["handleId"],
+      "required": [
+        "handleId"
+      ],
       "properties": {
         "handleId": {
           "type": "string"
@@ -6502,7 +7892,10 @@
     },
     "task_resource_download_open": {
       "type": "object",
-      "required": ["runId", "relPath"],
+      "required": [
+        "runId",
+        "relPath"
+      ],
       "properties": {
         "runId": {
           "type": "string"
@@ -6519,7 +7912,10 @@
     },
     "task_resource_download_read_chunk": {
       "type": "object",
-      "required": ["handleId", "offset"],
+      "required": [
+        "handleId",
+        "offset"
+      ],
       "properties": {
         "handleId": {
           "type": "string"
@@ -6536,7 +7932,10 @@
     },
     "task_resource_read_diff": {
       "type": "object",
-      "required": ["runId", "path"],
+      "required": [
+        "runId",
+        "path"
+      ],
       "properties": {
         "runId": {
           "type": "string"
@@ -6553,7 +7952,10 @@
     },
     "task_resource_read_text": {
       "type": "object",
-      "required": ["runId", "relPath"],
+      "required": [
+        "runId",
+        "relPath"
+      ],
       "properties": {
         "runId": {
           "type": "string"
@@ -6576,7 +7978,9 @@
     },
     "task_resource_upload_abort": {
       "type": "object",
-      "required": ["handleId"],
+      "required": [
+        "handleId"
+      ],
       "properties": {
         "handleId": {
           "type": "string"
@@ -6586,7 +7990,9 @@
     },
     "task_resource_upload_commit": {
       "type": "object",
-      "required": ["handleId"],
+      "required": [
+        "handleId"
+      ],
       "properties": {
         "handleId": {
           "type": "string"
@@ -6596,7 +8002,12 @@
     },
     "task_resource_upload_open": {
       "type": "object",
-      "required": ["runId", "relPath", "expectedSize", "expectedHash"],
+      "required": [
+        "runId",
+        "relPath",
+        "expectedSize",
+        "expectedHash"
+      ],
       "properties": {
         "runId": {
           "type": "string"
@@ -6618,7 +8029,12 @@
     },
     "task_resource_upload_write_chunk": {
       "type": "object",
-      "required": ["handleId", "offset", "dataBase64", "chunkHash"],
+      "required": [
+        "handleId",
+        "offset",
+        "dataBase64",
+        "chunkHash"
+      ],
       "properties": {
         "handleId": {
           "type": "string"
@@ -6637,7 +8053,9 @@
     },
     "task_workspace_apply": {
       "type": "object",
-      "required": ["runId"],
+      "required": [
+        "runId"
+      ],
       "properties": {
         "runId": {
           "type": "string"
@@ -6659,7 +8077,9 @@
     },
     "task_workspace_begin": {
       "type": "object",
-      "required": ["input"],
+      "required": [
+        "input"
+      ],
       "properties": {
         "input": {
           "type": "object",
@@ -6670,7 +8090,9 @@
     },
     "task_workspace_export_resource_manifest": {
       "type": "object",
-      "required": ["taskId"],
+      "required": [
+        "taskId"
+      ],
       "properties": {
         "taskId": {
           "type": "string",
@@ -6684,7 +8106,9 @@
     },
     "task_workspace_get": {
       "type": "object",
-      "required": ["taskId"],
+      "required": [
+        "taskId"
+      ],
       "properties": {
         "taskId": {
           "type": "string"
@@ -6694,7 +8118,9 @@
     },
     "task_workspace_get_patch_set": {
       "type": "object",
-      "required": ["runId"],
+      "required": [
+        "runId"
+      ],
       "properties": {
         "runId": {
           "type": "string"
@@ -6704,7 +8130,10 @@
     },
     "task_workspace_get_resource": {
       "type": "object",
-      "required": ["taskId", "path"],
+      "required": [
+        "taskId",
+        "path"
+      ],
       "properties": {
         "taskId": {
           "type": "string"
@@ -6717,7 +8146,9 @@
     },
     "task_workspace_get_resource_summary": {
       "type": "object",
-      "required": ["runId"],
+      "required": [
+        "runId"
+      ],
       "properties": {
         "runId": {
           "type": "string",
@@ -6737,7 +8168,9 @@
     },
     "task_workspace_list_resource_events": {
       "type": "object",
-      "required": ["runId"],
+      "required": [
+        "runId"
+      ],
       "properties": {
         "runId": {
           "type": "string",
@@ -6758,7 +8191,9 @@
     },
     "task_workspace_list_resources": {
       "type": "object",
-      "required": ["taskId"],
+      "required": [
+        "taskId"
+      ],
       "properties": {
         "taskId": {
           "type": "string"
@@ -6768,7 +8203,9 @@
     },
     "task_workspace_list_runs": {
       "type": "object",
-      "required": ["taskId"],
+      "required": [
+        "taskId"
+      ],
       "properties": {
         "taskId": {
           "type": "string"
@@ -6778,7 +8215,10 @@
     },
     "task_workspace_pin": {
       "type": "object",
-      "required": ["taskId", "pinned"],
+      "required": [
+        "taskId",
+        "pinned"
+      ],
       "properties": {
         "taskId": {
           "type": "string"
@@ -6796,7 +8236,11 @@
     },
     "task_workspace_record_tool_event": {
       "type": "object",
-      "required": ["runId", "path", "kind"],
+      "required": [
+        "runId",
+        "path",
+        "kind"
+      ],
       "properties": {
         "runId": {
           "type": "string",
@@ -6822,14 +8266,21 @@
     },
     "task_workspace_resolve_conflict": {
       "type": "object",
-      "required": ["runId", "resolution"],
+      "required": [
+        "runId",
+        "resolution"
+      ],
       "properties": {
         "runId": {
           "type": "string"
         },
         "resolution": {
           "type": "string",
-          "enum": ["retryMerge", "applyTask", "keepCurrent"]
+          "enum": [
+            "retryMerge",
+            "applyTask",
+            "keepCurrent"
+          ]
         },
         "selection": {
           "type": "array",
@@ -6847,14 +8298,20 @@
     },
     "task_workspace_settle": {
       "type": "object",
-      "required": ["runId"],
+      "required": [
+        "runId"
+      ],
       "properties": {
         "runId": {
           "type": "string"
         },
         "finalState": {
           "type": "string",
-          "enum": ["ready", "failed", "cancelled"]
+          "enum": [
+            "ready",
+            "failed",
+            "cancelled"
+          ]
         }
       },
       "additionalProperties": false
@@ -6866,7 +8323,9 @@
     },
     "task_workspace_undo": {
       "type": "object",
-      "required": ["runId"],
+      "required": [
+        "runId"
+      ],
       "properties": {
         "runId": {
           "type": "string"
@@ -6876,7 +8335,9 @@
     },
     "team_run_pause": {
       "type": "object",
-      "required": ["teamId"],
+      "required": [
+        "teamId"
+      ],
       "properties": {
         "teamId": {
           "type": "string"
@@ -6886,7 +8347,9 @@
     },
     "team_run_resume": {
       "type": "object",
-      "required": ["teamId"],
+      "required": [
+        "teamId"
+      ],
       "properties": {
         "teamId": {
           "type": "string"
@@ -6896,7 +8359,9 @@
     },
     "team_run_stop": {
       "type": "object",
-      "required": ["teamId"],
+      "required": [
+        "teamId"
+      ],
       "properties": {
         "teamId": {
           "type": "string"
@@ -6906,7 +8371,11 @@
     },
     "team_task_comment": {
       "type": "object",
-      "required": ["teamId", "taskId", "text"],
+      "required": [
+        "teamId",
+        "taskId",
+        "text"
+      ],
       "properties": {
         "teamId": {
           "type": "string"
@@ -6922,7 +8391,10 @@
     },
     "team_task_create": {
       "type": "object",
-      "required": ["teamId", "title"],
+      "required": [
+        "teamId",
+        "title"
+      ],
       "properties": {
         "teamId": {
           "type": "string"
@@ -6935,7 +8407,13 @@
         },
         "priority": {
           "type": "string",
-          "enum": ["critical", "high", "normal", "low", "background"]
+          "enum": [
+            "critical",
+            "high",
+            "normal",
+            "low",
+            "background"
+          ]
         },
         "tags": {
           "type": "array",
@@ -6951,7 +8429,11 @@
     },
     "team_task_move": {
       "type": "object",
-      "required": ["teamId", "taskId", "to"],
+      "required": [
+        "teamId",
+        "taskId",
+        "to"
+      ],
       "properties": {
         "teamId": {
           "type": "string"
@@ -6977,7 +8459,10 @@
     },
     "terminal_complete_paths": {
       "type": "object",
-      "required": ["cwd", "fragment"],
+      "required": [
+        "cwd",
+        "fragment"
+      ],
       "properties": {
         "cwd": {
           "type": "string"
@@ -6996,7 +8481,9 @@
     },
     "terminal_exec": {
       "type": "object",
-      "required": ["command"],
+      "required": [
+        "command"
+      ],
       "properties": {
         "command": {
           "type": "string"
@@ -7027,7 +8514,9 @@
     },
     "terminal_kill": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -7037,7 +8526,9 @@
     },
     "terminal_kill_port": {
       "type": "object",
-      "required": ["port"],
+      "required": [
+        "port"
+      ],
       "properties": {
         "port": {
           "type": "integer",
@@ -7052,7 +8543,9 @@
     },
     "terminal_list_for_project": {
       "type": "object",
-      "required": ["projectId"],
+      "required": [
+        "projectId"
+      ],
       "properties": {
         "projectId": {
           "type": "string"
@@ -7067,11 +8560,15 @@
     },
     "twin_create": {
       "type": "object",
-      "required": ["twin"],
+      "required": [
+        "twin"
+      ],
       "properties": {
         "twin": {
           "type": "object",
-          "required": ["name"],
+          "required": [
+            "name"
+          ],
           "additionalProperties": true,
           "properties": {
             "name": {
@@ -7084,7 +8581,9 @@
     },
     "twin_delete": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -7094,7 +8593,10 @@
     },
     "twin_draft_review": {
       "type": "object",
-      "required": ["draftId", "action"],
+      "required": [
+        "draftId",
+        "action"
+      ],
       "properties": {
         "twinId": {
           "type": "string",
@@ -7106,7 +8608,10 @@
         },
         "action": {
           "type": "string",
-          "enum": ["accept", "reject"]
+          "enum": [
+            "accept",
+            "reject"
+          ]
         },
         "reviewerNote": {
           "type": "string"
@@ -7116,7 +8621,9 @@
     },
     "twin_ingest_source": {
       "type": "object",
-      "required": ["twinId"],
+      "required": [
+        "twinId"
+      ],
       "properties": {
         "twinId": {
           "type": "string"
@@ -7133,7 +8640,9 @@
     },
     "twin_job_cancel": {
       "type": "object",
-      "required": ["jobId"],
+      "required": [
+        "jobId"
+      ],
       "properties": {
         "jobId": {
           "type": "string"
@@ -7146,7 +8655,9 @@
     },
     "twin_job_pause": {
       "type": "object",
-      "required": ["jobId"],
+      "required": [
+        "jobId"
+      ],
       "properties": {
         "jobId": {
           "type": "string"
@@ -7156,7 +8667,9 @@
     },
     "twin_job_resume": {
       "type": "object",
-      "required": ["jobId"],
+      "required": [
+        "jobId"
+      ],
       "properties": {
         "jobId": {
           "type": "string"
@@ -7166,7 +8679,9 @@
     },
     "twin_job_retry": {
       "type": "object",
-      "required": ["jobId"],
+      "required": [
+        "jobId"
+      ],
       "properties": {
         "jobId": {
           "type": "string"
@@ -7188,7 +8703,9 @@
     },
     "twin_profile_get": {
       "type": "object",
-      "required": ["twinId"],
+      "required": [
+        "twinId"
+      ],
       "properties": {
         "twinId": {
           "type": "string"
@@ -7198,7 +8715,10 @@
     },
     "twin_profile_update": {
       "type": "object",
-      "required": ["twinId", "op"],
+      "required": [
+        "twinId",
+        "op"
+      ],
       "additionalProperties": true,
       "properties": {
         "twinId": {
@@ -7227,11 +8747,15 @@
     },
     "twin_source_create": {
       "type": "object",
-      "required": ["source"],
+      "required": [
+        "source"
+      ],
       "properties": {
         "source": {
           "type": "object",
-          "required": ["twinId"],
+          "required": [
+            "twinId"
+          ],
           "additionalProperties": true,
           "properties": {
             "twinId": {
@@ -7244,7 +8768,9 @@
     },
     "twin_source_delete": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -7254,7 +8780,9 @@
     },
     "twin_source_list": {
       "type": "object",
-      "required": ["twinId"],
+      "required": [
+        "twinId"
+      ],
       "properties": {
         "twinId": {
           "type": "string"
@@ -7264,7 +8792,10 @@
     },
     "twin_source_update": {
       "type": "object",
-      "required": ["id", "patch"],
+      "required": [
+        "id",
+        "patch"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -7282,21 +8813,29 @@
     },
     "workflow_approval_respond": {
       "type": "object",
-      "required": ["approvalId", "decision"],
+      "required": [
+        "approvalId",
+        "decision"
+      ],
       "properties": {
         "approvalId": {
           "type": "string"
         },
         "decision": {
           "type": "string",
-          "enum": ["approved", "rejected"]
+          "enum": [
+            "approved",
+            "rejected"
+          ]
         }
       },
       "additionalProperties": false
     },
     "workflow_cancel_run": {
       "type": "object",
-      "required": ["runId"],
+      "required": [
+        "runId"
+      ],
       "properties": {
         "runId": {
           "type": "string"
@@ -7306,7 +8845,9 @@
     },
     "workflow_create": {
       "type": "object",
-      "required": ["draft"],
+      "required": [
+        "draft"
+      ],
       "properties": {
         "draft": {
           "type": "object",
@@ -7317,7 +8858,9 @@
     },
     "workflow_delete": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -7342,7 +8885,9 @@
     },
     "workflow_schedule_pause": {
       "type": "object",
-      "required": ["triggerId"],
+      "required": [
+        "triggerId"
+      ],
       "properties": {
         "triggerId": {
           "type": "string"
@@ -7352,7 +8897,9 @@
     },
     "workflow_schedule_resume": {
       "type": "object",
-      "required": ["triggerId"],
+      "required": [
+        "triggerId"
+      ],
       "properties": {
         "triggerId": {
           "type": "string"
@@ -7362,7 +8909,12 @@
     },
     "workflow_step_result": {
       "type": "object",
-      "required": ["requestId", "seq", "total", "chunk"],
+      "required": [
+        "requestId",
+        "seq",
+        "total",
+        "chunk"
+      ],
       "properties": {
         "requestId": {
           "type": "string"
@@ -7384,7 +8936,9 @@
     },
     "workflow_trigger_manual": {
       "type": "object",
-      "required": ["workflowId"],
+      "required": [
+        "workflowId"
+      ],
       "properties": {
         "workflowId": {
           "type": "string"
@@ -7397,7 +8951,10 @@
     },
     "workflow_update": {
       "type": "object",
-      "required": ["id", "patch"],
+      "required": [
+        "id",
+        "patch"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -7411,7 +8968,10 @@
     },
     "write_agent_config": {
       "type": "object",
-      "required": ["agent", "value"],
+      "required": [
+        "agent",
+        "value"
+      ],
       "properties": {
         "agent": {
           "type": "string"
@@ -7426,7 +8986,10 @@
     },
     "write_text_file": {
       "type": "object",
-      "required": ["path", "content"],
+      "required": [
+        "path",
+        "content"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -7439,7 +9002,11 @@
     },
     "write_text_file_confined": {
       "type": "object",
-      "required": ["path", "content", "allowedRoots"],
+      "required": [
+        "path",
+        "content",
+        "allowedRoots"
+      ],
       "properties": {
         "path": {
           "type": "string"

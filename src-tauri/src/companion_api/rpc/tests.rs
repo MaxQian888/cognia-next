@@ -274,7 +274,6 @@ async fn companion_can_control_is_not_control_gated() {
     // CONTROL_COMMANDS. Past the gate it hits the missing-app_handle 503 in
     // test mode; the point is it is neither 404 (unwired) nor 403 (gated).
     let device = "dev-cancontrol-ungated-001";
-    super::super::control_allow_list::global().disallow(device);
 
     let state = test_state();
     let router = build_router(state);
@@ -289,7 +288,6 @@ async fn baseline_chat_command_is_not_gated() {
     // claude_send is NOT in CONTROL_COMMANDS — a paired device with no
     // remote-control grant must still be able to use baseline chat.
     let device = "dev-baseline-001";
-    super::super::control_allow_list::global().disallow(device);
 
     let state = test_state();
     let router = build_router(state);
@@ -351,7 +349,6 @@ fn fleet_permission_respond_uses_the_manifest_capability() {
 #[tokio::test]
 async fn fleet_get_snapshot_read_is_not_control_gated() {
     let device = "dev-fleet-read-ungated-001";
-    super::super::control_allow_list::global().disallow(device);
     let state = test_state();
     let router = build_router(state);
     let jwt = device_jwt(device);
@@ -665,13 +662,13 @@ async fn headless_claude_arms_reach_the_registry_sidecar() {
 // ── External-agent arms: scope + policy + audit (ADR-0059 R11) ──────────
 
 #[test]
-fn legacy_allow_list_projection_does_not_confer_agent_control() {
-    let _guard = super::super::control_allow_list::test_guard();
-    let device = "legacy-agent-projection-only";
-    super::super::control_allow_list::agent_control_global().allow(device.to_string());
+fn agent_control_comes_from_the_security_store_or_the_service_scope_and_nowhere_else() {
+    // The in-memory allow lists that used to shadow this decision are gone. A
+    // device with no SecurityStore grant is refused no matter what; only the
+    // loopback service principal bypasses the capability check.
     assert!(!is_agent_control_authorized(
         "spawn_external_agent",
-        device,
+        "device-with-no-grant",
         Some("device")
     ));
     assert!(is_agent_control_authorized(
@@ -679,7 +676,6 @@ fn legacy_allow_list_projection_does_not_confer_agent_control() {
         "brain-local",
         Some("service")
     ));
-    super::super::control_allow_list::agent_control_global().disallow(device);
 }
 
 /// The agent arms must not have leaked into the remote-control tier while
@@ -986,9 +982,6 @@ fn service_only_commands_are_known_and_not_control_gated() {
         "connectors_register",
         "connectors_unregister",
         "connectors_list_adapters",
-        "connectors_runtime_lease_acquire",
-        "connectors_runtime_lease_renew",
-        "connectors_runtime_lease_release",
         // ADR-0059 T-A5 — connector command plane.
         "connectors_health",
         "connectors_keyring_set",
@@ -1181,6 +1174,158 @@ async fn connector_runtime_lease_arms_enforce_one_headless_owner() {
     assert_eq!(
         acquire("brain-b").await.expect("acquire after release"),
         Value::Bool(true)
+    );
+}
+
+#[tokio::test]
+async fn connector_runtime_lease_arms_admit_a_device_principal() {
+    // The lease arbitrates between EVERY runtime bound to this companion, and
+    // a desktop webview holds a device JWT — never a service token. Leaving
+    // these service-only made it impossible for the party that most needs to
+    // contend to do so, which is how a desktop and a brain on the same
+    // companion both ended up dialing the same bots.
+    let state = test_state();
+    let services = crate::headless::HeadlessServices::stub_for_tests();
+    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+
+    assert!(!super::is_service_only_command(
+        "connectors_runtime_lease_acquire"
+    ));
+
+    assert_eq!(
+        dispatch(
+            "connectors_runtime_lease_acquire",
+            json!({ "ownerId": "desktop:one", "ttlMs": 15_000 }),
+            &state,
+            &host,
+            "paired-desktop",
+            Some(ACCOUNT_ID),
+            Some("device"),
+        )
+        .await
+        .expect("a device principal may contend for the lease"),
+        Value::Bool(true)
+    );
+
+    // A legacy caller still gets the boolean response shape. It now stands
+    // down safely instead of being told to start before the desktop stopped.
+    assert_eq!(
+        dispatch(
+            "connectors_runtime_lease_acquire",
+            json!({ "ownerId": "brain:one", "ttlMs": 15_000 }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("legacy brain requests handoff"),
+        Value::Bool(false)
+    );
+
+    // Legacy callers cannot observe or acknowledge a handoff. Their failed
+    // acquire therefore must not poison the desktop's next renewal.
+    assert_eq!(
+        dispatch(
+            "connectors_runtime_lease_renew",
+            json!({ "ownerId": "desktop:one", "ttlMs": 15_000 }),
+            &state,
+            &host,
+            "paired-desktop",
+            Some(ACCOUNT_ID),
+            Some("device"),
+        )
+        .await
+        .expect("desktop remains owner after legacy contention"),
+        Value::Bool(true)
+    );
+
+    // Handoff-aware callers can distinguish the reserved takeover from an
+    // ordinary same-class busy result and wait for the desktop's release.
+    assert_eq!(
+        dispatch(
+            "connectors_runtime_lease_acquire",
+            json!({
+                "ownerId": "brain:one",
+                "ttlMs": 15_000,
+                "handoffAware": true,
+            }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("handoff-aware brain observes pending handoff"),
+        Value::String("handoff-pending".into())
+    );
+
+    assert_eq!(
+        dispatch(
+            "connectors_runtime_lease_acquire",
+            json!({
+                "ownerId": "brain:two",
+                "ttlMs": 15_000,
+                "handoffAware": true,
+            }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("same-class contender gets a stable busy result"),
+        Value::String("busy".into())
+    );
+
+    assert_eq!(
+        dispatch(
+            "connectors_runtime_lease_renew",
+            json!({ "ownerId": "desktop:one", "ttlMs": 15_000 }),
+            &state,
+            &host,
+            "paired-desktop",
+            Some(ACCOUNT_ID),
+            Some("device"),
+        )
+        .await
+        .expect("desktop observes lease loss"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        dispatch(
+            "connectors_runtime_lease_release",
+            json!({ "ownerId": "desktop:one" }),
+            &state,
+            &host,
+            "paired-desktop",
+            Some(ACCOUNT_ID),
+            Some("device"),
+        )
+        .await
+        .expect("desktop acknowledges shutdown"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        dispatch(
+            "connectors_runtime_lease_acquire",
+            json!({
+                "ownerId": "brain:one",
+                "ttlMs": 15_000,
+                "handoffAware": true,
+            }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("brain starts only after desktop shutdown"),
+        Value::String("acquired".into())
     );
 }
 
@@ -1417,6 +1562,32 @@ async fn ocr_service_arms_use_the_headless_registry() {
     .await
     .expect_err("unknown backend must fail");
     assert!(error.1 .0.message.contains("Unsupported backend tag"));
+
+    // `ocr_download_model` is host-neutral through `ocr_progress_emitter()`:
+    // the headless host must reach the download code proper (which rejects a
+    // backend that manages no models before any I/O), never a host gate.
+    let error = dispatch(
+        "ocr_download_model",
+        json!({ "backend": "does-not-exist", "requestId": "ocr-dl-1" }),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect_err("unknown backend must fail before any download");
+    assert!(
+        error
+            .1
+             .0
+            .message
+            .contains("does not manage its own models"),
+        "unexpected error: {}",
+        error.1 .0.message
+    );
+    assert_ne!(error.1 .0.code, "headless_unsupported");
+    assert_ne!(error.1 .0.code, "headless_host_required");
 }
 
 #[tokio::test]
@@ -1457,32 +1628,6 @@ async fn remote_notification_protocol_is_bounded_and_event_bus_backed() {
         "remote_notification_publish",
         json!({ "title": "Open", "body": "Unsafe", "href": "https://evil.example" }),
         &state,
-
-    // `ocr_download_model` is host-neutral through `ocr_progress_emitter()`:
-    // the headless host must reach the download code proper (which rejects a
-    // backend that manages no models before any I/O), never a host gate.
-    let error = dispatch(
-        "ocr_download_model",
-        json!({ "backend": "does-not-exist", "requestId": "ocr-dl-1" }),
-        &state,
-        &host,
-        "brain-local",
-        Some(ACCOUNT_ID),
-        Some("service"),
-    )
-    .await
-    .expect_err("unknown backend must fail before any download");
-    assert!(
-        error
-            .1
-             .0
-            .message
-            .contains("does not manage its own models"),
-        "unexpected error: {}",
-        error.1 .0.message
-    );
-    assert_ne!(error.1 .0.code, "headless_unsupported");
-    assert_ne!(error.1 .0.code, "headless_host_required");
         &host,
         "brain-local",
         Some(ACCOUNT_ID),
@@ -1539,7 +1684,6 @@ async fn remote_notification_protocol_is_bounded_and_event_bus_backed() {
 #[tokio::test]
 async fn plugin_lifecycle_arms_use_the_headless_process_registry() {
     let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-    crate::companion_api::control_allow_list::global().allow("brain-test".to_string());
     let state = test_state();
     let host = headless_host();
     let mut plugin_events = match host
@@ -1636,7 +1780,6 @@ async fn plugin_lifecycle_arms_use_the_headless_process_registry() {
         actions,
         [json!("installed"), json!("restored"), json!("uninstalled")]
     );
-    crate::companion_api::control_allow_list::global().disallow("brain-test");
 }
 
 #[tokio::test]
@@ -1657,9 +1800,12 @@ async fn wasm_runtime_arms_use_the_headless_process_registry() {
     .expect("headless WASM list");
     assert_eq!(listed, json!([]));
 
+    // `generation` is required by the arm even here, where nothing is loaded:
+    // the token is only compared against a live entry, so for an unknown plugin
+    // any value reaches the same `false`. Sending one is still the contract.
     let unloaded = dispatch(
         "plugin_wasm_unload",
-        json!({ "pluginId": "missing" }),
+        json!({ "pluginId": "missing", "generation": "00000000-0000-0000-0000-000000000000" }),
         &state,
         &host,
         "brain-local",
@@ -1958,17 +2104,47 @@ def helper(a, b):
     let loaded = call!("plugin_python_load", load_args).expect("load Python plugin");
     assert_eq!(loaded["hooks"][0]["event"], "onMessage");
 
-    let tools = call!("plugin_python_get_tools", json!({ "pluginId": plugin_id }))
-        .expect("get Python tools");
+    // Every post-load Python arm requires the generation token minted by the
+    // load, so a call aimed at a since-reloaded runtime is rejected instead of
+    // silently hitting the new host. Read it back from the load response rather
+    // than inventing one — the point of the token is that only the loader knows
+    // it, and a test that made one up would pass while proving nothing.
+    let generation = loaded["generation"]
+        .as_str()
+        .expect("load response carries the generation token")
+        .to_owned();
+
+    let tools = call!(
+        "plugin_python_get_tools",
+        json!({ "pluginId": plugin_id, "generation": generation })
+    )
+    .expect("get Python tools");
     assert_eq!(tools[0]["name"], "double");
     let doubled = call!(
         "plugin_python_call_tool",
-        json!({ "pluginId": plugin_id, "toolName": "double", "args": { "x": 21 } })
+        json!({
+            "pluginId": plugin_id,
+            "toolName": "double",
+            "args": { "x": 21 },
+            "generation": generation,
+        })
     )
     .expect("call Python tool");
     assert_eq!(doubled, json!(42));
 
-    call!("plugin_python_unload", json!({ "pluginId": plugin_id })).expect("unload Python plugin");
+    // A stale token must not be able to reach the live host.
+    let stale = call!(
+        "plugin_python_get_tools",
+        json!({ "pluginId": plugin_id, "generation": "00000000-0000-0000-0000-000000000000" })
+    )
+    .expect_err("a stale generation must be refused");
+    assert_eq!(stale.0, StatusCode::BAD_REQUEST);
+
+    call!(
+        "plugin_python_unload",
+        json!({ "pluginId": plugin_id, "generation": generation })
+    )
+    .expect("unload Python plugin");
     assert_eq!(
         call!("plugin_python_list", json!({})).expect("list Python plugins"),
         json!([])

@@ -19,7 +19,7 @@
  * Inbound frames arrive via Tauri events at `connectors://ws/<id>/message`.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen } from "@/lib/connectors/events"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsHttpRequest,
@@ -232,13 +232,16 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
       }
       armWatchdog()
 
-      const unlisten = await listen<string>(`connectors://ws/${handleId}/message`, (event) => {
-        armWatchdog()
-        queue.push(event.payload)
-        wakeResolve?.()
-        wakeResolve = null
-      })
-      const unlistenClose = await listen<void>(`connectors://ws/${handleId}/close`, () => {
+      const unlisten = await connectorListen<string>(
+        `connectors://ws/${handleId}/message`,
+        (event) => {
+          armWatchdog()
+          queue.push(event.payload)
+          wakeResolve?.()
+          wakeResolve = null
+        }
+      )
+      const unlistenClose = await connectorListen<void>(`connectors://ws/${handleId}/close`, () => {
         wsEnded = true
         wakeResolve?.()
         wakeResolve = null

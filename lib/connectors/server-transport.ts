@@ -47,3 +47,57 @@ export function adapterNeedsInboundServer(
   if (modes.includes("reverse-ws") && row.transportMode !== "forward-ws") return true
   return false
 }
+
+/**
+ * Path prefix the headless companion nests the connectors axum router under
+ * (`server.rs`, headless-only). The desktop serves the same router standalone
+ * on `CONNECTORS_SERVER_PORT`, so its routes carry no prefix — which is exactly
+ * why the public URL cannot be derived the same way on both hosts.
+ */
+export const HEADLESS_CONNECTORS_PREFIX = "/connectors"
+
+export interface ConnectorsIngressInput {
+  /** `isTauri()` — the desktop reaches the public internet via cloudflared. */
+  isDesktop: boolean
+  /** Tunnel origin, when a tunnel is running. Desktop only. */
+  tunnelUrl?: string | null
+  /**
+   * Public origin of the companion deployment. Same-origin in the reference
+   * compose (Caddy serves the static export and proxies `/connectors/*`), so
+   * callers normally pass `resolveLarkApiBase() || window.location.origin`.
+   */
+  publicBase?: string | null
+}
+
+/**
+ * Public base a platform should be pointed at for inbound webhooks, per host.
+ *
+ * The form used to derive this from the cloudflared tunnel unconditionally, so
+ * a cloud install saw an empty state telling it to go configure a tunnel it
+ * neither has nor needs — while the address that actually works,
+ * `https://<domain>/connectors/webhook/<type>/<id>`, appeared nowhere in the
+ * product. Returns `null` when nothing is reachable yet, which is a real state
+ * on the desktop (no tunnel) and a misconfiguration in the cloud (no origin).
+ */
+export function resolveConnectorsIngressBase(input: ConnectorsIngressInput): string | null {
+  const trim = (value?: string | null) => value?.trim().replace(/\/+$/, "") || null
+  if (input.isDesktop) return trim(input.tunnelUrl)
+  const base = trim(input.publicBase)
+  return base ? `${base}${HEADLESS_CONNECTORS_PREFIX}` : null
+}
+
+/** Inbound webhook path for an adapter — `POST /webhook/{type}/{id}` in `axum_app.rs`. */
+export function connectorWebhookPath(adapterType: string, adapterId: string): string {
+  return `/webhook/${adapterType}/${adapterId}`
+}
+
+/**
+ * Lark send-as-user OAuth relay path (`oauth_lark_callback` in `axum_app.rs`).
+ *
+ * Feishu's console only accepts http/https redirect URLs, so the authorize
+ * step registers `{ingressBase}{LARK_OAUTH_RELAY_PATH}` and the relay bounces
+ * the code onto the connector event bus (headless) and the desktop deep-link
+ * scheme. Lives here rather than in the settings form because the brain has to
+ * derive the same URL with no UI in the picture.
+ */
+export const LARK_OAUTH_RELAY_PATH = "/oauth/lark/callback"

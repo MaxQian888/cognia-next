@@ -13,7 +13,7 @@
  * Inbound messages arrive via Tauri events at connectors://ws/<id>/message.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen } from "@/lib/connectors/events"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
@@ -190,23 +190,29 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
       /** Close code from the /close payload (the Rust ws proxy emits `{code, reason}`; legacy proxies emit nothing). */
       let closeCode: number | null = null
 
-      const unlisten = await listen<string>(`connectors://ws/${handleId}/message`, (event) => {
-        queue.push(event.payload)
-        wakeResolve?.()
-        wakeResolve = null
-      })
+      const unlisten = await connectorListen<string>(
+        `connectors://ws/${handleId}/message`,
+        (event) => {
+          queue.push(event.payload)
+          wakeResolve?.()
+          wakeResolve = null
+        }
+      )
 
       // The close payload is `{code, reason}` on upgraded proxies and
       // `undefined` on legacy ones — read it defensively.
-      const unlistenClose = await listen<unknown>(`connectors://ws/${handleId}/close`, (event) => {
-        const payload = event.payload as { code?: unknown } | undefined | null
-        if (payload && typeof payload === "object" && typeof payload.code === "number") {
-          closeCode = payload.code
+      const unlistenClose = await connectorListen<unknown>(
+        `connectors://ws/${handleId}/close`,
+        (event) => {
+          const payload = event.payload as { code?: unknown } | undefined | null
+          if (payload && typeof payload === "object" && typeof payload.code === "number") {
+            closeCode = payload.code
+          }
+          wsEnded = true
+          wakeResolve?.()
+          wakeResolve = null
         }
-        wsEnded = true
-        wakeResolve?.()
-        wakeResolve = null
-      })
+      )
 
       const abortHandler = () => {
         wsEnded = true

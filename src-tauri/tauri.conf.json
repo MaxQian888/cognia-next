@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm plugin-node:prepare && node scripts/dev/free-port.mjs 3000 && pnpm dev",
-    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm plugin-node:prepare && pnpm build && pnpm tauri:frontend:check"
+    "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm external-agent-launcher:prepare:dev && pnpm plugin-node:prepare && node scripts/dev/free-port.mjs 3000 && pnpm dev",
+    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm external-agent-launcher:prepare && pnpm plugin-node:prepare && pnpm build && pnpm tauri:frontend:check"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -32,13 +32,13 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws: wss: https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.xethub.hf.co; object-src 'none'; frame-src 'self' blob:; base-uri 'self'; form-action 'self'"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws: wss: https://api.github.com https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.xethub.hf.co; object-src 'none'; frame-src 'self' blob:; base-uri 'self'; form-action 'self'"
     }
   },
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/cognia-server"],
+    "externalBin": ["binaries/cognia-server", "binaries/cognia-external-agent-launcher"],
     "targets": "all",
     "resources": [
       "../sidecar/agent-host.mjs",
@@ -48,6 +48,7 @@
       "../sidecar/mcp-oauth-helper.mjs",
       "../sidecar/mcp-stdio-relay.mjs",
       "../sidecar/codex-app-control/**/*",
+      "../sidecar/pi-extension/**/*",
       "../sidecar/package.json",
       "../sidecar/node_modules/**/*",
       "../sidecar/vscode-ext-host/package.json",
@@ -63,7 +64,8 @@
       "resources/plugin-node/**/*",
       "../hooks/builtin/auto-context-loader.mjs",
       "../hooks/builtin/cost-quota-guard.mjs",
-      "../hooks/builtin/pii-safety-guard.mjs"
+      "../hooks/builtin/pii-safety-guard.mjs",
+      "../runtime/deepseek-harness/*"
     ],
     "icon": [
       "icons/32x32.png",

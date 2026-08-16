@@ -378,6 +378,10 @@ export class CompanionTransport implements Transport {
 
   /** Per-channel subscriber sets. */
   private channelHandlers: Map<string, Set<Handler>> = new Map()
+  /** Channels the host refused on the last subscribe frame (diagnostics). */
+  private lastRejectedChannels: string[] = []
+  /** Last `subscribe_error` message from the host, if any (diagnostics). */
+  private lastSubscribeError: string | null = null
 
   // ── Connection state observable ────────────────────────────────────────────
   private connectionState: ConnectionState = "offline"
@@ -659,10 +663,16 @@ export class CompanionTransport implements Transport {
       this.wsCloseGraceTimer = null
     }
 
-    if (!this.channelHandlers.has(event)) {
+    const isNewChannel = !this.channelHandlers.has(event)
+    if (isNewChannel) {
       this.channelHandlers.set(event, new Set())
     }
     this.channelHandlers.get(event)!.add(handler as Handler)
+    // Channels that are not `default_on` in the host catalog (e.g.
+    // `workflow:trigger`, `scheduler:task-due`) are only delivered after the
+    // client asks for them; widen the live subscription when the socket is
+    // already open (a fresh open re-sends the whole set in `onopen`).
+    if (isNewChannel) this.sendSubscribeFrame("add", [event])
 
     // ADR-0021 — also wire the subscription on the WebRTC tier when it is
     // open AND we're not on a connected LAN (LAN-first: prefer the direct
@@ -697,6 +707,7 @@ export class CompanionTransport implements Transport {
         set.delete(handler as Handler)
         if (set.size === 0) {
           this.channelHandlers.delete(event)
+          this.sendSubscribeFrame("remove", [event])
         }
       }
 
@@ -704,6 +715,37 @@ export class CompanionTransport implements Transport {
       if (this.channelHandlers.size === 0) {
         this.scheduleWsClose()
       }
+    }
+  }
+
+  /**
+   * Send a `subscribe` control frame on the open events socket. The host
+   * replies with `subscribed` (accepted + rejected channels) or
+   * `subscribe_error`. No-op while the socket is not open — `onopen`
+   * re-sends the whole handler set. Exposed as `subscriptionDiagnostics()`
+   * for tests / the connection panel.
+   */
+  private sendSubscribeFrame(mode: "add" | "remove" | "replace", channels: string[]): void {
+    if (channels.length === 0) return
+    // WebSocket.OPEN === 1 per the WS spec.
+    if (!this.ws || this.ws.readyState !== 1) return
+    try {
+      this.ws.send(JSON.stringify({ type: "subscribe", mode, channels }))
+    } catch {
+      // A send failure surfaces through onclose → reconnect → onopen re-send.
+    }
+  }
+
+  /** Diagnostics for the last subscribe control-frame exchange. */
+  subscriptionDiagnostics(): {
+    channels: string[]
+    rejectedChannels: string[]
+    lastError: string | null
+  } {
+    return {
+      channels: Array.from(this.channelHandlers.keys()),
+      rejectedChannels: [...this.lastRejectedChannels],
+      lastError: this.lastSubscribeError,
     }
   }
 
@@ -1141,14 +1183,20 @@ export class CompanionTransport implements Transport {
       // 408, 429 and 5xx are retryable only when the manifest permits it.
       const errBody = await safeJson(response)
       const detail = nestedError(errBody)
+      // Prefer the host's own answer. A 503 covers both "still booting, try
+      // again" and "this host will never serve that command"
+      // (`headless_host_required`), and the status code alone cannot tell them
+      // apart — retrying the latter just burns the attempt budget.
+      const hostSaysRetryable = detail?.retryable
       lastError = new CompanionError({
         code: detail?.code ?? (response.status >= 500 ? "server_error" : `http_${response.status}`),
         message: detail?.message ?? `HTTP ${response.status}`,
-        retryable: true,
+        retryable: hostSaysRetryable ?? true,
       })
       this.setPlaneHealth({
         rpc: response.status === 503 || response.status === 504 ? "unavailable" : "ready",
       })
+      if (hostSaysRetryable === false) throw lastError
       if (canRetryRequest && attempt + 1 < HTTP_MAX_ATTEMPTS) {
         retryAfterMs = parseRetryAfterMs(response.headers?.get("retry-after") ?? null)
         continue
@@ -1319,6 +1367,10 @@ export class CompanionTransport implements Transport {
       this.wsReconnectAttempt = 0
       this.setPlaneHealth({ events: "replaying" })
       this.setConnectionState("connected")
+      // Widen the server-side subscription to every channel we handle. The
+      // socket starts on the catalog defaults only; `mode: "add"` keeps
+      // those defaults and layers our explicit channels on top.
+      this.sendSubscribeFrame("add", Array.from(this.channelHandlers.keys()))
     }
 
     ws.onmessage = (event: MessageEvent) => {
@@ -1372,6 +1424,23 @@ export class CompanionTransport implements Transport {
       return
     }
 
+    if (type === "subscribed" || type === "subscribe_error") {
+      // Acknowledgement of a subscribe control frame. Rejected channels are
+      // surfaced for diagnostics; nothing else to do — delivery of accepted
+      // channels starts with the next event frame.
+      const rejected = frame["rejected"]
+      if (Array.isArray(rejected) && rejected.length > 0) {
+        this.lastRejectedChannels = rejected
+          .map((r) => (r && typeof r === "object" ? (r as { channel?: string }).channel : null))
+          .filter((c): c is string => typeof c === "string")
+      }
+      if (type === "subscribe_error") {
+        this.lastSubscribeError =
+          typeof frame["message"] === "string" ? (frame["message"] as string) : "subscribe_error"
+      }
+      return
+    }
+
     if (type === "ping") {
       // Reply with pong. WebSocket.OPEN === 1 per the WS spec.
       if (this.ws && this.ws.readyState === 1) {
@@ -1380,7 +1449,30 @@ export class CompanionTransport implements Transport {
       return
     }
 
+    // ADR-0127 §2: several consecutive same-channel frames in one WS message
+    // — `{ type: "event_batch", channel, seq_from, seq_to, frames: [...] }`.
+    // Each inner frame keeps the plain shape, so it goes through the same
+    // per-channel seq cursor + dispatch as a lone frame. `event_batch` cannot
+    // collide with a channel name (real channels always contain `://`).
+    if (type === "event_batch") {
+      const frames = frame["frames"]
+      if (!Array.isArray(frames)) return
+      for (const inner of frames) {
+        if (inner && typeof inner === "object") {
+          this.dispatchEventFrame(inner as Record<string, unknown>)
+        }
+      }
+      return
+    }
+
     // Real event frame: { type, seq, payload, ts_ms }
+    this.dispatchEventFrame(frame)
+  }
+
+  /** Apply one plain event frame to the per-channel cursor and its handlers. */
+  private dispatchEventFrame(frame: Record<string, unknown>): void {
+    const type = frame["type"] as string | undefined
+    if (!type) return
     const seq = typeof frame["seq"] === "number" ? (frame["seq"] as number) : 0
     const payload = frame["payload"]
 
@@ -1449,30 +1541,7 @@ export class CompanionTransport implements Transport {
     }
     this.setConnectionState("reconnecting")
     this.setPlaneHealth({ events: "connecting" })
-    // ADR-0127 §2: several consecutive same-channel frames in one WS message
-    // — `{ type: "event_batch", channel, seq_from, seq_to, frames: [...] }`.
-    // Each inner frame keeps the plain shape, so it goes through the same
-    // per-channel seq cursor + dispatch as a lone frame. `event_batch` cannot
-    // collide with a channel name (real channels always contain `://`).
-    if (type === "event_batch") {
-      const frames = frame["frames"]
-      if (!Array.isArray(frames)) return
-      for (const inner of frames) {
-        if (inner && typeof inner === "object") {
-          this.dispatchEventFrame(inner as Record<string, unknown>)
-        }
-      }
-      return
-    }
 
-
-    this.dispatchEventFrame(frame)
-  }
-
-  /** Apply one plain event frame to the per-channel cursor and its handlers. */
-  private dispatchEventFrame(frame: Record<string, unknown>): void {
-    const type = frame["type"] as string | undefined
-    if (!type) return
     const idx = Math.min(this.wsReconnectAttempt, WS_BACKOFF_MS.length - 1)
     const delay = withJitter(WS_BACKOFF_MS[idx])
     this.wsReconnectAttempt++
@@ -1641,13 +1710,19 @@ async function safeJson(response: Response): Promise<Record<string, unknown> | n
 
 function nestedError(
   body: Record<string, unknown> | null
-): { code: string; message: string } | null {
+): { code: string; message: string; retryable?: boolean } | null {
   if (!body) return null
   const candidate =
     body.error && typeof body.error === "object" && !Array.isArray(body.error)
       ? (body.error as Record<string, unknown>)
       : body
   return typeof candidate.code === "string" && typeof candidate.message === "string"
-    ? { code: candidate.code, message: candidate.message }
+    ? {
+        code: candidate.code,
+        message: candidate.message,
+        // The host now states this (RpcError.retryable). Absent on older
+        // hosts, where the caller falls back to its status-code guess.
+        ...(typeof candidate.retryable === "boolean" ? { retryable: candidate.retryable } : {}),
+      }
     : null
 }

@@ -84,6 +84,10 @@ const mockStopServer = jest.fn().mockResolvedValue(undefined)
 const mockRegisterAdapterCmd = jest.fn().mockResolvedValue(undefined)
 const mockUnregisterAdapterCmd = jest.fn().mockResolvedValue(undefined)
 const mockResetAllWs = jest.fn().mockResolvedValue(0)
+const mockLeaseAcquire = jest.fn().mockResolvedValue(true)
+const mockLeaseRenew = jest.fn().mockResolvedValue(true)
+const mockLeaseRelease = jest.fn().mockResolvedValue(true)
+
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringGet: jest.fn().mockResolvedValue(null),
   connectorsHttpRequest: jest.fn().mockResolvedValue({ status: 200, body: "{}", headers: {} }),
@@ -92,6 +96,9 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsRegisterAdapter: (...args: unknown[]) => mockRegisterAdapterCmd(...args),
   connectorsUnregisterAdapter: (...args: unknown[]) => mockUnregisterAdapterCmd(...args),
   connectorsResetAllWs: (...args: unknown[]) => mockResetAllWs(...args),
+  connectorsRuntimeLeaseAcquire: (...args: unknown[]) => mockLeaseAcquire(...args),
+  connectorsRuntimeLeaseRenew: (...args: unknown[]) => mockLeaseRenew(...args),
+  connectorsRuntimeLeaseRelease: (...args: unknown[]) => mockLeaseRelease(...args),
 }))
 
 // ── Mock the AdapterContext factory (no IndexedDB needed for unit test) ──
@@ -241,7 +248,7 @@ const waitFor = async (assertion: () => void, timeoutMs = 2000): Promise<void> =
   }
 }
 
-const disposers: Array<() => void> = []
+const disposers: Array<() => Promise<void>> = []
 const install = (...args: Parameters<typeof installConnectorRuntime>) => {
   const dispose = installConnectorRuntime(...args)
   disposers.push(dispose)
@@ -260,8 +267,8 @@ beforeEach(() => {
   mockInstallHousekeepingSchedule.mockResolvedValue(undefined)
 })
 
-afterEach(() => {
-  for (const dispose of disposers.splice(0)) dispose()
+afterEach(async () => {
+  await Promise.all(disposers.splice(0).map((dispose) => dispose()))
   // Registration goes through the real (unmocked) scheduler executor Map —
   // clear it between tests so one test's registration doesn't leak into the
   // next via the shared module singleton.
@@ -528,6 +535,101 @@ describe("installConnectorRuntime", () => {
 
     afterEach(() => {
       delete (globalThis.navigator as { locks?: unknown }).locks
+    })
+
+    it("takes the Rust runtime lease after winning the Web Lock", async () => {
+      install()
+      // Both guards, in order: the lock covers this app's other webviews, the
+      // lease covers every other process bound to the same ConnectorsState.
+      await waitFor(() => expect(mockLeaseAcquire).toHaveBeenCalledTimes(1))
+      const [ownerId, ttlMs] = mockLeaseAcquire.mock.calls[0] as [string, number]
+      expect(ownerId).toMatch(/^desktop:/)
+      expect(ttlMs).toBeGreaterThan(0)
+      await waitFor(() => expect(mockRegisterAdapter).toHaveBeenCalledTimes(1))
+    })
+
+    it("does not boot when another process already holds the lease", async () => {
+      mockLeaseAcquire.mockResolvedValueOnce(false)
+      install()
+      await waitFor(() => expect(mockLeaseAcquire).toHaveBeenCalledTimes(1))
+      await new Promise((r) => setTimeout(r, 50))
+      // Winning the Web Lock is not enough — a brain on this companion may
+      // already be answering for these bots.
+      expect(mockRegisterAdapter).not.toHaveBeenCalled()
+    })
+
+    it("releases the Web Lock after a busy Rust lease so a later install can retry", async () => {
+      mockLeaseAcquire.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+      install()
+      await waitFor(() => expect(mockLeaseAcquire).toHaveBeenCalledTimes(1))
+
+      install()
+      await waitFor(() => expect(mockLeaseAcquire).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(mockRegisterAdapter).toHaveBeenCalledTimes(1))
+    })
+
+    it("exposes awaitable teardown and releases ownership after adapters and server stop", async () => {
+      const row = makeTelegramRow("cai_teardown_order")
+      let finishAdapterStop: (() => void) | undefined
+      const order: string[] = []
+      const adapter = makeFakeAdapter(row.id)
+      adapter.stop.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            order.push("adapter-stop-started")
+            finishAdapterStop = () => {
+              order.push("adapter-stopped")
+              resolve()
+            }
+          })
+      )
+      mockListEnabled.mockResolvedValue([row])
+      mockBuildAdapterFromRow.mockResolvedValue(adapter)
+      mockStopServer.mockImplementationOnce(async () => {
+        order.push("server-stopped")
+      })
+      mockLeaseRelease.mockImplementationOnce(async () => {
+        order.push("lease-released")
+        return true
+      })
+
+      const dispose = install()
+      await waitFor(() => expect(adapter.start).toHaveBeenCalledTimes(1))
+
+      const disposing = dispose()
+      expect(disposing).toBeInstanceOf(Promise)
+      await waitFor(() => expect(order).toEqual(["adapter-stop-started"]))
+      expect(mockLeaseRelease).not.toHaveBeenCalled()
+      expect(mockStopServer).not.toHaveBeenCalled()
+
+      finishAdapterStop?.()
+      await disposing
+      expect(order).toEqual([
+        "adapter-stop-started",
+        "adapter-stopped",
+        "server-stopped",
+        "lease-released",
+      ])
+    })
+
+    it("boots anyway when the lease command is unavailable", async () => {
+      mockLeaseAcquire.mockRejectedValueOnce(new Error("command not found"))
+      install()
+      // A stock desktop with no companion surface must behave exactly as it
+      // did before the lease existed.
+      await waitFor(() => expect(mockRegisterAdapter).toHaveBeenCalledTimes(1))
+    })
+
+    it("never reaches for the lease when the Web Lock was lost", async () => {
+      const first = install()
+      await waitFor(() => expect(mockLeaseAcquire).toHaveBeenCalledTimes(1))
+      mockLeaseAcquire.mockClear()
+      // Second webview: the lock is held, so it must stand down before
+      // touching the shared lease slot at all.
+      install()
+      await new Promise((r) => setTimeout(r, 50))
+      expect(mockLeaseAcquire).not.toHaveBeenCalled()
+      first()
     })
 
     it("boots after a StrictMode-style remount (teardown while the first request is still queued)", async () => {

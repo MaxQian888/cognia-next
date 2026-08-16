@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen } from "@/lib/connectors/events"
 import {
   connectorsWsClose,
   connectorsWsOpen,
@@ -45,7 +45,7 @@ export async function probeWeComCredentials(
       resolveOnce({ ok: false, error: "subscribe probe timed out" })
     }, timeoutMs)
 
-    unlisten = await listen<string>(`connectors://ws/${handleId}/message`, (event) => {
+    unlisten = await connectorListen<string>(`connectors://ws/${handleId}/message`, (event) => {
       let frame: WeComFrameEnvelope
       try {
         frame = JSON.parse(event.payload) as WeComFrameEnvelope

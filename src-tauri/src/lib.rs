@@ -91,6 +91,7 @@ mod ollama;
 mod parse;
 mod perf;
 mod pet_window;
+mod pi_extension;
 // ADR-0067 Tier B — extracted to `crates/cognia-plugin-runtime` (isolates
 // wasmtime/cranelift); re-aliased so `crate::plugin_api::…` (companion_api,
 // cli_bridge, generate_handler! + .manage()) resolves unchanged.
@@ -918,6 +919,9 @@ pub fn run() {
             terminal_host_bridge::ssh_terminal_write,
             terminal_host_bridge::ssh_terminal_resize,
             terminal_host_bridge::ssh_terminal_kill,
+            terminal_host_bridge::ssh_forget_host_key,
+            terminal_host_bridge::ssh_terminal_forward_status,
+            terminal_host_bridge::ssh_terminal_set_forward_enabled,
             terminal::exec::terminal_exec,
             terminal::complete::terminal_complete_paths,
             terminal::path_scan::terminal_list_path_executables,
@@ -961,6 +965,10 @@ pub fn run() {
             tts::proxy::tts_proxy_cancel,
             tts::realtime::tts_realtime_synthesize,
             tts::realtime::tts_realtime_cancel,
+            external_agent::commands::dsh_runtime_facts,
+            external_agent::commands::dsh_runtime_install,
+            external_agent::commands::dsh_runtime_finalize,
+            external_agent::commands::dsh_runtime_remove,
             external_agent::commands::spawn_external_agent,
             external_agent::commands::send_to_external_agent,
             external_agent::commands::kill_external_agent,
@@ -983,6 +991,7 @@ pub fn run() {
             external_agent::commands::acp_terminal_get_info,
             external_agent::commands::acp_terminal_list,
             external_agent::commands::check_command_exists,
+            pi_extension::resolve_pi_extension,
             logging::commands::native_logging_get_readiness,
             logging::commands::native_logging_get_log_directory,
             logging::commands::native_logging_open_log_directory,
@@ -1085,12 +1094,11 @@ pub fn run() {
             companion_api::commands::companion_seed_deny_list,
             companion_api::commands::companion_revoke_device,
             companion_api::commands::companion_unrevoke_device,
+            companion_api::commands::companion_list_device_grants,
             companion_api::commands::companion_set_remote_control,
-            companion_api::commands::companion_seed_remote_control,
             companion_api::commands::companion_set_agent_control,
-            companion_api::commands::companion_seed_agent_control,
             companion_api::commands::companion_set_remote_terminal,
-            companion_api::commands::companion_seed_remote_terminal,
+            companion_api::commands::companion_migrate_legacy_device_grants,
             companion_api::commands::companion_set_locked_computer_use,
             companion_api::commands::companion_seed_locked_computer_use,
             companion_api::commands::companion_sync_pull_response,
@@ -1134,6 +1142,9 @@ pub fn run() {
             connectors::commands::connectors_register_adapter,
             connectors::commands::connectors_unregister_adapter,
             connectors::commands::connectors_health,
+            connectors::commands::connectors_runtime_lease_acquire,
+            connectors::commands::connectors_runtime_lease_renew,
+            connectors::commands::connectors_runtime_lease_release,
             connectors::commands::connectors_start_server,
             connectors::commands::connectors_stop_server,
             connectors::commands::connectors_keyring_set,

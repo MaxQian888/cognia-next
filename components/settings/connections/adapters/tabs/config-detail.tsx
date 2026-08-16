@@ -42,6 +42,7 @@ import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { LarkEntrySurfaces } from "../../forms/lark/lark-entry-surfaces"
 import { LarkPrincipals } from "../../forms/lark/lark-principals"
+import { LarkWebSessions } from "../../forms/lark/lark-web-sessions"
 import { RunOperators } from "../../forms/run-operators"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
@@ -142,6 +143,11 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * closed, so this card is what makes `larkPrincipalRegistry` operable
        * at all. */}
       {row.type === "lark" && <LarkPrincipals adapterId={row.id} />}
+
+      {/* Lark-only: the web-session ledger the companion cannot keep itself
+       * (sessions are stateless HMAC tokens). Read-only — disabling the
+       * principal above is what revokes access. */}
+      {row.type === "lark" && <LarkWebSessions adapterId={row.id} />}
 
       {/* Who may act on a run they did not start. Read by the callback
        * authorization guard, the run-control gate, and follow-up control on

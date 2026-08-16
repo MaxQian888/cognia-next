@@ -13,6 +13,7 @@ const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "new-lark-id
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringGet = jest.fn().mockResolvedValue("cli_app_x")
+const mockConnectorsKeyringDelete = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsHttpRequest = jest.fn()
 const mockOpenUrl = jest.fn().mockResolvedValue(undefined)
 
@@ -25,6 +26,7 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
   connectorsKeyringGet: (...args: unknown[]) => mockConnectorsKeyringGet(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockConnectorsKeyringDelete(...args),
   connectorsHttpRequest: (...args: unknown[]) => mockConnectorsHttpRequest(...args),
 }))
 
@@ -34,13 +36,13 @@ jest.mock("@/lib/native/opener", () => ({
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
 
-// A running tunnel so the derived webhook URL renders in webhook transport mode.
+// A running tunnel by default so the derived webhook URL renders in webhook
+// transport mode; individual tests override it to exercise the no-ingress
+// empty states.
+const RUNNING_TUNNEL = { url: "https://demo.trycloudflare.com", running: true, loading: false }
+const mockedUseTunnelStatus = jest.fn(() => RUNNING_TUNNEL)
 jest.mock("@/hooks/use-tunnel-status", () => ({
-  useTunnelStatus: () => ({
-    url: "https://demo.trycloudflare.com",
-    running: true,
-    loading: false,
-  }),
+  useTunnelStatus: () => mockedUseTunnelStatus(),
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
@@ -53,6 +55,7 @@ const mockToastError = toast.error as jest.Mock
 // Import component after mocks
 // ---------------------------------------------------------------------------
 
+import { isTauri } from "@/lib/tauri"
 import { LarkConfigDialog } from "./lark-config"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
@@ -75,6 +78,7 @@ function makeTatFailResponse(msg = "invalid_app") {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockedUseTunnelStatus.mockReturnValue(RUNNING_TUNNEL)
   sessionStorage.clear()
   localStorage.clear()
 })
@@ -340,9 +344,45 @@ describe("LarkConfigDialog — send as user", () => {
       "https://demo.trycloudflare.com/oauth/lark/callback"
     )
     // State persisted for the deep-link router — sessionStorage (live) +
-    // localStorage (durable cold-start).
+    // localStorage (durable cold-start). This is a pre-check mirror only; the
+    // authoritative CSRF comparison is against the brain's pending record.
     expect(sessionStorage.getItem("connector-oauth-state")).toMatch(/^lark:lark-existing:/)
     expect(localStorage.getItem("connector-oauth-state")).toMatch(/^lark:lark-existing:/)
+
+    // The PKCE verifier goes to the adapter's secret store, which the brain
+    // reads back when the relay returns the code. It must NOT be in Web
+    // Storage: on a self-hosted install the completing process is a different
+    // one from whatever browser rendered this dialog.
+    const pendingWrite = mockConnectorsKeyringSet.mock.calls.find(
+      (call) => call[1] === "oauth_pending"
+    )
+    expect(pendingWrite).toBeDefined()
+    const pending = JSON.parse(String(pendingWrite![2])) as Record<string, string>
+    expect(pending.state).toBe(sessionStorage.getItem("connector-oauth-state"))
+    expect(pending.redirectUri).toBe("https://demo.trycloudflare.com/oauth/lark/callback")
+    expect(pending.codeVerifier).toHaveLength(43)
+    expect(url.searchParams.get("code_challenge")).not.toBe(pending.codeVerifier)
+    expect(JSON.stringify(Object.entries(localStorage))).not.toContain(pending.codeVerifier)
+  })
+
+  it("offers the tunnel CTA when the desktop has no reachable ingress", async () => {
+    // Regression: the two no-ingress empty states (desktop → start the tunnel,
+    // cloud → no public origin) live in `DeliveryFields`, which receives
+    // `desktop` as a prop. It was read as a free variable, so this branch threw
+    // `ReferenceError: desktop is not defined` the moment a webhook row
+    // rendered without a webhook URL — invisible to every test that had a
+    // running tunnel.
+    mockedUseTunnelStatus.mockReturnValue({ url: null, running: false, loading: false } as never)
+    render(
+      <LarkConfigDialog
+        open={true}
+        onOpenChange={jest.fn()}
+        row={{ ...baseRow, settings: { ...baseRow.settings, transport: "webhook" } } as never}
+      />
+    )
+    expect(screen.getByTestId("lark-webhook-url-tunnel-off")).toBeInTheDocument()
+    expect(screen.getByTestId("lark-open-companion")).toBeInTheDocument()
+    expect(screen.queryByTestId("lark-webhook-url-origin-missing")).not.toBeInTheDocument()
   })
 
   it("renders the redirect URL field defaulting to the tunnel-derived relay URL", () => {
@@ -380,3 +420,85 @@ describe("LarkConfigDialog — closed state", () => {
     expect(screen.queryByText(/add lark bot/i)).not.toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Cloud (headless) host
+// ---------------------------------------------------------------------------
+
+describe("LarkConfigDialog — cloud host", () => {
+  const mockIsTauri = isTauri as jest.Mock
+
+  beforeEach(() => {
+    // A cloud deployment: no Tauri, and no cloudflared tunnel to derive from.
+    mockIsTauri.mockReturnValue(false)
+  })
+
+  afterEach(() => {
+    mockIsTauri.mockReturnValue(true)
+  })
+
+  it("defaults a NEW adapter to webhook transport", async () => {
+    // The runtime default is fail-to-long-connection, which on a cloud host
+    // opens a Feishu socket the brain cannot consume. A cloud install has a
+    // public origin and should take the inbound path instead.
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "cli_cloud" } })
+    fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "secret_cloud" } })
+    fireEvent.change(screen.getByLabelText(/verification token/i), { target: { value: "vt" } })
+
+    // No transport interaction at all — the default alone must land on webhook.
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({ transportMode: "webhook" })
+      )
+    })
+  })
+
+  it("honours an existing row's saved transport rather than the host default", () => {
+    // Only the NEW-row default is host-aware; flipping a saved row underneath
+    // the operator would silently move where their bot receives.
+    const longConnRow: AdapterInstanceRow = {
+      ...existingCloudRow,
+      transportMode: "gateway",
+      settings: { transport: "long-connection" },
+    }
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={longConnRow} />)
+    expect(screen.queryByTestId("lark-webhook-url-input")).not.toBeInTheDocument()
+  })
+
+  it("derives the webhook URL under the /connectors nest, not the tunnel", () => {
+    // The headless companion mounts the connectors router under `/connectors`;
+    // the tunnel-derived address the desktop uses 404s there.
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={existingCloudRow} />)
+    const input = screen.getByTestId("lark-webhook-url-input") as HTMLInputElement
+    expect(input.value).toBe(`${window.location.origin}/connectors/webhook/lark/lark-cloud`)
+    expect(input.value).not.toContain("trycloudflare")
+  })
+
+  it("does not offer the cloudflared tunnel CTA", () => {
+    // Pointing a cloud operator at tunnel settings is advice for another host.
+    render(<LarkConfigDialog open={true} onOpenChange={jest.fn()} row={existingCloudRow} />)
+    expect(screen.queryByTestId("lark-open-companion")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lark-webhook-url-tunnel-off")).not.toBeInTheDocument()
+  })
+})
+
+const existingCloudRow: AdapterInstanceRow = {
+  id: "lark-cloud",
+  type: "lark",
+  displayName: "Cloud Lark Bot",
+  enabled: true,
+  transportMode: "webhook",
+  settings: { transport: "webhook" },
+  credentialsRef: {
+    keyringService: "com.cognia.platforms",
+    accounts: ["appId", "appSecret", "encryptKey", "verificationToken"],
+  },
+  trigger: defaultPrivateChatPolicy(),
+  defaultMode: "auto",
+  createdAt: 1000,
+  updatedAt: 2000,
+}

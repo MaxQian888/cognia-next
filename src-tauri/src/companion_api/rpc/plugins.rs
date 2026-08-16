@@ -70,7 +70,12 @@ pub(super) const COMMANDS: &[&str] = &[
     "plugin_wasm_call",
     "plugin_wasm_unload",
     "plugin_wasm_list",
-    "plugin_wasm_renderer_response",
+    // `plugin_wasm_renderer_response` deliberately absent: it is the renderer
+    // half of the WASM capability bridge (disposition `runtime-internal`), so
+    // it is not in KNOWN_COMMANDS. Listing it here without an allowlist entry
+    // made its arm unreachable dead code — the gate at rpc.rs rejects the name
+    // before this table is consulted — which is exactly the drift the
+    // KNOWN_COMMANDS doc comment warns about.
 ];
 
 pub(super) async fn dispatch(
@@ -409,7 +414,7 @@ pub(super) async fn dispatch(
         "plugin_set_status" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_runtime = std::sync::Arc::clone(&services.plugin_runtime);
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let status: String = required(&args, "status")?;
@@ -426,10 +431,6 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))
         }
         "plugin_permission_grant" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let plugin_runtime = std::sync::Arc::clone(&services.plugin_runtime);
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let permission: String = required(&args, "permission")?;
             let granted_by: String = required_aliased(&args, "granted_by", "grantedBy")?;
@@ -437,60 +438,40 @@ pub(super) async fn dispatch(
                 Some(value) => Some(value),
                 None => optional(&args, "expires_at")?,
             };
-            let grant = tokio::task::spawn_blocking(move || {
-                crate::plugin_api::permissions::grant_permission_for_state(
-                    plugin_runtime.as_ref(),
-                    plugin_id,
-                    permission,
-                    granted_by,
-                    expires_at,
-                )
-            })
-            .await
-            .map_err(|error| RpcError::internal(error.to_string()))?
+            let grant = crate::plugin_api::permissions::grant_permission_for_state(
+                host.plugin_runtime(),
+                plugin_id,
+                permission,
+                granted_by,
+                expires_at,
+            )
             .map_err(|error| RpcError::internal(error.to_string()))?;
             to_json(grant)
         }
         "plugin_permission_list" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let plugin_runtime = std::sync::Arc::clone(&services.plugin_runtime);
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            let permissions = tokio::task::spawn_blocking(move || {
-                crate::plugin_api::permissions::list_permissions_for_state(
-                    plugin_runtime.as_ref(),
-                    plugin_id,
-                )
-            })
-            .await
-            .map_err(|error| RpcError::internal(error.to_string()))?
+            let permissions = crate::plugin_api::permissions::list_permissions_for_state(
+                host.plugin_runtime(),
+                plugin_id,
+            )
             .map_err(|error| RpcError::internal(error.to_string()))?;
             to_json(permissions)
         }
         "plugin_permission_revoke" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            let plugin_runtime = std::sync::Arc::clone(&services.plugin_runtime);
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let permission: String = required(&args, "permission")?;
-            tokio::task::spawn_blocking(move || {
-                crate::plugin_api::permissions::revoke_permission_for_state(
-                    plugin_runtime.as_ref(),
-                    plugin_id,
-                    permission,
-                )
-            })
-            .await
-            .map_err(|error| RpcError::internal(error.to_string()))?
+            crate::plugin_api::permissions::revoke_permission_for_state(
+                host.plugin_runtime(),
+                plugin_id,
+                permission,
+            )
             .map(|_| Value::Null)
             .map_err(|error| RpcError::internal(error.to_string()))
         }
         "plugin_set_shell_allowlist" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let commands: Vec<String> = required(&args, "commands")?;
             services
@@ -501,7 +482,7 @@ pub(super) async fn dispatch(
         "plugin_set_network_allowlist" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let domains: Vec<String> = required(&args, "domains")?;
             let rules: Option<Vec<crate::plugin_api::NetworkAccessRule>> =
@@ -518,7 +499,7 @@ pub(super) async fn dispatch(
         "plugin_python_initialize" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let python_path: Option<String> = optional(&args, "pythonPath")?;
             crate::plugin_api::python::commands::plugin_python_initialize_for_state(
                 services.python_plugins.as_ref(),
@@ -532,7 +513,7 @@ pub(super) async fn dispatch(
         "plugin_python_runtime_info" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             to_json(
                 crate::plugin_api::python::commands::plugin_python_runtime_info_for_state(
                     services.python_plugins.as_ref(),
@@ -542,7 +523,7 @@ pub(super) async fn dispatch(
         "plugin_python_load" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
             let main_module: String = required_aliased(&args, "main_module", "mainModule")?;
@@ -566,7 +547,7 @@ pub(super) async fn dispatch(
         "plugin_python_call_hook" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let event: String = required(&args, "event")?;
@@ -587,7 +568,7 @@ pub(super) async fn dispatch(
         "plugin_python_push_config" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let config: Value = required(&args, "config")?;
@@ -605,7 +586,7 @@ pub(super) async fn dispatch(
         "plugin_python_get_tools" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::python::commands::plugin_python_get_tools_generation_for_state(
@@ -619,7 +600,7 @@ pub(super) async fn dispatch(
         "plugin_python_call_tool" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let tool_name: String = required_aliased(&args, "tool_name", "toolName")?;
@@ -638,7 +619,7 @@ pub(super) async fn dispatch(
         "plugin_python_call" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let function_name: String = required_aliased(&args, "function_name", "functionName")?;
@@ -657,7 +638,7 @@ pub(super) async fn dispatch(
         "plugin_python_eval" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let code: String = required(&args, "code")?;
@@ -676,7 +657,7 @@ pub(super) async fn dispatch(
         "plugin_python_import" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
@@ -693,7 +674,7 @@ pub(super) async fn dispatch(
         "plugin_python_module_call" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
@@ -714,7 +695,7 @@ pub(super) async fn dispatch(
         "plugin_python_module_getattr" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
@@ -733,7 +714,7 @@ pub(super) async fn dispatch(
         "plugin_python_is_initialized" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::python::commands::plugin_python_is_initialized_generation_for_state(
@@ -748,7 +729,7 @@ pub(super) async fn dispatch(
         "plugin_python_get_info" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             to_json(
@@ -763,7 +744,7 @@ pub(super) async fn dispatch(
         "plugin_python_install_deps" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let dependencies: Vec<String> = required(&args, "dependencies")?;
             crate::plugin_api::python::commands::plugin_python_install_deps_for_state(
@@ -779,7 +760,7 @@ pub(super) async fn dispatch(
         "plugin_python_unload" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::python::commands::plugin_python_unload_generation_for_state(
@@ -794,7 +775,7 @@ pub(super) async fn dispatch(
         "plugin_python_list" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             to_json(
                 crate::plugin_api::python::commands::plugin_python_list_for_state(
                     services.python_plugins.as_ref(),
@@ -803,13 +784,10 @@ pub(super) async fn dispatch(
         }
 
         "plugin_api_invoke" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let request: crate::plugin_api::api_bridge::PluginApiInvokeRequest =
                 required(&args, "request")?;
             let response = crate::plugin_api::api_bridge::plugin_api_invoke_for_state(
-                services.plugin_runtime.as_ref(),
+                host.plugin_runtime(),
                 request,
             )
             .await
@@ -817,13 +795,10 @@ pub(super) async fn dispatch(
             to_json(response)
         }
         "plugin_api_batch_invoke" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let request: crate::plugin_api::api_bridge::BatchInvokeRequest =
                 required(&args, "request")?;
             let response = crate::plugin_api::api_bridge::plugin_api_batch_invoke_for_state(
-                services.plugin_runtime.as_ref(),
+                host.plugin_runtime(),
                 request,
             )
             .await
@@ -838,7 +813,7 @@ pub(super) async fn dispatch(
         "codeserver_ensure" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
                 .unwrap_or_default();
@@ -855,7 +830,7 @@ pub(super) async fn dispatch(
         "codeserver_status" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             services
                 .code_server
@@ -870,21 +845,21 @@ pub(super) async fn dispatch(
         "codeserver_stop" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             to_json(services.code_server.stop(&root).await)
         }
         "codeserver_stop_all" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             services.code_server.stop_all().await;
             Ok(Value::Null)
         }
         "codeserver_build_proxy" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let request: crate::codeserver::proxy::ProxyBuildRequest = required(&args, "request")?;
             let code_server = std::sync::Arc::clone(&services.code_server);
             let artifact = tokio::task::spawn_blocking(move || code_server.build_proxy(request))
@@ -899,14 +874,14 @@ pub(super) async fn dispatch(
         "codeserver_activate_proxy" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let artifact: crate::codeserver::proxy::ProxyArtifact = required(&args, "artifact")?;
             to_json(services.code_server.install_proxy_artifact(&artifact).await)
         }
         "codeserver_list_proxies" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let code_server = std::sync::Arc::clone(&services.code_server);
             tokio::task::spawn_blocking(move || code_server.list_proxies())
                 .await
@@ -963,21 +938,13 @@ pub(super) async fn dispatch(
                 .map(|()| Value::Null)
                 .map_err(RpcError::service_unavailable)
         }
-        "lsp_host_ensure" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
-            crate::plugin_api::vscode::commands::ensure_system_lsp_host_for_state(
-                services.vscode_plugins.as_ref(),
-            )
-            .await
-            .map(|_| Value::Null)
-            .map_err(vscode_rpc_error)
-        }
+        "lsp_host_ensure" => crate::plugin_api::vscode::commands::ensure_system_lsp_host_for_state(
+            host.vscode_plugins(),
+        )
+        .await
+        .map(|_| Value::Null)
+        .map_err(vscode_rpc_error),
         "lsp_host_request" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let method: String = required(&args, "method")?;
             if !remote_lsp_method_allowed(&method) {
                 return Err(RpcError::malformed(format!(
@@ -990,7 +957,7 @@ pub(super) async fn dispatch(
                 None => "null".to_string(),
             };
             crate::plugin_api::vscode::commands::plugin_invoke_vscode_rpc_for_state(
-                services.vscode_plugins.as_ref(),
+                host.vscode_plugins(),
                 crate::plugin_api::vscode::commands::LSP_HOST_KEY.to_string(),
                 method,
                 payload_json,
@@ -1002,7 +969,7 @@ pub(super) async fn dispatch(
         "ensure_system_lsp_host" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             crate::plugin_api::vscode::commands::ensure_system_lsp_host_for_state(
                 services.vscode_plugins.as_ref(),
             )
@@ -1013,7 +980,7 @@ pub(super) async fn dispatch(
         "plugin_load_vscode" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let manifest_json: String = required_aliased(&args, "manifest_json", "manifestJson")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
@@ -1031,7 +998,7 @@ pub(super) async fn dispatch(
         "plugin_activate_vscode" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let config_json: String = required_aliased(&args, "config_json", "configJson")?;
@@ -1048,7 +1015,7 @@ pub(super) async fn dispatch(
         "plugin_deactivate_vscode" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::vscode::commands::plugin_deactivate_vscode_generation_for_state(
@@ -1063,7 +1030,7 @@ pub(super) async fn dispatch(
         "plugin_unload_vscode" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::vscode::commands::plugin_unload_vscode_generation_for_state(
@@ -1078,7 +1045,7 @@ pub(super) async fn dispatch(
         "plugin_invoke_vscode_rpc" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let method: String = required(&args, "method")?;
@@ -1097,7 +1064,7 @@ pub(super) async fn dispatch(
         "plugin_vscode_send_response" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let response_json: String = required_aliased(&args, "response_json", "responseJson")?;
@@ -1117,7 +1084,7 @@ pub(super) async fn dispatch(
         "plugin_launch_js" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
             let entry: String = required(&args, "entry")?;
@@ -1137,7 +1104,7 @@ pub(super) async fn dispatch(
         "plugin_invoke_js_callback" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
             let entry: String = required(&args, "entry")?;
@@ -1160,7 +1127,7 @@ pub(super) async fn dispatch(
         "plugin_deactivate_js" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
             let entry: String = required(&args, "entry")?;
@@ -1180,7 +1147,7 @@ pub(super) async fn dispatch(
         "plugin_stop_js" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::lifecycle::plugin_stop_js_for_state(
@@ -1195,7 +1162,7 @@ pub(super) async fn dispatch(
         "plugin_js_status" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::lifecycle::plugin_js_status_for_state(
@@ -1214,7 +1181,7 @@ pub(super) async fn dispatch(
         "plugin_wasm_load" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let manifest_json: String = required_aliased(&args, "manifest_json", "manifestJson")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
@@ -1232,7 +1199,7 @@ pub(super) async fn dispatch(
         "plugin_wasm_activate" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let config_json: String = required_aliased(&args, "config_json", "configJson")?;
@@ -1250,7 +1217,7 @@ pub(super) async fn dispatch(
         "plugin_wasm_deactivate" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::wasm::commands::plugin_wasm_deactivate_generation_for_state(
@@ -1265,7 +1232,7 @@ pub(super) async fn dispatch(
         "plugin_wasm_call" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let export_name: String = required_aliased(&args, "export_name", "exportName")?;
@@ -1285,7 +1252,7 @@ pub(super) async fn dispatch(
         "plugin_wasm_unload" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             crate::plugin_api::wasm::commands::plugin_wasm_unload_generation_for_state(
@@ -1300,7 +1267,7 @@ pub(super) async fn dispatch(
         "plugin_wasm_list" => {
             let services = host
                 .headless()
-                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+                .ok_or_else(|| RpcError::headless_host_required(name))?;
             crate::plugin_api::wasm::commands::plugin_wasm_list_for_state(
                 services.wasm_plugins.as_ref(),
             )
@@ -1308,11 +1275,6 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
             .and_then(to_json)
         }
-        // The renderer half of the WASM capability bridge. A headless host has
-        // no renderer to answer requests, and therefore never dispatches any —
-        // so a response frame arriving here is always a routing mistake, not a
-        // capability gap to paper over.
-        "plugin_wasm_renderer_response" => Err(RpcError::headless_unsupported(name)),
         unknown => Err(RpcError::unknown_command(unknown)),
     };
     result

@@ -36,21 +36,18 @@ import {
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { Switch } from "@/components/ui/switch"
 import { openUrl } from "@/lib/native/opener"
-import {
-  connectorsHttpRequest,
-  connectorsKeyringGet,
-  connectorsKeyringSet,
-} from "@/lib/connectors/tauri/commands"
-import { buildLarkOAuthUrl, LARK_SENDAS_SCOPES } from "@/lib/connectors/adapters/lark/auth"
-import { computeCodeChallenge, generateCodeVerifier } from "@/lib/connectors/adapters/lark/pkce"
-import { setLarkOAuthPending } from "@/lib/connectors/adapters/lark/oauth-pending"
-import {
-  buildLarkOAuthState,
-  type LarkConnectedUser,
-} from "@/lib/connectors/adapters/lark/oauth-handler"
+import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { beginLarkOAuth } from "@/lib/connectors/adapters/lark/oauth-begin"
+import type { LarkConnectedUser } from "@/lib/connectors/adapters/lark/oauth-handler"
 import { CONNECTOR_OAUTH_STATE_KEY } from "@/lib/connectors/oauth-registry"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
+import {
+  connectorWebhookPath,
+  LARK_OAUTH_RELAY_PATH,
+  resolveConnectorsIngressBase,
+} from "@/lib/connectors/server-transport"
+import { resolveLarkApiBase } from "@/lib/connectors/lark-web/entry-client"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 import { refreshSelfBotOpenId } from "@/lib/connectors/adapter-registry"
@@ -73,14 +70,6 @@ interface TatTestResult {
 }
 
 type TransportMode = "long-connection" | "webhook"
-
-/**
- * The relay callback path Feishu redirects to. Served by the connectors axum
- * server (crates/cognia-connectors/src/axum_app.rs) and exposed via the same
- * Cloudflared tunnel as the webhook route. It 302s back to
- * `cognia://connector/oauth/lark`.
- */
-const LARK_OAUTH_RELAY_PATH = "/oauth/lark/callback"
 
 interface LarkPersistedSettings {
   transport?: TransportMode
@@ -154,8 +143,13 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   const [appSecret, setAppSecret] = useState("")
   const [encryptKey, setEncryptKey] = useState("")
   const [verificationToken, setVerificationToken] = useState("")
+  // Cloud installs default to `webhook`: they have a public origin and no
+  // cloudflared tunnel, and a webhook survives a brain restart without
+  // re-establishing an outbound socket. Desktop keeps `long-connection`, which
+  // needs no inbound reachability at all. Only the NEW-row default is
+  // host-aware — an existing row's saved choice is always honoured.
   const [transport, setTransport] = useState<TransportMode>(
-    persistedSettings.transport ?? "long-connection"
+    persistedSettings.transport ?? (isTauri() ? "long-connection" : "webhook")
   )
   const [selfBotOpenId, setSelfBotOpenId] = useState<string | null>(
     persistedSettings.selfBotOpenId ?? null
@@ -178,6 +172,17 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
 
   const desktop = isTauri()
   const tunnel = useTunnelStatus()
+
+  // Public base a platform should be pointed at, per host. Declared up here
+  // because the authorize handler needs it too — the desktop reaches the
+  // internet through cloudflared, while a cloud install serves the same
+  // connectors router nested under `/connectors` on its own origin.
+  const ingressBase = resolveConnectorsIngressBase({
+    isDesktop: desktop,
+    tunnelUrl: tunnel.url,
+    publicBase:
+      resolveLarkApiBase() || (typeof window === "undefined" ? null : window.location.origin),
+  })
 
   // Treat any non-secret edit as dirty so the Save button is enabled even
   // before the user touches a credential field. Secret entry alone also
@@ -241,47 +246,36 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
     }
     setAuthorizing(true)
     try {
-      const appIdVal = (await connectorsKeyringGet(row.id, "appId")) ?? ""
-      if (!appIdVal) {
-        toast.error(t("authorizeNeedsAppId"))
-        return
-      }
-      // Redirect precedence: an explicit override, else the tunnel-derived
-      // relay URL. Both must be registered in the Feishu console.
+      // Redirect precedence: an explicit override, else the host-derived relay
+      // URL. Both must be registered in the Feishu console.
       const effectiveRedirect =
-        redirectUri.trim() ||
-        (tunnel.url ? `${tunnel.url.replace(/\/$/, "")}${LARK_OAUTH_RELAY_PATH}` : "")
+        redirectUri.trim() || (ingressBase ? `${ingressBase}${LARK_OAUTH_RELAY_PATH}` : "")
       if (!effectiveRedirect) {
         toast.error(t("authorizeNeedsRedirect"))
         return
       }
-      const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 16)
-      const state = buildLarkOAuthState(row.id, nonce)
-      // PKCE — the verifier travels via the durable pending store; only the
-      // challenge is sent to Feishu.
-      const codeVerifier = generateCodeVerifier()
-      const codeChallenge = await computeCodeChallenge(codeVerifier)
+      // The brain mints state + PKCE and owns the pending record, because the
+      // brain is what spends it when the relay hands the code back. On the
+      // desktop that is this same process; a headless install drives the very
+      // same function through the `oauth-begin` operator intent.
+      const begun = await beginLarkOAuth({ adapterId: row.id, redirectUri: effectiveRedirect })
       // The deep-link router validates the redirect's `state`. sessionStorage
       // covers the live path; a localStorage mirror survives a cold restart.
-      sessionStorage.setItem(CONNECTOR_OAUTH_STATE_KEY, state)
+      // This is a pre-check only — the authoritative one is against the
+      // pending record inside `handleLarkOAuth`.
+      sessionStorage.setItem(CONNECTOR_OAUTH_STATE_KEY, begun.state)
       try {
-        localStorage.setItem(CONNECTOR_OAUTH_STATE_KEY, state)
+        localStorage.setItem(CONNECTOR_OAUTH_STATE_KEY, begun.state)
       } catch {
         // localStorage unavailable — the live sessionStorage path still works.
       }
-      // The completion handler reads the verifier + exact redirect back out.
-      setLarkOAuthPending(row.id, { state, codeVerifier, redirectUri: effectiveRedirect })
-      const url = buildLarkOAuthUrl({
-        appId: appIdVal,
-        redirectUri: effectiveRedirect,
-        state,
-        scope: LARK_SENDAS_SCOPES,
-        codeChallenge,
-      })
-      await openUrl(url)
+      await openUrl(begun.authorizeUrl)
       toast.info(t("authorizeOpened"))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      const reason = err instanceof Error ? err.message : String(err)
+      // `beginLarkOAuth` throws short stable reasons; map the one an operator
+      // can actually fix rather than showing them a bare code.
+      toast.error(reason === "app_id_missing" ? t("authorizeNeedsAppId") : reason)
     } finally {
       setAuthorizing(false)
     }
@@ -418,9 +412,8 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   // (axum_app.rs) — the same `/webhook/<type>/<id>` shape every other adapter
   // form uses. The previous `/connectors/lark/...` prefix 404'd, so a Feishu
   // webhook aimed at the surfaced URL never reached the receiver.
-  const webhookPath = isNew ? null : `/webhook/lark/${row?.id ?? ""}`
-  const webhookUrl =
-    tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
+  const webhookPath = isNew ? null : connectorWebhookPath("lark", row?.id ?? "")
+  const webhookUrl = ingressBase && webhookPath ? `${ingressBase}${webhookPath}` : null
 
   // Lark Open Platform deep link to the app's Event-subscriptions panel.
   const openConsoleUrl = appId.trim().startsWith("cli_")
@@ -435,8 +428,9 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
 
   // Relay redirect derived from the running tunnel (send-as-user OAuth). The
   // user can override it via the redirect-URI field.
-  const derivedRelayUrl =
-    !isNew && tunnel.url ? `${tunnel.url.replace(/\/$/, "")}${LARK_OAUTH_RELAY_PATH}` : null
+  // Same host split as the webhook URL — on cloud the relay lives behind the
+  // `/connectors` nest, so a tunnel-derived redirect would 404 there.
+  const derivedRelayUrl = !isNew && ingressBase ? `${ingressBase}${LARK_OAUTH_RELAY_PATH}` : null
   const effectiveRedirectUri = redirectUri.trim() || derivedRelayUrl || ""
 
   // ── Sections ─────────────────────────────────────────────────────────────
@@ -481,6 +475,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         transport={transport}
         setTransport={setTransport}
         saving={saving}
+        desktop={desktop}
         webhookUrl={webhookUrl}
         tunnelLoading={tunnel.loading}
         tunnelRunning={tunnel.running}
@@ -960,6 +955,12 @@ interface DeliveryFieldsProps {
   transport: TransportMode
   setTransport: (t: TransportMode) => void
   saving: boolean
+  /**
+   * `isTauri()`, threaded down rather than re-derived: with no reachable
+   * ingress the desktop's remedy is to start the cloudflared tunnel, while a
+   * cloud install has no tunnel and needs none — two different empty states.
+   */
+  desktop: boolean
   webhookUrl: string | null
   tunnelLoading: boolean
   tunnelRunning: boolean
@@ -1048,7 +1049,7 @@ function DeliveryFields(p: DeliveryFieldsProps) {
               </div>
               <p className="text-[10px] text-muted-foreground">{t("webhookUrlHelp")}</p>
             </div>
-          ) : (
+          ) : p.desktop ? (
             <div className="space-y-2">
               <p
                 className="text-xs text-amber-700 dark:text-amber-400"
@@ -1060,13 +1061,22 @@ function DeliveryFields(p: DeliveryFieldsProps) {
                 type="button"
                 size="sm"
                 variant="outline"
-                      onClick={() => router.push("/settings?section=connections&connectionsTab=tunnel")}
+                onClick={() => router.push("/settings?section=connections&connectionsTab=tunnel")}
                 aria-label={t("openCompanionAria")}
                 data-testid="lark-open-companion"
               >
                 {t("openCompanion")}
               </Button>
             </div>
+          ) : (
+            // A cloud install has no tunnel and needs none — pointing it at the
+            // tunnel settings was advice for the wrong host.
+            <p
+              className="text-xs text-amber-700 dark:text-amber-400"
+              data-testid="lark-webhook-url-origin-missing"
+            >
+              {t("webhookUrlOriginMissingHelp")}
+            </p>
           )}
         </div>
       )}

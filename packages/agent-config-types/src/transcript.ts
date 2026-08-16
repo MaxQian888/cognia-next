@@ -124,9 +124,7 @@ export interface SystemTimelineItem extends TranscriptTimelineItemBase {
 }
 
 export type TranscriptTimelineItem =
-  | CompletedTurnTimelineItem
-  | ActiveTurnTimelineItem
-  | SystemTimelineItem
+  CompletedTurnTimelineItem | ActiveTurnTimelineItem | SystemTimelineItem
 
 export interface SessionTimelinePage {
   items: TranscriptTimelineItem[]
@@ -149,4 +147,3 @@ export interface TranscriptProtocolError {
   code: TranscriptErrorCode
   message?: string
 }
-

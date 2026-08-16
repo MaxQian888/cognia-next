@@ -416,9 +416,9 @@ export function TelegramConfigDialog({
                     type="button"
                     size="sm"
                     variant="outline"
-                      onClick={() =>
-                        router.push("/settings?section=connections&connectionsTab=tunnel")
-                      }
+                    onClick={() =>
+                      router.push("/settings?section=connections&connectionsTab=tunnel")
+                    }
                   >
                     {t("openCompanion")}
                   </Button>

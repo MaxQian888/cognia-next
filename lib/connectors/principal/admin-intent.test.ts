@@ -26,6 +26,104 @@ describe("runPrincipalAdminIntent", () => {
     __resetDbForTesting()
   })
 
+  describe("oauth-begin", () => {
+    const AUTHORIZED = {
+      authorizeUrl: "https://accounts.feishu.cn/open-apis/authen/v1/authorize?x=1",
+      state: "lark:lark-1:nonce",
+      redirectUri: "https://cognia.example/connectors/oauth/lark/callback",
+    }
+
+    function oauthDeps(overrides: Record<string, unknown> = {}) {
+      return {
+        ...deps(),
+        beginOAuth: jest.fn(async () => AUTHORIZED) as never,
+        publicBase: (() => "https://cognia.example") as never,
+        isDesktop: (() => false) as never,
+        ...overrides,
+      }
+    }
+
+    it("derives the relay redirect from the deployment's public base", async () => {
+      const d = oauthDeps()
+      const outcome = await runPrincipalAdminIntent({ adapterId: "lark-1", op: "oauth-begin" }, d)
+      expect(outcome).toEqual({ ok: true, result: AUTHORIZED })
+      // `/connectors` nest + the relay path — the address the Feishu console
+      // must have registered for a self-hosted install.
+      expect(d.beginOAuth).toHaveBeenCalledWith({
+        adapterId: "lark-1",
+        redirectUri: "https://cognia.example/connectors/oauth/lark/callback",
+      })
+    })
+
+    it("lets an explicit redirect win over the derived one", async () => {
+      const d = oauthDeps()
+      await runPrincipalAdminIntent(
+        {
+          adapterId: "lark-1",
+          op: "oauth-begin",
+          redirectUri: "  https://proxy.example/cognia/oauth/lark/callback  ",
+        },
+        d
+      )
+      expect(d.beginOAuth).toHaveBeenCalledWith({
+        adapterId: "lark-1",
+        redirectUri: "https://proxy.example/cognia/oauth/lark/callback",
+      })
+    })
+
+    it("refuses when neither an explicit nor a derivable redirect exists", async () => {
+      const d = oauthDeps({ publicBase: (() => undefined) as never })
+      expect(await runPrincipalAdminIntent({ adapterId: "lark-1", op: "oauth-begin" }, d)).toEqual({
+        ok: false,
+        error: "redirect_uri_unresolved",
+      })
+      expect(d.beginOAuth).not.toHaveBeenCalled()
+    })
+
+    it("has nothing to derive on a desktop host without a tunnel", async () => {
+      // The desktop reaches the internet through cloudflared; with no tunnel
+      // there is no public relay, and the settings dialog says so already.
+      const d = oauthDeps({ isDesktop: (() => true) as never })
+      expect(await runPrincipalAdminIntent({ adapterId: "lark-1", op: "oauth-begin" }, d)).toEqual({
+        ok: false,
+        error: "redirect_uri_unresolved",
+      })
+    })
+
+    it("reads the public base off the environment by default", async () => {
+      // The default deps are what the brain actually runs with; overriding
+      // them in every test would leave that wiring unexercised.
+      const previous = process.env.COGNIA_LARK_PUBLIC_BASE
+      process.env.COGNIA_LARK_PUBLIC_BASE = "https://env.example"
+      try {
+        const beginOAuth = jest.fn(async () => AUTHORIZED)
+        await runPrincipalAdminIntent(
+          { adapterId: "lark-1", op: "oauth-begin" },
+          { ...deps(), beginOAuth: beginOAuth as never }
+        )
+        expect(beginOAuth).toHaveBeenCalledWith({
+          adapterId: "lark-1",
+          redirectUri: "https://env.example/connectors/oauth/lark/callback",
+        })
+      } finally {
+        if (previous === undefined) delete process.env.COGNIA_LARK_PUBLIC_BASE
+        else process.env.COGNIA_LARK_PUBLIC_BASE = previous
+      }
+    })
+
+    it("passes a begin failure through as a short stable reason", async () => {
+      const d = oauthDeps({
+        beginOAuth: jest.fn(async () => {
+          throw new Error("app_id_missing")
+        }) as never,
+      })
+      expect(await runPrincipalAdminIntent({ adapterId: "lark-1", op: "oauth-begin" }, d)).toEqual({
+        ok: false,
+        error: "app_id_missing",
+      })
+    })
+  })
+
   it("rejects an unknown op", async () => {
     expect(await runPrincipalAdminIntent({ adapterId: "lark-1", op: "nope" }, deps())).toEqual({
       ok: false,

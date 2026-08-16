@@ -6,6 +6,13 @@
  * device-local fields cannot hitch a ride in otherwise valid actions.
  */
 
+import {
+  hasOnlyKeys,
+  isNonEmptyString as nonEmptyString,
+  isNonNegativeInteger as nonNegativeInteger,
+  isRecord,
+} from "./ref-safety"
+
 export const HOST_STATE_PROTOCOL_VERSION = 1 as const
 export const HOST_STATE_SESSION_CHANNEL_PREFIX = "cognia://target/" as const
 
@@ -970,21 +977,4 @@ function upsertDecision(
   request: HostStatePendingDecisionV1
 ): HostStatePendingDecisionV1[] {
   return [...decisions.filter((item) => item.requestId !== request.requestId), request]
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  const allow = new Set(allowed)
-  return Object.keys(value).every((key) => allow.has(key))
-}
-
-function nonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0
-}
-
-function nonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 }

@@ -23,6 +23,12 @@ use super::{
     BindMode, CompanionServerState, CompanionState, SharedState,
 };
 
+/// The single local tenant every desktop-paired device belongs to. Spelled once
+/// here because the grant commands below must address the same tenant the
+/// pairing commands enrolled the device into — a mismatch would write grants
+/// nothing looks up.
+const PAIRED_TENANT_ID: &str = "local_acct_a";
+
 // ---------------------------------------------------------------------------
 // Tauri command
 // ---------------------------------------------------------------------------
@@ -375,30 +381,127 @@ pub async fn companion_unrevoke_device(
     Ok(())
 }
 
-/// Grant or revoke a device's **remote-control** capability (Remote Session
-/// Control). Mirrors the Dexie `pairedDevices.allowRemoteControl` flag into
-/// the process-global [`super::control_allow_list`] consulted by the
-/// per-command gate in [`super::rpc`]. Takes effect immediately for in-flight
-/// requests after this command returns. Driven by the paired-devices card
-/// behind the biometric guard.
-#[tauri::command]
-pub async fn companion_set_remote_control(device_id: String, allowed: bool) -> Result<(), String> {
-    let acl = super::control_allow_list::global();
-    if allowed {
-        acl.allow(device_id);
-    } else {
-        acl.disallow(&device_id);
+// ---------------------------------------------------------------------------
+// Per-device elevated grants
+// ---------------------------------------------------------------------------
+//
+// All three toggles below write the SecurityStore's `capability_grants` table,
+// because that is the only thing the request path reads:
+// `remote_execution::authorize_capability` checks the manifest capability for
+// every command, and the two terminal gates (`rpc::ensure_terminal_rpc_authorized`,
+// `ws_terminal`) ask `has_capability(.., "terminal.open")` directly.
+//
+// They previously wrote a set of process-global in-memory allow lists that no
+// gate had consulted since authorization moved into the store — so the switches
+// reported granting a permission they were not granting. The headless half of
+// that migration had already landed (`cognia-server devices grant` writes the
+// store, and `migrate_legacy_device_grants` imports the retired JSON file); this
+// is the desktop half.
+
+/// Apply one elevated grant to a paired device.
+///
+/// Reads the live capability snapshot, adds or removes exactly the capabilities
+/// [`GrantKind::capabilities`] maps this grant onto, and writes the whole set
+/// back atomically. Additive/subtractive rather than a wholesale replace, so
+/// toggling terminal access cannot disturb an unrelated capability the device
+/// holds — including the `host.admin` grant the store refuses to let an owner
+/// device lose.
+///
+/// Takes effect on the very next request: the gates read the store, not a
+/// cached projection of it.
+fn apply_device_grant(
+    device_id: &str,
+    kind: super::device_grants::GrantKind,
+    allowed: bool,
+) -> Result<(), String> {
+    // An empty id is what an unauthenticated or malformed RPC context carries,
+    // so granting one would hand the capability to every such caller.
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
     }
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    let mut capabilities: std::collections::BTreeSet<String> = security
+        .capability_snapshot(PAIRED_TENANT_ID, device_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "paired device is unknown or revoked".to_string())?
+        .into_iter()
+        .collect();
+    for capability in kind.capabilities() {
+        if allowed {
+            capabilities.insert((*capability).to_string());
+        } else {
+            capabilities.remove(*capability);
+        }
+    }
+    security
+        .replace_device_capabilities(
+            PAIRED_TENANT_ID,
+            "local-trust-root",
+            device_id,
+            &capabilities.into_iter().collect::<Vec<_>>(),
+            unix_time_secs(),
+        )
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
-/// Re-seed the remote-control allow list at desktop boot from the persisted
-/// Dexie rows where `allowRemoteControl === true`. Replace semantics (not
-/// union) so a capability revoked while the process was down is not retained.
+/// Which elevated grants a paired device currently holds, for the
+/// paired-devices card.
+///
+/// The card used to render its switches from the Dexie mirror, which drifts
+/// from the store the moment a grant is changed anywhere else — the
+/// `cognia-server devices` CLI, the owner API, or the defaults a device
+/// receives at enrolment. Reporting the store keeps the switch position and the
+/// permission it describes the same fact.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceGrantSummary {
+    pub device_id: String,
+    pub control: bool,
+    pub agent_control: bool,
+    pub terminal: bool,
+}
+
 #[tauri::command]
-pub async fn companion_seed_remote_control(device_ids: Vec<String>) -> Result<(), String> {
-    super::control_allow_list::global().reseed(device_ids);
-    Ok(())
+pub async fn companion_list_device_grants() -> Result<Vec<DeviceGrantSummary>, String> {
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    let devices = security
+        .list_devices(PAIRED_TENANT_ID)
+        .map_err(|error| error.to_string())?;
+    Ok(devices
+        .into_iter()
+        .map(|device| {
+            // A grant counts as held only when the device has every capability
+            // it maps onto. A partial set is not the grant, and reporting it as
+            // one would put the switch back to describing something other than
+            // what the gates will allow.
+            let holds = |kind: super::device_grants::GrantKind| {
+                kind.capabilities()
+                    .iter()
+                    .all(|capability| device.capabilities.iter().any(|held| held == capability))
+            };
+            DeviceGrantSummary {
+                control: holds(super::device_grants::GrantKind::Control),
+                agent_control: holds(super::device_grants::GrantKind::AgentControl),
+                terminal: holds(super::device_grants::GrantKind::Terminal),
+                device_id: device.device_id,
+            }
+        })
+        .collect())
+}
+
+/// Grant or revoke a device's **remote-control** capability (Remote Session
+/// Control) — steering sessions, writing files, pushing commits. Driven by the
+/// paired-devices card behind the biometric guard.
+#[tauri::command]
+pub async fn companion_set_remote_control(device_id: String, allowed: bool) -> Result<(), String> {
+    apply_device_grant(
+        &device_id,
+        super::device_grants::GrantKind::Control,
+        allowed,
+    )
 }
 
 /// Grant or revoke a device's **agent-control** capability: starting and
@@ -410,66 +513,69 @@ pub async fn companion_seed_remote_control(device_ids: Vec<String>) -> Result<()
 /// approve a prompt had also handed out process execution.
 #[tauri::command]
 pub async fn companion_set_agent_control(device_id: String, allowed: bool) -> Result<(), String> {
-    // An empty id is what an unauthenticated or malformed RPC context carries,
-    // so storing one would hand agent control to every such caller. The CLI
-    // path (`device_grants::grant`) already refuses it; this is the same
-    // refusal on the desktop path.
-    if device_id.trim().is_empty() {
-        return Err("device_id is required".into());
-    }
-    let acl = super::control_allow_list::agent_control_global();
-    if allowed {
-        acl.allow(device_id);
-    } else {
-        acl.disallow(&device_id);
-    }
-    Ok(())
-}
-
-/// Re-seed the agent-control allow list at desktop boot from the persisted
-/// Dexie rows where `allowAgentControl === true`. Replace semantics, matching
-/// [`companion_seed_remote_control`].
-#[tauri::command]
-pub async fn companion_seed_agent_control(device_ids: Vec<String>) -> Result<(), String> {
-    super::control_allow_list::agent_control_global().reseed(device_ids);
-    Ok(())
+    apply_device_grant(
+        &device_id,
+        super::device_grants::GrantKind::AgentControl,
+        allowed,
+    )
 }
 
 /// Grant or revoke interactive terminal access for a paired device.
 ///
-/// This is deliberately separate from remote-control and agent-control. The
-/// settings UI performs system confirmation before invoking this command.
+/// Deliberately separate from remote-control and agent-control: it exposes an
+/// interactive shell, so neither adjacent capability may imply it. The settings
+/// UI performs system confirmation before invoking this command.
 #[tauri::command]
 pub async fn companion_set_remote_terminal(device_id: String, allowed: bool) -> Result<(), String> {
-    if device_id.trim().is_empty() {
-        return Err("device_id is required".into());
-    }
-    let acl = super::control_allow_list::terminal_global();
-    if allowed {
-        acl.allow(device_id);
-    } else {
-        acl.disallow(&device_id);
-    }
-    Ok(())
+    apply_device_grant(
+        &device_id,
+        super::device_grants::GrantKind::Terminal,
+        allowed,
+    )
 }
 
-/// Re-seed terminal grants from persisted paired-device rows at desktop boot.
+/// Import the desktop's legacy Dexie grant flags into the SecurityStore, once.
+///
+/// The desktop's pre-migration truth was `pairedDevices.allowRemoteControl` and
+/// its two siblings, re-projected onto in-memory lists at every boot. Those
+/// lists are gone, so without this import an upgrading user would silently lose
+/// grants they had made. It shares the marker with the headless import in
+/// [`super::security_store::SecurityStore::migrate_legacy_device_grants`], so it
+/// runs at most once per host and a grant revoked afterwards can never be
+/// resurrected by a stale Dexie row on the next launch.
+///
+/// Returns whether the import actually ran.
 #[tauri::command]
-pub async fn companion_seed_remote_terminal(device_ids: Vec<String>) -> Result<(), String> {
-    super::control_allow_list::terminal_global().reseed(
-        device_ids
-            .into_iter()
-            .filter(|device_id| !device_id.trim().is_empty())
-            .collect(),
-    );
-    Ok(())
+pub async fn companion_migrate_legacy_device_grants(
+    control: Vec<String>,
+    agent_control: Vec<String>,
+    terminal: Vec<String>,
+) -> Result<bool, String> {
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    security
+        .migrate_legacy_device_grants(&control, &agent_control, &terminal, unix_time_secs())
+        .map_err(|error| error.to_string())
 }
 
+/// Grant or revoke opt-in macOS Locked Use for a paired device.
+///
+/// **Dormant on purpose** — unlike the three grants above, this one does not
+/// write the SecurityStore, because its enforcement point is not the RPC
+/// capability gate. It writes [`super::locked_use_allow_list`], whose reader is
+/// `LockedUseController`; that controller is complete but unreachable until the
+/// macOS native edge ships. The paired-devices card renders this switch
+/// disabled and labelled unavailable so it cannot imply otherwise. Read
+/// [`super::locked_use_allow_list`]'s module docs before changing any of that —
+/// the three axes have to move together.
 #[tauri::command]
 pub async fn companion_set_locked_computer_use(
     device_id: String,
     allowed: bool,
 ) -> Result<(), String> {
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
+    }
     let acl = super::locked_use_allow_list::global();
     if allowed {
         acl.allow(device_id);
@@ -479,9 +585,17 @@ pub async fn companion_set_locked_computer_use(
     Ok(())
 }
 
+/// Re-seed Locked Use grants at desktop boot. Still Dexie-projected rather than
+/// store-backed, because the list it feeds is in-memory and dormant — see
+/// [`companion_set_locked_computer_use`].
 #[tauri::command]
 pub async fn companion_seed_locked_computer_use(device_ids: Vec<String>) -> Result<(), String> {
-    super::locked_use_allow_list::global().reseed(device_ids);
+    super::locked_use_allow_list::global().reseed(
+        device_ids
+            .into_iter()
+            .filter(|device_id| !device_id.trim().is_empty())
+            .collect(),
+    );
     Ok(())
 }
 
@@ -489,72 +603,26 @@ pub async fn companion_seed_locked_computer_use(device_ids: Vec<String>) -> Resu
 // Event-channel registration (M2.6)
 // ---------------------------------------------------------------------------
 
-/// Register the default set of Tauri event channels that the companion API
-/// should forward to connected WebSocket clients.
+/// Bridge every catalogued Tauri event channel into the companion
+/// [`EventBus`].
 ///
 /// Called once from [`companion_server_start`] before the axum server is
-/// spawned.  Adding a channel here is the canonical way to expose a new
-/// Tauri event to mobile clients.
+/// spawned. The channel list itself lives in
+/// [`event_channels::EVENT_CHANNELS`](super::event_channels::EVENT_CHANNELS)
+/// — registering here only decides whether a Tauri event can reach the bus,
+/// while whether it then reaches a given client is the connection's
+/// subscription (and that channel's audience) to decide.
+///
+/// Splitting those two questions is what let this list grow past the original
+/// eighteen entries. Before the subscription existed, registering a channel
+/// meant broadcasting it to every connected device, so each addition had to be
+/// weighed against the bandwidth and exposure it imposed on clients that never
+/// asked for it. Now everything added is `default_on: false` and reaches only
+/// a client that named it.
 pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus>) {
-    // Primary chat-streaming channel — the most latency-sensitive event.
-    register_tauri_event(app, Arc::clone(&bus), "claude://message");
-    // Phase A3 — fine-grained message mutation events emitted by the
-    // JS-side `messageRepository` (lib/db/plugin-bridge.ts). Mobile WS
-    // subscribers observe these to keep their session view in sync.
-    register_tauri_event(app, Arc::clone(&bus), "claude://message-added");
-    register_tauri_event(app, Arc::clone(&bus), "claude://message-updated");
-    register_tauri_event(app, Arc::clone(&bus), "claude://message-deleted");
-    // Transcript V1 invalidation contains only session identity + monotonic
-    // revision. Clients reconcile the bounded newest page on receipt.
-    register_tauri_event(app, Arc::clone(&bus), "transcript://revision");
-    // Remote Session Control — /goal lifecycle status so a remote watcher
-    // sees pause / resume / stop / completion transitions live.
-    register_tauri_event(app, Arc::clone(&bus), "goal://status");
-    // Remote Session Control — host computer-use HITL consent prompts so a
-    // remote watcher can render and resolve them via `automation_consent_respond`.
-    register_tauri_event(app, Arc::clone(&bus), AUTOMATION_CONSENT_CHANNEL);
-    // Server OCR and desktop OCR share one progress channel. Headless emits
-    // directly into EventBus; desktop forwards the Tauri event here.
-    register_tauri_event(app, Arc::clone(&bus), "ocr://download-progress");
-    // Pairing-lifecycle events — useful for multi-device observation.
-    register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
-    // ADR-0061 P2 — live workflow run-status frames (every transition incl.
-    // per-step lastStepId advances). Emitted by the TS
-    // `lib/workflow/runtime/companion-run-events.ts` funnel.
-    register_tauri_event(app, Arc::clone(&bus), "workflow://run-status");
-    // ADR-0061 P2 — HITL approval gate lifecycle: full request frames for
-    // foreground devices (title/message ride the authenticated WS only) and
-    // resolution frames so pending lists clear immediately. Emitted by
-    // `lib/workflow/runtime/approval-notify.ts`.
-    register_tauri_event(app, Arc::clone(&bus), "workflow://approval-request");
-    register_tauri_event(app, Arc::clone(&bus), "workflow://approval-resolved");
-    // ADR-0061 P3 — desktop-issued remote step requests. Full params ride
-    // the authenticated WS only; the device answers via the
-    // `workflow_step_result` RPC. Emitted by
-    // `lib/workflow/runtime/remote-step-broker.ts`.
-    register_tauri_event(app, Arc::clone(&bus), "workflow://step-execute");
-    // ADR-0061 P2 — sync invalidation. The mobile `installEventDrivenSync`
-    // has subscribed to this channel since ADR-0027; the desktop now emits
-    // it (terminal workflow runs → { table: "workflowRuns" }) so the phone
-    // re-pulls exactly when data changed instead of waiting for the next
-    // foreground/resume/network trigger.
-    register_tauri_event(app, Arc::clone(&bus), "sync://invalidate");
-    // ADR-0038 — repo change signal from the native git watcher
-    // (`git/watcher.rs`). Remote source-control clients can't run
-    // `git_watch_start` (it needs the Tauri watcher state), so this forwarded
-    // frame is their only push-based refresh trigger; the desktop StatusBar
-    // owns the watcher lifecycle.
-    register_tauri_event(app, Arc::clone(&bus), "git://status-changed");
-    // Task-scoped resource invalidations carry only ids, paths, and summaries;
-    // clients fetch file bodies through the bounded resource RPCs.
-    register_tauri_event(app, Arc::clone(&bus), crate::task_workspace::RESOURCE_EVENT);
-    // ADR-0009 — live agent-fleet snapshot. A phone / companion browser watching
-    // the fleet subscribes to this to mirror the desktop island in real time
-    // (backfill via the `fleet_get_snapshot` RPC). Full-snapshot semantics, so
-    // no push trigger — it fires on every tool call and would spam notifications.
-    register_tauri_event(app, Arc::clone(&bus), crate::fleet::UPDATE_EVENT);
-    // Heartbeat / presence signal emitted by the JWT middleware on each request.
-    register_tauri_event(app, bus, "companion://device-seen");
+    for channel in super::event_channels::tauri_forwarded_channels() {
+        register_tauri_event(app, Arc::clone(&bus), channel);
+    }
     // Phase B4 — push fan-out for events worth notifying about while the
     // phone is offline (WS not subscribed).
     register_push_trigger(app, "claude://message-added");
@@ -1390,35 +1458,213 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn remote_terminal_grants_reject_empty_ids_and_support_revoke_and_reseed() {
-        let acl = super::super::control_allow_list::terminal_global();
-        acl.clear();
-
-        assert!(companion_set_remote_terminal("   ".into(), true)
-            .await
-            .is_err());
-        companion_set_remote_terminal("terminal-device".into(), true)
-            .await
-            .unwrap();
-        assert!(acl.is_allowed("terminal-device"));
-        companion_set_remote_terminal("terminal-device".into(), false)
-            .await
-            .unwrap();
-        assert!(!acl.is_allowed("terminal-device"));
-
-        companion_seed_remote_terminal(vec!["seeded-terminal".into(), "".into(), "   ".into()])
-            .await
-            .unwrap();
-        assert!(acl.is_allowed("seeded-terminal"));
-        assert!(!acl.is_allowed(""));
-        assert!(!acl.is_allowed("   "));
-
-        acl.clear();
-    }
-
     #[test]
     fn commands_module_compiles() {}
+
+    /// Register a paired owner device in a fresh in-memory store and install it
+    /// as the process-global one. Returns the device id.
+    fn install_store_with_device(device_id: &str) -> std::sync::Arc<security_store::SecurityStore> {
+        let store = security_store::SecurityStore::in_memory().expect("in-memory store");
+        let now = unix_time_secs();
+        let challenge = store
+            .issue_challenge(PAIRED_TENANT_ID, now, 600)
+            .expect("challenge");
+        let invitation = store
+            .create_owner_invitation(PAIRED_TENANT_ID, "local-trust-root", now, 600)
+            .expect("invitation");
+        store
+            .register_owner_device(
+                PAIRED_TENANT_ID,
+                &invitation,
+                &challenge.id,
+                &challenge.nonce,
+                device_id,
+                "Owner phone",
+                "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----",
+                &format!("thumb-{device_id}"),
+                now,
+            )
+            .expect("register");
+        security_store::install_security_store(Some(store.clone()));
+        store
+    }
+
+    fn holds(store: &security_store::SecurityStore, device_id: &str, capability: &str) -> bool {
+        store
+            .has_capability(PAIRED_TENANT_ID, device_id, capability)
+            .expect("capability lookup")
+    }
+
+    /// The terminal toggle must move the capability the terminal gates read.
+    ///
+    /// This is the whole point of the command: `rpc::ensure_terminal_rpc_authorized`
+    /// and `ws_terminal` both ask the store for `terminal.open`, so a toggle
+    /// that writes anywhere else grants nothing while claiming to.
+    #[tokio::test]
+    async fn revoking_terminal_access_refuses_the_device_at_the_terminal_gate() {
+        let _guard = security_store::test_guard();
+        let device = "terminal-gate-device";
+        let store = install_store_with_device(device);
+
+        companion_set_remote_terminal(device.into(), true)
+            .await
+            .unwrap();
+        assert!(holds(&store, device, "terminal.open"));
+        // Remote terminal access is enabled on the host, and the device holds
+        // the grant → authorized.
+        assert!(super::super::rpc::terminal_rpc_authorization(device, true, true).is_ok());
+
+        companion_set_remote_terminal(device.into(), false)
+            .await
+            .unwrap();
+        assert!(!holds(&store, device, "terminal.open"));
+        // Same host, same device, grant withdrawn → refused. Before this
+        // command wrote the store, the revocation moved an in-memory list the
+        // gate never consulted and the device stayed authorized.
+        let refused = super::super::rpc::terminal_rpc_authorization(
+            device,
+            true,
+            holds(&store, device, "terminal.open"),
+        )
+        .expect_err("a device without terminal.open must be refused");
+        assert_eq!(refused.0, axum::http::StatusCode::FORBIDDEN);
+
+        security_store::install_security_store(None);
+    }
+
+    /// Toggling one grant must not disturb the others, or a user revoking
+    /// terminal access would silently also revoke file writes.
+    #[tokio::test]
+    async fn each_grant_moves_only_its_own_capabilities() {
+        let _guard = security_store::test_guard();
+        let device = "grant-isolation-device";
+        let store = install_store_with_device(device);
+
+        for kind in super::super::device_grants::GrantKind::all() {
+            for capability in kind.capabilities() {
+                assert!(
+                    holds(&store, device, capability),
+                    "an owner device starts with {capability}"
+                );
+            }
+        }
+
+        companion_set_remote_terminal(device.into(), false)
+            .await
+            .unwrap();
+        assert!(!holds(&store, device, "terminal.open"));
+        // The other two grants are untouched...
+        for capability in super::super::device_grants::GrantKind::Control.capabilities() {
+            assert!(holds(&store, device, capability), "{capability} survived");
+        }
+        for capability in super::super::device_grants::GrantKind::AgentControl.capabilities() {
+            assert!(holds(&store, device, capability), "{capability} survived");
+        }
+        // ...and so is the owner grant the store refuses to let an owner lose.
+        assert!(holds(&store, device, "host.admin"));
+
+        companion_set_agent_control(device.into(), false)
+            .await
+            .unwrap();
+        assert!(!holds(&store, device, "process.spawn"));
+        assert!(holds(&store, device, "workspace.write"));
+
+        security_store::install_security_store(None);
+    }
+
+    #[tokio::test]
+    async fn grants_refuse_an_empty_device_id_rather_than_widening_to_every_caller() {
+        let _guard = security_store::test_guard();
+        install_store_with_device("some-other-device");
+        // An empty id is what an unauthenticated or malformed context carries.
+        for allowed in [true, false] {
+            assert!(companion_set_remote_terminal("   ".into(), allowed)
+                .await
+                .is_err());
+            assert!(companion_set_remote_control("".into(), allowed)
+                .await
+                .is_err());
+            assert!(companion_set_agent_control("  ".into(), allowed)
+                .await
+                .is_err());
+        }
+        security_store::install_security_store(None);
+    }
+
+    /// An unknown device must be an error, not a silent no-op: a toggle that
+    /// reports success while writing nothing is the failure mode this whole
+    /// change exists to remove.
+    #[tokio::test]
+    async fn granting_to_an_unknown_device_surfaces_instead_of_succeeding_silently() {
+        let _guard = security_store::test_guard();
+        install_store_with_device("known-device");
+        assert!(companion_set_remote_terminal("never-paired".into(), true)
+            .await
+            .is_err());
+        security_store::install_security_store(None);
+    }
+
+    /// The Locked Use toggle is the one grant that is still dormant, and it
+    /// must stay visibly dormant: it writes its own in-memory list and must
+    /// never quietly acquire a SecurityStore capability, which would make it
+    /// live without the UI or the docs moving with it. See
+    /// `locked_use_allow_list`'s module docs.
+    #[tokio::test]
+    async fn locked_use_stays_out_of_the_capability_store() {
+        let _guard = security_store::test_guard();
+        let device = "locked-use-device";
+        let store = install_store_with_device(device);
+        let before = store
+            .capability_snapshot(PAIRED_TENANT_ID, device)
+            .expect("snapshot")
+            .expect("device");
+
+        companion_set_locked_computer_use(device.into(), true)
+            .await
+            .unwrap();
+        assert!(super::super::locked_use_allow_list::global().is_allowed(device));
+        assert_eq!(
+            store
+                .capability_snapshot(PAIRED_TENANT_ID, device)
+                .expect("snapshot")
+                .expect("device"),
+            before,
+            "Locked Use must not grant a capability while its enforcement point is unshipped"
+        );
+
+        companion_set_locked_computer_use(device.into(), false)
+            .await
+            .unwrap();
+        assert!(!super::super::locked_use_allow_list::global().is_allowed(device));
+        assert!(companion_set_locked_computer_use("  ".into(), true)
+            .await
+            .is_err());
+        security_store::install_security_store(None);
+    }
+
+    /// The card reads the store rather than the Dexie mirror, so the switch
+    /// position and the permission it describes are the same fact.
+    #[tokio::test]
+    async fn listed_grants_report_the_store() {
+        let _guard = security_store::test_guard();
+        let device = "listed-grants-device";
+        install_store_with_device(device);
+
+        companion_set_agent_control(device.into(), false)
+            .await
+            .unwrap();
+        let summary = companion_list_device_grants()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.device_id == device)
+            .expect("the paired device is listed");
+        assert!(summary.control);
+        assert!(summary.terminal);
+        assert!(!summary.agent_control);
+
+        security_store::install_security_store(None);
+    }
 
     fn empty_data() -> serde_json::Map<String, serde_json::Value> {
         serde_json::Map::new()

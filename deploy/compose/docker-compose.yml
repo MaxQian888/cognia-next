@@ -92,6 +92,17 @@ services:
       COGNIA_LOGTO_WEB_CLIENT_ID: ${COGNIA_LOGTO_WEB_CLIENT_ID:-}
       COGNIA_LOGTO_REQUIRED_SCOPES: ${COGNIA_LOGTO_REQUIRED_SCOPES:-}
       COGNIA_LOGTO_JWKS_TTL_SECS: ${COGNIA_LOGTO_JWKS_TTL_SECS:-}
+      # ── Lark / Feishu entry surfaces (ADR-0091) — OFF unless PUBLIC_BASE is
+      # set. It is the origin Feishu redirects back to, so it must match the
+      # 重定向 URL registered in the developer console
+      # (`<base>/integrations/lark/web/callback`) exactly. With the tls
+      # profile that is `https://${COGNIA_DOMAIN}`; Caddy already proxies
+      # `/integrations/*` and `/connectors/*` here. WEB_BASE only differs in a
+      # split-origin deployment — same-origin installs leave it empty and the
+      # server falls back to PUBLIC_BASE. Malformed values are fatal at
+      # startup rather than a 503 discovered inside a Feishu client.
+      COGNIA_LARK_PUBLIC_BASE: ${COGNIA_LARK_PUBLIC_BASE:-}
+      COGNIA_LARK_WEB_BASE: ${COGNIA_LARK_WEB_BASE:-}
       COGNIA_SIGNALING_URL: ${COGNIA_SIGNALING_URL:-ws://signaling:7892/signaling}
       COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
       COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}

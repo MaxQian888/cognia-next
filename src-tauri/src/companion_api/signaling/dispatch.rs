@@ -9,8 +9,12 @@
 //!   over the same data channel.
 //! - **Outbound** (desktop → mobile): the dispatcher subscribes to the
 //!   `EventBus` and forwards every `EventFrame` as a JSON envelope
-//!   `{ kind: "event", event, seq, payload }`. The mobile client tracks
-//!   per-channel cursors on its end (see `lib/tauri/transport-rtc.ts`).
+//!   `{ kind: "event", event, seq, payload }`. Consecutive same-channel frames
+//!   inside a 50 ms window travel together as
+//!   `{ kind: "event-batch", event, seq_from, seq_to, frames: [...] }`
+//!   (ADR-0127 §2, `companion_api::event_batcher`); a lone frame keeps the
+//!   plain shape. The mobile client tracks per-channel cursors on its end
+//!   (see `lib/tauri/transport-rtc.ts`).
 //!
 //! The shared idempotency ledger is keyed by
 //! `(device_id, method, idempotency_key)` and includes a parameter digest.
@@ -26,6 +30,8 @@ use tokio::sync::mpsc;
 
 use super::peer::PeerSession;
 use crate::companion_api::{
+    event_batcher::{chunk_replay, EventBatcher},
+    event_bus::EventFrame,
     middleware::DeviceContext,
     remote_execution::{self, ExecutionOutcome, ExecutionRequest, ExecutionTransport},
     security_store::security_store,
@@ -83,6 +89,44 @@ struct BinaryResourceStart<'a> {
 pub enum OutboundFrame {
     Response(ResponseFrame),
     Event(EventOutbound),
+    EventBatch(EventBatchOutbound),
+}
+
+/// ADR-0127 §2: several consecutive same-channel frames in one DataChannel
+/// message. `frames` keeps the per-frame `EventOutbound` shape so the client
+/// can feed each one through its existing single-frame handler.
+#[derive(Debug, Serialize)]
+pub struct EventBatchOutbound {
+    /// Always `"event-batch"`.
+    pub kind: &'static str,
+    pub event: String,
+    pub seq_from: u64,
+    pub seq_to: u64,
+    pub frames: Vec<EventOutbound>,
+}
+
+/// Encode one batch as an outbound frame: a lone frame is a plain `event`.
+pub fn outbound_for_batch(batch: Vec<EventFrame>) -> Option<OutboundFrame> {
+    let mut frames: Vec<EventOutbound> = batch
+        .into_iter()
+        .map(|frame| EventOutbound {
+            kind: "event",
+            event: frame.event_type,
+            seq: frame.seq,
+            payload: frame.payload,
+        })
+        .collect();
+    match frames.len() {
+        0 => None,
+        1 => frames.pop().map(OutboundFrame::Event),
+        _ => Some(OutboundFrame::EventBatch(EventBatchOutbound {
+            kind: "event-batch",
+            event: frames[0].event.clone(),
+            seq_from: frames[0].seq,
+            seq_to: frames[frames.len() - 1].seq,
+            frames,
+        })),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -117,6 +161,11 @@ enum EventControl {
     Resume { since: u64 },
     #[serde(rename = "event-ack")]
     Ack { seq: u64 },
+    /// Widen or narrow which channels this data channel receives. The WebRTC
+    /// twin of the `/ws/events` `subscribe` frame, so a peer does not have to
+    /// fall back to the WebSocket just to opt into a stream.
+    #[serde(rename = "event-subscribe")]
+    Subscribe(crate::companion_api::event_channels::SubscribeRequest),
 }
 
 /// Spawn the dispatcher task. The returned `JoinHandle` is cancelled by
@@ -155,6 +204,14 @@ async fn run(
              events still forward, inbound RPCs answer service_unavailable"
         );
     }
+    // Channels this data channel receives. WebRTC peers are always paired
+    // devices — the loopback brain reaches the bus over `/internal/events`,
+    // never over a peer connection — so `Device` is both correct and the
+    // conservative reading if that ever stops being true.
+    let mut subscription = crate::companion_api::event_channels::EventSubscription::defaults_for(
+        crate::companion_api::event_channels::ConnectionScope::Device,
+    );
+
     // Subscribe to EventBus with since=None → start at high-water mark
     // (matches the existing WS subscription default behaviour).
     use crate::companion_api::event_bus::SubscribeResult;
@@ -175,10 +232,25 @@ async fn run(
     };
     let mut reassembler =
         crate::companion_api::signaling::datachannel_framing::ChunkReassembler::default();
+    // ADR-0127 §2: per-subscriber batching lives here, in the send loop.
+    let mut batcher = EventBatcher::new();
 
     loop {
         tokio::select! {
             biased;
+
+            // Batch window expired — flush what accumulated.
+            _ = batch_window(batcher.deadline()) => {
+                if let Some(batch) = batcher.take_due(tokio::time::Instant::now()) {
+                    if let Some(outbound) = outbound_for_batch(batch) {
+                        if let Err(e) = send_outbound(&peer, &outbound).await {
+                            log::warn!(
+                                "signaling::dispatch: forward event batch failed: {e}; data channel may be closed"
+                            );
+                        }
+                    }
+                }
+            }
 
             maybe_inbound = inbound_data.recv() => {
                 let Some(bytes) = maybe_inbound else { break };
@@ -204,22 +276,35 @@ async fn run(
             receiver, replay, ..
         } => {
                                             event_rx = receiver;
-                                            for frame in replay {
-                                                if !frame.visible_to(&device_id) {
-                                                    continue;
+                                            // Flush anything pending from the old
+                                            // subscription before the replay burst.
+                                            if let Some(pending) = batcher.drain() {
+                                                if let Some(outbound) = outbound_for_batch(pending) {
+                                                    let _ = send_outbound(&peer, &outbound).await;
                                                 }
-                                                let outbound = OutboundFrame::Event(EventOutbound {
-                                                    kind: "event",
-                                                    event: frame.event_type,
-                                                    seq: frame.seq,
-                                                    payload: frame.payload,
-                                                });
+                                            }
+                                            let visible: Vec<EventFrame> = replay
+                                                .into_iter()
+                                                .filter(|frame| {
+                                                    frame.visible_to(&device_id)
+                                                        && subscription.allows(&frame.event_type)
+                                                })
+                                                .collect();
+                                            for batch in chunk_replay(visible) {
+                                                let Some(outbound) = outbound_for_batch(batch) else {
+                                                    continue;
+                                                };
                                                 if send_outbound(&peer, &outbound).await.is_err() {
                                                     break;
                                                 }
                                             }
                                         }
                                         SubscribeResult::ResyncRequired => {
+                                            if let Some(pending) = batcher.drain() {
+                                                if let Some(outbound) = outbound_for_batch(pending) {
+                                                    let _ = send_outbound(&peer, &outbound).await;
+                                                }
+                                            }
                                             let _ = peer.send_bytes(
                                                 serde_json::to_vec(&json!({
                                                     "kind": "resync_required",
@@ -234,6 +319,28 @@ async fn run(
                                     log::trace!(
                                         "signaling::dispatch: device {device_id} acked event seq {seq}"
                                     );
+                                }
+                                EventControl::Subscribe(request) => {
+                                    let outcome = subscription.apply(&request);
+                                    // ADR-0127: flush pending batched frames before
+                                    // the control reply so a narrowing subscribe is
+                                    // never followed by frames from a dropped channel.
+                                    if let Some(pending) = batcher.drain() {
+                                        if let Some(outbound) = outbound_for_batch(pending) {
+                                            let _ = send_outbound(&peer, &outbound).await;
+                                        }
+                                    }
+                                    // Answer with the resulting set, refusals
+                                    // included. A peer that asked for a channel
+                                    // it may not have needs to hear so, not to
+                                    // wait on a stream that will never arrive.
+                                    let _ = peer.send_bytes(
+                                        serde_json::to_vec(&json!({
+                                            "kind": "event-subscribed",
+                                            "channels": outcome.channels,
+                                            "rejected": outcome.rejected,
+                                        })).unwrap_or_default()
+                                    ).await;
                                 }
                             }
                             continue;
@@ -268,27 +375,31 @@ async fn run(
                 use tokio::sync::broadcast::error::RecvError;
                 match recv_result {
                     Ok(frame) => {
-                        if !frame.visible_to(&device_id) {
+                        if !frame.visible_to(&device_id)
+                            || !subscription.allows(&frame.event_type)
+                        {
                             continue;
                         }
-                        let outbound = OutboundFrame::Event(EventOutbound {
-                            kind: "event",
-                            event: frame.event_type,
-                            seq: frame.seq,
-                            payload: frame.payload,
-                        });
-                        if let Err(e) = send_outbound(&peer, &outbound).await {
-                            log::warn!(
-                                "signaling::dispatch: forward event failed: {e}; data channel may be closed"
-                            );
-                            // Drain remaining events but stop forwarding —
-                            // the WS path will pick up once the DC is gone.
+                        for batch in batcher.push(frame, tokio::time::Instant::now()) {
+                            let Some(outbound) = outbound_for_batch(batch) else { continue };
+                            if let Err(e) = send_outbound(&peer, &outbound).await {
+                                log::warn!(
+                                    "signaling::dispatch: forward event failed: {e}; data channel may be closed"
+                                );
+                                // Drain remaining events but stop forwarding —
+                                // the WS path will pick up once the DC is gone.
+                            }
                         }
                     }
                     Err(RecvError::Lagged(n)) => {
                         log::warn!(
                             "signaling::dispatch: lagged {n} frames; requiring explicit resync"
                         );
+                        if let Some(pending) = batcher.drain() {
+                            if let Some(outbound) = outbound_for_batch(pending) {
+                                let _ = send_outbound(&peer, &outbound).await;
+                            }
+                        }
                         let _ = peer.send_bytes(
                             serde_json::to_vec(&json!({
                                 "kind": "resync_required",
@@ -540,6 +651,15 @@ fn revocation_reject(
     }
 }
 
+/// Sleep until the batch window closes; pends forever while idle so the
+/// `select!` arm never fires spuriously.
+async fn batch_window(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
 async fn send_outbound(
     peer: &PeerSession,
     frame: &OutboundFrame,
@@ -636,6 +756,36 @@ mod tests {
         assert!(text.contains(r#""kind":"event""#));
         assert!(text.contains(r#""event":"claude://session-event""#));
         assert!(text.contains(r#""seq":7"#));
+    }
+
+    /// ADR-0127 §2: a batch of one stays a plain `event`; two or more become
+    /// `event-batch` whose inner frames keep the per-frame shape.
+    #[test]
+    fn outbound_for_batch_keeps_single_frames_plain_and_envelopes_runs() {
+        let mk = |seq: u64| EventFrame {
+            event_type: "claude://message".into(),
+            seq,
+            payload: json!({ "seq": seq }),
+            ts_ms: 0,
+            target_device_id: None,
+        };
+        assert!(outbound_for_batch(vec![]).is_none());
+
+        let one = serde_json::to_value(outbound_for_batch(vec![mk(3)]).unwrap()).unwrap();
+        assert_eq!(one["kind"], "event");
+        assert_eq!(one["seq"], 3);
+
+        let many =
+            serde_json::to_value(outbound_for_batch(vec![mk(3), mk(4), mk(6)]).unwrap()).unwrap();
+        assert_eq!(many["kind"], "event-batch");
+        assert_eq!(many["event"], "claude://message");
+        assert_eq!(many["seq_from"], 3);
+        assert_eq!(many["seq_to"], 6);
+        let frames = many["frames"].as_array().unwrap();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[0]["kind"], "event");
+        assert_eq!(frames[2]["seq"], 6);
+        assert_eq!(frames[2]["payload"]["seq"], 6);
     }
 
     #[test]

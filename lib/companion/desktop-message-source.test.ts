@@ -594,9 +594,7 @@ describe("readMessagesPage", () => {
 
     const page = await readMessagesPage("legacy-session", 1, 0)
 
-    expect((page.rows[0]?.parts[0] as { url?: string }).url).toBe(
-      "data:image/png;base64,AQID"
-    )
+    expect((page.rows[0]?.parts[0] as { url?: string }).url).toBe("data:image/png;base64,AQID")
   })
 })
 

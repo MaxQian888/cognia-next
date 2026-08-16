@@ -13,7 +13,7 @@
  * Returns AsyncGenerator<SocketModeDelivery>.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen } from "@/lib/connectors/events"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
@@ -184,13 +184,16 @@ export async function* startSocketMode(
     let wakeResolve: (() => void) | null = null
     let wsEnded = false
 
-    const unlisten = await listen<string>(`connectors://ws/${handleId}/message`, (event) => {
-      queue.push(event.payload)
-      wakeResolve?.()
-      wakeResolve = null
-    })
+    const unlisten = await connectorListen<string>(
+      `connectors://ws/${handleId}/message`,
+      (event) => {
+        queue.push(event.payload)
+        wakeResolve?.()
+        wakeResolve = null
+      }
+    )
 
-    const unlistenClose = await listen<void>(`connectors://ws/${handleId}/close`, () => {
+    const unlistenClose = await connectorListen<void>(`connectors://ws/${handleId}/close`, () => {
       wsEnded = true
       wakeResolve?.()
       wakeResolve = null

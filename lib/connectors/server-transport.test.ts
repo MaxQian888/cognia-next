@@ -2,7 +2,13 @@
  * @jest-environment node
  */
 
-import { CONNECTORS_SERVER_PORT, adapterNeedsInboundServer } from "./server-transport"
+import {
+  CONNECTORS_SERVER_PORT,
+  HEADLESS_CONNECTORS_PREFIX,
+  adapterNeedsInboundServer,
+  connectorWebhookPath,
+  resolveConnectorsIngressBase,
+} from "./server-transport"
 import type { TransportMode } from "@/types/connectors/adapter"
 
 function adapter(modes: TransportMode[]) {
@@ -43,5 +49,64 @@ describe("adapterNeedsInboundServer", () => {
     ["matrix longpoll", ["longpoll"], "longpoll", false],
   ])("%s → %s", (_label, modes, transportMode, expected) => {
     expect(adapterNeedsInboundServer(adapter(modes), row(transportMode))).toBe(expected)
+  })
+})
+
+describe("connectorWebhookPath", () => {
+  it("matches the Rust route shape `/webhook/{type}/{id}`", () => {
+    expect(connectorWebhookPath("lark", "adp_1")).toBe("/webhook/lark/adp_1")
+  })
+})
+
+describe("resolveConnectorsIngressBase", () => {
+  it("uses the cloudflared tunnel on the desktop", () => {
+    expect(
+      resolveConnectorsIngressBase({ isDesktop: true, tunnelUrl: "https://t.example.com" })
+    ).toBe("https://t.example.com")
+  })
+
+  it("returns null on the desktop when no tunnel is running", () => {
+    // A real state, not a misconfiguration: nothing is publicly reachable yet.
+    expect(resolveConnectorsIngressBase({ isDesktop: true, tunnelUrl: null })).toBeNull()
+    expect(resolveConnectorsIngressBase({ isDesktop: true, tunnelUrl: "  " })).toBeNull()
+  })
+
+  it("nests under /connectors on a cloud host", () => {
+    // The headless companion mounts the connectors router under a prefix; the
+    // desktop serves it standalone. Deriving one from the other 404s.
+    expect(
+      resolveConnectorsIngressBase({ isDesktop: false, publicBase: "https://app.example.com" })
+    ).toBe(`https://app.example.com${HEADLESS_CONNECTORS_PREFIX}`)
+  })
+
+  it("strips trailing slashes from either source", () => {
+    expect(
+      resolveConnectorsIngressBase({ isDesktop: true, tunnelUrl: "https://t.example.com//" })
+    ).toBe("https://t.example.com")
+    expect(
+      resolveConnectorsIngressBase({ isDesktop: false, publicBase: "https://app.example.com/" })
+    ).toBe(`https://app.example.com${HEADLESS_CONNECTORS_PREFIX}`)
+  })
+
+  it("ignores the tunnel on a cloud host, and the origin on the desktop", () => {
+    expect(
+      resolveConnectorsIngressBase({
+        isDesktop: false,
+        tunnelUrl: "https://t.example.com",
+        publicBase: "https://app.example.com",
+      })
+    ).toBe(`https://app.example.com${HEADLESS_CONNECTORS_PREFIX}`)
+    expect(
+      resolveConnectorsIngressBase({
+        isDesktop: true,
+        tunnelUrl: "https://t.example.com",
+        publicBase: "https://app.example.com",
+      })
+    ).toBe("https://t.example.com")
+  })
+
+  it("returns null on a cloud host with no configured origin", () => {
+    expect(resolveConnectorsIngressBase({ isDesktop: false })).toBeNull()
+    expect(resolveConnectorsIngressBase({ isDesktop: false, publicBase: "" })).toBeNull()
   })
 })

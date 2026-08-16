@@ -34,10 +34,12 @@ import type {
 } from "./compression"
 import type { AgentCapabilityId, AgentExecutionSendSpec } from "./agent-execution"
 import type { ClaudeAgentSdkOptionsV1 } from "./claude-agent-sdk-options"
+import type { OnboardingProfile, OnboardingProgress } from "./onboarding"
 
 export * from "./transcript"
 export * from "./working-set"
 export * from "./host-state"
+export * from "./onboarding"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -1252,8 +1254,6 @@ export const SESSION_CONTROL_CAPABILITIES: Record<SessionControlMethod, AgentCap
  * (`error` is a stable code: `no_active_session` | `unsupported_provider` |
  * `unknown_method` | a thrown message). Fans out on `claude://message`.
  */
-export interface ControlResponseEvent {
-  type: "control_response"
 /**
  * Sidecar → renderer acknowledgement of an idempotent command (ADR-0090
  * `commandId` dedupe, consumed per ADR-0127). Emitted on `claude://message`
@@ -1268,6 +1268,8 @@ export interface CommandAckEvent {
   duplicate: true
 }
 
+export interface ControlResponseEvent {
+  type: "control_response"
   sessionId: string
   requestId: string
   ok: boolean
@@ -1510,9 +1512,9 @@ export type ClaudeEvent =
   | ProtocolAdapterCancelEvent
   | ToolResultReviewEvent
   | ControlResponseEvent
+  | CommandAckEvent
   | SessionApiResponseEvent
   | FeatureCallEvent
-  | CommandAckEvent
   | McpLogEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
@@ -2351,10 +2353,89 @@ export type ConversationSidebarTitleMotion = "hover" | "off"
 export type ConversationGroupBy = "workspace" | "team" | "date" | "agent" | "none"
 
 /**
+ * Order applied *inside* each conversation-list section, under the pinned /
+ * folder / grouping split.
+ *
+ * - `"recent"` — last activity, newest first. The default, and the only mode in
+ *   which a drag-reordered `manualOrder` is honored: every other mode derives
+ *   its order from session data, so a hand-placed row would contradict the
+ *   axis the user just asked to sort by (and the list would silently ignore
+ *   the choice for those rows).
+ * - `"oldest"` — last activity, oldest first.
+ * - `"created"` — creation time, newest first. Diverges from `"recent"` for
+ *   long-running conversations that were revived.
+ * - `"title"` — title A→Z, locale-aware.
+ * - `"unread"` — unread conversations first, then by last activity.
+ */
+export type ConversationSortBy = "recent" | "oldest" | "created" | "title" | "unread"
+
+/** Which conversation kinds a filter admits. `"all"` = no kind restriction. */
+export type ConversationKindFilter = "all" | "dm" | "team"
+
+/**
+ * Quick filters AND-ed on top of the archive view and the search query.
+ *
+ * Every field is optional and falsy-by-default so an absent object means "no
+ * filtering" — read sites normalize through
+ * `lib/chat/conversation-filters.ts:resolveConversationFilters` rather than
+ * reading the fields raw.
+ */
+export interface ConversationFilters {
+  /** Only conversations carrying unread messages. */
+  unread?: boolean
+  /** Only pinned conversations. */
+  pinned?: boolean
+  /** Only conversations branched off another (`parentSessionId` set). */
+  branched?: boolean
+  /** Restrict to one conversation kind. Defaults to `"all"`. */
+  kind?: ConversationKindFilter
+  /**
+   * Workspace (`projectId`) allow-list; empty = any. The sentinel
+   * `lib/chat/conversation-filters.ts:CONVERSATION_FILTER_UNASSIGNED` admits
+   * conversations that carry no workspace.
+   */
+  workspaceIds?: string[]
+  /** Folder (`folderId`) allow-list; empty = any. Same unassigned sentinel. */
+  folderIds?: string[]
+  /** Bound character (`characterId`) allow-list; empty = any. Same sentinel. */
+  agentIds?: string[]
+  /** Team (`teamId`) allow-list; empty = any. */
+  teamIds?: string[]
+  /** Model id allow-list (resolved through the character/default fallback); empty = any. */
+  models?: string[]
+  /** Provider id allow-list (same fallback chain); empty = any. */
+  providers?: string[]
+  /** Last-activity window. Defaults to `"any"`. */
+  activity?: ConversationActivityFilter
+}
+
+/**
+ * Last-activity window for the conversation list. Buckets follow the date
+ * grouping (`lib/chat/conversation-list-model.ts:dateBucketFor`): `"week"` is
+ * today plus the previous seven calendar days, `"month"` the previous thirty,
+ * `"older"` everything beyond that.
+ */
+export type ConversationActivityFilter = "any" | "today" | "week" | "month" | "older"
+
+/**
+ * A named, reusable combination of conversation filters ("unread team chats
+ * this week"). Presets are user data — they live in
+ * {@link ConversationSidebarSettings.filterPresets} so they follow the profile
+ * across devices, unlike the *active* filters, which are layout state in the
+ * UI store.
+ */
+export interface ConversationFilterPreset {
+  id: string
+  name: string
+  filters: ConversationFilters
+  createdAt: number
+}
+
+/**
  * Behavior preferences for the conversation sidebar (ChannelList). All fields
  * optional; read sites derive the default with `?? <default>` so an absent
  * object (legacy settings) keeps today's behavior. Layout state (width, view,
- * collapsed folders) lives in `useUIStore`, not here.
+ * collapsed folders, active quick filters) lives in `useUIStore`, not here.
  */
 export interface ConversationSidebarSettings {
   /** Row density. Defaults to `"comfortable"`. */
@@ -2363,6 +2444,11 @@ export interface ConversationSidebarSettings {
   showPreview?: boolean
   /** Show each bound Agent/Team's configured image, emoji, and color. Defaults to on. */
   showCustomIcons?: boolean
+  /**
+   * Show the trailing last-activity timestamp on each row. Defaults to on — it
+   * is the field that makes a recency-ordered list legible.
+   */
+  showTimestamps?: boolean
   /**
    * @deprecated Superseded by {@link ConversationSidebarSettings.groupBy}. Kept
    * so a settings blob written before the grouping selector landed still means
@@ -2373,6 +2459,10 @@ export interface ConversationSidebarSettings {
   groupByDate?: boolean
   /** Primary grouping axis for the conversation list. Defaults to `"workspace"`. */
   groupBy?: ConversationGroupBy
+  /** Order applied inside each section. Defaults to `"recent"`. */
+  sortBy?: ConversationSortBy
+  /** Saved filter combinations, in creation order. Defaults to none. */
+  filterPresets?: ConversationFilterPreset[]
   /** Show per-conversation unread badges. Defaults to on. */
   showUnreadBadges?: boolean
   /** Whether search also matches message content (async). Defaults to title-only. */
@@ -2938,11 +3028,26 @@ export interface AppSettings {
   composerAssistance?: {
     /** Prompt enhancement (Wand) action. Defaults ON — click-only, no idle cost. */
     enhance?: { enabled?: boolean }
-    /** Inline ghost-text continuation as you type. Defaults OFF — opt-in. */
+    /**
+     * Inline ghost-text completion as you type. Two independent tiers, both
+     * served by the shared engine in `lib/chat/completion/inline/`:
+     */
     ghostText?: {
+      /**
+       * MODEL tier — an LLM-generated continuation of the draft. Defaults OFF
+       * (it bills a model on a debounce, so it stays opt-in).
+       */
       enabled?: boolean
-      /** Debounce before querying, ms. Default 500. Clamped [200, 2000]. */
+      /**
+       * LOCAL tier — completion from this session's input history and the
+       * slash-command names. Free and instant, so it defaults ON (`!== false`).
+       * Turning it off leaves only the model tier.
+       */
+      local?: boolean
+      /** Debounce before querying the model, ms. Default 500. Clamped [200, 2000]. */
       debounceMs?: number
+      /** How many ranked candidates can be cycled through. Default 5. */
+      maxCandidates?: number
     }
     /** AI starter prompts (empty state) + follow-up suggestions (post-reply). */
     suggestions?: {
@@ -3256,6 +3361,9 @@ export interface AppSettings {
     /**
      * Saved SSH connection metadata. Authentication material is never stored
      * here; `credentialRef` points at the native `cognia-ssh` keyring.
+     *
+     * `authMethod: "agent"` delegates the signature to a running `ssh-agent`
+     * and uses neither `credentialRef` nor `privateKeyPath`.
      */
     sshHosts?: Array<{
       id: string
@@ -3263,9 +3371,42 @@ export interface AppSettings {
       host: string
       port: number
       username: string
-      authMethod: "password" | "privateKey"
+      authMethod: "password" | "privateKey" | "agent"
       privateKeyPath?: string
       credentialRef?: string
+      /**
+       * Id of another entry in this list to reach the host through. The chain
+       * is walked outermost-first and each bastion authenticates and is
+       * host-key verified on its own account.
+       */
+      jumpHostId?: string | null
+      /**
+       * `-L` rules. Always bound to `127.0.0.1`; there is no wider bind to
+       * configure, because a LAN-reachable forward would relay strangers onto
+       * the remote network.
+       */
+      localForwards?: Array<{
+        id: string
+        localPort: number
+        remoteHost: string
+        remotePort: number
+        enabled: boolean
+      }>
+      /**
+       * `-R` rules. The remote bind is likewise forced to `127.0.0.1`, and
+       * each rule is off until deliberately enabled — a remote forward opens a
+       * listening socket on someone else's machine pointing back at this one.
+       * Neither these nor `localForwards` are ever included in a profile
+       * synchronized to the terminal host, so a phone or LAN client naming a
+       * profile id gets a shell and never a tunnel (ADR-0082 §8).
+       */
+      remoteForwards?: Array<{
+        id: string
+        remotePort: number
+        localHost: string
+        localPort: number
+        enabled: boolean
+      }>
     }>
     /**
      * xterm.js cursor shape. Defaults to `"block"`. Mapped 1:1 to the
@@ -3599,6 +3740,18 @@ export interface AppSettings {
     string,
     import("@/types/shell/workbench-rail").WorkbenchRailLayout
   >
+  /**
+   * Customization of the Context Workbench's *panel tabs* — one level below
+   * `workbenchRail`: the order of the panels inside an activity plus the ones
+   * the user removed from its tab strip.
+   *
+   * Hiding takes away the tab, never the panel — it stays in the workbench's
+   * resolved set, so the command palette, `Ctrl+Shift+E` and `Ctrl+1..7` still
+   * reach it. Same persistence path as `workbenchRail` (settings JSON, no Dexie
+   * migration). See `@/types/shell/workbench-panels` for the model and
+   * `@/lib/shell/workbench-panels` for the catalog + resolver.
+   */
+  workbenchPanels?: import("@/types/shell/workbench-panels").WorkbenchPanelLayout
   /**
    * Customization of the desktop title bar (the top window bar): the order of
    * its segments plus the ones the user removed. Lives in settings JSON (same
@@ -3976,6 +4129,14 @@ export interface AppSettings {
    * files. Tauri-only (web has no `dirPath`).
    */
   backupAutoSchedule?: BackupAutoSchedule
+  /**
+   * Remote backup destinations beyond WebDAV (spec 2026-08-16 scheduler
+   * host-neutral, D). Non-secret fields only — the GitHub token, the Google
+   * OAuth client secret and the Google refresh/access tokens live in the host
+   * keyring under the `backup-destinations` namespace
+   * (`lib/data/destinations/config.ts`).
+   */
+  backupDestinations?: BackupDestinationsSettings
 
   // ---- A2UI defaults (schema v13) ----
   /**
@@ -4129,14 +4290,6 @@ export interface AppSettings {
    *   reorder / inline edit / add / remove steps) instead of the static list.
    * - `interactiveHtmlStyle` — built-in visual preset for the interactive
    *   editor (mirrors `lib/agent/plan/plan-html.ts:PLAN_HTML_STYLES`).
-  /**
-   * Remote backup destinations beyond WebDAV (spec 2026-08-16 scheduler
-   * host-neutral, D). Non-secret fields only — the GitHub token, the Google
-   * OAuth client secret and the Google refresh/access tokens live in the host
-   * keyring under the `backup-destinations` namespace
-   * (`lib/data/destinations/config.ts`).
-   */
-  backupDestinations?: BackupDestinationsSettings
    */
   planSettings?: {
     requireApproval?: boolean
@@ -4171,13 +4324,28 @@ export interface AppSettings {
   /** Whether the user dismissed the first-time providers onboarding banner. */
   providerOnboardingDismissed?: boolean
   /**
-   * ISO 8601 timestamp recorded the first time the user dismissed or
-   * completed the desktop first-run onboarding dialog. Set on any exit path
-   * (skip, OAuth success, character pick, tour finish). The trigger
-   * predicate in `lib/onboarding/should-show.ts` treats any non-empty value
-   * as "do not show again" — re-entry happens via Settings only.
+   * @deprecated Read-only migration source, superseded by {@link onboarding}.
+   *
+   * ISO 8601 timestamp recorded the first time the user dismissed or completed
+   * the old desktop first-run onboarding *dialog*. It collapsed "finished",
+   * "bailed on step 1" and "hit Esc" into one value, which is why nothing
+   * writes it any more. `lib/onboarding/migrate-legacy.ts` reads it once and
+   * projects it to `onboarding.progress.path = "legacy_dismissed"`; the field
+   * itself is retained so the migration stays idempotent across devices and so
+   * an exported backup taken before the migration still restores meaningfully.
    */
   onboardingDismissedAt?: string
+  /**
+   * First-run onboarding completion bookkeeping (ADR-0122). Kept separate from
+   * {@link onboardingProfile} because the two sync differently and
+   * `SETTINGS_SYNC` classifies one entry per top-level key.
+   */
+  onboardingProgress?: OnboardingProgress
+  /**
+   * First-run onboarding personalization (ADR-0122) — the starter card the
+   * user picked and the character they ran it with.
+   */
+  onboardingProfile?: OnboardingProfile
 
   // ---- Provider routing (P4) ----
   /**
@@ -4585,6 +4753,59 @@ export interface BackupAutoSchedule {
   lastRunAt?: string
 }
 
+/**
+ * GitHub backup destination: encrypted snapshots are committed to a PRIVATE
+ * repository through the contents API. Public repositories are refused at
+ * configuration time and again before every upload.
+ */
+export interface GithubBackupDestinationSettings {
+  enabled: boolean
+  /** `owner/name`. */
+  repo: string
+  /** Branch to commit to; defaults to the repository's default branch. */
+  branch?: string
+  /** Directory inside the repo; default `cognia-backups`. */
+  path?: string
+  /**
+   * Where the token comes from: a stored auth session of the built-in
+   * `github-pat` / `github-app` providers, or a PAT saved in the keyring by
+   * the settings card. The token itself never lives here.
+   */
+  credential?:
+    | { kind: "auth-session"; providerId: "github-pat" | "github-app"; sessionId: string }
+    | { kind: "keyring" }
+  /** ISO timestamp of the last successful upload. */
+  lastSyncAt?: string
+  /** Last verified visibility (`private` required); refreshed on connect. */
+  lastVerifiedVisibility?: "private" | "public" | "unknown"
+}
+
+/**
+ * Google Drive backup destination (OAuth 2.0 device flow, `drive.file` scope).
+ * The user supplies their own OAuth client id (installed-app type); the client
+ * secret and the tokens are keyring-only.
+ */
+export interface GoogleDriveBackupDestinationSettings {
+  enabled: boolean
+  /** OAuth 2.0 client id of the user's Google Cloud "Desktop app" credential. */
+  clientId?: string
+  /** Drive folder name (created under My Drive when missing); default `Cognia Backups`. */
+  folderName?: string
+  /** Resolved folder id once created/found. */
+  folderId?: string
+  /** Google account email the tokens belong to (display only). */
+  accountEmail?: string
+  /** ISO timestamp of the last successful upload. */
+  lastSyncAt?: string
+  /** True once a refresh token has been stored (display only; the tokens live in the keyring). */
+  connected?: boolean
+}
+
+export interface BackupDestinationsSettings {
+  github?: GithubBackupDestinationSettings
+  googleDrive?: GoogleDriveBackupDestinationSettings
+}
+
 /** Defaults applied when the user hasn't customized the schedule yet. */
 export const DEFAULT_BACKUP_AUTO_SCHEDULE: BackupAutoSchedule = {
   enabled: false,
@@ -4753,59 +4974,6 @@ export interface McpServer {
   pluginId?: string
   /** Bare tool names denied whenever this server is attached to an agent run. */
   disallowedTools?: string[]
-/**
- * GitHub backup destination: encrypted snapshots are committed to a PRIVATE
- * repository through the contents API. Public repositories are refused at
- * configuration time and again before every upload.
- */
-export interface GithubBackupDestinationSettings {
-  enabled: boolean
-  /** `owner/name`. */
-  repo: string
-  /** Branch to commit to; defaults to the repository's default branch. */
-  branch?: string
-  /** Directory inside the repo; default `cognia-backups`. */
-  path?: string
-  /**
-   * Where the token comes from: a stored auth session of the built-in
-   * `github-pat` / `github-app` providers, or a PAT saved in the keyring by
-   * the settings card. The token itself never lives here.
-   */
-  credential?:
-    | { kind: "auth-session"; providerId: "github-pat" | "github-app"; sessionId: string }
-    | { kind: "keyring" }
-  /** ISO timestamp of the last successful upload. */
-  lastSyncAt?: string
-  /** Last verified visibility (`private` required); refreshed on connect. */
-  lastVerifiedVisibility?: "private" | "public" | "unknown"
-}
-
-/**
- * Google Drive backup destination (OAuth 2.0 device flow, `drive.file` scope).
- * The user supplies their own OAuth client id (installed-app type); the client
- * secret and the tokens are keyring-only.
- */
-export interface GoogleDriveBackupDestinationSettings {
-  enabled: boolean
-  /** OAuth 2.0 client id of the user's Google Cloud "Desktop app" credential. */
-  clientId?: string
-  /** Drive folder name (created under My Drive when missing); default `Cognia Backups`. */
-  folderName?: string
-  /** Resolved folder id once created/found. */
-  folderId?: string
-  /** Google account email the tokens belong to (display only). */
-  accountEmail?: string
-  /** ISO timestamp of the last successful upload. */
-  lastSyncAt?: string
-  /** True once a refresh token has been stored (display only; the tokens live in the keyring). */
-  connected?: boolean
-}
-
-export interface BackupDestinationsSettings {
-  github?: GithubBackupDestinationSettings
-  googleDrive?: GoogleDriveBackupDestinationSettings
-}
-
   /** Human-facing label; changing it never changes the SDK namespace. */
   displayName?: string
   /** Persisted governance contract version. Legacy rows omit this until migration. */

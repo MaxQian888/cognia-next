@@ -28,6 +28,7 @@ const mockToastError = toast.error as jest.Mock
 function label(p: Partial<ConversationLabelRow>): ConversationLabelRow {
   return {
     id: "l1",
+    scope: "conversation",
     name: "VIP",
     color: "#ff0000",
     sortOrder: 0,

@@ -176,6 +176,37 @@ smoke asserts). Point the platform's webhook URL at your public
 `https://<domain>/connectors/webhook/...` (through Caddy when the `tls`
 profile is up).
 
+## Lark / Feishu entry surfaces (server profile)
+
+Web SSO, entry-link resolve, message-shortcut import and JSSDK signing live at
+`/integrations/lark/*` on `cognia-server` (ADR-0091). Caddy already proxies
+that prefix, but the server needs to know its own public origin to build the
+OAuth `redirect_uri` — it cannot infer it, because the value has to match what
+is registered in the Feishu console byte for byte.
+
+| Variable                           | When                          | Value                            |
+| ---------------------------------- | ----------------------------- | -------------------------------- |
+| `COGNIA_LARK_PUBLIC_BASE`          | any Lark deployment           | `https://${COGNIA_DOMAIN}`       |
+| `COGNIA_LARK_WEB_BASE`             | web app on a different origin | `https://app.example`            |
+| `NEXT_PUBLIC_COGNIA_LARK_API_BASE` | web app on a different origin | the companion origin, build-time |
+
+The first two are runtime env on `cognia-server` and are validated at startup:
+a value that cannot work (no scheme, plaintext `http://` on a public host, a
+query string or fragment, embedded credentials) **aborts the boot** with the
+variable named, instead of 503-ing later inside a Feishu client. Warnings —
+loopback origins, a `WEB_BASE` with no `PUBLIC_BASE` behind it — print and
+start anyway.
+
+The third is baked into the static export at image-build time, so a
+split-origin deployment must rebuild the `caddy` image (add it as a build
+`ARG`/`ENV` in `Dockerfile.web`) rather than setting it in `.env`.
+Same-origin installs — the reference stack, where Caddy serves both — need
+none of that: leave `COGNIA_LARK_WEB_BASE` empty and the browser uses relative
+URLs.
+
+Console configuration, verification matrix and rollback:
+[`docs/runbooks/lark-entry-surfaces.md`](../../docs/runbooks/lark-entry-surfaces.md).
+
 ## Caddy (tls profile)
 
 Terminates public ACME TLS and reverse-proxies to `cognia-server`'s

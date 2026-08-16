@@ -5,15 +5,22 @@
  * Rust handle (`connectorsLarkWsOpen`) and consumes complete event envelopes
  * delivered on `connectors://lark-ws/<handleId>/event`.
  *
- * Mocks: connectorsLarkWsOpen, connectorsLarkWsClose, @tauri-apps/api/event listen.
+ * These drive the SEAM (`setConnectorListen`), not `@tauri-apps/api/event`.
+ * That is deliberate: the transport used to import Tauri's `listen` directly,
+ * which threw on the headless brain (no `__TAURI_INTERNALS__`) and left an open
+ * Feishu socket behind. A test that mocks the Tauri module cannot see that —
+ * it stubs out the exact boundary that breaks. Swapping the seam is what the
+ * brain does at boot, so exercising the seam is what proves the transport works
+ * there.
+ *
+ * Mocks: connectorsLarkWsOpen, connectorsLarkWsClose, the connectorListen seam.
  * Pattern: open → push /event envelopes → assert yield; abort → handle closed.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { setConnectorListen, type ConnectorListenFn } from "@/lib/connectors/events"
 import { connectorsLarkWsOpen, connectorsLarkWsClose } from "@/lib/connectors/tauri/commands"
 import { startLarkLongConn } from "./transport-long-conn"
 
-const mockListen = listen as jest.Mock
 const mockOpen = connectorsLarkWsOpen as jest.Mock
 const mockClose = connectorsLarkWsClose as jest.Mock
 
@@ -71,16 +78,28 @@ function makeLarkEnvelope(msgId: string) {
   }
 }
 
+/** Install a listener behind the seam and restore the default afterwards. */
+function installSeam(fn: ConnectorListenFn) {
+  const previous = setConnectorListen(fn)
+  restoreSeam = () => setConnectorListen(previous)
+}
+let restoreSeam: (() => void) | null = null
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockOpen.mockResolvedValue("lark-handle-id")
   mockClose.mockResolvedValue(undefined)
 })
 
+afterEach(() => {
+  restoreSeam?.()
+  restoreSeam = null
+})
+
 describe("startLarkLongConn", () => {
   it("yields envelopes delivered on the /event channel", async () => {
     const session = createFakeWsSession()
-    mockListen.mockImplementation(session.listenImpl)
+    installSeam(session.listenImpl)
 
     const ctrl = new AbortController()
     const yielded: string[] = []
@@ -110,9 +129,91 @@ describe("startLarkLongConn", () => {
     expect(yielded).toEqual(["om_001", "om_002"])
   }, 10000)
 
+  it("subscribes through the swappable seam, not Tauri's listen", async () => {
+    // The headless brain swaps this seam for a `/ws/events` listener. If the
+    // transport ever imports `@tauri-apps/api/event` again, the swapped
+    // listener sees nothing and Feishu silently stops delivering on cloud.
+    const session = createFakeWsSession()
+    installSeam(session.listenImpl)
+
+    const ctrl = new AbortController()
+    const collectorDone = (async () => {
+      for await (const _ of startLarkLongConn({
+        adapterId: "lark-1",
+        signal: ctrl.signal,
+        _backoffBaseMs: 1,
+      })) {
+        // drain
+      }
+    })()
+
+    await session.waitForListeners()
+    ctrl.abort()
+    await collectorDone
+
+    const topics = session.listenImpl.mock.calls.map((c: unknown[]) => c[0] as string)
+    expect(topics).toEqual([
+      "connectors://lark-ws/lark-handle-id/event",
+      "connectors://lark-ws/lark-handle-id/close",
+    ])
+  }, 10000)
+
+  it("releases the Rust handle when subscribing rejects", async () => {
+    // The regression: `listen` used to be awaited OUTSIDE the try/finally that
+    // closes the handle, so a rejection left a live, authenticated,
+    // self-reconnecting Feishu socket in Rust with no consumer and no path
+    // that would ever close it.
+    installSeam(jest.fn().mockRejectedValue(new Error("no __TAURI_INTERNALS__")))
+
+    const ctrl = new AbortController()
+    await expect(
+      (async () => {
+        for await (const _ of startLarkLongConn({
+          adapterId: "lark-1",
+          signal: ctrl.signal,
+          _backoffBaseMs: 1,
+        })) {
+          // unreachable
+        }
+      })()
+    ).rejects.toThrow("no __TAURI_INTERNALS__")
+
+    expect(mockOpen).toHaveBeenCalledWith("lark-1")
+    expect(mockClose).toHaveBeenCalledWith("lark-handle-id")
+  }, 10000)
+
+  it("releases the Rust handle when the second subscribe rejects", async () => {
+    // Half-subscribed is the nastier variant: the /event listener is live, so
+    // the failure looks like a working connection right up until nothing
+    // arrives.
+    let call = 0
+    installSeam(
+      jest.fn().mockImplementation(async () => {
+        call += 1
+        if (call === 1) return jest.fn()
+        throw new Error("close-channel subscribe failed")
+      })
+    )
+
+    const ctrl = new AbortController()
+    await expect(
+      (async () => {
+        for await (const _ of startLarkLongConn({
+          adapterId: "lark-1",
+          signal: ctrl.signal,
+          _backoffBaseMs: 1,
+        })) {
+          // unreachable
+        }
+      })()
+    ).rejects.toThrow("close-channel subscribe failed")
+
+    expect(mockClose).toHaveBeenCalledWith("lark-handle-id")
+  }, 10000)
+
   it("closes the Rust handle when the signal aborts", async () => {
     const session = createFakeWsSession()
-    mockListen.mockImplementation(session.listenImpl)
+    installSeam(session.listenImpl)
 
     const ctrl = new AbortController()
 
@@ -135,7 +236,7 @@ describe("startLarkLongConn", () => {
 
   it("ignores malformed (non-JSON) event payloads", async () => {
     const session = createFakeWsSession()
-    mockListen.mockImplementation(session.listenImpl)
+    installSeam(session.listenImpl)
 
     const ctrl = new AbortController()
     const yielded: string[] = []
@@ -169,7 +270,7 @@ describe("startLarkLongConn", () => {
   }, 10000)
 
   it("stops immediately when the signal is pre-aborted", async () => {
-    mockListen.mockResolvedValue(jest.fn())
+    installSeam(jest.fn().mockResolvedValue(jest.fn()))
 
     const ctrl = new AbortController()
     ctrl.abort()

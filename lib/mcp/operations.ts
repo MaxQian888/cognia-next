@@ -1,8 +1,4 @@
-import type {
-  AgentId,
-  McpCapabilityCacheRow,
-  McpSyncJobStatus,
-} from "@cognia/agent-config-types"
+import type { AgentId, McpCapabilityCacheRow, McpSyncJobStatus } from "@cognia/agent-config-types"
 
 import { getDb } from "@/lib/db/schema"
 import type { McpAuditLogRow } from "@/types/wiki"
@@ -113,7 +109,8 @@ export async function loadMcpOperationsSnapshot(now = Date.now()): Promise<McpOp
 
   const sync = syncJobs
     .map<McpSyncOperations>((job) => {
-      const active = job.status === "pending" || job.status === "running" || job.status === "retrying"
+      const active =
+        job.status === "pending" || job.status === "running" || job.status === "retrying"
       return {
         agentId: job.id,
         status: job.status,

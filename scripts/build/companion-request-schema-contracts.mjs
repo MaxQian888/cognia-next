@@ -393,16 +393,49 @@ const schemas = {
   }),
   provider_diagnostics_cancel: z.object({ jobId: z.string().min(1) }),
 
+  // `generation` is required by both arms (rpc/plugins.rs) so the host can
+  // reject a call aimed at a since-reloaded Python runtime. It was declared in
+  // protocol/companion-request-schemas.json but not here, and these Zod
+  // contracts override that file — so the generated schema forbade the one
+  // field the arm demands, leaving both commands uncallable by any payload.
   plugin_python_call: z.object({
     pluginId: z.string().min(1),
     functionName: z.string().min(1),
     args: jsonArrayItem.array(),
+    generation: z.string().min(1),
   }),
   plugin_python_module_call: z.object({
     pluginId: z.string().min(1),
     moduleName: z.string().min(1),
     functionName: z.string().min(1),
     args: jsonArrayItem.array(),
+    generation: z.string().min(1),
+  }),
+
+  // Both arms read an optional field the published schema never modelled, and
+  // because these contracts are enforced at runtime with
+  // `additionalProperties: false`, sending it was a 422 rather than a
+  // no-op. `generatedFiles` carries the manifest/entry files the installer
+  // synthesises for a repo that ships none; `rules` carries the per-domain
+  // method and path restrictions that narrow the flat `domains` allowlist —
+  // so without it the caller could widen network access but never constrain it.
+  plugin_install_from_github: z.object({
+    repo: z.string().min(1),
+    gitRef: z.string().min(1).optional(),
+    subdir: z.string().min(1).optional(),
+    generatedFiles: z.record(z.string(), z.string()).optional(),
+  }),
+  plugin_set_network_allowlist: z.object({
+    pluginId: z.string().min(1),
+    domains: z.string().array(),
+    rules: z
+      .object({
+        domain: z.string().min(1),
+        methods: z.string().array(),
+        paths: z.string().array(),
+      })
+      .array()
+      .optional(),
   }),
 
   twin_profile_update: z.discriminatedUnion("op", [

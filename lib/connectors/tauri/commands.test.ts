@@ -20,6 +20,9 @@ import {
   connectorsWsSend,
   connectorsWsClose,
   connectorsResetAllWs,
+  connectorsRuntimeLeaseAcquire,
+  connectorsRuntimeLeaseRenew,
+  connectorsRuntimeLeaseRelease,
   connectorsAttachmentFetch,
   connectorsAttachmentRead,
   connectorsMediaUpload,
@@ -577,5 +580,46 @@ describe("setConnectorCommandInvoker", () => {
     expect(second).not.toHaveBeenCalled()
 
     setConnectorCommandInvoker(initial)
+  })
+})
+
+describe("runtime lease wrappers", () => {
+  it("passes the owner id and TTL through to each lease arm", async () => {
+    const mockInvoke = invoke as jest.Mock
+    mockInvoke.mockResolvedValueOnce("acquired").mockResolvedValue(true)
+
+    await expect(connectorsRuntimeLeaseAcquire("desktop:abc", 15_000)).resolves.toBe("acquired")
+    expect(mockInvoke).toHaveBeenLastCalledWith("connectors_runtime_lease_acquire", {
+      ownerId: "desktop:abc",
+      ttlMs: 15_000,
+      handoffAware: true,
+    })
+
+    await expect(connectorsRuntimeLeaseRenew("brain:abc", 15_000)).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenLastCalledWith("connectors_runtime_lease_renew", {
+      ownerId: "brain:abc",
+      ttlMs: 15_000,
+    })
+
+    await expect(connectorsRuntimeLeaseRelease("brain:abc")).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenLastCalledWith("connectors_runtime_lease_release", {
+      ownerId: "brain:abc",
+    })
+  })
+
+  it("routes through the swappable invoker so the brain reaches the same arms", async () => {
+    const calls: string[] = []
+    const previous = setConnectorCommandInvoker(async (name) => {
+      calls.push(name)
+      return false as never
+    })
+    try {
+      // The desktop reaches these over Tauri IPC and the brain over companion
+      // RPC; the wrappers must not hard-code either.
+      await expect(connectorsRuntimeLeaseAcquire("brain:x", 15_000)).resolves.toBe(false)
+      expect(calls).toEqual(["connectors_runtime_lease_acquire"])
+    } finally {
+      setConnectorCommandInvoker(previous)
+    }
   })
 })

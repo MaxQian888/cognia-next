@@ -39,6 +39,12 @@
 //!   Standalone (BYOK) vs paired (companion) is what this handset is doing right now; it has no
 //!   meaning on any other device (ADR-0056).
 //!
+//! `onboardingProgress` — device-local (never crosses the wire).
+//!   Every device legitimately completes onboarding once on its own: a phone's onboarding is
+//!   substantially the pairing flow, and pairing is per-device. Syncing this would let a
+//!   desktop completion mark an unpaired phone as onboarded, stranding it in a state that is
+//!   simultaneously 'done' and unusable.
+//!
 //! `pinnedMeRowIds` — device-local (never crosses the wire).
 //!   Favourites of the mobile `/me` list. The desktop has no `/me` surface, so there is nothing
 //!   on the other side to mirror to or from.
@@ -102,6 +108,7 @@ pub const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "mobileComputerUseEnabled",
     "motion",
     "notificationPreferences",
+    "onboardingProfile",
     "openaiVoice",
     "permissionMode",
     "pinnedWorkflowIds",

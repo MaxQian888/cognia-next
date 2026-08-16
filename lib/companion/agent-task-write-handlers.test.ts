@@ -40,16 +40,18 @@ beforeEach(() => {
 
 describe("Agent task Companion write handlers", () => {
   it("validates the Agent scope before starting a task", async () => {
-    await expect(
-      handleAgentTaskStart({ agentId: "agent-2", taskId: "task-1" })
-    ).resolves.toEqual({ ok: false, reason: "task-not-found" })
+    await expect(handleAgentTaskStart({ agentId: "agent-2", taskId: "task-1" })).resolves.toEqual({
+      ok: false,
+      reason: "task-not-found",
+    })
     expect(mockRunAgentTaskNow).not.toHaveBeenCalled()
   })
 
   it("starts a task through the shared Scheduler runtime", async () => {
-    await expect(
-      handleAgentTaskStart({ agentId: "agent-1", taskId: "task-1" })
-    ).resolves.toEqual({ ok: true, executionId: "execution-1" })
+    await expect(handleAgentTaskStart({ agentId: "agent-1", taskId: "task-1" })).resolves.toEqual({
+      ok: true,
+      executionId: "execution-1",
+    })
     expect(mockRunAgentTaskNow).toHaveBeenCalledWith("task-1")
   })
 
@@ -98,8 +100,9 @@ describe("Agent task Companion write handlers", () => {
 
   it("returns stable denial codes instead of leaking runtime errors", async () => {
     mockPauseAgentTask.mockRejectedValueOnce(new Error("secret filesystem detail"))
-    await expect(
-      handleAgentTaskPause({ agentId: "agent-1", taskId: "task-1" })
-    ).resolves.toEqual({ ok: false, reason: "transition-denied" })
+    await expect(handleAgentTaskPause({ agentId: "agent-1", taskId: "task-1" })).resolves.toEqual({
+      ok: false,
+      reason: "transition-denied",
+    })
   })
 })

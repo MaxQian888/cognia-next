@@ -246,6 +246,15 @@
     "BooleanResult": {
       "type": "boolean"
     },
+    "RuntimeLeaseAcquireResult": {
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "string",
+          "enum": ["acquired", "busy", "handoff-pending"]
+        }
+      ]
+    },
     "StringResult": {
       "type": "string"
     },
@@ -554,6 +563,275 @@
         }
       },
       "additionalProperties": false
+    },
+    "TerminalSession": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null — the two ssh_host_key_* fields are the exception and do skip.",
+      "required": [
+        "id",
+        "hostId",
+        "kind",
+        "profileId",
+        "projectId",
+        "extensionId",
+        "origin",
+        "shell",
+        "createdAt",
+        "lastActivityAt",
+        "currentController",
+        "attachedClients",
+        "alive",
+        "sandboxed",
+        "integrationCapabilities",
+        "replay"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "hostId": { "type": "string" },
+        "kind": { "enum": ["localPty", "ssh"] },
+        "profileId": { "type": "string" },
+        "projectId": { "type": ["string", "null"] },
+        "extensionId": { "type": ["string", "null"] },
+        "origin": { "enum": ["local", "remote"] },
+        "shell": { "type": "string" },
+        "createdAt": { "type": "integer", "minimum": 0 },
+        "lastActivityAt": { "type": "integer", "minimum": 0 },
+        "currentController": { "type": ["string", "null"] },
+        "attachedClients": { "type": "integer", "minimum": 0 },
+        "alive": { "type": "boolean" },
+        "sandboxed": { "type": "boolean" },
+        "integrationCapabilities": {
+          "type": "object",
+          "required": ["osc633", "commandStatus", "cwdTracking", "degradedReason"],
+          "properties": {
+            "osc633": { "type": "boolean" },
+            "commandStatus": { "type": "boolean" },
+            "cwdTracking": { "type": "boolean" },
+            "degradedReason": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "replay": {
+          "type": "object",
+          "required": ["firstSequence", "lastSequence", "retainedBytes", "truncated"],
+          "properties": {
+            "firstSequence": { "type": "integer", "minimum": 0 },
+            "lastSequence": { "type": "integer", "minimum": 0 },
+            "retainedBytes": { "type": "integer", "minimum": 0 },
+            "truncated": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "sshHostKeyStatus": { "type": "string" },
+        "sshHostKeyFingerprint": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "TerminalSessionList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/TerminalSession" }
+    },
+    "TerminalExecResult": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia_terminal::exec::TerminalExecResult (serde rename_all = camelCase). A non-zero exit is a SUCCESSFUL response with exitCode set; exitCode is null when the child was signalled or killed on timeout.",
+      "required": ["stdout", "stderr", "exitCode", "timedOut"],
+      "properties": {
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "exitCode": { "type": ["integer", "null"] },
+        "timedOut": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "TerminalPathCandidateList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<cognia_terminal::complete::PathCandidate> (serde rename_all = camelCase).",
+      "items": {
+        "type": "object",
+        "required": ["name", "isDir"],
+        "properties": {
+          "name": { "type": "string" },
+          "isDir": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "TerminalKilledPidList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port — the PIDs actually signalled, possibly empty when nothing was listening.",
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "SecretValue": {
+      "type": ["string", "null"],
+      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
+      "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
+    },
+    "SidecarStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus — derives Serialize with NO rename_all, and has exactly one field.",
+      "required": ["ready"],
+      "properties": {
+        "ready": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "AgentReadResult": {
+      "type": "object",
+      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all — the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
+      "required": ["path", "exists", "writable", "format", "raw", "parsed"],
+      "properties": {
+        "path": { "type": ["string", "null"] },
+        "exists": { "type": "boolean" },
+        "writable": { "type": "boolean" },
+        "format": { "enum": ["json", "jsonc", "toml"] },
+        "raw": { "type": "string" },
+        "parsed": {
+          "x-cognia-opaque-reason": "serde_json::Value — the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
+        },
+        "parseError": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "AgentWriteResult": {
+      "type": "object",
+      "x-cognia-wire-source": "crate::agents::commands::AgentWriteResult. backup_path is renamed to backupPath and skipped when None.",
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string" },
+        "backupPath": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "NativeLogQueryResult": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia_observability::log_query::NativeLogQueryResult (rename_all = camelCase), via rpc/diagnostics.rs `to_json(result)`.",
+      "required": ["entries", "fileSize", "scannedBytes", "truncated", "path"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "x-cognia-wire-source": "cognia_observability::log_query::NativeLogEntry. epochMs and fields carry skip_serializing_if = Option::is_none, so both are absent rather than null.",
+            "required": ["timestamp", "level", "target", "message"],
+            "properties": {
+              "timestamp": { "type": "string" },
+              "epochMs": { "type": "integer" },
+              "level": { "type": "string" },
+              "target": { "type": "string" },
+              "message": { "type": "string" },
+              "fields": {
+                "x-cognia-opaque-reason": "serde_json::Value — arbitrary structured fields captured at the log call site."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "fileSize": { "type": "integer", "minimum": 0 },
+        "scannedBytes": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "NativeLogFileList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<cognia_observability::log_query::NativeLogFileInfo>. modifiedMs is skipped when None.",
+      "items": {
+        "type": "object",
+        "required": ["name", "size"],
+        "properties": {
+          "name": { "type": "string" },
+          "size": { "type": "integer", "minimum": 0 },
+          "modifiedMs": { "type": "integer" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "FleetSnapshot": {
+      "type": "object",
+      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent — not empty arrays — on a quiet host.",
+      "x-cognia-fixes": "Previously LegacyList, which requires an ARRAY. FleetSnapshot is a struct and always serializes as an object, so the enforced output contract rejected every fleet_get_snapshot response with contract_output_violation. The helper directly above the dispatch arm (fleet_event_payload) already asserted 'fleet snapshot must serialize as an object'.",
+      "required": ["sessions", "liveness", "generatedAt"],
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "x-cognia-opaque-reason": "FleetSession is owned by the Agent Fleet domain (ADR-0009) and is projected from several agent runtimes. The envelope is pinned here; item-level typing belongs with that domain and is tracked as remaining response-schema debt."
+          }
+        },
+        "hosts": { "type": "array", "items": { "type": "object" } },
+        "liveness": { "type": "array", "items": { "type": "object" } },
+        "runtimeCapabilities": { "type": "array", "items": { "type": "object" } },
+        "generatedAt": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "FleetWorkerEnrollment": {
+      "type": "object",
+      "x-cognia-wire-source": "Literal json! in the fleet_worker_enrollment_create arm; `enrollment` is the String returned by SecurityStore::create_worker_enrollment.",
+      "required": ["enrollment", "expiresAtMs", "baseUrl", "fingerprint", "tenantId"],
+      "properties": {
+        "enrollment": { "type": "string" },
+        "expiresAtMs": { "type": "integer" },
+        "baseUrl": { "type": "string" },
+        "fingerprint": { "type": "string" },
+        "tenantId": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "FleetWorkerList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<WorkerDeviceSummary>. NOTE serde(flatten): DeviceSummary's fields are inlined ALONGSIDE hostRef rather than nested under a `device` key.",
+      "items": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "displayName",
+          "role",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "capabilities",
+          "hostRef"
+        ],
+        "properties": {
+          "deviceId": { "type": "string" },
+          "displayName": { "type": "string" },
+          "role": { "type": "string" },
+          "status": { "type": "string" },
+          "createdAt": { "type": "integer" },
+          "updatedAt": { "type": "integer" },
+          "capabilities": { "type": "array", "items": { "type": "string" } },
+          "hostRef": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "LarkEntryToken": {
+      "type": "object",
+      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone — so only `token` is guaranteed.",
+      "required": ["token"],
+      "properties": {
+        "token": { "type": "string" },
+        "jti": { "type": "string" },
+        "expiresAt": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "LarkResultAck": {
+      "type": "object",
+      "x-cognia-wire-source": "lark_entry::rpc_result_complete — json!({ \"accepted\": bool }).",
+      "required": ["accepted"],
+      "properties": { "accepted": { "type": "boolean" } },
+      "additionalProperties": false
+    },
+    "LarkMetricAck": {
+      "type": "object",
+      "x-cognia-wire-source": "lark_entry::rpc_metrics_record — json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
+      "required": ["ok"],
+      "properties": { "ok": { "const": true } },
+      "additionalProperties": false
     }
   },
   "commands": {
@@ -765,7 +1043,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "claude_sidecar_status": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/SidecarStatus"
     },
     "claude_tool_result_decision": {
       "$ref": "#/$defs/NullResult"
@@ -930,7 +1208,7 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "connectors_runtime_lease_acquire": {
-      "$ref": "#/$defs/BooleanResult"
+      "$ref": "#/$defs/RuntimeLeaseAcquireResult"
     },
     "connectors_runtime_lease_release": {
       "$ref": "#/$defs/BooleanResult"
@@ -1011,16 +1289,16 @@
       "$ref": "#/$defs/NullResult"
     },
     "fleet_focus_terminal": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NullResult"
     },
     "fleet_get_snapshot": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/FleetSnapshot"
     },
     "fleet_worker_enrollment_create": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/FleetWorkerEnrollment"
     },
     "fleet_worker_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/FleetWorkerList"
     },
     "fleet_worker_set": {
       "$ref": "#/$defs/NullResult"
@@ -1035,19 +1313,19 @@
       "$ref": "#/$defs/BooleanResult"
     },
     "fleet_interrupt_session": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NullResult"
     },
     "fleet_opencode_send_message": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/StringResult"
     },
     "fleet_permission_respond": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "fleet_question_respond": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "fleet_question_reject": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "fs_copy_workspace_entry": {
       "$ref": "#/$defs/NullResult"
@@ -1359,31 +1637,31 @@
       "$ref": "#/$defs/NullResult"
     },
     "keyring_secret_clear": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NullResult"
     },
     "keyring_secret_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/SecretValue"
     },
     "keyring_secret_set": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NullResult"
     },
     "kill_external_agent": {
       "$ref": "#/$defs/NullResult"
     },
     "lark_entry_issue": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/LarkEntryToken"
     },
     "lark_metrics_record": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/LarkMetricAck"
     },
     "lark_result_complete": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/LarkResultAck"
     },
     "logs_list_files": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NativeLogFileList"
     },
     "logs_query": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NativeLogQueryResult"
     },
     "lsp_host_ensure": {
       "$ref": "#/$defs/NullResult"
@@ -1726,7 +2004,7 @@
       "$ref": "#/$defs/ProfileVersion"
     },
     "read_agent_config": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/AgentReadResult"
     },
     "read_text_file": {
       "$ref": "#/$defs/StringResult"
@@ -1815,7 +2093,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "secret_store_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/SecretValue"
     },
     "secret_store_set": {
       "$ref": "#/$defs/NullResult"
@@ -1983,22 +2261,22 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "terminal_complete_paths": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TerminalPathCandidateList"
     },
     "terminal_exec": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TerminalExecResult"
     },
     "terminal_kill": {
       "$ref": "#/$defs/NullResult"
     },
     "terminal_kill_port": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TerminalKilledPidList"
     },
     "terminal_list_all": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/TerminalSessionList"
     },
     "terminal_list_for_project": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/TerminalSessionList"
     },
     "transcript_capabilities": {
       "$ref": "#/$defs/LegacyRecord"
@@ -2088,7 +2366,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "write_agent_config": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/AgentWriteResult"
     },
     "write_text_file": {
       "$ref": "#/$defs/NullResult"

@@ -176,9 +176,43 @@ mod tests {
 
     #[test]
     fn shared_manifest_is_complete_and_validated() {
-        assert_eq!(commands().len(), 1063);
+        // No literal total. This assertion was `1063`, then `1066`, and went
+        // stale again the moment 59 previously-untriaged commands got the
+        // descriptors they had always needed — which is the same lesson
+        // `embedded_headless_contract_matches_the_generated_inventory` records
+        // two tests down: a hardcoded inventory count goes red on every
+        // legitimate addition, and a permanently-red test teaches people to
+        // ignore it. What the count was ever standing in for is asserted
+        // directly instead.
         assert_eq!(command_names().len(), commands().len());
         assert_eq!(DESCRIPTORS.len(), commands().len());
+        assert!(!commands().is_empty());
+
+        // Uniqueness is enforced by `MANIFEST` at load time, so it needs no
+        // assertion here — but the length equalities above only prove the maps
+        // are the same SIZE. This proves every name actually resolves.
+        let unresolvable: Vec<&str> = command_names()
+            .iter()
+            .copied()
+            .filter(|name| descriptor(name).is_none())
+            .collect();
+        assert!(
+            unresolvable.is_empty(),
+            "descriptors that do not resolve by name: {unresolvable:?}"
+        );
+
+        // The invariant the test name claims: every dispatchable command has a
+        // descriptor. Without it a command can enter `KNOWN_COMMANDS`
+        // undescribed and nothing notices.
+        let undescribed: Vec<&str> = super::super::rpc::known_commands()
+            .iter()
+            .copied()
+            .filter(|name| descriptor(name).is_none())
+            .collect();
+        assert!(
+            undescribed.is_empty(),
+            "dispatchable commands with no descriptor: {undescribed:?}"
+        );
     }
 
     #[test]
@@ -193,7 +227,16 @@ mod tests {
         let contract = headless_contract().expect("embedded Headless contract");
         assert_eq!(contract.schema_version(), 1);
         assert_eq!(contract.catalog_hash().len(), 64);
-        assert_eq!(contract.command_count(), 490);
+        // Bound to the dispatch allowlist rather than a literal. This assertion
+        // was `490` against a 493-command catalog and had been failing in CI;
+        // a hardcoded inventory count goes stale on every command added, and a
+        // permanently-red test teaches people to ignore it. The real invariant
+        // is that the embedded contract covers exactly what dispatch accepts —
+        // a command outside it is unvalidatable, one inside it undispatchable.
+        assert_eq!(
+            contract.command_count(),
+            super::super::rpc::known_commands().len()
+        );
         assert!(contract
             .validate_input(
                 "browser_session_ensure",

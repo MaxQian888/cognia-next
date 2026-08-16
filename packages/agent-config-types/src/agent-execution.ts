@@ -1,4 +1,9 @@
 import type { ResolvedAgentExecutionSpec as AgentSdkResolvedExecutionSpec } from "@cognia/agent"
+import type {
+  AgentOrchestrationPolicy,
+  AgentPermissionMode,
+  ToolPresentationMode,
+} from "./agent-composition"
 
 // Unified Agent execution contract (ADR-0090).
 //
@@ -280,6 +285,37 @@ export interface AgentExecutionSendSpec {
   }
   identity: { runId: string; parentRunId?: string; attemptId: string }
   hostRef: string
+  /**
+   * v2+. The turn's resolved composition axes (ADR-0117).
+   *
+   * Projected onto the wire so the sidecar can fail closed on its own side, in
+   * the same spirit as `capabilities.support`. The concrete need is the Code
+   * tool presentation: the sidecar decides which tool defs to register, so it
+   * has to know whether this turn is `native`, `code`, or `both` — deriving
+   * that from anything else would mean a second, drifting source of truth for
+   * what the model is allowed to see.
+   *
+   * Only the axes are sent, never the prompt or tool text: the digests are
+   * identity, not content. Absent means "native", which is the pre-ADR-0117
+   * behaviour and the safe default.
+   */
+  composition?: AgentCompositionProjection
+}
+
+/**
+ * The wire-safe slice of `ResolvedAgentCompositionV1`.
+ *
+ * Deliberately a hand-written subset rather than the whole resolved object:
+ * `warnings` is renderer-facing UI text, and shipping it would grow the
+ * envelope with strings the sidecar has no use for.
+ */
+export interface AgentCompositionProjection {
+  authority: AgentPermissionMode
+  toolPresentation: ToolPresentationMode
+  orchestration: AgentOrchestrationPolicy
+  /** Identity of the composition, for correlating events and replay tapes. */
+  compositionDigest: string
+  presetId: string
 }
 
 /**

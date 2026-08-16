@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "note": "Known RPC↔Tauri semantic gaps, recorded when the gate landed. This list may only shrink: `pnpm audit:rpc-semantic-parity` fails when a new one appears. Each key is `<command>:<kind>`. Regenerate with `pnpm audit:rpc-semantic-parity -- --write-baseline` after paying debt down.",
+  "ceilingNote": "Response-schema debt is ratcheted by count, not by key, because it is paid down per command in batches. A count above its ceiling fails the gate; a count below it prints the gain and asks you to lock it in. Output validation is enforced at remote_execution.rs:293 and :362, so a schema tightened past what the dispatch arm actually returns turns a working command into an error response — type each one from the arm's return expression, not from the #[tauri::command] signature.",
+  "findings": [],
+  "ceilings": {
+    "opaque-response-schema": 158,
+    "unconstrained-response-contents": 141
+  }
+}

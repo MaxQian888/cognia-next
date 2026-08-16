@@ -15,7 +15,7 @@
  * `streamReply()` drives the live preview by reusing the same stream id.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen } from "@/lib/connectors/events"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import type {
   PlatformAdapter,
@@ -452,10 +452,10 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     const id = await connectorsWsOpen(wsUrl)
     handleId = id
     try {
-      unlistenMessage = await listen<string>(`connectors://ws/${id}/message`, (e) => {
+      unlistenMessage = await connectorListen<string>(`connectors://ws/${id}/message`, (e) => {
         void routeFrame(e.payload)
       })
-      unlistenClose = await listen<void>(`connectors://ws/${id}/close`, () => {
+      unlistenClose = await connectorListen<void>(`connectors://ws/${id}/close`, () => {
         handleId = null
         rejectAllPending("connection closed")
         if (!stopCalled) {
