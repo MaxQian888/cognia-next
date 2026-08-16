@@ -5,13 +5,20 @@ import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { WorkflowEditorCanvas } from "./canvas"
+import { WORKFLOW_MOBILE_WORKBENCH_SHEET, WorkflowEditorCanvas } from "./canvas"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { toast } from "sonner"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow, getWorkflow } from "@/lib/db/workflows"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
+import { useAppShortcutDispatcher } from "@/hooks/shortcuts/use-app-shortcut-dispatcher"
+import { __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
+import {
+  getContextKeySnapshot,
+  __resetContextKeysForTesting,
+} from "@/lib/plugin/context-keys/context-key-store"
+import { __resetAppKeybindingStoreForTesting } from "@/stores/shortcuts/app-keybinding-store"
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
@@ -127,6 +134,14 @@ jest.mock("@xyflow/react", () => {
       }),
     Handle: () => null,
     Position: { Left: "left", Right: "right" },
+    // Two overlay primitives FlowCanvas reaches for indirectly. Without them
+    // every render of the canvas throws "Element type is invalid": the lasso +
+    // alignment-guide layers portal through `ViewportPortal`, and
+    // `ViewportBreadcrumb` renders `ai-elements/panel`, which wraps `Panel`.
+    ViewportPortal: ({ children }: { children: React.ReactNode }) =>
+      React.createElement(React.Fragment, null, children),
+    Panel: ({ children }: { children: React.ReactNode }) =>
+      React.createElement("div", { "data-testid": "flow-panel-mock" }, children),
     useReactFlow: () => ({
       getNode: (_id: string) => ({ measured: { width: 240, height: 80 } }),
       getNodes: () => [],
@@ -495,6 +510,61 @@ describe("WorkflowEditorCanvas — keyboard create+connect (C3)", () => {
   })
 })
 
+describe("WorkflowEditorCanvas — ⌘K goes through the shared dispatcher", () => {
+  // Regression: the canvas used to own a raw `window` keydown listener for ⌘K
+  // that ran alongside ADR-0129's dispatcher, so one keystroke opened both this
+  // palette and the global search dialog.
+  function Dispatcher() {
+    useAppShortcutDispatcher()
+    return null
+  }
+
+  beforeEach(() => {
+    __resetAppRuntimeForTesting()
+    __resetAppKeybindingStoreForTesting()
+    __resetContextKeysForTesting()
+  })
+
+  it("publishes view.workflowEditor so the global ⌘K stands down while mounted", async () => {
+    const wf = await createWorkflow({ name: "ctx-key" })
+    const { unmount } = renderWithProviders(
+      <WorkflowEditorCanvas workflow={{ ...buildSample(), id: wf.id }} />
+    )
+    expect(getContextKeySnapshot()["view.workflowEditor"]).toBe(true)
+    unmount()
+    expect(getContextKeySnapshot()["view.workflowEditor"]).toBe(false)
+  })
+
+  it("opens the command palette on ⌘K via the dispatcher", async () => {
+    const wf = await createWorkflow({ name: "kbd-palette" })
+    renderWithProviders(
+      <>
+        <Dispatcher />
+        <WorkflowEditorCanvas workflow={{ ...buildSample(), id: wf.id }} />
+      </>
+    )
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true })
+      )
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("workflow-command-palette-input")).toBeInTheDocument()
+    )
+  })
+
+  it("does nothing on ⌘K when no dispatcher is mounted (no raw listener left)", async () => {
+    const wf = await createWorkflow({ name: "no-raw-listener" })
+    renderWithProviders(<WorkflowEditorCanvas workflow={{ ...buildSample(), id: wf.id }} />)
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true })
+      )
+    })
+    expect(screen.queryByTestId("workflow-command-palette-input")).not.toBeInTheDocument()
+  })
+})
+
 describe("WorkflowEditorCanvas — extract to sub-workflow (C5)", () => {
   it("extracts the selection into a new workflow row and inserts a subworkflow node", async () => {
     const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
@@ -533,5 +603,19 @@ describe("WorkflowEditorCanvas — persistent workbench rail", () => {
     expect(sidebar).toHaveAttribute("data-has-ensure-visible", "true")
     // Nothing is collapsed on a fresh editor.
     expect(sidebar).not.toHaveAttribute("data-rail-only")
+  })
+
+  it("animates the mobile workbench vertically in both directions without unmounting it", () => {
+    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.side).toBe("bottom")
+    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.className).toContain(
+      "data-[state=open]:slide-in-from-bottom"
+    )
+    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.className).toContain(
+      "data-[state=closed]:slide-out-to-bottom"
+    )
+    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.className).toContain(
+      "data-[state=closed]:translate-y-full"
+    )
+    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.forceMount).toBe(true)
   })
 })

@@ -29,10 +29,7 @@ export function decodeRelayConfig(value = process.env[CONFIG_ENV]) {
 export function createRemoteTransport(
   config,
   guardedFetch,
-  {
-    HttpTransport = StreamableHTTPClientTransport,
-    SseTransport = SSEClientTransport,
-  } = {}
+  { HttpTransport = StreamableHTTPClientTransport, SseTransport = SSEClientTransport } = {}
 ) {
   const options = {
     requestInit: {
@@ -117,4 +114,3 @@ if (isEntryPoint) {
     process.exitCode = 1
   })
 }
-

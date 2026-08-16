@@ -198,12 +198,13 @@ export function createHostBgShellRegistry({ hostRpc, sessionId }) {
   }
 
   async function list() {
-    try {
-      const { jobs } = await hostRpc.call("jobs.list", { owner: sessionOwner })
-      return (jobs ?? []).map(toListRow)
-    } catch {
-      return []
-    }
+    // Deliberately NOT catch-and-return-[]. An empty array is a factual claim
+    // ("this session has no background shells") and swallowing an RPC failure
+    // — a 30 s host timeout, a closed channel — made "we could not ask" look
+    // identical to "there are none". `list_shells` surfaces the throw as a
+    // tool error instead.
+    const { jobs } = await hostRpc.call("jobs.list", { owner: sessionOwner })
+    return (jobs ?? []).map(toListRow)
   }
 
   return { spawnBackground, read, waitForOutput, kill, killByPid, killAll, list }

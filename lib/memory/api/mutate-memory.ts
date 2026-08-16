@@ -25,12 +25,7 @@ export type MutateExternalMemoryResult =
   | {
       ok: false
       reason:
-        | "disabled"
-        | "temporary"
-        | "pii_blocked"
-        | "not_found"
-        | "policy_denied"
-        | "scope_denied"
+        "disabled" | "temporary" | "pii_blocked" | "not_found" | "policy_denied" | "scope_denied"
     }
 
 export interface MemoryMutationPolicyContext {

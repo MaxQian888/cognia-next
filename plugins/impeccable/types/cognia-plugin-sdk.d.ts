@@ -8547,7 +8547,19 @@ interface CursorSettings {
   effect: CursorEffectSettings
 }
 
-type WallpaperPosition = "cover" | "contain" | "tile" | "center"
+/**
+ * How the wallpaper raster is fitted into its surface.
+ *
+ * - `cover`   — fill the surface, cropping whatever overflows (default)
+ * - `contain` — fit entirely inside, letterboxing whatever is left
+ * - `fill`    — stretch both axes to the surface, ignoring aspect ratio
+ * - `center`  — draw at natural size, no scaling
+ * - `tile`    — draw at natural size and repeat
+ *
+ * `cover` / `contain` / `center` honour {@link BackgroundSettings.focalX} /
+ * `focalY`; `fill` and `tile` leave no freedom to anchor, so they ignore it.
+ */
+type WallpaperPosition = "cover" | "contain" | "fill" | "tile" | "center"
 type BackgroundScope = "all" | "global" | "chat" | "canvas" | "sidebar"
 interface BackgroundSettings {
   enabled: boolean
@@ -8559,6 +8571,15 @@ interface BackgroundSettings {
   /** 0..1. Applied as `opacity: N` on the body::before pseudo. */
   opacity: number
   position: WallpaperPosition
+  /**
+   * Horizontal anchor, 0..100 (%). Decides which part of an over-wide image
+   * survives a `cover` crop — the subject of a photo is rarely dead centre.
+   * Optional so settings rows written before this field keep loading; the
+   * applier and the UI both fall back to 50.
+   */
+  focalX?: number
+  /** Vertical anchor, 0..100 (%). See {@link BackgroundSettings.focalX}. */
+  focalY?: number
 }
 /** Discriminated union — exactly one of these shapes per wallpaper. */
 type WallpaperSource =
@@ -14655,6 +14676,9 @@ interface AppSettings {
     /**
      * Saved SSH connection metadata. Authentication material is never stored
      * here; `credentialRef` points at the native `cognia-ssh` keyring.
+     *
+     * `authMethod: "agent"` delegates the signature to a running `ssh-agent`
+     * and uses neither `credentialRef` nor `privateKeyPath`.
      */
     sshHosts?: Array<{
       id: string
@@ -14662,9 +14686,42 @@ interface AppSettings {
       host: string
       port: number
       username: string
-      authMethod: "password" | "privateKey"
+      authMethod: "password" | "privateKey" | "agent"
       privateKeyPath?: string
       credentialRef?: string
+      /**
+       * Id of another entry in this list to reach the host through. The chain
+       * is walked outermost-first and each bastion authenticates and is
+       * host-key verified on its own account.
+       */
+      jumpHostId?: string | null
+      /**
+       * `-L` rules. Always bound to `127.0.0.1`; there is no wider bind to
+       * configure, because a LAN-reachable forward would relay strangers onto
+       * the remote network.
+       */
+      localForwards?: Array<{
+        id: string
+        localPort: number
+        remoteHost: string
+        remotePort: number
+        enabled: boolean
+      }>
+      /**
+       * `-R` rules. The remote bind is likewise forced to `127.0.0.1`, and
+       * each rule is off until deliberately enabled — a remote forward opens a
+       * listening socket on someone else's machine pointing back at this one.
+       * Neither these nor `localForwards` are ever included in a profile
+       * synchronized to the terminal host, so a phone or LAN client naming a
+       * profile id gets a shell and never a tunnel (ADR-0082 §8).
+       */
+      remoteForwards?: Array<{
+        id: string
+        remotePort: number
+        localHost: string
+        localPort: number
+        enabled: boolean
+      }>
     }>
     /**
      * xterm.js cursor shape. Defaults to `"block"`. Mapped 1:1 to the

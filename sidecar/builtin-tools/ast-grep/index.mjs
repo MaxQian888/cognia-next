@@ -56,6 +56,8 @@ export async function execAstGrepSearch(args, deps = {}) {
       // documented `paths: ['.']` default resolved against wherever Tauri/the
       // CLI was launched rather than the agent's workspace.
       cwd: deps?.cwd,
+      // `runSg` has always accepted a signal; nothing ever passed one.
+      signal: deps?.signal,
     })
     let output = formatSearchResult(result)
     if (result.matches.length === 0 && !result.error) {
@@ -116,6 +118,7 @@ export async function execAstGrepReplace(args, deps = {}) {
       // Critical for the write path: without the session cwd a non-dry-run
       // rewrite applied to an unrelated directory tree.
       cwd: deps?.cwd,
+      signal: deps?.signal,
     })
     const output = formatReplaceResult(result, dryRun)
     return result.error ? toolError(output) : toolText(output)
@@ -147,11 +150,11 @@ export const AST_GREP_TOOL_NAMES = Object.freeze(["ast_grep_search", "ast_grep_r
  */
 export function createAstGrepTools({ cwd } = {}) {
   return [
-    tool("ast_grep_search", astGrepSearchTool.description, astGrepSearchShape, (args) =>
-      execAstGrepSearch(args, { cwd })
+    tool("ast_grep_search", astGrepSearchTool.description, astGrepSearchShape, (args, extra) =>
+      execAstGrepSearch(args, { cwd, signal: extra?.signal })
     ),
-    tool("ast_grep_replace", astGrepReplaceTool.description, astGrepReplaceShape, (args) =>
-      execAstGrepReplace(args, { cwd })
+    tool("ast_grep_replace", astGrepReplaceTool.description, astGrepReplaceShape, (args, extra) =>
+      execAstGrepReplace(args, { cwd, signal: extra?.signal })
     ),
   ]
 }

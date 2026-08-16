@@ -110,7 +110,7 @@ export function normaliseAbsolutePath(target) {
  * @type {ReadonlySet<string>}
  */
 export const BLOCKED_COMMANDS = new Set([
-  // Deletion — use file_delete / directory_delete (with approval) instead.
+  // Deletion — use directory_delete (with approval) instead.
   "rm",
   "rmdir",
   "del",
@@ -475,7 +475,9 @@ export function validateShellCommand(command, args) {
   if (BLOCKED_COMMANDS.has(cmdLower)) {
     return {
       safe: false,
-      reason: `Command '${command}' is blocked. Use the file_delete / directory_delete / process tools (with approval) instead.`,
+      // Only name tools that actually exist. This used to steer the model to a
+      // `file_delete` tool that has never existed anywhere in the repo.
+      reason: `Command '${command}' is blocked. Use the directory_delete / file_move / terminate_process tools (with approval) instead.`,
     }
   }
   if (!ALLOWED_COMMANDS.has(cmdLower)) {

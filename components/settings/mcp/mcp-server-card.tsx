@@ -24,10 +24,7 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
-import {
-  discoverMcpServerViaSidecar,
-  type McpDiscoveryResult,
-} from "@/lib/claude/feature-call"
+import { discoverMcpServerViaSidecar, type McpDiscoveryResult } from "@/lib/claude/feature-call"
 import type { McpServer } from "@cognia/agent-config-types"
 import { McpAgentChipGroup } from "../mcp-agent-chip-group"
 import { McpAuthButton } from "./mcp-auth-button"

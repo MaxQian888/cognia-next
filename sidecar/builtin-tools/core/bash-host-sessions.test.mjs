@@ -277,12 +277,16 @@ test("list reports a terminal status distinct from the legacy running/exited pai
   assert.equal(row.terminalStatus, "interrupted")
 })
 
-test("list degrades to empty when the host is unreachable", async () => {
+test("list surfaces a host failure instead of reporting zero shells", async () => {
+  // An empty array is a factual claim ("this session has no background
+  // shells"). Swallowing the RPC failure made "we could not ask the host" look
+  // identical to "there are none", and `list_shells` rendered that as a normal
+  // success — so the model concluded its background job had vanished.
   const { hostRpc } = fakeHost({
     "jobs.list": () => {
       throw new Error("host gone")
     },
   })
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
-  assert.deepEqual(await reg.list(), [])
+  await assert.rejects(() => reg.list(), /host gone/)
 })

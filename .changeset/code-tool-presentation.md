@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Adds the Code tool presentation: instead of a long list of tools, the agent gets one `run_code` tool plus a typed read-only SDK, and writes a short program against it. Every SDK call re-enters the normal tool registry, so argument validation, permissions, confinement and the audit log all still apply — there is no path from generated code to a tool implementation that skips them. Only tools explicitly marked programmatically read-only are reachable, which is a hand-maintained first-party list rather than anything inferred: tools that skip the approval prompt but still change state (TodoWrite, TaskCreate) are excluded, as are the environment readers. Programs run in a separate process with no filesystem, no network, no environment variables and no `process`, `require`, `eval` or `fetch`, under limits on source size, wall time, tool calls, concurrency, result size and memory. If the host cannot establish a strict sandbox, Code is simply not offered — it never falls back to running unsandboxed.

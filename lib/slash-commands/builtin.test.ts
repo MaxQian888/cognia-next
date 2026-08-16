@@ -43,10 +43,18 @@ describe("BUILTIN_SLASH_COMMANDS registry", () => {
       "compact",
       "context",
       "doctor",
+      "report",
       "export",
     ]) {
       expect(names).toContain(expected)
     }
+  })
+
+  it("/report is a diagnostics action command that opens the report dialog", async () => {
+    const report = BUILTIN_SLASH_COMMANDS.find((c) => c.name === "report")
+    expect(report?.category).toBe("diagnostics")
+    expect(report?.template).toBeUndefined()
+    expect(typeof report?.handler).toBe("function")
   })
 
   it("/pet is an Action command with the subcommand hint", () => {

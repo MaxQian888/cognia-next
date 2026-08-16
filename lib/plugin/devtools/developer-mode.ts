@@ -60,6 +60,17 @@ export function isDeveloperModeEnabled(): boolean {
   return usePluginStore.getState().pluginSettings.developerModeEnabled === true
 }
 
+/**
+ * Reactive form of {@link isDeveloperModeEnabled} for React surfaces.
+ *
+ * The imperative getter reads a snapshot, so a component using it would not
+ * re-render when the user flips the switch — and a Creator gate that stays shut
+ * after developer mode is enabled looks like a broken feature.
+ */
+export function useDeveloperMode(): boolean {
+  return usePluginStore((state) => state.pluginSettings.developerModeEnabled === true)
+}
+
 export function setDeveloperModeEnabled(enabled: boolean): void {
   usePluginStore.getState().updatePluginSettings({ developerModeEnabled: enabled })
 }

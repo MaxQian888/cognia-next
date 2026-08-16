@@ -101,7 +101,12 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput value={query} onValueChange={setQuery} placeholder={t("searchPlaceholder")} />
+      <CommandInput
+        data-testid="workflow-command-palette-input"
+        value={query}
+        onValueChange={setQuery}
+        placeholder={t("searchPlaceholder")}
+      />
       <CommandList>
         <CommandEmpty>{t("empty")}</CommandEmpty>
 
@@ -114,7 +119,10 @@ export function CommandPalette({
           >
             <SaveIcon className="size-4 mr-2" />
             {t("commands.save")}
-            <CommandShortcut>Ctrl+S</CommandShortcut>
+            <CommandShortcut>
+              {/* i18n-exempt: physical keyboard shortcut */}
+              Ctrl+S
+            </CommandShortcut>
           </CommandItem>
           {onRun ? (
             <CommandItem
@@ -136,7 +144,10 @@ export function CommandPalette({
             >
               <UndoIcon className="size-4 mr-2" />
               {t("commands.undo")}
-              <CommandShortcut>Ctrl+Z</CommandShortcut>
+              <CommandShortcut>
+                {/* i18n-exempt: physical keyboard shortcut */}
+                Ctrl+Z
+              </CommandShortcut>
             </CommandItem>
           ) : null}
           {onRedo ? (
@@ -148,7 +159,10 @@ export function CommandPalette({
             >
               <RedoIcon className="size-4 mr-2" />
               {t("commands.redo")}
-              <CommandShortcut>Ctrl+Shift+Z</CommandShortcut>
+              <CommandShortcut>
+                {/* i18n-exempt: physical keyboard shortcut */}
+                Ctrl+Shift+Z
+              </CommandShortcut>
             </CommandItem>
           ) : null}
           {onAutoLayout ? (

@@ -1,22 +1,20 @@
 "use client"
 
-// Sticky header for the Library middle pane. Composes:
-//
-//   - Search input (reuses store.filters.query, like the legacy panel header)
-//   - Library sub-filter chips (All / Enabled / Updates / Configurable / Errored)
-//   - View-mode toggle (list / card)
-//   - Filter sheet trigger
+// Library's contribution to the page header's second tier. Supplies the
+// three things that tier takes — search, segments, section tools — to the
+// shared `PluginSectionToolbar`, which owns the layout and the zero-count
+// rule. Library's tools are the filter-sheet trigger, the capability sheet
+// (narrow panes only), the sort select, and the list/card view toggle.
 //
 // Lives inside the FeaturePageHeader controls slot. Primary and page-level
 // actions are hosted by the header's fixed action tier so they remain visible
 // when this dense controls row scrolls horizontally.
 
 import { useTranslations } from "next-intl"
-import { ArrowDownUpIcon, FilterIcon, SearchIcon } from "lucide-react"
+import { ArrowDownUpIcon, FilterIcon } from "lucide-react"
 import { usePluginsStore, type PluginSortMode } from "@/stores/plugins"
 import { usePlugins } from "@/hooks/plugins"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -25,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
+import { PluginSectionToolbar } from "../plugin-section-toolbar"
 import { PluginActiveFilters } from "./plugin-active-filters"
 import { PluginLibrarySubFilter } from "./plugin-library-sub-filter"
 import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
@@ -49,67 +48,70 @@ export function PluginLibraryHeader() {
   const showCount = !loading && totals.total > 0 && filtered.length !== totals.total
 
   return (
-    <div className="w-full space-y-2">
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 min-w-0">
-          <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("searchPlaceholder")}
-            className="pl-7 h-8 text-sm"
-            aria-label={t("searchPlaceholder")}
-          />
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setFilterSheetOpen(true)}
-          aria-label={t("filtersButton")}
-          data-testid="plugin-library-filters-trigger"
-        >
-          <FilterIcon className="size-3.5" />
-          <span className="hidden sm:inline ml-1.5">{t("filtersButton")}</span>
-        </Button>
-        {/* Capability rail is inline on lg+; narrow viewports get the
-            equivalent affordance as a Sheet trigger so the capability
-            filter axis stays reachable. */}
-        <PluginCategorySheet className="lg:hidden" />
-        <Select value={sort} onValueChange={(v) => setFilters({ sort: v as PluginSortMode })}>
-          <SelectTrigger
-            className="h-8 w-auto gap-1.5 text-xs"
-            aria-label={t("sortBy")}
-            data-testid="plugin-library-sort"
+    <PluginSectionToolbar
+      testId="plugin-library-toolbar"
+      search={{
+        value: query,
+        onChange: setQuery,
+        placeholder: t("searchPlaceholder"),
+        testId: "plugin-library-search",
+      }}
+      tools={
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setFilterSheetOpen(true)}
+            aria-label={t("filtersButton")}
+            data-testid="plugin-library-filters-trigger"
           >
-            <ArrowDownUpIcon className="size-3.5" />
-            <span className="hidden sm:inline">
-              <SelectValue />
-            </span>
-          </SelectTrigger>
-          <SelectContent>
-            {SORT_MODES.map((mode) => (
-              <SelectItem key={mode} value={mode}>
-                {tSort(`sortMode.${mode}` as never)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <PluginLibraryViewToggle />
-      </div>
-      <PluginLibrarySubFilter />
-      <PluginActiveFilters />
-      {showCount && (
-        <p
-          className="text-xs text-muted-foreground"
-          role="status"
-          aria-live="polite"
-          data-testid="plugin-library-result-count"
-        >
-          {filtered.length === 0
-            ? t("resultsCountEmpty", { total: totals.total })
-            : t("resultsCount", { count: filtered.length, total: totals.total })}
-        </p>
-      )}
-    </div>
+            <FilterIcon className="size-3.5" />
+            <span className="hidden sm:inline ml-1.5">{t("filtersButton")}</span>
+          </Button>
+          {/* Capability rail is inline on lg+; narrow viewports get the
+              equivalent affordance as a Sheet trigger so the capability
+              filter axis stays reachable. */}
+          <PluginCategorySheet className="lg:hidden" />
+          <Select value={sort} onValueChange={(v) => setFilters({ sort: v as PluginSortMode })}>
+            <SelectTrigger
+              className="h-8 w-auto gap-1.5 text-xs"
+              aria-label={t("sortBy")}
+              data-testid="plugin-library-sort"
+            >
+              <ArrowDownUpIcon className="size-3.5" />
+              <span className="hidden sm:inline">
+                <SelectValue />
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_MODES.map((mode) => (
+                <SelectItem key={mode} value={mode}>
+                  {tSort(`sortMode.${mode}` as never)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <PluginLibraryViewToggle />
+        </>
+      }
+      status={
+        <>
+          <PluginLibrarySubFilter />
+          <PluginActiveFilters />
+          {showCount && (
+            <p
+              className="text-xs text-muted-foreground"
+              role="status"
+              aria-live="polite"
+              data-testid="plugin-library-result-count"
+            >
+              {filtered.length === 0
+                ? t("resultsCountEmpty", { total: totals.total })
+                : t("resultsCount", { count: filtered.length, total: totals.total })}
+            </p>
+          )}
+        </>
+      }
+    />
   )
 }

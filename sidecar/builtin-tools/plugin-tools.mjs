@@ -221,36 +221,111 @@ export function jsonSchemaPropToZod(prop, required) {
   } else {
     /** @type {Record<string, unknown>} */
     const p = prop
-    switch (p.type) {
-      case "string":
-        zodType = z.string()
-        break
-      case "number":
-        zodType = z.number()
-        break
-      case "integer":
-        zodType = z.number().int()
-        break
-      case "boolean":
-        zodType = z.boolean()
-        break
-      case "array": {
-        const itemSchema =
-          p.items && typeof p.items === "object" ? jsonSchemaPropToZod(p.items, true) : z.unknown()
-        zodType = z.array(itemSchema)
-        break
+    // `enum` / `const` are checked BEFORE `type`: the enum IS the contract, and
+    // for several tools it is also the discovery mechanism (dispatch_agent's
+    // `subagentId` enumerates the available subagents). Dropping it left the
+    // model a bare string on this rail while the ai-sdk rail saw the real
+    // constraint — the same tool validated differently per provider.
+    if (Array.isArray(p.enum) && p.enum.length > 0) {
+      // `null` is a legal enum member and a common one: `enum: ["a","b",null]`
+      // is how a schema says "one of these, or explicitly cleared". Filtering it
+      // out (rather than mapping it to `z.null()`) made this rail reject a value
+      // the schema declares, and left `enum: [null]` with no members at all.
+      const literals = p.enum.filter((v) => v !== null && v !== undefined)
+      const hasNull = p.enum.includes(null)
+      if (!hasNull && literals.length > 0 && literals.every((v) => typeof v === "string")) {
+        zodType = z.enum(/** @type {[string, ...string[]]} */ (literals))
+      } else {
+        const branches = [
+          ...literals.map((v) => z.literal(/** @type {any} */ (v))),
+          ...(hasNull ? [z.null()] : []),
+        ]
+        // A single member is a literal, not a union: `z.union` needs two, and
+        // duplicating the member to satisfy it only obscured the empty case.
+        zodType =
+          branches.length === 1
+            ? branches[0]
+            : branches.length > 1
+              ? z.union(/** @type {any} */ (branches))
+              : z.unknown()
       }
-      case "object":
-        zodType = z.record(z.string(), z.unknown())
-        break
-      case "null":
-        zodType = z.null()
-        break
-      default:
-        zodType = z.unknown()
+    } else if (p.const !== undefined) {
+      zodType = z.literal(/** @type {any} */ (p.const))
+    } else {
+      switch (p.type) {
+        case "string": {
+          let s = z.string()
+          if (typeof p.minLength === "number") s = s.min(p.minLength)
+          if (typeof p.maxLength === "number") s = s.max(p.maxLength)
+          if (typeof p.pattern === "string") {
+            try {
+              s = s.regex(new RegExp(p.pattern))
+            } catch {
+              /* an unsupported pattern must not brick the tool */
+            }
+          }
+          zodType = s
+          break
+        }
+        case "number":
+        case "integer": {
+          let n = p.type === "integer" ? z.number().int() : z.number()
+          if (typeof p.minimum === "number") n = n.min(p.minimum)
+          if (typeof p.maximum === "number") n = n.max(p.maximum)
+          if (typeof p.exclusiveMinimum === "number") n = n.gt(p.exclusiveMinimum)
+          if (typeof p.exclusiveMaximum === "number") n = n.lt(p.exclusiveMaximum)
+          zodType = n
+          break
+        }
+        case "boolean":
+          zodType = z.boolean()
+          break
+        case "array": {
+          const itemSchema =
+            p.items && typeof p.items === "object"
+              ? jsonSchemaPropToZod(p.items, true)
+              : z.unknown()
+          let a = z.array(itemSchema)
+          if (typeof p.minItems === "number") a = a.min(p.minItems)
+          if (typeof p.maxItems === "number") a = a.max(p.maxItems)
+          zodType = a
+          break
+        }
+        case "object": {
+          // Recurse into nested `properties`/`required` instead of collapsing
+          // the whole object to an opaque record. `working_set.entry` carries
+          // three enums, a `required` list and `refs.maxItems` that all
+          // vanished under the old `z.record(z.string(), z.unknown())`.
+          if (p.properties && typeof p.properties === "object") {
+            const nestedRequired = Array.isArray(p.required) ? p.required : []
+            /** @type {Record<string, z.ZodType>} */
+            const nestedShape = {}
+            for (const [k, v] of Object.entries(p.properties)) {
+              nestedShape[k] = jsonSchemaPropToZod(v, nestedRequired.includes(k))
+            }
+            const obj = z.object(nestedShape)
+            // Only close the object when the schema says so; JSON Schema's
+            // default is open, and tightening it would reject valid calls.
+            zodType = p.additionalProperties === false ? obj.strict() : obj.passthrough()
+          } else {
+            zodType = z.record(z.string(), z.unknown())
+          }
+          break
+        }
+        case "null":
+          zodType = z.null()
+          break
+        default:
+          zodType = z.unknown()
+      }
     }
     if (typeof p.description === "string" && p.description.length > 0) {
       zodType = zodType.describe(p.description)
+    }
+    // `default` implies the field is optional to the caller; apply it last so
+    // it wraps whatever constraint was built above.
+    if (p.default !== undefined && !required) {
+      return zodType.optional().default(/** @type {any} */ (p.default))
     }
   }
   return required ? zodType : zodType.optional()

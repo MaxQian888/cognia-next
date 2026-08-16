@@ -3,11 +3,15 @@
 // Left nav for the /plugins 3-pane shell. Mounted as
 // `<FeaturePageShell leftPane={{ content: <PluginNavSidebar /> }} />` so it
 // inherits the resize handle + mobile Sheet treatment from the feature
-// shell. Two-level structure:
+// shell.
 //
-//   1. Top-level sections (Library / Discover / Governance / Devtools).
-//   2. Nested sub-items under Library (status sub-filter chips) and
-//      Governance (cross-plugin aggregate view picker).
+// The rail carries exactly one axis: which section you are in (Library /
+// Discover / Governance / Devtools). Anything that switches the *view
+// inside* a section — Library's status filter, Governance's aggregate
+// view picker — belongs to `PluginSectionToolbar` in the page header's
+// second tier instead. Mixing the two axes in one column is what made the
+// rail read as neither navigation nor filter; Governance's picker has
+// already moved, Library's follows.
 //
 // Click handlers route through the plugins store — no prop drilling. The
 // devtools section uses `useDevtoolsGate()` so production builds without
@@ -19,11 +23,7 @@ import { useDevtoolsGate } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import {
-  PLUGIN_GOVERNANCE_VIEWS,
-  PLUGIN_LIBRARY_SUBFILTERS,
-  PLUGIN_NAV_SECTIONS,
-} from "./plugin-nav-config"
+import { PLUGIN_LIBRARY_SUBFILTERS, PLUGIN_NAV_SECTIONS } from "./plugin-nav-config"
 
 export function PluginNavSidebar() {
   const t = useTranslations("plugins.sections")
@@ -31,8 +31,6 @@ export function PluginNavSidebar() {
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
   const librarySub = usePluginsStore((s) => s.librarySubFilter)
   const setLibrarySub = usePluginsStore((s) => s.setLibrarySubFilter)
-  const governanceView = usePluginsStore((s) => s.governanceView)
-  const setGovernanceView = usePluginsStore((s) => s.setGovernanceView)
   const devtoolsEnabled = useDevtoolsGate()
 
   const visibleSections = PLUGIN_NAV_SECTIONS.filter((item) => {
@@ -69,15 +67,6 @@ export function PluginNavSidebar() {
                   items={PLUGIN_LIBRARY_SUBFILTERS}
                   value={librarySub}
                   onSelect={setLibrarySub}
-                />
-              )}
-              {section === "governance" && active && (
-                <SubList
-                  testIdPrefix="plugin-nav-governance-sub"
-                  i18nPrefix="governanceSub"
-                  items={PLUGIN_GOVERNANCE_VIEWS}
-                  value={governanceView}
-                  onSelect={setGovernanceView}
                 />
               )}
             </li>

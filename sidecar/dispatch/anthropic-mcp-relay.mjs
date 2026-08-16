@@ -47,9 +47,7 @@ export function guardAnthropicRemoteMcpServers(
           args: packaged ? [] : [scriptPath],
           env: {
             [RELAY_CONFIG_ENV]: encodeRelayConfig(entry),
-            ...(packaged
-              ? { COGNIA_ROLE: "mcp-relay", COGNIA_MCP_RELAY_SCRIPT: scriptPath }
-              : {}),
+            ...(packaged ? { COGNIA_ROLE: "mcp-relay", COGNIA_MCP_RELAY_SCRIPT: scriptPath } : {}),
           },
           ...(typeof entry.timeout === "number" ? { timeout: entry.timeout } : {}),
           ...(entry.alwaysLoad === true ? { alwaysLoad: true } : {}),

@@ -6,7 +6,11 @@ import { toMcpTransport } from "./ai-sdk-mcp.mjs"
 const DEFAULT_TIMEOUT_MS = 15_000
 
 function isMethodNotFound(error) {
-  return error?.code === -32601 || error?.data?.code === -32601 || /method not found/i.test(error?.message)
+  return (
+    error?.code === -32601 ||
+    error?.data?.code === -32601 ||
+    /method not found/i.test(error?.message)
+  )
 }
 
 async function optionalList(operation) {
@@ -102,4 +106,3 @@ export async function discoverMcpServer(
     }
   }
 }
-

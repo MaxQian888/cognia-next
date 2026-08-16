@@ -90,13 +90,23 @@ jest.mock("@/lib/plugin/package/marketplace", () => ({
   })),
 }))
 
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
+jest.mock("sonner", () => ({
+  toast: { success: jest.fn(), error: jest.fn(), message: jest.fn() },
+}))
+
+// The cascade-uninstall spies live inside the factory (jest.mock factories
+// hit the TDZ for outer consts) and are re-exported so the test can assert
+// the two table deletes actually fired.
+jest.mock("@/lib/db/schema", () => {
+  const deletePermissions = jest.fn(async () => undefined)
+  const deleteAnalytics = jest.fn(async () => undefined)
+  const db = {
     pluginAnalytics: {
       orderBy: () => ({ reverse: () => ({ toArray: async () => [] }) }),
+      where: () => ({ equals: () => ({ delete: deleteAnalytics }) }),
     },
     pluginPermissions: {
-      where: () => ({ equals: () => ({ delete: async () => undefined }) }),
+      where: () => ({ equals: () => ({ delete: deletePermissions }) }),
     },
     // The marketplace-sources hook writes each catalog fetch's outcome back to
     // its row, so this stub has to cover the table too.
@@ -106,8 +116,13 @@ jest.mock("@/lib/db/schema", () => ({
       orderBy: () => ({ toArray: async () => [] }),
       delete: async () => undefined,
     },
-  }),
-}))
+  }
+  return {
+    getDb: () => db,
+    __deletePermissions: deletePermissions,
+    __deleteAnalytics: deleteAnalytics,
+  }
+})
 
 // FeaturePageShell already has its own tests — stub it to a transparent
 // composition wrapper so this test focuses on PluginPanel's wiring (which
@@ -139,11 +154,15 @@ jest.mock("./devtools/plugin-devtools-pane", () => ({
 
 import { PluginPanel } from "./plugin-panel"
 import { getPluginMarketplace } from "@/lib/plugin/package/marketplace"
-import { deletePlugin } from "@/lib/db/plugins"
+import { deletePlugin, updatePlugin } from "@/lib/db/plugins"
 import { unregisterScheduledTasksForPlugin } from "@/lib/plugin/bridge/scheduled-task-bridge"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
+import { toast } from "sonner"
+import * as dbSchema from "@/lib/db/schema"
 
 const getPluginMarketplaceMock = getPluginMarketplace as unknown as jest.Mock
+const { __deletePermissions: deletePermissionsMock, __deleteAnalytics: deleteAnalyticsMock } =
+  dbSchema as unknown as { __deletePermissions: jest.Mock; __deleteAnalytics: jest.Mock }
 
 beforeEach(() => {
   mockRows.length = 0
@@ -153,7 +172,13 @@ beforeEach(() => {
   mockSearchCacheValue = new URLSearchParams("")
   mockReplace.mockClear()
   jest.mocked(deletePlugin).mockClear()
+  jest.mocked(updatePlugin).mockClear()
   jest.mocked(unregisterScheduledTasksForPlugin).mockClear()
+  jest.mocked(toast.success).mockClear()
+  jest.mocked(toast.error).mockClear()
+  deletePermissionsMock.mockClear()
+  deleteAnalyticsMock.mockClear()
+  getPluginMarketplaceMock.mockReturnValue({ checkForUpdates: jest.fn(async () => []) })
   usePluginsStore.setState({
     activeSection: "library",
     librarySubFilter: "all",
@@ -196,11 +221,29 @@ describe("PluginPanel (3-pane shell)", () => {
     expect(screen.getByTestId("plugin-discover-pane")).toBeInTheDocument()
   })
 
-  it("swaps the center pane to Governance when activeSection=governance", () => {
+  // Library / Discover / Governance are all 3-pane, so moving between them
+  // never changes the pane count and never throws away the split the user
+  // dragged. Governance's aggregate views are per-plugin, so the same
+  // detail pane is the right right-pane content for them.
+  it("keeps the detail pane mounted when activeSection=governance", () => {
     usePluginsStore.setState({ activeSection: "governance" })
     render(<PluginPanel />)
     expect(screen.getByTestId("plugin-governance-pane")).toBeInTheDocument()
-    expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
+    expect(screen.getByTestId("shell-right")).not.toBeEmptyDOMElement()
+  })
+
+  it("renders the governance view picker in the header, not the left rail", () => {
+    usePluginsStore.setState({ activeSection: "governance" })
+    render(<PluginPanel />)
+    expect(screen.getByTestId("plugin-governance-view-audit")).toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-nav-governance-sub-audit")).not.toBeInTheDocument()
+  })
+
+  it("switches the governance view from the header segments", () => {
+    usePluginsStore.setState({ activeSection: "governance", governanceView: "permissions" })
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByTestId("plugin-governance-view-audit"))
+    expect(usePluginsStore.getState().governanceView).toBe("audit")
   })
 
   it("uses the full workspace and hides plugin detail when activeSection=devtools", () => {
@@ -298,5 +341,74 @@ describe("PluginPanel (3-pane shell)", () => {
     expect(sentIds).not.toContain("esbenp.prettier-vscode")
     // ...while ordinary cognia plugins are still checked as before.
     expect(sentIds).toEqual(["plugin_x"])
+  })
+
+  it("Sync Registry stamps manifest.updateAvailable on rows the catalog reports as stale", async () => {
+    getPluginMarketplaceMock.mockReturnValue({
+      checkForUpdates: jest.fn(async () => [{ id: "plugin_x", latestVersion: "2.0.0" }]),
+    })
+
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+
+    await waitFor(() => expect(jest.mocked(updatePlugin)).toHaveBeenCalled())
+    expect(jest.mocked(updatePlugin)).toHaveBeenCalledWith("plugin_x", {
+      manifest: { ...baseRow.manifest, updateAvailable: true },
+    })
+  })
+
+  it("Sync Registry leaves rows alone when the flag already matches the catalog", async () => {
+    // wantsFlag === currentFlag → no write. Without this branch every sync
+    // would rewrite all 40 manifests and churn the Dexie table.
+    getPluginMarketplaceMock.mockReturnValue({ checkForUpdates: jest.fn(async () => []) })
+
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    expect(jest.mocked(updatePlugin)).not.toHaveBeenCalled()
+  })
+
+  it("Sync Registry surfaces a toast when the registry throws", async () => {
+    // The toolbar fires this handler with `void`, so a rejection here would
+    // otherwise be an unhandled promise plus a spinner stuck on forever.
+    getPluginMarketplaceMock.mockReturnValue({
+      checkForUpdates: jest.fn(async () => {
+        throw new Error("registry down")
+      }),
+    })
+
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(jest.mocked(toast.error).mock.calls[0][0]).toContain("registry down")
+    // The spinner has to clear even on the failure path.
+    expect(screen.getByLabelText("syncRegistryAria")).not.toBeDisabled()
+  })
+
+  it("cascade uninstall also drops the plugin's permissions and analytics rows", async () => {
+    usePluginsStore.setState({
+      deleteTarget: { pluginId: "plugin_x", name: "Test Plugin" },
+    })
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByRole("checkbox", { name: /cascade/i }))
+    fireEvent.click(screen.getByRole("button", { name: "confirm" }))
+
+    await waitFor(() => expect(jest.mocked(deletePlugin)).toHaveBeenCalledWith("plugin_x"))
+    expect(deletePermissionsMock).toHaveBeenCalled()
+    expect(deleteAnalyticsMock).toHaveBeenCalled()
+  })
+
+  it("plain uninstall leaves permissions and analytics rows in place", async () => {
+    usePluginsStore.setState({
+      deleteTarget: { pluginId: "plugin_x", name: "Test Plugin" },
+    })
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByRole("button", { name: "confirm" }))
+
+    await waitFor(() => expect(jest.mocked(deletePlugin)).toHaveBeenCalledWith("plugin_x"))
+    expect(deletePermissionsMock).not.toHaveBeenCalled()
+    expect(deleteAnalyticsMock).not.toHaveBeenCalled()
   })
 })

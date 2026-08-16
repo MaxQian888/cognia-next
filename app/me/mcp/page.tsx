@@ -30,13 +30,10 @@ import type { McpServerSummary } from "@cognia/agent-config-types"
 
 function McpBody() {
   const t = useTranslations("mobile.mcp")
-  const servers = useLiveQuery(
-    async () => {
-      const rows = await getDb().mcpServerSummaries.toArray()
-      return rows.sort((a, b) => a.displayName.localeCompare(b.displayName))
-    },
-    []
-  )
+  const servers = useLiveQuery(async () => {
+    const rows = await getDb().mcpServerSummaries.toArray()
+    return rows.sort((a, b) => a.displayName.localeCompare(b.displayName))
+  }, [])
 
   return (
     <div className="flex flex-col gap-4">

@@ -258,6 +258,10 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     taskStore,
     model: sendOptions.model,
     provider: sendOptions.provider ?? "anthropic",
+    // ADR-0117: the frozen composition decides which tool surface the model
+    // sees. Read from the send spec rather than re-derived here, so renderer
+    // and sidecar cannot disagree about what this turn is.
+    toolPresentation: sendOptions.execution?.composition?.toolPresentation,
     // Per-tool deadline for read-only built-ins on this channel too (parity with
     // the ai-sdk bridge). `undefined` ⇒ buildCogniaToolsServer's 120s default;
     // `0` disables.

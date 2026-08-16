@@ -95,10 +95,15 @@ const ACCEPT_EDITS_TOOL_NAMES = new Set([
  * @param {{ name: string, handler: Function }} def
  * @param {Record<string, unknown>} effective  gated/validated args
  * @param {number} timeoutMs                    0 / non-finite ⇒ no net
+ * @param {AbortSignal} [signal]  The step's abort signal. Forwarded as
+ *   `extra.signal` so a handler can actually stop work on a user interrupt —
+ *   `core/rg.mjs` and `ast-grep/run.mjs` both accept one and, until now, no
+ *   caller ever supplied it, so an interrupt abandoned the promise while the
+ *   child process kept running.
  */
-function runBuiltinHandler(def, effective, timeoutMs) {
+function runBuiltinHandler(def, effective, timeoutMs, signal) {
   const net = READ_ONLY_TOOL_NAMES.has(def.name) ? timeoutMs : 0
-  const call = () => def.handler(effective, {})
+  const call = () => def.handler(effective, { signal })
   if (!Number.isFinite(net) || net <= 0) return call()
   let timer = null
   const deadline = new Promise((_, reject) => {
@@ -660,7 +665,7 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
         : (args ?? {})
       let result
       try {
-        result = await runBuiltinHandler(def, effective, timeoutMs)
+        result = await runBuiltinHandler(def, effective, timeoutMs, options?.abortSignal)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         const reviewed = await applyOutputReview(
@@ -872,6 +877,10 @@ export function buildAiSdkTools({
     taskStore,
     model: sendOptions.model,
     provider: sendOptions.provider,
+    // ADR-0117: the frozen composition decides which tool surface the model
+    // sees. Read from the send spec rather than re-derived here, so renderer
+    // and sidecar cannot disagree about what this turn is.
+    toolPresentation: sendOptions.execution?.composition?.toolPresentation,
   })) {
     if (!def || !def.name || isDisallowed(def.name)) continue
     const candidates = [def.name, `mcp__${SERVER_NAME}__${def.name}`]

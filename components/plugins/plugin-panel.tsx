@@ -58,6 +58,7 @@ import { PluginLibraryHeader } from "./library/plugin-library-header"
 import { PluginPanelToolbar } from "./plugin-panel-toolbar"
 import { PluginDiscoverPane } from "./discover/plugin-discover-pane"
 import { PluginGovernancePane } from "./governance/plugin-governance-pane"
+import { PluginGovernanceHeader } from "./governance/plugin-governance-header"
 import { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"
 import { PluginDetailPane } from "./detail/plugin-detail-pane"
 
@@ -274,7 +275,15 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
   const tPage = useTranslations("plugins")
   const activeSection = usePluginsStore((s) => s.activeSection)
 
-  const controls = activeSection === "library" ? <PluginLibraryHeader /> : undefined
+  // Second header tier — one control vocabulary for every section. Each
+  // section supplies its own segments/tools through `PluginSectionToolbar`
+  // rather than inventing a picker of its own (see that component's note).
+  const controls =
+    activeSection === "library" ? (
+      <PluginLibraryHeader />
+    ) : activeSection === "governance" ? (
+      <PluginGovernanceHeader />
+    ) : undefined
 
   const center =
     activeSection === "library" ? (
@@ -318,8 +327,14 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
         minSize: 12,
         maxSize: 24,
       }}
+      // Library / Discover / Governance all keep the right pane mounted, so
+      // moving between them never changes the pane count and never discards
+      // the split the user dragged. Governance's aggregate views are
+      // per-plugin rows, so the same detail pane is the right target for
+      // them. Devtools is still 2-pane — its diagnostics grid needs the full
+      // width and gets its own right-pane content in a later step.
       rightPane={
-        activeSection === "devtools" || activeSection === "governance"
+        activeSection === "devtools"
           ? undefined
           : {
               label: t("detailSheetLabel"),

@@ -19,7 +19,9 @@ const summaryRows = [
 ]
 const toArrayMock = jest.fn(async () => summaryRows)
 const orderByMock = jest.fn(() => {
-  throw new Error("SchemaError: KeyPath displayName on object store mcpServerSummaries is not indexed")
+  throw new Error(
+    "SchemaError: KeyPath displayName on object store mcpServerSummaries is not indexed"
+  )
 })
 
 jest.mock("dexie-react-hooks", () => ({

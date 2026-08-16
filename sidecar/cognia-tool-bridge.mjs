@@ -22,17 +22,18 @@
 
 import net from "node:net"
 import { pathToFileURL } from "node:url"
-import { z } from "zod"
 
 import { collectCogniaToolDefs, READ_ONLY_TOOL_NAMES } from "./builtin-tools/index.mjs"
 import { createReadTracker } from "./builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "./builtin-tools/core/bash-sessions.mjs"
 import { createSessionTaskStore } from "./builtin-tools/core/tasks.mjs"
+import { MONITOR_TOOL_NAMES } from "./builtin-tools/core/monitor.mjs"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
   wrapDefsWithReadOnlyTimeout,
 } from "./builtin-tools/read-only-timeout.mjs"
 import { wrapDefsWithResultCap } from "./builtin-tools/result-cap.mjs"
+import { parseToolArgs, toolInputJsonSchema } from "./builtin-tools/tool-args.mjs"
 import { makeLazyLspResolver } from "./dispatch/lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./dispatch/codegraph-resolver-factory.mjs"
 
@@ -102,60 +103,10 @@ export function connectBroker(socketPath, { connect = net.connect } = {}) {
   }
 }
 
-/**
- * Convert a builtin tool def's zod raw shape into a JSON Schema object, which is
- * what MCP `tools/list` requires. Zod 4 ships the conversion, so the schema the
- * external agent sees is derived from the SAME definition the built-in backend
- * validates against rather than a hand-maintained copy.
- */
-export function toolInputJsonSchema(inputSchema) {
-  if (!inputSchema || typeof inputSchema !== "object") {
-    return { type: "object", properties: {} }
-  }
-  try {
-    const object = typeof inputSchema.safeParse === "function" ? inputSchema : z.object(inputSchema)
-    const schema = z.toJSONSchema(object, { io: "input", unrepresentable: "any" })
-    // MCP requires an object schema at the top level.
-    if (!schema || schema.type !== "object") return { type: "object", properties: {} }
-    return schema
-  } catch {
-    return { type: "object", properties: {} }
-  }
-}
-
-/**
- * Validate + normalise raw JSON-RPC arguments against a tool's zod shape.
- *
- * The bridge previously called `def.handler(args ?? {}, {})` on whatever the
- * external agent sent, using the zod shape ONLY to advertise a JSON Schema. So
- * on this rail every `.default()`, `.min()`, `.max()` and `.enum()` was inert:
- * `content_search`'s `maxResults` cap vanished (`length >= undefined` is always
- * false), `shell_execute_advanced` ran with no timeout, `start_process` got a
- * `NaN` timeout, and `terminal_repl_read` returned an empty string. The
- * Anthropic and ai-sdk rails both parse; this one now does too.
- *
- * Fails OPEN on an unrepresentable schema (same posture as
- * `toolInputJsonSchema`) so a conversion quirk cannot brick a working tool.
- *
- * @returns {{ ok: true, value: unknown } | { ok: false, message: string }}
- */
-export function parseToolArgs(inputSchema, args) {
-  const input = args ?? {}
-  if (!inputSchema || typeof inputSchema !== "object") return { ok: true, value: input }
-  let object
-  try {
-    object = typeof inputSchema.safeParse === "function" ? inputSchema : z.object(inputSchema)
-  } catch {
-    return { ok: true, value: input }
-  }
-  const parsed = object.safeParse(input)
-  if (parsed.success) return { ok: true, value: parsed.data }
-  const detail = parsed.error?.issues
-    ?.slice(0, 5)
-    .map((i) => `${i.path?.length ? i.path.join(".") : "(root)"}: ${i.message}`)
-    .join("; ")
-  return { ok: false, message: detail || "invalid arguments" }
-}
+// Schema conversion + argument validation are shared with the `run_code` broker
+// in `builtin-tools/index.mjs`, which reaches the same defs by a different
+// route. Re-exported here so this module stays the bridge's whole surface.
+export { parseToolArgs, toolInputJsonSchema }
 
 /** Flatten an SDK tool result into the MCP content shape. */
 export function toMcpContent(result) {
@@ -244,6 +195,11 @@ export function buildToolSurface(serverName, session, broker) {
     // -only `ExitPlanMode` duplicate — so the dispatch path stays unset.
     model: session.model,
     provider: session.provider,
+    // Available on the descriptor and previously dropped. No `hostRpc` exists
+    // here (the bridge is a separate process reached over a hello/authorize/
+    // exec/report broker), so anything keyed on it still degrades — but the id
+    // itself should not be silently lost.
+    sessionId: session.sessionId,
   })
   const timeout =
     typeof session.toolExecutionTimeoutMs === "number"
@@ -253,49 +209,62 @@ export function buildToolSurface(serverName, session, broker) {
     wrapDefsWithReadOnlyTimeout(defs, timeout, READ_ONLY_TOOL_NAMES),
     session.maxToolResultTokens
   )
-  return guarded
-    .filter((def) => visible.has(def.name))
-    .map((def) => ({
-      name: def.name,
-      description: def.description ?? "",
-      inputSchema: toolInputJsonSchema(def.inputSchema),
-      async run(args) {
-        // Cognia decides FIRST. The bridge never infers permission from the
-        // agent's own approval — that governs the agent's tools, not Cognia's.
-        // Authorisation deliberately precedes validation: a refused caller must
-        // not be able to probe the schema, and the permission decision must not
-        // be preemptable by an argument error.
-        const verdict = await broker.call("authorize", { name: def.name, args })
-        if (!verdict.allow) {
-          return { content: [{ type: "text", text: `Error: ${verdict.reason}` }], isError: true }
-        }
-        // Only then validate + normalise, so the handler receives the same
-        // parsed shape it would get on the Anthropic and ai-sdk rails.
-        const parsed = parseToolArgs(def.inputSchema, args)
-        if (!parsed.ok) {
-          return {
-            content: [{ type: "text", text: `Error: invalid arguments — ${parsed.message}` }],
-            isError: true,
+  return (
+    guarded
+      .filter((def) => visible.has(def.name))
+      // Never advertise a tool that cannot possibly work here. The Monitor family
+      // is backed by the Rust job supervisor over `host_rpc`, which this process
+      // has no channel to, so all three returned "monitors are not available in
+      // this session" on every call while still appearing in `tools/list`.
+      // `visibleBuiltinTools` is computed host-side and has no notion of runtime
+      // availability, so the filter has to live here.
+      .filter((def) => !MONITOR_TOOL_NAMES.includes(def.name))
+      .map((def) => ({
+        name: def.name,
+        description: def.description ?? "",
+        inputSchema: toolInputJsonSchema(def.inputSchema),
+        async run(args) {
+          // Cognia decides FIRST. The bridge never infers permission from the
+          // agent's own approval — that governs the agent's tools, not Cognia's.
+          // Authorisation deliberately precedes validation: a refused caller must
+          // not be able to probe the schema, and the permission decision must not
+          // be preemptable by an argument error.
+          const verdict = await broker.call("authorize", { name: def.name, args })
+          if (!verdict.allow) {
+            return { content: [{ type: "text", text: `Error: ${verdict.reason}` }], isError: true }
           }
-        }
-        let result
-        try {
-          result = toMcpContent(await def.handler(parsed.value, {}))
-        } catch (err) {
-          result = {
-            content: [{ type: "text", text: `Error: ${err?.message ?? String(err)}` }],
-            isError: true,
+          // Only then validate + normalise, so the handler receives the same
+          // parsed shape it would get on the Anthropic and ai-sdk rails.
+          const parsed = parseToolArgs(def.inputSchema, args)
+          let result
+          if (!parsed.ok) {
+            // Falls through to the report below rather than returning early: a
+            // rejected call is still a tool OUTCOME and must render in the TUI
+            // and land in the audit trail exactly like an execution failure.
+            result = {
+              content: [{ type: "text", text: `Error: invalid arguments — ${parsed.message}` }],
+              isError: true,
+            }
+          } else {
+            try {
+              result = toMcpContent(await def.handler(parsed.value, {}))
+            } catch (err) {
+              result = {
+                content: [{ type: "text", text: `Error: ${err?.message ?? String(err)}` }],
+                isError: true,
+              }
+            }
           }
-        }
-        // Report so the call renders in the TUI and lands in the audit trail
-        // exactly like a built-in one. Best-effort: a failed report must not
-        // turn a successful tool call into an error.
-        await broker
-          .call("report", { name: def.name, ok: !result.isError, summary: summarize(result) })
-          .catch(() => undefined)
-        return result
-      },
-    }))
+          // Report so the call renders in the TUI and lands in the audit trail
+          // exactly like a built-in one. Best-effort: a failed report must not
+          // turn a successful tool call into an error.
+          await broker
+            .call("report", { name: def.name, ok: !result.isError, summary: summarize(result) })
+            .catch(() => undefined)
+          return result
+        },
+      }))
+  )
 }
 
 /** Minimal MCP stdio server: JSON-RPC 2.0, newline framed. */

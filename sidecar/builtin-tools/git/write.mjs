@@ -26,7 +26,23 @@ async function execGitStage(args) {
     await assertRepo(args.cwd)
     await runGit(["add", "--", ...args.paths], args.cwd)
     const { stdout } = await runGit(["status", "--porcelain"], args.cwd)
-    return toolText({ staged: args.paths, status: stdout || "(clean)" })
+    // `git add` exits 0 having staged nothing when every path matched only
+    // ignored or unchanged files. Echoing `args.paths` as `staged` therefore
+    // asserted something git never confirmed. Report what the index actually
+    // holds; `requested` keeps the model's own input visible for comparison.
+    const { stdout: stagedOut } = await runGit(["diff", "--cached", "--name-only"], args.cwd)
+    const staged = stagedOut.split(/\r?\n/).filter(Boolean)
+    return toolText({
+      requested: args.paths,
+      staged,
+      stagedCount: staged.length,
+      ...(staged.length === 0
+        ? {
+            note: "git add staged nothing — the paths may be ignored, unchanged, or already staged.",
+          }
+        : {}),
+      status: stdout || "(clean)",
+    })
   } catch (err) {
     return toolError(err, "git_stage")
   }

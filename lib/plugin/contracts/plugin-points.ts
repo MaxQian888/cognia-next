@@ -429,8 +429,12 @@ export function getExtensionPointFormFactor(
 }
 
 const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
-  "sidebar.left.top": "components/shell/guild-rail.tsx",
-  "sidebar.left.bottom": "components/shell/guild-rail.tsx",
+  // Two hosts each: the 56px icon column and the expanded workspace sidebar's
+  // own top / bottom, which is the same rail in its other state. Both keep the
+  // declared `icon` form factor — the expanded sidebar draws contributions as
+  // an icon strip, not as labelled rows, so one contribution fits both.
+  "sidebar.left.top": "components/shell/guild-rail.tsx + components/shell/sidebar-nav-section.tsx",
+  "sidebar.left.bottom": "components/shell/guild-rail.tsx + components/shell/sidebar-footer.tsx",
   "sidebar.right.top": "components/context-workbench/context-workbench.tsx",
   "sidebar.right.bottom": "components/context-workbench/context-workbench.tsx",
   "toolbar.left": "components/desktop/title-bar.tsx",

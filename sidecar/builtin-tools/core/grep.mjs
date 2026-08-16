@@ -159,7 +159,7 @@ export function groupByFile(lines) {
   return out
 }
 
-async function execWithRipgrep(args, { root, target, rgPath }) {
+async function execWithRipgrep(args, { root, target, rgPath, signal }) {
   const rgArgs = ["--no-config", "--no-heading", "--glob", "!.git/**"]
   if (args.case_insensitive) rgArgs.push("-i")
   if (args.multiline) rgArgs.push("-U", "--multiline-dotall")
@@ -185,6 +185,9 @@ async function execWithRipgrep(args, { root, target, rgPath }) {
   } = await runRipgrep(rgArgs, {
     cwd: root,
     rgPath,
+    // Forwarded from the dispatch layer so a user interrupt actually kills the
+    // ripgrep child instead of orphaning it.
+    signal,
   })
   if (code === 1 && stdout.length === 0) return { lines: [], streamTruncated }
   const lines = stdout
@@ -256,7 +259,7 @@ async function execWithJsFallback(args, { root, target }) {
 }
 
 export function createGrepTool({ cwd }) {
-  async function execGrep(args) {
+  async function execGrep(args, extra) {
     try {
       const resolvedPath = resolveToolPath(cwd, args.path ?? ".")
       const stat = await fsp.stat(resolvedPath)
@@ -264,8 +267,9 @@ export function createGrepTool({ cwd }) {
       const root = isFile ? path.dirname(resolvedPath) : resolvedPath
       const target = isFile ? path.basename(resolvedPath) : "."
       const rgPath = await detectRipgrep()
+      const signal = extra?.signal
       const { lines, streamTruncated } = rgPath
-        ? await execWithRipgrep(args, { root, target, rgPath })
+        ? await execWithRipgrep(args, { root, target, rgPath, signal })
         : await execWithJsFallback(args, { root, target })
 
       if (lines.length === 0) return toolText("No matches found.")

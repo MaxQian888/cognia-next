@@ -38,6 +38,7 @@ import {
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
 import { paneCenterScreenPoint } from "@/lib/workflow/editor/pane-center"
 import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
+import { useWorkflowCommandPaletteShortcut } from "@/hooks/workflow/use-workflow-command-palette-shortcut"
 import { CanvasContextMenu, type ContextTarget } from "./canvas-context-menu"
 import { SpotlightSearch } from "./spotlight-search"
 import { ConnectionLineGhostFactory } from "./connection-overlay"
@@ -74,6 +75,18 @@ import {
 /** The right rail's shipped width and floor, as percentages of the editor. */
 const WORKFLOW_RIGHT_DEFAULT_PERCENT = 28
 const WORKFLOW_RIGHT_MIN_PERCENT = 20
+
+/**
+ * Keep the workflow editor's mobile Workbench aligned with the shared Context
+ * Workbench: a force-mounted bottom sheet can finish its exit animation before
+ * settling off-canvas, while a right-edge sheet feels like desktop navigation.
+ */
+export const WORKFLOW_MOBILE_WORKBENCH_SHEET = {
+  forceMount: true,
+  side: "bottom",
+  className:
+    "h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)] data-[state=closed]:translate-y-full data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]",
+} as const
 
 interface CanvasInnerProps {
   store: EditorStore
@@ -811,6 +824,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   // CanvasInner fires during a node drag (setNodes + alignment-guide state) —
   // inline arrows here would defeat the memo by changing identity each render.
   const handleOpenPalette = useCallback(() => setPaletteOpen(true), [])
+  const togglePalette = useCallback(() => setPaletteOpen((v) => !v), [])
   const handleOpenSpotlight = useCallback(() => setSpotlightOpen(true), [])
   const handleOpenShortcuts = useCallback(() => setShortcutsOpen(true), [])
   const handleAddSticky = useCallback(
@@ -829,7 +843,13 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     [reactFlowInstance, perfTier.flags.edgeAnimations]
   )
 
-  // Keyboard shortcuts: Ctrl/Cmd+S, Z/Shift-Z/Y, K — plus clipboard/group
+  // Ctrl/Cmd+K → the editor's command palette. Registered on the shared
+  // dispatcher (not the raw listener below) because the global search claims
+  // the same chord app-wide; the two descriptors carry opposite `when` clauses
+  // so exactly one fires. See ADR-0129.
+  useWorkflowCommandPaletteShortcut(togglePalette)
+
+  // Keyboard shortcuts: Ctrl/Cmd+S, Z/Shift-Z/Y — plus clipboard/group
   // family (A/C/X/V/D/G). Skip when focus is in an input / textarea / CM
   // editor so typing in the inspector doesn't fight the canvas shortcuts.
   useEffect(() => {
@@ -891,11 +911,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         handleRedo()
         return
       }
-      if (key === "k") {
-        e.preventDefault()
-        setPaletteOpen((v) => !v)
-        return
-      }
+      // Ctrl/Cmd+K is NOT handled here — it goes through the shared app
+      // shortcut dispatcher (`useWorkflowCommandPaletteShortcut`) so it can
+      // never double-fire with the global search that owns the same chord.
       // Ctrl/Cmd+B / Ctrl/Cmd+J — toggle the node palette / right sidebar.
       // Mirrors the Canvas-guild (VS Code) bindings so muscle memory carries
       // over; reclaims ~34% width on laptop screens.
@@ -1228,9 +1246,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       {isMobile ? (
         <Sheet open={mobileToolsOpen} onOpenChange={setMobileToolsOpen} modal={mobileToolsOpen}>
           <SheetContent
-            forceMount
-            side="right"
-            className="w-full gap-0 p-0 sm:max-w-none"
+            {...WORKFLOW_MOBILE_WORKBENCH_SHEET}
+            showCloseButton={false}
             inert={!mobileToolsOpen}
             aria-hidden={!mobileToolsOpen}
             data-testid="context-workbench-mobile-sheet"
@@ -1239,6 +1256,10 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               <SheetTitle>{tWorkbench("mobileTitle")}</SheetTitle>
               <SheetDescription>{tWorkbench("mobileDescription")}</SheetDescription>
             </SheetHeader>
+            <div
+              aria-hidden
+              className="mx-auto mt-2 mb-1 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30"
+            />
             <RightSidebar
               useStore={store}
               className="h-full w-full border-l-0"

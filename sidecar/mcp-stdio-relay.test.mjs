@@ -57,4 +57,3 @@ test("relays JSON-RPC and applies the negotiated protocol version", async () => 
     "guard.close",
   ])
 })
-

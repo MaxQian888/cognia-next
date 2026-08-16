@@ -34,6 +34,20 @@ export interface BuiltinToolMeta {
   requiresApproval: boolean
   /** Mirror of the SDK's `tool({alwaysLoad})` flag. Read-only safe tools default to true. */
   alwaysLoad: boolean
+  /**
+   * Eligible to be exposed through the Code presentation's typed SDK
+   * (ADR-0117, Phase 4).
+   *
+   * This is a **first-party allowlist**, deliberately declared per tool rather
+   * than derived from `requiresApproval`. The two mean different things:
+   * `requiresApproval: false` says "no per-call prompt", which is true of
+   * `TodoWrite` and `TaskCreate` — tools that mutate state. Programmatic
+   * read-only means the tool can be called in a loop from generated code with
+   * no side effect at all. It is also deliberately not derived from the MCP
+   * `readOnlyHint` annotation, which third-party servers declare about
+   * themselves and which is therefore not a security boundary.
+   */
+  programmaticReadOnly?: boolean
 }
 
 export interface BuiltinToolCategory {

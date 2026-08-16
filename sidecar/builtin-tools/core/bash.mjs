@@ -428,7 +428,14 @@ export function createListShellsTool({ bgShells }) {
     if (!bgShells) {
       return toolError("background shells are not available in this session")
     }
-    return toolText(JSON.stringify({ shells: await bgShells.list() }, null, 2))
+    try {
+      return toolText(JSON.stringify({ shells: await bgShells.list() }, null, 2))
+    } catch (err) {
+      // The host registry no longer swallows a failed `jobs.list`, so a real
+      // lookup failure surfaces as a tool error instead of an empty list the
+      // model would read as "no background shells".
+      return toolError(err, "list_shells")
+    }
   }
 
   return tool(

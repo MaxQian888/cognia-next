@@ -84,4 +84,3 @@ test("closes the guarded dispatcher when connection fails", async () => {
   )
   assert.equal(closed, 1)
 })
-

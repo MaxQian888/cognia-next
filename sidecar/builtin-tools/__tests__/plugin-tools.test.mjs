@@ -304,3 +304,37 @@ test("jsonSchemaPropToZod preserves descriptions on known fields", () => {
   const schema = jsonSchemaPropToZod({ type: "string", description: "field docs" }, true)
   assert.equal(schema.description, "field docs")
 })
+
+test("jsonSchemaPropToZod accepts null as a declared enum member", () => {
+  // `enum: [...,null]` is how a schema says "one of these, or explicitly
+  // cleared". Dropping the null made this rail reject a value the schema
+  // declares, while the ai-sdk rail accepted it — the same tool validating
+  // differently per provider.
+  const schema = jsonSchemaPropToZod({ type: ["string", "null"], enum: ["a", "b", null] }, true)
+  assert.equal(schema.safeParse("a").success, true)
+  assert.equal(schema.safeParse(null).success, true)
+  assert.equal(schema.safeParse("nope").success, false)
+})
+
+test("jsonSchemaPropToZod maps a null-only enum to null, not to undefined", () => {
+  // `enum: [null]` is legal JSON Schema for "must be null". Filtering the only
+  // member out once left a union of two `z.literal(undefined)` — a schema whose
+  // declared value was the one thing it rejected.
+  const schema = jsonSchemaPropToZod({ enum: [null] }, true)
+  assert.equal(schema.safeParse(null).success, true)
+  assert.equal(schema.safeParse("a").success, false)
+})
+
+test("jsonSchemaPropToZod maps a single-member enum to that literal", () => {
+  const schema = jsonSchemaPropToZod({ enum: [7] }, true)
+  assert.equal(schema.safeParse(7).success, true)
+  assert.equal(schema.safeParse(8).success, false)
+})
+
+test("jsonSchemaPropToZod keeps mixed-type enums exact", () => {
+  const schema = jsonSchemaPropToZod({ enum: ["a", 2, true] }, true)
+  for (const value of ["a", 2, true]) {
+    assert.equal(schema.safeParse(value).success, true, `expected ${String(value)} to parse`)
+  }
+  assert.equal(schema.safeParse("2").success, false)
+})

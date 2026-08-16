@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -72,6 +73,19 @@ describe("PluginLibraryHeader", () => {
     expect(sort).toBeInTheDocument()
     // The trigger shows the active sort mode's label (sortMode.updated).
     expect(sort.textContent).toContain("sortMode.updated")
+  })
+
+  // Radix Select checks pointer-event detail, so fireEvent.click never opens
+  // it — this has to go through userEvent (jest-gotchas #4).
+  it("writes the picked sort mode back to the store", async () => {
+    const user = userEvent.setup()
+    usePluginsStore.setState({
+      filters: { ...usePluginsStore.getState().filters, sort: "name" },
+    })
+    render(<PluginLibraryHeader />)
+    await user.click(screen.getByTestId("plugin-library-sort"))
+    await user.click(await screen.findByRole("option", { name: "sortMode.usage" }))
+    expect(usePluginsStore.getState().filters.sort).toBe("usage")
   })
 
   it("renders the capability sheet trigger gated to lg:hidden so the rail is only fallback for narrow viewports", () => {

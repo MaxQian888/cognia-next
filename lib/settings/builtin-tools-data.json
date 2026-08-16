@@ -16,42 +16,48 @@
           "descriptionKey": "tools.fileHash",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "file_diff",
           "descriptionKey": "tools.fileDiff",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "file_info",
           "descriptionKey": "tools.fileInfo",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "file_search",
           "descriptionKey": "tools.fileSearch",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "content_search",
           "descriptionKey": "tools.contentSearch",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "file_exists",
           "descriptionKey": "tools.fileExists",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "file_append",
@@ -117,28 +123,32 @@
           "descriptionKey": "tools.coreGrep",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "glob",
           "descriptionKey": "tools.coreGlob",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "read",
           "descriptionKey": "tools.coreRead",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "ls",
           "descriptionKey": "tools.coreLs",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "edit",
@@ -274,28 +284,32 @@
           "descriptionKey": "tools.gitStatus",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": true
+          "alwaysLoad": true,
+          "programmaticReadOnly": true
         },
         {
           "name": "git_diff",
           "descriptionKey": "tools.gitDiff",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "git_log",
           "descriptionKey": "tools.gitLog",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "git_branch",
           "descriptionKey": "tools.gitBranch",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "git_remote",
@@ -309,7 +323,8 @@
           "descriptionKey": "tools.gitTag",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "git_repo_inspect",
@@ -323,14 +338,16 @@
           "descriptionKey": "tools.gitChanges",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "git_history",
           "descriptionKey": "tools.gitHistory",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "git_stage",
@@ -527,35 +544,40 @@
           "descriptionKey": "tools.lspGotoDefinition",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "lsp_find_references",
           "descriptionKey": "tools.lspFindReferences",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "lsp_hover",
           "descriptionKey": "tools.lspHover",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "lsp_document_symbols",
           "descriptionKey": "tools.lspDocumentSymbols",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "lsp_diagnostics",
           "descriptionKey": "tools.lspDiagnostics",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         }
       ]
     },
@@ -572,63 +594,72 @@
           "descriptionKey": "tools.codegraphStatus",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "codegraph_search",
           "descriptionKey": "tools.codegraphSearch",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "codegraph_node",
           "descriptionKey": "tools.codegraphNode",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "codegraph_callers",
           "descriptionKey": "tools.codegraphCallers",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "codegraph_callees",
           "descriptionKey": "tools.codegraphCallees",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "codegraph_impact",
           "descriptionKey": "tools.codegraphImpact",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "codegraph_context",
           "descriptionKey": "tools.codegraphContext",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "codegraph_explore",
           "descriptionKey": "tools.codegraphExplore",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "codegraph_files",
           "descriptionKey": "tools.codegraphFiles",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         }
       ]
     },
@@ -645,7 +676,8 @@
           "descriptionKey": "tools.astGrepSearch",
           "riskLevel": "low",
           "requiresApproval": false,
-          "alwaysLoad": false
+          "alwaysLoad": false,
+          "programmaticReadOnly": true
         },
         {
           "name": "ast_grep_replace",

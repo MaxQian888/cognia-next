@@ -32,7 +32,14 @@ import { assertPathInside, canonicalisePartial } from "./safety.mjs"
 // they are the hard-deny set for every tool. `.env` is deliberately NOT listed —
 // it is a normal project file the agent legitimately reads/writes.
 
-/** Directory segments that mark a credential store. Case-folded on Windows. */
+/**
+ * Directory segments that mark a credential store.
+ *
+ * Kept in union with `cli/src/agent/tool-host/policy.ts`. The two enforcement
+ * points stay separate on purpose (Cognia must not trust a check running inside
+ * the process it confines), but the DATA must not drift — and it had: `.cognia`
+ * existed only CLI-side, while `.gpg` / `.config/gcloud` existed only here.
+ */
 const SECRET_DIR_SEGMENTS = new Set([
   ".ssh",
   ".aws",
@@ -40,6 +47,8 @@ const SECRET_DIR_SEGMENTS = new Set([
   ".gpg",
   ".kube",
   ".docker",
+  ".npmrc",
+  ".cognia",
   ".config/gcloud",
 ])
 
@@ -50,14 +59,24 @@ const SECRET_FILE_NAMES = new Set([
   ".netrc",
   "_netrc",
   ".pypirc",
+  ".pgpass",
   "credentials",
+  "id_rsa",
+  "id_ed25519",
+  "known_hosts",
 ])
 
 /** Two-segment secret paths (`<dir>/<child>`), e.g. `~/.config/gh`. */
 const SECRET_SEGMENT_PAIRS = [[".config", "gh"]]
 
+/**
+ * Case-fold on the platforms with case-insensitive filesystems. macOS was
+ * missing, so a first write to `~/.AWS/credentials` on a machine with no
+ * existing `~/.aws` slipped past (an existing path is normally saved by
+ * `realpathSync.native` returning the true on-disk case).
+ */
 function foldCase(s) {
-  return process.platform === "win32" ? s.toLowerCase() : s
+  return process.platform === "win32" || process.platform === "darwin" ? s.toLowerCase() : s
 }
 
 /** Split an absolute path into normalized, case-folded segments. */

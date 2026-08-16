@@ -30,8 +30,10 @@ import {
   TerminalSquareIcon,
   Trash2Icon,
   TimerIcon,
+  Wand2Icon,
   ZapIcon,
 } from "lucide-react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -120,6 +122,17 @@ export function PluginDevtoolsPanel() {
           <BugIcon className="size-4 text-muted-foreground" aria-hidden="true" />
         </div>
         <h2 className="text-sm font-semibold tracking-tight">{t("title")}</h2>
+        {/*
+          Creator's entry point (ADR-0117). It lives here rather than on the nav
+          rail because Creator is gated on developer mode, which is per-user —
+          and this panel is behind that same gate, so the two cannot drift.
+        */}
+        <Button asChild size="sm" variant="ghost" className="ml-auto">
+          <Link href="/creator">
+            <Wand2Icon className="size-4" aria-hidden="true" />
+            {t("openCreator")}
+          </Link>
+        </Button>
       </div>
 
       <Tabs defaultValue="logs" className="min-w-0 gap-0">

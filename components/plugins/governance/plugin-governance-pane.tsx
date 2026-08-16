@@ -25,14 +25,18 @@ export function PluginGovernancePane() {
   const view = usePluginsStore((s) => s.governanceView)
 
   return (
+    // No visible <h2>: the active view's name is already rendered by
+    // FeaturePageHeader's `context` slot and by the selected segment in
+    // PluginGovernanceHeader — a third copy was the page saying the same
+    // word three times. The name stays available to assistive tech as the
+    // region's accessible name.
     <div
       className="flex h-full min-h-0 flex-col overflow-y-auto p-4"
       data-testid="plugin-governance-pane"
       data-view={view}
+      role="region"
+      aria-label={t(view)}
     >
-      <header className="mb-3 shrink-0">
-        <h2 className="text-base font-semibold">{t(view)}</h2>
-      </header>
       <div className="min-h-0 flex-1">
         {view === "permissions" && <PluginPermissionsTab />}
         {view === "scheduled" && <PluginScheduledJobs />}

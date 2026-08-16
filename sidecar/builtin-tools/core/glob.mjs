@@ -35,12 +35,12 @@ export const globShape = {
  * @param {{ pattern: string, root: string }} opts
  * @returns {Promise<{ files: string[], truncated: boolean }>}
  */
-export async function enumerateGlob({ pattern, root }) {
+export async function enumerateGlob({ pattern, root, signal }) {
   const rgPath = await detectRipgrep()
   if (rgPath) {
     const { stdout, truncated } = await runRipgrep(
       ["--no-config", "--files", "--glob", pattern, "--glob", "!.git/**"],
-      { cwd: root, rgPath }
+      { cwd: root, rgPath, signal }
     )
     const files = stdout
       .split(/\r?\n/)
@@ -54,10 +54,14 @@ export async function enumerateGlob({ pattern, root }) {
 }
 
 export function createGlobTool({ cwd }) {
-  async function execGlob(args) {
+  async function execGlob(args, extra) {
     try {
       const root = resolveToolPath(cwd, args.path ?? ".")
-      const { files, truncated } = await enumerateGlob({ pattern: args.pattern, root })
+      const { files, truncated } = await enumerateGlob({
+        pattern: args.pattern,
+        root,
+        signal: extra?.signal,
+      })
       if (files.length === 0) return toolText("No files matched the pattern.")
 
       // Sort by mtime, newest first — recently-touched files are usually what

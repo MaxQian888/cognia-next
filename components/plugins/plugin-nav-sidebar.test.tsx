@@ -73,16 +73,23 @@ describe("PluginNavSidebar", () => {
     expect(usePluginsStore.getState().filters.configurable).toBe(true)
   })
 
-  it("reveals the governance sub-views only when the Governance section is active", () => {
+  // The rail carries one axis: which section you are in. Governance's
+  // aggregate-view picker moved to PluginGovernanceHeader (the shared
+  // second header tier); rendering it here too would put two axes back in
+  // one column.
+  it("never renders the governance sub-views, even on the Governance section", () => {
     usePluginsStore.setState({ activeSection: "governance" })
     render(<PluginNavSidebar />)
-    expect(screen.getByTestId("plugin-nav-governance-sub-audit")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-nav-governance")).toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-nav-governance-sub-audit")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-nav-governance-sub-permissions")).not.toBeInTheDocument()
   })
 
-  it("clicking a governance sub-view updates the store", () => {
-    usePluginsStore.setState({ activeSection: "governance" })
+  it("leaves governanceView untouched when the Governance section is selected", () => {
+    usePluginsStore.setState({ activeSection: "library", governanceView: "audit" })
     render(<PluginNavSidebar />)
-    fireEvent.click(screen.getByTestId("plugin-nav-governance-sub-audit"))
+    fireEvent.click(screen.getByTestId("plugin-nav-governance"))
+    expect(usePluginsStore.getState().activeSection).toBe("governance")
     expect(usePluginsStore.getState().governanceView).toBe("audit")
   })
 })

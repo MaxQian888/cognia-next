@@ -1,9 +1,6 @@
 import type { UIMessage } from "ai"
 
-import {
-  isSkillSuggestionEligible,
-  prepareSkillRecordingFromSource,
-} from "./session-suggestion"
+import { isSkillSuggestionEligible, prepareSkillRecordingFromSource } from "./session-suggestion"
 
 const mockCreateRecording = jest.fn()
 const mockCheckpointRecording = jest.fn()
@@ -124,7 +121,10 @@ describe("prepareSkillRecordingFromSource", () => {
     expect(JSON.stringify(edits)).toContain("<EMAIL_001>")
     expect(mockSetEdits).toHaveBeenCalledWith(edits)
     expect(mockDispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "REATTACH", snapshot: expect.objectContaining({ phase: "review" }) })
+      expect.objectContaining({
+        type: "REATTACH",
+        snapshot: expect.objectContaining({ phase: "review" }),
+      })
     )
     expect(mockDispatch).toHaveBeenCalledWith({ type: "OPEN", source: "session-suggestion" })
   })
@@ -145,8 +145,8 @@ describe("prepareSkillRecordingFromSource", () => {
     ).rejects.toThrow("skill-source-empty")
 
     mockGetAttempt.mockResolvedValue({ status: "failed", result: "partial" })
-    await expect(
-      prepareSkillRecordingFromSource({ kind: "run", runId: "failed" })
-    ).rejects.toThrow("skill-source-not-successful")
+    await expect(prepareSkillRecordingFromSource({ kind: "run", runId: "failed" })).rejects.toThrow(
+      "skill-source-not-successful"
+    )
   })
 })

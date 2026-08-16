@@ -65,6 +65,14 @@ async function execStartProcess(args, ctx = {}) {
           cwd: args.cwd,
           label: args.program,
         })
+        // Record the pid here too. This is the path that actually runs in every
+        // production wiring (`collectCogniaToolDefs` always supplies bgShells),
+        // and it used to return without touching `trackedPids` — so
+        // `get_tracked_processes` was permanently empty,
+        // `get_process_manager_status` reported `enabled: true` for a registry
+        // that could never be non-empty, and `terminate_process` refused pids
+        // this very call had just spawned.
+        if (entry.pid) trackedPids.add(entry.pid)
         return toolText({
           pid: entry.pid ?? null,
           jobId: entry.id,

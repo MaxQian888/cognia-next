@@ -421,6 +421,17 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     handler: handleDoctor,
   },
   {
+    name: "report",
+    description:
+      "Report a problem: describe it, review the redacted details, then copy, download, or open a GitHub issue.",
+    scope: "builtin",
+    category: "diagnostics",
+    handler: async (ctx) => {
+      const { runReportCommand } = await import("./actions/report")
+      await runReportCommand(ctx)
+    },
+  },
+  {
     name: "usage",
     description: "Show Anthropic subscription quota windows (5h / 7d) and reset countdowns.",
     scope: "builtin",

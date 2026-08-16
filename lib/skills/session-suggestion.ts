@@ -24,8 +24,7 @@ export interface SkillSuggestionOutcome {
 }
 
 export type SkillSuggestionSource =
-  | { kind: "session"; sessionId: string }
-  | { kind: "run"; runId: string; sessionId?: string }
+  { kind: "session"; sessionId: string } | { kind: "run"; runId: string; sessionId?: string }
 
 export function isSkillSuggestionEligible(outcome: SkillSuggestionOutcome): boolean {
   if (!outcome.completed || outcome.turns < 2) return false
