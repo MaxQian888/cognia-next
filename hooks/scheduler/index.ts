@@ -7,4 +7,5 @@
  */
 
 export { useScheduler } from "./use-scheduler"
+export { useSchedulerHostTarget, useSchedulerTargetHost } from "./use-scheduler-host-target"
 export { useSystemScheduler, type UseSystemSchedulerReturn } from "./use-system-scheduler"

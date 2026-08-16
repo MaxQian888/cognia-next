@@ -333,6 +333,40 @@ describe("TaskForm", () => {
     )
   })
 
+  it("disables task types the target host cannot run and explains why", () => {
+    render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        hostForTesting={{ platform: "web", capabilities: ["webview"] }}
+      />
+    )
+    // Web-standalone has no sidecar → chat is disabled and, being the default
+    // type, surfaces the inline warning; test needs nothing → enabled.
+    const chat = screen.getByTestId("task-type-chat")
+    expect(chat).toBeDisabled()
+    expect(chat.getAttribute("data-host-supported")).toBe("false")
+    expect(chat.getAttribute("title")).toContain("hostSupport.reason.")
+    expect(screen.getByTestId("task-type-test")).not.toBeDisabled()
+    expect(screen.getByTestId("task-type-host-warning")).toBeInTheDocument()
+  })
+
+  it("enables every type on a full desktop host and hides the warning", () => {
+    render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        hostForTesting={{
+          platform: "tauri",
+          capabilities: ["shell", "sidecar", "keyring", "connector-runtime", "mcp-runtime"],
+        }}
+      />
+    )
+    expect(screen.getByTestId("task-type-chat")).not.toBeDisabled()
+    expect(screen.getByTestId("task-type-script")).not.toBeDisabled()
+    expect(screen.queryByTestId("task-type-host-warning")).not.toBeInTheDocument()
+  })
+
   it("rejects an end time in the past", async () => {
     const onSubmit = jest.fn(async () => undefined)
     render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)

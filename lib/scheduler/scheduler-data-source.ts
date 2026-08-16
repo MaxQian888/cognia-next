@@ -8,7 +8,7 @@ import type {
   UpdateScheduledTaskInput,
 } from "@/types/scheduler"
 import { transport } from "@/lib/tauri"
-import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import { getEffectiveSchedulerHostTarget } from "./scheduler-host-target"
 import { schedulerDb } from "./scheduler-db"
 import { getTaskScheduler } from "./task-scheduler"
 
@@ -302,6 +302,12 @@ class RemoteSchedulerDataSource implements SchedulerDataSource {
 const localDataSource = new LocalSchedulerDataSource()
 const remoteDataSource = new RemoteSchedulerDataSource()
 
+/**
+ * The data source for the schedule the UI currently manages: the paired /
+ * remote host's (through the `scheduled_task_*` RPCs) or this device's own
+ * (`TaskScheduler`) — see `scheduler-host-target.ts` for how the target is
+ * chosen. `host` on the returned source tells callers which one they got.
+ */
 export function getSchedulerDataSource(): SchedulerDataSource {
-  return isRemoteHostActive() ? remoteDataSource : localDataSource
+  return getEffectiveSchedulerHostTarget() === "paired" ? remoteDataSource : localDataSource
 }

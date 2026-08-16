@@ -51,6 +51,7 @@ import { TaskNotificationDisplay } from "./task-notification-display"
 import { TaskTagsDisplay } from "./task-tags-display"
 import { TaskDependencyGraph } from "./task-dependency-graph"
 import { buildDependencyGraph, hasDependencyLinks } from "@/lib/scheduler/dependency-graph"
+import { isDeprecatedTaskType } from "@/lib/scheduler/host-support"
 
 export interface TaskDetailViewProps {
   task: ScheduledTask
@@ -297,6 +298,15 @@ export function TaskDetailView({
 
         {/* Scrollable content */}
         <ScrollArea className="flex-1 p-5 sm:p-6">
+          {isDeprecatedTaskType(task.type) && (
+            <div
+              className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300"
+              role="alert"
+              data-testid="task-deprecated-banner"
+            >
+              {t("hostSupport.deprecatedBanner", { type: task.type })}
+            </div>
+          )}
           <TaskStatsCards task={task} executions={executions} />
 
           <div className="mt-5">

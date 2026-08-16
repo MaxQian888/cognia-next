@@ -196,6 +196,16 @@ describe("TaskDetailView", () => {
     }
   })
 
+  it("shows the deprecated banner only for deprecated task types", () => {
+    const cbs = callbacks()
+    const { rerender } = render(
+      <TaskDetailView task={buildTask({ type: "sync" })} executions={[]} {...cbs} />
+    )
+    expect(screen.getByTestId("task-deprecated-banner")).toBeInTheDocument()
+    rerender(<TaskDetailView task={buildTask({ type: "chat" })} executions={[]} {...cbs} />)
+    expect(screen.queryByTestId("task-deprecated-banner")).not.toBeInTheDocument()
+  })
+
   it("handles tags array missing", () => {
     const cbs = callbacks()
     render(

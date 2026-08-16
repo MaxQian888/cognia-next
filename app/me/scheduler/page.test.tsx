@@ -230,6 +230,9 @@ jest.mock("@/components/scheduler/unified-task-sidebar-item", () => ({
   ),
 }))
 
+jest.mock("@/components/scheduler/scheduler-host-bar", () => ({
+  SchedulerHostBar: () => <div data-testid="scheduler-host-bar" />,
+}))
 jest.mock("@/components/mobile/scheduler/mobile-scheduler-stat-strip", () => ({
   MobileSchedulerStatStrip: ({ statistics }: { statistics: TaskStatistics | null }) => (
     <div data-testid="stub-stat-strip">{statistics ? statistics.activeTasks : "no-stats"}</div>

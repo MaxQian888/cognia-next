@@ -21,6 +21,7 @@ import type {
 import { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
 import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
 import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import { subscribeSchedulerHostTarget } from "@/lib/scheduler/scheduler-host-target"
 import {
   cancelPluginTaskExecution,
   getActivePluginTaskCount,
@@ -38,6 +39,7 @@ let initializationGeneration = 0
 // Deduplication guard for concurrent refreshAll() calls
 let refreshPromise: Promise<void> | null = null
 let schedulerRoutingUnsubscribe: (() => void) | null = null
+let schedulerTargetUnsubscribe: (() => void) | null = null
 let schedulerHostGeneration = 0
 
 // Scheduler system status
@@ -838,6 +840,16 @@ export const useSchedulerStore = create<SchedulerStore>()(
             if (!schedulerRoutingUnsubscribe) {
               schedulerRoutingUnsubscribe = subscribeActiveRemoteTransport(() => {
                 void rebindSchedulerHost()
+              })
+            }
+            // Flipping the managed schedule (this device ↔ paired host) only
+            // changes which data source the store reads; the local scheduler
+            // keeps running its own table either way.
+            if (!schedulerTargetUnsubscribe) {
+              schedulerTargetUnsubscribe = subscribeSchedulerHostTarget(() => {
+                if (!get().isInitialized) return
+                set({ selectedTaskId: null })
+                void get().refreshAll()
               })
             }
           } catch (error) {

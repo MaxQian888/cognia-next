@@ -20501,6 +20501,36 @@
       "local": "Local host",
       "remote": "Remote host"
     },
+    "hostBar": {
+      "localOnlyWhileOpen": "runs only while this app is open",
+      "localSuspended": "suspended — taken over by the cloud host",
+      "managing": "Managing: {host}",
+      "noPairedHost": "no paired host — tasks run on this device",
+      "pairedCloud": "cloud host",
+      "pairedDesktop": "paired desktop",
+      "pairedNamed": "cloud host {name}",
+      "switchToLocal": "View this device",
+      "switchToPaired": "Manage {host}",
+      "thisDevice": "this device"
+    },
+    "hostSupport": {
+      "deprecatedBanner": "This task type ({type}) is deprecated and has no executor. The task was paused automatically — recreate it as a Chat task or delete it.",
+      "host": {
+        "headless": "the cloud host",
+        "local": "this device",
+        "mobile": "the mobile app",
+        "paired": "the paired host",
+        "tauri": "the desktop app",
+        "web": "the browser"
+      },
+      "reason": {
+        "deprecated-type": "This task type is deprecated and has no executor.",
+        "desktop-only": "Only available in the desktop app.",
+        "missing-capability": "Needs the {missing} capability, which this host does not provide.",
+        "missing-host-filesystem": "Needs a host filesystem (desktop app or cloud host)."
+      },
+      "unavailableTitle": "Not available on {host}"
+    },
     "importError": "Import failed: {message}",
     "importExport": {
       "exportAll": "Export all tasks",

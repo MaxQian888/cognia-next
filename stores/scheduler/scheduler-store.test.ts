@@ -141,6 +141,15 @@ jest.mock("@/lib/tauri/transport-routing", () => ({
   subscribeActiveRemoteTransport: () => jest.fn(),
 }))
 
+const hostTargetListeners = new Set<() => void>()
+jest.mock("@/lib/scheduler/scheduler-host-target", () => ({
+  getEffectiveSchedulerHostTarget: () => "local",
+  subscribeSchedulerHostTarget: (listener: () => void) => {
+    hostTargetListeners.add(listener)
+    return () => hostTargetListeners.delete(listener)
+  },
+}))
+
 jest.mock("@/lib/scheduler/executors/plugin-executor", () => ({
   cancelPluginTaskExecution: jest.fn().mockReturnValue(true),
   getActivePluginTaskCount: jest.fn().mockReturnValue(2),
@@ -1636,6 +1645,35 @@ describe("useSchedulerStore", () => {
       expect(schedulerLibMock.initSchedulerSystem).toHaveBeenCalledTimes(1)
       expect(result.current.isInitialized).toBe(true)
       expect(result.current.isLoading).toBe(false)
+    })
+
+    it("re-reads the managed schedule and drops the selection when the host target flips", async () => {
+      const { result } = renderHook(() => useSchedulerStore())
+      await act(async () => {
+        await result.current.initialize()
+      })
+      expect(hostTargetListeners.size).toBeGreaterThan(0)
+      act(() => {
+        useSchedulerStore.setState({ selectedTaskId: "task-1" })
+      })
+      mockedDb.getAllTasks.mockClear()
+      await act(async () => {
+        hostTargetListeners.forEach((listener) => listener())
+        await Promise.resolve()
+      })
+      expect(result.current.selectedTaskId).toBeNull()
+      expect(mockedDb.getAllTasks).toHaveBeenCalled()
+
+      // Before initialisation the listener is a no-op.
+      act(() => {
+        useSchedulerStore.setState({ isInitialized: false, selectedTaskId: "task-2" })
+      })
+      mockedDb.getAllTasks.mockClear()
+      act(() => {
+        hostTargetListeners.forEach((listener) => listener())
+      })
+      expect(result.current.selectedTaskId).toBe("task-2")
+      expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
     })
 
     it("skips work when already initialized", async () => {

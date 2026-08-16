@@ -37,11 +37,34 @@ jest.mock("./task-scheduler", () => ({
 
 import { schedulerDb } from "./scheduler-db"
 import { getSchedulerDataSource } from "./scheduler-data-source"
+import {
+  __resetSchedulerHostTargetForTesting,
+  setPreferredSchedulerHostTarget,
+} from "./scheduler-host-target"
 
 beforeEach(() => {
   call.mockReset()
   remoteActive = false
+  __resetSchedulerHostTargetForTesting()
   jest.clearAllMocks()
+})
+
+it("keeps reading this device's schedule while a remote host is active if the user chose local", async () => {
+  remoteActive = true
+  setPreferredSchedulerHostTarget("local")
+  ;(schedulerDb.getAllTasks as jest.Mock).mockResolvedValue([])
+
+  const source = getSchedulerDataSource()
+  await source.listTasks()
+
+  expect(source.host).toBe("local")
+  expect(call).not.toHaveBeenCalled()
+
+  // A remembered `paired` preference only takes effect while a paired host exists.
+  setPreferredSchedulerHostTarget("paired")
+  expect(getSchedulerDataSource().host).toBe("remote")
+  remoteActive = false
+  expect(getSchedulerDataSource().host).toBe("local")
 })
 
 it("uses the local scheduler database while no remote host is active", async () => {

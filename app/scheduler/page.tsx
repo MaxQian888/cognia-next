@@ -32,6 +32,7 @@ import {
   SchedulerDialogs,
 } from "@/components/scheduler"
 import { UnifiedTaskDetailView } from "@/components/scheduler/unified-task-detail-view"
+import { SchedulerHostBar } from "@/components/scheduler/scheduler-host-bar"
 import { RunDetailSheet } from "@/components/scheduler/run-detail-sheet"
 import { SchedulerBulkToolbar } from "@/components/scheduler/scheduler-bulk-toolbar"
 import { SchedulerUpcomingRail } from "@/components/scheduler/scheduler-upcoming-rail"
@@ -637,20 +638,23 @@ export default function SchedulerPage() {
           />
         }
         header={
-          <SchedulerContentHeader
-            selectedTaskName={selectedTask?.name}
-            isRefreshing={isLoading}
-            onCreate={handleCreateClick}
-            onCreateSystemTask={() => setShowSystemCreateSheet(true)}
-            onCreateWorkflowTrigger={() => setShowQuickWorkflowDialog(true)}
-            onOpenBackupSettings={() => setShowBackupDialog(true)}
-            onOpenPluginSettings={() => router.push("/settings?section=plugins")}
-            onRefresh={handleRefresh}
-            onExport={() => setShowExportDialog(true)}
-            onImport={() => setShowImportDialog(true)}
-            onOpenTemplates={() => setShowTemplateGallery(true)}
-            onCleanup={handleCleanup}
-          />
+          <div className="space-y-2">
+            <SchedulerContentHeader
+              selectedTaskName={selectedTask?.name}
+              isRefreshing={isLoading}
+              onCreate={handleCreateClick}
+              onCreateSystemTask={() => setShowSystemCreateSheet(true)}
+              onCreateWorkflowTrigger={() => setShowQuickWorkflowDialog(true)}
+              onOpenBackupSettings={() => setShowBackupDialog(true)}
+              onOpenPluginSettings={() => router.push("/settings?section=plugins")}
+              onRefresh={handleRefresh}
+              onExport={() => setShowExportDialog(true)}
+              onImport={() => setShowImportDialog(true)}
+              onOpenTemplates={() => setShowTemplateGallery(true)}
+              onCleanup={handleCleanup}
+            />
+            <SchedulerHostBar />
+          </div>
         }
         detail={
           <AnimatePresence mode="wait" initial={false}>

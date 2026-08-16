@@ -46,6 +46,7 @@ import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
 import { MobileSchedulerStatStrip } from "@/components/mobile/scheduler/mobile-scheduler-stat-strip"
+import { SchedulerHostBar } from "@/components/scheduler/scheduler-host-bar"
 import { FilterChips, SchedulerMobileDetailView, TaskForm } from "@/components/scheduler"
 import { KindFilterChips } from "@/components/scheduler/kind-filter-chips"
 import { UnifiedTaskSidebarItem } from "@/components/scheduler/unified-task-sidebar-item"
@@ -272,6 +273,7 @@ export default function MobileSchedulerPage() {
         testid="mobile-scheduler-page"
         bodyClassName="space-y-4 px-4 py-4 pb-28"
       >
+        <SchedulerHostBar />
         <MobileSchedulerStatStrip statistics={statistics} />
 
         <div className="space-y-2" data-testid="mobile-scheduler-filters">

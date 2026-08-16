@@ -33,6 +33,8 @@ import {
   CRON_PRESETS,
   DEFAULT_EXECUTION_CONFIG,
 } from "@/types/scheduler"
+import { getTaskTypeHostSupport, type SchedulerHostDescriptor } from "@/lib/scheduler/host-support"
+import { useSchedulerTargetHost } from "@/hooks/scheduler/use-scheduler-host-target"
 import {
   ChatPayloadEditor,
   ExternalAgentPayloadEditor,
@@ -92,6 +94,8 @@ interface TaskFormProps {
   onCancel: () => void
   isSubmitting?: boolean
   existingTasks?: ScheduledTask[]
+  /** Test seam: host descriptor used for the type-availability gate. */
+  hostForTesting?: SchedulerHostDescriptor
 }
 
 // Display labels are sourced from i18n keys `scheduler.taskTypes.*` and
@@ -484,12 +488,18 @@ export function TaskForm({
   onCancel,
   isSubmitting,
   existingTasks,
+  hostForTesting,
 }: TaskFormProps) {
   const t = useTranslations("scheduler")
   const tCron = useTranslations("scheduler.cronDescribe")
   const locale = useLocale()
   const isZh = locale.startsWith("zh")
   const [f, updateForm] = useReducer(formReducer, initialValues, createInitialState)
+  // The host whose schedule is being edited (this device or the paired host):
+  // task types the host cannot run are shown disabled with the reason —
+  // never hidden (Working Rule 7).
+  const resolvedHost = useSchedulerTargetHost()
+  const host: SchedulerHostDescriptor = hostForTesting ?? resolvedHost
 
   // Validation constants
   const MAX_NAME_LENGTH = 100
@@ -987,26 +997,59 @@ export function TaskForm({
           <div className="space-y-2">
             <Label className="text-sm font-medium">{t("taskType") || "Task Type"}</Label>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
-              {TASK_TYPES.map((type) => (
-                <Button
-                  key={type.value}
-                  type="button"
-                  variant={f.taskType === type.value ? "secondary" : "outline"}
-                  size="sm"
-                  aria-pressed={f.taskType === type.value}
-                  onClick={() => handleTaskTypeChange(type.value)}
-                  className={cn(
-                    "rounded-lg border px-2 py-2 text-xs font-medium transition-all",
-                    "hover:border-primary/50 hover:bg-primary/5",
-                    f.taskType === type.value
-                      ? "border-primary bg-primary/10 text-primary shadow-sm"
-                      : "border-border bg-background text-muted-foreground"
-                  )}
-                >
-                  {t(`taskTypes.${type.value}`)}
-                </Button>
-              ))}
+              {TASK_TYPES.map((type) => {
+                const support = getTaskTypeHostSupport(type.value, host)
+                const reason = support.supported
+                  ? undefined
+                  : t(`hostSupport.reason.${support.reason ?? "missing-capability"}`, {
+                      missing: support.missing.join(", "),
+                    })
+                return (
+                  <Button
+                    key={type.value}
+                    type="button"
+                    variant={f.taskType === type.value ? "secondary" : "outline"}
+                    size="sm"
+                    aria-pressed={f.taskType === type.value}
+                    aria-disabled={!support.supported}
+                    disabled={!support.supported}
+                    title={reason}
+                    onClick={() => handleTaskTypeChange(type.value)}
+                    data-testid={`task-type-${type.value}`}
+                    data-host-supported={support.supported ? "true" : "false"}
+                    className={cn(
+                      "rounded-lg border px-2 py-2 text-xs font-medium transition-all",
+                      "hover:border-primary/50 hover:bg-primary/5",
+                      f.taskType === type.value
+                        ? "border-primary bg-primary/10 text-primary shadow-sm"
+                        : "border-border bg-background text-muted-foreground",
+                      !support.supported && "opacity-60"
+                    )}
+                  >
+                    {t(`taskTypes.${type.value}`)}
+                  </Button>
+                )
+              })}
             </div>
+            {(() => {
+              const current = getTaskTypeHostSupport(f.taskType, host)
+              if (current.supported) return null
+              return (
+                <p
+                  className="text-xs text-destructive"
+                  role="alert"
+                  data-testid="task-type-host-warning"
+                >
+                  {t("hostSupport.unavailableTitle", {
+                    host: t(`hostSupport.host.${host.platform}`),
+                  })}
+                  {" — "}
+                  {t(`hostSupport.reason.${current.reason ?? "missing-capability"}`, {
+                    missing: current.missing.join(", "),
+                  })}
+                </p>
+              )
+            })()}
           </div>
         </div>
       </div>

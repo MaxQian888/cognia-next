@@ -322,6 +322,36 @@
     "local": "本地主机",
     "remote": "远程主机"
   },
+  "hostBar": {
+    "localOnlyWhileOpen": "仅在应用打开时运行",
+    "localSuspended": "已挂起——由云端主机接管",
+    "managing": "正在管理：{host}",
+    "noPairedHost": "未配对主机——任务在本设备运行",
+    "pairedCloud": "云端主机",
+    "pairedDesktop": "已配对的桌面",
+    "pairedNamed": "云端主机 {name}",
+    "switchToLocal": "查看本设备",
+    "switchToPaired": "管理 {host}",
+    "thisDevice": "本设备"
+  },
+  "hostSupport": {
+    "deprecatedBanner": "该任务类型（{type}）已弃用，没有执行器。任务已被自动暂停——请改建为 Chat 任务或删除。",
+    "host": {
+      "headless": "云端主机",
+      "local": "本设备",
+      "mobile": "移动应用",
+      "paired": "已配对主机",
+      "tauri": "桌面应用",
+      "web": "浏览器"
+    },
+    "reason": {
+      "deprecated-type": "该任务类型已弃用，没有执行器。",
+      "desktop-only": "仅在桌面应用中可用。",
+      "missing-capability": "需要 {missing} 能力，而此宿主不提供。",
+      "missing-host-filesystem": "需要宿主文件系统（桌面应用或云端主机）。"
+    },
+    "unavailableTitle": "在{host}上不可用"
+  },
   "importError": "导入失败：{message}",
   "importExport": {
     "exportAll": "导出全部任务",
