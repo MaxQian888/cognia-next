@@ -23,16 +23,15 @@ describe("useLoadingI18n", () => {
       page: {
         title: "loading.page.title",
         description: "loading.page.description",
-        progressLabel: "loading.page.progressLabel",
-        stages: [
-          "loading.page.stages.interface",
-          "loading.page.stages.workspace",
-          "loading.page.stages.finalizing",
-        ],
-        reload: "loading.page.reload",
-        reloadHint: "loading.page.reloadHint",
       },
     })
+  })
+
+  it("leaves the boot screen's own copy to the boot screen", () => {
+    const { result } = renderHook(() => useLoadingI18n())
+    // Milestones, progress caption and reload copy are read by
+    // `components/boot/boot-screen.tsx` directly, not routed through here.
+    expect(Object.keys(result.current.page)).toEqual(["title", "description"])
   })
 
   it("passes the elapsed seconds through to the stillWorking message", () => {

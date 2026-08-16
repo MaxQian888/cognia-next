@@ -216,8 +216,7 @@ export async function switchAccountRuntimeTarget(
         throw new Error("Companion target credentials are unavailable.")
       }
     },
-    finalizeCaptures: (context) =>
-      runRuntimeTargetTransitionPhase("finalize-captures", context),
+    finalizeCaptures: (context) => runRuntimeTargetTransitionPhase("finalize-captures", context),
     stopSubscriptions: async () => {
       const scope = getActiveRuntimeTargetContext()
       await runRuntimeTargetTransitionPhase("release-subscriptions", {
@@ -280,8 +279,7 @@ export async function detachActiveCompanionRuntimeTarget(
     registry: runtimeTargetRegistry,
     activateDatabase: activateAccountDatabase,
     setContext: setActiveRuntimeTargetContext,
-    finalizeCaptures: (context) =>
-      runRuntimeTargetTransitionPhase("finalize-captures", context),
+    finalizeCaptures: (context) => runRuntimeTargetTransitionPhase("finalize-captures", context),
     stopSubscriptions: stopRuntimeTargetSubscriptions,
     deleteDatabase: (name) => Dexie.delete(name),
   }

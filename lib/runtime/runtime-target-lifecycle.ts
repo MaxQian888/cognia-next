@@ -53,9 +53,7 @@ export async function runRuntimeTargetTransitionPhase(
 ): Promise<void> {
   const ordered = [...participants.values()]
     .filter((participant) => participant.phase === phase)
-    .sort(
-      (left, right) => left.priority - right.priority || left.id.localeCompare(right.id)
-    )
+    .sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id))
   for (const participant of ordered) await participant.run(context)
   if (phase === "release-subscriptions") await stopRuntimeTargetSubscriptions()
 }

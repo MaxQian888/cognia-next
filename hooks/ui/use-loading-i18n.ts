@@ -22,13 +22,14 @@ export function useLoadingI18n() {
     /** Replaces the elapsed count when the device reports no connection. */
     offline: t("offline"),
     cancel: t("cancel"),
+    /**
+     * Heading + sub-heading of the workspace boot screen. The screen itself
+     * (`components/boot/boot-screen.tsx`) reads the rest of `loading.page` —
+     * milestones, progress caption, reload copy — directly.
+     */
     page: {
       title: t("page.title"),
       description: t("page.description"),
-      progressLabel: t("page.progressLabel"),
-      stages: [t("page.stages.interface"), t("page.stages.workspace"), t("page.stages.finalizing")],
-      reload: t("page.reload"),
-      reloadHint: t("page.reloadHint"),
     },
   }
 }

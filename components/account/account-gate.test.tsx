@@ -117,10 +117,15 @@ describe("AccountGate", () => {
         <div>child</div>
       </AccountGate>
     )
-    expect(screen.getByText("loading")).toBeInTheDocument()
-    expect(screen.getByRole("progressbar", { name: "page.progressLabel" })).toHaveAttribute(
+    // The boot screen, standing for its `accounts` milestone.
+    expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "progressLabel" })).toHaveAttribute(
       "aria-valuetext",
-      "page.stages.interface"
+      "milestones.accounts.label"
+    )
+    expect(document.querySelector('[data-slot="boot-screen"]')).toHaveAttribute(
+      "data-milestone",
+      "accounts"
     )
     expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
@@ -135,7 +140,7 @@ describe("AccountGate", () => {
     )
     // The Tauri bypass sits after the loaded gate, so server + first client
     // render agree on the loading shell (no hydration mismatch).
-    expect(screen.getByText("loading")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument()
     expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
 
@@ -150,7 +155,7 @@ describe("AccountGate", () => {
         <div>child</div>
       </AccountGate>
     )
-    expect(screen.queryByText("loading")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "title" })).not.toBeInTheDocument()
     expect(screen.getByText("registry offline")).toBeInTheDocument()
   })
 

@@ -93,4 +93,50 @@ describe("useLoadingPhase", () => {
     unmount()
     expect(() => jest.advanceTimersByTime(ESCALATED_AT_MS)).not.toThrow()
   })
+
+  describe("anchored to an earlier start", () => {
+    it("reports the true elapsed time on the very first render", () => {
+      const startedAt = Date.now() - 7000
+      const { result } = renderHook(() => useLoadingPhase({ startedAt }))
+      // No tick has fired yet, but the wait began 7s ago and must say so.
+      expect(result.current.elapsedMs).toBeGreaterThanOrEqual(7000)
+      expect(result.current.phase).toBe("prolonged")
+    })
+
+    it("keeps counting from the anchor, not from mount", () => {
+      const startedAt = Date.now() - 3000
+      const { result } = renderHook(() => useLoadingPhase({ startedAt, canEscalate: true }))
+      act(() => {
+        jest.advanceTimersByTime(2000)
+      })
+      expect(result.current.elapsedMs).toBeGreaterThanOrEqual(5000)
+      expect(result.current.phase).toBe("prolonged")
+      act(() => {
+        jest.advanceTimersByTime(10000)
+      })
+      expect(result.current.phase).toBe("escalated")
+    })
+
+    it("never reports a negative elapsed time for an anchor in the future", () => {
+      const { result } = renderHook(() => useLoadingPhase({ startedAt: Date.now() + 60_000 }))
+      expect(result.current.elapsedMs).toBe(0)
+      act(() => {
+        jest.advanceTimersByTime(1000)
+      })
+      expect(result.current.elapsedMs).toBe(0)
+    })
+
+    it("re-anchors when the start moves", () => {
+      let startedAt: number | null = null
+      const { result, rerender } = renderHook(() => useLoadingPhase({ startedAt }))
+      expect(result.current.elapsedMs).toBe(0)
+      startedAt = Date.now() - 6000
+      rerender()
+      act(() => {
+        jest.advanceTimersByTime(1000)
+      })
+      expect(result.current.elapsedMs).toBeGreaterThanOrEqual(7000)
+      expect(result.current.phase).toBe("prolonged")
+    })
+  })
 })

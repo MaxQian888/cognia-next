@@ -43,6 +43,14 @@ export interface LoadingPhaseOptions {
   prolongedAtMs?: number
   escalatedAtMs?: number
   tickMs?: number
+  /**
+   * Anchor the elapsed count to a moment before this mount. The boot screen
+   * is re-mounted by successive owners during one wait (see
+   * `lib/boot/boot-progress.ts`); anchoring to the shared sequence start keeps
+   * "still working (7s)" honest across the hand-overs instead of resetting to
+   * zero at each one. `null` / `undefined` means "since mount", as before.
+   */
+  startedAt?: number | null
 }
 
 export interface LoadingPhase {
@@ -58,18 +66,24 @@ export function useLoadingPhase(options: LoadingPhaseOptions = {}): LoadingPhase
     prolongedAtMs = PROLONGED_AT_MS,
     escalatedAtMs = ESCALATED_AT_MS,
     tickMs = ELAPSED_TICK_MS,
+    startedAt = null,
   } = options
 
-  const [elapsedMs, setElapsedMs] = useState(0)
+  // Seeded from the anchor when there is one, so a re-mount mid-wait reports
+  // the true elapsed time on its very first render rather than flickering
+  // back to zero until the first tick. Without an anchor the wait starts now.
+  const [elapsedMs, setElapsedMs] = useState(() =>
+    startedAt === null ? 0 : Math.max(0, Date.now() - startedAt)
+  )
   const { status } = useNetworkStatus()
 
   useEffect(() => {
-    const startedAt = Date.now()
+    const origin = startedAt ?? Date.now()
     const interval = setInterval(() => {
-      setElapsedMs(Date.now() - startedAt)
+      setElapsedMs(Math.max(0, Date.now() - origin))
     }, tickMs)
     return () => clearInterval(interval)
-  }, [tickMs])
+  }, [tickMs, startedAt])
 
   const prolonged = elapsedMs >= prolongedAtMs
   const phase: LoadingPhaseName =

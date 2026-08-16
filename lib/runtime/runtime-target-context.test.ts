@@ -25,7 +25,9 @@ it("keeps a stable generation for one route and advances it on target change", (
   expect(getActiveRuntimeTargetContext()!.routingGeneration).toBe(first.routingGeneration)
 
   setActiveRuntimeTargetContext("acct_alpha", "desktop-cloud")
-  expect(getActiveRuntimeTargetContext()!.routingGeneration).toBeGreaterThan(first.routingGeneration)
+  expect(getActiveRuntimeTargetContext()!.routingGeneration).toBeGreaterThan(
+    first.routingGeneration
+  )
 })
 
 it("clears both dimensions atomically", () => {

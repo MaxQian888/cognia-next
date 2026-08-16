@@ -56,7 +56,10 @@ export function AccountGate({ children }: AccountGateProps) {
   useAutoLock()
 
   if (!loaded || loading) {
-    return <PageLoading variant="workspace" allowReload title={t("loading")} />
+    // The boot screen's `accounts` step names this wait; the heading stays the
+    // shared "Preparing your workspace" so the hand-over to the next owner
+    // (recovery / onboarding gates, then the shell) reads as one screen.
+    return <PageLoading variant="workspace" milestone="accounts" allowReload />
   }
 
   // Native mobile retains the established runtime chooser / pairing gate.
