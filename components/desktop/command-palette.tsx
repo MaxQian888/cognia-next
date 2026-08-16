@@ -76,6 +76,7 @@ import {
 } from "@/lib/plugin/registries/quick-action-registry"
 import { ChatHistorySearchResults } from "@/components/chat/search/chat-history-search-results"
 import type { ChatSearchResult } from "@/lib/chat/search/engine"
+import { onCommandPaletteRequest } from "@/lib/shell/command-palette-request"
 
 const log = loggers.ui
 
@@ -131,6 +132,20 @@ export function CommandPalette({ onOpenSettings }: Props) {
     setOpen(false)
     resetSearch()
   }, [resetSearch])
+
+  // Programmatic open — the conversation rail's search hands off here for a
+  // global search, carrying the words already typed (`command-palette-request`).
+  useEffect(() => {
+    return onCommandPaletteRequest(({ query }) => {
+      log.info("command-palette open", { source: "request", seeded: Boolean(query) })
+      setOpen(true)
+      if (query) {
+        setSearchInput(query)
+        cancelSearchQuery()
+        setSearchQuery(query)
+      }
+    })
+  }, [cancelSearchQuery])
 
   const handleOpenChange = useCallback(
     (next: boolean) => {

@@ -204,6 +204,7 @@ import {
   setRecorderAvailability,
 } from "@/lib/skills/recording/recorder-availability"
 import { useRecorderStore } from "@/stores/skills/recorder-store"
+import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 
 async function openWithShortcut() {
   const user = userEvent.setup()
@@ -222,6 +223,18 @@ test("opens via Cmd/Ctrl+K and renders the action list", async () => {
   expect(logInfo).toHaveBeenCalledWith(
     "command-palette toggle",
     expect.objectContaining({ next: true, source: "shortcut" })
+  )
+})
+
+test("opens on a request from elsewhere in the shell, seeded with the caller's query", async () => {
+  queueChars([], [])
+  render(<CommandPalette onOpenSettings={jest.fn()} />)
+  expect(screen.queryByText("actions.newChat")).toBeNull()
+  act(() => requestCommandPalette({ query: "budget" }))
+  await waitFor(() => expect(screen.getByPlaceholderText("placeholder")).toHaveValue("budget"))
+  expect(logInfo).toHaveBeenCalledWith(
+    "command-palette open",
+    expect.objectContaining({ source: "request", seeded: true })
   )
 })
 

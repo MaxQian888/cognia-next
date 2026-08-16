@@ -40,6 +40,7 @@
     }
   },
   "channelList": {
+    "archivedTitleSuffix": "已归档",
     "bucketOlder": "更早",
     "bucketPrev30": "过去 30 天",
     "bucketPrev7": "过去 7 天",
@@ -79,6 +80,8 @@
     "emptyTeam": "还没有会话，从上方开启一个吧。",
     "expandSidebar": "展开会话列表",
     "folderActions": "文件夹操作",
+    "globalSearch": "全局搜索",
+    "globalSearchHint": "用这些词搜索全部会话、命令和文件（⌘/Ctrl+Enter）",
     "groupBy": {
       "label": "分组方式",
       "options": {
@@ -90,6 +93,7 @@
       }
     },
     "groupOther": "其它",
+    "listActions": "列表操作",
     "metadata": {
       "agent": "Agent",
       "label": "行详情",
