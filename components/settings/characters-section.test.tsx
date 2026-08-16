@@ -311,12 +311,8 @@ describe("CharacterEditor — Agent profile", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: "operations.recall" }))
     fireEvent.click(screen.getByRole("switch", { name: "operations.autoLearn" }))
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "readableScopes: scopes.global" })
-    )
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "writableScopes: scopes.workspace" })
-    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "readableScopes: scopes.global" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "writableScopes: scopes.workspace" }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))

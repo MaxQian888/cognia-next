@@ -18,11 +18,7 @@
     "calculator": {
       "description": "A basic calculator for arithmetic operations",
       "name": "Calculator",
-      "tags": [
-        "math",
-        "calculator",
-        "utility"
-      ]
+      "tags": ["math", "calculator", "utility"]
     },
     "contact-form": {
       "components": {
@@ -83,12 +79,7 @@
       },
       "description": "A professional contact form with validation",
       "name": "Contact Form",
-      "tags": [
-        "contact",
-        "form",
-        "email",
-        "support"
-      ]
+      "tags": ["contact", "form", "email", "support"]
     },
     "data-dashboard": {
       "components": {
@@ -196,12 +187,7 @@
       },
       "description": "A dashboard displaying charts and statistics",
       "name": "Data Dashboard",
-      "tags": [
-        "dashboard",
-        "analytics",
-        "charts",
-        "data"
-      ]
+      "tags": ["dashboard", "analytics", "charts", "data"]
     },
     "expense-tracker": {
       "components": {
@@ -255,13 +241,7 @@
       },
       "description": "Track your daily expenses and budget",
       "name": "Expense Tracker",
-      "tags": [
-        "expenses",
-        "money",
-        "budget",
-        "finance",
-        "tracking"
-      ]
+      "tags": ["expenses", "money", "budget", "finance", "tracking"]
     },
     "habit-tracker": {
       "components": {
@@ -286,13 +266,7 @@
       },
       "description": "Track your daily habits and build streaks",
       "name": "Habit Tracker",
-      "tags": [
-        "habits",
-        "tracking",
-        "daily",
-        "goals",
-        "productivity"
-      ]
+      "tags": ["habits", "tracking", "daily", "goals", "productivity"]
     },
     "notes": {
       "components": {
@@ -318,11 +292,7 @@
       },
       "description": "A simple note-taking app with search",
       "name": "Quick Notes",
-      "tags": [
-        "notes",
-        "writing",
-        "productivity"
-      ]
+      "tags": ["notes", "writing", "productivity"]
     },
     "profile-card": {
       "components": {
@@ -355,12 +325,7 @@
       },
       "description": "Display user profile information",
       "name": "Profile Card",
-      "tags": [
-        "profile",
-        "user",
-        "card",
-        "social"
-      ]
+      "tags": ["profile", "user", "card", "social"]
     },
     "shopping-list": {
       "components": {
@@ -388,12 +353,7 @@
       },
       "description": "Simple grocery and shopping list manager",
       "name": "Shopping List",
-      "tags": [
-        "shopping",
-        "grocery",
-        "list",
-        "productivity"
-      ]
+      "tags": ["shopping", "grocery", "list", "productivity"]
     },
     "survey-form": {
       "components": {
@@ -432,12 +392,7 @@
       },
       "description": "A customizable survey or feedback collection form",
       "name": "Survey Form",
-      "tags": [
-        "survey",
-        "feedback",
-        "form",
-        "questionnaire"
-      ]
+      "tags": ["survey", "feedback", "form", "questionnaire"]
     },
     "timer": {
       "components": {
@@ -468,12 +423,7 @@
       },
       "description": "A countdown timer and stopwatch app",
       "name": "Timer",
-      "tags": [
-        "timer",
-        "stopwatch",
-        "countdown",
-        "time"
-      ]
+      "tags": ["timer", "stopwatch", "countdown", "time"]
     },
     "todo-list": {
       "components": {
@@ -498,11 +448,7 @@
       },
       "description": "A simple task management app with add, complete, and delete functionality",
       "name": "Todo List",
-      "tags": [
-        "tasks",
-        "productivity",
-        "list"
-      ]
+      "tags": ["tasks", "productivity", "list"]
     },
     "unit-converter": {
       "components": {
@@ -572,12 +518,7 @@
       },
       "description": "Convert between different units of measurement",
       "name": "Unit Converter",
-      "tags": [
-        "converter",
-        "units",
-        "utility",
-        "measurement"
-      ]
+      "tags": ["converter", "units", "utility", "measurement"]
     },
     "weather": {
       "components": {
@@ -601,11 +542,7 @@
       },
       "description": "Display current weather information",
       "name": "Weather Widget",
-      "tags": [
-        "weather",
-        "widget",
-        "utility"
-      ]
+      "tags": ["weather", "widget", "utility"]
     }
   }
 }

@@ -135,9 +135,15 @@ describe("CompanionSection", () => {
       expect(callSpy).toHaveBeenCalledWith("companion_seed_locked_computer_use", {
         deviceIds: ["trusted-device"],
       })
-      expect(callSpy).toHaveBeenCalledWith("companion_seed_remote_terminal", {
-        deviceIds: ["trusted-device"],
+      // The three real grants are imported once into the host's SecurityStore
+      // rather than re-projected onto an in-memory list at every boot — the
+      // store is the authority and is already persistent.
+      expect(callSpy).toHaveBeenCalledWith("companion_migrate_legacy_device_grants", {
+        control: ["trusted-device"],
+        agentControl: [],
+        terminal: ["trusted-device"],
       })
+      expect(callSpy.mock.calls.map((c) => c[0])).not.toContain("companion_seed_remote_terminal")
     })
   })
 

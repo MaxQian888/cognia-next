@@ -61,8 +61,30 @@ describe("unified app-shortcut facade", () => {
       expect(findAppConflict("ctrl+j", "artifacts.toggleDock")).toBeNull()
     })
 
+    it("does not flag the two ⌘K palettes against each other", () => {
+      // app.commandPalette.toggle (when !view.workflowEditor) vs
+      // workflow.commandPalette.toggle (when view.workflowEditor). Without the
+      // exclusion neither could be rebound — the recorder would refuse the
+      // chord each already owns.
+      expect(findAppConflict("ctrl+k", "app.commandPalette.toggle")).toBeNull()
+      expect(findAppConflict("ctrl+k", "workflow.commandPalette.toggle")).toBeNull()
+    })
+
     it("returns null for the empty chord", () => {
       expect(findAppConflict("", "terminal.toggle")).toBeNull()
+    })
+
+    it("treats a conjunction that negates the other clause's term as exclusive", () => {
+      // shell.sidebar.toggle (when !view.canvas && !platform.tauri) shares ⌘B
+      // with canvasLayout.toggleLeft (when view.canvas): the `!view.canvas`
+      // term alone rules out co-activation, so neither reports the other.
+      expect(findAppConflict("ctrl+b", "shell.sidebar.toggle")).toBeNull()
+      expect(findAppConflict("ctrl+b", "canvasLayout.toggleLeft")).toBeNull()
+    })
+
+    it("still flags a chord owned by a shortcut whose when clause is unrelated", () => {
+      // No negated term in common → the two can co-activate → conflict.
+      expect(findAppConflict("ctrl+f", "shell.conversation.next")).toBe("chat.search.toggle")
     })
   })
 

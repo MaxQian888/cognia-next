@@ -16,6 +16,8 @@
     "chatPrevAnchor": "跳到上一个消息锚点",
     "chatSearchToggle": "在会话中查找",
     "commandPaletteToggle": "打开全局搜索 / 命令面板",
+    "conversationNext": "下一个会话",
+    "conversationPrevious": "上一个会话",
     "dockLayoutRedo": "重做停靠布局更改",
     "dockLayoutReset": "重置停靠布局",
     "dockLayoutUndo": "撤销停靠布局更改",
@@ -32,6 +34,7 @@
     "observabilityRefresh": "刷新",
     "observabilityToggleEdit": "切换编辑布局",
     "searchFocus": "聚焦搜索",
+    "sidebarToggle": "切换会话侧栏",
     "skillsClearSelection": "清除选择 / 关闭详情",
     "skillsCreate": "新建技能",
     "skillsDelete": "删除所选技能",
@@ -48,6 +51,7 @@
     "workbenchActivityTemplates": "工作台：模板",
     "workbenchActivityWorkspace": "工作台：工作区",
     "workbenchQuickSwitch": "工作台：快速切换面板",
+    "workflowCommandPaletteToggle": "工作流编辑器：命令面板",
     "zoomIn": "放大",
     "zoomOut": "缩小",
     "zoomReset": "重置缩放"
@@ -62,6 +66,7 @@
     "panels": "面板",
     "skills": "技能",
     "terminal": "终端",
+    "workflow": "工作流编辑器",
     "zoom": "缩放"
   },
   "clear": "清除",

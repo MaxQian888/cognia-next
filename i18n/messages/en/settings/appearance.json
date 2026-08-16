@@ -8,6 +8,20 @@
       "protan": "Protanopia (red-weak)",
       "tritan": "Tritanopia (blue-yellow)"
     },
+    "groups": {
+      "contrast": {
+        "hint": "How strictly the theme editor checks color pairs.",
+        "label": "Contrast audit"
+      },
+      "motion": {
+        "hint": "How much the interface animates.",
+        "label": "Motion"
+      },
+      "vision": {
+        "hint": "Color layers applied on top of the active theme.",
+        "label": "Vision adjustments"
+      }
+    },
     "highContrast": {
       "dark": "High-contrast dark",
       "hint": "Applies a high-contrast color layer on top of the current theme.",
@@ -23,6 +37,7 @@
         "normal": "Normal (1×)",
         "slow": "Slow (0.5×)"
       },
+      "speedDisabledHint": "Unavailable while reduce motion is on.",
       "speedLabel": "Animation speed"
     },
     "wcag": {
@@ -448,41 +463,41 @@
       "label": "Layout"
     },
     "markdown": {
-      "codeLineNumbers": {
-        "hint": "Default for the line-number gutter; each block can still toggle it.",
-        "label": "Code line numbers"
-      },
-      "codeWrap": {
-        "hint": "Default for soft wrapping; each block can still toggle it.",
-        "label": "Wrap long code lines"
-      },
-      "diff": {
-        "hint": "Render ```diff fences with the diff viewer; off shows a plain code block.",
-        "label": "Diff viewer"
-      },
       "label": "Content rendering",
       "math": {
-        "hint": "Render $…$ and $$…$$ as typeset math; off shows the source.",
-        "label": "Math (KaTeX)"
-      },
-      "mathAlign": {
-        "center": "Centered",
-        "label": "Display math alignment",
-        "left": "Left"
-      },
-      "mathCopy": {
-        "hint": "Show a copy affordance when hovering inline math.",
-        "label": "Copy button on inline math"
-      },
-      "mathFontScale": {
-        "1": "Normal",
-        "0_8": "Small",
-        "1_2": "Large",
-        "label": "Math size"
+        "label": "Math (KaTeX)",
+        "hint": "Render $…$ and $$…$$ as typeset math; off shows the source."
       },
       "mermaid": {
-        "hint": "Render ```mermaid fences as diagrams; off shows the code.",
-        "label": "Mermaid diagrams"
+        "label": "Mermaid diagrams",
+        "hint": "Render ```mermaid fences as diagrams; off shows the code."
+      },
+      "diff": {
+        "label": "Diff viewer",
+        "hint": "Render ```diff fences with the diff viewer; off shows a plain code block."
+      },
+      "codeLineNumbers": {
+        "label": "Code line numbers",
+        "hint": "Default for the line-number gutter; each block can still toggle it."
+      },
+      "codeWrap": {
+        "label": "Wrap long code lines",
+        "hint": "Default for soft wrapping; each block can still toggle it."
+      },
+      "mathCopy": {
+        "label": "Copy button on inline math",
+        "hint": "Show a copy affordance when hovering inline math."
+      },
+      "mathFontScale": {
+        "label": "Math size",
+        "0_8": "Small",
+        "1": "Normal",
+        "1_2": "Large"
+      },
+      "mathAlign": {
+        "label": "Display math alignment",
+        "center": "Centered",
+        "left": "Left"
       }
     },
     "metadata": {
@@ -564,6 +579,10 @@
       "components": {
         "description": "Per-surface tonality and elevation",
         "label": "Components"
+      },
+      "cursor": {
+        "description": "Pointer packs and motion effects",
+        "label": "Cursor"
       },
       "custom": {
         "description": "Edit the color tokens directly",
@@ -752,16 +771,33 @@
     "description": "Apply an image, gradient, or solid color as the background. Built-in presets are pre-loaded; uploads stay on your device.",
     "dropHint": "Drop an image here, or click below",
     "enabledLabel": "Enable background",
+    "focal": {
+      "bottom": "Bottom",
+      "bottomLeft": "Bottom left",
+      "bottomRight": "Bottom right",
+      "center": "Center",
+      "left": "Left",
+      "right": "Right",
+      "top": "Top",
+      "topLeft": "Top left",
+      "topRight": "Top right"
+    },
+    "focalHint": "Anchors the part of the image that survives the crop.",
+    "focalLabel": "Focal point",
+    "focalUnavailable": "This fit leaves no room to anchor the image.",
     "formats": "PNG, JPEG, WebP, GIF, AVIF · up to 32 MB",
     "galleryTitle": "Gallery",
     "generator": {
       "accent": "Generated accent color",
       "action": "Generate matching theme",
+      "applyTuning": "Apply suggested",
       "created": "A matching light/dark theme was created and activated.",
       "description": "Extract a local accent color from this image and build a readable light/dark theme.",
       "error": "Could not analyze this image. The wallpaper is unchanged.",
+      "secondary": "Generated secondary color",
       "themeName": "{name} palette",
       "title": "Generate theme from wallpaper",
+      "tuningHint": "Suggested for this wallpaper: {opacity}% opacity, {blur}px blur.",
       "variant": {
         "dark": "Dark base",
         "light": "Light base"
@@ -780,16 +816,30 @@
     "opacity": {
       "autoFix": "Auto-fix",
       "contrastLabel": "Estimated text contrast",
+      "estimated": "Estimated — not yet sampled",
       "fail": "Text nearly unreadable. Lower opacity to restore contrast.",
+      "measured": "Measured from this wallpaper",
       "warn": "Below WCAG AA — text may be hard to read"
     },
     "opacityLabel": "Opacity",
+    "placementHint": "Where the wallpaper is drawn and which part of it you keep.",
+    "placementTitle": "Placement",
     "pluginBadge": "Plugin",
     "positionCenter": "Center",
     "positionContain": "Contain",
     "positionCover": "Cover",
+    "positionFill": "Stretch",
+    "positionHint": {
+      "center": "Drawn at its natural size, no scaling.",
+      "contain": "Whole image fits; empty space is left around it.",
+      "cover": "Fills the surface; whatever overflows is cropped.",
+      "fill": "Stretched to the surface — distorts the aspect ratio.",
+      "tile": "Repeated at natural size across the surface."
+    },
     "positionLabel": "Position",
     "positionTile": "Tile",
+    "readabilityHint": "How much of the wallpaper reaches the text in front of it.",
+    "readabilityTitle": "Readability",
     "scope": {
       "all": {
         "desc": "Everything including sidebar",

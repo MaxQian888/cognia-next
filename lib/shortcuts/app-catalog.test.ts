@@ -43,6 +43,30 @@ describe("app-catalog", () => {
   })
 })
 
+describe("the two ⌘K palettes", () => {
+  it("share the chord under exactly opposite when-clauses", () => {
+    // Same chord is deliberate — the workflow editor keeps its editor-local
+    // palette (ADR-0129). What makes that safe is the exact negation: the
+    // dispatcher fires the first hit whose `when` passes, so only one can.
+    expect(getAppShortcutDescriptor("app.commandPalette.toggle")).toMatchObject({
+      defaultChord: "ctrl+k",
+      when: "!view.workflowEditor",
+    })
+    expect(getAppShortcutDescriptor("workflow.commandPalette.toggle")).toMatchObject({
+      scope: "app",
+      category: "app.workflow",
+      defaultChord: "ctrl+k",
+      when: "view.workflowEditor",
+      labelKey: "settings.shortcuts.catalog.workflowCommandPaletteToggle",
+    })
+  })
+
+  it("are the only catalog entries on ctrl+k", () => {
+    const ids = APP_SHORTCUT_CATALOG.filter((d) => d.defaultChord === "ctrl+k").map((d) => d.id)
+    expect(ids.sort()).toEqual(["app.commandPalette.toggle", "workflow.commandPalette.toggle"])
+  })
+})
+
 describe("skills.record", () => {
   it("is registered as a desktop-only app shortcut", () => {
     // `when: "platform.tauri"` is what makes it inert in the web build with no

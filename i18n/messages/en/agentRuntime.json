@@ -1,12 +1,14 @@
 {
+  "addExternalAgent": "Add an external agent…",
   "ariaLabel": "Choose agent runtime",
   "claudeSdk": "Claude SDK",
   "claudeSdkDesc": "Built-in Anthropic SDK sidecar (default)",
-  "external": "External agent",
-  "externalAgentLabel": "Choose external agent",
-  "externalDesc": "Spawn a CLI agent (Codex, Claude Code, Gemini, Cursor…)",
-  "externalEmpty": "No external agents — add one in Settings → Agents",
+  "enableExternal": "Turn on external agents",
+  "externalEmpty": "No external agents configured yet.",
+  "externalTurnedOff": "External agents are turned off.",
   "externalUnconfigured": "External (none selected)",
   "label": "Agent runtime",
+  "lastCheckFailed": "Last check failed — it may not start.",
+  "needsAuth": "Needs sign-in — connect it under Manage agents.",
   "tooltip": "Active agent runtime — Claude SDK or an external agent"
 }

@@ -1,12 +1,14 @@
 {
+  "addExternalAgent": "添加外部代理…",
   "ariaLabel": "选择代理运行时",
   "claudeSdk": "Claude SDK",
   "claudeSdkDesc": "内置 Anthropic SDK sidecar（默认）",
-  "external": "外部代理",
-  "externalAgentLabel": "选择外部代理",
-  "externalDesc": "拉起 CLI 代理（Codex、Claude Code、Gemini、Cursor…）",
-  "externalEmpty": "尚未配置外部代理 — 前往 设置 → 外部代理 添加",
+  "enableExternal": "启用外部代理",
+  "externalEmpty": "尚未配置外部代理。",
+  "externalTurnedOff": "外部代理已关闭。",
   "externalUnconfigured": "外部代理（未选择）",
   "label": "代理运行时",
+  "lastCheckFailed": "上次检查失败 — 可能无法启动。",
+  "needsAuth": "需要登录 — 请在“管理代理”中连接。",
   "tooltip": "当前代理运行时 — Claude SDK 或外部代理"
 }

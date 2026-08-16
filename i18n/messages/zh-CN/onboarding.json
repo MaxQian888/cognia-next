@@ -1,0 +1,167 @@
+{
+  "apiKeyHintHost": "console.anthropic.com",
+  "apiKeyHintPrefix": "在 ",
+  "apiKeyHintSuffix": " 申请一个。密钥不会离开本机。",
+  "apiKeyLabel": "Anthropic API 密钥",
+  "apiKeyPlaceholder": "sk-ant-…",
+  "back": "返回",
+  "cards": {
+    "readFolder": {
+      "title": "读一个文件夹",
+      "description": "指给它一个目录，拿回一份清楚的内容说明。",
+      "prompt": "读一下这台机器上的某个文件夹，告诉我里面有什么。"
+    },
+    "extractText": {
+      "title": "从图片里取出文字",
+      "description": "截个屏，把里面的文字提取出来。",
+      "prompt": "帮我截屏并提取其中的文字。"
+    },
+    "summarizeWeb": {
+      "title": "总结一个网页",
+      "description": "给它一个链接，不离开 App 就拿到要点。",
+      "prompt": "帮我总结一个网页。"
+    }
+  },
+  "continue": "继续",
+  "done": "完成",
+  "finishBar": {
+    "provider_skipped": "Cognia 还无法访问模型 —— 请完成登录。",
+    "runtime_skipped": "这台机器上还没有配置 agent 运行时。",
+    "task_failed": "首次运行没有完成，要再试一次吗？",
+    "cta": "完成设置",
+    "dismiss": "关闭"
+  },
+  "firstRun": {
+    "title": "先真做一件事",
+    "description": "挑一个试试。Agent 现在就做，结果你自己判断。",
+    "runningWith": "以 {name} 的身份运行",
+    "changeCharacter": "更换",
+    "runtimeLine": "正在使用 {runtime}",
+    "starting": "正在启动…",
+    "failed": "这次没成功。可以换一个，或者先跳过稍后再试。"
+  },
+  "provider": {
+    "apiKey": {
+      "cta": "使用 API 密钥",
+      "description": "如果你在 console.anthropic.com 拿到的是工作空间 API 密钥而非订阅，用这种方式。",
+      "title": "粘贴 Anthropic API 密钥"
+    },
+    "backToChooser": "换一种登录方式",
+    "claude": {
+      "cta": "使用 Anthropic 登录",
+      "description": "通过浏览器 PKCE 登录你的 Anthropic 订阅。",
+      "title": "Claude Pro / Max"
+    },
+    "codex": {
+      "cta": "使用 ChatGPT 登录",
+      "description": "用设备代码流将本应用与 ChatGPT 订阅配对。",
+      "title": "ChatGPT Plus / Pro（Codex）"
+    },
+    "description": "用你已经付费的方式登录。后续可以在 设置 → 订阅 添加更多账号。",
+    "loggedInBadge": "已连接",
+    "loggedInDescription": "{provider} 已连接。可以继续下一步，或在下方选择另一个角色。",
+    "opencode": {
+      "cta": "粘贴 OpenCode 密钥",
+      "description": "粘贴 OpenCode Zen 的 API 密钥，可选填写区域 Base URL。",
+      "title": "OpenCode Zen"
+    },
+    "title": "选择登录方式"
+  },
+  "rail": {
+    "label": "设置进度",
+    "scan": {
+      "label": "这台机器",
+      "description": "发现了什么，要带过来什么。"
+    },
+    "provider": {
+      "label": "登录",
+      "description": "Cognia 通过什么访问模型。"
+    },
+    "first-run": {
+      "label": "首次运行",
+      "description": "看它真的做完一件事。"
+    }
+  },
+  "restart": {
+    "label": "重新运行引导",
+    "description": "从头走一遍首次运行流程。"
+  },
+  "saving": "保存中…",
+  "scan": {
+    "title": "这台机器上已经有什么",
+    "description": "我们会找你已安装的 agent 命令行工具，以及值得带过来的配置。任何数据都不会离开你的电脑。",
+    "scanning": "正在查看…",
+    "empty": "没有找到 agent 运行时",
+    "emptyDescription": "没关系 —— 你可以在下一步改用 Cognia 订阅登录。",
+    "rescan": "重新扫描",
+    "runtimesFound": "{count, plural, other {# 个 agent 运行时}}",
+    "authenticated": "已登录",
+    "needsAuth": "未登录",
+    "migrateTitle": "把你的配置带过来",
+    "migrateDescription": "从 {vendor} 导入命令、设置和历史会话。",
+    "migrateCta": "导入",
+    "migrateRunning": "正在导入…",
+    "migrateDone": "已导入",
+    "migrateFailed": "导入失败。可以在「设置 → 数据」里重试。",
+    "pairedTitle": "与桌面配对",
+    "pairedDescription": "真正干活的是你的桌面端。现在配对，这台手机就成了它的遥控器。",
+    "pairedCta": "打开配对"
+  },
+  "skip": "暂时跳过",
+  "toastNeedKey": "粘贴你的 Anthropic API 密钥以继续。",
+  "tour": {
+    "computerUse": {
+      "cta": "打开自动化设置",
+      "description": "Computer Use 默认关闭。可按角色启用，并选择权限等级（关闭 / 白名单 / 单次询问）。",
+      "title": "让 AI 操作桌面"
+    },
+    "connectors": {
+      "cta": "配置连接器",
+      "description": "把助手运行为常用平台上的机器人，支持自动 / 手动 / 草稿三种模式。",
+      "title": "对接 Telegram、Discord、Slack、飞书、OneBot"
+    },
+    "description": "这些功能已经上线。如果不需要可以直接跳过。",
+    "done": "完成",
+    "mobile": {
+      "cta": "打开配对设置",
+      "description": "生成 5 分钟有效的配对凭据让手机扫码。优先 mDNS，依次回退到 WebRTC 和 Cloudflare 隧道。",
+      "title": "在局域网或公网上配对手机"
+    },
+    "next": "下一个",
+    "ocr": {
+      "cta": "配置 OCR",
+      "description": "在输入栏悬浮附件即可把文字拉进对话。本地引擎离线可用；云端提供商可选。",
+      "title": "从图片和 PDF 中提取文字"
+    },
+    "openSettings": "打开设置",
+    "previous": "上一个",
+    "progress": "第 {current} / {total} 个",
+    "sandbox": {
+      "cta": "打开沙盒设置",
+      "description": "Bash / Edit / Write 可以经由 OS 沙盒（sandbox-exec / bwrap / Windows 合成用户）或可选的 e2b microVM 执行。任何后端不健康时严格模式直接拒绝调用，没有 bypass。",
+      "title": "Shell 工具在沙盒中运行"
+    },
+    "skip": "跳过引导",
+    "title": "接下来你可以做什么",
+    "twin": {
+      "cta": "打开数字分身设置",
+      "description": "上传文档后，蒸馏流水线会生成一份脱敏的风格画像，可以绑定到任意角色。",
+      "title": "用你自己的写作训练数字分身"
+    }
+  },
+  "welcome": {
+    "headline": "你的桌面，装进一个 agent。",
+    "lede": "Cognia 让 agent 直接面对这台机器上真实存在的东西 —— 你的文件、你的屏幕、你的浏览器 —— 而不只是一个聊天框。",
+    "sub": "大约一分钟，结束时 agent 会替你做完一件真实的事。",
+    "cta": "开始",
+    "skipExisting": "我以前用过",
+    "modeTitle": "这台手机怎么跑？",
+    "byokTitle": "独立运行",
+    "byokDescription": "用你自己的 API key，在这个 App 里直接推理。",
+    "byokCta": "用我自己的 key",
+    "pairTitle": "与桌面配对",
+    "pairDescription": "通过局域网或广域网把任务交给 Cognia 桌面端，由它承担重活。",
+    "pairCta": "与桌面配对"
+  },
+  "wordmark": "Cognia"
+}

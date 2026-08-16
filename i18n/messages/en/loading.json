@@ -3,16 +3,51 @@
   "loading": "Loading…",
   "offline": "You're offline — this will retry once the connection returns",
   "page": {
+    "capabilities": {
+      "core-chat": "Chat",
+      "desktop-tools": "Desktop tools",
+      "integrations": "Integrations",
+      "knowledge-agents": "Knowledge & agents",
+      "plugin-runtime": "Plugins",
+      "workflow-automation": "Workflows"
+    },
+    "capabilitiesReady": "{ready} of {total} runtimes ready",
     "description": "Loading your interface, preferences, and recent context",
+    "milestoneDuration": "{seconds}s",
+    "milestones": {
+      "accounts": {
+        "detail": "Reading the local account registry",
+        "label": "Unlocking your account"
+      },
+      "interface": {
+        "detail": "Mounting the window chrome and panels",
+        "label": "Starting the interface"
+      },
+      "preferences": {
+        "detail": "Applying saved settings and running startup checks",
+        "label": "Loading your preferences"
+      },
+      "workspace": {
+        "detail": "Loading the workspace view and its runtimes",
+        "label": "Restoring your workspace"
+      }
+    },
+    "platform": {
+      "headless": "Headless",
+      "mobile": "Mobile",
+      "tauri": "Desktop",
+      "web": "Web"
+    },
     "progressLabel": "Workspace preparation",
     "reload": "Reload app",
     "reloadHint": "Taking longer than expected. You can reload and try again.",
-    "stages": {
-      "finalizing": "Finishing setup",
-      "interface": "Starting the interface",
-      "workspace": "Restoring your workspace"
-    },
-    "title": "Preparing your workspace"
+    "statusActive": "In progress",
+    "statusDone": "Done",
+    "statusPending": "Pending",
+    "stepOf": "Step {current} of {total}",
+    "stepsLabel": "Startup steps",
+    "title": "Preparing your workspace",
+    "version": "Version {version}"
   },
   "pageLoading": "Loading…",
   "stillWorking": "Still working… ({seconds}s)",

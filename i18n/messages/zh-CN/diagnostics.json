@@ -128,6 +128,10 @@
       "hint": "外部智能体在执行本回合时失败——请重试，或改用内置智能体运行。",
       "label": "智能体运行失败"
     },
+    "extensionHandshakeFailed": {
+      "hint": "在该智能体内执行权限控制的 Cognia 扩展未报告就绪，因此会话被拒绝，而不是在无管控的情况下运行。",
+      "label": "智能体扩展未启动"
+    },
     "extensionUnknown": {
       "hint": "Cognia 尚未确定该智能体是否支持此操作——请重新连接以探测。",
       "label": "支持情况未知"
@@ -224,6 +228,10 @@
       "hint": "有插件在消息发出前将其拦截——请检查该插件的设置。",
       "label": "被插件拦截"
     },
+    "protocolFrameInvalid": {
+      "hint": "智能体发送的数据不符合其协议，该数据流已不可信——请新建会话。",
+      "label": "智能体响应格式错误"
+    },
     "protocolUnsupported": {
       "hint": "Cognia 与该智能体没有共同的协议——请将其切换为 ACP 并重新保存配置。",
       "label": "协议不支持"
@@ -248,9 +256,21 @@
       "hint": "部分界面崩溃了——请重试；若反复出现，请把报告发给我们。",
       "label": "应用程序错误"
     },
+    "resourceLimit": {
+      "hint": "此主机已达到智能体进程数上限——请结束或关闭一个后重试。",
+      "label": "智能体会话过多"
+    },
     "routingNoCandidates": {
       "hint": "路由链中没有服务商可以处理该请求——请检查服务商与模型映射配置。",
       "label": "没有可用服务商"
+    },
+    "runtimeVersionUnsupported": {
+      "hint": "已安装该智能体，但版本低于所支持的最低版本——请升级后重新连接。",
+      "label": "智能体版本过低"
+    },
+    "sandboxUnavailable": {
+      "hint": "外部智能体只在严格沙箱内运行，而此处无法启动沙箱。Cognia 不会退回到无沙箱进程。",
+      "label": "沙箱不可用"
     },
     "seedFailed": {
       "hint": "Cognia 未能写入内置技能和角色——部分默认内容会缺失。",

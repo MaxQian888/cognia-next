@@ -98,10 +98,9 @@
   "evalRow": "Agent evaluation",
   "externalAgentsRow": "External agents",
   "feedback": {
-    "copyDescription": "App version, user agent, and current sync snapshot.",
+    "copyDescription": "Copies the default redacted report: app build, runtime snapshot, and sync state.",
     "copyError": "Clipboard unavailable in this shell.",
     "copyLabel": "Copy diagnostics",
-    "copyLabelDone": "Diagnostics copied",
     "copyToast": "Diagnostics copied to clipboard.",
     "deviceInfoDescription": "Permissions, app build, and platform details.",
     "deviceInfoLabel": "Device info",
@@ -109,17 +108,8 @@
     "openIssueDescription": "Includes templates for bug reports and feature requests.",
     "openIssueLabel": "Open a GitHub issue",
     "reportTitle": "Report a problem",
-    "support": {
-      "cancel": "Cancel",
-      "confirmExport": "Confirm and export",
-      "description": "After confirmation, Cognia generates a local Markdown draft from your description and redacted diagnostics. Nothing is sent automatically.",
-      "exportFailed": "Could not generate the support feedback export.",
-      "exported": "Support feedback exported.",
-      "placeholder": "What happened, and what did you expect?",
-      "summary": "Feedback description",
-      "title": "Generate support feedback?",
-      "trigger": "Generate redacted support feedback"
-    }
+    "reportProblemLabel": "Report a problem",
+    "reportProblemDescription": "Describe what happened, review the redacted details, then copy, download, or open a GitHub issue."
   },
   "feedbackRow": "Feedback & diagnostics",
   "goalsRow": "Goals",

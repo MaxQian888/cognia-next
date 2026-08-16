@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl"
 
 import { DiscoverCustomizer } from "@/components/discover/discover-customizer"
 import { DiscoverPreferences } from "@/components/settings/discover/discover-preferences"
+import { OnboardingSettingsCard } from "@/components/settings/onboarding/onboarding-settings-card"
 import { Separator } from "@/components/ui/separator"
 
 export function DiscoverSection(): React.ReactElement {
@@ -27,6 +28,11 @@ export function DiscoverSection(): React.ReactElement {
         </div>
         <DiscoverCustomizer />
       </div>
+      <Separator />
+      {/* First-run re-entry + the capability tour (ADR-0122). Discover is the
+       * "what else can this do" surface, and the tour's own deep links all
+       * point back into Settings. */}
+      <OnboardingSettingsCard />
     </div>
   )
 }

@@ -1,0 +1,111 @@
+{
+  "title": "Creator",
+  "subtitle": "Author plugins, skills, hooks, presets and workflows inside an authoring root.",
+  "gate": {
+    "title": "Developer mode required",
+    "description": "Creator can write files and change permissions, so it is only offered when developer mode is on.",
+    "enable": "Enable developer mode"
+  },
+  "root": {
+    "title": "Authoring root",
+    "description": "Every file Creator reads or writes stays inside this directory. There is no implicit default.",
+    "empty": "No authoring root chosen yet.",
+    "choose": "Choose a directory",
+    "change": "Change",
+    "revoke": "Revoke",
+    "pathLabel": "Path",
+    "origin": {
+      "selected": "Selected",
+      "created": "Created"
+    },
+    "rejected": {
+      "empty": "That path is empty.",
+      "not-absolute": "Choose an absolute path.",
+      "filesystem-root": "The filesystem root cannot be an authoring root.",
+      "home-directory": "Your home directory is too broad to be an authoring root."
+    }
+  },
+  "artifact": {
+    "label": "What are you building?",
+    "kinds": {
+      "plugin": "Plugin",
+      "skill": "Skill",
+      "hook": "Hook",
+      "agent-preset": "Agent preset",
+      "visual-workflow": "Visual workflow"
+    }
+  },
+  "steps": {
+    "title": "Workflow",
+    "collect-requirements": "Collect requirements",
+    "survey-existing": "Check for an existing implementation",
+    "plan-scaffold": "Plan the scaffold",
+    "approve-permissions": "Review permissions",
+    "apply-changes": "Generate files",
+    "verify": "Lint, typecheck, build, contract check",
+    "preview": "Sandbox preview",
+    "review": "Independent review",
+    "approve-delivery": "Approve delivery"
+  },
+  "status": {
+    "pending": "Pending",
+    "active": "Running",
+    "awaiting-approval": "Waiting for approval",
+    "completed": "Done",
+    "failed": "Failed",
+    "skipped": "Skipped"
+  },
+  "blocked": {
+    "out-of-order": "Blocked by an earlier step: {step}",
+    "awaiting-approval": "Needs your approval first",
+    "already-completed": "Already done",
+    "unknown-step": "Unknown step"
+  },
+  "permissions": {
+    "title": "Permission diff",
+    "none": "This artifact asks for no new capabilities.",
+    "requiresApproval": "{count, plural, one {# new capability needs your approval} other {# new capabilities need your approval}}",
+    "added": "Added",
+    "removed": "Removed",
+    "unchanged": "Unchanged",
+    "approve": "Approve these capabilities",
+    "approved": "Approved",
+    "stale": "The proposal changed since you approved it. Review it again.",
+    "writesBlocked": "Files cannot be written until this is approved."
+  },
+  "preview": {
+    "title": "Sandbox preview",
+    "inactive": "Not running.",
+    "generation": "Generation {generation}",
+    "start": "Start preview",
+    "reload": "Reload",
+    "stop": "Stop",
+    "clean": "Released everything.",
+    "leaked": "{count, plural, one {# resource was not released} other {# resources were not released}}: {labels}"
+  },
+  "review": {
+    "title": "Independent review",
+    "pending": "Not reviewed yet.",
+    "approved": "Approved by the reviewer.",
+    "rejected": "The reviewer found blocking issues.",
+    "readOnly": "The reviewer runs read-only, with its own context.",
+    "authority": "Reviewer permission: {authority}",
+    "noFindings": "No findings.",
+    "severity": {
+      "blocker": "Blocker",
+      "warning": "Warning",
+      "info": "Info"
+    }
+  },
+  "run": {
+    "start": "Start a Creator run",
+    "needsRoot": "Choose an authoring root first.",
+    "active": "Run {runId} is active.",
+    "end": "End run",
+    "advance": "Run the workflow",
+    "advanceHint": "Runs forward until the workflow needs you.",
+    "stopped": "Stopped at {step}: {detail}",
+    "requirements": "What should it do?",
+    "requirementsPlaceholder": "Describe the artifact in a sentence or two."
+  }
+}

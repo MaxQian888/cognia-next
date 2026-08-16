@@ -57,7 +57,8 @@
     "codex": "Codex CLI",
     "continue-dev": "Continue",
     "gemini-cli": "Gemini CLI",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "pi": "Pi"
   },
   "title": "导入 Agent 会话",
   "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",

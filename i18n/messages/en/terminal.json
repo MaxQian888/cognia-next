@@ -95,13 +95,23 @@
     "restore": "Restore terminal panel size",
     "spawnDenied": "Terminal blocked by a plugin",
     "spawnError": "Couldn't open terminal: {message}",
-    "splitRight": "Split terminal right (Ctrl+\\)"
+    "splitRight": "Split terminal right (Ctrl+\\)",
+    "sshConnected": {
+      "learned": "Connected and saved the host fingerprint",
+      "verified": "Connected with a verified host fingerprint"
+    },
+    "sshCredentialRequired": "Set a password for “{name}” in Settings → Terminal before connecting."
   },
   "emptyState": {
     "desktop": {
       "action": "+ New terminal",
       "body": "Spawn a shell with the button below, or press Ctrl+` to toggle the dock anywhere in the app.",
       "title": "No terminals yet"
+    },
+    "cloud": {
+      "action": "+ New terminal",
+      "body": "New terminals open on the paired Cognia server. If a spawn is refused, the server must be started with remote terminal access enabled.",
+      "title": "No terminals on the server"
     },
     "mobile": {
       "action": "+ New terminal",
@@ -252,6 +262,7 @@
     "profilesLabel": "Profiles",
     "pwsh": "PowerShell 7",
     "sh": "sh",
+    "sshLabel": "SSH hosts",
     "zsh": "zsh"
   },
   "stickyScroll": {
@@ -319,5 +330,27 @@
     "run": "Run",
     "selectPlaceholder": "Choose an option",
     "title": "Fill template variables"
+  },
+  "forwards": {
+    "title": "Port forwards",
+    "open": "Show port forwards",
+    "close": "Close port forwards",
+    "active": "{count} open",
+    "queued": "{count} waiting",
+    "direction": {
+      "local": "Local (-L)",
+      "remote": "Remote (-R)"
+    },
+    "state": {
+      "stopped": "Off",
+      "starting": "Starting…",
+      "listening": "Listening",
+      "waiting": "Waiting for the connection",
+      "failed": "Failed"
+    },
+    "toggle": {
+      "local": "Enable or disable the local forward {summary}",
+      "remote": "Enable or disable the remote forward {summary}"
+    }
   }
 }

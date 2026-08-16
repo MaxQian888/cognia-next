@@ -410,16 +410,6 @@
   "saving": "保存中…",
   "searchPlaceholder": "搜索角色…",
   "skillsCount": "{count} 项技能",
-  "support": {
-    "diagnostics": "允许读取已脱敏的本机诊断",
-    "diagnosticsDescription": "本地诊断总开关。关闭后，支持 Agent 仅接收内置产品文档。",
-    "hidePreview": "隐藏预览",
-    "openIssue": "打开问题",
-    "preview": "预览",
-    "previewUnavailable": "预览不可用",
-    "supportResponse": "支持回复",
-    "userReport": "用户反馈"
-  },
   "title": "角色",
   "trust": {
     "rejectedToast": "角色包「{id}」已被拒绝：签名验证未通过（{reason}）。",

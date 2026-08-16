@@ -1,0 +1,59 @@
+{
+  "advanced": "Advanced",
+  "advancedHint": "Adjust permission, tool presentation, and orchestration independently of the preset.",
+  "axis": {
+    "authority": {
+      "label": "Permission",
+      "options": {
+        "acceptEdits": "Accept edits",
+        "bypassPermissions": "Bypass permissions",
+        "default": "Ask each time",
+        "plan": "Read-only"
+      }
+    },
+    "orchestration": {
+      "label": "Orchestration",
+      "options": {
+        "direct": "Single agent",
+        "subagent": "Delegate to subagents",
+        "verified-fresh-agent": "Independent reviewer",
+        "workflow": "Workflow"
+      }
+    },
+    "toolPresentation": {
+      "label": "Tools",
+      "options": {
+        "both": "Native and code",
+        "code": "As code",
+        "native": "Native tools"
+      }
+    }
+  },
+  "badges": {
+    "developerOnly": "Developer",
+    "experimental": "Experimental"
+  },
+  "chip": {
+    "ariaLabel": "Mode: {preset}",
+    "narrowed": "This mode was narrowed for this turn"
+  },
+  "inherit": "Preset default · {preset}",
+  "inheritGeneric": "Preset default",
+  "overrides": "{count, plural, one {# override} other {# overrides}}",
+  "pinned": "Pinned for this session",
+  "presetLabel": "Preset",
+  "summary": {
+    "cappedByCeiling": "Limited by the parent agent",
+    "cappedByPreset": "Limited by this preset",
+    "title": "This turn will run as"
+  },
+  "title": "Mode",
+  "warnings": {
+    "authority-capped-by-ceiling": "Permission lowered to {applied}: a subagent cannot exceed its parent.",
+    "authority-capped-by-preset": "Permission lowered to {applied}: the {preset} preset does not allow {requested}.",
+    "orchestration-unavailable": "{requested} orchestration is unavailable here; running as a single agent.",
+    "presentation-unavailable": "Code tools need a strict sandbox, which is unavailable here; using native tools.",
+    "unknown-legacy-mode": "The saved mode \"{requested}\" is no longer available; using Standard with default permission.",
+    "unknown-preset": "The preset \"{requested}\" is no longer available; using Standard."
+  }
+}

@@ -169,6 +169,11 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   "open-router": assets.openRouter,
   perplexity: assets.perplexity,
   pi: assets.pi,
+  // Same product as `pi`, different transport (ADR-0119). Without this the
+  // native-RPC runtime falls through to the grey letter tile in the runtime
+  // badge, the runtime selector, and the mention picker — while plain `pi`
+  // right beside it shows the logo.
+  "pi-rpc": assets.pi,
   qiniu: assets.qiniu,
   qwen: assets.qwen,
   "qwen-code": assets.qwen,

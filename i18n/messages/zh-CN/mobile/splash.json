@@ -1,3 +1,62 @@
 {
-  "label": "正在启动 cognia"
+  "build": "移动端 · v{version}",
+  "duration": "{seconds}s",
+  "headline": {
+    "boot": "正在准备就绪",
+    "route": "正在加载页面",
+    "settled": "已就绪"
+  },
+  "label": "正在启动 cognia",
+  "outcomes": {
+    "incompatible": "需要更新",
+    "linked": "在线",
+    "notNeeded": "无需执行",
+    "offline": "离线",
+    "paired": "已配对",
+    "registered": "原生就绪",
+    "standalone": "独立模式",
+    "syncFailed": "稍后重试",
+    "synced": "已是最新",
+    "unavailable": "桥接不可用",
+    "unpaired": "未配对"
+  },
+  "progressLabel": "启动进度",
+  "rows": {
+    "accounts": {
+      "detail": "读取本地账户注册表",
+      "label": "解锁账户"
+    },
+    "bridge": {
+      "detail": "注册 Capacitor 原生插件",
+      "label": "唤醒原生桥接"
+    },
+    "companion": {
+      "detail": "从安全存储读取已配对的桌面端",
+      "label": "读取配对信息"
+    },
+    "host": {
+      "detail": "协商连接与主机能力",
+      "label": "连接桌面端"
+    },
+    "preferences": {
+      "detail": "应用已保存的设置并执行启动检查",
+      "label": "加载偏好设置"
+    },
+    "sync": {
+      "detail": "拉取最近的会话与消息",
+      "label": "同步会话"
+    },
+    "workspace": {
+      "detail": "获取视图及其运行时",
+      "label": "加载视图"
+    }
+  },
+  "statusActive": "进行中",
+  "statusDone": "已完成",
+  "statusFailed": "失败",
+  "statusPending": "等待中",
+  "statusSkipped": "已跳过",
+  "stepsLabel": "启动步骤",
+  "stepsOf": "{completed} / {total}",
+  "wordmark": "cognia"
 }

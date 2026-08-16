@@ -23,9 +23,17 @@
       "description": "Full access — implement changes, edit files, and run commands",
       "name": "Build"
     },
+    "code": {
+      "name": "Code",
+      "description": "Compose tool calls as code in a sandbox. Read-only in this release"
+    },
     "code-gen": {
       "description": "Generate and explain code in various languages",
       "name": "Code Generator"
+    },
+    "creator": {
+      "name": "Creator",
+      "description": "Author plugins, skills, hooks, presets and workflows in an authoring root"
     },
     "data-analysis": {
       "description": "Analyze data and create visualizations",
@@ -34,6 +42,10 @@
     "general": {
       "description": "General purpose AI assistant for various tasks",
       "name": "General Assistant"
+    },
+    "minimal": {
+      "name": "Minimal",
+      "description": "Deterministic read-only tools only — inspect without changing anything"
     },
     "plan": {
       "description": "Investigate and propose a step-by-step plan without editing files or running mutating commands",
@@ -46,6 +58,10 @@
     "research": {
       "description": "Help with research and information gathering",
       "name": "Research Assistant"
+    },
+    "standard": {
+      "name": "Standard",
+      "description": "General purpose assistant with the default tools"
     },
     "web-design": {
       "description": "Design and build web pages with live preview",

@@ -95,13 +95,23 @@
     "restore": "还原终端面板大小",
     "spawnDenied": "终端被插件拦截",
     "spawnError": "无法打开终端：{message}",
-    "splitRight": "向右分屏（Ctrl+\\）"
+    "splitRight": "向右分屏（Ctrl+\\）",
+    "sshConnected": {
+      "learned": "已连接，并保存了主机指纹",
+      "verified": "已连接，主机指纹校验通过"
+    },
+    "sshCredentialRequired": "请先在 设置 → 终端 中为「{name}」设置密码，然后再连接。"
   },
   "emptyState": {
     "desktop": {
       "action": "+ 新建终端",
       "body": "点击下方按钮启动 shell，或按 Ctrl+` 在任意页面切换面板。",
       "title": "暂无终端"
+    },
+    "cloud": {
+      "action": "+ 新建终端",
+      "body": "新建的终端将在已配对的 Cognia 服务器上启动。若创建被拒绝，说明服务器启动时未开启远程终端访问。",
+      "title": "服务器上暂无终端"
     },
     "mobile": {
       "action": "+ 新建终端",
@@ -252,6 +262,7 @@
     "profilesLabel": "配置文件",
     "pwsh": "PowerShell 7",
     "sh": "sh",
+    "sshLabel": "SSH 主机",
     "zsh": "zsh"
   },
   "stickyScroll": {
@@ -319,5 +330,27 @@
     "run": "运行",
     "selectPlaceholder": "请选择",
     "title": "填写模板变量"
+  },
+  "forwards": {
+    "title": "端口转发",
+    "open": "显示端口转发",
+    "close": "关闭端口转发",
+    "active": "{count} 个连接",
+    "queued": "{count} 个等待中",
+    "direction": {
+      "local": "本地 (-L)",
+      "remote": "远程 (-R)"
+    },
+    "state": {
+      "stopped": "已关闭",
+      "starting": "启动中…",
+      "listening": "监听中",
+      "waiting": "等待连接恢复",
+      "failed": "失败"
+    },
+    "toggle": {
+      "local": "启用或停用本地转发 {summary}",
+      "remote": "启用或停用远程转发 {summary}"
+    }
   }
 }

@@ -258,6 +258,7 @@
   "ssh": {
     "add": "Add SSH host",
     "auth": {
+      "agent": "SSH agent",
       "password": "Password",
       "privateKey": "Private key"
     },
@@ -265,6 +266,7 @@
     "connecting": "Connecting…",
     "empty": "No SSH hosts saved yet.",
     "fields": {
+      "agentNotice": "Signing is delegated to your running ssh-agent. No password, passphrase, or key path is stored for this host.",
       "authMethod": "Authentication method",
       "credentialSaved": "Credential saved securely",
       "host": "Host",
@@ -279,16 +281,104 @@
       "username": "Username"
     },
     "helper": "Credentials are stored in the system keyring. The first connection trusts and saves the host fingerprint; changed fingerprints are rejected.",
+    "hostKeyChanged": {
+      "body": "{host}:{port} presented a different key than the one saved on the first connection. This happens when a server is rebuilt or reinstalled — but it is also what a machine-in-the-middle looks like. The connection was refused.",
+      "cancel": "Keep the connection blocked",
+      "expected": "Fingerprint you trusted",
+      "guidance": "Only continue if you can confirm the new fingerprint out of band — from the server console, your provider's dashboard, or whoever rebuilt it.",
+      "presented": "Fingerprint presented now",
+      "title": "The host key for this server has changed",
+      "trust": "Forget the old key and trust this one",
+      "trusting": "Forgetting…",
+      "unknownFingerprint": "Not readable from known_hosts"
+    },
     "newName": "New SSH host",
     "remove": "Remove SSH host",
     "title": "SSH hosts",
     "toasts": {
+      "agentUnavailable": "No SSH agent is reachable",
       "connectFailed": "SSH connection failed",
       "credentialRequired": "Enter a password before connecting.",
+      "hostKeyForgetFailed": "Could not update known_hosts",
+      "hostKeyForgotten": "Old host key forgotten. Connect again to trust the new one.",
       "learned": "Connected and saved the host fingerprint",
       "removeFailed": "Could not remove the SSH host",
       "syncFailed": "Could not synchronize SSH profiles with the terminal host",
-      "verified": "Connected with a verified host fingerprint"
+      "verified": "Connected with a verified host fingerprint",
+      "imported": "Imported {created} new and replaced {replaced} SSH host(s)",
+      "importJumpsDropped": "These hosts will connect directly because their jump host was not imported: {names}"
+    },
+    "forwarding": {
+      "add": "Add rule",
+      "remove": "Remove rule",
+      "jumpHost": {
+        "label": "Connect through",
+        "direct": "Connect directly",
+        "helper": "Each hop authenticates on its own account and its host key is trusted separately, so connect to a bastion once by itself before using it here."
+      },
+      "local": {
+        "label": "Local forwards (-L)",
+        "helper": "Listens on 127.0.0.1 on this machine and hands each connection to the server, which dials the destination. Reachable only from this machine.",
+        "localPort": "Local port",
+        "remoteHost": "Destination host, as the server sees it",
+        "remoteHostPlaceholder": "db.internal",
+        "remotePort": "Destination port",
+        "enable": "Enable this local forward"
+      },
+      "remote": {
+        "label": "Remote forwards (-R)",
+        "warning": "The server listens on its own 127.0.0.1 and sends each connection back here. Anyone with access to that machine can then reach the local port you name. Off until you turn it on, and never included when a profile is shared with your phone or another device.",
+        "remotePort": "Port on the server",
+        "localHost": "Destination host on this machine",
+        "localHostPlaceholder": "localhost",
+        "localPort": "Destination port on this machine",
+        "enable": "Enable this remote forward"
+      },
+      "errors": {
+        "port_out_of_range": "Ports must be between 1 and 65535.",
+        "host_empty": "Enter a destination host.",
+        "host_invalid": "A host cannot contain spaces.",
+        "duplicate_local_port": "Another rule already listens on this local port.",
+        "duplicate_remote_port": "Another rule already uses this port on the server."
+      }
+    },
+    "configImport": {
+      "open": "Import from ~/.ssh/config",
+      "title": "Import SSH hosts",
+      "description": "Reading ~/.ssh/config…",
+      "loading": "Reading the file…",
+      "absent": "No config file at {path}.",
+      "noHosts": "The file has no host entries this app can import.",
+      "cancel": "Cancel",
+      "confirm": "Import {count} host(s)",
+      "importing": "Importing…",
+      "via": "through a jump host",
+      "badges": {
+        "exists": "Already saved",
+        "synthesized": "From a ProxyJump line"
+      },
+      "resolution": {
+        "label": "What to do with {name}",
+        "create": "Add as new",
+        "overwrite": "Replace saved",
+        "skip": "Skip"
+      },
+      "adjustments": {
+        "bindNarrowedToLoopback": "A forward binding a wider address will be narrowed to 127.0.0.1.",
+        "remoteForwardDisabled": "Remote forwards are imported switched off; turn one on when you want it.",
+        "extraAliasesDropped": "Only the first alias on the Host line becomes a profile."
+      },
+      "notices": {
+        "title": "Not imported",
+        "line": "line {line}",
+        "wildcardHost": "Host pattern “{subject}” cannot become a single profile.",
+        "matchBlock": "Match block “{subject}” was skipped.",
+        "include": "Include “{subject}” was not followed.",
+        "proxyCommand": "ProxyCommand on “{subject}” has no equivalent here; set a jump host instead.",
+        "malformedForward": "Could not read “{subject}”.",
+        "missingHostName": "“{subject}” has no HostName, so it will connect to that name directly.",
+        "unsupportedDirective": "Directive “{subject}” is not modelled."
+      }
     }
   },
   "stickyScroll": {

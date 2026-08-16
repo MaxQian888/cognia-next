@@ -9,6 +9,7 @@
     "items": {
       "accountStatus": "Account",
       "accountTop": "Account",
+      "agentThreads": "Agent threads",
       "appIcon": "App icon",
       "attention": "Needs attention",
       "branch": "Git branch",
@@ -54,8 +55,11 @@
       "deleteConfirmBody": "This permanently removes the conversations and all their messages. This cannot be undone.",
       "deleteConfirmTitle": "{count, plural, one {Delete # conversation?} other {Delete # conversations?}}",
       "deleteSuccess": "{count, plural, one {Deleted # conversation} other {Deleted # conversations}}",
+      "moveSuccess": "{count, plural, one {Moved # conversation} other {Moved # conversations}}",
+      "moveToFolder": "Move to folder",
       "pin": "Pin",
       "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
+      "removeFromFolder": "Remove from folder",
       "selectedCount": "{count, plural, one {# selected} other {# selected}}",
       "share": "Share",
       "unarchive": "Unarchive",
@@ -75,6 +79,7 @@
     "displayOptions": "Display options",
     "emptyArchived": "No archived conversations.",
     "emptyDm": "No chats yet. Pick a character to begin.",
+    "emptyFiltered": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
     "emptyFolder": "Empty — move conversations here.",
     "emptySearch": "No conversations match “{query}”.",
     "emptyTeam": "No conversations yet. Start one above.",
@@ -101,6 +106,8 @@
       "provider": "Provider",
       "workspace": "Workspace"
     },
+    "moveFolderDown": "Move folder down",
+    "moveFolderUp": "Move folder up",
     "newChat": "New chat",
     "newConversation": "New conversation",
     "newFolder": "New folder",
@@ -111,12 +118,25 @@
     "searchAria": "Search conversations",
     "searchMessageContent": "Search message content",
     "searchPlaceholder": "Search conversations…",
+    "searchShortcutHint": "Press / to search",
     "searchTruncated": "Some results may be hidden — refine your search.",
     "sectionPinned": "Pinned",
     "sectionRecent": "Recent",
+    "sectionResults": "Results",
     "showCustomIcons": "Show custom Agent and Team icons",
     "showPreview": "Show message previews",
+    "showTimestamps": "Show activity time",
     "showUnreadBadges": "Show unread badges",
+    "sortBy": {
+      "label": "Sort by",
+      "options": {
+        "created": "Date created",
+        "oldest": "Oldest activity",
+        "recent": "Recent activity",
+        "title": "Title (A–Z)",
+        "unread": "Unread first"
+      }
+    },
     "teamFallback": "Team",
     "titleMotion": "Scroll long titles on hover",
     "ungroupedAgent": "No agent",
@@ -151,6 +171,7 @@
     "previous": "Previous match"
   },
   "guildRail": {
+    "a2ui": "Mini-Apps",
     "agentRuns": "Agent runs",
     "agentTeams": "Agent teams",
     "auxiliaryGroup": "Profile and logs",
@@ -183,8 +204,12 @@
     "featuresGroup": "Features",
     "goals": "Goals",
     "inbox": "Inbox",
+    "issueProjects": "Projects",
+    "issues": "Issues",
     "label": "Guild rail",
     "logs": "Logs",
+    "manageTeams": "Manage teams",
+    "markAllRead": "Mark all as read",
     "me": "Me",
     "memory": "Memory",
     "more": "More",
@@ -197,11 +222,14 @@
     "scheduler": "Scheduler",
     "servers": "Servers",
     "settings": "Settings",
+    "sites": "Sites",
     "skills": "Skills",
     "sourceControl": "Source Control",
     "templates": "Templates",
     "twin": "Digital twin",
+    "unreadCount": "{count, plural, one {# unread} other {# unread}}",
     "workflows": "Workflows",
+    "workspace": "Workspace",
     "workspacesGroup": "Workspaces"
   },
   "jobCenter": {
@@ -430,6 +458,7 @@
     },
     "view": {
       "commandPalette": "Command Palette…",
+      "guildRailFolded": "folded into the sidebar",
       "label": "View",
       "language": "Language",
       "languageChinese": "简体中文",
@@ -459,90 +488,6 @@
       "restore": "Restore"
     }
   },
-  "onboarding": {
-    "apiKeyHintHost": "console.anthropic.com",
-    "apiKeyHintPrefix": "Get one at ",
-    "apiKeyHintSuffix": ". The key never leaves your machine.",
-    "apiKeyLabel": "Anthropic API key",
-    "apiKeyPlaceholder": "sk-ant-…",
-    "back": "Back",
-    "continue": "Continue",
-    "done": "Done",
-    "provider": {
-      "apiKey": {
-        "cta": "Use API key",
-        "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
-        "title": "Paste an Anthropic API key"
-      },
-      "backToChooser": "Choose a different sign-in method",
-      "claude": {
-        "cta": "Sign in with Anthropic",
-        "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
-        "title": "Claude Pro / Max"
-      },
-      "codex": {
-        "cta": "Sign in with ChatGPT",
-        "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
-        "title": "ChatGPT Plus / Pro (Codex)"
-      },
-      "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
-      "loggedInBadge": "Connected",
-      "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
-      "opencode": {
-        "cta": "Paste OpenCode key",
-        "description": "Paste an OpenCode Zen API key. Optional region override available.",
-        "title": "OpenCode Zen"
-      },
-      "title": "How do you want to sign in?"
-    },
-    "saving": "Saving…",
-    "skip": "Skip for now",
-    "step1Description": "Pick how you want to sign in. Subscription logins live in your OS keyring; pasted API keys live in your browser's IndexedDB and the embedded Node sidecar.",
-    "step1Title": "Welcome to Cognia",
-    "step2Description": "Each character carries its own system prompt and tools. You can edit, duplicate, or create more later in Settings → Characters.",
-    "step2Title": "Pick a character to start",
-    "toastNeedKey": "Paste your Anthropic API key to continue.",
-    "tour": {
-      "computerUse": {
-        "cta": "Open automation settings",
-        "description": "Computer Use is off by default. Enable it per character and pick a permission tier (off / whitelist / per-call).",
-        "title": "Let the AI drive the desktop"
-      },
-      "connectors": {
-        "cta": "Configure connectors",
-        "description": "Run the assistant as a bot in your favorite messaging platform with auto / manual / draft modes.",
-        "title": "Bridge to Telegram, Discord, Slack, Lark, OneBot"
-      },
-      "description": "These ship with Cognia today. Skip if you'd rather discover them yourself.",
-      "done": "Done",
-      "mobile": {
-        "cta": "Open companion settings",
-        "description": "Generate a 5-minute pair token, then scan it from the mobile app. Falls back from mDNS to WebRTC to Cloudflare tunnel automatically.",
-        "title": "Pair your phone over LAN or WAN"
-      },
-      "next": "Next",
-      "ocr": {
-        "cta": "Configure OCR",
-        "description": "Hover an attachment in the composer to pull text into your prompt. Local engines work offline; cloud providers are optional.",
-        "title": "Extract text from images and PDFs"
-      },
-      "openSettings": "Open settings",
-      "previous": "Previous",
-      "progress": "{current} of {total}",
-      "sandbox": {
-        "cta": "Open sandbox settings",
-        "description": "Bash / Edit / Write can be routed through an OS sandbox (sandbox-exec / bwrap / Windows synthetic-user) or an opt-in e2b microVM. Strict mode refuses calls when no backend is healthy — no bypass.",
-        "title": "Shell tools run inside a sandbox"
-      },
-      "skip": "Skip tour",
-      "title": "What you can do next",
-      "twin": {
-        "cta": "Open twin settings",
-        "description": "Upload documents and the distill pipeline builds a redacted style profile you can bind to any character.",
-        "title": "Train a digital twin on your writing"
-      }
-    }
-  },
   "sessionRow": {
     "actionsMenu": "Session actions",
     "archive": "Archive",
@@ -550,6 +495,7 @@
     "cancel": "Cancel",
     "cogniaAgentChecking": "Checking for the Cognia agent…",
     "cogniaAgentNotInstalled": "The Cognia agent CLI isn't installed",
+    "contentMatch": "Matched inside messages",
     "delete": "Delete",
     "deleteConfirmAction": "Delete conversation",
     "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
@@ -693,6 +639,7 @@
       "appearanceGroup": "Appearance",
       "customize": "Customize layout",
       "customizeBars": "Customize layout…",
+      "guildRailFolded": "folded into the sidebar",
       "localeEn": "English",
       "localeZh": "简体中文",
       "openBrowser": "Open browser panel",

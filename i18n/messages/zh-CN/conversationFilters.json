@@ -1,0 +1,101 @@
+{
+  "clearAll": "清除筛选",
+  "count": "{shown} / {total}",
+  "filters": {
+    "label": "筛选",
+    "options": {
+      "branched": "分支会话",
+      "pinned": "已置顶",
+      "unread": "未读"
+    }
+  },
+  "kind": {
+    "label": "会话类型",
+    "options": {
+      "all": "全部类型",
+      "dm": "私聊",
+      "team": "团队"
+    }
+  },
+  "label": "筛选与排序",
+  "labelActive": "筛选与排序（已启用 {count} 项筛选）",
+  "remove": "移除“{name}”筛选",
+  "sort": {
+    "label": "排序方式",
+    "options": {
+      "created": "创建时间",
+      "oldest": "最早活动",
+      "recent": "最近活动",
+      "title": "标题（A–Z）",
+      "unread": "未读优先"
+    }
+  },
+  "cancel": "取消",
+  "selectedSummary": "已选 {count} 项",
+  "sections": {
+    "location": "工作区与文件夹",
+    "agent": "Agent 与团队",
+    "model": "模型与提供商"
+  },
+  "workspace": {
+    "label": "工作区",
+    "any": "任意工作区",
+    "unassigned": "无工作区"
+  },
+  "folder": {
+    "label": "文件夹",
+    "any": "任意文件夹",
+    "unassigned": "未归入文件夹"
+  },
+  "agent": {
+    "label": "Agent",
+    "any": "任意 Agent",
+    "unassigned": "无 Agent"
+  },
+  "team": {
+    "label": "团队",
+    "any": "任意团队",
+    "unassigned": "无团队"
+  },
+  "model": {
+    "label": "模型",
+    "any": "任意模型",
+    "unassigned": "未知模型"
+  },
+  "provider": {
+    "label": "提供商",
+    "any": "任意提供商",
+    "unassigned": "未知提供商"
+  },
+  "activity": {
+    "label": "最近活跃",
+    "options": {
+      "any": "不限时间",
+      "today": "今天",
+      "week": "近 7 天",
+      "month": "近 30 天",
+      "older": "30 天以前"
+    }
+  },
+  "presets": {
+    "label": "预设",
+    "empty": "还没有保存的预设。",
+    "save": "保存当前筛选…",
+    "saveShort": "保存",
+    "manage": "管理预设…",
+    "saveTitle": "保存筛选预设",
+    "saveDescription": "为这组筛选条件命名，之后可在任意设备上一键套用。",
+    "namePlaceholder": "预设名称",
+    "saveAction": "保存预设",
+    "saveRejected": "请输入名称，并至少保留一项筛选条件。",
+    "manageTitle": "管理预设",
+    "manageDescription": "重命名或删除已保存的筛选组合，更改立即生效。",
+    "rename": "重命名预设 {name}",
+    "delete": "删除预设 {name}"
+  },
+  "drawer": {
+    "title": "筛选与排序",
+    "hint": "缩小列表范围后点击「完成」。",
+    "done": "完成"
+  }
+}

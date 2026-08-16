@@ -1467,9 +1467,9 @@
       "operationFailed": "本地账户操作失败。",
       "passwordLabel": "密码",
       "passwordPlaceholder": "密码",
+      "recoveryContinue": "继续",
       "recoveryCopied": "已复制",
       "recoveryCopy": "复制恢复密钥",
-      "recoveryContinue": "继续",
       "recoveryDescription": "继续前请保存这枚一次性恢复密钥。忘记账户密码时，可用它解锁浏览器 Vault。",
       "recoveryDownload": "下载 .txt",
       "recoveryForm": "保存恢复密钥",
@@ -1578,6 +1578,65 @@
       "switchPasswordPlaceholder": "密码"
     }
   },
+  "agentComposition": {
+    "advanced": "高级",
+    "advancedHint": "独立调整权限、工具呈现与编排方式，不受预置限制。",
+    "axis": {
+      "authority": {
+        "label": "权限",
+        "options": {
+          "acceptEdits": "自动接受编辑",
+          "bypassPermissions": "跳过权限确认",
+          "default": "每次询问",
+          "plan": "只读"
+        }
+      },
+      "orchestration": {
+        "label": "编排",
+        "options": {
+          "direct": "单个 Agent",
+          "subagent": "委派子 Agent",
+          "verified-fresh-agent": "独立 Reviewer",
+          "workflow": "工作流"
+        }
+      },
+      "toolPresentation": {
+        "label": "工具",
+        "options": {
+          "both": "原生与代码并存",
+          "code": "以代码调用",
+          "native": "原生工具"
+        }
+      }
+    },
+    "badges": {
+      "developerOnly": "开发者",
+      "experimental": "实验性"
+    },
+    "chip": {
+      "ariaLabel": "模式：{preset}",
+      "narrowed": "该模式在本轮被收窄"
+    },
+    "inherit": "跟随预置 · {preset}",
+    "inheritGeneric": "跟随预置",
+    "overrides": "{count} 项覆盖",
+    "pinned": "已为本会话固定",
+    "presetLabel": "预置",
+    "summary": {
+      "cappedByCeiling": "受父 Agent 限制",
+      "cappedByPreset": "受该预置限制",
+      "title": "本轮将以此运行"
+    },
+    "title": "模式",
+    "warnings": {
+      "authority-capped-by-ceiling": "权限已降为 {applied}：子 Agent 不能超过父 Agent。",
+      "authority-capped-by-preset": "权限已降为 {applied}：{preset} 预置不允许 {requested}。",
+      "orchestration-unavailable": "此处不支持 {requested} 编排，已改为单个 Agent 运行。",
+      "presentation-unavailable": "代码工具需要严格沙箱，此处不可用，已改用原生工具。",
+      "unknown-legacy-mode": "已保存的模式“{requested}”不再可用，已改用 Standard 与默认权限。",
+      "unknown-preset": "预置“{requested}”不再可用，已改用 Standard。"
+    }
+  },
   "agentMigration": {
     "artifacts": {
       "names": {
@@ -1673,9 +1732,17 @@
         "description": "完全访问 —— 实施变更、编辑文件并运行命令",
         "name": "构建"
       },
+      "code": {
+        "description": "在沙箱中以代码方式组合工具调用。本版本为只读",
+        "name": "代码"
+      },
       "code-gen": {
         "description": "生成与解释多种语言的代码",
         "name": "代码生成器"
+      },
+      "creator": {
+        "description": "在指定的创作根目录内编写插件、技能、Hook、预置与工作流",
+        "name": "创作"
       },
       "data-analysis": {
         "description": "分析数据并创建可视化",
@@ -1684,6 +1751,10 @@
       "general": {
         "description": "面向各类任务的通用 AI 助手",
         "name": "通用助手"
+      },
+      "minimal": {
+        "description": "仅确定性只读工具——只查看，不做任何更改",
+        "name": "最小"
       },
       "plan": {
         "description": "调研并提出分步实施计划，不编辑文件、不执行变更命令",
@@ -1696,6 +1767,10 @@
       "research": {
         "description": "辅助研究与信息搜集",
         "name": "研究助手"
+      },
+      "standard": {
+        "description": "使用默认工具的通用助手",
+        "name": "标准"
       },
       "web-design": {
         "description": "设计并构建网页，支持实时预览",
@@ -1770,15 +1845,17 @@
     "title": "智能体运行"
   },
   "agentRuntime": {
+    "addExternalAgent": "添加外部代理…",
     "ariaLabel": "选择代理运行时",
     "claudeSdk": "Claude SDK",
     "claudeSdkDesc": "内置 Anthropic SDK sidecar（默认）",
-    "external": "外部代理",
-    "externalAgentLabel": "选择外部代理",
-    "externalDesc": "拉起 CLI 代理（Codex、Claude Code、Gemini、Cursor…）",
-    "externalEmpty": "尚未配置外部代理 — 前往 设置 → 外部代理 添加",
+    "enableExternal": "启用外部代理",
+    "externalEmpty": "尚未配置外部代理。",
+    "externalTurnedOff": "外部代理已关闭。",
     "externalUnconfigured": "外部代理（未选择）",
     "label": "代理运行时",
+    "lastCheckFailed": "上次检查失败 — 可能无法启动。",
+    "needsAuth": "需要登录 — 请在“管理代理”中连接。",
     "tooltip": "当前代理运行时 — Claude SDK 或外部代理"
   },
   "agentStatus": {
@@ -2162,6 +2239,7 @@
         "opencodeRemote": "OpenCode（远程）",
         "opencodeServer": "OpenCode",
         "pi": "Pi",
+        "piRpc": "Pi（原生 RPC）",
         "qwenCode": "Qwen Code"
       },
       "runtimeStatus": {
@@ -3022,13 +3100,13 @@
   },
   "agentThreadBrowser": {
     "completed": "已完成子线程",
-    "empty": "尚未创建智能体线程。",
     "open": "浏览智能体线程",
     "primary": "主任务",
     "promote": "将 {name} 提升为新的任务快照",
     "promotionBlocked": "请先停止正在运行的子线程，再提升其快照。",
     "running": "运行中的子线程",
-    "title": "智能体线程"
+    "title": "智能体线程",
+    "trigger": "线程"
   },
   "aiElements": {
     "agent": {
@@ -4858,7 +4936,14 @@
       },
       "ghostAccept": "接受",
       "ghostAcceptHint": "Tab",
+      "ghostCycleHint": "Alt+] / Alt+[ 切换",
       "ghostDismiss": "忽略建议",
+      "ghostPosition": "第 {index} / {total} 条",
+      "ghostSourceAgent": "来自 Agent",
+      "ghostSourceAi": "模型建议",
+      "ghostSourceCommand": "命令",
+      "ghostSourceHistory": "来自历史记录",
+      "ghostSourcePlugin": "来自插件",
       "helperHints": {
         "chainingNote": "将命令分行输入，即可按顺序执行。",
         "cheatsheetDescription": "消息输入框可用的键盘快捷键与前缀。",
@@ -5293,12 +5378,14 @@
       },
       "ariaSettings": "会话设置",
       "bareMode": "极简模式",
+      "bareModeHint": "跳过磁盘上的自动发现（CLAUDE.md、hooks、插件、MCP）。冷启动更快；但 agent 看不到你的项目设置。",
       "branchAria": "分支对话",
       "branchEmpty": "还没有可分支的内容 —— 这个对话还没有消息。",
       "branchError": "无法分支该对话。",
       "branchSuccess": "已分支，已切换到新对话。",
       "branchTooltip": "分支对话 —— 把当前线程复制成一个可以另走一路的新对话",
       "briefMode": "简短输出",
+      "briefModeHint": "在每次发送时附加一段「精简输出」指令。",
       "cancel": "取消",
       "compactAria": "压缩",
       "compactFailure": "上下文压缩失败：{error}",
@@ -5315,6 +5402,7 @@
       "cwdFallbackHint": "未设置时使用: {path}",
       "cwdReset": "重置",
       "debugMode": "调试模式",
+      "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。",
       "description": "为本会话覆盖默认值，留空则继承全局设置。",
       "execution": {
         "addEnv": "添加变量",
@@ -5415,6 +5503,8 @@
       "save": "保存",
       "sessionCommunication": "会话通信",
       "sheet": {
+        "collapseAll": "全部收起",
+        "expandAll": "全部展开",
         "sections": {
           "account": "模型与账号",
           "actions": "会话操作",
@@ -5424,6 +5514,10 @@
           "memory": "记忆",
           "role": "角色与能力",
           "status": "状态"
+        },
+        "summary": {
+          "defaults": "使用默认值",
+          "overrides": "{count} 项覆盖"
         }
       },
       "showArtifacts": "展开产物面板",
@@ -6266,6 +6360,20 @@
       "tone": "语气",
       "translate": "翻译"
     },
+    "workSubmission": {
+      "blocked": {
+        "body": "消息已保存。设备重新连上执行主机后会自动开始。",
+        "title": "等待重新连接"
+      },
+      "queued": {
+        "body": "消息已保存，等到有空闲运行时就会开始。",
+        "title": "等待开始"
+      },
+      "recoveryRequired": {
+        "body": "这一轮在已经开始调用工具之后中断，因此没有自动重试——重放可能重复执行无法撤销的操作。请先确认发生了什么，再决定是否重新发送。",
+        "title": "需要你处理"
+      }
+    },
     "workspaceRestricted": {
       "body": "此工作区尚未受信任。智能体以只读方式运行——Bash、编辑、写入与计算机操作已禁用。",
       "rootsLabel": "未受信任的文件夹",
@@ -6752,6 +6860,107 @@
     },
     "webviewPanelPending": "该面板的 webview 尚未加载。"
   },
+  "conversationFilters": {
+    "activity": {
+      "label": "最近活跃",
+      "options": {
+        "any": "不限时间",
+        "month": "近 30 天",
+        "older": "30 天以前",
+        "today": "今天",
+        "week": "近 7 天"
+      }
+    },
+    "agent": {
+      "any": "任意 Agent",
+      "label": "Agent",
+      "unassigned": "无 Agent"
+    },
+    "cancel": "取消",
+    "clearAll": "清除筛选",
+    "count": "{shown} / {total}",
+    "drawer": {
+      "done": "完成",
+      "hint": "缩小列表范围后点击「完成」。",
+      "title": "筛选与排序"
+    },
+    "filters": {
+      "label": "筛选",
+      "options": {
+        "branched": "分支会话",
+        "pinned": "已置顶",
+        "unread": "未读"
+      }
+    },
+    "folder": {
+      "any": "任意文件夹",
+      "label": "文件夹",
+      "unassigned": "未归入文件夹"
+    },
+    "kind": {
+      "label": "会话类型",
+      "options": {
+        "all": "全部类型",
+        "dm": "私聊",
+        "team": "团队"
+      }
+    },
+    "label": "筛选与排序",
+    "labelActive": "筛选与排序（已启用 {count} 项筛选）",
+    "model": {
+      "any": "任意模型",
+      "label": "模型",
+      "unassigned": "未知模型"
+    },
+    "presets": {
+      "delete": "删除预设 {name}",
+      "empty": "还没有保存的预设。",
+      "label": "预设",
+      "manage": "管理预设…",
+      "manageDescription": "重命名或删除已保存的筛选组合，更改立即生效。",
+      "manageTitle": "管理预设",
+      "namePlaceholder": "预设名称",
+      "rename": "重命名预设 {name}",
+      "save": "保存当前筛选…",
+      "saveAction": "保存预设",
+      "saveDescription": "为这组筛选条件命名，之后可在任意设备上一键套用。",
+      "saveRejected": "请输入名称，并至少保留一项筛选条件。",
+      "saveShort": "保存",
+      "saveTitle": "保存筛选预设"
+    },
+    "provider": {
+      "any": "任意提供商",
+      "label": "提供商",
+      "unassigned": "未知提供商"
+    },
+    "remove": "移除“{name}”筛选",
+    "sections": {
+      "agent": "Agent 与团队",
+      "location": "工作区与文件夹",
+      "model": "模型与提供商"
+    },
+    "selectedSummary": "已选 {count} 项",
+    "sort": {
+      "label": "排序方式",
+      "options": {
+        "created": "创建时间",
+        "oldest": "最早活动",
+        "recent": "最近活动",
+        "title": "标题（A–Z）",
+        "unread": "未读优先"
+      }
+    },
+    "team": {
+      "any": "任意团队",
+      "label": "团队",
+      "unassigned": "无团队"
+    },
+    "workspace": {
+      "any": "任意工作区",
+      "label": "工作区",
+      "unassigned": "无工作区"
+    }
+  },
   "crashDialog": {
     "description": "{time} 开始的会话（版本 {version}）因崩溃而结束。已保存包含详细信息的崩溃报告。",
     "dismiss": "关闭",
@@ -6759,6 +6968,117 @@
     "openFolder": "打开文件夹",
     "title": "Cognia 异常退出",
     "viewReport": "查看报告"
+  },
+  "creator": {
+    "artifact": {
+      "kinds": {
+        "agent-preset": "Agent 预置",
+        "hook": "Hook",
+        "plugin": "插件",
+        "skill": "技能",
+        "visual-workflow": "可视化工作流"
+      },
+      "label": "要创建什么？"
+    },
+    "blocked": {
+      "already-completed": "已完成",
+      "awaiting-approval": "需要先获得你的批准",
+      "out-of-order": "被前置步骤阻塞：{step}",
+      "unknown-step": "未知步骤"
+    },
+    "gate": {
+      "description": "Creator 会写入文件并变更权限，因此仅在开启开发者模式后提供。",
+      "enable": "开启开发者模式",
+      "title": "需要开发者模式"
+    },
+    "permissions": {
+      "added": "新增",
+      "approve": "批准这些能力",
+      "approved": "已批准",
+      "none": "该产物没有申请新的能力。",
+      "removed": "移除",
+      "requiresApproval": "{count, plural, other {# 项新增能力需要你的批准}}",
+      "stale": "批准之后方案已变更，请重新审阅。",
+      "title": "权限差异",
+      "unchanged": "未变化",
+      "writesBlocked": "在批准之前不会写入任何文件。"
+    },
+    "preview": {
+      "clean": "资源已全部释放。",
+      "generation": "第 {generation} 代",
+      "inactive": "未运行。",
+      "leaked": "{count, plural, other {# 项资源未释放}}：{labels}",
+      "reload": "重新加载",
+      "start": "启动预览",
+      "stop": "停止",
+      "title": "沙箱预览"
+    },
+    "review": {
+      "approved": "评审通过。",
+      "authority": "评审权限：{authority}",
+      "noFindings": "没有发现问题。",
+      "pending": "尚未评审。",
+      "readOnly": "评审子 Agent 以只读方式运行，并使用独立上下文。",
+      "rejected": "评审发现阻塞性问题。",
+      "severity": {
+        "blocker": "阻塞",
+        "info": "提示",
+        "warning": "警告"
+      },
+      "title": "独立评审"
+    },
+    "root": {
+      "change": "更换",
+      "choose": "选择目录",
+      "description": "Creator 读写的每个文件都限制在该目录内，且没有隐式默认值。",
+      "empty": "尚未选择创作根目录。",
+      "origin": {
+        "created": "已创建",
+        "selected": "已选择"
+      },
+      "pathLabel": "路径",
+      "rejected": {
+        "empty": "路径为空。",
+        "filesystem-root": "文件系统根目录不能作为创作根目录。",
+        "home-directory": "主目录范围过大，不能作为创作根目录。",
+        "not-absolute": "请选择绝对路径。"
+      },
+      "revoke": "撤销",
+      "title": "创作根目录"
+    },
+    "run": {
+      "active": "运行 {runId} 进行中。",
+      "advance": "运行流程",
+      "advanceHint": "一直向前运行,直到需要你决定为止。",
+      "end": "结束运行",
+      "needsRoot": "请先选择创作根目录。",
+      "requirements": "它要做什么?",
+      "requirementsPlaceholder": "用一两句话描述这个产物。",
+      "start": "开始一次 Creator 运行",
+      "stopped": "在「{step}」停下:{detail}"
+    },
+    "status": {
+      "active": "进行中",
+      "awaiting-approval": "等待批准",
+      "completed": "已完成",
+      "failed": "失败",
+      "pending": "待开始",
+      "skipped": "已跳过"
+    },
+    "steps": {
+      "apply-changes": "生成文件",
+      "approve-delivery": "批准交付",
+      "approve-permissions": "审阅权限",
+      "collect-requirements": "收集需求",
+      "plan-scaffold": "生成脚手架计划",
+      "preview": "沙箱预览",
+      "review": "独立评审",
+      "survey-existing": "检查已有实现",
+      "title": "流程",
+      "verify": "Lint、类型检查、构建与契约检查"
+    },
+    "subtitle": "在创作根目录内编写插件、技能、Hook、预置与可视化工作流。",
+    "title": "Creator"
   },
   "customMode": {
     "a2uiSettings": "A2UI 模板",
@@ -6929,6 +7249,7 @@
       "items": {
         "accountStatus": "账户",
         "accountTop": "账户",
+        "agentThreads": "智能体线程",
         "appIcon": "应用图标",
         "attention": "待处理事项",
         "branch": "Git 分支",
@@ -6974,8 +7295,11 @@
         "deleteConfirmBody": "将永久删除这些会话及其所有消息，不可撤销。",
         "deleteConfirmTitle": "删除 {count} 个会话？",
         "deleteSuccess": "已删除 {count} 个会话",
+        "moveSuccess": "已移动 {count} 个会话",
+        "moveToFolder": "移动到文件夹",
         "pin": "置顶",
         "pinSuccess": "已置顶 {count} 个会话",
+        "removeFromFolder": "移出文件夹",
         "selectedCount": "已选 {count} 项",
         "share": "分享",
         "unarchive": "取消归档",
@@ -6995,6 +7319,7 @@
       "displayOptions": "显示选项",
       "emptyArchived": "没有已归档的会话。",
       "emptyDm": "还没有聊天，挑选一个角色开始。",
+      "emptyFiltered": "没有会话符合当前的 {count} 项筛选条件。",
       "emptyFolder": "空文件夹——把会话移动到这里。",
       "emptySearch": "没有与「{query}」匹配的会话。",
       "emptyTeam": "还没有会话，从上方开启一个吧。",
@@ -7021,6 +7346,8 @@
         "provider": "提供商",
         "workspace": "工作区"
       },
+      "moveFolderDown": "下移文件夹",
+      "moveFolderUp": "上移文件夹",
       "newChat": "新建聊天",
       "newConversation": "新建会话",
       "newFolder": "新建文件夹",
@@ -7031,12 +7358,25 @@
       "searchAria": "搜索会话",
       "searchMessageContent": "搜索消息正文",
       "searchPlaceholder": "搜索会话…",
+      "searchShortcutHint": "按 / 开始搜索",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
       "sectionPinned": "置顶",
       "sectionRecent": "最近",
+      "sectionResults": "搜索结果",
       "showCustomIcons": "显示自定义 Agent 和团队图标",
       "showPreview": "显示消息预览",
+      "showTimestamps": "显示活动时间",
       "showUnreadBadges": "显示未读角标",
+      "sortBy": {
+        "label": "排序方式",
+        "options": {
+          "created": "创建时间",
+          "oldest": "最早活动",
+          "recent": "最近活动",
+          "title": "标题 (A–Z)",
+          "unread": "未读优先"
+        }
+      },
       "teamFallback": "团队",
       "titleMotion": "悬停时滚动长标题",
       "ungroupedAgent": "未绑定角色",
@@ -7071,6 +7411,7 @@
       "previous": "上一个匹配"
     },
     "guildRail": {
+      "a2ui": "小应用",
       "agentRuns": "智能体运行",
       "agentTeams": "智能体团队",
       "auxiliaryGroup": "个人与日志",
@@ -7103,8 +7444,12 @@
       "featuresGroup": "功能",
       "goals": "目标",
       "inbox": "收件箱",
+      "issueProjects": "项目",
+      "issues": "议题",
       "label": "频道导航栏",
       "logs": "日志",
+      "manageTeams": "管理团队",
+      "markAllRead": "全部标为已读",
       "me": "我的",
       "memory": "记忆",
       "more": "更多",
@@ -7117,11 +7462,14 @@
       "scheduler": "调度器",
       "servers": "服务器",
       "settings": "设置",
+      "sites": "站点",
       "skills": "技能",
       "sourceControl": "源代码管理",
       "templates": "模板",
       "twin": "数字分身",
+      "unreadCount": "{count} 条未读",
       "workflows": "工作流",
+      "workspace": "工作区",
       "workspacesGroup": "工作区"
     },
     "jobCenter": {
@@ -7350,6 +7698,7 @@
       },
       "view": {
         "commandPalette": "命令面板…",
+        "guildRailFolded": "已并入侧栏",
         "label": "视图",
         "language": "语言",
         "languageChinese": "简体中文",
@@ -7379,90 +7728,6 @@
         "restore": "还原"
       }
     },
-    "onboarding": {
-      "apiKeyHintHost": "console.anthropic.com",
-      "apiKeyHintPrefix": "在 ",
-      "apiKeyHintSuffix": " 申请一个。密钥不会离开本机。",
-      "apiKeyLabel": "Anthropic API 密钥",
-      "apiKeyPlaceholder": "sk-ant-…",
-      "back": "返回",
-      "continue": "继续",
-      "done": "完成",
-      "provider": {
-        "apiKey": {
-          "cta": "使用 API 密钥",
-          "description": "如果你在 console.anthropic.com 拿到的是工作空间 API 密钥而非订阅，用这种方式。",
-          "title": "粘贴 Anthropic API 密钥"
-        },
-        "backToChooser": "换一种登录方式",
-        "claude": {
-          "cta": "使用 Anthropic 登录",
-          "description": "通过浏览器 PKCE 登录你的 Anthropic 订阅。",
-          "title": "Claude Pro / Max"
-        },
-        "codex": {
-          "cta": "使用 ChatGPT 登录",
-          "description": "用设备代码流将本应用与 ChatGPT 订阅配对。",
-          "title": "ChatGPT Plus / Pro（Codex）"
-        },
-        "description": "用你已经付费的方式登录。后续可以在 设置 → 订阅 添加更多账号。",
-        "loggedInBadge": "已连接",
-        "loggedInDescription": "{provider} 已连接。可以继续下一步，或在下方选择另一个角色。",
-        "opencode": {
-          "cta": "粘贴 OpenCode 密钥",
-          "description": "粘贴 OpenCode Zen 的 API 密钥，可选填写区域 Base URL。",
-          "title": "OpenCode Zen"
-        },
-        "title": "选择登录方式"
-      },
-      "saving": "保存中…",
-      "skip": "暂时跳过",
-      "step1Description": "选择你想使用的登录方式。订阅登录会写入系统密钥环；粘贴的 API 密钥仅保存在本机 IndexedDB 与内嵌的 Node 子进程中。",
-      "step1Title": "欢迎使用 Cognia",
-      "step2Description": "每个角色都自带系统提示与工具。稍后可以在 设置 → 角色 中编辑、复制或新建更多。",
-      "step2Title": "挑选一个角色开始",
-      "toastNeedKey": "粘贴你的 Anthropic API 密钥以继续。",
-      "tour": {
-        "computerUse": {
-          "cta": "打开自动化设置",
-          "description": "Computer Use 默认关闭。可按角色启用，并选择权限等级（关闭 / 白名单 / 单次询问）。",
-          "title": "让 AI 操作桌面"
-        },
-        "connectors": {
-          "cta": "配置连接器",
-          "description": "把助手运行为常用平台上的机器人，支持自动 / 手动 / 草稿三种模式。",
-          "title": "对接 Telegram、Discord、Slack、飞书、OneBot"
-        },
-        "description": "这些功能已经上线。如果不需要可以直接跳过。",
-        "done": "完成",
-        "mobile": {
-          "cta": "打开配对设置",
-          "description": "生成 5 分钟有效的配对凭据让手机扫码。优先 mDNS，依次回退到 WebRTC 和 Cloudflare 隧道。",
-          "title": "在局域网或公网上配对手机"
-        },
-        "next": "下一个",
-        "ocr": {
-          "cta": "配置 OCR",
-          "description": "在输入栏悬浮附件即可把文字拉进对话。本地引擎离线可用；云端提供商可选。",
-          "title": "从图片和 PDF 中提取文字"
-        },
-        "openSettings": "打开设置",
-        "previous": "上一个",
-        "progress": "第 {current} / {total} 个",
-        "sandbox": {
-          "cta": "打开沙盒设置",
-          "description": "Bash / Edit / Write 可以经由 OS 沙盒（sandbox-exec / bwrap / Windows 合成用户）或可选的 e2b microVM 执行。任何后端不健康时严格模式直接拒绝调用，没有 bypass。",
-          "title": "Shell 工具在沙盒中运行"
-        },
-        "skip": "跳过引导",
-        "title": "接下来你可以做什么",
-        "twin": {
-          "cta": "打开数字分身设置",
-          "description": "上传文档后，蒸馏流水线会生成一份脱敏的风格画像，可以绑定到任意角色。",
-          "title": "用你自己的写作训练数字分身"
-        }
-      }
-    },
     "sessionRow": {
       "actionsMenu": "会话操作",
       "archive": "归档",
@@ -7470,6 +7735,7 @@
       "cancel": "取消",
       "cogniaAgentChecking": "正在检查 Cognia 代理…",
       "cogniaAgentNotInstalled": "未安装 Cognia 代理 CLI",
+      "contentMatch": "匹配到消息内容",
       "delete": "删除",
       "deleteConfirmAction": "删除会话",
       "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
@@ -7613,6 +7879,7 @@
         "appearanceGroup": "外观",
         "customize": "自定义布局",
         "customizeBars": "自定义布局…",
+        "guildRailFolded": "已并入侧栏",
         "localeEn": "English",
         "localeZh": "简体中文",
         "openBrowser": "打开浏览器面板",
@@ -7778,6 +8045,10 @@
         "hint": "外部智能体在执行本回合时失败——请重试，或改用内置智能体运行。",
         "label": "智能体运行失败"
       },
+      "extensionHandshakeFailed": {
+        "hint": "在该智能体内执行权限控制的 Cognia 扩展未报告就绪，因此会话被拒绝，而不是在无管控的情况下运行。",
+        "label": "智能体扩展未启动"
+      },
       "extensionUnknown": {
         "hint": "Cognia 尚未确定该智能体是否支持此操作——请重新连接以探测。",
         "label": "支持情况未知"
@@ -7874,6 +8145,10 @@
         "hint": "有插件在消息发出前将其拦截——请检查该插件的设置。",
         "label": "被插件拦截"
       },
+      "protocolFrameInvalid": {
+        "hint": "智能体发送的数据不符合其协议，该数据流已不可信——请新建会话。",
+        "label": "智能体响应格式错误"
+      },
       "protocolUnsupported": {
         "hint": "Cognia 与该智能体没有共同的协议——请将其切换为 ACP 并重新保存配置。",
         "label": "协议不支持"
@@ -7898,9 +8173,21 @@
         "hint": "部分界面崩溃了——请重试；若反复出现，请把报告发给我们。",
         "label": "应用程序错误"
       },
+      "resourceLimit": {
+        "hint": "此主机已达到智能体进程数上限——请结束或关闭一个后重试。",
+        "label": "智能体会话过多"
+      },
       "routingNoCandidates": {
         "hint": "路由链中没有服务商可以处理该请求——请检查服务商与模型映射配置。",
         "label": "没有可用服务商"
+      },
+      "runtimeVersionUnsupported": {
+        "hint": "已安装该智能体，但版本低于所支持的最低版本——请升级后重新连接。",
+        "label": "智能体版本过低"
+      },
+      "sandboxUnavailable": {
+        "hint": "外部智能体只在严格沙箱内运行，而此处无法启动沙箱。Cognia 不会退回到无沙箱进程。",
+        "label": "沙箱不可用"
       },
       "seedFailed": {
         "hint": "Cognia 未能写入内置技能和角色——部分默认内容会缺失。",
@@ -8418,7 +8705,8 @@
       "copyReport": "复制完整报告",
       "copyReportFailed": "复制报告失败",
       "copyReportSuccess": "报告已复制到剪贴板",
-      "reportIssue": "报告问题"
+      "reportIssue": "报告问题",
+      "reportIssueFailed": "无法打开问题追踪器"
     },
     "retry": "重试",
     "showStack": "查看调用栈",
@@ -9304,6 +9592,12 @@
     "commandsDescription": "此外部代理提供的斜杠命令",
     "commandsTooltip": "查看可用的代理命令",
     "disabled": "外部代理已禁用",
+    "elicitation": {
+      "decline": "拒绝",
+      "punycodeWarning": "该网址包含可能伪装成其他域名的字符，请确认后再继续。",
+      "submit": "提交",
+      "title": "代理需要你的回答"
+    },
     "enableInSettings": "请在设置中启用外部代理",
     "errors": {
       "tauriOnly": "外部代理仅在 Tauri 中可用"
@@ -9481,6 +9775,54 @@
       "connectionFailed": "连接失败",
       "customConfiguration": "自定义配置",
       "cwdPlaceholder": "留空使用当前目录",
+      "deepseekHarness": {
+        "approvalNotice": "该传输层无法在对话进行中申请授权，因此权限在运行时启动时就已确定。",
+        "cancelNotice": "取消对话会关闭整个运行时：该传输层没有单次对话取消能力。",
+        "capabilities": "能力",
+        "capabilityApproval": "对话中授权",
+        "capabilityCancel": "取消单次对话",
+        "capabilityReasoning": "推理过程",
+        "capabilityStreaming": "实时流式输出",
+        "capabilitySubagents": "子 Agent 谱系",
+        "capabilitySupported": "支持",
+        "capabilityToolEvents": "工具活动",
+        "capabilityUnsupported": "不支持",
+        "capabilityUsage": "Token 用量",
+        "channel": "通道",
+        "checking": "检查中…",
+        "description": "由 Cognia 托管的 DeepSeek Harness 运行时。与其他外部 Agent 不同，DeepSeek Harness 未发布可执行文件，因此 Cognia 在隔离目录中安装并认证自己的运行时。",
+        "doctor": "检查",
+        "experimentalBadge": "实验性",
+        "experimentalNotice": "上游仍处于开发者预览阶段，并明确提示会有破坏性变更。Cognia 锁定确切版本，一旦漂移则拒绝启动。",
+        "findings": {
+          "channelMalformed": "尚未安装运行时，或其清单无法读取。",
+          "compositionDigestMismatch": "磁盘上的运行时组合在认证后被修改过。",
+          "lockfileDigestMismatch": "已安装的依赖与认证的 lockfile 不再一致。",
+          "nativeToolchainMissing": "该配置档案需要 C/C++ 工具链，但当前不可用。",
+          "nodeVersionUnsupported": "当前 Node.js 版本低于该运行时的要求。",
+          "platformUnsupported": "该运行时未针对当前平台进行认证。",
+          "strayPatchLayer": "发现未纳管的 patch 层，它可能为已认证的配置档案添加额外工具。"
+        },
+        "healthy": "运行时状态正常。",
+        "install": "安装",
+        "installFailed": "安装失败，已保留之前的运行时。",
+        "installSucceeded": "DeepSeek Harness 运行时安装完成。",
+        "installed": "已安装",
+        "installing": "安装中…",
+        "notInstalled": "未安装",
+        "profile": "配置档案",
+        "profileReadonly": "只读",
+        "profileReadonlyDesc": "可以读取和搜索文件，不能写入或执行命令，也无法在对话过程中向你申请授权。",
+        "profileWorkspace": "工作区写入",
+        "profileWorkspaceDesc": "可在工作区内写入并执行命令。其全部权限在启动时授予，且无法在对话过程中收回。",
+        "reinstall": "重新安装",
+        "remove": "删除",
+        "removeConfirm": "确定删除已安装的 DeepSeek Harness 运行时吗？使用它的 Agent 在重新安装前将无法工作。",
+        "removeSucceeded": "DeepSeek Harness 运行时已删除。",
+        "title": "DeepSeek Harness",
+        "unhealthy": "运行时存在问题。",
+        "upstreamVersion": "上游版本"
+      },
       "defaultPermissionMode": "默认权限模式",
       "defaultPermissionModeDesc": "新代理会话使用的默认权限模式",
       "delegation": {
@@ -9578,6 +9920,30 @@
       "permissionDefault": "默认（每次操作询问）",
       "permissionDontAsk": "不询问（未预先批准则拒绝）",
       "permissionPlan": "计划模式（不执行）",
+      "piExtensionPolicyGlobal": "加载我的全局 Pi 扩展",
+      "piExtensionPolicyHint": "隔离模式下运行 Pi 时不加载你自己的扩展、技能与提示模板，AGENTS.md 与 CLAUDE.md 仍会加载。社区权限扩展同样会拦截工具调用，与 Cognia 的权限链同时启用可能产生重复确认。",
+      "piExtensionPolicyIsolated": "隔离（推荐）",
+      "piExtensionPolicyLabel": "扩展策略",
+      "piExtensionPolicyTrustedProject": "同时信任项目本地文件",
+      "piExtensionPolicyTrustedProjectWarning": "项目本地的 Pi 文件可以执行所打开仓库中的任意代码。请仅对你信任的仓库启用。",
+      "piMigration": {
+        "blocker": {
+          "command_missing": "未安装 Pi，或其不在 PATH 中。",
+          "runtime_version_unsupported": "已安装的 Pi 版本低于所支持的版本。",
+          "sandbox_unavailable": "本机沙箱不可用，因此无法在此运行 Pi。"
+        },
+        "continuityNote": "你的设置与该智能体的 ID 会保留。切换后的首次运行会新建一个 Pi 会话，当前对话不会延续。",
+        "legacyDescription": "此智能体通过社区 pi-acp 桥运行。切换到 Pi 原生协议后可使用思考等级、实时引导、上下文压缩与会话分叉。",
+        "migrateAction": "切换到原生 Pi",
+        "migratedDescription": "此智能体已运行在 Pi 原生协议上。",
+        "rollbackAction": "切回桥接方式",
+        "rollbackNote": "切回只会恢复之前的连接设置，会话与记录都会保留。",
+        "statusLegacy": "社区 ACP 桥",
+        "statusNative": "原生 RPC",
+        "title": "Pi 连接方式"
+      },
+      "piSandboxNote": "Pi 始终在严格沙箱内运行，且仅支持 macOS 与 Linux，不存在无沙箱回退。",
+      "piSectionTitle": "Pi 运行时",
       "presetGalleryEmpty": "暂无可用预设。",
       "protocol": "协议",
       "providerUndoWarningReset": "恢复警告",
@@ -11118,6 +11484,241 @@
     "title": "Integrations",
     "unsupportedWeb": "集成管理需要桌面应用。"
   },
+  "issues": {
+    "activity": {
+      "artifact_linked": "关联了一个产物",
+      "assigned": "将其指派给 {to}",
+      "commented": "发表了评论",
+      "created": "创建了这个议题",
+      "description_changed": "编辑了描述",
+      "github_linked": "关联了一个 GitHub 议题",
+      "github_write_back": "向 GitHub 推送了一次变更",
+      "label_added": "添加了标签",
+      "label_removed": "移除了标签",
+      "priority_changed": "将优先级从「{from}」改为「{to}」",
+      "project_changed": "将其移动到了另一个项目",
+      "reassigned": "将负责人从 {from} 改为 {to}",
+      "run_failed": "Agent 运行失败",
+      "run_started": "启动了一次 Agent 运行",
+      "run_succeeded": "完成了一次 Agent 运行",
+      "status_changed": "将状态从「{from}」改为「{to}」",
+      "title_changed": "重命名了这个议题",
+      "unassigned": "移除了负责人"
+    },
+    "actor": {
+      "agent": "Agent",
+      "human": "我",
+      "noLead": "无负责人",
+      "team": "小队",
+      "unassigned": "未指派"
+    },
+    "board": {
+      "addIssue": "在「{status}」中新建议题",
+      "agentsWorking": "{count, plural, =0 {0 个 Agent 在工作} other {# 个 Agent 在工作}}",
+      "awaitingReview": "{count, plural, =0 {} other {# 个待评审}}",
+      "columnActions": "列操作",
+      "denied": {
+        "federated-read-only": "该议题归属于 {source}，无法在这里移动。",
+        "illegal-transition": "不允许这样移动。",
+        "runtime-owned": "有 Agent 正在处理这个议题 —— 请等待运行结束。"
+      },
+      "empty": "暂无议题"
+    },
+    "create": {
+      "cancel": "取消",
+      "descriptionLabel": "描述",
+      "noProject": "请先创建一个项目 —— 议题需要有归属。",
+      "projectLabel": "项目",
+      "submit": "创建议题",
+      "title": "新建议题",
+      "titleLabel": "标题",
+      "titlePlaceholder": "议题标题",
+      "trigger": "新建议题"
+    },
+    "detail": {
+      "activity": "活动",
+      "assignee": "负责人",
+      "close": "关闭详情",
+      "comment": "评论",
+      "commentPlaceholder": "写下评论…",
+      "created": "创建于",
+      "description": "描述",
+      "descriptionPlaceholder": "添加描述…",
+      "empty": "选择一个议题查看详情",
+      "labels": "标签",
+      "openInGithub": "在 GitHub 中打开",
+      "priority": "优先级",
+      "project": "项目",
+      "properties": "属性",
+      "status": "状态",
+      "updated": "更新于"
+    },
+    "labels": {
+      "add": "添加标签",
+      "manage": "管理标签",
+      "none": "暂无标签",
+      "remove": "移除 {name}",
+      "title": "标签"
+    },
+    "priority": {
+      "high": "高",
+      "low": "低",
+      "medium": "中",
+      "none": "无优先级",
+      "urgent": "紧急"
+    },
+    "projects": {
+      "addLocalDirectory": "添加本地目录",
+      "addResource": "添加资源",
+      "addResourceHint": "引用一个 GitHub 仓库以把它的 issue 镜像到看板，或引用一个本工作区已挂载的目录。",
+      "create": "新建项目",
+      "delete": "删除项目",
+      "deleteConfirm": "删除「{name}」及其全部 {count} 个议题？此操作不可撤销。",
+      "description": "描述",
+      "descriptionHint": "作为上下文共享给本项目中每一个任务的 Agent。",
+      "directoryHint": "只能引用已挂载到当前工作区的目录。",
+      "empty": "还没有项目",
+      "emptyHint": "项目用于归集同一交付物的议题，并携带每次 Agent 运行都能看到的上下文。",
+      "keyHint": "2–5 个字母。议题编号形如 {example}。创建后不可修改。",
+      "keyInvalid": "2–5 个字符，且以字母开头。",
+      "keyLabel": "标识前缀",
+      "keyTaken": "该前缀已被占用。",
+      "lead": "负责人",
+      "nameLabel": "名称",
+      "namePlaceholder": "项目名称",
+      "noResources": "尚未绑定任何资源。",
+      "noRootsAvailable": "本工作区没有尚未绑定的已挂载目录。",
+      "progress": "进度",
+      "progressCount": "{completed}/{total}",
+      "removeResource": "移除资源",
+      "repoHint": "该仓库的 issue 会以只读行的形式出现在看板上。",
+      "repoInvalid": "请使用 owner/repository 形式。",
+      "repoTaken": "该仓库已绑定到某个项目。",
+      "resourceDirectory": "本地目录",
+      "resourceKind": "类型",
+      "resourceRepo": "GitHub 仓库",
+      "resources": "资源",
+      "startDate": "开始日期",
+      "status": {
+        "backlog": "待办池",
+        "canceled": "已取消",
+        "completed": "已完成",
+        "in_progress": "进行中",
+        "paused": "已暂停",
+        "planned": "已计划"
+      },
+      "summary": "{count, plural, =0 {暂无项目} other {# 个项目}}",
+      "targetDate": "截止日期",
+      "title": "项目"
+    },
+    "source": {
+      "agent-task": "Agent 任务",
+      "agent-team": "Agent 团队",
+      "degraded": "{count, plural, other {# 个数据源加载失败}}",
+      "github": "GitHub",
+      "local": "本地",
+      "readOnly": "只读 —— 由 {source} 管理"
+    },
+    "status": {
+      "backlog": "待办池",
+      "canceled": "已取消",
+      "done": "已完成",
+      "in_progress": "进行中",
+      "in_review": "待评审",
+      "todo": "待处理"
+    },
+    "summary": "{count, plural, =0 {暂无议题} other {# 个议题}}",
+    "sync": {
+      "done": "{count, plural, =0 {已是最新} other {已更新 # 条 issue}}",
+      "failed": "{repos} 同步失败",
+      "noCredential": "没有可用的 GitHub 凭据。请用 GitHub CLI 登录，或连接一个账号。",
+      "noRepos": "本工作区没有任何项目绑定了 GitHub 仓库。",
+      "now": "立即同步",
+      "running": "同步中…"
+    },
+    "title": "议题",
+    "toolbar": {
+      "activeFilters": "{count, plural, other {# 项筛选}}",
+      "board": "看板",
+      "clearFilters": "清除筛选",
+      "display": "显示",
+      "facet": {
+        "assignee": "负责人",
+        "labels": "标签",
+        "priority": "优先级",
+        "project": "项目",
+        "source": "来源"
+      },
+      "filter": "筛选",
+      "groupBy": {
+        "assignee": "负责人",
+        "label": "分组方式",
+        "none": "不分组",
+        "priority": "优先级",
+        "project": "项目",
+        "status": "状态"
+      },
+      "list": "列表",
+      "search": "搜索议题",
+      "sort": {
+        "created": "创建时间",
+        "label": "排序方式",
+        "manual": "手动",
+        "priority": "优先级",
+        "title": "标题",
+        "updated": "最近更新"
+      }
+    },
+    "views": {
+      "all": "全部",
+      "assigned": "指派给我",
+      "created": "我创建的",
+      "myAgents": "我的 Agent 与小队"
+    },
+    "workspace": {
+      "agentsWorking": "工作中的 Agent",
+      "issueSummary": "议题",
+      "manage": "管理工作区",
+      "noProjects": "当前工作区还没有项目",
+      "openIssues": "未完成议题",
+      "overview": "总览",
+      "projectSummary": "项目",
+      "recentActivity": "最近活动",
+      "resources": "资源",
+      "title": "工作区",
+      "trust": "工作区信任"
+    },
+    "writeback": {
+      "account": "以 {account} 的身份写入",
+      "accountChecking": "正在检查已连接的账号…",
+      "bodyLabel": "评论",
+      "confirm": {
+        "close": "关闭 issue",
+        "comment": "发表评论",
+        "label": "添加标签"
+      },
+      "description": "这会写入 GitHub 上的 {issue}，且无法在此撤销。",
+      "error": {
+        "no-account": "没有已启用的 GitHub 账号。请在「设置 → 连接」中连接一个。",
+        "plugin-unavailable": "GitHub delivery 插件不可用。请先启用它再试。"
+      },
+      "labelsHint": "用英文逗号分隔。标签必须已存在于该仓库。",
+      "labelsLabel": "标签",
+      "reason": {
+        "completed": "已完成",
+        "not_planned": "不再计划"
+      },
+      "reasonLabel": "原因",
+      "section": "GitHub 操作",
+      "sectionHint": "这些操作会写入 GitHub。看板会在下次同步后反映变更。",
+      "success": "GitHub 已接受该变更。",
+      "title": {
+        "close": "在 GitHub 上关闭",
+        "comment": "在 GitHub 上评论",
+        "label": "添加标签"
+      }
+    }
+  },
   "larkEntry": {
     "errors": {
       "adapter_missing": "页面缺少机器人上下文，请从飞书快捷操作重新打开。",
@@ -11153,16 +11754,51 @@
     "loading": "加载中…",
     "offline": "当前离线 —— 网络恢复后会自动重试",
     "page": {
+      "capabilities": {
+        "core-chat": "对话",
+        "desktop-tools": "桌面工具",
+        "integrations": "集成",
+        "knowledge-agents": "知识与智能体",
+        "plugin-runtime": "插件",
+        "workflow-automation": "工作流"
+      },
+      "capabilitiesReady": "运行时就绪 {ready}/{total}",
       "description": "正在加载界面、偏好设置和最近使用的内容",
+      "milestoneDuration": "{seconds} 秒",
+      "milestones": {
+        "accounts": {
+          "detail": "读取本地账户注册表",
+          "label": "正在解锁账户"
+        },
+        "interface": {
+          "detail": "挂载窗口框架与面板",
+          "label": "正在启动界面"
+        },
+        "preferences": {
+          "detail": "应用已保存的设置并执行启动检查",
+          "label": "正在加载偏好设置"
+        },
+        "workspace": {
+          "detail": "加载工作区视图与运行时",
+          "label": "正在恢复工作区"
+        }
+      },
+      "platform": {
+        "headless": "无头模式",
+        "mobile": "移动版",
+        "tauri": "桌面版",
+        "web": "网页版"
+      },
       "progressLabel": "工作区准备进度",
       "reload": "重新载入应用",
       "reloadHint": "加载时间超出预期，你可以重新载入后再试。",
-      "stages": {
-        "finalizing": "正在完成最后设置",
-        "interface": "正在启动界面",
-        "workspace": "正在恢复工作区"
-      },
-      "title": "正在准备你的工作区"
+      "statusActive": "进行中",
+      "statusDone": "已完成",
+      "statusPending": "等待中",
+      "stepOf": "第 {current} 步，共 {total} 步",
+      "stepsLabel": "启动步骤",
+      "title": "正在准备你的工作区",
+      "version": "版本 {version}"
     },
     "pageLoading": "加载中…",
     "stillWorking": "仍在进行…（{seconds} 秒）",
@@ -12783,12 +13419,13 @@
       "lockedComputerUse": {
         "blocked": "Locked Use 未启用（{reason}）。",
         "col": "Locked Use",
-        "description": "允许此设备请求短时、与任务绑定的 Locked Use lease；远程控制必须保持开启。此权限不允许管理员认证或绕过安全警告。",
+        "description": "授予此设备 Locked Use —— 短时、与任务绑定的解锁 lease。尚未生效：本版本未包含 macOS Locked Use 系统组件，在其发布前此开关不会授予任何权限。",
         "disabledToast": "已为 {label} 关闭 Locked Use。",
         "enabledToast": "已为 {label} 启用 Locked Use。",
         "reason": "确认授予 {label} Locked Use 权限",
         "title": "允许 Locked Use",
-        "toggleAria": "切换 {label} 的 Locked Use"
+        "toggleAria": "切换 {label} 的 Locked Use",
+        "unavailable": "此版本暂不可用"
       },
       "logto": {
         "awaitingCode": "已打开浏览器窗口。授权后，请将完整的回调 URL（或仅 code）粘贴到下方。",
@@ -13431,6 +14068,7 @@
       "emptyArchived": "没有已归档的聊天。",
       "emptyChats": "还没有聊天，点击 + 新建一个。",
       "emptyFiltered": "没有与「{query}」匹配的聊天。",
+      "emptyFilters": "没有会话符合当前的 {count} 项筛选条件。",
       "pinned": "置顶",
       "presenceStreaming": "回复中",
       "quickActions": "快捷操作",
@@ -13589,28 +14227,18 @@
       "evalRow": "Agent 评估",
       "externalAgentsRow": "外部 Agent",
       "feedback": {
-        "copyDescription": "应用版本、User Agent 和当前同步快照。",
+        "copyDescription": "复制默认脱敏报告：应用构建信息、运行时快照和同步状态。",
         "copyError": "当前壳层无法访问剪贴板。",
         "copyLabel": "复制诊断信息",
-        "copyLabelDone": "已复制诊断信息",
         "copyToast": "已复制诊断信息到剪贴板。",
         "deviceInfoDescription": "权限、构建号、平台细节。",
         "deviceInfoLabel": "设备信息",
         "diagnosticsTitle": "更多诊断",
         "openIssueDescription": "包含 Bug 报告与功能请求模板。",
         "openIssueLabel": "在 GitHub 提交 Issue",
-        "reportTitle": "反馈问题",
-        "support": {
-          "cancel": "取消",
-          "confirmExport": "确认并导出",
-          "description": "确认后，Cognia 会根据你的描述和已脱敏诊断在本地生成 Markdown 草稿，不会自动发送任何内容。",
-          "exportFailed": "无法生成支持反馈文件。",
-          "exported": "已导出支持反馈。",
-          "placeholder": "发生了什么？你原本期望什么结果？",
-          "summary": "反馈描述",
-          "title": "生成支持反馈？",
-          "trigger": "生成已脱敏的支持反馈"
-        }
+        "reportProblemDescription": "描述发生了什么，检查脱敏后的详情，然后复制、下载或在 GitHub 提交 Issue。",
+        "reportProblemLabel": "反馈问题",
+        "reportTitle": "反馈问题"
       },
       "feedbackRow": "反馈与诊断",
       "goalsRow": "目标",
@@ -14030,10 +14658,6 @@
       "fingerprintPinned": "桌面身份已锁定",
       "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
       "formCardTitle": "配对手机",
-      "invitationSummary": {
-        "description": "服务器 v{version} · {expiresAt, time, short} 过期",
-        "title": "已识别 {host} 的配对邀请"
-      },
       "health": {
         "checking": "检查中",
         "continueToChat": "进入聊天",
@@ -14054,6 +14678,10 @@
         "generic": "配对失败（HTTP {status}）。"
       },
       "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+      "invitationSummary": {
+        "description": "服务器 v{version} · {expiresAt, time, short} 过期",
+        "title": "已识别 {host} 的配对邀请"
+      },
       "loadingManualCta": "手动配对",
       "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
       "loadingTitle": "正在检查既有配对…",
@@ -14154,8 +14782,8 @@
         "headlessTitle": "正在使用 Headless 服务器？",
         "httpsRequired": "浏览器配对必须使用 HTTPS，避免配对凭据以明文发送。请输入 HTTPS Companion 地址。",
         "intro": "使用 Cognia 服务器签发的一次性邀请连接此浏览器。",
-        "pasteHint": "粘贴完整的 cgnp3|… 邀请，系统会自动验证服务器地址和身份。",
         "pasteClipboard": "粘贴",
+        "pasteHint": "粘贴完整的 cgnp3|… 邀请，系统会自动验证服务器地址和身份。",
         "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
         "storageNoticeTitle": "凭据保存在此浏览器中",
         "title": "连接到服务器"
@@ -14386,7 +15014,66 @@
       "volume": "音量"
     },
     "splash": {
-      "label": "正在启动 cognia"
+      "build": "移动端 · v{version}",
+      "duration": "{seconds}s",
+      "headline": {
+        "boot": "正在准备就绪",
+        "route": "正在加载页面",
+        "settled": "已就绪"
+      },
+      "label": "正在启动 cognia",
+      "outcomes": {
+        "incompatible": "需要更新",
+        "linked": "在线",
+        "notNeeded": "无需执行",
+        "offline": "离线",
+        "paired": "已配对",
+        "registered": "原生就绪",
+        "standalone": "独立模式",
+        "syncFailed": "稍后重试",
+        "synced": "已是最新",
+        "unavailable": "桥接不可用",
+        "unpaired": "未配对"
+      },
+      "progressLabel": "启动进度",
+      "rows": {
+        "accounts": {
+          "detail": "读取本地账户注册表",
+          "label": "解锁账户"
+        },
+        "bridge": {
+          "detail": "注册 Capacitor 原生插件",
+          "label": "唤醒原生桥接"
+        },
+        "companion": {
+          "detail": "从安全存储读取已配对的桌面端",
+          "label": "读取配对信息"
+        },
+        "host": {
+          "detail": "协商连接与主机能力",
+          "label": "连接桌面端"
+        },
+        "preferences": {
+          "detail": "应用已保存的设置并执行启动检查",
+          "label": "加载偏好设置"
+        },
+        "sync": {
+          "detail": "拉取最近的会话与消息",
+          "label": "同步会话"
+        },
+        "workspace": {
+          "detail": "获取视图及其运行时",
+          "label": "加载视图"
+        }
+      },
+      "statusActive": "进行中",
+      "statusDone": "已完成",
+      "statusFailed": "失败",
+      "statusPending": "等待中",
+      "statusSkipped": "已跳过",
+      "stepsLabel": "启动步骤",
+      "stepsOf": "{completed} / {total}",
+      "wordmark": "cognia"
     },
     "standaloneSearch": {
       "answerTitle": "回答",
@@ -15559,6 +16246,173 @@
       }
     }
   },
+  "onboarding": {
+    "apiKeyHintHost": "console.anthropic.com",
+    "apiKeyHintPrefix": "在 ",
+    "apiKeyHintSuffix": " 申请一个。密钥不会离开本机。",
+    "apiKeyLabel": "Anthropic API 密钥",
+    "apiKeyPlaceholder": "sk-ant-…",
+    "back": "返回",
+    "cards": {
+      "extractText": {
+        "description": "截个屏，把里面的文字提取出来。",
+        "prompt": "帮我截屏并提取其中的文字。",
+        "title": "从图片里取出文字"
+      },
+      "readFolder": {
+        "description": "指给它一个目录，拿回一份清楚的内容说明。",
+        "prompt": "读一下这台机器上的某个文件夹，告诉我里面有什么。",
+        "title": "读一个文件夹"
+      },
+      "summarizeWeb": {
+        "description": "给它一个链接，不离开 App 就拿到要点。",
+        "prompt": "帮我总结一个网页。",
+        "title": "总结一个网页"
+      }
+    },
+    "continue": "继续",
+    "done": "完成",
+    "finishBar": {
+      "cta": "完成设置",
+      "dismiss": "关闭",
+      "provider_skipped": "Cognia 还无法访问模型 —— 请完成登录。",
+      "runtime_skipped": "这台机器上还没有配置 agent 运行时。",
+      "task_failed": "首次运行没有完成，要再试一次吗？"
+    },
+    "firstRun": {
+      "changeCharacter": "更换",
+      "description": "挑一个试试。Agent 现在就做，结果你自己判断。",
+      "failed": "这次没成功。可以换一个，或者先跳过稍后再试。",
+      "runningWith": "以 {name} 的身份运行",
+      "runtimeLine": "正在使用 {runtime}",
+      "starting": "正在启动…",
+      "title": "先真做一件事"
+    },
+    "provider": {
+      "apiKey": {
+        "cta": "使用 API 密钥",
+        "description": "如果你在 console.anthropic.com 拿到的是工作空间 API 密钥而非订阅，用这种方式。",
+        "title": "粘贴 Anthropic API 密钥"
+      },
+      "backToChooser": "换一种登录方式",
+      "claude": {
+        "cta": "使用 Anthropic 登录",
+        "description": "通过浏览器 PKCE 登录你的 Anthropic 订阅。",
+        "title": "Claude Pro / Max"
+      },
+      "codex": {
+        "cta": "使用 ChatGPT 登录",
+        "description": "用设备代码流将本应用与 ChatGPT 订阅配对。",
+        "title": "ChatGPT Plus / Pro（Codex）"
+      },
+      "description": "用你已经付费的方式登录。后续可以在 设置 → 订阅 添加更多账号。",
+      "loggedInBadge": "已连接",
+      "loggedInDescription": "{provider} 已连接。可以继续下一步，或在下方选择另一个角色。",
+      "opencode": {
+        "cta": "粘贴 OpenCode 密钥",
+        "description": "粘贴 OpenCode Zen 的 API 密钥，可选填写区域 Base URL。",
+        "title": "OpenCode Zen"
+      },
+      "title": "选择登录方式"
+    },
+    "rail": {
+      "first-run": {
+        "description": "看它真的做完一件事。",
+        "label": "首次运行"
+      },
+      "label": "设置进度",
+      "provider": {
+        "description": "Cognia 通过什么访问模型。",
+        "label": "登录"
+      },
+      "scan": {
+        "description": "发现了什么，要带过来什么。",
+        "label": "这台机器"
+      }
+    },
+    "restart": {
+      "description": "从头走一遍首次运行流程。",
+      "label": "重新运行引导"
+    },
+    "saving": "保存中…",
+    "scan": {
+      "authenticated": "已登录",
+      "description": "我们会找你已安装的 agent 命令行工具，以及值得带过来的配置。任何数据都不会离开你的电脑。",
+      "empty": "没有找到 agent 运行时",
+      "emptyDescription": "没关系 —— 你可以在下一步改用 Cognia 订阅登录。",
+      "migrateCta": "导入",
+      "migrateDescription": "从 {vendor} 导入命令、设置和历史会话。",
+      "migrateDone": "已导入",
+      "migrateFailed": "导入失败。可以在「设置 → 数据」里重试。",
+      "migrateRunning": "正在导入…",
+      "migrateTitle": "把你的配置带过来",
+      "needsAuth": "未登录",
+      "pairedCta": "打开配对",
+      "pairedDescription": "真正干活的是你的桌面端。现在配对，这台手机就成了它的遥控器。",
+      "pairedTitle": "与桌面配对",
+      "rescan": "重新扫描",
+      "runtimesFound": "{count, plural, other {# 个 agent 运行时}}",
+      "scanning": "正在查看…",
+      "title": "这台机器上已经有什么"
+    },
+    "skip": "暂时跳过",
+    "toastNeedKey": "粘贴你的 Anthropic API 密钥以继续。",
+    "tour": {
+      "computerUse": {
+        "cta": "打开自动化设置",
+        "description": "Computer Use 默认关闭。可按角色启用，并选择权限等级（关闭 / 白名单 / 单次询问）。",
+        "title": "让 AI 操作桌面"
+      },
+      "connectors": {
+        "cta": "配置连接器",
+        "description": "把助手运行为常用平台上的机器人，支持自动 / 手动 / 草稿三种模式。",
+        "title": "对接 Telegram、Discord、Slack、飞书、OneBot"
+      },
+      "description": "这些功能已经上线。如果不需要可以直接跳过。",
+      "done": "完成",
+      "mobile": {
+        "cta": "打开配对设置",
+        "description": "生成 5 分钟有效的配对凭据让手机扫码。优先 mDNS，依次回退到 WebRTC 和 Cloudflare 隧道。",
+        "title": "在局域网或公网上配对手机"
+      },
+      "next": "下一个",
+      "ocr": {
+        "cta": "配置 OCR",
+        "description": "在输入栏悬浮附件即可把文字拉进对话。本地引擎离线可用；云端提供商可选。",
+        "title": "从图片和 PDF 中提取文字"
+      },
+      "openSettings": "打开设置",
+      "previous": "上一个",
+      "progress": "第 {current} / {total} 个",
+      "sandbox": {
+        "cta": "打开沙盒设置",
+        "description": "Bash / Edit / Write 可以经由 OS 沙盒（sandbox-exec / bwrap / Windows 合成用户）或可选的 e2b microVM 执行。任何后端不健康时严格模式直接拒绝调用，没有 bypass。",
+        "title": "Shell 工具在沙盒中运行"
+      },
+      "skip": "跳过引导",
+      "title": "接下来你可以做什么",
+      "twin": {
+        "cta": "打开数字分身设置",
+        "description": "上传文档后，蒸馏流水线会生成一份脱敏的风格画像，可以绑定到任意角色。",
+        "title": "用你自己的写作训练数字分身"
+      }
+    },
+    "welcome": {
+      "byokCta": "用我自己的 key",
+      "byokDescription": "用你自己的 API key，在这个 App 里直接推理。",
+      "byokTitle": "独立运行",
+      "cta": "开始",
+      "headline": "你的桌面，装进一个 agent。",
+      "lede": "Cognia 让 agent 直接面对这台机器上真实存在的东西 —— 你的文件、你的屏幕、你的浏览器 —— 而不只是一个聊天框。",
+      "modeTitle": "这台手机怎么跑？",
+      "pairCta": "与桌面配对",
+      "pairDescription": "通过局域网或广域网把任务交给 Cognia 桌面端，由它承担重活。",
+      "pairTitle": "与桌面配对",
+      "skipExisting": "我以前用过",
+      "sub": "大约一分钟，结束时 agent 会替你做完一件真实的事。"
+    },
+    "wordmark": "Cognia"
+  },
   "page": {
     "deployNow": "立即部署",
     "instructionEdit": "编辑开始",
@@ -16650,8 +17504,6 @@
     "triggerText": "计划任务（{count}）"
   },
   "plugins": {
-    "description": "浏览、安装、配置并治理在 Cognia 中运行的插件。查看权限、定时任务、使用统计与开发工具——完整的市场搜索与安装流程都在这里。",
-    "title": "插件",
     "activation": {
       "cancelled": "启用在「{phase}」阶段被取消",
       "countLabel": "第 {processed} 步，共 {total} 步",
@@ -17016,6 +17868,7 @@
       "unresolved": "未解决",
       "warningsTitle": "{count} 个警告"
     },
+    "description": "浏览、安装、配置并治理在 Cognia 中运行的插件。查看权限、定时任务、使用统计与开发工具——完整的市场搜索与安装流程都在这里。",
     "detail": {
       "activation": "激活事件",
       "capabilitiesTitle": "能力",
@@ -17068,14 +17921,6 @@
         "switchAria": "信任此插件的前端代码",
         "title": "信任前端代码"
       },
-      "logs": {
-        "aria": "Python 宿主日志条目",
-        "clear": "清空",
-        "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
-        "exited": "宿主进程已退出",
-        "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
-        "streamEnd": "— 流式输出结束 —"
-      },
       "lifecycle": {
         "activating": "正在激活",
         "dirty": "需要清理",
@@ -17085,6 +17930,14 @@
         "retrying": "正在重试清理",
         "stopping": "正在停止",
         "waiting": "正在等待服务"
+      },
+      "logs": {
+        "aria": "Python 宿主日志条目",
+        "clear": "清空",
+        "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
+        "exited": "宿主进程已退出",
+        "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
+        "streamEnd": "— 流式输出结束 —"
       },
       "metaAuthor": "作者",
       "metaCreatedAt": "安装时间",
@@ -17250,9 +18103,6 @@
         "loading": "正在采集插件信息…",
         "refresh": "刷新"
       },
-      "logs": {
-        "empty": "未捕获到日志。"
-      },
       "lifecycle": {
         "effects": "资源（活动 / 等待 / 失败）",
         "empty": "尚未观测到插件生命周期 generation。",
@@ -17260,6 +18110,10 @@
         "services": "服务",
         "state": "Generation 与状态"
       },
+      "logs": {
+        "empty": "未捕获到日志。"
+      },
+      "openCreator": "打开 Creator",
       "profiler": {
         "avgDuration": "平均耗时",
         "emptyAll": "暂无可分析的已安装插件。",
@@ -17276,8 +18130,8 @@
         "hooks": "Hook 历史",
         "hotReload": "热重载",
         "inspect": "运行时检查",
-        "logs": "日志",
         "lifecycle": "生命周期",
+        "logs": "日志",
         "profiler": "性能分析",
         "triggers": "触发记录"
       },
@@ -17740,6 +18594,7 @@
       "permissions": "权限",
       "scheduled": "定时任务"
     },
+    "title": "插件",
     "toolbar": {
       "checkUpdates": "检查更新",
       "fromFile": "从文件…",
@@ -21773,7 +22628,8 @@
       "codex": "Codex CLI",
       "continue-dev": "Continue",
       "gemini-cli": "Gemini CLI",
-      "opencode": "OpenCode"
+      "opencode": "OpenCode",
+      "pi": "Pi"
     },
     "title": "导入 Agent 会话",
     "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",
@@ -21896,24 +22752,6 @@
     }
   },
   "settings": {
-    "backToChat": "返回聊天",
-    "close": "关闭",
-    "customModes": "自定义代理模式",
-    "customModesDesc": "创建并管理具有特定工具、提示词和行为的自定义代理模式。",
-    "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
-    "groupAi": "AI 核心",
-    "groupData": "数据",
-    "groupExtensions": "扩展",
-    "groupInterface": "界面",
-    "groupObservability": "可观测性",
-    "groupSystem": "系统",
-    "hostUnavailableSectionBody": "该设置项管理的能力在你当前连接的主机上不可用——它需要桌面应用，或一台已配对且运行该能力的主机。请在那里打开 Cognia 使用。",
-    "hostUnavailableSectionTitle": "当前主机不可用",
-    "loadingSection": "正在加载设置项",
-    "loadingSettings": "正在加载设置…",
-    "noSettingsFound": "没有匹配的设置。",
-    "searchPlaceholder": "搜索设置…",
-    "title": "设置",
     "a2ui": {
       "debugger": {
         "allSurfaces": "所有 surface",
@@ -22654,6 +23492,20 @@
           "protan": "红色弱视（红弱）",
           "tritan": "蓝色弱视（蓝黄）"
         },
+        "groups": {
+          "contrast": {
+            "hint": "主题编辑器检查颜色搭配的严格程度。",
+            "label": "对比度审计"
+          },
+          "motion": {
+            "hint": "界面动画的幅度与速度。",
+            "label": "动态效果"
+          },
+          "vision": {
+            "hint": "叠加在当前主题之上的配色层。",
+            "label": "视觉辅助"
+          }
+        },
         "highContrast": {
           "dark": "高对比度深色",
           "hint": "在当前主题之上叠加一层高对比度配色。",
@@ -22669,6 +23521,7 @@
             "normal": "正常（1×）",
             "slow": "慢速（0.5×）"
           },
+          "speedDisabledHint": "开启减弱动态效果后不可用。",
           "speedLabel": "动画速度"
         },
         "wcag": {
@@ -23211,6 +24064,10 @@
             "description": "各表面的色调与投影",
             "label": "组件"
           },
+          "cursor": {
+            "description": "指针样式包与动态特效",
+            "label": "光标"
+          },
           "custom": {
             "description": "直接编辑颜色令牌",
             "label": "自定义主题"
@@ -23398,16 +24255,33 @@
         "description": "把图片、渐变或纯色用作背景。内置预设已自带，上传的文件保留在本机。",
         "dropHint": "把图片拖到这里，或点击下方按钮",
         "enabledLabel": "启用背景",
+        "focal": {
+          "bottom": "下",
+          "bottomLeft": "左下",
+          "bottomRight": "右下",
+          "center": "居中",
+          "left": "左",
+          "right": "右",
+          "top": "上",
+          "topLeft": "左上",
+          "topRight": "右上"
+        },
+        "focalHint": "指定裁剪后保留画面的哪一部分。",
+        "focalLabel": "焦点",
+        "focalUnavailable": "当前适配方式没有可移动的空间。",
         "formats": "PNG、JPEG、WebP、GIF、AVIF · 不超过 32 MB",
         "galleryTitle": "图库",
         "generator": {
           "accent": "生成的强调色",
           "action": "生成匹配主题",
+          "applyTuning": "应用建议值",
           "created": "已创建并启用匹配的明暗双主题。",
           "description": "在本地提取图片强调色，并生成可读的明暗双主题。",
           "error": "无法分析这张图片，壁纸设置未受影响。",
+          "secondary": "生成的辅助色",
           "themeName": "{name} 配色",
           "title": "从壁纸生成主题",
+          "tuningHint": "针对该壁纸的建议：不透明度 {opacity}%、模糊 {blur}px。",
           "variant": {
             "dark": "暗色基底",
             "light": "亮色基底"
@@ -23426,16 +24300,30 @@
         "opacity": {
           "autoFix": "一键修复",
           "contrastLabel": "估算文字对比度",
+          "estimated": "估算值 — 尚未采样",
           "fail": "文字几乎无法辨认，请降低不透明度以恢复对比度。",
+          "measured": "基于该壁纸的实测值",
           "warn": "低于 WCAG AA 标准 — 文字可能难以阅读"
         },
         "opacityLabel": "不透明度",
+        "placementHint": "决定壁纸画在哪里，以及保留画面的哪一部分。",
+        "placementTitle": "放置方式",
         "pluginBadge": "插件",
         "positionCenter": "居中",
         "positionContain": "适应",
         "positionCover": "覆盖",
+        "positionFill": "拉伸",
+        "positionHint": {
+          "center": "按原始尺寸显示，不做缩放。",
+          "contain": "完整显示整张图，四周会留白。",
+          "cover": "铺满整个区域，超出的部分被裁掉。",
+          "fill": "拉伸到整个区域 — 会改变原始比例。",
+          "tile": "按原始尺寸在区域内重复平铺。"
+        },
         "positionLabel": "位置",
         "positionTile": "平铺",
+        "readabilityHint": "决定壁纸有多少会透到前景文字背后。",
+        "readabilityTitle": "可读性",
         "scope": {
           "all": {
             "desc": "包含侧栏在内的全部界面",
@@ -23501,6 +24389,7 @@
       "showNotificationLabel": "自动创建时弹出提示",
       "title": "作品"
     },
+    "backToChat": "返回聊天",
     "builtInSkills": {
       "conversation": {
         "allowedListLabel": "允许的技能 ID",
@@ -24142,16 +25031,6 @@
       "saving": "保存中…",
       "searchPlaceholder": "搜索角色…",
       "skillsCount": "{count} 项技能",
-      "support": {
-        "diagnostics": "允许读取已脱敏的本机诊断",
-        "diagnosticsDescription": "本地诊断总开关。关闭后，支持 Agent 仅接收内置产品文档。",
-        "hidePreview": "隐藏预览",
-        "openIssue": "打开问题",
-        "preview": "预览",
-        "previewUnavailable": "预览不可用",
-        "supportResponse": "支持回复",
-        "userReport": "用户反馈"
-      },
       "title": "角色",
       "trust": {
         "rejectedToast": "角色包「{id}」已被拒绝：签名验证未通过（{reason}）。",
@@ -24201,6 +25080,7 @@
         "partial": "同步完成但有问题——成功 {ok} 项，失败 {errors} 项。"
       }
     },
+    "close": "关闭",
     "common": {
       "unsavedBar": {
         "discard": "放弃",
@@ -24336,6 +25216,10 @@
         "debounceLabel": "防抖(毫秒)",
         "hint": "打字时显示灰色 AI 续写，按 Tab 接受。默认关闭。",
         "label": "行内自动补全"
+      },
+      "ghostTextLocal": {
+        "hint": "只用你自己的历史记录和命令补全，不调用模型。",
+        "label": "仅本地建议"
       },
       "starters": {
         "hint": "在空聊天页推荐起始提示。",
@@ -25268,12 +26152,29 @@
         "verificationTokenLabel": "Verification Token",
         "verificationTokenPlaceholder": "Verification token…",
         "verificationTokenRequired": "Verification Token 不能为空。",
+        "webSessions": {
+          "actionFailed": "操作失败：{reason}",
+          "description": "伴生服务已为其转发过入口意图的飞书网页会话。伴生服务不保存会话状态，因此这份台账是谁持有会话的唯一记录。只读——要切断某人的访问，请在上方停用其身份主体。",
+          "empty": "尚未观察到网页会话。",
+          "prune": "清理过期记录",
+          "pruned": "已删除 {count} 条过期记录。",
+          "seenAt": "最近出现于 {at}",
+          "state": {
+            "expired": "已过期",
+            "live": "有效",
+            "revoked": "已撤销"
+          },
+          "stateAria": "会话状态",
+          "summary": "已记录 {total} 条，其中 {live} 条有效",
+          "title": "网页会话"
+        },
         "webhookUrlCopied": "回调 URL 已复制。",
         "webhookUrlCopy": "复制 URL",
         "webhookUrlCopyAria": "复制回调 URL",
         "webhookUrlHelp": "将此 URL 粘贴到飞书开放平台 → 事件订阅 → 请求 URL。校验阶段的 token 必须与上方的 Verification Token 一致。",
         "webhookUrlLabel": "回调 URL",
         "webhookUrlNewAdapterHint": "请先保存适配器；回调 URL 使用新生成的适配器 ID 拼接。",
+        "webhookUrlOriginMissingHelp": "当前部署尚未配置公网来源，因此无法生成回调 URL。请设置 COGNIA_LARK_PUBLIC_BASE（或让应用与伴生服务共用同一个前置入口），然后重新打开此对话框。",
         "webhookUrlTunnelLoading": "正在检查 Tunnel 状态…",
         "webhookUrlTunnelOffHelp": "尚未具备公网 HTTPS 入口。请先在 移动端伴侣 设置中启动 Cloudflared Tunnel，然后回到此处。",
         "whitelist": {
@@ -26054,6 +26955,11 @@
           "heading": "搜索消息内容",
           "label": "在消息内容中搜索"
         },
+        "customIcons": {
+          "description": "在列表中显示每个会话的角色或团队头像；关闭后使用中性图标。",
+          "heading": "角色与团队图标",
+          "label": "显示自定义图标"
+        },
         "density": {
           "description": "收紧行间距以容纳更多会话。",
           "heading": "紧凑行",
@@ -26106,6 +27012,23 @@
           "description": "将可拖拽的侧边栏恢复到默认宽度。",
           "heading": "侧边栏宽度"
         },
+        "sortBy": {
+          "description": "应用于每个分组内部的排序。仅「最近活动」会保留手动拖拽的顺序。",
+          "heading": "会话排序方式",
+          "label": "会话排序",
+          "options": {
+            "created": "创建时间",
+            "oldest": "最早活动",
+            "recent": "最近活动",
+            "title": "标题（A–Z）",
+            "unread": "未读优先"
+          }
+        },
+        "timestamps": {
+          "description": "在会话标题末尾显示最近一次活动的时间。",
+          "heading": "活动时间",
+          "label": "显示活动时间"
+        },
         "title": "会话侧边栏",
         "titleMotion": {
           "description": "悬停时以两端停顿的往返滚动展示溢出标题；开启减少动态效果后始终保持静态。",
@@ -26135,6 +27058,8 @@
       },
       "useDefault": "使用对话默认"
     },
+    "customModes": "自定义代理模式",
+    "customModesDesc": "创建并管理具有特定工具、提示词和行为的自定义代理模式。",
     "data": {
       "apply": "应用",
       "applying": "应用中…",
@@ -26788,6 +27713,7 @@
         "usernamePlaceholder": "你的用户名"
       }
     },
+    "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
     "descriptions": {
       "a2ui": "Agent-to-UI 小应用、运行时默认值、MCP 桥接与调试器。",
       "about": "版本、构建、诊断、更新与致谢。",
@@ -27757,6 +28683,12 @@
       "useSdkDefault": "使用 SDK 默认值",
       "workingDirectory": "工作目录"
     },
+    "groupAi": "AI 核心",
+    "groupData": "数据",
+    "groupExtensions": "扩展",
+    "groupInterface": "界面",
+    "groupObservability": "可观测性",
+    "groupSystem": "系统",
     "hooks": {
       "addGroup": "新建分组",
       "builtin": {
@@ -27868,6 +28800,8 @@
       "title": "生命周期钩子",
       "unsaved": "有未保存的更改"
     },
+    "hostUnavailableSectionBody": "该设置项管理的能力在你当前连接的主机上不可用——它需要桌面应用，或一台已配对且运行该能力的主机。请在那里打开 Cognia 使用。",
+    "hostUnavailableSectionTitle": "当前主机不可用",
     "instructions": {
       "description": "将活动工作区的磁盘指令文件（CLAUDE.md / AGENTS.md / AGENT.md）加载进 Agent 的系统提示，支持嵌套目录发现与 @import 展开。",
       "enabled": "启用指令文件",
@@ -27891,6 +28825,8 @@
       "saved": "指令设置已保存。",
       "title": "项目指令"
     },
+    "loadingSection": "正在加载设置项",
+    "loadingSettings": "正在加载设置…",
     "logs": {
       "linkCardDescription": "列表 / 仪表盘 / 追踪 三种视图，实时搜索、过滤、分组、导出与收藏日志。",
       "linkCardFooter": "关闭设置弹窗，跳转到 /logs。",
@@ -28361,6 +29297,7 @@
       },
       "title": "网络代理"
     },
+    "noSettingsFound": "没有匹配的设置。",
     "notifications": {
       "badgeHint": "在通知铃铛上显示未读角标。",
       "badgeLabel": "角标",
@@ -29256,6 +30193,7 @@
         "title": "工作区约束"
       }
     },
+    "searchPlaceholder": "搜索设置…",
     "sectionReset": {
       "button": "重置此分区",
       "cancel": "取消",
@@ -29332,6 +30270,8 @@
         "chatPrevAnchor": "跳到上一个消息锚点",
         "chatSearchToggle": "在会话中查找",
         "commandPaletteToggle": "打开全局搜索 / 命令面板",
+        "conversationNext": "下一个会话",
+        "conversationPrevious": "上一个会话",
         "dockLayoutRedo": "重做停靠布局更改",
         "dockLayoutReset": "重置停靠布局",
         "dockLayoutUndo": "撤销停靠布局更改",
@@ -29348,6 +30288,7 @@
         "observabilityRefresh": "刷新",
         "observabilityToggleEdit": "切换编辑布局",
         "searchFocus": "聚焦搜索",
+        "sidebarToggle": "切换会话侧栏",
         "skillsClearSelection": "清除选择 / 关闭详情",
         "skillsCreate": "新建技能",
         "skillsDelete": "删除所选技能",
@@ -29364,6 +30305,7 @@
         "workbenchActivityTemplates": "工作台：模板",
         "workbenchActivityWorkspace": "工作台：工作区",
         "workbenchQuickSwitch": "工作台：快速切换面板",
+        "workflowCommandPaletteToggle": "工作流编辑器：命令面板",
         "zoomIn": "放大",
         "zoomOut": "缩小",
         "zoomReset": "重置缩放"
@@ -29378,6 +30320,7 @@
         "panels": "面板",
         "skills": "技能",
         "terminal": "终端",
+        "workflow": "工作流编辑器",
         "zoom": "缩放"
       },
       "clear": "清除",
@@ -30390,13 +31333,53 @@
       "ssh": {
         "add": "添加 SSH 主机",
         "auth": {
+          "agent": "SSH agent",
           "password": "密码",
           "privateKey": "私钥"
+        },
+        "configImport": {
+          "absent": "{path} 不存在。",
+          "adjustments": {
+            "bindNarrowedToLoopback": "绑定了更宽地址的转发会被收窄到 127.0.0.1。",
+            "extraAliasesDropped": "Host 行中只有第一个别名会成为配置。",
+            "remoteForwardDisabled": "远程转发导入后默认关闭，需要时再手动启用。"
+          },
+          "badges": {
+            "exists": "已存在",
+            "synthesized": "来自 ProxyJump"
+          },
+          "cancel": "取消",
+          "confirm": "导入 {count} 个主机",
+          "description": "正在读取 ~/.ssh/config…",
+          "importing": "导入中…",
+          "loading": "正在读取文件…",
+          "noHosts": "文件中没有可导入的主机条目。",
+          "notices": {
+            "include": "未展开 Include「{subject}」。",
+            "line": "第 {line} 行",
+            "malformedForward": "无法解析「{subject}」。",
+            "matchBlock": "已跳过 Match 块「{subject}」。",
+            "missingHostName": "「{subject}」没有 HostName，将直接以该名称连接。",
+            "proxyCommand": "「{subject}」上的 ProxyCommand 在此没有对应能力，请改用跳板机设置。",
+            "title": "未导入的内容",
+            "unsupportedDirective": "指令「{subject}」不在支持范围内。",
+            "wildcardHost": "通配 Host「{subject}」无法对应到单个主机配置。"
+          },
+          "open": "从 ~/.ssh/config 导入",
+          "resolution": {
+            "create": "新增",
+            "label": "如何处理 {name}",
+            "overwrite": "覆盖已有",
+            "skip": "跳过"
+          },
+          "title": "导入 SSH 主机",
+          "via": "经由跳板机"
         },
         "connect": "连接",
         "connecting": "连接中…",
         "empty": "尚未保存 SSH 主机。",
         "fields": {
+          "agentNotice": "签名委托给正在运行的 ssh-agent。此主机不会存储密码、口令或密钥路径。",
           "authMethod": "认证方式",
           "credentialSaved": "凭据已安全保存",
           "host": "主机",
@@ -30410,13 +31393,63 @@
           "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
           "username": "用户名"
         },
+        "forwarding": {
+          "add": "添加规则",
+          "errors": {
+            "duplicate_local_port": "已有其他规则监听这个本地端口。",
+            "duplicate_remote_port": "已有其他规则占用服务器上的这个端口。",
+            "host_empty": "请填写目标主机。",
+            "host_invalid": "主机名不能包含空格。",
+            "port_out_of_range": "端口必须在 1 到 65535 之间。"
+          },
+          "jumpHost": {
+            "direct": "直接连接",
+            "helper": "每一跳都独立认证、独立信任主机密钥，因此请先单独连接一次跳板机，再在这里选用它。",
+            "label": "经由"
+          },
+          "local": {
+            "enable": "启用此本地转发",
+            "helper": "在本机 127.0.0.1 上监听，把每个连接交给服务器，由服务器去连目标地址。仅本机可访问。",
+            "label": "本地转发 (-L)",
+            "localPort": "本地端口",
+            "remoteHost": "目标主机（以服务器的视角解析）",
+            "remoteHostPlaceholder": "db.internal",
+            "remotePort": "目标端口"
+          },
+          "remote": {
+            "enable": "启用此远程转发",
+            "label": "远程转发 (-R)",
+            "localHost": "本机上的目标主机",
+            "localHostPlaceholder": "localhost",
+            "localPort": "本机上的目标端口",
+            "remotePort": "服务器上的端口",
+            "warning": "服务器在它自己的 127.0.0.1 上监听，并把每个连接送回本机。能访问那台机器的人都可以借此访问你指定的本地端口。默认关闭，需手动启用；同步给手机或其他设备的配置中也永远不会包含它。"
+          },
+          "remove": "删除规则"
+        },
         "helper": "凭据保存在系统密钥环中。首次连接会信任并保存主机指纹；后续若指纹发生变化将拒绝连接。",
+        "hostKeyChanged": {
+          "body": "{host}:{port} 出示的密钥与首次连接时保存的不一致。服务器重装或重建会导致这种情况 —— 但中间人攻击看起来也是这样。连接已被拒绝。",
+          "cancel": "保持拒绝连接",
+          "expected": "你信任的指纹",
+          "guidance": "只有在你能通过其他渠道核实新指纹时才继续 —— 服务器控制台、云厂商面板，或重建它的人。",
+          "presented": "本次出示的指纹",
+          "title": "该服务器的主机密钥已变更",
+          "trust": "忘记旧密钥并信任这一个",
+          "trusting": "正在忘记…",
+          "unknownFingerprint": "无法从 known_hosts 中读取"
+        },
         "newName": "新 SSH 主机",
         "remove": "移除 SSH 主机",
         "title": "SSH 主机",
         "toasts": {
+          "agentUnavailable": "无法连接到 SSH agent",
           "connectFailed": "SSH 连接失败",
           "credentialRequired": "连接前请输入密码。",
+          "hostKeyForgetFailed": "无法更新 known_hosts",
+          "hostKeyForgotten": "已忘记旧的主机密钥。重新连接即可信任新密钥。",
+          "importJumpsDropped": "以下主机的跳板机未被导入，将直接连接：{names}",
+          "imported": "已新增 {created} 个、覆盖 {replaced} 个 SSH 主机",
           "learned": "已连接并保存主机指纹",
           "removeFailed": "无法移除 SSH 主机",
           "syncFailed": "无法与终端主机同步 SSH 配置",
@@ -30440,6 +31473,7 @@
         "label": "允许无人值守执行"
       }
     },
+    "title": "设置",
     "tray": {
       "addItem": "添加项目",
       "description": "自定义系统托盘菜单中显示的项目。",
@@ -32976,6 +34010,88 @@
     },
     "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。"
   },
+  "support": {
+    "consent": {
+      "description": "本机开关。关闭：支持 Agent 仅依据内置文档回答；开启：排障时可读取一份已脱敏的运行时快照。",
+      "hidePreview": "隐藏预览",
+      "label": "允许读取已脱敏的本机诊断",
+      "preview": "预览 Agent 会读到的内容",
+      "previewUnavailable": "预览不可用"
+    },
+    "panel": {
+      "diagnosticsChipAria": "本机诊断授权",
+      "diagnosticsOff": "诊断已关闭",
+      "diagnosticsOn": "诊断已开启",
+      "reportProblem": "反馈问题",
+      "supportResponse": "支持回复",
+      "title": "支持 Agent",
+      "userReport": "用户反馈"
+    },
+    "report": {
+      "alwaysIncluded": "始终包含：{items}",
+      "building": "正在生成脱敏预览…",
+      "channel": {
+        "copy": "复制报告",
+        "download": "下载 Markdown",
+        "issue": "打开 GitHub Issue"
+      },
+      "delivered": {
+        "copy": "报告已复制到剪贴板。",
+        "download": "报告已下载。",
+        "generic": "已通过“{channel}”发送报告。",
+        "issue": "已打开问题追踪器并预填报告。"
+      },
+      "description": "以下内容全部在本机生成，并在离开设备前完成脱敏。在你选择去向之前不会发送任何内容。",
+      "descriptionLabel": "发生了什么？",
+      "descriptionPlaceholder": "你当时在做什么、期望什么结果、实际发生了什么？",
+      "failed": "报告发送失败。",
+      "hidePreview": "隐藏预览",
+      "includeTitle": "报告中包含",
+      "preview": "预览报告",
+      "previewFailed": "无法生成报告——脱敏后仍有内容疑似敏感。请取消勾选某个段落后重试。",
+      "privacyNote": "个人信息（邮箱、密钥、电话、姓名）会被替换为占位符，并在报告离开本机前再次核验。",
+      "redacted": "已脱敏",
+      "section": {
+        "app": {
+          "description": "版本、渠道、提交、平台。",
+          "label": "应用构建信息"
+        },
+        "conversation": {
+          "description": "你的最新消息与 Agent 的最新回复。",
+          "label": "支持对话"
+        },
+        "crashReports": {
+          "description": "桌面端最近何时、因何崩溃——不含转储。",
+          "label": "原生崩溃摘要"
+        },
+        "description": {
+          "description": "你在上方输入的文字。",
+          "label": "你的描述"
+        },
+        "diagnostic": {
+          "description": "结构化的失败代码及其上下文。",
+          "label": "诊断详情"
+        },
+        "error": {
+          "description": "本页捕获到的失败。",
+          "label": "错误与调用栈"
+        },
+        "recentErrors": {
+          "description": "本次会话最近记录的错误。",
+          "label": "最近错误"
+        },
+        "runtime": {
+          "description": "本机运行时与环境的健康状态。",
+          "label": "运行时快照"
+        },
+        "sync": {
+          "description": "本机各表的伴侣同步状态。",
+          "label": "同步状态"
+        }
+      },
+      "title": "反馈问题"
+    }
+  },
   "tauriDemo": {
     "buttonLabel": "调用 Rust greet()"
   },
@@ -33227,9 +34343,19 @@
       "restore": "还原终端面板大小",
       "spawnDenied": "终端被插件拦截",
       "spawnError": "无法打开终端：{message}",
-      "splitRight": "向右分屏（Ctrl+\\）"
+      "splitRight": "向右分屏（Ctrl+\\）",
+      "sshConnected": {
+        "learned": "已连接，并保存了主机指纹",
+        "verified": "已连接，主机指纹校验通过"
+      },
+      "sshCredentialRequired": "请先在 设置 → 终端 中为「{name}」设置密码，然后再连接。"
     },
     "emptyState": {
+      "cloud": {
+        "action": "+ 新建终端",
+        "body": "新建的终端将在已配对的 Cognia 服务器上启动。若创建被拒绝，说明服务器启动时未开启远程终端访问。",
+        "title": "服务器上暂无终端"
+      },
       "desktop": {
         "action": "+ 新建终端",
         "body": "点击下方按钮启动 shell，或按 Ctrl+` 在任意页面切换面板。",
@@ -33260,6 +34386,28 @@
       "collapse": "折叠输出",
       "expand": "展开输出",
       "linesHidden": "已隐藏 {count} 行"
+    },
+    "forwards": {
+      "active": "{count} 个连接",
+      "close": "关闭端口转发",
+      "direction": {
+        "local": "本地 (-L)",
+        "remote": "远程 (-R)"
+      },
+      "open": "显示端口转发",
+      "queued": "{count} 个等待中",
+      "state": {
+        "failed": "失败",
+        "listening": "监听中",
+        "starting": "启动中…",
+        "stopped": "已关闭",
+        "waiting": "等待连接恢复"
+      },
+      "title": "端口转发",
+      "toggle": {
+        "local": "启用或停用本地转发 {summary}",
+        "remote": "启用或停用远程转发 {summary}"
+      }
     },
     "ghost": {
       "acceptHint": "Tab"
@@ -33384,6 +34532,7 @@
       "profilesLabel": "配置文件",
       "pwsh": "PowerShell 7",
       "sh": "sh",
+      "sshLabel": "SSH 主机",
       "zsh": "zsh"
     },
     "stickyScroll": {
@@ -33653,7 +34802,7 @@
       "copyDiagnostics": "复制诊断信息",
       "docs": "文档",
       "openDataFolder": "打开数据文件夹",
-      "reportIssue": "反馈问题",
+      "reportIssue": "反馈问题…",
       "title": "关于"
     },
     "allCommands": "所有命令",
@@ -34669,9 +35818,6 @@
     }
   },
   "workflows": {
-    "notFoundBackToLibrary": "返回工作流库",
-    "notFoundDescription": "你要打开的工作流不存在或已被删除。",
-    "notFoundTitle": "未找到工作流",
     "canvasToast": {
       "completed": "工作流执行完成",
       "exported": "已下载工作流 JSON",
@@ -39029,6 +40175,9 @@
         }
       }
     },
+    "notFoundBackToLibrary": "返回工作流库",
+    "notFoundDescription": "你要打开的工作流不存在或已被删除。",
+    "notFoundTitle": "未找到工作流",
     "runs": {
       "detail": {
         "backToRuns": "返回运行列表",
@@ -39357,6 +40506,7 @@
       "addRootManual": "输入绝对路径…",
       "additionalDirsHint": "挂载到该工作区的额外文件夹，便于智能体读取和编辑。",
       "additionalDirsLabel": "附加目录",
+      "browseServer": "浏览服务器",
       "confirmDelete": "确认删除",
       "defaultName": "新工作区",
       "delete": "删除",
@@ -39392,12 +40542,27 @@
       "pickDir": "选择目录",
       "pickDirTitle": "选择一个目录",
       "primaryBadge": "主",
+      "remotePicker": {
+        "chooseCurrent": "选择此文件夹",
+        "description": "浏览已配对 Cognia 服务器上的文件夹。所选路径将加入当前工作区。",
+        "empty": "此文件夹中没有子文件夹",
+        "folderList": "服务器文件夹",
+        "go": "前往",
+        "loadError": "无法打开此文件夹，请检查路径和服务器连接。",
+        "loading": "正在加载文件夹…",
+        "openFolder": "打开 {name}",
+        "pathLabel": "服务器路径",
+        "pathPlaceholder": "/服务器上的路径",
+        "title": "选择服务器文件夹",
+        "up": "前往上一级文件夹"
+      },
       "removeDir": "移除目录",
       "removeRoot": "移除文件夹",
       "revokeRoot": "撤销信任",
       "rootDirLabel": "主目录",
       "rootDirPlaceholder": "/项目/路径",
       "rootLabelPlaceholder": "文件夹名称（可选）",
+      "rootsEmpty": "尚未添加文件夹。可浏览文件夹，或在下方输入绝对路径。",
       "rootsHint": "挂载一个或多个文件夹。主文件夹即工作目录；其余文件夹可一并读取与编辑。",
       "rootsLabel": "文件夹",
       "save": "保存",

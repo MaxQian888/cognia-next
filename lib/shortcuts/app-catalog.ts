@@ -20,12 +20,18 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     // The unified global search / command palette (ADR-0129). `ctrl` folds
     // with ⌘ in the dispatcher, so one chord serves both platforms; the
     // command id keeps the plugin-facing name the old palette announced.
+    //
+    // The workflow editor keeps its own editor-local palette on the same chord
+    // (`workflow.commandPalette.toggle`), so this one stands down inside it —
+    // the exact negation of that descriptor's `when`, which is also what stops
+    // `findAppConflict` from reporting the shared `ctrl+k` as a collision.
     id: "app.commandPalette.toggle",
     scope: "app",
     labelKey: "settings.shortcuts.catalog.commandPaletteToggle",
     category: "app.navigation",
     defaultChord: "ctrl+k",
     commandId: "command-palette.toggle",
+    when: "!view.workflowEditor",
   },
   {
     id: "app.search.focus",
@@ -33,6 +39,42 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     labelKey: "settings.shortcuts.catalog.searchFocus",
     category: "app.navigation",
     defaultChord: "/",
+  },
+  // ── Conversation sidebar ─────────────────────────────────────────────────
+  //
+  // The desktop shell advertises ⌘B for the sidebar in the View menu, the
+  // layout dropdown and the shortcuts dialog. Under Tauri the chord is a native
+  // menu accelerator (`src-tauri/src/menu.rs`, `toggle-sidebar`) that reaches
+  // the renderer through `useMenuEventRouter`, so the DOM binding here is gated
+  // to the web shell — registering both would toggle twice on one press. The
+  // Canvas rail owns the same chord in its own view (`canvasLayout.toggleLeft`),
+  // so the guard is the exact negation of that clause.
+  {
+    id: "shell.sidebar.toggle",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.sidebarToggle",
+    category: "app.panels",
+    defaultChord: "ctrl+b",
+    when: "!view.canvas && !platform.tauri",
+  },
+  // Move the active conversation up / down the sidebar's visible order (what
+  // the list shows after grouping, filters and search). ⌘⌥[ / ⌘⌥] — bracket
+  // pairs read as prev / next the way tab strips bind them, and, unlike a
+  // bare or shifted arrow chord, they do nothing inside a textarea, so they can
+  // fire while the composer has focus (the normal reading posture).
+  {
+    id: "shell.conversation.previous",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.conversationPrevious",
+    category: "app.navigation",
+    defaultChord: "ctrl+alt+[",
+  },
+  {
+    id: "shell.conversation.next",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.conversationNext",
+    category: "app.navigation",
+    defaultChord: "ctrl+alt+]",
   },
   {
     id: "terminal.toggle",
@@ -285,6 +327,19 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     category: "app.canvasLayout",
     defaultChord: "ctrl+j",
     when: "view.canvas",
+  },
+  {
+    // The workflow editor's own command palette (add node / save / run /
+    // auto-layout / import-export). ADR-0129 kept editor-local palettes but
+    // left this one on a raw `window` listener, so ⌘K inside
+    // `/workflows/editor` opened *both* it and the global search. Same chord,
+    // opposite `when` ⇒ the dispatcher can only ever fire one of them.
+    id: "workflow.commandPalette.toggle",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.workflowCommandPaletteToggle",
+    category: "app.workflow",
+    defaultChord: "ctrl+k",
+    when: "view.workflowEditor",
   },
   {
     id: "skills.search",

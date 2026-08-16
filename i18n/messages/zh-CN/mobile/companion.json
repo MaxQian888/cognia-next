@@ -51,12 +51,13 @@
   "lockedComputerUse": {
     "blocked": "Locked Use 未启用（{reason}）。",
     "col": "Locked Use",
-    "description": "允许此设备请求短时、与任务绑定的 Locked Use lease；远程控制必须保持开启。此权限不允许管理员认证或绕过安全警告。",
+    "description": "授予此设备 Locked Use —— 短时、与任务绑定的解锁 lease。尚未生效：本版本未包含 macOS Locked Use 系统组件，在其发布前此开关不会授予任何权限。",
     "disabledToast": "已为 {label} 关闭 Locked Use。",
     "enabledToast": "已为 {label} 启用 Locked Use。",
     "reason": "确认授予 {label} Locked Use 权限",
     "title": "允许 Locked Use",
-    "toggleAria": "切换 {label} 的 Locked Use"
+    "toggleAria": "切换 {label} 的 Locked Use",
+    "unavailable": "此版本暂不可用"
   },
   "logto": {
     "awaitingCode": "已打开浏览器窗口。授权后，请将完整的回调 URL（或仅 code）粘贴到下方。",

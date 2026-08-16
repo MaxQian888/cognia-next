@@ -6,9 +6,16 @@ import type {
   AppLanguage,
   AppTheme,
   BuiltinToolsConfig,
+  OnboardingPath,
+  OnboardingProfile,
+  OnboardingStepId,
   UpdateSettings,
 } from "@cognia/agent-config-types"
-import { DEFAULT_BUILTIN_TOOLS, DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
+import {
+  DEFAULT_BUILTIN_TOOLS,
+  DEFAULT_UPDATE_SETTINGS,
+  initialOnboardingProgress,
+} from "@cognia/agent-config-types"
 import { createDiagnostic } from "@cognia/diagnostics"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
@@ -380,8 +387,23 @@ interface SettingsState {
   ) => Promise<void>
   setProviderUIPreferences: (patch: Partial<ProviderUIPreferences>) => Promise<void>
   dismissProviderOnboarding: () => Promise<void>
-  /** Persist the desktop first-run dialog dismissal so it doesn't re-appear on relaunch. */
-  dismissOnboarding: () => Promise<void>
+  /**
+   * Record which onboarding step the user is on, so a relaunch mid-flow
+   * resumes there instead of restarting. Never sets a terminal stamp.
+   */
+  advanceOnboarding: (step: OnboardingStepId) => Promise<void>
+  /** Mark onboarding finished — the user reached a first real output. */
+  completeOnboarding: () => Promise<void>
+  /**
+   * Mark onboarding abandoned, recording *why* so the residual "finish setup"
+   * bar can name what is still missing. `lastStep` is kept so re-entry from
+   * Settings resumes where they left off.
+   */
+  skipOnboarding: (path: OnboardingPath, lastStep: OnboardingStepId) => Promise<void>
+  /** Persist the user closing the residual "finish setup" bar for good. */
+  dismissOnboardingFinishBar: () => Promise<void>
+  /** Persist the starter card / character the user onboarded with. */
+  setOnboardingProfile: (patch: Partial<OnboardingProfile>) => Promise<void>
   /** Patch provider-level inference defaults (temperature, max tokens, …). */
   setProviderInferenceDefaults: (
     providerId: string,
@@ -1671,8 +1693,47 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
-    dismissOnboarding: async () => {
-      const next = await saveSettings({ onboardingDismissedAt: new Date().toISOString() })
+    advanceOnboarding: async (step) => {
+      const cur = get().settings?.onboardingProgress ?? initialOnboardingProgress()
+      const next = await saveSettings({ onboardingProgress: { ...cur, lastStep: step } })
+      set({ settings: next })
+    },
+
+    completeOnboarding: async () => {
+      const cur = get().settings?.onboardingProgress ?? initialOnboardingProgress()
+      // `lastStep` is dropped on completion: there is nothing left to resume,
+      // and leaving it set would make a Settings re-run reopen the final step
+      // instead of the flow.
+      const { lastStep: _dropped, ...rest } = cur
+      const next = await saveSettings({
+        onboardingProgress: {
+          ...rest,
+          path: "completed",
+          completedAt: new Date().toISOString(),
+        },
+      })
+      set({ settings: next })
+    },
+
+    skipOnboarding: async (path, lastStep) => {
+      const cur = get().settings?.onboardingProgress ?? initialOnboardingProgress()
+      const next = await saveSettings({
+        onboardingProgress: { ...cur, path, lastStep, skippedAt: new Date().toISOString() },
+      })
+      set({ settings: next })
+    },
+
+    dismissOnboardingFinishBar: async () => {
+      const cur = get().settings?.onboardingProgress ?? initialOnboardingProgress()
+      const next = await saveSettings({
+        onboardingProgress: { ...cur, finishBarDismissed: true },
+      })
+      set({ settings: next })
+    },
+
+    setOnboardingProfile: async (patch) => {
+      const cur = get().settings?.onboardingProfile ?? {}
+      const next = await saveSettings({ onboardingProfile: { ...cur, ...patch } })
       set({ settings: next })
     },
 

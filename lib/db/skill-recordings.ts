@@ -42,8 +42,7 @@ export interface SkillRecordingGeneration {
 }
 
 export type SkillRecordingSource =
-  | { kind: "session"; sessionId: string }
-  | { kind: "run"; runId: string; sessionId?: string }
+  { kind: "session"; sessionId: string } | { kind: "run"; runId: string; sessionId?: string }
 
 export interface SkillRecordingRow {
   id: RecordingId

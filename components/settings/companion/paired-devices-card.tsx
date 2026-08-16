@@ -8,7 +8,7 @@
  * the rest of the desktop pairing chrome.
  */
 
-import { useCallback } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PauseIcon, PlayIcon, RefreshCwIcon, TrashIcon } from "lucide-react"
@@ -91,8 +91,83 @@ async function setLockedComputerUseRustSide(deviceId: string, allowed: boolean):
   await transport.call<void>("companion_set_locked_computer_use", { deviceId, allowed })
 }
 
+/**
+ * Whether Locked Use can be granted at all on this build.
+ *
+ * `false` because the grant has no enforcement point yet: the policy core
+ * (`LockedUseController`) is complete, but the macOS edges it sits behind — the
+ * XPC service, the guardian windows, the Authorization Plugin — have not
+ * shipped, so nothing ever consumes the grant. The switch is therefore inert
+ * and labelled, rather than implying a permission is being handed out.
+ *
+ * This is the UI axis of the dormancy contract in CLAUDE.md Working Rule 7.
+ * Flipping it to `true` is one of three edits that must land together — see
+ * `src-tauri/src/companion_api/locked_use_allow_list.rs`, whose module docs and
+ * dormancy test name the other two.
+ */
+const LOCKED_USE_AVAILABLE = false
+
+/** Which elevated grants a device holds, as reported by the host's SecurityStore. */
+type DeviceGrantSummary = {
+  deviceId: string
+  control: boolean
+  agentControl: boolean
+  terminal: boolean
+}
+
+/**
+ * Read the three elevated grants from the host rather than the Dexie mirror.
+ *
+ * The mirror is written alongside each toggle, but it is not the authority —
+ * the host's SecurityStore is, and it also moves when a device is enrolled
+ * (owner devices start with the full set) or when the `cognia-server devices`
+ * CLI is used. Rendering the mirror would put the switch position and the
+ * permission it describes out of sync, which is the same class of bug as a
+ * toggle writing a store nobody reads.
+ *
+ * Falls back to the mirror when the host cannot be asked (web/mobile shells,
+ * where `transport.call` has no Tauri backend).
+ */
+async function readDeviceGrants(): Promise<Map<string, DeviceGrantSummary> | undefined> {
+  if (!isTauri()) return undefined
+  try {
+    const rows = await transport.call<DeviceGrantSummary[]>("companion_list_device_grants")
+    // A host that answers with nothing is not an error — it just cannot tell
+    // us, so fall back to the mirror rather than rendering every grant off.
+    return Array.isArray(rows) ? new Map(rows.map((row) => [row.deviceId, row])) : undefined
+  } catch (err) {
+    // Showing the mirror is better than showing nothing, but never silently:
+    // a stale switch is exactly what this hook exists to prevent.
+    console.warn("companion_list_device_grants failed", err)
+    return undefined
+  }
+}
+
+function useDeviceGrants(): {
+  grants: Map<string, DeviceGrantSummary> | undefined
+  refresh: () => Promise<void>
+} {
+  const [grants, setGrants] = useState<Map<string, DeviceGrantSummary> | undefined>(undefined)
+  const refresh = useCallback(async () => {
+    setGrants(await readDeviceGrants())
+  }, [])
+  useEffect(() => {
+    // Settled in the callback rather than the effect body, and dropped if the
+    // card unmounts first.
+    let cancelled = false
+    void readDeviceGrants().then((next) => {
+      if (!cancelled) setGrants(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return { grants, refresh }
+}
+
 export function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
+  const { grants, refresh: refreshGrants } = useDeviceGrants()
   const guard = useBiometricGuard()
   const t = useTranslations("mobile.companion.paired")
   const tRev = useTranslations("mobile.companion.revoke")
@@ -164,6 +239,7 @@ export function PairedDevicesCard() {
         await setLockedComputerUseRustSide(deviceId, false)
         await setRemoteControlAllowed(deviceId, false)
         await setRemoteControlRustSide(deviceId, false)
+        await refreshGrants()
         toast.success(tRc("disabledToast", { label }))
         return
       }
@@ -183,9 +259,10 @@ export function PairedDevicesCard() {
         toast.error(tRc("blocked", { reason: result.reason }))
         return
       }
+      await refreshGrants()
       toast.success(tRc("enabledToast", { label }))
     },
-    [guard, tRc]
+    [guard, refreshGrants, tRc]
   )
 
   const onToggleAgentControl = useCallback(
@@ -198,6 +275,7 @@ export function PairedDevicesCard() {
       if (!next) {
         await setAgentControlAllowed(deviceId, false)
         await setAgentControlRustSide(deviceId, false)
+        await refreshGrants()
         toast.success(tAc("disabledToast", { label }))
         return
       }
@@ -217,9 +295,10 @@ export function PairedDevicesCard() {
         toast.error(tAc("blocked", { reason: result.reason }))
         return
       }
+      await refreshGrants()
       toast.success(tAc("enabledToast", { label }))
     },
-    [guard, tAc]
+    [guard, refreshGrants, tAc]
   )
 
   const onToggleRemoteTerminal = useCallback(
@@ -227,6 +306,7 @@ export function PairedDevicesCard() {
       if (!next) {
         await setRemoteTerminalRustSide(deviceId, false)
         await setRemoteTerminalAllowed(deviceId, false)
+        await refreshGrants()
         toast.success(tTerminal("disabledToast", { label }))
         return
       }
@@ -259,9 +339,10 @@ export function PairedDevicesCard() {
         toast.error(tTerminal("blocked", { reason: result.reason }))
         return
       }
+      await refreshGrants()
       toast.success(tTerminal("enabledToast", { label }))
     },
-    [guard, tTerminal]
+    [guard, refreshGrants, tTerminal]
   )
 
   const onToggleLockedComputerUse = useCallback(
@@ -350,134 +431,154 @@ export function PairedDevicesCard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.deviceId}>
-                    <TableCell className="text-sm">
-                      <div className="flex items-center gap-2">
-                        <span>{row.label}</span>
-                        {row.revokedAt !== undefined && (
-                          <Badge variant="outline" className="text-[10px]">
-                            {t("revoked")}
-                          </Badge>
-                        )}
-                        {row.revokedAt === undefined && row.pausedAt !== undefined && (
-                          <Badge variant="outline" className="text-[10px]">
-                            {t("paused")}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="text-[10px] font-mono text-muted-foreground">
-                        v{row.appVersion}
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs uppercase">{row.platform}</TableCell>
-                    <TableCell className="font-mono text-[10px] text-muted-foreground">
-                      {row.serverFingerprint ? (
-                        <span
-                          title={row.serverFingerprint}
-                          className="cursor-help"
-                          aria-label={t("fingerprintAria", {
-                            fingerprint: row.serverFingerprint,
-                          })}
-                        >
-                          {row.serverFingerprint.slice(0, 12)}…
-                        </span>
-                      ) : (
-                        <span className="italic text-muted-foreground/60">{t("unpinned")}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatRelative(row.pairedAt)}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatRelative(row.lastSeenAt)}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Switch
-                        checked={row.allowRemoteControl === true}
-                        disabled={row.revokedAt !== undefined}
-                        onCheckedChange={(next) =>
-                          onToggleRemoteControl(row.deviceId, row.label, next)
-                        }
-                        aria-label={tRc("toggleAria", { label: row.label })}
-                        data-testid={`paired-device-remote-control-${row.deviceId}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Switch
-                        checked={row.allowAgentControl === true}
-                        disabled={row.revokedAt !== undefined}
-                        onCheckedChange={(next) =>
-                          onToggleAgentControl(row.deviceId, row.label, next)
-                        }
-                        aria-label={tAc("toggleAria", { label: row.label })}
-                        data-testid={`paired-device-agent-control-${row.deviceId}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Switch
-                        checked={row.allowRemoteTerminal === true}
-                        disabled={row.revokedAt !== undefined || !isTauri()}
-                        onCheckedChange={(next) =>
-                          onToggleRemoteTerminal(row.deviceId, row.pubkey, row.label, next)
-                        }
-                        aria-label={tTerminal("toggleAria", { label: row.label })}
-                        data-testid={`paired-device-remote-terminal-${row.deviceId}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Switch
-                        checked={row.allowLockedComputerUse === true}
-                        disabled={row.revokedAt !== undefined || row.allowRemoteControl !== true}
-                        onCheckedChange={(next) =>
-                          onToggleLockedComputerUse(row.deviceId, row.label, next)
-                        }
-                        aria-label={tLocked("toggleAria", { label: row.label })}
-                        data-testid={`paired-device-locked-computer-use-${row.deviceId}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {row.revokedAt === undefined &&
-                          (row.pausedAt !== undefined ? (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => onResume(row.deviceId, row.label)}
-                              aria-label={t("resumeAria", { label: row.label })}
-                              data-testid={`paired-device-resume-${row.deviceId}`}
-                            >
-                              <PlayIcon className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => onPause(row.deviceId, row.label)}
-                              aria-label={t("pauseAria", { label: row.label })}
-                              data-testid={`paired-device-pause-${row.deviceId}`}
-                            >
-                              <PauseIcon className="h-3.5 w-3.5" />
-                            </Button>
-                          ))}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => onRevoke(row.deviceId, row.label)}
-                          disabled={row.revokedAt !== undefined}
-                          aria-label={t("revokeAria", { label: row.label })}
-                          data-testid={`paired-device-revoke-${row.deviceId}`}
-                        >
-                          {row.revokedAt !== undefined ? (
-                            <RefreshCwIcon className="h-3.5 w-3.5" />
-                          ) : (
-                            <TrashIcon className="h-3.5 w-3.5" />
+                {rows.map((row) => {
+                  // The host's answer when we have it; the Dexie mirror only
+                  // as a fallback for shells that cannot reach the host.
+                  const grant = grants?.get(row.deviceId)
+                  return (
+                    <TableRow key={row.deviceId}>
+                      <TableCell className="text-sm">
+                        <div className="flex items-center gap-2">
+                          <span>{row.label}</span>
+                          {row.revokedAt !== undefined && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {t("revoked")}
+                            </Badge>
                           )}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {row.revokedAt === undefined && row.pausedAt !== undefined && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {t("paused")}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-[10px] font-mono text-muted-foreground">
+                          v{row.appVersion}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs uppercase">{row.platform}</TableCell>
+                      <TableCell className="font-mono text-[10px] text-muted-foreground">
+                        {row.serverFingerprint ? (
+                          <span
+                            title={row.serverFingerprint}
+                            className="cursor-help"
+                            aria-label={t("fingerprintAria", {
+                              fingerprint: row.serverFingerprint,
+                            })}
+                          >
+                            {row.serverFingerprint.slice(0, 12)}…
+                          </span>
+                        ) : (
+                          <span className="italic text-muted-foreground/60">{t("unpinned")}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {formatRelative(row.pairedAt)}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {formatRelative(row.lastSeenAt)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Switch
+                          checked={grant ? grant.control : row.allowRemoteControl === true}
+                          disabled={row.revokedAt !== undefined}
+                          onCheckedChange={(next) =>
+                            onToggleRemoteControl(row.deviceId, row.label, next)
+                          }
+                          aria-label={tRc("toggleAria", { label: row.label })}
+                          data-testid={`paired-device-remote-control-${row.deviceId}`}
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Switch
+                          checked={grant ? grant.agentControl : row.allowAgentControl === true}
+                          disabled={row.revokedAt !== undefined}
+                          onCheckedChange={(next) =>
+                            onToggleAgentControl(row.deviceId, row.label, next)
+                          }
+                          aria-label={tAc("toggleAria", { label: row.label })}
+                          data-testid={`paired-device-agent-control-${row.deviceId}`}
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Switch
+                          checked={grant ? grant.terminal : row.allowRemoteTerminal === true}
+                          disabled={row.revokedAt !== undefined || !isTauri()}
+                          onCheckedChange={(next) =>
+                            onToggleRemoteTerminal(row.deviceId, row.pubkey, row.label, next)
+                          }
+                          aria-label={tTerminal("toggleAria", { label: row.label })}
+                          data-testid={`paired-device-remote-terminal-${row.deviceId}`}
+                        />
+                      </TableCell>
+                      {/* Inert while LOCKED_USE_AVAILABLE is false — see its docs. */}
+                      <TableCell className="text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <Switch
+                            checked={LOCKED_USE_AVAILABLE && row.allowLockedComputerUse === true}
+                            disabled={
+                              !LOCKED_USE_AVAILABLE ||
+                              row.revokedAt !== undefined ||
+                              (grant ? !grant.control : row.allowRemoteControl !== true)
+                            }
+                            onCheckedChange={(next) =>
+                              onToggleLockedComputerUse(row.deviceId, row.label, next)
+                            }
+                            aria-label={tLocked("toggleAria", { label: row.label })}
+                            data-testid={`paired-device-locked-computer-use-${row.deviceId}`}
+                          />
+                          {!LOCKED_USE_AVAILABLE && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] font-normal text-muted-foreground"
+                            >
+                              {tLocked("unavailable")}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {row.revokedAt === undefined &&
+                            (row.pausedAt !== undefined ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => onResume(row.deviceId, row.label)}
+                                aria-label={t("resumeAria", { label: row.label })}
+                                data-testid={`paired-device-resume-${row.deviceId}`}
+                              >
+                                <PlayIcon className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => onPause(row.deviceId, row.label)}
+                                aria-label={t("pauseAria", { label: row.label })}
+                                data-testid={`paired-device-pause-${row.deviceId}`}
+                              >
+                                <PauseIcon className="h-3.5 w-3.5" />
+                              </Button>
+                            ))}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => onRevoke(row.deviceId, row.label)}
+                            disabled={row.revokedAt !== undefined}
+                            aria-label={t("revokeAria", { label: row.label })}
+                            data-testid={`paired-device-revoke-${row.deviceId}`}
+                          >
+                            {row.revokedAt !== undefined ? (
+                              <RefreshCwIcon className="h-3.5 w-3.5" />
+                            ) : (
+                              <TrashIcon className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           </div>

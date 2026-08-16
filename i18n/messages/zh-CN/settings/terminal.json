@@ -258,6 +258,7 @@
   "ssh": {
     "add": "添加 SSH 主机",
     "auth": {
+      "agent": "SSH agent",
       "password": "密码",
       "privateKey": "私钥"
     },
@@ -265,6 +266,7 @@
     "connecting": "连接中…",
     "empty": "尚未保存 SSH 主机。",
     "fields": {
+      "agentNotice": "签名委托给正在运行的 ssh-agent。此主机不会存储密码、口令或密钥路径。",
       "authMethod": "认证方式",
       "credentialSaved": "凭据已安全保存",
       "host": "主机",
@@ -279,16 +281,104 @@
       "username": "用户名"
     },
     "helper": "凭据保存在系统密钥环中。首次连接会信任并保存主机指纹；后续若指纹发生变化将拒绝连接。",
+    "hostKeyChanged": {
+      "body": "{host}:{port} 出示的密钥与首次连接时保存的不一致。服务器重装或重建会导致这种情况 —— 但中间人攻击看起来也是这样。连接已被拒绝。",
+      "cancel": "保持拒绝连接",
+      "expected": "你信任的指纹",
+      "guidance": "只有在你能通过其他渠道核实新指纹时才继续 —— 服务器控制台、云厂商面板，或重建它的人。",
+      "presented": "本次出示的指纹",
+      "title": "该服务器的主机密钥已变更",
+      "trust": "忘记旧密钥并信任这一个",
+      "trusting": "正在忘记…",
+      "unknownFingerprint": "无法从 known_hosts 中读取"
+    },
     "newName": "新 SSH 主机",
     "remove": "移除 SSH 主机",
     "title": "SSH 主机",
     "toasts": {
+      "agentUnavailable": "无法连接到 SSH agent",
       "connectFailed": "SSH 连接失败",
       "credentialRequired": "连接前请输入密码。",
+      "hostKeyForgetFailed": "无法更新 known_hosts",
+      "hostKeyForgotten": "已忘记旧的主机密钥。重新连接即可信任新密钥。",
       "learned": "已连接并保存主机指纹",
       "removeFailed": "无法移除 SSH 主机",
       "syncFailed": "无法与终端主机同步 SSH 配置",
-      "verified": "已通过主机指纹校验并连接"
+      "verified": "已通过主机指纹校验并连接",
+      "imported": "已新增 {created} 个、覆盖 {replaced} 个 SSH 主机",
+      "importJumpsDropped": "以下主机的跳板机未被导入，将直接连接：{names}"
+    },
+    "forwarding": {
+      "add": "添加规则",
+      "remove": "删除规则",
+      "jumpHost": {
+        "label": "经由",
+        "direct": "直接连接",
+        "helper": "每一跳都独立认证、独立信任主机密钥，因此请先单独连接一次跳板机，再在这里选用它。"
+      },
+      "local": {
+        "label": "本地转发 (-L)",
+        "helper": "在本机 127.0.0.1 上监听，把每个连接交给服务器，由服务器去连目标地址。仅本机可访问。",
+        "localPort": "本地端口",
+        "remoteHost": "目标主机（以服务器的视角解析）",
+        "remoteHostPlaceholder": "db.internal",
+        "remotePort": "目标端口",
+        "enable": "启用此本地转发"
+      },
+      "remote": {
+        "label": "远程转发 (-R)",
+        "warning": "服务器在它自己的 127.0.0.1 上监听，并把每个连接送回本机。能访问那台机器的人都可以借此访问你指定的本地端口。默认关闭，需手动启用；同步给手机或其他设备的配置中也永远不会包含它。",
+        "remotePort": "服务器上的端口",
+        "localHost": "本机上的目标主机",
+        "localHostPlaceholder": "localhost",
+        "localPort": "本机上的目标端口",
+        "enable": "启用此远程转发"
+      },
+      "errors": {
+        "port_out_of_range": "端口必须在 1 到 65535 之间。",
+        "host_empty": "请填写目标主机。",
+        "host_invalid": "主机名不能包含空格。",
+        "duplicate_local_port": "已有其他规则监听这个本地端口。",
+        "duplicate_remote_port": "已有其他规则占用服务器上的这个端口。"
+      }
+    },
+    "configImport": {
+      "open": "从 ~/.ssh/config 导入",
+      "title": "导入 SSH 主机",
+      "description": "正在读取 ~/.ssh/config…",
+      "loading": "正在读取文件…",
+      "absent": "{path} 不存在。",
+      "noHosts": "文件中没有可导入的主机条目。",
+      "cancel": "取消",
+      "confirm": "导入 {count} 个主机",
+      "importing": "导入中…",
+      "via": "经由跳板机",
+      "badges": {
+        "exists": "已存在",
+        "synthesized": "来自 ProxyJump"
+      },
+      "resolution": {
+        "label": "如何处理 {name}",
+        "create": "新增",
+        "overwrite": "覆盖已有",
+        "skip": "跳过"
+      },
+      "adjustments": {
+        "bindNarrowedToLoopback": "绑定了更宽地址的转发会被收窄到 127.0.0.1。",
+        "remoteForwardDisabled": "远程转发导入后默认关闭，需要时再手动启用。",
+        "extraAliasesDropped": "Host 行中只有第一个别名会成为配置。"
+      },
+      "notices": {
+        "title": "未导入的内容",
+        "line": "第 {line} 行",
+        "wildcardHost": "通配 Host「{subject}」无法对应到单个主机配置。",
+        "matchBlock": "已跳过 Match 块「{subject}」。",
+        "include": "未展开 Include「{subject}」。",
+        "proxyCommand": "「{subject}」上的 ProxyCommand 在此没有对应能力，请改用跳板机设置。",
+        "malformedForward": "无法解析「{subject}」。",
+        "missingHostName": "「{subject}」没有 HostName，将直接以该名称连接。",
+        "unsupportedDirective": "指令「{subject}」不在支持范围内。"
+      }
     }
   },
   "stickyScroll": {

@@ -167,12 +167,12 @@
     "title": "恢复文件检查点"
   },
   "compactBoundary": {
-    "auto": "自动",
     "checkpoint": {
       "failed": "检查点保存失败",
       "locked": "保险库已锁定",
       "stored": "检查点已保存"
     },
+    "auto": "自动",
     "detail": "{from} → {to} tokens",
     "effectiveness": "已回收 {pct}%",
     "label": "上下文已压缩",
@@ -342,7 +342,14 @@
     },
     "ghostAccept": "接受",
     "ghostAcceptHint": "Tab",
+    "ghostCycleHint": "Alt+] / Alt+[ 切换",
     "ghostDismiss": "忽略建议",
+    "ghostPosition": "第 {index} / {total} 条",
+    "ghostSourceAgent": "来自 Agent",
+    "ghostSourceAi": "模型建议",
+    "ghostSourceCommand": "命令",
+    "ghostSourceHistory": "来自历史记录",
+    "ghostSourcePlugin": "来自插件",
     "helperHints": {
       "chainingNote": "将命令分行输入，即可按顺序执行。",
       "cheatsheetDescription": "消息输入框可用的键盘快捷键与前缀。",
@@ -777,12 +784,14 @@
     },
     "ariaSettings": "会话设置",
     "bareMode": "极简模式",
+    "bareModeHint": "跳过磁盘上的自动发现（CLAUDE.md、hooks、插件、MCP）。冷启动更快；但 agent 看不到你的项目设置。",
     "branchAria": "分支对话",
     "branchEmpty": "还没有可分支的内容 —— 这个对话还没有消息。",
     "branchError": "无法分支该对话。",
     "branchSuccess": "已分支，已切换到新对话。",
     "branchTooltip": "分支对话 —— 把当前线程复制成一个可以另走一路的新对话",
     "briefMode": "简短输出",
+    "briefModeHint": "在每次发送时附加一段「精简输出」指令。",
     "cancel": "取消",
     "compactAria": "压缩",
     "compactFailure": "上下文压缩失败：{error}",
@@ -799,6 +808,7 @@
     "cwdFallbackHint": "未设置时使用: {path}",
     "cwdReset": "重置",
     "debugMode": "调试模式",
+    "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。",
     "description": "为本会话覆盖默认值，留空则继承全局设置。",
     "execution": {
       "addEnv": "添加变量",
@@ -899,6 +909,8 @@
     "save": "保存",
     "sessionCommunication": "会话通信",
     "sheet": {
+      "collapseAll": "全部收起",
+      "expandAll": "全部展开",
       "sections": {
         "account": "模型与账号",
         "actions": "会话操作",
@@ -908,6 +920,10 @@
         "memory": "记忆",
         "role": "角色与能力",
         "status": "状态"
+      },
+      "summary": {
+        "defaults": "使用默认值",
+        "overrides": "{count} 项覆盖"
       }
     },
     "showArtifacts": "展开产物面板",
@@ -1600,8 +1616,8 @@
       "twinRag": "数字分身",
       "twinStyle": "风格"
     },
-    "projectKnowledgeHeader": "项目知识片段（{count}）",
     "recalledMemoriesHeader": "召回的记忆（{count}）",
+    "projectKnowledgeHeader": "项目知识片段（{count}）",
     "retrievedChunksHeader": "检索片段（{count}）",
     "styleSamplesHeader": "风格样本（{count}）",
     "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
@@ -1682,30 +1698,30 @@
     "toolLabel": "工具"
   },
   "toolCards": {
-    "clipboardHistory": {
-      "copy": "复制该条",
-      "count": "{count} 条",
-      "empty": "暂无剪贴板记录。",
-      "showAll": "显示全部 {count} 条",
-      "showLess": "收起",
-      "title": "剪贴板历史"
-    },
-    "screenshot": {
-      "alt": "屏幕截图",
-      "title": "截图"
+    "webSearch": {
+      "title": "网页搜索",
+      "via": "来自 {provider}",
+      "failed": "搜索失败。",
+      "noResults": "没有结果。"
     },
     "webFetch": {
-      "failed": "抓取失败。",
-      "showLess": "收起",
-      "showMore": "展开全部（{chars} 字符）",
+      "title": "网页抓取",
       "status": "HTTP {status}",
-      "title": "网页抓取"
+      "failed": "抓取失败。",
+      "showMore": "展开全部（{chars} 字符）",
+      "showLess": "收起"
     },
-    "webSearch": {
-      "failed": "搜索失败。",
-      "noResults": "没有结果。",
-      "title": "网页搜索",
-      "via": "来自 {provider}"
+    "screenshot": {
+      "title": "截图",
+      "alt": "屏幕截图"
+    },
+    "clipboardHistory": {
+      "title": "剪贴板历史",
+      "count": "{count} 条",
+      "empty": "暂无剪贴板记录。",
+      "copy": "复制该条",
+      "showAll": "显示全部 {count} 条",
+      "showLess": "收起"
     }
   },
   "transcript": {
@@ -1749,6 +1765,20 @@
     "summarize": "总结",
     "tone": "语气",
     "translate": "翻译"
+  },
+  "workSubmission": {
+    "queued": {
+      "title": "等待开始",
+      "body": "消息已保存，等到有空闲运行时就会开始。"
+    },
+    "blocked": {
+      "title": "等待重新连接",
+      "body": "消息已保存。设备重新连上执行主机后会自动开始。"
+    },
+    "recoveryRequired": {
+      "title": "需要你处理",
+      "body": "这一轮在已经开始调用工具之后中断，因此没有自动重试——重放可能重复执行无法撤销的操作。请先确认发生了什么，再决定是否重新发送。"
+    }
   },
   "workspaceRestricted": {
     "body": "此工作区尚未受信任。智能体以只读方式运行——Bash、编辑、写入与计算机操作已禁用。",

@@ -51,12 +51,13 @@
   "lockedComputerUse": {
     "blocked": "Locked Use not enabled ({reason}).",
     "col": "Locked Use",
-    "description": "Allows this device to request a short, task-bound Locked Use lease. Remote control must remain enabled. This does not permit administrator authentication or security-warning bypasses.",
+    "description": "Grants this device Locked Use — a short, task-bound unlock lease. Not active yet: the macOS Locked Use system component is not part of this build, so this switch grants nothing until it ships.",
     "disabledToast": "Locked Use disabled for {label}.",
     "enabledToast": "Locked Use enabled for {label}.",
     "reason": "Confirm granting Locked Use to {label}",
     "title": "Allow Locked Use",
-    "toggleAria": "Toggle Locked Use for {label}"
+    "toggleAria": "Toggle Locked Use for {label}",
+    "unavailable": "Not available in this build"
   },
   "logto": {
     "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",

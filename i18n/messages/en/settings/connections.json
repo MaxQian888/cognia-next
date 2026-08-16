@@ -923,12 +923,29 @@
     "verificationTokenLabel": "Verification Token",
     "verificationTokenPlaceholder": "Verification token…",
     "verificationTokenRequired": "Verification Token is required.",
+    "webSessions": {
+      "title": "Web sessions",
+      "description": "Feishu web sessions the companion has forwarded an entry intent for. The companion keeps sessions stateless, so this ledger is the only record of who holds one. Read-only — disable the principal above to cut someone off.",
+      "empty": "No web session has been seen yet.",
+      "summary": "{live} live of {total} recorded",
+      "seenAt": "Last seen {at}",
+      "stateAria": "Session state",
+      "state": {
+        "live": "Live",
+        "expired": "Expired",
+        "revoked": "Revoked"
+      },
+      "prune": "Prune old rows",
+      "pruned": "Removed {count} expired row(s).",
+      "actionFailed": "Action failed: {reason}"
+    },
     "webhookUrlCopied": "Callback URL copied.",
     "webhookUrlCopy": "Copy URL",
     "webhookUrlCopyAria": "Copy callback URL",
     "webhookUrlHelp": "Paste this URL into Lark Open Platform → Event subscriptions → Request URL. The token in the verification step must match the Verification Token field above.",
     "webhookUrlLabel": "Callback URL",
     "webhookUrlNewAdapterHint": "Save the adapter first; the callback URL is generated using the new adapter ID.",
+    "webhookUrlOriginMissingHelp": "This deployment has no public origin yet, so the callback URL cannot be built. Set COGNIA_LARK_PUBLIC_BASE (or serve the app behind the same front door as the companion) and reopen this dialog.",
     "webhookUrlTunnelLoading": "Checking tunnel status…",
     "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
     "whitelist": {

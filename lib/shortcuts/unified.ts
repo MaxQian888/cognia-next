@@ -25,10 +25,19 @@ export interface AppShortcutGroup {
   rows: AppShortcutRow[]
 }
 
-/** True when two `when` clauses are exact negations (`x` vs `!x`) — mutually exclusive contexts. */
+/**
+ * True when two `when` clauses can never hold at the same time: one is the
+ * exact negation of the other (`x` vs `!x`), or — for conjunctions — one
+ * `&&` term of either clause is the exact negation of a term of the other
+ * (`x` vs `!x && y`). Only top-level `&&` is split; anything more (`||`,
+ * parentheses) is treated as non-exclusive, which errs on the side of reporting
+ * a conflict.
+ */
 function whensAreExclusive(a: string | undefined, b: string | undefined): boolean {
   if (!a || !b) return false
-  return a === `!${b}` || b === `!${a}`
+  const termsA = a.split("&&").map((term) => term.trim())
+  const termsB = b.split("&&").map((term) => term.trim())
+  return termsA.some((ta) => termsB.some((tb) => ta === `!${tb}` || tb === `!${ta}`))
 }
 
 /**

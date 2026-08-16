@@ -167,12 +167,12 @@
     "title": "Restore file checkpoint"
   },
   "compactBoundary": {
-    "auto": "automatic",
     "checkpoint": {
       "failed": "checkpoint failed",
       "locked": "Vault locked",
       "stored": "checkpoint saved"
     },
+    "auto": "automatic",
     "detail": "{from} → {to} tokens",
     "effectiveness": "reclaimed {pct}%",
     "label": "Context compacted",
@@ -342,7 +342,14 @@
     },
     "ghostAccept": "Accept",
     "ghostAcceptHint": "Tab",
+    "ghostCycleHint": "Alt+] / Alt+[ to cycle",
     "ghostDismiss": "Dismiss suggestion",
+    "ghostPosition": "{index} of {total}",
+    "ghostSourceAgent": "From the agent",
+    "ghostSourceAi": "Suggested",
+    "ghostSourceCommand": "Command",
+    "ghostSourceHistory": "From your history",
+    "ghostSourcePlugin": "From a plugin",
     "helperHints": {
       "chainingNote": "Put commands on separate lines to run them in order.",
       "cheatsheetDescription": "Keyboard shortcuts and prefixes available in the message composer.",
@@ -777,12 +784,14 @@
     },
     "ariaSettings": "Session settings",
     "bareMode": "Bare mode",
+    "bareModeHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Faster cold starts; the agent won't see your project's settings.",
     "branchAria": "Branch conversation",
     "branchEmpty": "Nothing to branch yet — this conversation has no messages.",
     "branchError": "Couldn't branch this conversation.",
     "branchSuccess": "Branched. The new conversation is now active.",
     "branchTooltip": "Branch conversation — copies this thread into a new one you can take elsewhere",
     "briefMode": "Brief output",
+    "briefModeHint": "Append a concise-output instruction to every send.",
     "cancel": "Cancel",
     "compactAria": "Compact",
     "compactFailure": "Context compaction failed: {error}",
@@ -799,6 +808,7 @@
     "cwdFallbackHint": "Falls back to: {path}",
     "cwdReset": "Reset",
     "debugMode": "Debug mode",
+    "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process.",
     "description": "Override defaults for this chat. Empty = use global.",
     "execution": {
       "addEnv": "Add variable",
@@ -899,6 +909,8 @@
     "save": "Save",
     "sessionCommunication": "Session communication",
     "sheet": {
+      "collapseAll": "Collapse all",
+      "expandAll": "Expand all",
       "sections": {
         "account": "Model & account",
         "actions": "Session actions",
@@ -908,6 +920,10 @@
         "memory": "Memory",
         "role": "Role & abilities",
         "status": "Status"
+      },
+      "summary": {
+        "defaults": "Using defaults",
+        "overrides": "{count, plural, one {# override} other {# overrides}}"
       }
     },
     "showArtifacts": "Show artifacts panel",
@@ -1600,8 +1616,8 @@
       "twinRag": "Twin",
       "twinStyle": "Style"
     },
-    "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
     "recalledMemoriesHeader": "Recalled memories ({count})",
+    "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
     "retrievedChunksHeader": "Retrieved chunks ({count})",
     "styleSamplesHeader": "Style samples ({count})",
     "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
@@ -1682,30 +1698,30 @@
     "toolLabel": "Tool"
   },
   "toolCards": {
-    "clipboardHistory": {
-      "copy": "Copy entry",
-      "count": "{count, plural, =1 {1 entry} other {# entries}}",
-      "empty": "No clipboard entries yet.",
-      "showAll": "Show all {count}",
-      "showLess": "Show less",
-      "title": "Clipboard history"
-    },
-    "screenshot": {
-      "alt": "Captured screen",
-      "title": "Screenshot"
+    "webSearch": {
+      "title": "Web search",
+      "via": "via {provider}",
+      "failed": "Search failed.",
+      "noResults": "No results."
     },
     "webFetch": {
-      "failed": "Fetch failed.",
-      "showLess": "Show less",
-      "showMore": "Show all ({chars} characters)",
+      "title": "Web fetch",
       "status": "HTTP {status}",
-      "title": "Web fetch"
+      "failed": "Fetch failed.",
+      "showMore": "Show all ({chars} characters)",
+      "showLess": "Show less"
     },
-    "webSearch": {
-      "failed": "Search failed.",
-      "noResults": "No results.",
-      "title": "Web search",
-      "via": "via {provider}"
+    "screenshot": {
+      "title": "Screenshot",
+      "alt": "Captured screen"
+    },
+    "clipboardHistory": {
+      "title": "Clipboard history",
+      "count": "{count, plural, =1 {1 entry} other {# entries}}",
+      "empty": "No clipboard entries yet.",
+      "copy": "Copy entry",
+      "showAll": "Show all {count}",
+      "showLess": "Show less"
     }
   },
   "transcript": {
@@ -1749,6 +1765,20 @@
     "summarize": "Summarize",
     "tone": "Tone",
     "translate": "Translate"
+  },
+  "workSubmission": {
+    "queued": {
+      "title": "Waiting to start",
+      "body": "Your message is saved and will run as soon as a runtime is free."
+    },
+    "blocked": {
+      "title": "Waiting to reconnect",
+      "body": "Your message is saved. It will run automatically once this device reaches the execution host again."
+    },
+    "recoveryRequired": {
+      "title": "Needs your attention",
+      "body": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again."
+    }
   },
   "workspaceRestricted": {
     "body": "This workspace isn't trusted yet. Agents run read-only — Bash, Edit, Write and Computer-Use are disabled.",

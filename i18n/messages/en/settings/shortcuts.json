@@ -16,6 +16,8 @@
     "chatPrevAnchor": "Jump to previous message anchor",
     "chatSearchToggle": "Find in conversation",
     "commandPaletteToggle": "Open global search / command palette",
+    "conversationNext": "Next conversation",
+    "conversationPrevious": "Previous conversation",
     "dockLayoutRedo": "Redo dock layout change",
     "dockLayoutReset": "Reset the dock layout",
     "dockLayoutUndo": "Undo dock layout change",
@@ -32,6 +34,7 @@
     "observabilityRefresh": "Refresh",
     "observabilityToggleEdit": "Toggle edit layout",
     "searchFocus": "Focus search",
+    "sidebarToggle": "Toggle conversation sidebar",
     "skillsClearSelection": "Clear selection / close detail",
     "skillsCreate": "Create skill",
     "skillsDelete": "Delete selected skill",
@@ -48,6 +51,7 @@
     "workbenchActivityTemplates": "Workbench: templates",
     "workbenchActivityWorkspace": "Workbench: workspace",
     "workbenchQuickSwitch": "Workbench: quick switch panel",
+    "workflowCommandPaletteToggle": "Workflow editor: command palette",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "zoomReset": "Reset zoom"
@@ -62,6 +66,7 @@
     "panels": "Panels",
     "skills": "Skills",
     "terminal": "Terminal",
+    "workflow": "Workflow editor",
     "zoom": "Zoom"
   },
   "clear": "Clear",

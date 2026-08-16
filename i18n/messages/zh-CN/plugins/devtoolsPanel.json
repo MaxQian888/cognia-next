@@ -69,5 +69,6 @@
     "profiler": "性能分析",
     "triggers": "触发记录"
   },
-  "title": "插件开发工具"
+  "title": "插件开发工具",
+  "openCreator": "打开 Creator"
 }

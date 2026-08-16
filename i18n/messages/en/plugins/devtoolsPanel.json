@@ -69,5 +69,6 @@
     "profiler": "Profiler",
     "triggers": "Triggers"
   },
-  "title": "Plugin devtools"
+  "title": "Plugin devtools",
+  "openCreator": "Open Creator"
 }

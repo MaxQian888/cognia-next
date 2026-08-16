@@ -55,7 +55,8 @@
     "copyReport": "复制完整报告",
     "copyReportFailed": "复制报告失败",
     "copyReportSuccess": "报告已复制到剪贴板",
-    "reportIssue": "报告问题"
+    "reportIssue": "报告问题",
+    "reportIssueFailed": "无法打开问题追踪器"
   },
   "retry": "重试",
   "showStack": "查看调用栈",

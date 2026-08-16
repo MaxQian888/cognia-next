@@ -1,3 +1,62 @@
 {
-  "label": "Starting cognia"
+  "build": "Mobile · v{version}",
+  "duration": "{seconds}s",
+  "headline": {
+    "boot": "Getting things ready",
+    "route": "Loading this page",
+    "settled": "Ready"
+  },
+  "label": "Starting cognia",
+  "outcomes": {
+    "incompatible": "Needs update",
+    "linked": "Online",
+    "notNeeded": "Not needed",
+    "offline": "Offline",
+    "paired": "Paired",
+    "registered": "Native",
+    "standalone": "Standalone",
+    "syncFailed": "Will retry",
+    "synced": "Up to date",
+    "unavailable": "No bridge",
+    "unpaired": "Not paired"
+  },
+  "progressLabel": "Startup progress",
+  "rows": {
+    "accounts": {
+      "detail": "Reading the local account registry",
+      "label": "Unlocking your account"
+    },
+    "bridge": {
+      "detail": "Registering the Capacitor plugins",
+      "label": "Waking the native bridge"
+    },
+    "companion": {
+      "detail": "Checking secure storage for a paired desktop",
+      "label": "Reading your pairing"
+    },
+    "host": {
+      "detail": "Negotiating the connection and its capabilities",
+      "label": "Reaching your desktop"
+    },
+    "preferences": {
+      "detail": "Applying saved settings and running startup checks",
+      "label": "Loading your preferences"
+    },
+    "sync": {
+      "detail": "Pulling recent sessions and messages",
+      "label": "Syncing conversations"
+    },
+    "workspace": {
+      "detail": "Fetching the view and its runtimes",
+      "label": "Loading the view"
+    }
+  },
+  "statusActive": "In progress",
+  "statusDone": "Done",
+  "statusFailed": "Failed",
+  "statusPending": "Pending",
+  "statusSkipped": "Skipped",
+  "stepsLabel": "Startup steps",
+  "stepsOf": "{completed} of {total}",
+  "wordmark": "cognia"
 }

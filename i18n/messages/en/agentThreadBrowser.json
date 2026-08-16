@@ -1,10 +1,10 @@
 {
   "completed": "Completed child",
-  "empty": "No agent threads have been created yet.",
   "open": "Browse agent threads",
   "primary": "Primary task",
   "promote": "Promote {name} to a new task snapshot",
   "promotionBlocked": "Stop this running child before promoting its snapshot.",
   "running": "Running child",
-  "title": "Agent threads"
+  "title": "Agent threads",
+  "trigger": "Threads"
 }

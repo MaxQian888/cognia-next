@@ -212,6 +212,7 @@
       "opencodeRemote": "OpenCode (Remote)",
       "opencodeServer": "OpenCode",
       "pi": "Pi",
+      "piRpc": "Pi (native RPC)",
       "qwenCode": "Qwen Code"
     },
     "runtimeStatus": {

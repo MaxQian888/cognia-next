@@ -35,6 +35,8 @@ export const NON_PREFERENCE_KEYS = [
   "lastUpdateCheckAt",
   "lastInboxViewedAt",
   "onboardingDismissedAt",
+  "onboardingProgress",
+  "onboardingProfile",
   "pinnedWorkflowIds",
   "pinnedMeRowIds",
   "searchUsageStats",
@@ -58,12 +60,12 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "semanticToolRouting",
     "difficultyRouting",
     "autoRouting",
-  ],
-  "agent-runtime": [
     // Provider diagnostics tab preferences (`provider-diagnostics-tab.tsx`);
     // was in DEFAULTS but unclaimed, which is exactly the class the
     // completeness guard exists to catch.
     "providerDiagnostics",
+  ],
+  "agent-runtime": [
     "subagentNesting",
     // Moved here from the former standalone "general" section (their UI now
     // lives in agent-runtime → Defaults).
@@ -122,8 +124,6 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     // Language selector lives in the Appearance section (the former "general"
     // section owned it before the merge).
     "language",
-  ],
-  speech: [
     // ADR-0127: message presentation + typography + usage display were
     // defined/edited under Appearance but never claimed here, so "reset this
     // section", the changed-settings review, and appearance export all skipped
@@ -134,6 +134,8 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "typographyExt",
     "usageDisplayMode",
     "activeThemePackId",
+  ],
+  speech: [
     "sttLanguage",
     "selectedMicId",
     "ttsProvider",
@@ -225,14 +227,14 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "compaction",
     "streamPartialMessages",
     "conversationSidebar",
-  ],
-  notifications: ["notificationPreferences"],
     // ADR-0127: run-status-bar metrics and composer behavior/assistance are
     // edited in the Conversation section (`run-status-bar-card`,
     // `composer-behavior-card`, `composer-assistance-card`).
     "runStatusBar",
     "composerBehavior",
     "composerAssistance",
+  ],
+  notifications: ["notificationPreferences"],
   terminal: ["terminal"],
   memory: ["memory", "memoryView"],
   artifacts: ["artifacts"],
@@ -247,6 +249,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "workbenchRail",
     "workbenchRailPersistent",
     "workbenchRailPerProject",
+    "workbenchPanels",
     "titleBarLayout",
     "statusBarLayout",
   ],

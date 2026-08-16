@@ -22,6 +22,7 @@
 import { pruneOlderThan as pruneAgentTraces } from "@/lib/db/agent-traces"
 import { deleteExpiredEvalArtifacts } from "@/lib/db/eval-lab"
 import { purgeOcrCacheOlderThan } from "@/lib/db/ocr-results"
+import { pruneExpiredWorkSubmissionPayloads } from "@/lib/db/work-submissions"
 import { recoverEvalQueueOnStartup } from "@/lib/ai/eval/recovery"
 import { getSettings, DEFAULTS } from "@/lib/db/settings"
 import { centralRetentionExecutorIds } from "@/lib/data-governance/table-catalog"
@@ -60,6 +61,13 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
       const now = Date.now()
       return purgeOcrCacheOlderThan(Math.max(0, now - cutoff), now)
     },
+  },
+  // Frozen submission input/context expire on their own `expiresAt`, not the
+  // user's trace window: a replay must stay possible for the full retention
+  // period regardless of how aggressively traces are pruned.
+  workSubmissions: {
+    policy: "row-expiry",
+    prune: () => pruneExpiredWorkSubmissionPayloads(Date.now()),
   },
 }
 

@@ -1,10 +1,10 @@
 {
   "completed": "已完成子线程",
-  "empty": "尚未创建智能体线程。",
   "open": "浏览智能体线程",
   "primary": "主任务",
   "promote": "将 {name} 提升为新的任务快照",
   "promotionBlocked": "请先停止正在运行的子线程，再提升其快照。",
   "running": "运行中的子线程",
-  "title": "智能体线程"
+  "title": "智能体线程",
+  "trigger": "线程"
 }

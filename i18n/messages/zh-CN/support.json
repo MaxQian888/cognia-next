@@ -1,0 +1,82 @@
+{
+  "consent": {
+    "label": "允许读取已脱敏的本机诊断",
+    "description": "本机开关。关闭：支持 Agent 仅依据内置文档回答；开启：排障时可读取一份已脱敏的运行时快照。",
+    "preview": "预览 Agent 会读到的内容",
+    "hidePreview": "隐藏预览",
+    "previewUnavailable": "预览不可用"
+  },
+  "panel": {
+    "title": "支持 Agent",
+    "diagnosticsOn": "诊断已开启",
+    "diagnosticsOff": "诊断已关闭",
+    "diagnosticsChipAria": "本机诊断授权",
+    "reportProblem": "反馈问题",
+    "userReport": "用户反馈",
+    "supportResponse": "支持回复"
+  },
+  "report": {
+    "title": "反馈问题",
+    "description": "以下内容全部在本机生成，并在离开设备前完成脱敏。在你选择去向之前不会发送任何内容。",
+    "descriptionLabel": "发生了什么？",
+    "descriptionPlaceholder": "你当时在做什么、期望什么结果、实际发生了什么？",
+    "includeTitle": "报告中包含",
+    "alwaysIncluded": "始终包含：{items}",
+    "redacted": "已脱敏",
+    "preview": "预览报告",
+    "hidePreview": "隐藏预览",
+    "building": "正在生成脱敏预览…",
+    "previewFailed": "无法生成报告——脱敏后仍有内容疑似敏感。请取消勾选某个段落后重试。",
+    "privacyNote": "个人信息（邮箱、密钥、电话、姓名）会被替换为占位符，并在报告离开本机前再次核验。",
+    "delivered": {
+      "copy": "报告已复制到剪贴板。",
+      "download": "报告已下载。",
+      "issue": "已打开问题追踪器并预填报告。",
+      "generic": "已通过“{channel}”发送报告。"
+    },
+    "failed": "报告发送失败。",
+    "channel": {
+      "copy": "复制报告",
+      "download": "下载 Markdown",
+      "issue": "打开 GitHub Issue"
+    },
+    "section": {
+      "description": {
+        "label": "你的描述",
+        "description": "你在上方输入的文字。"
+      },
+      "app": {
+        "label": "应用构建信息",
+        "description": "版本、渠道、提交、平台。"
+      },
+      "error": {
+        "label": "错误与调用栈",
+        "description": "本页捕获到的失败。"
+      },
+      "diagnostic": {
+        "label": "诊断详情",
+        "description": "结构化的失败代码及其上下文。"
+      },
+      "conversation": {
+        "label": "支持对话",
+        "description": "你的最新消息与 Agent 的最新回复。"
+      },
+      "runtime": {
+        "label": "运行时快照",
+        "description": "本机运行时与环境的健康状态。"
+      },
+      "recentErrors": {
+        "label": "最近错误",
+        "description": "本次会话最近记录的错误。"
+      },
+      "crashReports": {
+        "label": "原生崩溃摘要",
+        "description": "桌面端最近何时、因何崩溃——不含转储。"
+      },
+      "sync": {
+        "label": "同步状态",
+        "description": "本机各表的伴侣同步状态。"
+      }
+    }
+  }
+}

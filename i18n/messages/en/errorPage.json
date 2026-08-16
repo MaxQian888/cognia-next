@@ -55,7 +55,8 @@
     "copyReport": "Copy full report",
     "copyReportFailed": "Failed to copy report",
     "copyReportSuccess": "Report copied to clipboard",
-    "reportIssue": "Report issue"
+    "reportIssue": "Report issue",
+    "reportIssueFailed": "Failed to open the issue tracker"
   },
   "retry": "Try again",
   "showStack": "Show stack trace",

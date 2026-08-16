@@ -1467,9 +1467,9 @@
       "operationFailed": "Local account operation failed.",
       "passwordLabel": "Password",
       "passwordPlaceholder": "Password",
+      "recoveryContinue": "Continue",
       "recoveryCopied": "Copied",
       "recoveryCopy": "Copy recovery key",
-      "recoveryContinue": "Continue",
       "recoveryDescription": "Save this one-time recovery key before continuing. It can unlock your browser Vault if you forget the account password.",
       "recoveryDownload": "Download .txt",
       "recoveryForm": "Save recovery key",
@@ -1578,6 +1578,65 @@
       "switchPasswordPlaceholder": "Password"
     }
   },
+  "agentComposition": {
+    "advanced": "Advanced",
+    "advancedHint": "Adjust permission, tool presentation, and orchestration independently of the preset.",
+    "axis": {
+      "authority": {
+        "label": "Permission",
+        "options": {
+          "acceptEdits": "Accept edits",
+          "bypassPermissions": "Bypass permissions",
+          "default": "Ask each time",
+          "plan": "Read-only"
+        }
+      },
+      "orchestration": {
+        "label": "Orchestration",
+        "options": {
+          "direct": "Single agent",
+          "subagent": "Delegate to subagents",
+          "verified-fresh-agent": "Independent reviewer",
+          "workflow": "Workflow"
+        }
+      },
+      "toolPresentation": {
+        "label": "Tools",
+        "options": {
+          "both": "Native and code",
+          "code": "As code",
+          "native": "Native tools"
+        }
+      }
+    },
+    "badges": {
+      "developerOnly": "Developer",
+      "experimental": "Experimental"
+    },
+    "chip": {
+      "ariaLabel": "Mode: {preset}",
+      "narrowed": "This mode was narrowed for this turn"
+    },
+    "inherit": "Preset default · {preset}",
+    "inheritGeneric": "Preset default",
+    "overrides": "{count, plural, one {# override} other {# overrides}}",
+    "pinned": "Pinned for this session",
+    "presetLabel": "Preset",
+    "summary": {
+      "cappedByCeiling": "Limited by the parent agent",
+      "cappedByPreset": "Limited by this preset",
+      "title": "This turn will run as"
+    },
+    "title": "Mode",
+    "warnings": {
+      "authority-capped-by-ceiling": "Permission lowered to {applied}: a subagent cannot exceed its parent.",
+      "authority-capped-by-preset": "Permission lowered to {applied}: the {preset} preset does not allow {requested}.",
+      "orchestration-unavailable": "{requested} orchestration is unavailable here; running as a single agent.",
+      "presentation-unavailable": "Code tools need a strict sandbox, which is unavailable here; using native tools.",
+      "unknown-legacy-mode": "The saved mode \"{requested}\" is no longer available; using Standard with default permission.",
+      "unknown-preset": "The preset \"{requested}\" is no longer available; using Standard."
+    }
+  },
   "agentMigration": {
     "artifacts": {
       "names": {
@@ -1673,9 +1732,17 @@
         "description": "Full access — implement changes, edit files, and run commands",
         "name": "Build"
       },
+      "code": {
+        "description": "Compose tool calls as code in a sandbox. Read-only in this release",
+        "name": "Code"
+      },
       "code-gen": {
         "description": "Generate and explain code in various languages",
         "name": "Code Generator"
+      },
+      "creator": {
+        "description": "Author plugins, skills, hooks, presets and workflows in an authoring root",
+        "name": "Creator"
       },
       "data-analysis": {
         "description": "Analyze data and create visualizations",
@@ -1684,6 +1751,10 @@
       "general": {
         "description": "General purpose AI assistant for various tasks",
         "name": "General Assistant"
+      },
+      "minimal": {
+        "description": "Deterministic read-only tools only — inspect without changing anything",
+        "name": "Minimal"
       },
       "plan": {
         "description": "Investigate and propose a step-by-step plan without editing files or running mutating commands",
@@ -1696,6 +1767,10 @@
       "research": {
         "description": "Help with research and information gathering",
         "name": "Research Assistant"
+      },
+      "standard": {
+        "description": "General purpose assistant with the default tools",
+        "name": "Standard"
       },
       "web-design": {
         "description": "Design and build web pages with live preview",
@@ -1770,15 +1845,17 @@
     "title": "Agent Runs"
   },
   "agentRuntime": {
+    "addExternalAgent": "Add an external agent…",
     "ariaLabel": "Choose agent runtime",
     "claudeSdk": "Claude SDK",
     "claudeSdkDesc": "Built-in Anthropic SDK sidecar (default)",
-    "external": "External agent",
-    "externalAgentLabel": "Choose external agent",
-    "externalDesc": "Spawn a CLI agent (Codex, Claude Code, Gemini, Cursor…)",
-    "externalEmpty": "No external agents — add one in Settings → Agents",
+    "enableExternal": "Turn on external agents",
+    "externalEmpty": "No external agents configured yet.",
+    "externalTurnedOff": "External agents are turned off.",
     "externalUnconfigured": "External (none selected)",
     "label": "Agent runtime",
+    "lastCheckFailed": "Last check failed — it may not start.",
+    "needsAuth": "Needs sign-in — connect it under Manage agents.",
     "tooltip": "Active agent runtime — Claude SDK or an external agent"
   },
   "agentStatus": {
@@ -2162,6 +2239,7 @@
         "opencodeRemote": "OpenCode (Remote)",
         "opencodeServer": "OpenCode",
         "pi": "Pi",
+        "piRpc": "Pi (native RPC)",
         "qwenCode": "Qwen Code"
       },
       "runtimeStatus": {
@@ -3022,13 +3100,13 @@
   },
   "agentThreadBrowser": {
     "completed": "Completed child",
-    "empty": "No agent threads have been created yet.",
     "open": "Browse agent threads",
     "primary": "Primary task",
     "promote": "Promote {name} to a new task snapshot",
     "promotionBlocked": "Stop this running child before promoting its snapshot.",
     "running": "Running child",
-    "title": "Agent threads"
+    "title": "Agent threads",
+    "trigger": "Threads"
   },
   "aiElements": {
     "agent": {
@@ -4858,7 +4936,14 @@
       },
       "ghostAccept": "Accept",
       "ghostAcceptHint": "Tab",
+      "ghostCycleHint": "Alt+] / Alt+[ to cycle",
       "ghostDismiss": "Dismiss suggestion",
+      "ghostPosition": "{index} of {total}",
+      "ghostSourceAgent": "From the agent",
+      "ghostSourceAi": "Suggested",
+      "ghostSourceCommand": "Command",
+      "ghostSourceHistory": "From your history",
+      "ghostSourcePlugin": "From a plugin",
       "helperHints": {
         "chainingNote": "Put commands on separate lines to run them in order.",
         "cheatsheetDescription": "Keyboard shortcuts and prefixes available in the message composer.",
@@ -5293,12 +5378,14 @@
       },
       "ariaSettings": "Session settings",
       "bareMode": "Bare mode",
+      "bareModeHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Faster cold starts; the agent won't see your project's settings.",
       "branchAria": "Branch conversation",
       "branchEmpty": "Nothing to branch yet — this conversation has no messages.",
       "branchError": "Couldn't branch this conversation.",
       "branchSuccess": "Branched. The new conversation is now active.",
       "branchTooltip": "Branch conversation — copies this thread into a new one you can take elsewhere",
       "briefMode": "Brief output",
+      "briefModeHint": "Append a concise-output instruction to every send.",
       "cancel": "Cancel",
       "compactAria": "Compact",
       "compactFailure": "Context compaction failed: {error}",
@@ -5315,6 +5402,7 @@
       "cwdFallbackHint": "Falls back to: {path}",
       "cwdReset": "Reset",
       "debugMode": "Debug mode",
+      "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process.",
       "description": "Override defaults for this chat. Empty = use global.",
       "execution": {
         "addEnv": "Add variable",
@@ -5415,6 +5503,8 @@
       "save": "Save",
       "sessionCommunication": "Session communication",
       "sheet": {
+        "collapseAll": "Collapse all",
+        "expandAll": "Expand all",
         "sections": {
           "account": "Model & account",
           "actions": "Session actions",
@@ -5424,6 +5514,10 @@
           "memory": "Memory",
           "role": "Role & abilities",
           "status": "Status"
+        },
+        "summary": {
+          "defaults": "Using defaults",
+          "overrides": "{count, plural, one {# override} other {# overrides}}"
         }
       },
       "showArtifacts": "Show artifacts panel",
@@ -6266,6 +6360,20 @@
       "tone": "Tone",
       "translate": "Translate"
     },
+    "workSubmission": {
+      "blocked": {
+        "body": "Your message is saved. It will run automatically once this device reaches the execution host again.",
+        "title": "Waiting to reconnect"
+      },
+      "queued": {
+        "body": "Your message is saved and will run as soon as a runtime is free.",
+        "title": "Waiting to start"
+      },
+      "recoveryRequired": {
+        "body": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again.",
+        "title": "Needs your attention"
+      }
+    },
     "workspaceRestricted": {
       "body": "This workspace isn't trusted yet. Agents run read-only — Bash, Edit, Write and Computer-Use are disabled.",
       "rootsLabel": "Untrusted folders",
@@ -6752,6 +6860,107 @@
     },
     "webviewPanelPending": "This panel's webview has not loaded yet."
   },
+  "conversationFilters": {
+    "activity": {
+      "label": "Last activity",
+      "options": {
+        "any": "Any time",
+        "month": "Past 30 days",
+        "older": "Older than 30 days",
+        "today": "Today",
+        "week": "Past 7 days"
+      }
+    },
+    "agent": {
+      "any": "Any agent",
+      "label": "Agent",
+      "unassigned": "No agent"
+    },
+    "cancel": "Cancel",
+    "clearAll": "Clear filters",
+    "count": "{shown} / {total}",
+    "drawer": {
+      "done": "Done",
+      "hint": "Narrow the list, then tap Done.",
+      "title": "Filter and sort"
+    },
+    "filters": {
+      "label": "Filters",
+      "options": {
+        "branched": "Branched",
+        "pinned": "Pinned",
+        "unread": "Unread"
+      }
+    },
+    "folder": {
+      "any": "Any folder",
+      "label": "Folder",
+      "unassigned": "Not in a folder"
+    },
+    "kind": {
+      "label": "Conversation type",
+      "options": {
+        "all": "All types",
+        "dm": "Direct messages",
+        "team": "Team"
+      }
+    },
+    "label": "Filter and sort",
+    "labelActive": "{count, plural, one {Filter and sort (# filter active)} other {Filter and sort (# filters active)}}",
+    "model": {
+      "any": "Any model",
+      "label": "Model",
+      "unassigned": "Unknown model"
+    },
+    "presets": {
+      "delete": "Delete preset {name}",
+      "empty": "No saved presets yet.",
+      "label": "Presets",
+      "manage": "Manage presets…",
+      "manageDescription": "Rename or remove saved filter combinations. Changes apply immediately.",
+      "manageTitle": "Manage presets",
+      "namePlaceholder": "Preset name",
+      "rename": "Rename preset {name}",
+      "save": "Save current filters…",
+      "saveAction": "Save preset",
+      "saveDescription": "Name this combination to reapply it in one click, on every device.",
+      "saveRejected": "Enter a name — and keep at least one filter active.",
+      "saveShort": "Save",
+      "saveTitle": "Save filter preset"
+    },
+    "provider": {
+      "any": "Any provider",
+      "label": "Provider",
+      "unassigned": "Unknown provider"
+    },
+    "remove": "Remove the {name} filter",
+    "sections": {
+      "agent": "Agent & team",
+      "location": "Workspace & folder",
+      "model": "Model & provider"
+    },
+    "selectedSummary": "{count, plural, one {# selected} other {# selected}}",
+    "sort": {
+      "label": "Sort by",
+      "options": {
+        "created": "Date created",
+        "oldest": "Oldest activity",
+        "recent": "Recent activity",
+        "title": "Title (A–Z)",
+        "unread": "Unread first"
+      }
+    },
+    "team": {
+      "any": "Any team",
+      "label": "Team",
+      "unassigned": "No team"
+    },
+    "workspace": {
+      "any": "Any workspace",
+      "label": "Workspace",
+      "unassigned": "No workspace"
+    }
+  },
   "crashDialog": {
     "description": "A session started {time} (version {version}) ended in a crash. A crash report was saved with the details.",
     "dismiss": "Dismiss",
@@ -6759,6 +6968,117 @@
     "openFolder": "Open folder",
     "title": "Cognia closed unexpectedly",
     "viewReport": "View report"
+  },
+  "creator": {
+    "artifact": {
+      "kinds": {
+        "agent-preset": "Agent preset",
+        "hook": "Hook",
+        "plugin": "Plugin",
+        "skill": "Skill",
+        "visual-workflow": "Visual workflow"
+      },
+      "label": "What are you building?"
+    },
+    "blocked": {
+      "already-completed": "Already done",
+      "awaiting-approval": "Needs your approval first",
+      "out-of-order": "Blocked by an earlier step: {step}",
+      "unknown-step": "Unknown step"
+    },
+    "gate": {
+      "description": "Creator can write files and change permissions, so it is only offered when developer mode is on.",
+      "enable": "Enable developer mode",
+      "title": "Developer mode required"
+    },
+    "permissions": {
+      "added": "Added",
+      "approve": "Approve these capabilities",
+      "approved": "Approved",
+      "none": "This artifact asks for no new capabilities.",
+      "removed": "Removed",
+      "requiresApproval": "{count, plural, one {# new capability needs your approval} other {# new capabilities need your approval}}",
+      "stale": "The proposal changed since you approved it. Review it again.",
+      "title": "Permission diff",
+      "unchanged": "Unchanged",
+      "writesBlocked": "Files cannot be written until this is approved."
+    },
+    "preview": {
+      "clean": "Released everything.",
+      "generation": "Generation {generation}",
+      "inactive": "Not running.",
+      "leaked": "{count, plural, one {# resource was not released} other {# resources were not released}}: {labels}",
+      "reload": "Reload",
+      "start": "Start preview",
+      "stop": "Stop",
+      "title": "Sandbox preview"
+    },
+    "review": {
+      "approved": "Approved by the reviewer.",
+      "authority": "Reviewer permission: {authority}",
+      "noFindings": "No findings.",
+      "pending": "Not reviewed yet.",
+      "readOnly": "The reviewer runs read-only, with its own context.",
+      "rejected": "The reviewer found blocking issues.",
+      "severity": {
+        "blocker": "Blocker",
+        "info": "Info",
+        "warning": "Warning"
+      },
+      "title": "Independent review"
+    },
+    "root": {
+      "change": "Change",
+      "choose": "Choose a directory",
+      "description": "Every file Creator reads or writes stays inside this directory. There is no implicit default.",
+      "empty": "No authoring root chosen yet.",
+      "origin": {
+        "created": "Created",
+        "selected": "Selected"
+      },
+      "pathLabel": "Path",
+      "rejected": {
+        "empty": "That path is empty.",
+        "filesystem-root": "The filesystem root cannot be an authoring root.",
+        "home-directory": "Your home directory is too broad to be an authoring root.",
+        "not-absolute": "Choose an absolute path."
+      },
+      "revoke": "Revoke",
+      "title": "Authoring root"
+    },
+    "run": {
+      "active": "Run {runId} is active.",
+      "advance": "Run the workflow",
+      "advanceHint": "Runs forward until the workflow needs you.",
+      "end": "End run",
+      "needsRoot": "Choose an authoring root first.",
+      "requirements": "What should it do?",
+      "requirementsPlaceholder": "Describe the artifact in a sentence or two.",
+      "start": "Start a Creator run",
+      "stopped": "Stopped at {step}: {detail}"
+    },
+    "status": {
+      "active": "Running",
+      "awaiting-approval": "Waiting for approval",
+      "completed": "Done",
+      "failed": "Failed",
+      "pending": "Pending",
+      "skipped": "Skipped"
+    },
+    "steps": {
+      "apply-changes": "Generate files",
+      "approve-delivery": "Approve delivery",
+      "approve-permissions": "Review permissions",
+      "collect-requirements": "Collect requirements",
+      "plan-scaffold": "Plan the scaffold",
+      "preview": "Sandbox preview",
+      "review": "Independent review",
+      "survey-existing": "Check for an existing implementation",
+      "title": "Workflow",
+      "verify": "Lint, typecheck, build, contract check"
+    },
+    "subtitle": "Author plugins, skills, hooks, presets and workflows inside an authoring root.",
+    "title": "Creator"
   },
   "customMode": {
     "a2uiSettings": "A2UI Template",
@@ -6929,6 +7249,7 @@
       "items": {
         "accountStatus": "Account",
         "accountTop": "Account",
+        "agentThreads": "Agent threads",
         "appIcon": "App icon",
         "attention": "Needs attention",
         "branch": "Git branch",
@@ -6974,8 +7295,11 @@
         "deleteConfirmBody": "This permanently removes the conversations and all their messages. This cannot be undone.",
         "deleteConfirmTitle": "{count, plural, one {Delete # conversation?} other {Delete # conversations?}}",
         "deleteSuccess": "{count, plural, one {Deleted # conversation} other {Deleted # conversations}}",
+        "moveSuccess": "{count, plural, one {Moved # conversation} other {Moved # conversations}}",
+        "moveToFolder": "Move to folder",
         "pin": "Pin",
         "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
+        "removeFromFolder": "Remove from folder",
         "selectedCount": "{count, plural, one {# selected} other {# selected}}",
         "share": "Share",
         "unarchive": "Unarchive",
@@ -6995,6 +7319,7 @@
       "displayOptions": "Display options",
       "emptyArchived": "No archived conversations.",
       "emptyDm": "No chats yet. Pick a character to begin.",
+      "emptyFiltered": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
       "emptyFolder": "Empty — move conversations here.",
       "emptySearch": "No conversations match “{query}”.",
       "emptyTeam": "No conversations yet. Start one above.",
@@ -7021,6 +7346,8 @@
         "provider": "Provider",
         "workspace": "Workspace"
       },
+      "moveFolderDown": "Move folder down",
+      "moveFolderUp": "Move folder up",
       "newChat": "New chat",
       "newConversation": "New conversation",
       "newFolder": "New folder",
@@ -7031,12 +7358,25 @@
       "searchAria": "Search conversations",
       "searchMessageContent": "Search message content",
       "searchPlaceholder": "Search conversations…",
+      "searchShortcutHint": "Press / to search",
       "searchTruncated": "Some results may be hidden — refine your search.",
       "sectionPinned": "Pinned",
       "sectionRecent": "Recent",
+      "sectionResults": "Results",
       "showCustomIcons": "Show custom Agent and Team icons",
       "showPreview": "Show message previews",
+      "showTimestamps": "Show activity time",
       "showUnreadBadges": "Show unread badges",
+      "sortBy": {
+        "label": "Sort by",
+        "options": {
+          "created": "Date created",
+          "oldest": "Oldest activity",
+          "recent": "Recent activity",
+          "title": "Title (A–Z)",
+          "unread": "Unread first"
+        }
+      },
       "teamFallback": "Team",
       "titleMotion": "Scroll long titles on hover",
       "ungroupedAgent": "No agent",
@@ -7071,6 +7411,7 @@
       "previous": "Previous match"
     },
     "guildRail": {
+      "a2ui": "Mini-Apps",
       "agentRuns": "Agent runs",
       "agentTeams": "Agent teams",
       "auxiliaryGroup": "Profile and logs",
@@ -7103,8 +7444,12 @@
       "featuresGroup": "Features",
       "goals": "Goals",
       "inbox": "Inbox",
+      "issueProjects": "Projects",
+      "issues": "Issues",
       "label": "Guild rail",
       "logs": "Logs",
+      "manageTeams": "Manage teams",
+      "markAllRead": "Mark all as read",
       "me": "Me",
       "memory": "Memory",
       "more": "More",
@@ -7117,11 +7462,14 @@
       "scheduler": "Scheduler",
       "servers": "Servers",
       "settings": "Settings",
+      "sites": "Sites",
       "skills": "Skills",
       "sourceControl": "Source Control",
       "templates": "Templates",
       "twin": "Digital twin",
+      "unreadCount": "{count, plural, one {# unread} other {# unread}}",
       "workflows": "Workflows",
+      "workspace": "Workspace",
       "workspacesGroup": "Workspaces"
     },
     "jobCenter": {
@@ -7350,6 +7698,7 @@
       },
       "view": {
         "commandPalette": "Command Palette…",
+        "guildRailFolded": "folded into the sidebar",
         "label": "View",
         "language": "Language",
         "languageChinese": "简体中文",
@@ -7379,90 +7728,6 @@
         "restore": "Restore"
       }
     },
-    "onboarding": {
-      "apiKeyHintHost": "console.anthropic.com",
-      "apiKeyHintPrefix": "Get one at ",
-      "apiKeyHintSuffix": ". The key never leaves your machine.",
-      "apiKeyLabel": "Anthropic API key",
-      "apiKeyPlaceholder": "sk-ant-…",
-      "back": "Back",
-      "continue": "Continue",
-      "done": "Done",
-      "provider": {
-        "apiKey": {
-          "cta": "Use API key",
-          "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
-          "title": "Paste an Anthropic API key"
-        },
-        "backToChooser": "Choose a different sign-in method",
-        "claude": {
-          "cta": "Sign in with Anthropic",
-          "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
-          "title": "Claude Pro / Max"
-        },
-        "codex": {
-          "cta": "Sign in with ChatGPT",
-          "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
-          "title": "ChatGPT Plus / Pro (Codex)"
-        },
-        "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
-        "loggedInBadge": "Connected",
-        "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
-        "opencode": {
-          "cta": "Paste OpenCode key",
-          "description": "Paste an OpenCode Zen API key. Optional region override available.",
-          "title": "OpenCode Zen"
-        },
-        "title": "How do you want to sign in?"
-      },
-      "saving": "Saving…",
-      "skip": "Skip for now",
-      "step1Description": "Pick how you want to sign in. Subscription logins live in your OS keyring; pasted API keys live in your browser's IndexedDB and the embedded Node sidecar.",
-      "step1Title": "Welcome to Cognia",
-      "step2Description": "Each character carries its own system prompt and tools. You can edit, duplicate, or create more later in Settings → Characters.",
-      "step2Title": "Pick a character to start",
-      "toastNeedKey": "Paste your Anthropic API key to continue.",
-      "tour": {
-        "computerUse": {
-          "cta": "Open automation settings",
-          "description": "Computer Use is off by default. Enable it per character and pick a permission tier (off / whitelist / per-call).",
-          "title": "Let the AI drive the desktop"
-        },
-        "connectors": {
-          "cta": "Configure connectors",
-          "description": "Run the assistant as a bot in your favorite messaging platform with auto / manual / draft modes.",
-          "title": "Bridge to Telegram, Discord, Slack, Lark, OneBot"
-        },
-        "description": "These ship with Cognia today. Skip if you'd rather discover them yourself.",
-        "done": "Done",
-        "mobile": {
-          "cta": "Open companion settings",
-          "description": "Generate a 5-minute pair token, then scan it from the mobile app. Falls back from mDNS to WebRTC to Cloudflare tunnel automatically.",
-          "title": "Pair your phone over LAN or WAN"
-        },
-        "next": "Next",
-        "ocr": {
-          "cta": "Configure OCR",
-          "description": "Hover an attachment in the composer to pull text into your prompt. Local engines work offline; cloud providers are optional.",
-          "title": "Extract text from images and PDFs"
-        },
-        "openSettings": "Open settings",
-        "previous": "Previous",
-        "progress": "{current} of {total}",
-        "sandbox": {
-          "cta": "Open sandbox settings",
-          "description": "Bash / Edit / Write can be routed through an OS sandbox (sandbox-exec / bwrap / Windows synthetic-user) or an opt-in e2b microVM. Strict mode refuses calls when no backend is healthy — no bypass.",
-          "title": "Shell tools run inside a sandbox"
-        },
-        "skip": "Skip tour",
-        "title": "What you can do next",
-        "twin": {
-          "cta": "Open twin settings",
-          "description": "Upload documents and the distill pipeline builds a redacted style profile you can bind to any character.",
-          "title": "Train a digital twin on your writing"
-        }
-      }
-    },
     "sessionRow": {
       "actionsMenu": "Session actions",
       "archive": "Archive",
@@ -7470,6 +7735,7 @@
       "cancel": "Cancel",
       "cogniaAgentChecking": "Checking for the Cognia agent…",
       "cogniaAgentNotInstalled": "The Cognia agent CLI isn't installed",
+      "contentMatch": "Matched inside messages",
       "delete": "Delete",
       "deleteConfirmAction": "Delete conversation",
       "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
@@ -7613,6 +7879,7 @@
         "appearanceGroup": "Appearance",
         "customize": "Customize layout",
         "customizeBars": "Customize layout…",
+        "guildRailFolded": "folded into the sidebar",
         "localeEn": "English",
         "localeZh": "简体中文",
         "openBrowser": "Open browser panel",
@@ -7778,6 +8045,10 @@
         "hint": "The external agent failed while running this turn — retry, or run it on the built-in agent.",
         "label": "Agent run failed"
       },
+      "extensionHandshakeFailed": {
+        "hint": "The Cognia extension that enforces permissions inside this agent never reported ready, so the session was refused instead of running ungated.",
+        "label": "Agent extension didn't start"
+      },
       "extensionUnknown": {
         "hint": "Cognia hasn't determined whether this agent supports that operation yet — reconnect to probe it.",
         "label": "Support not determined"
@@ -7874,6 +8145,10 @@
         "hint": "A plugin stopped this message before it was sent — check the plugin's settings.",
         "label": "Blocked by a plugin"
       },
+      "protocolFrameInvalid": {
+        "hint": "The agent sent data that doesn't match its protocol, so the stream can't be trusted — start a new session.",
+        "label": "Malformed agent response"
+      },
       "protocolUnsupported": {
         "hint": "Cognia and this agent don't share a protocol — switch it to ACP and save its configuration again.",
         "label": "Protocol not supported"
@@ -7898,9 +8173,21 @@
         "hint": "Part of the interface crashed — try again; if it keeps happening, send us the report.",
         "label": "Application error"
       },
+      "resourceLimit": {
+        "hint": "This host is already running the maximum number of agent processes — finish or close one, then try again.",
+        "label": "Too many agent sessions"
+      },
       "routingNoCandidates": {
         "hint": "No provider in the routing chain can serve this request — check your providers and model mappings.",
         "label": "No provider available"
+      },
+      "runtimeVersionUnsupported": {
+        "hint": "This agent is installed but its version is below the supported minimum — upgrade it, then reconnect.",
+        "label": "Agent version too old"
+      },
+      "sandboxUnavailable": {
+        "hint": "External agents only run inside the strict sandbox, and it couldn't be started here. Cognia never falls back to an unsandboxed process.",
+        "label": "Sandbox unavailable"
       },
       "seedFailed": {
         "hint": "Cognia couldn't install its built-in skills and characters — some defaults will be missing.",
@@ -8418,7 +8705,8 @@
       "copyReport": "Copy full report",
       "copyReportFailed": "Failed to copy report",
       "copyReportSuccess": "Report copied to clipboard",
-      "reportIssue": "Report issue"
+      "reportIssue": "Report issue",
+      "reportIssueFailed": "Failed to open the issue tracker"
     },
     "retry": "Try again",
     "showStack": "Show stack trace",
@@ -9304,6 +9592,12 @@
     "commandsDescription": "Slash commands provided by this external agent",
     "commandsTooltip": "View available agent commands",
     "disabled": "External Agents Disabled",
+    "elicitation": {
+      "decline": "Decline",
+      "punycodeWarning": "This address uses characters that can imitate another domain. Check it before continuing.",
+      "submit": "Submit",
+      "title": "The agent needs an answer"
+    },
     "enableInSettings": "Enable external agents in settings",
     "errors": {
       "tauriOnly": "External agent is only available in Tauri"
@@ -9481,6 +9775,54 @@
       "connectionFailed": "Connection failed",
       "customConfiguration": "Custom configuration",
       "cwdPlaceholder": "Leave empty for current directory",
+      "deepseekHarness": {
+        "approvalNotice": "This transport cannot ask for approval while a turn is running, so authority is fixed when the runtime starts.",
+        "cancelNotice": "Cancelling a turn closes the runtime: this transport has no mid-turn cancel.",
+        "capabilities": "Capabilities",
+        "capabilityApproval": "Mid-turn approval",
+        "capabilityCancel": "Cancel a single turn",
+        "capabilityReasoning": "Reasoning",
+        "capabilityStreaming": "Live streaming",
+        "capabilitySubagents": "Subagent lineage",
+        "capabilitySupported": "Supported",
+        "capabilityToolEvents": "Tool activity",
+        "capabilityUnsupported": "Not supported",
+        "capabilityUsage": "Token usage",
+        "channel": "Channel",
+        "checking": "Checking…",
+        "description": "A managed DeepSeek Harness runtime. Unlike other external agents, DeepSeek Harness publishes no executable, so Cognia installs and certifies its own runtime in an isolated home.",
+        "doctor": "Check",
+        "experimentalBadge": "Experimental",
+        "experimentalNotice": "Upstream is a developer preview and warns of compatibility-breaking changes. Cognia pins an exact version and refuses to start on drift.",
+        "findings": {
+          "channelMalformed": "No runtime is installed, or its manifest is unreadable.",
+          "compositionDigestMismatch": "The runtime composition on disk was modified after certification.",
+          "lockfileDigestMismatch": "Installed packages no longer match the certified lockfile.",
+          "nativeToolchainMissing": "This profile needs a C/C++ toolchain that is not available.",
+          "nodeVersionUnsupported": "The available Node.js version is older than this runtime requires.",
+          "platformUnsupported": "This runtime was not certified for the current platform.",
+          "strayPatchLayer": "An unmanaged patch layer was found; it can add tools the certified profile does not include."
+        },
+        "healthy": "Runtime is healthy.",
+        "install": "Install",
+        "installFailed": "Install failed. The previous runtime was left in place.",
+        "installSucceeded": "DeepSeek Harness runtime installed.",
+        "installed": "Installed",
+        "installing": "Installing…",
+        "notInstalled": "Not installed",
+        "profile": "Profile",
+        "profileReadonly": "Read-only",
+        "profileReadonlyDesc": "Reads and searches files. Cannot write or run commands, and cannot ask you for approval mid-turn.",
+        "profileWorkspace": "Workspace write",
+        "profileWorkspaceDesc": "Can write inside the workspace and run commands. Everything it may do is granted at launch and cannot be revoked mid-turn.",
+        "reinstall": "Reinstall",
+        "remove": "Remove",
+        "removeConfirm": "Remove the installed DeepSeek Harness runtime? Any agent using it will stop working until you reinstall.",
+        "removeSucceeded": "DeepSeek Harness runtime removed.",
+        "title": "DeepSeek Harness",
+        "unhealthy": "Runtime has problems.",
+        "upstreamVersion": "Upstream version"
+      },
       "defaultPermissionMode": "Default Permission Mode",
       "defaultPermissionModeDesc": "Default permission mode for new agent sessions",
       "delegation": {
@@ -9578,6 +9920,30 @@
       "permissionDefault": "Default (Ask for each action)",
       "permissionDontAsk": "Don't Ask (Deny unless pre-approved)",
       "permissionPlan": "Plan Mode (No execution)",
+      "piExtensionPolicyGlobal": "Load my global Pi extensions",
+      "piExtensionPolicyHint": "Isolated runs Pi without your own extensions, skills or prompt templates. AGENTS.md and CLAUDE.md still load. Community permission extensions also intercept tool calls, so loading them alongside Cognia's can produce duplicate prompts.",
+      "piExtensionPolicyIsolated": "Isolated (recommended)",
+      "piExtensionPolicyLabel": "Extension policy",
+      "piExtensionPolicyTrustedProject": "Also trust project-local files",
+      "piExtensionPolicyTrustedProjectWarning": "Project-local Pi files can execute arbitrary code from the repository you open. Only use this for repositories you trust.",
+      "piMigration": {
+        "blocker": {
+          "command_missing": "Pi is not installed, or not on PATH.",
+          "runtime_version_unsupported": "The installed Pi is older than the supported version.",
+          "sandbox_unavailable": "The sandbox is unavailable on this machine, so Pi cannot run here."
+        },
+        "continuityNote": "Your settings and this agent's ID are kept. The first run after switching starts a new Pi session — the current conversation is not carried across.",
+        "legacyDescription": "This agent runs through the community pi-acp bridge. Switching to Pi's native protocol adds thinking levels, steering, compaction and session forks.",
+        "migrateAction": "Switch to native Pi",
+        "migratedDescription": "This agent runs on Pi's native protocol.",
+        "rollbackAction": "Switch back to the bridge",
+        "rollbackNote": "Switching back restores the previous connection settings only. Sessions and transcripts are kept.",
+        "statusLegacy": "Community ACP bridge",
+        "statusNative": "Native RPC",
+        "title": "Pi connection"
+      },
+      "piSandboxNote": "Pi always runs inside the strict sandbox, on macOS and Linux only. There is no unsandboxed fallback.",
+      "piSectionTitle": "Pi runtime",
       "presetGalleryEmpty": "No presets available.",
       "protocol": "Protocol",
       "providerUndoWarningReset": "Restore warning",
@@ -11118,6 +11484,241 @@
     "title": "Integrations",
     "unsupportedWeb": "Integration management requires the desktop app."
   },
+  "issues": {
+    "activity": {
+      "artifact_linked": "linked an artifact",
+      "assigned": "assigned this to {to}",
+      "commented": "commented",
+      "created": "created this issue",
+      "description_changed": "edited the description",
+      "github_linked": "linked a GitHub issue",
+      "github_write_back": "pushed a change to GitHub",
+      "label_added": "added a label",
+      "label_removed": "removed a label",
+      "priority_changed": "changed priority from {from} to {to}",
+      "project_changed": "moved this to another project",
+      "reassigned": "reassigned this from {from} to {to}",
+      "run_failed": "an agent run failed",
+      "run_started": "started an agent run",
+      "run_succeeded": "finished an agent run",
+      "status_changed": "moved this from {from} to {to}",
+      "title_changed": "renamed this issue",
+      "unassigned": "removed the assignee"
+    },
+    "actor": {
+      "agent": "Agent",
+      "human": "Me",
+      "noLead": "No lead",
+      "team": "Squad",
+      "unassigned": "Unassigned"
+    },
+    "board": {
+      "addIssue": "Add issue to {status}",
+      "agentsWorking": "{count, plural, =0 {0 agents working} one {# agent working} other {# agents working}}",
+      "awaitingReview": "{count, plural, =0 {} one {# awaiting review} other {# awaiting review}}",
+      "columnActions": "Column actions",
+      "denied": {
+        "federated-read-only": "This issue lives in {source} and cannot be moved from here.",
+        "illegal-transition": "That move isn't allowed.",
+        "runtime-owned": "An agent is working on this issue — wait for the run to finish."
+      },
+      "empty": "No issues"
+    },
+    "create": {
+      "cancel": "Cancel",
+      "descriptionLabel": "Description",
+      "noProject": "Create a project first — issues need somewhere to live.",
+      "projectLabel": "Project",
+      "submit": "Create issue",
+      "title": "New issue",
+      "titleLabel": "Title",
+      "titlePlaceholder": "Issue title",
+      "trigger": "New issue"
+    },
+    "detail": {
+      "activity": "Activity",
+      "assignee": "Assignee",
+      "close": "Close details",
+      "comment": "Comment",
+      "commentPlaceholder": "Leave a comment…",
+      "created": "Created",
+      "description": "Description",
+      "descriptionPlaceholder": "Add description…",
+      "empty": "Select an issue to see its details",
+      "labels": "Labels",
+      "openInGithub": "Open in GitHub",
+      "priority": "Priority",
+      "project": "Project",
+      "properties": "Properties",
+      "status": "Status",
+      "updated": "Updated"
+    },
+    "labels": {
+      "add": "Add label",
+      "manage": "Manage labels",
+      "none": "No labels",
+      "remove": "Remove {name}",
+      "title": "Labels"
+    },
+    "priority": {
+      "high": "High",
+      "low": "Low",
+      "medium": "Medium",
+      "none": "No priority",
+      "urgent": "Urgent"
+    },
+    "projects": {
+      "addLocalDirectory": "Add local directory",
+      "addResource": "Add resource",
+      "addResourceHint": "Reference a GitHub repository to mirror its issues onto the board, or a directory this workspace has already mounted.",
+      "create": "New project",
+      "delete": "Delete project",
+      "deleteConfirm": "Delete “{name}” and all {count} of its issues? This cannot be undone.",
+      "description": "Description",
+      "descriptionHint": "Shared with agents as context for every task in this project.",
+      "directoryHint": "Only directories already mounted on this workspace can be referenced.",
+      "empty": "No projects yet",
+      "emptyHint": "A project groups issues for one deliverable and carries the context every agent run sees.",
+      "keyHint": "2–5 letters. Issues read {example}. Cannot be changed later.",
+      "keyInvalid": "2–5 characters, starting with a letter.",
+      "keyLabel": "Key",
+      "keyTaken": "That key is already in use.",
+      "lead": "Lead",
+      "nameLabel": "Name",
+      "namePlaceholder": "Project name",
+      "noResources": "No resources bound yet.",
+      "noRootsAvailable": "No unbound directories are mounted on this workspace.",
+      "progress": "Progress",
+      "progressCount": "{completed}/{total}",
+      "removeResource": "Remove resource",
+      "repoHint": "Issues from this repository appear on the board as read-only rows.",
+      "repoInvalid": "Use the owner/repository form.",
+      "repoTaken": "That repository is already bound to a project.",
+      "resourceDirectory": "Local directory",
+      "resourceKind": "Kind",
+      "resourceRepo": "GitHub repository",
+      "resources": "Resources",
+      "startDate": "Start date",
+      "status": {
+        "backlog": "Backlog",
+        "canceled": "Canceled",
+        "completed": "Completed",
+        "in_progress": "In Progress",
+        "paused": "Paused",
+        "planned": "Planned"
+      },
+      "summary": "{count, plural, =0 {No projects} one {# project} other {# projects}}",
+      "targetDate": "Due date",
+      "title": "Projects"
+    },
+    "source": {
+      "agent-task": "Agent Task",
+      "agent-team": "Agent Team",
+      "degraded": "{count, plural, one {# source failed to load} other {# sources failed to load}}",
+      "github": "GitHub",
+      "local": "Local",
+      "readOnly": "Read-only — managed by {source}"
+    },
+    "status": {
+      "backlog": "Backlog",
+      "canceled": "Canceled",
+      "done": "Done",
+      "in_progress": "In Progress",
+      "in_review": "In Review",
+      "todo": "Todo"
+    },
+    "summary": "{count, plural, =0 {No issues} one {# issue} other {# issues}}",
+    "sync": {
+      "done": "{count, plural, =0 {Already up to date} one {# issue updated} other {# issues updated}}",
+      "failed": "Sync failed for {repos}",
+      "noCredential": "No GitHub credential available. Sign in with the GitHub CLI or connect an account.",
+      "noRepos": "No GitHub repository is bound to a project in this workspace.",
+      "now": "Sync now",
+      "running": "Syncing…"
+    },
+    "title": "Issues",
+    "toolbar": {
+      "activeFilters": "{count, plural, one {# filter} other {# filters}}",
+      "board": "Board",
+      "clearFilters": "Clear filters",
+      "display": "Display",
+      "facet": {
+        "assignee": "Assignee",
+        "labels": "Labels",
+        "priority": "Priority",
+        "project": "Project",
+        "source": "Source"
+      },
+      "filter": "Filter",
+      "groupBy": {
+        "assignee": "Assignee",
+        "label": "Group by",
+        "none": "No grouping",
+        "priority": "Priority",
+        "project": "Project",
+        "status": "Status"
+      },
+      "list": "List",
+      "search": "Search issues",
+      "sort": {
+        "created": "Created",
+        "label": "Sort by",
+        "manual": "Manual",
+        "priority": "Priority",
+        "title": "Title",
+        "updated": "Last updated"
+      }
+    },
+    "views": {
+      "all": "All",
+      "assigned": "Assigned",
+      "created": "Created",
+      "myAgents": "My Agents and Squads"
+    },
+    "workspace": {
+      "agentsWorking": "Agents working",
+      "issueSummary": "Issues",
+      "manage": "Manage workspace",
+      "noProjects": "No projects in this workspace yet",
+      "openIssues": "Open issues",
+      "overview": "Overview",
+      "projectSummary": "Projects",
+      "recentActivity": "Recent activity",
+      "resources": "Resources",
+      "title": "Workspace",
+      "trust": "Workspace trust"
+    },
+    "writeback": {
+      "account": "Writing as {account}",
+      "accountChecking": "Checking the connected account…",
+      "bodyLabel": "Comment",
+      "confirm": {
+        "close": "Close issue",
+        "comment": "Post comment",
+        "label": "Add labels"
+      },
+      "description": "This writes to {issue} on GitHub and cannot be undone from here.",
+      "error": {
+        "no-account": "No enabled GitHub account is connected. Connect one in Settings → Connections.",
+        "plugin-unavailable": "The GitHub delivery plugin is unavailable. Enable it, then try again."
+      },
+      "labelsHint": "Comma-separated. Labels must already exist on the repository.",
+      "labelsLabel": "Labels",
+      "reason": {
+        "completed": "Completed",
+        "not_planned": "Not planned"
+      },
+      "reasonLabel": "Reason",
+      "section": "GitHub actions",
+      "sectionHint": "These write to GitHub. The board reflects the change after the next sync.",
+      "success": "GitHub accepted the change.",
+      "title": {
+        "close": "Close on GitHub",
+        "comment": "Comment on GitHub",
+        "label": "Add labels"
+      }
+    }
+  },
   "larkEntry": {
     "errors": {
       "adapter_missing": "This page is missing its bot context — open it from the Feishu shortcut again.",
@@ -11153,16 +11754,51 @@
     "loading": "Loading…",
     "offline": "You're offline — this will retry once the connection returns",
     "page": {
+      "capabilities": {
+        "core-chat": "Chat",
+        "desktop-tools": "Desktop tools",
+        "integrations": "Integrations",
+        "knowledge-agents": "Knowledge & agents",
+        "plugin-runtime": "Plugins",
+        "workflow-automation": "Workflows"
+      },
+      "capabilitiesReady": "{ready} of {total} runtimes ready",
       "description": "Loading your interface, preferences, and recent context",
+      "milestoneDuration": "{seconds}s",
+      "milestones": {
+        "accounts": {
+          "detail": "Reading the local account registry",
+          "label": "Unlocking your account"
+        },
+        "interface": {
+          "detail": "Mounting the window chrome and panels",
+          "label": "Starting the interface"
+        },
+        "preferences": {
+          "detail": "Applying saved settings and running startup checks",
+          "label": "Loading your preferences"
+        },
+        "workspace": {
+          "detail": "Loading the workspace view and its runtimes",
+          "label": "Restoring your workspace"
+        }
+      },
+      "platform": {
+        "headless": "Headless",
+        "mobile": "Mobile",
+        "tauri": "Desktop",
+        "web": "Web"
+      },
       "progressLabel": "Workspace preparation",
       "reload": "Reload app",
       "reloadHint": "Taking longer than expected. You can reload and try again.",
-      "stages": {
-        "finalizing": "Finishing setup",
-        "interface": "Starting the interface",
-        "workspace": "Restoring your workspace"
-      },
-      "title": "Preparing your workspace"
+      "statusActive": "In progress",
+      "statusDone": "Done",
+      "statusPending": "Pending",
+      "stepOf": "Step {current} of {total}",
+      "stepsLabel": "Startup steps",
+      "title": "Preparing your workspace",
+      "version": "Version {version}"
     },
     "pageLoading": "Loading…",
     "stillWorking": "Still working… ({seconds}s)",
@@ -12783,12 +13419,13 @@
       "lockedComputerUse": {
         "blocked": "Locked Use not enabled ({reason}).",
         "col": "Locked Use",
-        "description": "Allows this device to request a short, task-bound Locked Use lease. Remote control must remain enabled. This does not permit administrator authentication or security-warning bypasses.",
+        "description": "Grants this device Locked Use — a short, task-bound unlock lease. Not active yet: the macOS Locked Use system component is not part of this build, so this switch grants nothing until it ships.",
         "disabledToast": "Locked Use disabled for {label}.",
         "enabledToast": "Locked Use enabled for {label}.",
         "reason": "Confirm granting Locked Use to {label}",
         "title": "Allow Locked Use",
-        "toggleAria": "Toggle Locked Use for {label}"
+        "toggleAria": "Toggle Locked Use for {label}",
+        "unavailable": "Not available in this build"
       },
       "logto": {
         "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
@@ -13431,6 +14068,7 @@
       "emptyArchived": "No archived chats.",
       "emptyChats": "No chats yet. Tap + to start one.",
       "emptyFiltered": "No chats match “{query}”.",
+      "emptyFilters": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
       "pinned": "Pinned",
       "presenceStreaming": "Streaming",
       "quickActions": "Quick actions",
@@ -13589,28 +14227,18 @@
       "evalRow": "Agent evaluation",
       "externalAgentsRow": "External agents",
       "feedback": {
-        "copyDescription": "App version, user agent, and current sync snapshot.",
+        "copyDescription": "Copies the default redacted report: app build, runtime snapshot, and sync state.",
         "copyError": "Clipboard unavailable in this shell.",
         "copyLabel": "Copy diagnostics",
-        "copyLabelDone": "Diagnostics copied",
         "copyToast": "Diagnostics copied to clipboard.",
         "deviceInfoDescription": "Permissions, app build, and platform details.",
         "deviceInfoLabel": "Device info",
         "diagnosticsTitle": "More diagnostics",
         "openIssueDescription": "Includes templates for bug reports and feature requests.",
         "openIssueLabel": "Open a GitHub issue",
-        "reportTitle": "Report a problem",
-        "support": {
-          "cancel": "Cancel",
-          "confirmExport": "Confirm and export",
-          "description": "After confirmation, Cognia generates a local Markdown draft from your description and redacted diagnostics. Nothing is sent automatically.",
-          "exportFailed": "Could not generate the support feedback export.",
-          "exported": "Support feedback exported.",
-          "placeholder": "What happened, and what did you expect?",
-          "summary": "Feedback description",
-          "title": "Generate support feedback?",
-          "trigger": "Generate redacted support feedback"
-        }
+        "reportProblemDescription": "Describe what happened, review the redacted details, then copy, download, or open a GitHub issue.",
+        "reportProblemLabel": "Report a problem",
+        "reportTitle": "Report a problem"
       },
       "feedbackRow": "Feedback & diagnostics",
       "goalsRow": "Goals",
@@ -14030,10 +14658,6 @@
       "fingerprintPinned": "Desktop identity pinned",
       "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
       "formCardTitle": "Pair this phone",
-      "invitationSummary": {
-        "description": "Server v{version} · expires at {expiresAt, time, short}",
-        "title": "Invitation ready for {host}"
-      },
       "health": {
         "checking": "Checking",
         "continueToChat": "Continue to chat",
@@ -14054,6 +14678,10 @@
         "generic": "Pairing failed (HTTP {status})."
       },
       "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+      "invitationSummary": {
+        "description": "Server v{version} · expires at {expiresAt, time, short}",
+        "title": "Invitation ready for {host}"
+      },
       "loadingManualCta": "Set up manually",
       "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
       "loadingTitle": "Checking for an existing pairing…",
@@ -14154,8 +14782,8 @@
         "headlessTitle": "Using a headless server?",
         "httpsRequired": "Browser pairing requires HTTPS so the pair credential is never sent in cleartext. Use an HTTPS companion URL.",
         "intro": "Connect this browser with a one-time invitation issued by your cognia server.",
-        "pasteHint": "Paste the full cgnp3|… invitation; the server address and identity are verified automatically.",
         "pasteClipboard": "Paste",
+        "pasteHint": "Paste the full cgnp3|… invitation; the server address and identity are verified automatically.",
         "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
         "storageNoticeTitle": "Credential stays in this browser",
         "title": "Connect to your server"
@@ -14386,7 +15014,66 @@
       "volume": "Volume"
     },
     "splash": {
-      "label": "Starting cognia"
+      "build": "Mobile · v{version}",
+      "duration": "{seconds}s",
+      "headline": {
+        "boot": "Getting things ready",
+        "route": "Loading this page",
+        "settled": "Ready"
+      },
+      "label": "Starting cognia",
+      "outcomes": {
+        "incompatible": "Needs update",
+        "linked": "Online",
+        "notNeeded": "Not needed",
+        "offline": "Offline",
+        "paired": "Paired",
+        "registered": "Native",
+        "standalone": "Standalone",
+        "syncFailed": "Will retry",
+        "synced": "Up to date",
+        "unavailable": "No bridge",
+        "unpaired": "Not paired"
+      },
+      "progressLabel": "Startup progress",
+      "rows": {
+        "accounts": {
+          "detail": "Reading the local account registry",
+          "label": "Unlocking your account"
+        },
+        "bridge": {
+          "detail": "Registering the Capacitor plugins",
+          "label": "Waking the native bridge"
+        },
+        "companion": {
+          "detail": "Checking secure storage for a paired desktop",
+          "label": "Reading your pairing"
+        },
+        "host": {
+          "detail": "Negotiating the connection and its capabilities",
+          "label": "Reaching your desktop"
+        },
+        "preferences": {
+          "detail": "Applying saved settings and running startup checks",
+          "label": "Loading your preferences"
+        },
+        "sync": {
+          "detail": "Pulling recent sessions and messages",
+          "label": "Syncing conversations"
+        },
+        "workspace": {
+          "detail": "Fetching the view and its runtimes",
+          "label": "Loading the view"
+        }
+      },
+      "statusActive": "In progress",
+      "statusDone": "Done",
+      "statusFailed": "Failed",
+      "statusPending": "Pending",
+      "statusSkipped": "Skipped",
+      "stepsLabel": "Startup steps",
+      "stepsOf": "{completed} of {total}",
+      "wordmark": "cognia"
     },
     "standaloneSearch": {
       "answerTitle": "Answer",
@@ -15559,6 +16246,173 @@
       }
     }
   },
+  "onboarding": {
+    "apiKeyHintHost": "console.anthropic.com",
+    "apiKeyHintPrefix": "Get one at ",
+    "apiKeyHintSuffix": ". The key never leaves your machine.",
+    "apiKeyLabel": "Anthropic API key",
+    "apiKeyPlaceholder": "sk-ant-…",
+    "back": "Back",
+    "cards": {
+      "extractText": {
+        "description": "Take a screenshot and get the words back out of it.",
+        "prompt": "Take a screenshot and extract the text from it.",
+        "title": "Pull text out of an image"
+      },
+      "readFolder": {
+        "description": "Point it at a directory and get a plain summary of what's inside.",
+        "prompt": "Read a folder on this machine and tell me what's in it.",
+        "title": "Read a folder"
+      },
+      "summarizeWeb": {
+        "description": "Give it a link and get the gist, without leaving the app.",
+        "prompt": "Summarize a web page for me.",
+        "title": "Summarize a web page"
+      }
+    },
+    "continue": "Continue",
+    "done": "Done",
+    "finishBar": {
+      "cta": "Finish setup",
+      "dismiss": "Dismiss",
+      "provider_skipped": "Cognia can't reach a model yet — finish signing in.",
+      "runtime_skipped": "No agent runtime is set up on this machine yet.",
+      "task_failed": "Your first run didn't finish. Want to try again?"
+    },
+    "firstRun": {
+      "changeCharacter": "Change",
+      "description": "Pick something to try. The agent will do it now, and you can judge the result yourself.",
+      "failed": "That didn't work. You can pick another, or skip and try later.",
+      "runningWith": "Running as {name}",
+      "runtimeLine": "Using {runtime}",
+      "starting": "Starting…",
+      "title": "Let's do one real thing"
+    },
+    "provider": {
+      "apiKey": {
+        "cta": "Use API key",
+        "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
+        "title": "Paste an Anthropic API key"
+      },
+      "backToChooser": "Choose a different sign-in method",
+      "claude": {
+        "cta": "Sign in with Anthropic",
+        "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
+        "title": "Claude Pro / Max"
+      },
+      "codex": {
+        "cta": "Sign in with ChatGPT",
+        "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
+        "title": "ChatGPT Plus / Pro (Codex)"
+      },
+      "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
+      "loggedInBadge": "Connected",
+      "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
+      "opencode": {
+        "cta": "Paste OpenCode key",
+        "description": "Paste an OpenCode Zen API key. Optional region override available.",
+        "title": "OpenCode Zen"
+      },
+      "title": "How do you want to sign in?"
+    },
+    "rail": {
+      "first-run": {
+        "description": "Watch it do one real thing.",
+        "label": "First run"
+      },
+      "label": "Setup progress",
+      "provider": {
+        "description": "How Cognia reaches a model.",
+        "label": "Sign in"
+      },
+      "scan": {
+        "description": "What we found, and what to bring over.",
+        "label": "This machine"
+      }
+    },
+    "restart": {
+      "description": "Walk through the first-run flow from the beginning.",
+      "label": "Run setup again"
+    },
+    "saving": "Saving…",
+    "scan": {
+      "authenticated": "Already signed in",
+      "description": "We look for agent CLIs you have installed, and for settings worth bringing over. Nothing leaves your computer.",
+      "empty": "No agent runtimes found",
+      "emptyDescription": "That's fine — you can sign in with a Cognia subscription on the next step instead.",
+      "migrateCta": "Import",
+      "migrateDescription": "Import commands, settings and past sessions from {vendor}.",
+      "migrateDone": "Imported",
+      "migrateFailed": "Import failed. You can retry from Settings → Data.",
+      "migrateRunning": "Importing…",
+      "migrateTitle": "Bring over your setup",
+      "needsAuth": "Not signed in",
+      "pairedCta": "Open pairing",
+      "pairedDescription": "Your desktop does the work. Pair it now and this phone becomes a remote for it.",
+      "pairedTitle": "Pair with your desktop",
+      "rescan": "Scan again",
+      "runtimesFound": "{count, plural, one {# agent runtime} other {# agent runtimes}}",
+      "scanning": "Looking around…",
+      "title": "What's already on this machine"
+    },
+    "skip": "Skip for now",
+    "toastNeedKey": "Paste your Anthropic API key to continue.",
+    "tour": {
+      "computerUse": {
+        "cta": "Open automation settings",
+        "description": "Computer Use is off by default. Enable it per character and pick a permission tier (off / whitelist / per-call).",
+        "title": "Let the AI drive the desktop"
+      },
+      "connectors": {
+        "cta": "Configure connectors",
+        "description": "Run the assistant as a bot in your favorite messaging platform with auto / manual / draft modes.",
+        "title": "Bridge to Telegram, Discord, Slack, Lark, OneBot"
+      },
+      "description": "These ship with Cognia today. Skip if you'd rather discover them yourself.",
+      "done": "Done",
+      "mobile": {
+        "cta": "Open companion settings",
+        "description": "Generate a 5-minute pair token, then scan it from the mobile app. Falls back from mDNS to WebRTC to Cloudflare tunnel automatically.",
+        "title": "Pair your phone over LAN or WAN"
+      },
+      "next": "Next",
+      "ocr": {
+        "cta": "Configure OCR",
+        "description": "Hover an attachment in the composer to pull text into your prompt. Local engines work offline; cloud providers are optional.",
+        "title": "Extract text from images and PDFs"
+      },
+      "openSettings": "Open settings",
+      "previous": "Previous",
+      "progress": "{current} of {total}",
+      "sandbox": {
+        "cta": "Open sandbox settings",
+        "description": "Bash / Edit / Write can be routed through an OS sandbox (sandbox-exec / bwrap / Windows synthetic-user) or an opt-in e2b microVM. Strict mode refuses calls when no backend is healthy — no bypass.",
+        "title": "Shell tools run inside a sandbox"
+      },
+      "skip": "Skip tour",
+      "title": "What you can do next",
+      "twin": {
+        "cta": "Open twin settings",
+        "description": "Upload documents and the distill pipeline builds a redacted style profile you can bind to any character.",
+        "title": "Train a digital twin on your writing"
+      }
+    },
+    "welcome": {
+      "byokCta": "Use my own key",
+      "byokDescription": "Bring your own API key and run inference in this app.",
+      "byokTitle": "On its own",
+      "cta": "Get started",
+      "headline": "Your desktop, with an agent in it.",
+      "lede": "Cognia runs agents against what is actually on this machine — your files, your screen, your browser — not just a chat box.",
+      "modeTitle": "How should this phone run?",
+      "pairCta": "Pair with a desktop",
+      "pairDescription": "Send work to a Cognia desktop over LAN or WAN. It does the heavy lifting.",
+      "pairTitle": "Paired with my desktop",
+      "skipExisting": "I've done this before",
+      "sub": "This takes about a minute, and ends with the agent finishing one real task."
+    },
+    "wordmark": "Cognia"
+  },
   "page": {
     "deployNow": "Deploy now",
     "instructionEdit": "Get started by editing",
@@ -16650,8 +17504,6 @@
     "triggerText": "Plan / tasks ({count})"
   },
   "plugins": {
-    "description": "Browse, install, configure, and govern the plugins running inside Cognia. Inspect their permissions, scheduled jobs, analytics, and devtools — full marketplace search and installation flows are available here.",
-    "title": "Plugins",
     "activation": {
       "cancelled": "Activation cancelled at: {phase}",
       "countLabel": "Step {processed} of {total}",
@@ -17016,6 +17868,7 @@
       "unresolved": "Unresolved",
       "warningsTitle": "{count} warnings"
     },
+    "description": "Browse, install, configure, and govern the plugins running inside Cognia. Inspect their permissions, scheduled jobs, analytics, and devtools — full marketplace search and installation flows are available here.",
     "detail": {
       "activation": "Activation events",
       "capabilitiesTitle": "Capabilities",
@@ -17068,14 +17921,6 @@
         "switchAria": "Trust this plugin's frontend code",
         "title": "Trust frontend code"
       },
-      "logs": {
-        "aria": "Python host log entries",
-        "clear": "Clear",
-        "empty": "No host activity yet. Logs, pip progress, and streaming output appear here once the Python host runs.",
-        "exited": "Host process exited",
-        "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
-        "streamEnd": "— stream ended —"
-      },
       "lifecycle": {
         "activating": "Activating",
         "dirty": "Cleanup required",
@@ -17085,6 +17930,14 @@
         "retrying": "Retrying cleanup",
         "stopping": "Stopping",
         "waiting": "Waiting for service"
+      },
+      "logs": {
+        "aria": "Python host log entries",
+        "clear": "Clear",
+        "empty": "No host activity yet. Logs, pip progress, and streaming output appear here once the Python host runs.",
+        "exited": "Host process exited",
+        "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
+        "streamEnd": "— stream ended —"
       },
       "metaAuthor": "Author",
       "metaCreatedAt": "Installed at",
@@ -17250,9 +18103,6 @@
         "loading": "Inspecting plugins…",
         "refresh": "Refresh"
       },
-      "logs": {
-        "empty": "No logs captured."
-      },
       "lifecycle": {
         "effects": "Effects (active / pending / failed)",
         "empty": "No lifecycle generations have been observed.",
@@ -17260,6 +18110,10 @@
         "services": "Services",
         "state": "Generation and state"
       },
+      "logs": {
+        "empty": "No logs captured."
+      },
+      "openCreator": "Open Creator",
       "profiler": {
         "avgDuration": "Average duration",
         "emptyAll": "No installed plugins to profile yet.",
@@ -17276,8 +18130,8 @@
         "hooks": "Hook history",
         "hotReload": "Hot reload",
         "inspect": "Inspect",
-        "logs": "Logs",
         "lifecycle": "Lifecycle",
+        "logs": "Logs",
         "profiler": "Profiler",
         "triggers": "Triggers"
       },
@@ -17740,6 +18594,7 @@
       "permissions": "Permissions",
       "scheduled": "Scheduled"
     },
+    "title": "Plugins",
     "toolbar": {
       "checkUpdates": "Check for updates",
       "fromFile": "From file…",
@@ -21773,7 +22628,8 @@
       "codex": "Codex CLI",
       "continue-dev": "Continue",
       "gemini-cli": "Gemini CLI",
-      "opencode": "OpenCode"
+      "opencode": "OpenCode",
+      "pi": "Pi"
     },
     "title": "Import agent sessions",
     "unrecognized": "These files weren't recognized as a supported agent session.",
@@ -21896,24 +22752,6 @@
     }
   },
   "settings": {
-    "backToChat": "Back to chat",
-    "close": "Close",
-    "customModes": "Custom Agent Modes",
-    "customModesDesc": "Create and manage custom agent modes with specific tools, prompts, and behaviors.",
-    "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
-    "groupAi": "AI Core",
-    "groupData": "Data",
-    "groupExtensions": "Extensions",
-    "groupInterface": "Interface",
-    "groupObservability": "Observability",
-    "groupSystem": "System",
-    "hostUnavailableSectionBody": "This section administers a capability the host you are connected to doesn't provide — it needs the desktop app, or a paired host that runs it. Open Cognia there to use it.",
-    "hostUnavailableSectionTitle": "Not available on this host",
-    "loadingSection": "Loading section",
-    "loadingSettings": "Loading settings…",
-    "noSettingsFound": "No settings match your search.",
-    "searchPlaceholder": "Search settings…",
-    "title": "Settings",
     "a2ui": {
       "debugger": {
         "allSurfaces": "All surfaces",
@@ -22654,6 +23492,20 @@
           "protan": "Protanopia (red-weak)",
           "tritan": "Tritanopia (blue-yellow)"
         },
+        "groups": {
+          "contrast": {
+            "hint": "How strictly the theme editor checks color pairs.",
+            "label": "Contrast audit"
+          },
+          "motion": {
+            "hint": "How much the interface animates.",
+            "label": "Motion"
+          },
+          "vision": {
+            "hint": "Color layers applied on top of the active theme.",
+            "label": "Vision adjustments"
+          }
+        },
         "highContrast": {
           "dark": "High-contrast dark",
           "hint": "Applies a high-contrast color layer on top of the current theme.",
@@ -22669,6 +23521,7 @@
             "normal": "Normal (1×)",
             "slow": "Slow (0.5×)"
           },
+          "speedDisabledHint": "Unavailable while reduce motion is on.",
           "speedLabel": "Animation speed"
         },
         "wcag": {
@@ -23211,6 +24064,10 @@
             "description": "Per-surface tonality and elevation",
             "label": "Components"
           },
+          "cursor": {
+            "description": "Pointer packs and motion effects",
+            "label": "Cursor"
+          },
           "custom": {
             "description": "Edit the color tokens directly",
             "label": "Custom theme"
@@ -23398,16 +24255,33 @@
         "description": "Apply an image, gradient, or solid color as the background. Built-in presets are pre-loaded; uploads stay on your device.",
         "dropHint": "Drop an image here, or click below",
         "enabledLabel": "Enable background",
+        "focal": {
+          "bottom": "Bottom",
+          "bottomLeft": "Bottom left",
+          "bottomRight": "Bottom right",
+          "center": "Center",
+          "left": "Left",
+          "right": "Right",
+          "top": "Top",
+          "topLeft": "Top left",
+          "topRight": "Top right"
+        },
+        "focalHint": "Anchors the part of the image that survives the crop.",
+        "focalLabel": "Focal point",
+        "focalUnavailable": "This fit leaves no room to anchor the image.",
         "formats": "PNG, JPEG, WebP, GIF, AVIF · up to 32 MB",
         "galleryTitle": "Gallery",
         "generator": {
           "accent": "Generated accent color",
           "action": "Generate matching theme",
+          "applyTuning": "Apply suggested",
           "created": "A matching light/dark theme was created and activated.",
           "description": "Extract a local accent color from this image and build a readable light/dark theme.",
           "error": "Could not analyze this image. The wallpaper is unchanged.",
+          "secondary": "Generated secondary color",
           "themeName": "{name} palette",
           "title": "Generate theme from wallpaper",
+          "tuningHint": "Suggested for this wallpaper: {opacity}% opacity, {blur}px blur.",
           "variant": {
             "dark": "Dark base",
             "light": "Light base"
@@ -23426,16 +24300,30 @@
         "opacity": {
           "autoFix": "Auto-fix",
           "contrastLabel": "Estimated text contrast",
+          "estimated": "Estimated — not yet sampled",
           "fail": "Text nearly unreadable. Lower opacity to restore contrast.",
+          "measured": "Measured from this wallpaper",
           "warn": "Below WCAG AA — text may be hard to read"
         },
         "opacityLabel": "Opacity",
+        "placementHint": "Where the wallpaper is drawn and which part of it you keep.",
+        "placementTitle": "Placement",
         "pluginBadge": "Plugin",
         "positionCenter": "Center",
         "positionContain": "Contain",
         "positionCover": "Cover",
+        "positionFill": "Stretch",
+        "positionHint": {
+          "center": "Drawn at its natural size, no scaling.",
+          "contain": "Whole image fits; empty space is left around it.",
+          "cover": "Fills the surface; whatever overflows is cropped.",
+          "fill": "Stretched to the surface — distorts the aspect ratio.",
+          "tile": "Repeated at natural size across the surface."
+        },
         "positionLabel": "Position",
         "positionTile": "Tile",
+        "readabilityHint": "How much of the wallpaper reaches the text in front of it.",
+        "readabilityTitle": "Readability",
         "scope": {
           "all": {
             "desc": "Everything including sidebar",
@@ -23501,6 +24389,7 @@
       "showNotificationLabel": "Toast on auto-create",
       "title": "Artifacts"
     },
+    "backToChat": "Back to chat",
     "builtInSkills": {
       "conversation": {
         "allowedListLabel": "Allowed skill IDs",
@@ -24142,16 +25031,6 @@
       "saving": "Saving…",
       "searchPlaceholder": "Search characters…",
       "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
-      "support": {
-        "diagnostics": "Allow redacted local diagnostics",
-        "diagnosticsDescription": "Local kill switch. When off, the Support Agent receives bundled product docs only.",
-        "hidePreview": "Hide preview",
-        "openIssue": "Open issue",
-        "preview": "Preview",
-        "previewUnavailable": "Preview unavailable",
-        "supportResponse": "Support response",
-        "userReport": "User report"
-      },
       "title": "Characters",
       "trust": {
         "rejectedToast": "Pack “{id}” was rejected: its signature did not verify ({reason}).",
@@ -24201,6 +25080,7 @@
         "partial": "Synced with issues — {ok} ok, {errors} failed."
       }
     },
+    "close": "Close",
     "common": {
       "unsavedBar": {
         "discard": "Discard",
@@ -24336,6 +25216,10 @@
         "debounceLabel": "Debounce (ms)",
         "hint": "Show a dim AI continuation as you type; press Tab to accept. Off by default.",
         "label": "Inline autocomplete"
+      },
+      "ghostTextLocal": {
+        "hint": "Complete from your own history and commands without calling a model.",
+        "label": "Local suggestions only"
       },
       "starters": {
         "hint": "Suggest opening prompts on the empty chat screen.",
@@ -25268,12 +26152,29 @@
         "verificationTokenLabel": "Verification Token",
         "verificationTokenPlaceholder": "Verification token…",
         "verificationTokenRequired": "Verification Token is required.",
+        "webSessions": {
+          "actionFailed": "Action failed: {reason}",
+          "description": "Feishu web sessions the companion has forwarded an entry intent for. The companion keeps sessions stateless, so this ledger is the only record of who holds one. Read-only — disable the principal above to cut someone off.",
+          "empty": "No web session has been seen yet.",
+          "prune": "Prune old rows",
+          "pruned": "Removed {count} expired row(s).",
+          "seenAt": "Last seen {at}",
+          "state": {
+            "expired": "Expired",
+            "live": "Live",
+            "revoked": "Revoked"
+          },
+          "stateAria": "Session state",
+          "summary": "{live} live of {total} recorded",
+          "title": "Web sessions"
+        },
         "webhookUrlCopied": "Callback URL copied.",
         "webhookUrlCopy": "Copy URL",
         "webhookUrlCopyAria": "Copy callback URL",
         "webhookUrlHelp": "Paste this URL into Lark Open Platform → Event subscriptions → Request URL. The token in the verification step must match the Verification Token field above.",
         "webhookUrlLabel": "Callback URL",
         "webhookUrlNewAdapterHint": "Save the adapter first; the callback URL is generated using the new adapter ID.",
+        "webhookUrlOriginMissingHelp": "This deployment has no public origin yet, so the callback URL cannot be built. Set COGNIA_LARK_PUBLIC_BASE (or serve the app behind the same front door as the companion) and reopen this dialog.",
         "webhookUrlTunnelLoading": "Checking tunnel status…",
         "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
         "whitelist": {
@@ -26054,6 +26955,11 @@
           "heading": "Search message content",
           "label": "Search inside messages"
         },
+        "customIcons": {
+          "description": "Show each conversation's character or team avatar in the list. Off falls back to a neutral glyph.",
+          "heading": "Character and team icons",
+          "label": "Show custom icons"
+        },
         "density": {
           "description": "Tighten row spacing to fit more conversations.",
           "heading": "Compact rows",
@@ -26106,6 +27012,23 @@
           "description": "Reset the draggable sidebar back to its default width.",
           "heading": "Sidebar width"
         },
+        "sortBy": {
+          "description": "Order applied inside each section. Only “Recent activity” keeps a manual drag order.",
+          "heading": "Sort conversations by",
+          "label": "Conversation sort",
+          "options": {
+            "created": "Date created",
+            "oldest": "Oldest activity",
+            "recent": "Recent activity",
+            "title": "Title (A–Z)",
+            "unread": "Unread first"
+          }
+        },
+        "timestamps": {
+          "description": "Show when each conversation was last active at the end of its title.",
+          "heading": "Activity time",
+          "label": "Show activity time"
+        },
         "title": "Conversation sidebar",
         "titleMotion": {
           "description": "Reveal overflowing titles with a paused back-and-forth scroll on hover. Reduced-motion preferences always stay static.",
@@ -26135,6 +27058,8 @@
       },
       "useDefault": "Use chat default"
     },
+    "customModes": "Custom Agent Modes",
+    "customModesDesc": "Create and manage custom agent modes with specific tools, prompts, and behaviors.",
     "data": {
       "apply": "Apply",
       "applying": "Applying…",
@@ -26788,6 +27713,7 @@
         "usernamePlaceholder": "your-username"
       }
     },
+    "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
     "descriptions": {
       "a2ui": "Agent-to-UI mini-apps, runtime defaults, MCP bridge, and debugger.",
       "about": "Version, build, diagnostics, updates and credits.",
@@ -27757,6 +28683,12 @@
       "useSdkDefault": "Use SDK default",
       "workingDirectory": "Working directory"
     },
+    "groupAi": "AI Core",
+    "groupData": "Data",
+    "groupExtensions": "Extensions",
+    "groupInterface": "Interface",
+    "groupObservability": "Observability",
+    "groupSystem": "System",
     "hooks": {
       "addGroup": "Add group",
       "builtin": {
@@ -27868,6 +28800,8 @@
       "title": "Lifecycle hooks",
       "unsaved": "Unsaved changes"
     },
+    "hostUnavailableSectionBody": "This section administers a capability the host you are connected to doesn't provide — it needs the desktop app, or a paired host that runs it. Open Cognia there to use it.",
+    "hostUnavailableSectionTitle": "Not available on this host",
     "instructions": {
       "description": "Load on-disk instruction files (CLAUDE.md / AGENTS.md / AGENT.md) from the active workspace into the agent's system prompt, with nested directory discovery and @import expansion.",
       "enabled": "Enable instruction files",
@@ -27891,6 +28825,8 @@
       "saved": "Instruction settings saved.",
       "title": "Project instructions"
     },
+    "loadingSection": "Loading section",
+    "loadingSettings": "Loading settings…",
     "logs": {
       "linkCardDescription": "List, dashboard, trace views — search, filter, group, export and bookmark logs in real time.",
       "linkCardFooter": "Closes the settings dialog and navigates to /logs.",
@@ -28361,6 +29297,7 @@
       },
       "title": "Network Proxy"
     },
+    "noSettingsFound": "No settings match your search.",
     "notifications": {
       "badgeHint": "Show the unread badge on the bell.",
       "badgeLabel": "Badge",
@@ -29256,6 +30193,7 @@
         "title": "Workspace confinement"
       }
     },
+    "searchPlaceholder": "Search settings…",
     "sectionReset": {
       "button": "Reset section",
       "cancel": "Cancel",
@@ -29332,6 +30270,8 @@
         "chatPrevAnchor": "Jump to previous message anchor",
         "chatSearchToggle": "Find in conversation",
         "commandPaletteToggle": "Open global search / command palette",
+        "conversationNext": "Next conversation",
+        "conversationPrevious": "Previous conversation",
         "dockLayoutRedo": "Redo dock layout change",
         "dockLayoutReset": "Reset the dock layout",
         "dockLayoutUndo": "Undo dock layout change",
@@ -29348,6 +30288,7 @@
         "observabilityRefresh": "Refresh",
         "observabilityToggleEdit": "Toggle edit layout",
         "searchFocus": "Focus search",
+        "sidebarToggle": "Toggle conversation sidebar",
         "skillsClearSelection": "Clear selection / close detail",
         "skillsCreate": "Create skill",
         "skillsDelete": "Delete selected skill",
@@ -29364,6 +30305,7 @@
         "workbenchActivityTemplates": "Workbench: templates",
         "workbenchActivityWorkspace": "Workbench: workspace",
         "workbenchQuickSwitch": "Workbench: quick switch panel",
+        "workflowCommandPaletteToggle": "Workflow editor: command palette",
         "zoomIn": "Zoom in",
         "zoomOut": "Zoom out",
         "zoomReset": "Reset zoom"
@@ -29378,6 +30320,7 @@
         "panels": "Panels",
         "skills": "Skills",
         "terminal": "Terminal",
+        "workflow": "Workflow editor",
         "zoom": "Zoom"
       },
       "clear": "Clear",
@@ -30390,13 +31333,53 @@
       "ssh": {
         "add": "Add SSH host",
         "auth": {
+          "agent": "SSH agent",
           "password": "Password",
           "privateKey": "Private key"
+        },
+        "configImport": {
+          "absent": "No config file at {path}.",
+          "adjustments": {
+            "bindNarrowedToLoopback": "A forward binding a wider address will be narrowed to 127.0.0.1.",
+            "extraAliasesDropped": "Only the first alias on the Host line becomes a profile.",
+            "remoteForwardDisabled": "Remote forwards are imported switched off; turn one on when you want it."
+          },
+          "badges": {
+            "exists": "Already saved",
+            "synthesized": "From a ProxyJump line"
+          },
+          "cancel": "Cancel",
+          "confirm": "Import {count} host(s)",
+          "description": "Reading ~/.ssh/config…",
+          "importing": "Importing…",
+          "loading": "Reading the file…",
+          "noHosts": "The file has no host entries this app can import.",
+          "notices": {
+            "include": "Include “{subject}” was not followed.",
+            "line": "line {line}",
+            "malformedForward": "Could not read “{subject}”.",
+            "matchBlock": "Match block “{subject}” was skipped.",
+            "missingHostName": "“{subject}” has no HostName, so it will connect to that name directly.",
+            "proxyCommand": "ProxyCommand on “{subject}” has no equivalent here; set a jump host instead.",
+            "title": "Not imported",
+            "unsupportedDirective": "Directive “{subject}” is not modelled.",
+            "wildcardHost": "Host pattern “{subject}” cannot become a single profile."
+          },
+          "open": "Import from ~/.ssh/config",
+          "resolution": {
+            "create": "Add as new",
+            "label": "What to do with {name}",
+            "overwrite": "Replace saved",
+            "skip": "Skip"
+          },
+          "title": "Import SSH hosts",
+          "via": "through a jump host"
         },
         "connect": "Connect",
         "connecting": "Connecting…",
         "empty": "No SSH hosts saved yet.",
         "fields": {
+          "agentNotice": "Signing is delegated to your running ssh-agent. No password, passphrase, or key path is stored for this host.",
           "authMethod": "Authentication method",
           "credentialSaved": "Credential saved securely",
           "host": "Host",
@@ -30410,13 +31393,63 @@
           "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
           "username": "Username"
         },
+        "forwarding": {
+          "add": "Add rule",
+          "errors": {
+            "duplicate_local_port": "Another rule already listens on this local port.",
+            "duplicate_remote_port": "Another rule already uses this port on the server.",
+            "host_empty": "Enter a destination host.",
+            "host_invalid": "A host cannot contain spaces.",
+            "port_out_of_range": "Ports must be between 1 and 65535."
+          },
+          "jumpHost": {
+            "direct": "Connect directly",
+            "helper": "Each hop authenticates on its own account and its host key is trusted separately, so connect to a bastion once by itself before using it here.",
+            "label": "Connect through"
+          },
+          "local": {
+            "enable": "Enable this local forward",
+            "helper": "Listens on 127.0.0.1 on this machine and hands each connection to the server, which dials the destination. Reachable only from this machine.",
+            "label": "Local forwards (-L)",
+            "localPort": "Local port",
+            "remoteHost": "Destination host, as the server sees it",
+            "remoteHostPlaceholder": "db.internal",
+            "remotePort": "Destination port"
+          },
+          "remote": {
+            "enable": "Enable this remote forward",
+            "label": "Remote forwards (-R)",
+            "localHost": "Destination host on this machine",
+            "localHostPlaceholder": "localhost",
+            "localPort": "Destination port on this machine",
+            "remotePort": "Port on the server",
+            "warning": "The server listens on its own 127.0.0.1 and sends each connection back here. Anyone with access to that machine can then reach the local port you name. Off until you turn it on, and never included when a profile is shared with your phone or another device."
+          },
+          "remove": "Remove rule"
+        },
         "helper": "Credentials are stored in the system keyring. The first connection trusts and saves the host fingerprint; changed fingerprints are rejected.",
+        "hostKeyChanged": {
+          "body": "{host}:{port} presented a different key than the one saved on the first connection. This happens when a server is rebuilt or reinstalled — but it is also what a machine-in-the-middle looks like. The connection was refused.",
+          "cancel": "Keep the connection blocked",
+          "expected": "Fingerprint you trusted",
+          "guidance": "Only continue if you can confirm the new fingerprint out of band — from the server console, your provider's dashboard, or whoever rebuilt it.",
+          "presented": "Fingerprint presented now",
+          "title": "The host key for this server has changed",
+          "trust": "Forget the old key and trust this one",
+          "trusting": "Forgetting…",
+          "unknownFingerprint": "Not readable from known_hosts"
+        },
         "newName": "New SSH host",
         "remove": "Remove SSH host",
         "title": "SSH hosts",
         "toasts": {
+          "agentUnavailable": "No SSH agent is reachable",
           "connectFailed": "SSH connection failed",
           "credentialRequired": "Enter a password before connecting.",
+          "hostKeyForgetFailed": "Could not update known_hosts",
+          "hostKeyForgotten": "Old host key forgotten. Connect again to trust the new one.",
+          "importJumpsDropped": "These hosts will connect directly because their jump host was not imported: {names}",
+          "imported": "Imported {created} new and replaced {replaced} SSH host(s)",
           "learned": "Connected and saved the host fingerprint",
           "removeFailed": "Could not remove the SSH host",
           "syncFailed": "Could not synchronize SSH profiles with the terminal host",
@@ -30440,6 +31473,7 @@
         "label": "Allow unattended execution"
       }
     },
+    "title": "Settings",
     "tray": {
       "addItem": "Add item",
       "description": "Customise the items shown in the system tray menu.",
@@ -32976,6 +34010,88 @@
     },
     "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app."
   },
+  "support": {
+    "consent": {
+      "description": "Per-device switch. Off: the Support Agent answers from bundled docs only. On: it may read a redacted runtime snapshot when troubleshooting.",
+      "hidePreview": "Hide preview",
+      "label": "Allow redacted local diagnostics",
+      "preview": "Preview what the agent would read",
+      "previewUnavailable": "Preview unavailable"
+    },
+    "panel": {
+      "diagnosticsChipAria": "Local diagnostics consent",
+      "diagnosticsOff": "Diagnostics off",
+      "diagnosticsOn": "Diagnostics on",
+      "reportProblem": "Report a problem",
+      "supportResponse": "Support response",
+      "title": "Support Agent",
+      "userReport": "User report"
+    },
+    "report": {
+      "alwaysIncluded": "Always included: {items}",
+      "building": "Building the redacted preview…",
+      "channel": {
+        "copy": "Copy report",
+        "download": "Download Markdown",
+        "issue": "Open GitHub issue"
+      },
+      "delivered": {
+        "copy": "Report copied to the clipboard.",
+        "download": "Report downloaded.",
+        "generic": "Report sent via {channel}.",
+        "issue": "Issue tracker opened with the report pre-filled."
+      },
+      "description": "Everything below is assembled on this device and redacted before it goes anywhere. Nothing is sent until you choose where.",
+      "descriptionLabel": "What happened?",
+      "descriptionPlaceholder": "What were you doing, what did you expect, and what happened instead?",
+      "failed": "The report could not be delivered.",
+      "hidePreview": "Hide preview",
+      "includeTitle": "Include in the report",
+      "preview": "Preview report",
+      "previewFailed": "The report could not be built — some content still looked sensitive after redaction. Untick a section and try again.",
+      "privacyNote": "Personal data (emails, keys, phone numbers, names) is replaced with placeholders and re-checked before the report leaves this device.",
+      "redacted": "Redacted",
+      "section": {
+        "app": {
+          "description": "Version, channel, commit, platform.",
+          "label": "App build"
+        },
+        "conversation": {
+          "description": "Your latest message and the agent's latest reply.",
+          "label": "Support conversation"
+        },
+        "crashReports": {
+          "description": "When and how the desktop app last crashed — no dumps.",
+          "label": "Native crash summaries"
+        },
+        "description": {
+          "description": "The text you typed above.",
+          "label": "Your description"
+        },
+        "diagnostic": {
+          "description": "The structured failure code and its context.",
+          "label": "Diagnostic details"
+        },
+        "error": {
+          "description": "The failure this page caught.",
+          "label": "Error and stack trace"
+        },
+        "recentErrors": {
+          "description": "The last errors recorded in this session.",
+          "label": "Recent errors"
+        },
+        "runtime": {
+          "description": "Health of the local runtime and environment.",
+          "label": "Runtime snapshot"
+        },
+        "sync": {
+          "description": "Per-table companion sync status on this device.",
+          "label": "Sync state"
+        }
+      },
+      "title": "Report a problem"
+    }
+  },
   "tauriDemo": {
     "buttonLabel": "Call Rust greet()"
   },
@@ -33227,9 +34343,19 @@
       "restore": "Restore terminal panel size",
       "spawnDenied": "Terminal blocked by a plugin",
       "spawnError": "Couldn't open terminal: {message}",
-      "splitRight": "Split terminal right (Ctrl+\\)"
+      "splitRight": "Split terminal right (Ctrl+\\)",
+      "sshConnected": {
+        "learned": "Connected and saved the host fingerprint",
+        "verified": "Connected with a verified host fingerprint"
+      },
+      "sshCredentialRequired": "Set a password for “{name}” in Settings → Terminal before connecting."
     },
     "emptyState": {
+      "cloud": {
+        "action": "+ New terminal",
+        "body": "New terminals open on the paired Cognia server. If a spawn is refused, the server must be started with remote terminal access enabled.",
+        "title": "No terminals on the server"
+      },
       "desktop": {
         "action": "+ New terminal",
         "body": "Spawn a shell with the button below, or press Ctrl+` to toggle the dock anywhere in the app.",
@@ -33260,6 +34386,28 @@
       "collapse": "Fold output",
       "expand": "Unfold output",
       "linesHidden": "{count} lines hidden"
+    },
+    "forwards": {
+      "active": "{count} open",
+      "close": "Close port forwards",
+      "direction": {
+        "local": "Local (-L)",
+        "remote": "Remote (-R)"
+      },
+      "open": "Show port forwards",
+      "queued": "{count} waiting",
+      "state": {
+        "failed": "Failed",
+        "listening": "Listening",
+        "starting": "Starting…",
+        "stopped": "Off",
+        "waiting": "Waiting for the connection"
+      },
+      "title": "Port forwards",
+      "toggle": {
+        "local": "Enable or disable the local forward {summary}",
+        "remote": "Enable or disable the remote forward {summary}"
+      }
     },
     "ghost": {
       "acceptHint": "Tab"
@@ -33384,6 +34532,7 @@
       "profilesLabel": "Profiles",
       "pwsh": "PowerShell 7",
       "sh": "sh",
+      "sshLabel": "SSH hosts",
       "zsh": "zsh"
     },
     "stickyScroll": {
@@ -33653,7 +34802,7 @@
       "copyDiagnostics": "Copy diagnostics",
       "docs": "Documentation",
       "openDataFolder": "Open data folder",
-      "reportIssue": "Report an issue",
+      "reportIssue": "Report a problem…",
       "title": "About"
     },
     "allCommands": "All Commands",
@@ -34669,9 +35818,6 @@
     }
   },
   "workflows": {
-    "notFoundBackToLibrary": "Back to library",
-    "notFoundDescription": "The workflow you tried to open doesn't exist or has been deleted.",
-    "notFoundTitle": "Workflow not found",
     "canvasToast": {
       "completed": "Workflow completed",
       "exported": "Workflow JSON downloaded",
@@ -39029,6 +40175,9 @@
         }
       }
     },
+    "notFoundBackToLibrary": "Back to library",
+    "notFoundDescription": "The workflow you tried to open doesn't exist or has been deleted.",
+    "notFoundTitle": "Workflow not found",
     "runs": {
       "detail": {
         "backToRuns": "Back to runs",
@@ -39357,6 +40506,7 @@
       "addRootManual": "Type an absolute path…",
       "additionalDirsHint": "Extra folders mounted into this workspace so the agent can read and edit them.",
       "additionalDirsLabel": "Additional directories",
+      "browseServer": "Browse server",
       "confirmDelete": "Confirm delete",
       "defaultName": "New Workspace",
       "delete": "Delete",
@@ -39392,12 +40542,27 @@
       "pickDir": "Choose directory",
       "pickDirTitle": "Select a directory",
       "primaryBadge": "Primary",
+      "remotePicker": {
+        "chooseCurrent": "Choose this folder",
+        "description": "Browse folders on the paired Cognia server. The selected path becomes available to this workspace.",
+        "empty": "This folder has no subfolders",
+        "folderList": "Server folders",
+        "go": "Go",
+        "loadError": "This folder could not be opened. Check the path and server connection.",
+        "loading": "Loading folders…",
+        "openFolder": "Open {name}",
+        "pathLabel": "Server path",
+        "pathPlaceholder": "/path/on/server",
+        "title": "Choose a server folder",
+        "up": "Go to parent folder"
+      },
       "removeDir": "Remove directory",
       "removeRoot": "Remove folder",
       "revokeRoot": "Revoke trust",
       "rootDirLabel": "Primary directory",
       "rootDirPlaceholder": "/path/to/project",
       "rootLabelPlaceholder": "Folder name (optional)",
+      "rootsEmpty": "No folders added yet. Browse for a folder or enter an absolute path below.",
       "rootsHint": "Mount one or more folders. The primary folder is the working directory; the rest are readable and editable alongside it.",
       "rootsLabel": "Folders",
       "save": "Save",

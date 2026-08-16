@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react"
 
 import { BrandIcon, hasBrandIcon } from "./brand-icon"
+import { RUNTIME_OPTIONS } from "@/components/agent/workspace/runtime-options"
+import type { TeammateRuntime } from "@/types/agent/agent-team"
 
 describe("BrandIcon", () => {
   it("renders the Claude Code brand asset for a known external-agent id", () => {
@@ -174,5 +176,22 @@ describe("BrandIcon", () => {
     render(<BrandIcon id="---" label="---" decorative={false} />)
 
     expect(screen.getByRole("img", { name: "---" })).toHaveTextContent("?")
+  })
+
+  // Every selectable teammate runtime is rendered through `BrandIcon` by
+  // `RuntimeBadge`, the runtime selector, and the mention picker. A runtime with
+  // no alias silently degrades to a grey monogram, which is how `pi-rpc` shipped
+  // sitting next to `pi`'s logo. `droid` is the one accepted gap: no Factory
+  // asset is vendored, so the monogram is the honest answer there rather than
+  // borrowing someone else's mark.
+  describe("teammate runtimes resolve to a brand asset", () => {
+    const NO_VENDORED_ASSET: readonly TeammateRuntime[] = ["droid"]
+
+    it.each(RUNTIME_OPTIONS.filter((r) => !NO_VENDORED_ASSET.includes(r)))(
+      "%s has a brand alias",
+      (runtime) => {
+        expect(hasBrandIcon(runtime)).toBe(true)
+      }
+    )
   })
 })

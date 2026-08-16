@@ -2659,3 +2659,103 @@ describe("plugin-facing setters emit on the message bus", () => {
     })
   })
 })
+
+// ---- onboarding (ADR-0122) ----
+
+describe("onboarding actions", () => {
+  beforeEach(() => {
+    dbSettings.saveSettings.mockImplementation(async (p: Partial<AppSettings>) => baseSettings(p))
+  })
+
+  const savedProgress = () =>
+    (dbSettings.saveSettings.mock.calls[0]?.[0] as Partial<AppSettings>).onboardingProgress
+
+  it("advanceOnboarding records the step without stamping a terminal state", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().advanceOnboarding("scan")
+    })
+    expect(savedProgress()).toMatchObject({ lastStep: "scan" })
+    expect(savedProgress()?.completedAt).toBeUndefined()
+    expect(savedProgress()?.skippedAt).toBeUndefined()
+  })
+
+  it("advanceOnboarding preserves an existing record instead of resetting it", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        onboardingProgress: { version: 1, path: "runtime_skipped", lastStep: "welcome" },
+        onboardingProfile: { intent: "extract-text" },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().advanceOnboarding("first-run")
+    })
+    expect(savedProgress()).toMatchObject({
+      version: 1,
+      path: "runtime_skipped",
+      lastStep: "first-run",
+    })
+  })
+
+  it("completeOnboarding stamps completedAt and drops lastStep", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        onboardingProgress: { version: 1, path: "runtime_skipped", lastStep: "first-run" },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().completeOnboarding()
+    })
+    // lastStep must go: leaving it set would make a Settings re-run reopen the
+    // final step rather than the flow.
+    expect(savedProgress()).toMatchObject({ path: "completed" })
+    expect(savedProgress()?.lastStep).toBeUndefined()
+    expect(Date.parse(savedProgress()!.completedAt!)).not.toBeNaN()
+  })
+
+  it("skipOnboarding records why and where, so re-entry can resume", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().skipOnboarding("provider_skipped", "provider")
+    })
+    expect(savedProgress()).toMatchObject({ path: "provider_skipped", lastStep: "provider" })
+    expect(Date.parse(savedProgress()!.skippedAt!)).not.toBeNaN()
+  })
+
+  it("dismissOnboardingFinishBar flips only the bar flag", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        onboardingProgress: {
+          version: 1,
+          path: "runtime_skipped",
+          skippedAt: "2026-08-01T00:00:00.000Z",
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().dismissOnboardingFinishBar()
+    })
+    expect(savedProgress()).toMatchObject({
+      path: "runtime_skipped",
+      skippedAt: "2026-08-01T00:00:00.000Z",
+      finishBarDismissed: true,
+    })
+  })
+
+  it("setOnboardingProfile merges rather than replaces", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ onboardingProfile: { intent: "read-folder" } }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setOnboardingProfile({ characterId: "char-1" })
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0]?.[0] as Partial<AppSettings>
+    expect(saved.onboardingProfile).toEqual({ intent: "read-folder", characterId: "char-1" })
+  })
+
+  it("never writes the deprecated onboardingDismissedAt stamp", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().completeOnboarding()
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0]?.[0] as Partial<AppSettings>
+    expect(saved).not.toHaveProperty("onboardingDismissedAt")
+  })
+})

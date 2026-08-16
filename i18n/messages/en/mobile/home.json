@@ -38,6 +38,7 @@
   "emptyArchived": "No archived chats.",
   "emptyChats": "No chats yet. Tap + to start one.",
   "emptyFiltered": "No chats match “{query}”.",
+  "emptyFilters": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
   "pinned": "Pinned",
   "presenceStreaming": "Streaming",
   "quickActions": "Quick actions",

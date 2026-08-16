@@ -96,6 +96,11 @@
       "heading": "Search message content",
       "label": "Search inside messages"
     },
+    "customIcons": {
+      "description": "Show each conversation's character or team avatar in the list. Off falls back to a neutral glyph.",
+      "heading": "Character and team icons",
+      "label": "Show custom icons"
+    },
     "density": {
       "description": "Tighten row spacing to fit more conversations.",
       "heading": "Compact rows",
@@ -147,6 +152,23 @@
       "button": "Reset width",
       "description": "Reset the draggable sidebar back to its default width.",
       "heading": "Sidebar width"
+    },
+    "sortBy": {
+      "description": "Order applied inside each section. Only “Recent activity” keeps a manual drag order.",
+      "heading": "Sort conversations by",
+      "label": "Conversation sort",
+      "options": {
+        "created": "Date created",
+        "oldest": "Oldest activity",
+        "recent": "Recent activity",
+        "title": "Title (A–Z)",
+        "unread": "Unread first"
+      }
+    },
+    "timestamps": {
+      "description": "Show when each conversation was last active at the end of its title.",
+      "heading": "Activity time",
+      "label": "Show activity time"
     },
     "title": "Conversation sidebar",
     "titleMotion": {

@@ -3,16 +3,51 @@
   "loading": "加载中…",
   "offline": "当前离线 —— 网络恢复后会自动重试",
   "page": {
+    "capabilities": {
+      "core-chat": "对话",
+      "desktop-tools": "桌面工具",
+      "integrations": "集成",
+      "knowledge-agents": "知识与智能体",
+      "plugin-runtime": "插件",
+      "workflow-automation": "工作流"
+    },
+    "capabilitiesReady": "运行时就绪 {ready}/{total}",
     "description": "正在加载界面、偏好设置和最近使用的内容",
+    "milestoneDuration": "{seconds} 秒",
+    "milestones": {
+      "accounts": {
+        "detail": "读取本地账户注册表",
+        "label": "正在解锁账户"
+      },
+      "interface": {
+        "detail": "挂载窗口框架与面板",
+        "label": "正在启动界面"
+      },
+      "preferences": {
+        "detail": "应用已保存的设置并执行启动检查",
+        "label": "正在加载偏好设置"
+      },
+      "workspace": {
+        "detail": "加载工作区视图与运行时",
+        "label": "正在恢复工作区"
+      }
+    },
+    "platform": {
+      "headless": "无头模式",
+      "mobile": "移动版",
+      "tauri": "桌面版",
+      "web": "网页版"
+    },
     "progressLabel": "工作区准备进度",
     "reload": "重新载入应用",
     "reloadHint": "加载时间超出预期，你可以重新载入后再试。",
-    "stages": {
-      "finalizing": "正在完成最后设置",
-      "interface": "正在启动界面",
-      "workspace": "正在恢复工作区"
-    },
-    "title": "正在准备你的工作区"
+    "statusActive": "进行中",
+    "statusDone": "已完成",
+    "statusPending": "等待中",
+    "stepOf": "第 {current} 步，共 {total} 步",
+    "stepsLabel": "启动步骤",
+    "title": "正在准备你的工作区",
+    "version": "版本 {version}"
   },
   "pageLoading": "加载中…",
   "stillWorking": "仍在进行…（{seconds} 秒）",

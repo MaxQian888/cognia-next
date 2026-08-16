@@ -57,7 +57,8 @@
     "codex": "Codex CLI",
     "continue-dev": "Continue",
     "gemini-cli": "Gemini CLI",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "pi": "Pi"
   },
   "title": "Import agent sessions",
   "unrecognized": "These files weren't recognized as a supported agent session.",

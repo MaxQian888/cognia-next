@@ -74,7 +74,12 @@ export const DEFAULTS: AppSettings = {
   remoteBrowserEnabled: false,
   cliBridge: { autoSync: false },
   webTools: { enabled: true },
+  // Legacy dismissal stamp — read once by `lib/onboarding/migrate-legacy.ts`,
+  // never written. Fresh installs have no progress at all, which is what makes
+  // `OnboardingGate` route them into the flow.
   onboardingDismissedAt: undefined,
+  onboardingProgress: undefined,
+  onboardingProfile: undefined,
   theme: "system",
   fontScale: "md",
   language: "en",
@@ -224,21 +229,25 @@ export const DEFAULTS: AppSettings = {
   // Conversation sidebar (ChannelList) — comfortable density, no preview line,
   // workspace grouping (the axis conversations are already stamped with) +
   // unread badges on, title-only search (content search is opt-in).
+  // Every field the sidebar reads is named here, including the five that used
+  // to rely on a `??` fallback in the component. `changed-settings` and
+  // `profile-transfer` diff against DEFAULTS, so an omitted key read as
+  // "changed by the user" the moment the sidebar merged its own fallback in.
   conversationSidebar: {
     density: "comfortable",
     showPreview: false,
     showCustomIcons: true,
+    showTimestamps: true,
     groupBy: "workspace",
+    sortBy: "recent",
     showUnreadBadges: true,
     searchScope: "title",
+    metadata: ["agent", "model"],
+    titleMotion: "hover",
+    filterPresets: [],
   },
   // Token-level streaming for interactive chat — on by default.
   streamPartialMessages: true,
-}
-
-export async function getSettings(): Promise<AppSettings> {
-  // Retried across a connection close: this read is what every window makes at
-  // boot, right when the plugin table bridge closes and reopens the shared
   // Appearance slice (ADR-0029 / ADR-0114 / ADR-0127). `DEFAULT_APPEARANCE_SLICE`
   // is the single default source for the appearance-owned keys; spreading it
   // here is what makes them canonical `DEFAULTS` keys, so per-section reset,
@@ -260,6 +269,11 @@ function omitAgentFlowMode(
 ): Omit<typeof DEFAULT_APPEARANCE_SLICE, "agentFlowMode"> {
   const { agentFlowMode: _legacy, ...rest } = slice
   return rest
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  // Retried across a connection close: this read is what every window makes at
+  // boot, right when the plugin table bridge closes and reopens the shared
   // connection to register plugin stores. Losing it used to strand the whole
   // window on DEFAULTS for the rest of the session (see `withDbReopenRetry`).
   const row = await withDbReopenRetry(() => getDb().settings.get(SINGLETON_ID))

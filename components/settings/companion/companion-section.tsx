@@ -86,37 +86,50 @@ async function startServer(bindMode: BindMode): Promise<number> {
     port: DEFAULT_PORT,
     bindLoopbackOnly: bindMode === "loopback",
   })
-  // Re-seed the Rust remote-control allow list from the persisted Dexie
-  // grants so the elevated capability survives a desktop restart. Replace
-  // semantics — a grant revoked while the desktop was down is not retained.
-  // Best-effort: a failure here only means a granted phone must re-toggle.
-  await seedRemoteControlAllowList()
+  // The three elevated grants live in the host's SecurityStore, which is
+  // persistent — nothing to re-project at boot. All that is left is the
+  // one-time import of the pre-migration Dexie flags, so an upgrading user
+  // does not silently lose grants they had already made.
+  await migrateLegacyDeviceGrants()
   await seedLockedComputerUseAllowList()
   return port
 }
 
-async function seedRemoteControlAllowList(): Promise<void> {
+/**
+ * Import the legacy Dexie grant flags into the host's SecurityStore, once.
+ *
+ * Deliberately not a per-boot reseed. The store is the authority now, so
+ * re-projecting Dexie on every launch would let a stale mirror row resurrect a
+ * grant that was revoked through the store (the `cognia-server devices` CLI,
+ * the owner API) — the exact revocation-doesn't-stick bug the old replace
+ * semantics were guarding against, just in the other direction. Rust guards the
+ * import behind a committed marker, so this is a no-op after the first run.
+ *
+ * Best-effort: a failure here leaves the store's own grants untouched.
+ */
+async function migrateLegacyDeviceGrants(): Promise<void> {
   if (!isTauri()) return
   try {
     const devices = await listPairedDevices()
     const live = devices.filter((d) => d.revokedAt === undefined)
-    await transport.call<void>("companion_seed_remote_control", {
-      deviceIds: live.filter((d) => d.allowRemoteControl === true).map((d) => d.deviceId),
-    })
-    // Seeded from its own column, not derived from remote control: the two are
-    // independent grants, and inferring one from the other would quietly widen
+    // Each grant comes from its own column, never derived from another: they
+    // are independent, and inferring one from the other would quietly widen
     // whichever the user actually chose.
-    await transport.call<void>("companion_seed_agent_control", {
-      deviceIds: live.filter((d) => d.allowAgentControl === true).map((d) => d.deviceId),
-    })
-    await transport.call<void>("companion_seed_remote_terminal", {
-      deviceIds: live.filter((d) => d.allowRemoteTerminal === true).map((d) => d.deviceId),
+    await transport.call<boolean>("companion_migrate_legacy_device_grants", {
+      control: live.filter((d) => d.allowRemoteControl === true).map((d) => d.deviceId),
+      agentControl: live.filter((d) => d.allowAgentControl === true).map((d) => d.deviceId),
+      terminal: live.filter((d) => d.allowRemoteTerminal === true).map((d) => d.deviceId),
     })
   } catch (err) {
-    console.warn("seedRemoteControlAllowList failed", err)
+    console.warn("migrateLegacyDeviceGrants failed", err)
   }
 }
 
+/**
+ * Locked Use keeps its per-boot reseed: unlike the three grants above, its list
+ * is in-memory and intentionally dormant, so Dexie is still its only truth.
+ * See `src-tauri/src/companion_api/locked_use_allow_list.rs`.
+ */
 async function seedLockedComputerUseAllowList(): Promise<void> {
   if (!isTauri()) return
   try {

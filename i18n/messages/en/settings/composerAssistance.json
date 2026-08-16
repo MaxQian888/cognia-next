@@ -13,6 +13,10 @@
     "hint": "Show a dim AI continuation as you type; press Tab to accept. Off by default.",
     "label": "Inline autocomplete"
   },
+  "ghostTextLocal": {
+    "label": "Local suggestions only",
+    "hint": "Complete from your own history and commands without calling a model."
+  },
   "starters": {
     "hint": "Suggest opening prompts on the empty chat screen.",
     "label": "AI starter prompts"

@@ -119,6 +119,7 @@ describe("pruneRetainedTables", () => {
     expect(out).toEqual([
       { id: "agentTraces", removed: 1 },
       { id: "evalArtifacts", removed: 0 },
+      { id: "workSubmissions", removed: 0 },
       { id: "ocrResults", removed: 0 },
     ])
     expect((await getDb().agentTraces.toArray()).map((r) => r.id)).toEqual(["fresh"])

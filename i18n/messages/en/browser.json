@@ -111,17 +111,17 @@
     "standard": "Standard"
   },
   "devtools": {
-    "clear": "Clear",
-    "collapse": "Collapse DevTools",
-    "consoleEmpty": "No console output captured yet.",
-    "consoleTab": "Console ({count})",
-    "durationMs": "{ms} ms",
+    "title": "DevTools",
     "expand": "Expand DevTools",
-    "failedRequests": "{count, plural, =1 {1 failed request} other {# failed requests}}",
-    "networkEmpty": "No requests captured yet.",
-    "networkTab": "Network ({count})",
+    "collapse": "Collapse DevTools",
     "problems": "{count, plural, =1 {1 problem} other {# problems}}",
-    "title": "DevTools"
+    "failedRequests": "{count, plural, =1 {1 failed request} other {# failed requests}}",
+    "consoleTab": "Console ({count})",
+    "networkTab": "Network ({count})",
+    "clear": "Clear",
+    "consoleEmpty": "No console output captured yet.",
+    "networkEmpty": "No requests captured yet.",
+    "durationMs": "{ms} ms"
   },
   "empty": {
     "hint": "Enter any web address or a localhost URL to render it here, then select an element to comment on it.",

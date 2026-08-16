@@ -98,10 +98,9 @@
   "evalRow": "Agent 评估",
   "externalAgentsRow": "外部 Agent",
   "feedback": {
-    "copyDescription": "应用版本、User Agent 和当前同步快照。",
+    "copyDescription": "复制默认脱敏报告：应用构建信息、运行时快照和同步状态。",
     "copyError": "当前壳层无法访问剪贴板。",
     "copyLabel": "复制诊断信息",
-    "copyLabelDone": "已复制诊断信息",
     "copyToast": "已复制诊断信息到剪贴板。",
     "deviceInfoDescription": "权限、构建号、平台细节。",
     "deviceInfoLabel": "设备信息",
@@ -109,17 +108,8 @@
     "openIssueDescription": "包含 Bug 报告与功能请求模板。",
     "openIssueLabel": "在 GitHub 提交 Issue",
     "reportTitle": "反馈问题",
-    "support": {
-      "cancel": "取消",
-      "confirmExport": "确认并导出",
-      "description": "确认后，Cognia 会根据你的描述和已脱敏诊断在本地生成 Markdown 草稿，不会自动发送任何内容。",
-      "exportFailed": "无法生成支持反馈文件。",
-      "exported": "已导出支持反馈。",
-      "placeholder": "发生了什么？你原本期望什么结果？",
-      "summary": "反馈描述",
-      "title": "生成支持反馈？",
-      "trigger": "生成已脱敏的支持反馈"
-    }
+    "reportProblemLabel": "反馈问题",
+    "reportProblemDescription": "描述发生了什么，检查脱敏后的详情，然后复制、下载或在 GitHub 提交 Issue。"
   },
   "feedbackRow": "反馈与诊断",
   "goalsRow": "目标",

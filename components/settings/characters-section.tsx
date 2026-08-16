@@ -85,7 +85,7 @@ import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { TestTtsButton } from "@/components/settings/speech/test-tts-button"
 import { KnowledgeBaseManager } from "@/components/settings/knowledge-base-manager"
 import { AgentTaskBoardDialog } from "@/components/agent/agent-task-board"
-import { SupportAgentControls } from "@/components/support/support-agent-controls"
+import { SupportDiagnosticsConsent } from "@/components/support/support-diagnostics-consent"
 import { removeKnowledgeBase } from "@/lib/knowledge-base/ingest/ingest-source"
 import { isSupportAgentId } from "@/lib/support-agent/context"
 import { tryBuildProjectKnowledgeDeps } from "@/lib/project-knowledge/runtime/build-deps"
@@ -1125,7 +1125,9 @@ function CharacterRow({
               {skillNames && `: ${skillNames}`}
             </p>
           )}
-          {isSupportAgentId(character.id) && <SupportAgentControls />}
+          {isSupportAgentId(character.id) && (
+            <SupportDiagnosticsConsent surface="settings" className="mt-2" />
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <AgentTaskBoardDialog agentId={character.id} agentName={character.name} />

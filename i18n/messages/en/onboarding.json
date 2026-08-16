@@ -1,0 +1,167 @@
+{
+  "apiKeyHintHost": "console.anthropic.com",
+  "apiKeyHintPrefix": "Get one at ",
+  "apiKeyHintSuffix": ". The key never leaves your machine.",
+  "apiKeyLabel": "Anthropic API key",
+  "apiKeyPlaceholder": "sk-ant-…",
+  "back": "Back",
+  "cards": {
+    "readFolder": {
+      "title": "Read a folder",
+      "description": "Point it at a directory and get a plain summary of what's inside.",
+      "prompt": "Read a folder on this machine and tell me what's in it."
+    },
+    "extractText": {
+      "title": "Pull text out of an image",
+      "description": "Take a screenshot and get the words back out of it.",
+      "prompt": "Take a screenshot and extract the text from it."
+    },
+    "summarizeWeb": {
+      "title": "Summarize a web page",
+      "description": "Give it a link and get the gist, without leaving the app.",
+      "prompt": "Summarize a web page for me."
+    }
+  },
+  "continue": "Continue",
+  "done": "Done",
+  "finishBar": {
+    "provider_skipped": "Cognia can't reach a model yet — finish signing in.",
+    "runtime_skipped": "No agent runtime is set up on this machine yet.",
+    "task_failed": "Your first run didn't finish. Want to try again?",
+    "cta": "Finish setup",
+    "dismiss": "Dismiss"
+  },
+  "firstRun": {
+    "title": "Let's do one real thing",
+    "description": "Pick something to try. The agent will do it now, and you can judge the result yourself.",
+    "runningWith": "Running as {name}",
+    "changeCharacter": "Change",
+    "runtimeLine": "Using {runtime}",
+    "starting": "Starting…",
+    "failed": "That didn't work. You can pick another, or skip and try later."
+  },
+  "provider": {
+    "apiKey": {
+      "cta": "Use API key",
+      "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
+      "title": "Paste an Anthropic API key"
+    },
+    "backToChooser": "Choose a different sign-in method",
+    "claude": {
+      "cta": "Sign in with Anthropic",
+      "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
+      "title": "Claude Pro / Max"
+    },
+    "codex": {
+      "cta": "Sign in with ChatGPT",
+      "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
+      "title": "ChatGPT Plus / Pro (Codex)"
+    },
+    "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
+    "loggedInBadge": "Connected",
+    "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
+    "opencode": {
+      "cta": "Paste OpenCode key",
+      "description": "Paste an OpenCode Zen API key. Optional region override available.",
+      "title": "OpenCode Zen"
+    },
+    "title": "How do you want to sign in?"
+  },
+  "rail": {
+    "label": "Setup progress",
+    "scan": {
+      "label": "This machine",
+      "description": "What we found, and what to bring over."
+    },
+    "provider": {
+      "label": "Sign in",
+      "description": "How Cognia reaches a model."
+    },
+    "first-run": {
+      "label": "First run",
+      "description": "Watch it do one real thing."
+    }
+  },
+  "restart": {
+    "label": "Run setup again",
+    "description": "Walk through the first-run flow from the beginning."
+  },
+  "saving": "Saving…",
+  "scan": {
+    "title": "What's already on this machine",
+    "description": "We look for agent CLIs you have installed, and for settings worth bringing over. Nothing leaves your computer.",
+    "scanning": "Looking around…",
+    "empty": "No agent runtimes found",
+    "emptyDescription": "That's fine — you can sign in with a Cognia subscription on the next step instead.",
+    "rescan": "Scan again",
+    "runtimesFound": "{count, plural, one {# agent runtime} other {# agent runtimes}}",
+    "authenticated": "Already signed in",
+    "needsAuth": "Not signed in",
+    "migrateTitle": "Bring over your setup",
+    "migrateDescription": "Import commands, settings and past sessions from {vendor}.",
+    "migrateCta": "Import",
+    "migrateRunning": "Importing…",
+    "migrateDone": "Imported",
+    "migrateFailed": "Import failed. You can retry from Settings → Data.",
+    "pairedTitle": "Pair with your desktop",
+    "pairedDescription": "Your desktop does the work. Pair it now and this phone becomes a remote for it.",
+    "pairedCta": "Open pairing"
+  },
+  "skip": "Skip for now",
+  "toastNeedKey": "Paste your Anthropic API key to continue.",
+  "tour": {
+    "computerUse": {
+      "cta": "Open automation settings",
+      "description": "Computer Use is off by default. Enable it per character and pick a permission tier (off / whitelist / per-call).",
+      "title": "Let the AI drive the desktop"
+    },
+    "connectors": {
+      "cta": "Configure connectors",
+      "description": "Run the assistant as a bot in your favorite messaging platform with auto / manual / draft modes.",
+      "title": "Bridge to Telegram, Discord, Slack, Lark, OneBot"
+    },
+    "description": "These ship with Cognia today. Skip if you'd rather discover them yourself.",
+    "done": "Done",
+    "mobile": {
+      "cta": "Open companion settings",
+      "description": "Generate a 5-minute pair token, then scan it from the mobile app. Falls back from mDNS to WebRTC to Cloudflare tunnel automatically.",
+      "title": "Pair your phone over LAN or WAN"
+    },
+    "next": "Next",
+    "ocr": {
+      "cta": "Configure OCR",
+      "description": "Hover an attachment in the composer to pull text into your prompt. Local engines work offline; cloud providers are optional.",
+      "title": "Extract text from images and PDFs"
+    },
+    "openSettings": "Open settings",
+    "previous": "Previous",
+    "progress": "{current} of {total}",
+    "sandbox": {
+      "cta": "Open sandbox settings",
+      "description": "Bash / Edit / Write can be routed through an OS sandbox (sandbox-exec / bwrap / Windows synthetic-user) or an opt-in e2b microVM. Strict mode refuses calls when no backend is healthy — no bypass.",
+      "title": "Shell tools run inside a sandbox"
+    },
+    "skip": "Skip tour",
+    "title": "What you can do next",
+    "twin": {
+      "cta": "Open twin settings",
+      "description": "Upload documents and the distill pipeline builds a redacted style profile you can bind to any character.",
+      "title": "Train a digital twin on your writing"
+    }
+  },
+  "welcome": {
+    "headline": "Your desktop, with an agent in it.",
+    "lede": "Cognia runs agents against what is actually on this machine — your files, your screen, your browser — not just a chat box.",
+    "sub": "This takes about a minute, and ends with the agent finishing one real task.",
+    "cta": "Get started",
+    "skipExisting": "I've done this before",
+    "modeTitle": "How should this phone run?",
+    "byokTitle": "On its own",
+    "byokDescription": "Bring your own API key and run inference in this app.",
+    "byokCta": "Use my own key",
+    "pairTitle": "Paired with my desktop",
+    "pairDescription": "Send work to a Cognia desktop over LAN or WAN. It does the heavy lifting.",
+    "pairCta": "Pair with a desktop"
+  },
+  "wordmark": "Cognia"
+}

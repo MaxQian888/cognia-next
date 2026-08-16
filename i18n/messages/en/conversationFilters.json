@@ -1,0 +1,101 @@
+{
+  "clearAll": "Clear filters",
+  "count": "{shown} / {total}",
+  "filters": {
+    "label": "Filters",
+    "options": {
+      "branched": "Branched",
+      "pinned": "Pinned",
+      "unread": "Unread"
+    }
+  },
+  "kind": {
+    "label": "Conversation type",
+    "options": {
+      "all": "All types",
+      "dm": "Direct messages",
+      "team": "Team"
+    }
+  },
+  "label": "Filter and sort",
+  "labelActive": "{count, plural, one {Filter and sort (# filter active)} other {Filter and sort (# filters active)}}",
+  "remove": "Remove the {name} filter",
+  "sort": {
+    "label": "Sort by",
+    "options": {
+      "created": "Date created",
+      "oldest": "Oldest activity",
+      "recent": "Recent activity",
+      "title": "Title (A–Z)",
+      "unread": "Unread first"
+    }
+  },
+  "cancel": "Cancel",
+  "selectedSummary": "{count, plural, one {# selected} other {# selected}}",
+  "sections": {
+    "location": "Workspace & folder",
+    "agent": "Agent & team",
+    "model": "Model & provider"
+  },
+  "workspace": {
+    "label": "Workspace",
+    "any": "Any workspace",
+    "unassigned": "No workspace"
+  },
+  "folder": {
+    "label": "Folder",
+    "any": "Any folder",
+    "unassigned": "Not in a folder"
+  },
+  "agent": {
+    "label": "Agent",
+    "any": "Any agent",
+    "unassigned": "No agent"
+  },
+  "team": {
+    "label": "Team",
+    "any": "Any team",
+    "unassigned": "No team"
+  },
+  "model": {
+    "label": "Model",
+    "any": "Any model",
+    "unassigned": "Unknown model"
+  },
+  "provider": {
+    "label": "Provider",
+    "any": "Any provider",
+    "unassigned": "Unknown provider"
+  },
+  "activity": {
+    "label": "Last activity",
+    "options": {
+      "any": "Any time",
+      "today": "Today",
+      "week": "Past 7 days",
+      "month": "Past 30 days",
+      "older": "Older than 30 days"
+    }
+  },
+  "presets": {
+    "label": "Presets",
+    "empty": "No saved presets yet.",
+    "save": "Save current filters…",
+    "saveShort": "Save",
+    "manage": "Manage presets…",
+    "saveTitle": "Save filter preset",
+    "saveDescription": "Name this combination to reapply it in one click, on every device.",
+    "namePlaceholder": "Preset name",
+    "saveAction": "Save preset",
+    "saveRejected": "Enter a name — and keep at least one filter active.",
+    "manageTitle": "Manage presets",
+    "manageDescription": "Rename or remove saved filter combinations. Changes apply immediately.",
+    "rename": "Rename preset {name}",
+    "delete": "Delete preset {name}"
+  },
+  "drawer": {
+    "title": "Filter and sort",
+    "hint": "Narrow the list, then tap Done.",
+    "done": "Done"
+  }
+}

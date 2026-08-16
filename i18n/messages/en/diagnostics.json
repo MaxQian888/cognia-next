@@ -128,6 +128,10 @@
       "hint": "The external agent failed while running this turn — retry, or run it on the built-in agent.",
       "label": "Agent run failed"
     },
+    "extensionHandshakeFailed": {
+      "hint": "The Cognia extension that enforces permissions inside this agent never reported ready, so the session was refused instead of running ungated.",
+      "label": "Agent extension didn't start"
+    },
     "extensionUnknown": {
       "hint": "Cognia hasn't determined whether this agent supports that operation yet — reconnect to probe it.",
       "label": "Support not determined"
@@ -224,6 +228,10 @@
       "hint": "A plugin stopped this message before it was sent — check the plugin's settings.",
       "label": "Blocked by a plugin"
     },
+    "protocolFrameInvalid": {
+      "hint": "The agent sent data that doesn't match its protocol, so the stream can't be trusted — start a new session.",
+      "label": "Malformed agent response"
+    },
     "protocolUnsupported": {
       "hint": "Cognia and this agent don't share a protocol — switch it to ACP and save its configuration again.",
       "label": "Protocol not supported"
@@ -248,9 +256,21 @@
       "hint": "Part of the interface crashed — try again; if it keeps happening, send us the report.",
       "label": "Application error"
     },
+    "resourceLimit": {
+      "hint": "This host is already running the maximum number of agent processes — finish or close one, then try again.",
+      "label": "Too many agent sessions"
+    },
     "routingNoCandidates": {
       "hint": "No provider in the routing chain can serve this request — check your providers and model mappings.",
       "label": "No provider available"
+    },
+    "runtimeVersionUnsupported": {
+      "hint": "This agent is installed but its version is below the supported minimum — upgrade it, then reconnect.",
+      "label": "Agent version too old"
+    },
+    "sandboxUnavailable": {
+      "hint": "External agents only run inside the strict sandbox, and it couldn't be started here. Cognia never falls back to an unsandboxed process.",
+      "label": "Sandbox unavailable"
     },
     "seedFailed": {
       "hint": "Cognia couldn't install its built-in skills and characters — some defaults will be missing.",

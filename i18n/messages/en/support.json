@@ -1,0 +1,82 @@
+{
+  "consent": {
+    "label": "Allow redacted local diagnostics",
+    "description": "Per-device switch. Off: the Support Agent answers from bundled docs only. On: it may read a redacted runtime snapshot when troubleshooting.",
+    "preview": "Preview what the agent would read",
+    "hidePreview": "Hide preview",
+    "previewUnavailable": "Preview unavailable"
+  },
+  "panel": {
+    "title": "Support Agent",
+    "diagnosticsOn": "Diagnostics on",
+    "diagnosticsOff": "Diagnostics off",
+    "diagnosticsChipAria": "Local diagnostics consent",
+    "reportProblem": "Report a problem",
+    "userReport": "User report",
+    "supportResponse": "Support response"
+  },
+  "report": {
+    "title": "Report a problem",
+    "description": "Everything below is assembled on this device and redacted before it goes anywhere. Nothing is sent until you choose where.",
+    "descriptionLabel": "What happened?",
+    "descriptionPlaceholder": "What were you doing, what did you expect, and what happened instead?",
+    "includeTitle": "Include in the report",
+    "alwaysIncluded": "Always included: {items}",
+    "redacted": "Redacted",
+    "preview": "Preview report",
+    "hidePreview": "Hide preview",
+    "building": "Building the redacted preview…",
+    "previewFailed": "The report could not be built — some content still looked sensitive after redaction. Untick a section and try again.",
+    "privacyNote": "Personal data (emails, keys, phone numbers, names) is replaced with placeholders and re-checked before the report leaves this device.",
+    "delivered": {
+      "copy": "Report copied to the clipboard.",
+      "download": "Report downloaded.",
+      "issue": "Issue tracker opened with the report pre-filled.",
+      "generic": "Report sent via {channel}."
+    },
+    "failed": "The report could not be delivered.",
+    "channel": {
+      "copy": "Copy report",
+      "download": "Download Markdown",
+      "issue": "Open GitHub issue"
+    },
+    "section": {
+      "description": {
+        "label": "Your description",
+        "description": "The text you typed above."
+      },
+      "app": {
+        "label": "App build",
+        "description": "Version, channel, commit, platform."
+      },
+      "error": {
+        "label": "Error and stack trace",
+        "description": "The failure this page caught."
+      },
+      "diagnostic": {
+        "label": "Diagnostic details",
+        "description": "The structured failure code and its context."
+      },
+      "conversation": {
+        "label": "Support conversation",
+        "description": "Your latest message and the agent's latest reply."
+      },
+      "runtime": {
+        "label": "Runtime snapshot",
+        "description": "Health of the local runtime and environment."
+      },
+      "recentErrors": {
+        "label": "Recent errors",
+        "description": "The last errors recorded in this session."
+      },
+      "crashReports": {
+        "label": "Native crash summaries",
+        "description": "When and how the desktop app last crashed — no dumps."
+      },
+      "sync": {
+        "label": "Sync state",
+        "description": "Per-table companion sync status on this device."
+      }
+    }
+  }
+}

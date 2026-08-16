@@ -1,0 +1,111 @@
+{
+  "title": "Creator",
+  "subtitle": "在创作根目录内编写插件、技能、Hook、预置与可视化工作流。",
+  "gate": {
+    "title": "需要开发者模式",
+    "description": "Creator 会写入文件并变更权限，因此仅在开启开发者模式后提供。",
+    "enable": "开启开发者模式"
+  },
+  "root": {
+    "title": "创作根目录",
+    "description": "Creator 读写的每个文件都限制在该目录内，且没有隐式默认值。",
+    "empty": "尚未选择创作根目录。",
+    "choose": "选择目录",
+    "change": "更换",
+    "revoke": "撤销",
+    "pathLabel": "路径",
+    "origin": {
+      "selected": "已选择",
+      "created": "已创建"
+    },
+    "rejected": {
+      "empty": "路径为空。",
+      "not-absolute": "请选择绝对路径。",
+      "filesystem-root": "文件系统根目录不能作为创作根目录。",
+      "home-directory": "主目录范围过大，不能作为创作根目录。"
+    }
+  },
+  "artifact": {
+    "label": "要创建什么？",
+    "kinds": {
+      "plugin": "插件",
+      "skill": "技能",
+      "hook": "Hook",
+      "agent-preset": "Agent 预置",
+      "visual-workflow": "可视化工作流"
+    }
+  },
+  "steps": {
+    "title": "流程",
+    "collect-requirements": "收集需求",
+    "survey-existing": "检查已有实现",
+    "plan-scaffold": "生成脚手架计划",
+    "approve-permissions": "审阅权限",
+    "apply-changes": "生成文件",
+    "verify": "Lint、类型检查、构建与契约检查",
+    "preview": "沙箱预览",
+    "review": "独立评审",
+    "approve-delivery": "批准交付"
+  },
+  "status": {
+    "pending": "待开始",
+    "active": "进行中",
+    "awaiting-approval": "等待批准",
+    "completed": "已完成",
+    "failed": "失败",
+    "skipped": "已跳过"
+  },
+  "blocked": {
+    "out-of-order": "被前置步骤阻塞：{step}",
+    "awaiting-approval": "需要先获得你的批准",
+    "already-completed": "已完成",
+    "unknown-step": "未知步骤"
+  },
+  "permissions": {
+    "title": "权限差异",
+    "none": "该产物没有申请新的能力。",
+    "requiresApproval": "{count, plural, other {# 项新增能力需要你的批准}}",
+    "added": "新增",
+    "removed": "移除",
+    "unchanged": "未变化",
+    "approve": "批准这些能力",
+    "approved": "已批准",
+    "stale": "批准之后方案已变更，请重新审阅。",
+    "writesBlocked": "在批准之前不会写入任何文件。"
+  },
+  "preview": {
+    "title": "沙箱预览",
+    "inactive": "未运行。",
+    "generation": "第 {generation} 代",
+    "start": "启动预览",
+    "reload": "重新加载",
+    "stop": "停止",
+    "clean": "资源已全部释放。",
+    "leaked": "{count, plural, other {# 项资源未释放}}：{labels}"
+  },
+  "review": {
+    "title": "独立评审",
+    "pending": "尚未评审。",
+    "approved": "评审通过。",
+    "rejected": "评审发现阻塞性问题。",
+    "readOnly": "评审子 Agent 以只读方式运行，并使用独立上下文。",
+    "authority": "评审权限：{authority}",
+    "noFindings": "没有发现问题。",
+    "severity": {
+      "blocker": "阻塞",
+      "warning": "警告",
+      "info": "提示"
+    }
+  },
+  "run": {
+    "start": "开始一次 Creator 运行",
+    "needsRoot": "请先选择创作根目录。",
+    "active": "运行 {runId} 进行中。",
+    "end": "结束运行",
+    "advance": "运行流程",
+    "advanceHint": "一直向前运行,直到需要你决定为止。",
+    "stopped": "在「{step}」停下:{detail}",
+    "requirements": "它要做什么?",
+    "requirementsPlaceholder": "用一两句话描述这个产物。"
+  }
+}

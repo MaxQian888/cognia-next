@@ -111,17 +111,17 @@
     "standard": "标准"
   },
   "devtools": {
-    "clear": "清空",
-    "collapse": "收起开发者工具",
-    "consoleEmpty": "尚未捕获控制台输出。",
-    "consoleTab": "控制台（{count}）",
-    "durationMs": "{ms} 毫秒",
+    "title": "开发者工具",
     "expand": "展开开发者工具",
-    "failedRequests": "{count} 个失败请求",
-    "networkEmpty": "尚未捕获请求。",
-    "networkTab": "网络（{count}）",
+    "collapse": "收起开发者工具",
     "problems": "{count} 个问题",
-    "title": "开发者工具"
+    "failedRequests": "{count} 个失败请求",
+    "consoleTab": "控制台（{count}）",
+    "networkTab": "网络（{count}）",
+    "clear": "清空",
+    "consoleEmpty": "尚未捕获控制台输出。",
+    "networkEmpty": "尚未捕获请求。",
+    "durationMs": "{ms} 毫秒"
   },
   "empty": {
     "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
