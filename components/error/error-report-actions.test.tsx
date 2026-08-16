@@ -1,11 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-// `buildErrorReportMarkdown` / `buildIssueUrl` moved to `lib/error/build-report.ts`
-// so non-page surfaces can reach them; their unit tests moved with them to
-// `lib/error/build-report.test.ts`. This file covers the component only.
+import { ISSUES_URL } from "@/lib/constants/external-urls"
+import type { SupportReport } from "@/lib/support-report/types"
+
 import { ErrorReportActions, type ErrorReportContext } from "./error-report-actions"
-import { resetRecentErrorLogsForTest } from "@cognia/logging/recent-errors"
 
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
@@ -19,44 +18,71 @@ const copy = {
   copyReportSuccess: "Report copied",
   copyReportFailed: "Copy failed",
   reportIssue: "Report issue",
+  reportIssueFailed: "Tracker failed",
 }
 
 const context: ErrorReportContext = { category: "render", locale: "en", pathname: "/x" }
 
+const report: SupportReport = {
+  title: "[render] boom",
+  markdown: "## Cognia support report\nboom",
+  filename: "cognia-support-report-2026-08-16.md",
+  generatedAt: "2026-08-16T00:00:00.000Z",
+  sectionIds: ["error"],
+}
+
 function setup(overrides?: Partial<React.ComponentProps<typeof ErrorReportActions>>) {
   const writeClipboard = jest.fn().mockResolvedValue(undefined)
-  const openUrl = jest.fn()
-  const getDiagnostics = jest.fn().mockResolvedValue({ isTauri: false, appVersion: "1.0.0" })
-  const getRecentErrors = jest.fn().mockReturnValue([])
+  const openExternal = jest.fn().mockResolvedValue(undefined)
+  const build = jest.fn().mockResolvedValue(report)
   render(
     <ErrorReportActions
-      error={Object.assign(new Error("boom"), { digest: "d1" })}
+      error={Object.assign(new Error("boom"), { digest: "d1", stack: "at foo" })}
       copy={copy}
       context={context}
       toastsEnabled
-      writeClipboard={writeClipboard}
-      openUrl={openUrl}
-      getDiagnostics={getDiagnostics}
-      getRecentErrors={getRecentErrors}
+      channelDeps={{ writeClipboard, openExternal }}
+      build={build}
       {...overrides}
     />
   )
-  return { writeClipboard, openUrl, getDiagnostics, getRecentErrors }
+  return { writeClipboard, openExternal, build }
 }
 
 beforeEach(() => {
-  resetRecentErrorLogsForTest()
   toastSuccess.mockReset()
   toastError.mockReset()
 })
 
 describe("ErrorReportActions component", () => {
-  it("copies a report and toasts success", async () => {
-    const { writeClipboard } = setup()
+  it("builds the report from the error-page context and copies it", async () => {
+    const { writeClipboard, build } = setup()
     await userEvent.click(screen.getByTestId("error-page-copy-report"))
-    await waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(1))
-    expect(writeClipboard.mock.calls[0][0]).toContain("Cognia error report")
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith(report.markdown))
+    expect(build).toHaveBeenCalledWith({
+      context: {
+        surface: "error-page",
+        category: "render",
+        locale: "en",
+        route: "/x",
+        error: { name: "Error", message: "boom", stack: "at foo", digest: "d1" },
+      },
+    })
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Report copied"))
+  })
+
+  it("passes a null error through and omits absent stack / digest", async () => {
+    const { build } = setup({ error: null })
+    await userEvent.click(screen.getByTestId("error-page-copy-report"))
+    await waitFor(() => expect(build).toHaveBeenCalled())
+    expect(build.mock.calls[0][0].context.error).toBeNull()
+
+    const bare = new Error("bare")
+    bare.stack = undefined
+    const second = setup({ error: bare })
+    await userEvent.click(screen.getAllByTestId("error-page-copy-report")[1])
+    await waitFor(() => expect(second.build).toHaveBeenCalled())
+    expect(second.build.mock.calls[0][0].context.error).toEqual({ name: "Error", message: "bare" })
   })
 
   it("flips the copy button to an inline confirmation tick after a successful copy", async () => {
@@ -69,62 +95,58 @@ describe("ErrorReportActions component", () => {
   })
 
   it("toasts failure when the clipboard write rejects", async () => {
-    setup({ writeClipboard: jest.fn().mockRejectedValue(new Error("denied")) })
+    setup({ channelDeps: { writeClipboard: jest.fn().mockRejectedValue(new Error("denied")) } })
     await userEvent.click(screen.getByTestId("error-page-copy-report"))
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Copy failed"))
   })
 
   it("suppresses toasts when toastsEnabled is false", async () => {
     setup({ toastsEnabled: false })
     await userEvent.click(screen.getByTestId("error-page-copy-report"))
     await waitFor(() => expect(toastSuccess).not.toHaveBeenCalled())
-  })
-
-  it("hides the report-issue button when no URL is configured", () => {
-    setup({ issueReportUrl: undefined })
-    expect(screen.queryByTestId("error-page-report-issue")).toBeNull()
-  })
-
-  it("uses the default clipboard and window.open when no seams are injected", async () => {
-    const writeText = jest.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
+    setup({
+      toastsEnabled: false,
+      channelDeps: { writeClipboard: jest.fn().mockRejectedValue(new Error("denied")) },
     })
-    const openSpy = jest.spyOn(window, "open").mockImplementation(() => null)
-    render(
-      <ErrorReportActions
-        error={Object.assign(new Error("boom"), { digest: "d1" })}
-        copy={copy}
-        context={context}
-        toastsEnabled
-        issueReportUrl="https://github.com/acme/app"
-        getDiagnostics={jest.fn().mockResolvedValue(null)}
-        getRecentErrors={jest.fn().mockReturnValue([])}
-      />
+    await userEvent.click(screen.getAllByTestId("error-page-copy-report")[1])
+    await waitFor(() => expect(toastError).not.toHaveBeenCalled())
+  })
+
+  it("opens the public tracker pre-filled when no URL is configured", async () => {
+    const { openExternal } = setup({ issueReportUrl: undefined })
+    await userEvent.click(screen.getByTestId("error-page-report-issue"))
+    await waitFor(() => expect(openExternal).toHaveBeenCalledTimes(1))
+    const url = openExternal.mock.calls[0][0] as string
+    expect(url.startsWith(`${ISSUES_URL}/new?`)).toBe(true)
+    expect(new URL(url).searchParams.get("title")).toBe("[render] boom")
+    expect(new URL(url).searchParams.get("body")).toBe(report.markdown)
+  })
+
+  it("prefers the configured tracker and toasts when it cannot be opened", async () => {
+    const { openExternal } = setup({ issueReportUrl: "https://github.com/acme/app" })
+    await userEvent.click(screen.getByTestId("error-page-report-issue"))
+    await waitFor(() => expect(openExternal).toHaveBeenCalledTimes(1))
+    expect(openExternal.mock.calls[0][0]).toContain("https://github.com/acme/app/issues/new?")
+
+    setup({ channelDeps: { openExternal: jest.fn().mockRejectedValue(new Error("blocked")) } })
+    await userEvent.click(screen.getAllByTestId("error-page-report-issue")[1])
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Tracker failed"))
+  })
+
+  it("ignores a second copy click while the first is still building", async () => {
+    let release: (value: SupportReport) => void = () => {}
+    const build = jest.fn(
+      () =>
+        new Promise<SupportReport>((resolve) => {
+          release = resolve
+        })
     )
-    await userEvent.click(screen.getByTestId("error-page-copy-report"))
-    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
-    await userEvent.click(screen.getByTestId("error-page-report-issue"))
-    await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(1))
-    openSpy.mockRestore()
-  })
-
-  it("builds a generic issue title when no error object is present", async () => {
-    const { openUrl } = setup({ error: null, issueReportUrl: "https://github.com/acme/app" })
-    await userEvent.click(screen.getByTestId("error-page-report-issue"))
-    await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(1))
-    const url = openUrl.mock.calls[0][0] as string
-    expect(new URL(url).searchParams.get("title")).toBe("[render] Error report")
-  })
-
-  it("shows the report-issue button and opens a prefilled URL when configured", async () => {
-    const { openUrl } = setup({ issueReportUrl: "https://github.com/acme/app" })
-    await userEvent.click(screen.getByTestId("error-page-report-issue"))
-    await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(1))
-    const url = openUrl.mock.calls[0][0] as string
-    expect(url).toContain("https://github.com/acme/app/issues/new?")
-    expect(url).toContain("title=")
-    expect(url).toContain("body=")
+    const { writeClipboard } = setup({ build })
+    const button = screen.getByTestId("error-page-copy-report")
+    await userEvent.click(button)
+    expect(button).toBeDisabled()
+    release(report)
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(1))
+    expect(build).toHaveBeenCalledTimes(1)
   })
 })

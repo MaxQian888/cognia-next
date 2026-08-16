@@ -164,6 +164,7 @@ const STATIC_REPORT: ErrorReportCopy = {
   copyReportSuccess: "Report copied to clipboard",
   copyReportFailed: "Failed to copy report",
   reportIssue: "Report issue",
+  reportIssueFailed: "Failed to open the issue tracker",
 }
 
 const STATIC_EN_BASE: Omit<
@@ -374,6 +375,7 @@ function ErrorPageIntl(props: ErrorPageProps) {
       copyReportSuccess: t("report.copyReportSuccess"),
       copyReportFailed: t("report.copyReportFailed"),
       reportIssue: t("report.reportIssue"),
+      reportIssueFailed: t("report.reportIssueFailed"),
     },
   }
 

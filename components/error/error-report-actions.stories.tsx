@@ -8,12 +8,13 @@ const copy: ErrorReportCopy = {
   copyReportSuccess: "Report copied",
   copyReportFailed: "Failed to copy",
   reportIssue: "Report issue",
+  reportIssueFailed: "Failed to open the issue tracker",
 }
 
 const error = Object.assign(new Error("Render failed"), { digest: "abc123" })
 
-// Error-page report actions: "Copy full report" (always) and "Report issue"
-// (only when an issue-tracker URL is configured).
+// Error-page report actions: "Copy full report" and "Report issue" — both
+// backed by the unified support-report channels, with the shell IO stubbed.
 const meta = {
   title: "Error/ErrorReportActions",
   component: ErrorReportActions,
@@ -22,8 +23,7 @@ const meta = {
     copy,
     context: { category: "render", locale: "en", pathname: "/" },
     toastsEnabled: true,
-    writeClipboard: fn(),
-    openUrl: fn(),
+    channelDeps: { writeClipboard: fn(), openExternal: fn() },
   },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof ErrorReportActions>
@@ -31,8 +31,8 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const CopyOnly: Story = {}
+export const Default: Story = {}
 
-export const WithReportIssue: Story = {
+export const ConfiguredTracker: Story = {
   args: { issueReportUrl: "https://github.com/example/repo" },
 }

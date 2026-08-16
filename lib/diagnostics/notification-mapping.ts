@@ -63,6 +63,8 @@ export interface DiagnosticNotificationOptions {
   resolveTitle: (code: string) => string
   /** Resolves `diagnostics.action.<kind>`. */
   resolveActionLabel: (kind: DiagnosticActionKind) => string
+  /** Whether a `diagnostic.<kind>` command has an executor; defaults to "yes". */
+  isActionExecutable?: (kind: DiagnosticActionKind) => boolean
   /** Fold a burst into one row instead of announcing each failure. */
   collapsed?: boolean
   /** Aggregate title for the collapsed case (e.g. "3 problems"). */
@@ -81,7 +83,11 @@ export function toNotificationInput(
   diag: CogniaDiagnostic,
   opts: DiagnosticNotificationOptions
 ): NotificationInput {
-  const actions = toNotificationActions(diag.actions, opts.resolveActionLabel)
+  const actions = toNotificationActions(
+    diag.actions,
+    opts.resolveActionLabel,
+    opts.isActionExecutable
+  )
   return {
     source: SOURCE[diag.source],
     level: LEVEL[diag.severity],

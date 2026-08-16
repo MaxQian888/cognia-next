@@ -325,6 +325,62 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "retry" }, { kind: "switch-to-builtin" }],
     icon: "plug",
   },
+  runtimeVersionUnsupported: {
+    // The binary is present, so `locate-binary` and `copy-install-command` are
+    // both wrong answers — the user needs to upgrade the one they have.
+    // Retrying the same executable can only fail identically.
+    severity: "error",
+    retryable: false,
+    persistent: true,
+    actions: [{ kind: "open-settings", section: "external-bridge" }, { kind: "switch-to-builtin" }],
+    icon: "plug",
+  },
+  sandboxUnavailable: {
+    // Terminal by design (ADR-0077): there is no unsandboxed fallback, so the
+    // only routes forward are fixing the launcher or leaving the external path.
+    severity: "error",
+    retryable: false,
+    persistent: true,
+    actions: [
+      { kind: "open-settings", section: "external-bridge" },
+      { kind: "switch-to-builtin" },
+      { kind: "view-logs" },
+    ],
+    icon: "settings",
+  },
+  extensionHandshakeFailed: {
+    // The permission interception this agent depends on never proved itself
+    // live, so the session was refused rather than run ungated. A fresh
+    // connection genuinely can succeed — slow cold starts cause this.
+    severity: "error",
+    retryable: true,
+    persistent: true,
+    actions: [
+      { kind: "reconnect-external-agent" },
+      { kind: "retry" },
+      { kind: "view-logs" },
+      { kind: "switch-to-builtin" },
+    ],
+    icon: "plug",
+  },
+  protocolFrameInvalid: {
+    // The stream desynchronised and cannot be resynchronised in place, but a
+    // brand-new session starts from a clean framing state.
+    severity: "error",
+    retryable: true,
+    persistent: false,
+    actions: [{ kind: "retry" }, { kind: "view-logs" }, { kind: "switch-to-builtin" }],
+    icon: "plug",
+  },
+  resourceLimit: {
+    // A concurrency ceiling, not a fault: the same request succeeds once an
+    // in-flight session finishes, so this must not read as broken.
+    severity: "warning",
+    retryable: true,
+    persistent: false,
+    actions: [{ kind: "retry" }, { kind: "dismiss" }],
+    icon: "gauge",
+  },
   permissionDenied: {
     severity: "error",
     retryable: false,

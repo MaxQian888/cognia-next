@@ -7,11 +7,14 @@ import { createDiagnostic } from "@cognia/diagnostics"
 
 import { DiagnosticNotifier } from "./diagnostic-notifier"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
+import { hasNotificationCommand } from "@/lib/notifications/action-registry"
 
 const notifyMock = jest.fn().mockResolvedValue("n1")
 jest.mock("@/lib/notifications/runtime", () => ({
   notify: (...args: unknown[]) => notifyMock(...args),
 }))
+const push = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 
 const diag = (code: Parameters<typeof createDiagnostic>[0], init = {}) =>
   createDiagnostic(code, { source: "storage", now: () => Date.now(), ...init })
@@ -69,6 +72,19 @@ describe("DiagnosticNotifier", () => {
     expect(input.actions).toEqual([
       { id: "reload-app", label: "Reload app", command: "diagnostic.reload-app" },
     ])
+  })
+
+  it("drops global actions that have no registered executor, and unregisters its own on unmount", () => {
+    const { unmount } = render(<DiagnosticNotifier />)
+    act(() => {
+      dispatchDiagnostic(diag("unauthorized", { source: "provider" }))
+    })
+    const input = notifyMock.mock.calls[0][0] as { actions?: { id: string }[] }
+    // `open-settings` has an executor; `reauth` does not yet — no dead button.
+    expect(input.actions?.map((a) => a.id)).toEqual(["open-settings"])
+    expect(hasNotificationCommand("diagnostic.open-settings")).toBe(true)
+    unmount()
+    expect(hasNotificationCommand("diagnostic.open-settings")).toBe(false)
   })
 
   it("escalates a fatal to critical so DND cannot swallow it", () => {

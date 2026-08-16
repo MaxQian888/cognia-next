@@ -2,12 +2,14 @@
 
 /**
  * Feedback / diagnostics entry. Provides:
- *   • Direct link to file a new GitHub issue.
- *   • Action to copy a diagnostics blob (app version + UA + sync status)
- *     onto the system clipboard.
+ *   • "Report a problem" — the unified support-report dialog (description,
+ *     redacted sections, copy / download / pre-filled GitHub issue).
+ *   • One-tap copy of the default redacted report onto the clipboard.
+ *   • Direct link to the issue tracker for feature requests.
  *   • Permission / device check shortcut into `/me/device-info`.
  */
 
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { BugIcon, ClipboardCopyIcon, ExternalLinkIcon, HardDriveIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -15,39 +17,33 @@ import { toast } from "sonner"
 import { MeRow } from "@/components/mobile/me/me-row"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
-import { APP_VERSION } from "@/lib/app-version"
-import { snapshotSyncStates } from "@/lib/sync/companion-sync"
-import { useCopy } from "@/hooks/ui/use-copy"
-import { SupportFeedbackDialog } from "@/components/support/support-feedback-dialog"
-import { ISSUES_URL } from "@/lib/constants/external-urls"
-
-function diagnosticsPayload(): string {
-  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "unknown"
-  let sync = ""
-  try {
-    sync = JSON.stringify(snapshotSyncStates(), null, 2)
-  } catch {
-    sync = "(unavailable)"
-  }
-  return [
-    `Cognia ${APP_VERSION}`,
-    `UA: ${ua}`,
-    `Date: ${new Date().toISOString()}`,
-    `Sync snapshot:\n${sync}`,
-  ].join("\n")
-}
+import { ReportProblemDialog } from "@/components/support/report-problem-dialog"
+import { buildSupportReport } from "@/lib/support-report/build"
+import { deliverSupportReport } from "@/lib/support-report/channels"
+import { resolveIssueTrackerUrl, resolveNewIssueEndpoint } from "@/lib/support-report/issue-url"
+import type { SupportReportContext } from "@/lib/support-report/types"
 
 export default function MobileFeedbackPage() {
   const t = useTranslations("mobile.me")
   const tFeedback = useTranslations("mobile.me.feedback")
-  const { copied, copy } = useCopy(2000)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [copying, setCopying] = useState(false)
+  const reportContext = useMemo<Omit<SupportReportContext, "description">>(
+    () => ({ surface: "mobile" }),
+    []
+  )
 
   const copyDiagnostics = async () => {
-    const ok = await copy(diagnosticsPayload())
-    if (ok) {
+    if (copying) return
+    setCopying(true)
+    try {
+      const report = await buildSupportReport({ context: reportContext })
+      await deliverSupportReport("copy", report)
       toast.success(tFeedback("copyToast"))
-    } else {
+    } catch {
       toast.error(tFeedback("copyError"))
+    } finally {
+      setCopying(false)
     }
   }
 
@@ -61,20 +57,25 @@ export default function MobileFeedbackPage() {
         <MeSection title={tFeedback("reportTitle")} testid="feedback-section-report">
           <MeRow
             icon={BugIcon}
-            label={tFeedback("openIssueLabel")}
-            description={tFeedback("openIssueDescription")}
-            value={<ExternalLinkIcon className="size-3.5" aria-hidden="true" />}
-            href={`${ISSUES_URL}/new`}
-            testid="feedback-row-open-issue"
+            label={tFeedback("reportProblemLabel")}
+            description={tFeedback("reportProblemDescription")}
+            onClick={() => setReportOpen(true)}
+            testid="feedback-row-report-problem"
           />
           <MeRow
             icon={ClipboardCopyIcon}
-            label={copied ? tFeedback("copyLabelDone") : tFeedback("copyLabel")}
+            label={tFeedback("copyLabel")}
             description={tFeedback("copyDescription")}
             onClick={() => void copyDiagnostics()}
             testid="feedback-row-copy"
           />
-          <SupportFeedbackDialog />
+          <MeRow
+            icon={ExternalLinkIcon}
+            label={tFeedback("openIssueLabel")}
+            description={tFeedback("openIssueDescription")}
+            href={resolveNewIssueEndpoint(resolveIssueTrackerUrl())}
+            testid="feedback-row-open-issue"
+          />
         </MeSection>
         <MeSection title={tFeedback("diagnosticsTitle")} testid="feedback-section-diagnostics">
           <MeRow
@@ -86,6 +87,7 @@ export default function MobileFeedbackPage() {
           />
         </MeSection>
       </div>
+      <ReportProblemDialog context={reportContext} open={reportOpen} onOpenChange={setReportOpen} />
     </SubPageShell>
   )
 }

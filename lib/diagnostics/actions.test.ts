@@ -100,6 +100,18 @@ describe("toNotificationActions", () => {
     expect(toNotificationActions(actions, labelFor).map((a) => a.id)).toEqual(["open-settings"])
   })
 
+  it("also drops global kinds the caller reports as having no executor", () => {
+    const actions: DiagnosticAction[] = [
+      { kind: "reauth", providerId: "anthropic" },
+      { kind: "open-settings", section: "providers" },
+      { kind: "retry" },
+    ]
+    const registered = new Set<string>(["open-settings"])
+    expect(
+      toNotificationActions(actions, labelFor, (kind) => registered.has(kind)).map((a) => a.id)
+    ).toEqual(["open-settings"])
+  })
+
   it("returns nothing when every action needs a live surface", () => {
     expect(toNotificationActions([{ kind: "retry" }, { kind: "shorten-input" }], labelFor)).toEqual(
       []

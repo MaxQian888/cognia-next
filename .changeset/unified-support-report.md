@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Redesigned problem reporting: one "Report a problem" dialog (description, toggleable redacted sections with live preview, copy / download / pre-filled GitHub issue channels) now backs the Support Agent chat strip, the mobile Feedback page and the error page — replacing four hand-rolled diagnostics blobs with a single extensible `lib/support-report` (section + channel registries, redact-then-recheck gate). The Support Agent panel is a compact single-row strip with a diagnostics-consent chip whose kill switch stays in sync across the chat popover and Settings → Characters. The tray's "Report a problem…" and a new `/report` slash command open the same dialog (root-mounted `ReportProblemHost`, driven by `useUIStore().pendingReportRequest`). Notification-center rows raised from diagnostics now have working `Copy report`, `Report issue`, `View logs`, `Open settings`, `Reload`, `Export crash log`, `Open docs`, `Restart backend`, `Copy install command` and `Dismiss` buttons, and never show a button without an executor.

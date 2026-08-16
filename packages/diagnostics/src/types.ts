@@ -253,6 +253,11 @@ export type DiagnosticCode =
   | "executionFailed"
   | "strictFailure"
   | "fallbackToBuiltin"
+  | "runtimeVersionUnsupported"
+  | "sandboxUnavailable"
+  | "extensionHandshakeFailed"
+  | "protocolFrameInvalid"
+  | "resourceLimit"
   // --- Route boundaries ---
   | "chunkLoad"
   | "offline"

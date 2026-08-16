@@ -10,6 +10,7 @@ import {
   isSupportDiagnosticsEnabled,
   setSupportDiagnosticsEnabled,
   shouldReadSupportDiagnostics,
+  subscribeSupportDiagnosticsConsent,
 } from "./context"
 
 describe("Support Agent identity and diagnostics kill switch", () => {
@@ -31,6 +32,17 @@ describe("Support Agent identity and diagnostics kill switch", () => {
     setSupportDiagnosticsEnabled(true, storage)
     expect(values.get(SUPPORT_DIAGNOSTICS_STORAGE_KEY)).toBe("true")
     expect(isSupportDiagnosticsEnabled(storage)).toBe(true)
+  })
+
+  it("notifies subscribers on every in-window write and stops after unsubscribe", () => {
+    const storage = { setItem: jest.fn(), getItem: () => null } as unknown as Storage
+    const listener = jest.fn()
+    const off = subscribeSupportDiagnosticsConsent(listener)
+    setSupportDiagnosticsEnabled(true, storage)
+    expect(listener).toHaveBeenCalledTimes(1)
+    off()
+    setSupportDiagnosticsEnabled(false, storage)
+    expect(listener).toHaveBeenCalledTimes(1)
   })
 
   it("reads diagnostics only for troubleshooting intent", () => {

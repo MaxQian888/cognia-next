@@ -15,15 +15,20 @@
  * previously-silent sources somewhere to land.
  *
  * Sibling of `PluginErrorToaster`, mounted the same way and for the same reason.
+ * Also mounts the `diagnostic.*` command executors (ADR-0042 action registry)
+ * so the buttons it files can be clicked days later from a persisted row.
  */
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 
+import { useDiagnosticNotificationCommands } from "@/hooks/diagnostics/use-diagnostic-notification-commands"
+import { diagnosticActionCommand } from "@/lib/diagnostics/actions"
 import { subscribeDiagnostic } from "@/lib/diagnostics/bus"
 import { resolveSurface } from "@/lib/diagnostics/surface-router"
 import { CASCADE_WINDOW_MS } from "@/lib/diagnostics/cascade"
 import { toNotificationInput } from "@/lib/diagnostics/notification-mapping"
+import { hasNotificationCommand } from "@/lib/notifications/action-registry"
 import { notify } from "@/lib/notifications/runtime"
 import { actionI18nKey } from "@cognia/diagnostics"
 import type { DiagnosticActionKind } from "@cognia/diagnostics"
@@ -34,6 +39,10 @@ export function DiagnosticNotifier() {
   useEffect(() => {
     tRef.current = t
   }, [t])
+
+  // The other half of the projection below: without registered executors the
+  // persisted rows would carry `diagnostic.*` buttons that do nothing.
+  useDiagnosticNotificationCommands()
 
   useEffect(() => {
     /** Raise times inside the cascade window, for the burst check. */
@@ -69,6 +78,8 @@ export function DiagnosticNotifier() {
             const key = `action.${actionI18nKey(kind)}`
             return tr.has(key) ? tr(key) : kind
           },
+          isActionExecutable: (kind: DiagnosticActionKind) =>
+            hasNotificationCommand(diagnosticActionCommand(kind)),
           ...(decision.collapsed
             ? { collapsed: true, collapsedTitle: tr("surface.cascade", { count: recent.length }) }
             : {}),

@@ -3,40 +3,42 @@
 /**
  * Report actions for the error page.
  *
- * - "Copy full report" (always available): assembles a human-readable Markdown
- *   report — the current error + stack, the recent-error stream, and a runtime
- *   diagnostics snapshot — and writes it to the clipboard so a user can paste it
- *   into a support thread. This complements the existing JSON crash-log *download*
- *   (`exportCrashLogBundleNow`): the download is for archival, this is for pasting.
- * - "Report issue" (conditional): only rendered when an issue-tracker URL is
- *   configured via `NEXT_PUBLIC_ISSUE_REPORT_URL`. No repository is hard-coded.
+ * - "Copy full report": assembles the unified support report — the current
+ *   error + stack, the runtime snapshot, the recent-error stream — through
+ *   `lib/support-report` and writes it to the clipboard. This complements the
+ *   JSON crash-log *download* (`exportCrashLogBundleNow`): the download is for
+ *   archival, this is for pasting into a support thread.
+ * - "Report issue": opens the tracker with the same report pre-filled. The
+ *   tracker is `NEXT_PUBLIC_ISSUE_REPORT_URL` when configured, otherwise the
+ *   project's public repository (`resolveIssueTrackerUrl`).
  *
- * The report builder (`buildErrorReportMarkdown`) and the issue-URL builder
- * (`buildIssueUrl`) live in `lib/error/build-report.ts` so surfaces that aren't
- * this page — an inline diagnostic card, a toast, a notification-center row —
- * can offer the same two actions without importing a React component.
+ * Both are the `copy` / `issue` channels of `lib/support-report/channels`, so
+ * this page, the Support strip, the mobile Feedback page and a notification
+ * row all produce byte-identical reports.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, Copy, ExternalLink } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { getRecentErrorLogs } from "@cognia/logging/recent-errors"
-import { getLocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
-import {
-  buildErrorReportMarkdown,
-  buildIssueUrl,
-  type ErrorReportContext,
-} from "@/lib/error/build-report"
+import type { ErrorCategory } from "@/lib/error/classify-error"
+import { buildSupportReport } from "@/lib/support-report/build"
+import { deliverSupportReport, type SupportReportChannelDeps } from "@/lib/support-report/channels"
+import type { SupportReportContext } from "@/lib/support-report/types"
 
-export type { ErrorReportContext }
+export interface ErrorReportContext {
+  category: ErrorCategory
+  locale: string
+  pathname: string | null
+}
 
 export interface ErrorReportCopy {
   copyReport: string
   copyReportSuccess: string
   copyReportFailed: string
   reportIssue: string
+  reportIssueFailed: string
 }
 
 export interface ErrorReportActionsProps {
@@ -45,21 +47,11 @@ export interface ErrorReportActionsProps {
   context: ErrorReportContext
   /** Suppress sonner toasts (static global-error path has no Toaster). */
   toastsEnabled: boolean
-  /** Configured issue tracker URL. Defaults to `NEXT_PUBLIC_ISSUE_REPORT_URL`. */
+  /** Configured issue tracker URL. Defaults to `NEXT_PUBLIC_ISSUE_REPORT_URL`, then the public repo. */
   issueReportUrl?: string
-  /** Test seams. */
-  getDiagnostics?: typeof getLocalRuntimeDiagnostics
-  getRecentErrors?: typeof getRecentErrorLogs
-  writeClipboard?: (text: string) => Promise<void>
-  openUrl?: (url: string) => void
-}
-
-function defaultWriteClipboard(text: string): Promise<void> {
-  return navigator.clipboard.writeText(text)
-}
-
-function defaultOpenUrl(url: string): void {
-  window.open(url, "_blank", "noopener,noreferrer")
+  /** Test seams for the built-in channels. */
+  channelDeps?: SupportReportChannelDeps
+  build?: typeof buildSupportReport
 }
 
 export function ErrorReportActions({
@@ -68,10 +60,8 @@ export function ErrorReportActions({
   context,
   toastsEnabled,
   issueReportUrl = process.env.NEXT_PUBLIC_ISSUE_REPORT_URL,
-  getDiagnostics = getLocalRuntimeDiagnostics,
-  getRecentErrors = getRecentErrorLogs,
-  writeClipboard = defaultWriteClipboard,
-  openUrl = defaultOpenUrl,
+  channelDeps,
+  build = buildSupportReport,
 }: ErrorReportActionsProps) {
   const [copying, setCopying] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -84,24 +74,38 @@ export function ErrorReportActions({
     []
   )
 
-  const buildReport = useCallback(async (): Promise<string> => {
-    const recent = getRecentErrors()
-    const diagnostics = await getDiagnostics().catch(() => null)
-    return buildErrorReportMarkdown({
-      error,
-      context,
-      recent,
-      diagnostics,
-      generatedAt: new Date().toISOString(),
-    })
-  }, [error, context, getDiagnostics, getRecentErrors])
+  const reportContext = useMemo<SupportReportContext>(
+    () => ({
+      surface: "error-page",
+      category: context.category,
+      locale: context.locale,
+      route: context.pathname,
+      error: error
+        ? {
+            name: error.name,
+            message: error.message,
+            ...(error.stack ? { stack: error.stack } : {}),
+            ...(error.digest ? { digest: error.digest } : {}),
+          }
+        : null,
+    }),
+    [context.category, context.locale, context.pathname, error]
+  )
+
+  const deps = useMemo<SupportReportChannelDeps>(
+    () => ({
+      ...channelDeps,
+      ...(issueReportUrl ? { issueTrackerUrl: issueReportUrl } : {}),
+    }),
+    [channelDeps, issueReportUrl]
+  )
 
   const handleCopy = useCallback(async () => {
     if (copying) return
     setCopying(true)
     try {
-      const report = await buildReport()
-      await writeClipboard(report)
+      const report = await build({ context: reportContext })
+      await deliverSupportReport("copy", report, deps)
       setCopied(true)
       if (copiedTimer.current) clearTimeout(copiedTimer.current)
       copiedTimer.current = setTimeout(() => setCopied(false), 1600)
@@ -112,22 +116,23 @@ export function ErrorReportActions({
       setCopying(false)
     }
   }, [
-    buildReport,
+    build,
     copy.copyReportFailed,
     copy.copyReportSuccess,
     copying,
+    deps,
+    reportContext,
     toastsEnabled,
-    writeClipboard,
   ])
 
   const handleReportIssue = useCallback(async () => {
-    if (!issueReportUrl) return
-    const report = await buildReport()
-    const title = error
-      ? `[${context.category}] ${error.message}`
-      : `[${context.category}] Error report`
-    openUrl(buildIssueUrl(issueReportUrl, title, report))
-  }, [buildReport, context.category, error, issueReportUrl, openUrl])
+    try {
+      const report = await build({ context: reportContext })
+      await deliverSupportReport("issue", report, deps)
+    } catch {
+      if (toastsEnabled) toast.error(copy.reportIssueFailed)
+    }
+  }, [build, copy.reportIssueFailed, deps, reportContext, toastsEnabled])
 
   return (
     <>
@@ -146,18 +151,16 @@ export function ErrorReportActions({
         )}
         {copy.copyReport}
       </Button>
-      {issueReportUrl && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleReportIssue}
-          className="gap-2"
-          data-testid="error-page-report-issue"
-        >
-          <ExternalLink className="size-4" aria-hidden="true" />
-          {copy.reportIssue}
-        </Button>
-      )}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={handleReportIssue}
+        className="gap-2"
+        data-testid="error-page-report-issue"
+      >
+        <ExternalLink className="size-4" aria-hidden="true" />
+        {copy.reportIssue}
+      </Button>
     </>
   )
 }

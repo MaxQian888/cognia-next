@@ -97,7 +97,11 @@ function actionArgs(action: DiagnosticAction): Record<string, unknown> | undefin
  *
  * Host-only actions are dropped rather than rendered dead: `notification-item`
  * shows `action.label` as-is and dispatches by command key, with no way to
- * express "this button can't work right now".
+ * express "this button can't work right now". `isExecutable` extends the same
+ * rule to global kinds: the notifier passes "is a `diagnostic.<kind>` command
+ * registered right now?", so a global kind with no executor yet (`reauth`,
+ * `reconnect-adapter`, …) is dropped too instead of persisting as a button that
+ * logs "no handler".
  *
  * `resolveLabel` is injected because `NotificationAction.label` is display text,
  * not a key — the renderer prints it verbatim — so translation has to happen at
@@ -105,15 +109,18 @@ function actionArgs(action: DiagnosticAction): Record<string, unknown> | undefin
  */
 export function toNotificationActions(
   actions: readonly DiagnosticAction[],
-  resolveLabel: (kind: DiagnosticActionKind) => string
+  resolveLabel: (kind: DiagnosticActionKind) => string,
+  isExecutable: (kind: DiagnosticActionKind) => boolean = () => true
 ): NotificationAction[] {
-  return actions.filter(isGlobalAction).map((action) => {
-    const args = actionArgs(action)
-    return {
-      id: action.kind,
-      label: resolveLabel(action.kind),
-      command: diagnosticActionCommand(action.kind),
-      ...(args ? { args } : {}),
-    }
-  })
+  return actions
+    .filter((action) => isGlobalAction(action) && isExecutable(action.kind))
+    .map((action) => {
+      const args = actionArgs(action)
+      return {
+        id: action.kind,
+        label: resolveLabel(action.kind),
+        command: diagnosticActionCommand(action.kind),
+        ...(args ? { args } : {}),
+      }
+    })
 }

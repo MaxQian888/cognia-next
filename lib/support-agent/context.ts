@@ -24,11 +24,32 @@ export function isSupportDiagnosticsEnabled(
   }
 }
 
+const consentListeners = new Set<() => void>()
+
 export function setSupportDiagnosticsEnabled(
   enabled: boolean,
   storage: Storage = localStorage
 ): void {
   storage.setItem(SUPPORT_DIAGNOSTICS_STORAGE_KEY, String(enabled))
+  for (const listener of consentListeners) listener()
+}
+
+/**
+ * Observe the kill switch. Fires for in-window writes through
+ * {@link setSupportDiagnosticsEnabled} and for other-window writes via the
+ * `storage` event, so the chat strip and the Settings row never disagree.
+ */
+export function subscribeSupportDiagnosticsConsent(listener: () => void): () => void {
+  consentListeners.add(listener)
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key === SUPPORT_DIAGNOSTICS_STORAGE_KEY) listener()
+  }
+  const win = typeof window !== "undefined" ? window : undefined
+  win?.addEventListener("storage", onStorage)
+  return () => {
+    consentListeners.delete(listener)
+    win?.removeEventListener("storage", onStorage)
+  }
 }
 
 export function shouldReadSupportDiagnostics(userText: string | undefined): boolean {
