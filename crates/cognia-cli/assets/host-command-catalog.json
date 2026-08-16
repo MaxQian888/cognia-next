@@ -3258,8 +3258,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "session_id",
-          "request_id",
           "decision"
         ],
         "properties": {
@@ -3295,9 +3293,153 @@
                 "type": "null"
               }
             ]
+          },
+          "remote_execution_context": {
+            "type": "object",
+            "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+            "required": [
+              "hostId",
+              "originDeviceId",
+              "sessionId",
+              "generation",
+              "requestId",
+              "issuedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "hostId": {
+                "type": "string"
+              },
+              "originDeviceId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "ID of the pending approval request emitted via WS."
+          },
+          "updatedInput": {
+            "description": "Replacement tool input — substituted for the original arguments when sent (typically with `decision: allow`).",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {},
+                "example": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "remoteExecutionContext": {
+            "type": "object",
+            "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+            "required": [
+              "hostId",
+              "originDeviceId",
+              "sessionId",
+              "generation",
+              "requestId",
+              "issuedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "hostId": {
+                "type": "string"
+              },
+              "originDeviceId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "request_id"
+                ]
+              },
+              {
+                "required": [
+                  "requestId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "remote_execution_context"
+                ]
+              },
+              {
+                "required": [
+                  "remoteExecutionContext"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3320,15 +3462,31 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "session_id"
-        ],
         "properties": {
           "session_id": {
             "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3351,9 +3509,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "session_id"
-        ],
         "properties": {
           "session_id": {
             "type": "string"
@@ -3364,9 +3519,28 @@
               "null"
             ],
             "description": "Optional compact instruction/focus."
+          },
+          "sessionId": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3433,15 +3607,31 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "session_id"
-        ],
         "properties": {
           "session_id": {
             "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3464,10 +3654,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "sessionId",
-          "toolUseId"
-        ],
         "properties": {
           "sessionId": {
             "type": "string"
@@ -3478,9 +3664,139 @@
           "result": {},
           "error": {
             "type": "string"
+          },
+          "remote_execution_context": {
+            "type": "object",
+            "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+            "required": [
+              "hostId",
+              "originDeviceId",
+              "sessionId",
+              "generation",
+              "requestId",
+              "issuedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "hostId": {
+                "type": "string"
+              },
+              "originDeviceId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "tool_use_id": {
+            "type": "string"
+          },
+          "remoteExecutionContext": {
+            "type": "object",
+            "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+            "required": [
+              "hostId",
+              "originDeviceId",
+              "sessionId",
+              "generation",
+              "requestId",
+              "issuedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "hostId": {
+                "type": "string"
+              },
+              "originDeviceId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "tool_use_id"
+                ]
+              },
+              {
+                "required": [
+                  "toolUseId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "remote_execution_context"
+                ]
+              },
+              {
+                "required": [
+                  "remoteExecutionContext"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3511,9 +3827,125 @@
             "type": "object",
             "additionalProperties": {},
             "example": {}
+          },
+          "remote_execution_context": {
+            "type": "object",
+            "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+            "required": [
+              "hostId",
+              "originDeviceId",
+              "sessionId",
+              "generation",
+              "requestId",
+              "issuedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "hostId": {
+                "type": "string"
+              },
+              "originDeviceId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "remoteExecutionContext": {
+            "type": "object",
+            "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+            "required": [
+              "hostId",
+              "originDeviceId",
+              "sessionId",
+              "generation",
+              "requestId",
+              "issuedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "hostId": {
+                "type": "string"
+              },
+              "originDeviceId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "sessionId": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "remote_execution_context"
+                ]
+              },
+              {
+                "required": [
+                  "remoteExecutionContext"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3559,16 +3991,34 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "sessionId",
           "messages"
         ],
         "properties": {
           "sessionId": {
             "type": "string"
           },
-          "messages": {}
+          "messages": {},
+          "session_id": {
+            "type": "string"
+          }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3592,7 +4042,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "session_id",
           "prompt"
         ],
         "properties": {
@@ -3758,9 +4207,29 @@
                 "example": {}
               }
             }
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Logical session id chosen by the caller (Dexie row key)."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3820,7 +4289,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "sessionId",
           "mode"
         ],
         "properties": {
@@ -3837,9 +4305,36 @@
               "dontAsk",
               "auto"
             ]
+          },
+          "command_id": {
+            "type": "string",
+            "description": "Correlation id echoed on the sidecar ack, so the caller can match the response to this request."
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string",
+            "description": "Correlation id echoed on the sidecar ack, so the caller can match the response to this request."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -3918,6 +4413,44 @@
                 "type": "null"
               }
             ]
+          },
+          "custom_headers": {
+            "description": "Ordered `[name, value]` pairs forwarded as ANTHROPIC_CUSTOM_HEADER_* at sidecar spawn. Omit to leave the existing set untouched; send [] to clear it.",
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customHeaders": {
+            "description": "Ordered `[name, value]` pairs forwarded as ANTHROPIC_CUSTOM_HEADER_* at sidecar spawn. Omit to leave the existing set untouched; send [] to clear it.",
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -3948,9 +4481,16 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "claude"
+        "x-cognia-wire-source": "crate::claude::commands::SidecarStatus — derives Serialize with NO rename_all, and has exactly one field.",
+        "required": [
+          "ready"
+        ],
+        "properties": {
+          "ready": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -3969,10 +4509,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "sessionId",
-          "reviewId"
-        ],
         "properties": {
           "sessionId": {
             "type": "string"
@@ -3980,9 +4516,139 @@
           "reviewId": {
             "type": "string"
           },
-          "updatedToolOutput": {}
+          "updatedToolOutput": {},
+          "remote_execution_context": {
+            "type": "object",
+            "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+            "required": [
+              "hostId",
+              "originDeviceId",
+              "sessionId",
+              "generation",
+              "requestId",
+              "issuedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "hostId": {
+                "type": "string"
+              },
+              "originDeviceId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "review_id": {
+            "type": "string"
+          },
+          "remoteExecutionContext": {
+            "type": "object",
+            "description": "Remote-execution provenance minted by the host when the turn was dispatched.\nRequired on every companion-originated control message: the arm validates and\nconsumes it (remote_execution::validate_and_consume) before acting.\n",
+            "required": [
+              "hostId",
+              "originDeviceId",
+              "sessionId",
+              "generation",
+              "requestId",
+              "issuedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "hostId": {
+                "type": "string"
+              },
+              "originDeviceId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "issuedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "review_id"
+                ]
+              },
+              {
+                "required": [
+                  "reviewId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "remote_execution_context"
+                ]
+              },
+              {
+                "required": [
+                  "remoteExecutionContext"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5456,11 +6122,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "adapterId",
-          "remoteRef",
-          "sourceUrl"
-        ],
         "properties": {
           "adapterId": {
             "type": "string"
@@ -5477,9 +6138,62 @@
               "type": "string"
             },
             "example": {}
+          },
+          "adapter_id": {
+            "type": "string"
+          },
+          "remote_ref": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "remote_ref"
+                ]
+              },
+              {
+                "required": [
+                  "remoteRef"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "source_url"
+                ]
+              },
+              {
+                "required": [
+                  "sourceUrl"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5505,11 +6219,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "adapterId",
-          "remoteRef",
-          "maxBytes"
-        ],
         "properties": {
           "adapterId": {
             "type": "string"
@@ -5519,9 +6228,62 @@
           },
           "maxBytes": {
             "type": "integer"
+          },
+          "adapter_id": {
+            "type": "string"
+          },
+          "remote_ref": {
+            "type": "string"
+          },
+          "max_bytes": {
+            "type": "integer"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "remote_ref"
+                ]
+              },
+              {
+                "required": [
+                  "remoteRef"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "max_bytes"
+                ]
+              },
+              {
+                "required": [
+                  "maxBytes"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5645,7 +6407,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "adapterId",
           "credential"
         ],
         "properties": {
@@ -5654,9 +6415,28 @@
           },
           "credential": {
             "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5680,7 +6460,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "adapterId",
           "credential"
         ],
         "properties": {
@@ -5689,9 +6468,28 @@
           },
           "credential": {
             "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5718,7 +6516,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "adapterId",
           "accounts"
         ],
         "properties": {
@@ -5730,9 +6527,28 @@
             "items": {
               "type": "string"
             }
+          },
+          "adapter_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5769,7 +6585,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "adapterId",
           "credential",
           "value"
         ],
@@ -5782,9 +6597,28 @@
           },
           "value": {
             "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5807,12 +6641,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "accessToken",
-          "sourceUrl",
-          "fileType",
-          "fileName"
-        ],
         "properties": {
           "accessToken": {
             "type": "string"
@@ -5828,9 +6656,79 @@
           },
           "durationMs": {
             "type": "integer"
+          },
+          "access_token": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "file_type": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "access_token"
+                ]
+              },
+              {
+                "required": [
+                  "accessToken"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "source_url"
+                ]
+              },
+              {
+                "required": [
+                  "sourceUrl"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "file_type"
+                ]
+              },
+              {
+                "required": [
+                  "fileType"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "file_name"
+                ]
+              },
+              {
+                "required": [
+                  "fileName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5862,10 +6760,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "accessToken",
-          "sourceUrl"
-        ],
         "properties": {
           "accessToken": {
             "type": "string"
@@ -5879,9 +6773,45 @@
               "message",
               "avatar"
             ]
+          },
+          "access_token": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "access_token"
+                ]
+              },
+              {
+                "required": [
+                  "accessToken"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "source_url"
+                ]
+              },
+              {
+                "required": [
+                  "sourceUrl"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5913,15 +6843,31 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "handleId"
-        ],
         "properties": {
           "handleId": {
             "type": "string"
+          },
+          "handle_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "handle_id"
+                ]
+              },
+              {
+                "required": [
+                  "handleId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -5944,15 +6890,31 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "adapterId"
-        ],
         "properties": {
           "adapterId": {
             "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -6025,17 +6987,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "adapter_id"
-        ],
         "properties": {
           "adapter_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `adapterId`."
+          },
+          "adapterId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `adapterId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -6242,17 +7222,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "adapter_id"
-        ],
         "properties": {
           "adapter_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `adapterId`."
+          },
+          "adapterId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `adapterId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -6537,19 +7535,51 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "adapterId",
-          "callJson"
-        ],
         "properties": {
           "adapterId": {
             "type": "string"
           },
           "callJson": {
             "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
+          },
+          "call_json": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "call_json"
+                ]
+              },
+              {
+                "required": [
+                  "callJson"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -6634,21 +7664,17 @@
       "name": "connectors_runtime_lease_acquire",
       "category": "connectors",
       "resource": "connectors",
-      "target": "service",
+      "target": "execution",
       "operation": "write",
-      "capability": "service.internal",
+      "capability": "agent.run",
       "risk": "critical",
       "approval": "signed-policy",
       "idempotency": "required",
-      "summary": "connectors_runtime_lease_acquire (service.internal)",
-      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "summary": "connectors_runtime_lease_acquire (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "owner_id",
-          "ttl_ms"
-        ],
         "properties": {
           "owner_id": {
             "type": "string",
@@ -6661,13 +7687,77 @@
             "minimum": 0,
             "example": 0,
             "description": "Also accepted as `ttlMs`."
+          },
+          "handoff_aware": {
+            "type": "boolean",
+            "example": false,
+            "description": "Also accepted as `handoffAware`."
+          },
+          "ownerId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `ownerId`."
+          },
+          "ttlMs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0,
+            "description": "Also accepted as `ttlMs`."
+          },
+          "handoffAware": {
+            "type": "boolean",
+            "example": false,
+            "description": "Also accepted as `handoffAware`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "owner_id"
+                ]
+              },
+              {
+                "required": [
+                  "ownerId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "ttl_ms"
+                ]
+              },
+              {
+                "required": [
+                  "ttlMs"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "boolean"
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "string",
+            "enum": [
+              "acquired",
+              "busy",
+              "handoff-pending"
+            ]
+          }
+        ]
       },
       "outputTyped": true
     },
@@ -6675,28 +7765,46 @@
       "name": "connectors_runtime_lease_release",
       "category": "connectors",
       "resource": "connectors",
-      "target": "service",
+      "target": "execution",
       "operation": "write",
-      "capability": "service.internal",
+      "capability": "agent.run",
       "risk": "critical",
       "approval": "signed-policy",
       "idempotency": "required",
-      "summary": "connectors_runtime_lease_release (service.internal)",
-      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "summary": "connectors_runtime_lease_release (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "owner_id"
-        ],
         "properties": {
           "owner_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `ownerId`."
+          },
+          "ownerId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `ownerId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "owner_id"
+                ]
+              },
+              {
+                "required": [
+                  "ownerId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -6708,21 +7816,17 @@
       "name": "connectors_runtime_lease_renew",
       "category": "connectors",
       "resource": "connectors",
-      "target": "service",
+      "target": "execution",
       "operation": "write",
-      "capability": "service.internal",
+      "capability": "agent.run",
       "risk": "critical",
       "approval": "signed-policy",
       "idempotency": "required",
-      "summary": "connectors_runtime_lease_renew (service.internal)",
-      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "summary": "connectors_runtime_lease_renew (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "owner_id",
-          "ttl_ms"
-        ],
         "properties": {
           "owner_id": {
             "type": "string",
@@ -6735,9 +7839,51 @@
             "minimum": 0,
             "example": 0,
             "description": "Also accepted as `ttlMs`."
+          },
+          "ownerId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `ownerId`."
+          },
+          "ttlMs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0,
+            "description": "Also accepted as `ttlMs`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "owner_id"
+                ]
+              },
+              {
+                "required": [
+                  "ownerId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "ttl_ms"
+                ]
+              },
+              {
+                "required": [
+                  "ttlMs"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -6791,15 +7937,31 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "handleId"
-        ],
         "properties": {
           "handleId": {
             "type": "string"
+          },
+          "handle_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "handle_id"
+                ]
+              },
+              {
+                "required": [
+                  "handleId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -6865,7 +8027,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "handleId",
           "data"
         ],
         "properties": {
@@ -6874,9 +8035,28 @@
           },
           "data": {
             "type": "string"
+          },
+          "handle_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "handle_id"
+                ]
+              },
+              {
+                "required": [
+                  "handleId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -7204,6 +8384,12 @@
             "format": "int64",
             "minimum": 0,
             "description": "Also accepted as `expiresAt`."
+          },
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Also accepted as `expiresAt`."
           }
         },
         "additionalProperties": false
@@ -7269,17 +8455,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "client_id"
-        ],
         "properties": {
           "client_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `clientId`."
+          },
+          "clientId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `clientId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "client_id"
+                ]
+              },
+              {
+                "required": [
+                  "clientId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -7311,17 +8515,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "client_id"
-        ],
         "properties": {
           "client_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `clientId`."
+          },
+          "clientId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `clientId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "client_id"
+                ]
+              },
+              {
+                "required": [
+                  "clientId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -7609,16 +8831,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "fleet"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -7642,19 +8855,46 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent — not empty arrays — on a quiet host.",
+        "x-cognia-fixes": "Previously LegacyList, which requires an ARRAY. FleetSnapshot is a struct and always serializes as an object, so the enforced output contract rejected every fleet_get_snapshot response with contract_output_violation. The helper directly above the dispatch arm (fleet_event_payload) already asserted 'fleet snapshot must serialize as an object'.",
+        "required": [
+          "sessions",
+          "liveness",
+          "generatedAt"
+        ],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-opaque-reason": "FleetSession is owned by the Agent Fleet domain (ADR-0009) and is projected from several agent runtimes. The envelope is pinned here; item-level typing belongs with that domain and is tracked as remaining response-schema debt."
+            }
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "liveness": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "runtimeCapabilities": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "generatedAt": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "additionalProperties": false,
         "x-cognia-schema-owner": "fleet"
       },
       "outputTyped": true
@@ -7690,16 +8930,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "fleet"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -7734,16 +8965,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "fleet"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -7782,16 +9004,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "fleet"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -7963,16 +9176,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "fleet"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -8014,16 +9218,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "fleet"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -8092,9 +9287,32 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "fleet"
+        "x-cognia-wire-source": "Literal json! in the fleet_worker_enrollment_create arm; `enrollment` is the String returned by SecurityStore::create_worker_enrollment.",
+        "required": [
+          "enrollment",
+          "expiresAtMs",
+          "baseUrl",
+          "fingerprint",
+          "tenantId"
+        ],
+        "properties": {
+          "enrollment": {
+            "type": "string"
+          },
+          "expiresAtMs": {
+            "type": "integer"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -8119,19 +9337,50 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "array",
+        "x-cognia-wire-source": "Vec<WorkerDeviceSummary>. NOTE serde(flatten): DeviceSummary's fields are inlined ALONGSIDE hostRef rather than nested under a `device` key.",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "required": [
+            "deviceId",
+            "displayName",
+            "role",
+            "status",
+            "createdAt",
+            "updatedAt",
+            "capabilities",
+            "hostRef"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "fleet"
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "integer"
+            },
+            "updatedAt": {
+              "type": "integer"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "hostRef": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -8599,15 +9848,31 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "agent_id"
-        ],
         "properties": {
           "agent_id": {
             "type": "string"
+          },
+          "agentId": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "agent_id"
+                ]
+              },
+              {
+                "required": [
+                  "agentId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -11701,8 +12966,8 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "operations",
-          "confirmed"
+          "confirmed",
+          "operations"
         ],
         "properties": {
           "operations": {
@@ -11721,6 +12986,12 @@
           "confirmed": {
             "type": "boolean",
             "example": false
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Also accepted as `ttlSeconds`."
           }
         },
         "additionalProperties": false
@@ -12048,10 +13319,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "route_id",
-          "delivery_id"
-        ],
         "properties": {
           "route_id": {
             "type": "string",
@@ -12062,9 +13329,49 @@
             "type": "string",
             "example": "",
             "description": "Also accepted as `deliveryId`."
+          },
+          "routeId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `routeId`."
+          },
+          "deliveryId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `deliveryId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "route_id"
+                ]
+              },
+              {
+                "required": [
+                  "routeId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "delivery_id"
+                ]
+              },
+              {
+                "required": [
+                  "deliveryId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -12087,10 +13394,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "route_id",
-          "delivery_id"
-        ],
         "properties": {
           "route_id": {
             "type": "string",
@@ -12101,9 +13404,49 @@
             "type": "string",
             "example": "",
             "description": "Also accepted as `deliveryId`."
+          },
+          "routeId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `routeId`."
+          },
+          "deliveryId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `deliveryId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "route_id"
+                ]
+              },
+              {
+                "required": [
+                  "routeId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "delivery_id"
+                ]
+              },
+              {
+                "required": [
+                  "deliveryId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -12178,17 +13521,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "route_id"
-        ],
         "properties": {
           "route_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `routeId`."
+          },
+          "routeId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `routeId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "route_id"
+                ]
+              },
+              {
+                "required": [
+                  "routeId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -12230,13 +13591,49 @@
             "type": "string",
             "minLength": 1,
             "description": "Also accepted as deliveryId."
+          },
+          "routeId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Also accepted as routeId."
+          },
+          "deliveryId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Also accepted as deliveryId."
           }
         },
-        "required": [
-          "route_id",
-          "delivery_id"
-        ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "route_id"
+                ]
+              },
+              {
+                "required": [
+                  "routeId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "delivery_id"
+                ]
+              },
+              {
+                "required": [
+                  "deliveryId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -12337,10 +13734,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "route_id",
-          "delivery_id"
-        ],
         "properties": {
           "route_id": {
             "type": "string",
@@ -12351,9 +13744,49 @@
             "type": "string",
             "example": "",
             "description": "Also accepted as `deliveryId`."
+          },
+          "routeId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `routeId`."
+          },
+          "deliveryId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `deliveryId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "route_id"
+                ]
+              },
+              {
+                "required": [
+                  "routeId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "delivery_id"
+                ]
+              },
+              {
+                "required": [
+                  "deliveryId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -12385,17 +13818,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "route_id"
-        ],
         "properties": {
           "route_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `routeId`."
+          },
+          "routeId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `routeId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "route_id"
+                ]
+              },
+              {
+                "required": [
+                  "routeId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -12445,16 +13896,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "secrets"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -12500,10 +13942,12 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "secrets"
+        "type": [
+          "string",
+          "null"
+        ],
+        "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
+        "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
       },
       "outputTyped": true
     },
@@ -12553,16 +13997,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "secrets"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -12581,15 +14016,31 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "agent_id"
-        ],
         "properties": {
           "agent_id": {
             "type": "string"
+          },
+          "agentId": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "agent_id"
+                ]
+              },
+              {
+                "required": [
+                  "agentId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -12669,9 +14120,22 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "lark"
+        "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone — so only `token` is guaranteed.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "jti": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -12702,16 +14166,17 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lark_entry::rpc_metrics_record — json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
+        "required": [
+          "ok"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "lark"
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -12748,16 +14213,17 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lark_entry::rpc_result_complete — json!({ \"accepted\": bool }).",
+        "required": [
+          "accepted"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "lark"
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -12781,16 +14247,28 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "logs"
+        "type": "array",
+        "x-cognia-wire-source": "Vec<cognia_observability::log_query::NativeLogFileInfo>. modifiedMs is skipped when None.",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "size"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "modifiedMs": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -12859,15 +14337,66 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "cognia_observability::log_query::NativeLogQueryResult (rename_all = camelCase), via rpc/diagnostics.rs `to_json(result)`.",
+        "required": [
+          "entries",
+          "fileSize",
+          "scannedBytes",
+          "truncated",
+          "path"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "cognia_observability::log_query::NativeLogEntry. epochMs and fields carry skip_serializing_if = Option::is_none, so both are absent rather than null.",
+              "required": [
+                "timestamp",
+                "level",
+                "target",
+                "message"
+              ],
+              "properties": {
+                "timestamp": {
+                  "type": "string"
+                },
+                "epochMs": {
+                  "type": "integer"
+                },
+                "level": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "fields": {
+                  "x-cognia-opaque-reason": "serde_json::Value — arbitrary structured fields captured at the log call site."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "fileSize": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "scannedBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
         "x-cognia-schema-owner": "logs"
       },
       "outputTyped": true
@@ -12947,7 +14476,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "serverName",
           "server"
         ],
         "properties": {
@@ -13002,9 +14530,30 @@
               }
             },
             "additionalProperties": false
+          },
+          "server_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "server_name"
+                ]
+              },
+              {
+                "required": [
+                  "serverName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -13062,17 +14611,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "serverName"
-        ],
         "properties": {
           "serverName": {
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "server_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "server_name"
+                ]
+              },
+              {
+                "required": [
+                  "serverName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -13095,17 +14662,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "serverName"
-        ],
         "properties": {
           "serverName": {
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "server_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "server_name"
+                ]
+              },
+              {
+                "required": [
+                  "serverName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -13151,7 +14736,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "serverName",
           "server"
         ],
         "properties": {
@@ -13206,9 +14790,30 @@
               }
             },
             "additionalProperties": false
+          },
+          "server_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "server_name"
+                ]
+              },
+              {
+                "required": [
+                  "serverName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -13253,17 +14858,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "serverName"
-        ],
         "properties": {
           "serverName": {
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "server_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "server_name"
+                ]
+              },
+              {
+                "required": [
+                  "serverName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -13315,8 +14938,7 @@
         "type": "object",
         "required": [
           "port",
-          "token",
-          "settingsJson"
+          "token"
         ],
         "additionalProperties": false,
         "properties": {
@@ -13337,8 +14959,28 @@
             "type": "string",
             "deprecated": true,
             "description": "Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host sidecar."
+          },
+          "settings_json": {
+            "type": "string",
+            "description": "Serialized ExternalBridgeSettings snapshot."
           }
-        }
+        },
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "settings_json"
+                ]
+              },
+              {
+                "required": [
+                  "settingsJson"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -13372,8 +15014,7 @@
         "type": "object",
         "required": [
           "port",
-          "token",
-          "settingsJson"
+          "token"
         ],
         "additionalProperties": false,
         "properties": {
@@ -13394,8 +15035,28 @@
             "type": "string",
             "deprecated": true,
             "description": "Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host sidecar."
+          },
+          "settings_json": {
+            "type": "string",
+            "description": "Serialized ExternalBridgeSettings snapshot."
           }
-        }
+        },
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "settings_json"
+                ]
+              },
+              {
+                "required": [
+                  "settingsJson"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -13991,7 +15652,23 @@
             ]
           }
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "request_id"
+                ]
+              },
+              {
+                "required": [
+                  "requestId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -15542,8 +17219,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "configJson",
           "generation"
         ],
         "properties": {
@@ -15555,9 +17230,45 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "config_json": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "config_json"
+                ]
+              },
+              {
+                "required": [
+                  "configJson"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -15883,8 +17594,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "plugin_id",
-          "plugin_path",
           "entry",
           "generation"
         ],
@@ -15906,9 +17615,49 @@
           "generation": {
             "type": "string",
             "example": ""
+          },
+          "pluginId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginId`."
+          },
+          "pluginPath": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginPath`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_path"
+                ]
+              },
+              {
+                "required": [
+                  "pluginPath"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -15932,7 +17681,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "generation"
         ],
         "properties": {
@@ -15941,9 +17689,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16116,29 +17883,36 @@
       "idempotency": "required",
       "summary": "plugin_install_from_github (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "zod-contract",
       "inputSchema": {
         "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "gitRef": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subdir": {
+            "type": "string",
+            "minLength": 1
+          },
+          "generatedFiles": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {}
+          }
+        },
         "required": [
           "repo"
         ],
-        "properties": {
-          "repo": {
-            "type": "string"
-          },
-          "gitRef": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "subdir": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
         "additionalProperties": false
       },
       "outputSchemaSource": "contract",
@@ -16172,11 +17946,8 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "plugin_id",
-          "plugin_path",
-          "entry",
-          "callback_id",
           "args",
+          "entry",
           "generation"
         ],
         "properties": {
@@ -16203,9 +17974,68 @@
           "generation": {
             "type": "string",
             "example": ""
+          },
+          "pluginId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginId`."
+          },
+          "pluginPath": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginPath`."
+          },
+          "callbackId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `callbackId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_path"
+                ]
+              },
+              {
+                "required": [
+                  "pluginPath"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "callback_id"
+                ]
+              },
+              {
+                "required": [
+                  "callbackId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16238,10 +18068,8 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "method",
-          "payloadJson",
-          "generation"
+          "generation",
+          "method"
         ],
         "properties": {
           "pluginId": {
@@ -16255,9 +18083,45 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "payload_json": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "payload_json"
+                ]
+              },
+              {
+                "required": [
+                  "payloadJson"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16281,7 +18145,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "plugin_id",
           "generation"
         ],
         "properties": {
@@ -16293,9 +18156,30 @@
           "generation": {
             "type": "string",
             "example": ""
+          },
+          "pluginId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16319,8 +18203,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "plugin_id",
-          "plugin_path",
           "entry"
         ],
         "properties": {
@@ -16343,9 +18225,49 @@
             "items": {
               "type": "string"
             }
+          },
+          "pluginId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginId`."
+          },
+          "pluginPath": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginPath`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_path"
+                ]
+              },
+              {
+                "required": [
+                  "pluginPath"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16412,11 +18334,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "pluginId",
-          "manifestJson",
-          "pluginPath"
-        ],
         "properties": {
           "pluginId": {
             "type": "string"
@@ -16427,9 +18344,63 @@
           },
           "pluginPath": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "manifest_json": {
+            "type": "string",
+            "description": "Serialized Cognia plugin manifest."
+          },
+          "plugin_path": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "manifest_json"
+                ]
+              },
+              {
+                "required": [
+                  "manifestJson"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_path"
+                ]
+              },
+              {
+                "required": [
+                  "pluginPath"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16462,9 +18433,7 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "permission",
-          "grantedBy"
+          "permission"
         ],
         "properties": {
           "pluginId": {
@@ -16482,9 +18451,45 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "granted_by": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "granted_by"
+                ]
+              },
+              {
+                "required": [
+                  "grantedBy"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16516,15 +18521,31 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "pluginId"
-        ],
         "properties": {
           "pluginId": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16561,7 +18582,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "permission"
         ],
         "properties": {
@@ -16570,9 +18590,28 @@
           },
           "permission": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16657,14 +18696,55 @@
                 }
               ]
             }
+          },
+          "generation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plugin_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "function_name": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
-          "pluginId",
-          "functionName",
-          "args"
+          "args",
+          "generation"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "function_name"
+                ]
+              },
+              {
+                "required": [
+                  "functionName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16697,11 +18777,10 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "event",
+          "generation",
           "name",
-          "payload",
-          "generation"
+          "payload"
         ],
         "properties": {
           "pluginId": {
@@ -16716,9 +18795,28 @@
           "payload": {},
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16751,8 +18849,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "toolName",
           "args",
           "generation"
         ],
@@ -16770,9 +18866,45 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "tool_name"
+                ]
+              },
+              {
+                "required": [
+                  "toolName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16805,7 +18937,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "code",
           "generation"
         ],
@@ -16826,9 +18957,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16861,7 +19011,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "generation"
         ],
         "properties": {
@@ -16870,9 +19019,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16905,7 +19073,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "generation"
         ],
         "properties": {
@@ -16914,9 +19081,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -16949,8 +19135,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "moduleName",
           "generation"
         ],
         "properties": {
@@ -16962,9 +19146,45 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "module_name": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "module_name"
+                ]
+              },
+              {
+                "required": [
+                  "moduleName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17028,7 +19248,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "dependencies"
         ],
         "properties": {
@@ -17040,9 +19259,28 @@
             "items": {
               "type": "string"
             }
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17066,7 +19304,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "generation"
         ],
         "properties": {
@@ -17075,9 +19312,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17135,11 +19391,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "pluginId",
-          "pluginPath",
-          "mainModule"
-        ],
         "properties": {
           "pluginId": {
             "type": "string"
@@ -17174,9 +19425,62 @@
             ],
             "additionalProperties": {},
             "example": {}
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "plugin_path": {
+            "type": "string"
+          },
+          "main_module": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_path"
+                ]
+              },
+              {
+                "required": [
+                  "pluginPath"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "main_module"
+                ]
+              },
+              {
+                "required": [
+                  "mainModule"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17274,15 +19578,73 @@
                 }
               ]
             }
+          },
+          "generation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plugin_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "module_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "function_name": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
-          "pluginId",
-          "moduleName",
-          "functionName",
-          "args"
+          "args",
+          "generation"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "module_name"
+                ]
+              },
+              {
+                "required": [
+                  "moduleName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "function_name"
+                ]
+              },
+              {
+                "required": [
+                  "functionName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17315,9 +19677,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "moduleName",
-          "attrName",
           "generation"
         ],
         "properties": {
@@ -17332,9 +19691,62 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "module_name": {
+            "type": "string"
+          },
+          "attr_name": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "module_name"
+                ]
+              },
+              {
+                "required": [
+                  "moduleName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "attr_name"
+                ]
+              },
+              {
+                "required": [
+                  "attrName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17367,7 +19779,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "config",
           "generation"
         ],
@@ -17382,9 +19793,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17439,7 +19869,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "generation"
         ],
         "properties": {
@@ -17448,9 +19877,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17558,25 +20006,75 @@
       "idempotency": "required",
       "summary": "plugin_set_network_allowlist (service.internal)",
       "description": "Loopback service-token command. Target: service; risk: critical.",
-      "inputSchemaSource": "contract",
+      "inputSchemaSource": "zod-contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "pluginId",
-          "domains"
-        ],
         "properties": {
           "pluginId": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "domains": {
             "type": "array",
             "items": {
               "type": "string"
             }
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "domain": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "methods": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "domain",
+                "methods",
+                "paths"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "plugin_id": {
+            "type": "string",
+            "minLength": 1
           }
         },
-        "additionalProperties": false
+        "required": [
+          "domains"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17600,7 +20098,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "commands"
         ],
         "properties": {
@@ -17612,9 +20109,28 @@
             "items": {
               "type": "string"
             }
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17638,7 +20154,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "plugin_id",
           "status"
         ],
         "properties": {
@@ -17650,9 +20165,30 @@
           "status": {
             "type": "string",
             "example": ""
+          },
+          "pluginId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17737,7 +20273,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "plugin_id",
           "generation"
         ],
         "properties": {
@@ -17749,9 +20284,30 @@
           "generation": {
             "type": "string",
             "example": ""
+          },
+          "pluginId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17806,7 +20362,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "generation"
         ],
         "properties": {
@@ -17815,9 +20370,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17841,8 +20415,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "responseJson",
           "generation"
         ],
         "properties": {
@@ -17854,9 +20426,45 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "response_json": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "response_json"
+                ]
+              },
+              {
+                "required": [
+                  "responseJson"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17880,8 +20488,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "configJson",
           "generation"
         ],
         "properties": {
@@ -17893,9 +20499,45 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "config_json": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "config_json"
+                ]
+              },
+              {
+                "required": [
+                  "configJson"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17928,9 +20570,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
-          "exportName",
-          "payloadJson",
           "generation"
         ],
         "properties": {
@@ -17945,9 +20584,62 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "export_name": {
+            "type": "string"
+          },
+          "payload_json": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "export_name"
+                ]
+              },
+              {
+                "required": [
+                  "exportName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "payload_json"
+                ]
+              },
+              {
+                "required": [
+                  "payloadJson"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -17971,7 +20663,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "generation"
         ],
         "properties": {
@@ -17980,9 +20671,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -18049,11 +20759,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "pluginId",
-          "manifestJson",
-          "pluginPath"
-        ],
         "properties": {
           "pluginId": {
             "type": "string"
@@ -18063,9 +20768,62 @@
           },
           "pluginPath": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "manifest_json": {
+            "type": "string"
+          },
+          "plugin_path": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "manifest_json"
+                ]
+              },
+              {
+                "required": [
+                  "manifestJson"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_path"
+                ]
+              },
+              {
+                "required": [
+                  "pluginPath"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -18098,7 +20856,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "pluginId",
           "generation"
         ],
         "properties": {
@@ -18107,9 +20864,28 @@
           },
           "generation": {
             "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -18686,15 +21462,47 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all — the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
+        "required": [
+          "path",
+          "exists",
+          "writable",
+          "format",
+          "raw",
+          "parsed"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "properties": {
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "writable": {
+            "type": "boolean"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "jsonc",
+              "toml"
+            ]
+          },
+          "raw": {
+            "type": "string"
+          },
+          "parsed": {
+            "x-cognia-opaque-reason": "serde_json::Value — the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
+          },
+          "parseError": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
         "x-cognia-schema-owner": "agent-config"
       },
       "outputTyped": true
@@ -20854,10 +23662,12 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "secrets"
+        "type": [
+          "string",
+          "null"
+        ],
+        "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
+        "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
       },
       "outputTyped": true
     },
@@ -20928,7 +23738,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "agent_id",
           "message"
         ],
         "properties": {
@@ -20937,9 +23746,28 @@
           },
           "message": {
             "type": "string"
+          },
+          "agentId": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "agent_id"
+                ]
+              },
+              {
+                "required": [
+                  "agentId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -21290,17 +24118,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "handle_id"
-        ],
         "properties": {
           "handle_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `handleId`."
+          },
+          "handleId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `handleId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "handle_id"
+                ]
+              },
+              {
+                "required": [
+                  "handleId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -21323,17 +24169,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "handle_id"
-        ],
         "properties": {
           "handle_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `handleId`."
+          },
+          "handleId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `handleId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "handle_id"
+                ]
+              },
+              {
+                "required": [
+                  "handleId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -21393,10 +24257,7 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "handle_id",
-          "offset",
-          "data_base64",
-          "chunk_hash"
+          "offset"
         ],
         "properties": {
           "handle_id": {
@@ -21419,9 +24280,68 @@
             "type": "string",
             "example": "",
             "description": "Also accepted as `chunkHash`."
+          },
+          "handleId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `handleId`."
+          },
+          "dataBase64": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `dataBase64`."
+          },
+          "chunkHash": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `chunkHash`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "handle_id"
+                ]
+              },
+              {
+                "required": [
+                  "handleId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "data_base64"
+                ]
+              },
+              {
+                "required": [
+                  "dataBase64"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "chunk_hash"
+                ]
+              },
+              {
+                "required": [
+                  "chunkHash"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -21480,17 +24400,35 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "handle_id"
-        ],
         "properties": {
           "handle_id": {
             "type": "string",
             "example": "",
             "description": "Also accepted as `handleId`."
+          },
+          "handleId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `handleId`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "handle_id"
+                ]
+              },
+              {
+                "required": [
+                  "handleId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -21703,8 +24641,7 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "target",
-          "dir_name"
+          "target"
         ],
         "properties": {
           "target": {
@@ -21716,9 +24653,30 @@
             "type": "string",
             "example": "",
             "description": "Also accepted as `dirName`."
+          },
+          "dirName": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `dirName`."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "dir_name"
+                ]
+              },
+              {
+                "required": [
+                  "dirName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -23425,16 +26383,24 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "terminal"
+        "type": "array",
+        "x-cognia-wire-source": "Vec<cognia_terminal::complete::PathCandidate> (serde rename_all = camelCase).",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "isDir"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "isDir": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -23487,16 +26453,32 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "cognia_terminal::exec::TerminalExecResult (serde rename_all = camelCase). A non-zero exit is a SUCCESSFUL response with exitCode set; exitCode is null when the child was signalled or killed on timeout.",
+        "required": [
+          "stdout",
+          "stderr",
+          "exitCode",
+          "timedOut"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "terminal"
+        "properties": {
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "exitCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timedOut": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -23560,16 +26542,12 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "terminal"
+        "type": "array",
+        "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port — the PIDs actually signalled, possibly empty when nothing was listening.",
+        "items": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "outputTyped": true
     },
@@ -23593,18 +26571,150 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null — the two ssh_host_key_* fields are the exception and do skip.",
+          "required": [
+            "id",
+            "hostId",
+            "kind",
+            "profileId",
+            "projectId",
+            "extensionId",
+            "origin",
+            "shell",
+            "createdAt",
+            "lastActivityAt",
+            "currentController",
+            "attachedClients",
+            "alive",
+            "sandboxed",
+            "integrationCapabilities",
+            "replay"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "terminal"
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "hostId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "localPty",
+                "ssh"
+              ]
+            },
+            "profileId": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "extensionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "origin": {
+              "enum": [
+                "local",
+                "remote"
+              ]
+            },
+            "shell": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "lastActivityAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "currentController": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "attachedClients": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "alive": {
+              "type": "boolean"
+            },
+            "sandboxed": {
+              "type": "boolean"
+            },
+            "integrationCapabilities": {
+              "type": "object",
+              "required": [
+                "osc633",
+                "commandStatus",
+                "cwdTracking",
+                "degradedReason"
+              ],
+              "properties": {
+                "osc633": {
+                  "type": "boolean"
+                },
+                "commandStatus": {
+                  "type": "boolean"
+                },
+                "cwdTracking": {
+                  "type": "boolean"
+                },
+                "degradedReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "replay": {
+              "type": "object",
+              "required": [
+                "firstSequence",
+                "lastSequence",
+                "retainedBytes",
+                "truncated"
+              ],
+              "properties": {
+                "firstSequence": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "lastSequence": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "retainedBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "sshHostKeyStatus": {
+              "type": "string"
+            },
+            "sshHostKeyFingerprint": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -23637,18 +26747,150 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null — the two ssh_host_key_* fields are the exception and do skip.",
+          "required": [
+            "id",
+            "hostId",
+            "kind",
+            "profileId",
+            "projectId",
+            "extensionId",
+            "origin",
+            "shell",
+            "createdAt",
+            "lastActivityAt",
+            "currentController",
+            "attachedClients",
+            "alive",
+            "sandboxed",
+            "integrationCapabilities",
+            "replay"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "terminal"
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "hostId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "localPty",
+                "ssh"
+              ]
+            },
+            "profileId": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "extensionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "origin": {
+              "enum": [
+                "local",
+                "remote"
+              ]
+            },
+            "shell": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "lastActivityAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "currentController": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "attachedClients": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "alive": {
+              "type": "boolean"
+            },
+            "sandboxed": {
+              "type": "boolean"
+            },
+            "integrationCapabilities": {
+              "type": "object",
+              "required": [
+                "osc633",
+                "commandStatus",
+                "cwdTracking",
+                "degradedReason"
+              ],
+              "properties": {
+                "osc633": {
+                  "type": "boolean"
+                },
+                "commandStatus": {
+                  "type": "boolean"
+                },
+                "cwdTracking": {
+                  "type": "boolean"
+                },
+                "degradedReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "replay": {
+              "type": "object",
+              "required": [
+                "firstSequence",
+                "lastSequence",
+                "retainedBytes",
+                "truncated"
+              ],
+              "properties": {
+                "firstSequence": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "lastSequence": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "retainedBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "sshHostKeyStatus": {
+              "type": "string"
+            },
+            "sshHostKeyFingerprint": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -25081,7 +28323,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "approvalId",
           "decision"
         ],
         "properties": {
@@ -25094,9 +28335,28 @@
               "approved",
               "rejected"
             ]
+          },
+          "approval_id": {
+            "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "approval_id"
+                ]
+              },
+              {
+                "required": [
+                  "approvalId"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -25528,16 +28788,20 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "crate::agents::commands::AgentWriteResult. backup_path is renamed to backupPath and skipped when None.",
+        "required": [
+          "path"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "agent-config"
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "backupPath": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -25620,5 +28884,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "d701e8b044d0adb7ac9434158bbaf8935863b069a1d437c4b26c289454986254"
+  "catalogHash": "07bc09ba3a6849d7a0e2f99f88c75ad930b80185b496ab3b577a0684f76efec1"
 }

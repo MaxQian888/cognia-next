@@ -45,10 +45,12 @@ function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgent
 }
 
 describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
-  it("contains the five registered built-in adapters", () => {
+  it("contains the seven registered built-in adapters", () => {
     expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual([
       "acp",
       "codex-app-server",
+      "dsh-sdk",
+      "pi-rpc",
       "opencode",
       "opencode-v2",
       "a2a",
@@ -57,12 +59,14 @@ describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
 })
 
 describe("isSupportedExternalAgentProtocol", () => {
-  it("returns true for the five built-in protocols", () => {
+  it("returns true for the built-in protocols", () => {
     expect(isSupportedExternalAgentProtocol("acp")).toBe(true)
     expect(isSupportedExternalAgentProtocol("opencode")).toBe(true)
     expect(isSupportedExternalAgentProtocol("opencode-v2")).toBe(true)
     expect(isSupportedExternalAgentProtocol("codex-app-server")).toBe(true)
     expect(isSupportedExternalAgentProtocol("a2a")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("dsh-sdk")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("pi-rpc")).toBe(true)
   })
   it("returns false for unknown protocols", () => {
     expect(isSupportedExternalAgentProtocol("custom" as never)).toBe(false)

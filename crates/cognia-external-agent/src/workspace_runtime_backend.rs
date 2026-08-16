@@ -794,6 +794,7 @@ mod tests {
             args: vec!["--stdio".into()],
             env: HashMap::from([("TOKEN".into(), "secret".into())]),
             cwd: Some(cwd.into()),
+            framing: Default::default(),
         }
     }
 

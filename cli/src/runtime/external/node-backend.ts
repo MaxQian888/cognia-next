@@ -10,6 +10,24 @@ import {
   resolveAgentSearchPath,
   type AgentPathRuntime,
 } from "./agent-path"
+// Single source for the runtime-home layout the launcher exception is pinned to.
+import { runtimeHomeFor } from "./dsh-installer"
+
+/**
+ * How this agent's stdout is delivered.
+ *
+ * `"line"` (default) splits with `readline` and emits one string per line on
+ * `external-agent://stdout` — what ACP, Codex and OpenCode have always used.
+ *
+ * `"raw"` forwards undecoded bytes as base64 on `external-agent://stdout-raw`
+ * and lets the adapter frame them. Required by `pi-rpc`, because `readline`
+ * treats U+2028 / U+2029 as line terminators while `JSON.stringify` leaves
+ * them unescaped — one valid Pi frame carrying U+2028 arrives as several
+ * unparseable fragments. Base64 rather than a string because the payload
+ * crosses an IPC boundary on the desktop host, and because a chunk boundary
+ * can fall inside a multi-byte UTF-8 sequence (see ADR-0119).
+ */
+export type ExternalAgentStdoutFraming = "line" | "raw"
 
 export interface NodeExternalAgentSpawnConfig {
   id: string
@@ -17,6 +35,8 @@ export interface NodeExternalAgentSpawnConfig {
   args?: string[]
   cwd?: string
   env?: Record<string, string>
+  /** Defaults to `"line"`; only `pi-rpc` opts into `"raw"`. */
+  framing?: ExternalAgentStdoutFraming
 }
 
 export interface ExternalAgentLaunch {
@@ -36,6 +56,7 @@ export interface NodeExternalAgentBackendOptions {
 
 const CHANNEL = {
   stdout: "external-agent://stdout",
+  stdoutRaw: "external-agent://stdout-raw",
   stderr: "external-agent://stderr",
   exit: "external-agent://exit",
   state: "external-agent://state-change",
@@ -55,6 +76,9 @@ const BINARY_ALLOWLIST = new Set([
   "copilot",
   "kiro-cli",
   "droid",
+  // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119). The
+  // `pi-acp` npx bridge below stays for the legacy compatibility preset.
+  "pi",
 ])
 const NPX_ALLOWLIST = new Set([
   "@agentclientprotocol/claude-agent-acp",
@@ -76,6 +100,10 @@ const CONFIG_ENV_KEYS = new Set([
   "TERM",
   "LANG",
   "LC_ALL",
+  // Pins the DeepSeek Harness user-data root into Cognia-owned space; without
+  // it DSH falls back to ~/.dsh, where a user-writable cordis.patch.yml can
+  // inject plugins and arbitrary JS into a certified composition.
+  "DSH_HOME",
 ])
 const RUNTIME_ENV_KEYS = new Set([
   "PATH",
@@ -131,6 +159,17 @@ const CONFIG_ENV_PREFIXES = [
   "DROID_",
   "ACP_",
   "COGNIA_AGENT_",
+  // DeepSeek Harness: the provider credential plus the composition's own
+  // COGNIA_DSH_* inputs (workspace, session root, model, persona).
+  "DEEPSEEK_",
+  "COGNIA_DSH_",
+  // The tool-host handshake (socket path + per-attempt token + server name).
+  // ACP agents never needed this because the token goes to the MCP bridge they
+  // spawn; Pi has no per-session mcpServers parameter, so the bundled Cognia
+  // extension reads it from its own process env instead. Safe because the
+  // broker's authorize() is the permission authority, not possession of the
+  // token — see ADR-0119.
+  "COGNIA_TOOLHOST_",
 ]
 const DANGEROUS_ENV =
   /^(?:LD_|DYLD_|NODE_OPTIONS$|GCONV_PATH$|GIT_CONFIG_|HOSTALIASES$|NLSPATH$|RESOLV_HOST_CONF$|PSMODULEPATH$|PSEXECUTIONPOLICYPREFERENCE$)/i
@@ -147,7 +186,11 @@ function baseCommand(command: string): string {
     .replace(/\.(?:exe|cmd|bat)$/i, "")
 }
 
-function validateCommand(config: NodeExternalAgentSpawnConfig, smoke: boolean): void {
+function validateCommand(
+  config: NodeExternalAgentSpawnConfig,
+  smoke: boolean,
+  workspacesRoot: string
+): void {
   const command = config.command.trim()
   if (!command) throw new Error("empty command")
   if (command.includes("/") || command.includes("\\")) {
@@ -162,7 +205,46 @@ function validateCommand(config: NodeExternalAgentSpawnConfig, smoke: boolean): 
   }
   const stub = path.basename(config.args?.[0] ?? "") === "stub-acp-agent.mjs"
   if (base === "node" && smoke && stub) return
+  // DeepSeek Harness ships no binary of its own, so Cognia supplies the entry
+  // point and the spawn is `node <launcher> <composition>`. Admitting bare
+  // `node` would defeat the allowlist, so the exception is pinned to a launcher
+  // inside Cognia's own runtime home; the launcher then refuses to boot unless
+  // DSH_HOME is pinned there too. Mirrors the Rust rule in
+  // crates/cognia-external-agent/src/presets.rs.
+  if (base === "node" && isDshLauncherInvocation(config.args ?? [], workspacesRoot)) return
   throw new Error(`binary ${command} is not in the external-agent allowlist`)
+}
+
+/** `node <launcher.mjs> <composition.yml>`, both canonicalizing under the DSH runtime home. */
+export function isDshLauncherInvocation(args: readonly string[], workspacesRoot: string): boolean {
+  if (args.length !== 2) return false
+  const [launcher, composition] = args
+  if (path.basename(launcher) !== "launcher.mjs") return false
+  if (path.extname(composition) !== ".yml") return false
+  // Pinned to the runtime home, NOT the data root that contains it: the data
+  // root also contains `workspaces/`, which is where `validateCwd` confines
+  // every agent cwd and therefore agent-writable. Rooting the check there let
+  // an agent drop its own `launcher.mjs` + `.yml` into its workspace and run
+  // arbitrary JS through the one `node` exception — defeating the allowlist.
+  const runtimeHome = runtimeHomeFor(path.dirname(workspacesRoot))
+  let canonicalRoot: string
+  try {
+    canonicalRoot = fs.realpathSync(runtimeHome)
+  } catch {
+    return false
+  }
+  // Canonicalize both so `..` traversal and a planted symlink cannot escape.
+  return [launcher, composition].every((candidate) => {
+    try {
+      const resolved = fs.realpathSync(candidate)
+      const relative = path.relative(canonicalRoot, resolved)
+      return (
+        relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+      )
+    } catch {
+      return false
+    }
+  })
 }
 
 function validateCwd(root: string, requested?: string): string {
@@ -251,6 +333,44 @@ export class NodeExternalAgentBackend {
         return undefined as T
       case "check_command_exists":
         return (await commandExists(String(args.command))) as T
+      // The Pi adapter cannot touch the filesystem itself (it also runs in the
+      // renderer under static export), so each host answers "is the bundled
+      // extension the one we shipped?" in its own way behind one command name.
+      // The desktop's answer is `pi_extension::resolve_pi_extension`; both emit
+      // the same tagged verdict.
+      case "resolve_pi_extension": {
+        const { verifyPiExtension } = await import("../../agent/tool-host/pi-extension")
+        return verifyPiExtension() as T
+      }
+      // DeepSeek Harness is the one backend Cognia installs itself, so its
+      // lifecycle is served here rather than by an external CLI on PATH. The
+      // surface mirrors the Tauri commands exactly (facts -> stage -> finalize),
+      // so the renderer runs one flow on every host.
+      case "dsh_runtime_facts": {
+        const { defaultDataRoot, gatherDshRuntimeFacts } = await import("./dsh-installer")
+        return gatherDshRuntimeFacts(defaultDataRoot()) as T
+      }
+      case "dsh_runtime_install": {
+        const { defaultDataRoot, stageDshInstall } = await import("./dsh-installer")
+        const { resolveRuntimeSourceDir } = await import("../../cli/backend-command")
+        return (await stageDshInstall({
+          dataRoot: defaultDataRoot(),
+          sourceDir: resolveRuntimeSourceDir(import.meta.url),
+        })) as T
+      }
+      case "dsh_runtime_finalize": {
+        const { defaultDataRoot, finalizeDshInstall } = await import("./dsh-installer")
+        finalizeDshInstall(defaultDataRoot(), String(args.manifestJson))
+        return undefined as T
+      }
+      case "dsh_runtime_remove": {
+        const { defaultDataRoot, removeDshRuntime } = await import("./dsh-installer")
+        removeDshRuntime({
+          dataRoot: defaultDataRoot(),
+          activeSessionCount: Number(args.activeSessionCount ?? 0),
+        })
+        return undefined as T
+      }
       default:
         throw new Error(`unsupported external-agent command: ${name}`)
     }
@@ -262,7 +382,7 @@ export class NodeExternalAgentBackend {
 
   private async spawn(config: NodeExternalAgentSpawnConfig): Promise<string> {
     if (this.processes.has(config.id)) throw new Error(`agent already running: ${config.id}`)
-    validateCommand(config, this.allowSmokeAgent)
+    validateCommand(config, this.allowSmokeAgent, this.workspacesRoot)
     const cwd = validateCwd(this.workspacesRoot, config.cwd)
     const normalized = { ...config, cwd }
     const launch = await this.resolveLaunch(normalized)
@@ -283,9 +403,18 @@ export class NodeExternalAgentBackend {
     })
     const record: ProcessRecord = { child, stopping: false }
     this.processes.set(config.id, record)
-    readline.createInterface({ input: child.stdout }).on("line", (data) => {
-      this.emit(CHANNEL.stdout, { agentId: config.id, data })
-    })
+    if (config.framing === "raw") {
+      child.stdout.on("data", (chunk: Buffer) => {
+        this.emit(CHANNEL.stdoutRaw, { agentId: config.id, data: chunk.toString("base64") })
+      })
+    } else {
+      readline.createInterface({ input: child.stdout }).on("line", (data) => {
+        this.emit(CHANNEL.stdout, { agentId: config.id, data })
+      })
+    }
+    // stderr stays line-framed regardless: it is diagnostic output only and
+    // never participates in protocol parsing, so losing exotic separators in
+    // a log line is harmless where losing them in a frame is not.
     readline.createInterface({ input: child.stderr }).on("line", (data) => {
       this.emit(CHANNEL.stderr, { agentId: config.id, data })
     })

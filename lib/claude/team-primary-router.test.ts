@@ -55,7 +55,12 @@ describe("selectPrimaryResponder", () => {
     const complete = jest.fn(async () => "A2")
 
     await expect(
-      selectPrimaryResponder({ client: { complete }, userText: "Write a release note", members, memberByCharId: slots })
+      selectPrimaryResponder({
+        client: { complete },
+        userText: "Write a release note",
+        members,
+        memberByCharId: slots,
+      })
     ).resolves.toBe(members[1])
 
     expect(complete).toHaveBeenCalledWith(
@@ -70,12 +75,21 @@ describe("selectPrimaryResponder", () => {
     const complete = jest.fn(async () => "A2")
 
     await expect(
-      selectPrimaryResponder({ client: { complete }, userText: "secret", members, memberByCharId: slots })
+      selectPrimaryResponder({
+        client: { complete },
+        userText: "secret",
+        members,
+        memberByCharId: slots,
+      })
     ).resolves.toBe(members[0])
     expect(complete).not.toHaveBeenCalled()
   })
 
-  it.each([null, { complete: jest.fn(async () => "invalid") }, { complete: jest.fn(async () => "A99") }])(
+  it.each([
+    null,
+    { complete: jest.fn(async () => "invalid") },
+    { complete: jest.fn(async () => "A99") },
+  ])(
     "falls back to the first declared member for unavailable or invalid utility output",
     async (client) => {
       await expect(
@@ -89,7 +103,12 @@ describe("selectPrimaryResponder", () => {
       throw new Error("offline")
     })
     await expect(
-      selectPrimaryResponder({ client: { complete }, userText: "help", members, memberByCharId: slots })
+      selectPrimaryResponder({
+        client: { complete },
+        userText: "help",
+        members,
+        memberByCharId: slots,
+      })
     ).resolves.toBe(members[0])
   })
 })

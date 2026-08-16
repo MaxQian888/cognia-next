@@ -34,6 +34,10 @@ use super::process::{
 // ---------------------------------------------------------------------------
 
 pub const STDOUT_CHANNEL: &str = "external-agent://stdout";
+/// Undecoded stdout bytes, base64 in `data`, for agents spawned with
+/// `framing: "raw"`. Additive: nothing subscribes unless an adapter asked for
+/// raw framing, and the four channels above keep their exact shapes.
+pub const STDOUT_RAW_CHANNEL: &str = "external-agent://stdout-raw";
 pub const STDERR_CHANNEL: &str = "external-agent://stderr";
 pub const EXIT_CHANNEL: &str = "external-agent://exit";
 pub const STATE_CHANGE_CHANNEL: &str = "external-agent://state-change";
@@ -41,6 +45,13 @@ pub const SPAWN_CHANNEL: &str = "external-agent://spawn";
 
 pub fn stdout_payload(agent_id: &str, line: &str) -> Value {
     json!({ "agentId": agent_id, "data": line })
+}
+
+/// Same `{agentId, data}` shape as [`stdout_payload`], but `data` is base64 of
+/// the undecoded chunk — matching what the Node backend's raw mode emits, so
+/// one adapter decodes both hosts identically.
+pub fn stdout_raw_payload(agent_id: &str, base64: &str) -> Value {
+    json!({ "agentId": agent_id, "data": base64 })
 }
 
 pub fn stderr_payload(agent_id: &str, line: &str) -> Value {
@@ -89,6 +100,11 @@ impl ExternalAgentEventSink for EmitterEventSink {
     fn stdout_line(&self, agent_id: &str, line: &str) {
         self.emitter
             .emit(STDOUT_CHANNEL, stdout_payload(agent_id, line));
+    }
+
+    fn stdout_raw(&self, agent_id: &str, base64: &str) {
+        self.emitter
+            .emit(STDOUT_RAW_CHANNEL, stdout_raw_payload(agent_id, base64));
     }
 
     fn stderr_line(&self, agent_id: &str, line: &str) {
@@ -332,6 +348,7 @@ mod tests {
             args: vec![],
             env: HashMap::new(),
             cwd: None,
+            framing: Default::default(),
         };
         let result = spawn_with_events(backend.as_ref(), emitter.clone(), config).await;
         assert!(result.is_err());
@@ -376,6 +393,7 @@ mod tests {
             args: vec![script.display().to_string()],
             env: HashMap::new(),
             cwd: Some(tmp.path().display().to_string()),
+            framing: Default::default(),
         };
 
         let id = spawn_with_events(backend.as_ref(), emitter.clone(), config)

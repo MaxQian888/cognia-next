@@ -15,7 +15,9 @@ use std::collections::HashMap;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex as StdMutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{oneshot, watch, Mutex, RwLock};
 
@@ -27,6 +29,12 @@ use tokio::sync::{oneshot, watch, Mutex, RwLock};
 pub trait ExternalAgentEventSink: Send + Sync + 'static {
     /// A single line arrived on the process's stdout.
     fn stdout_line(&self, agent_id: &str, line: &str);
+    /// A raw stdout chunk, base64-encoded, for agents spawned with
+    /// [`ExternalAgentStdoutFraming::Raw`].
+    ///
+    /// Defaulted to a no-op so a sink that only cares about line framing — every
+    /// test collector, and every agent other than `pi-rpc` — is unaffected.
+    fn stdout_raw(&self, _agent_id: &str, _base64: &str) {}
     /// A single line arrived on the process's stderr.
     fn stderr_line(&self, agent_id: &str, line: &str);
     /// The process exited (naturally or via kill). `code`/`signal` mirror the
@@ -52,6 +60,27 @@ fn is_transient_codex_noise(line: &str) -> bool {
         && (line.contains("failed to load models cache") || line.contains("failed to renew cache"))
 }
 
+/// How an agent's stdout is delivered to the renderer.
+///
+/// Mirrors `ExternalAgentStdoutFraming` in
+/// `cli/src/runtime/external/node-backend.ts` — the two hosts must offer the
+/// same choice or an adapter works on one and hangs on the other.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExternalAgentStdoutFraming {
+    /// `\n`-delimited lines on `external-agent://stdout`. What ACP, Codex and
+    /// OpenCode have always used.
+    #[default]
+    Line,
+    /// Undecoded bytes, base64-encoded, on `external-agent://stdout-raw`.
+    ///
+    /// Only `pi-rpc` opts in. Pi's JSONL frames are delimited by the `\n` BYTE
+    /// alone, and its adapter owns a strict LF codec with frame/buffer ceilings;
+    /// handing it pre-split lines would move those limits somewhere they cannot
+    /// be enforced.
+    Raw,
+}
+
 /// Configuration for spawning an external agent
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ExternalAgentSpawnConfig {
@@ -67,6 +96,10 @@ pub struct ExternalAgentSpawnConfig {
     pub env: HashMap<String, String>,
     /// Working directory
     pub cwd: Option<String>,
+    /// Stdout delivery mode; defaults to [`ExternalAgentStdoutFraming::Line`]
+    /// so every existing caller and persisted payload keeps its behaviour.
+    #[serde(default)]
+    pub framing: ExternalAgentStdoutFraming,
 }
 
 /// State of an external agent process
@@ -346,14 +379,38 @@ impl ExternalAgentProcessManager {
         let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
         let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-        // Spawn stdout reader task — pushes each line to the sink as it arrives.
+        // Spawn stdout reader task. Line framing pushes each line to the sink as
+        // it arrives; raw framing forwards undecoded chunks so the adapter's own
+        // codec decides where frames begin and end.
         let stdout_id = id.clone();
         let stdout_sink = sink.clone();
+        let stdout_framing = config.framing;
         tokio::spawn(async move {
-            let mut reader = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                log::trace!("External agent {} stdout: {}", stdout_id, line);
-                stdout_sink.stdout_line(&stdout_id, &line);
+            match stdout_framing {
+                ExternalAgentStdoutFraming::Line => {
+                    let mut reader = BufReader::new(stdout).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        log::trace!("External agent {} stdout: {}", stdout_id, line);
+                        stdout_sink.stdout_line(&stdout_id, &line);
+                    }
+                }
+                ExternalAgentStdoutFraming::Raw => {
+                    let mut reader = BufReader::new(stdout);
+                    // Read whatever is available rather than filling the buffer:
+                    // a request/response protocol must not wait for 8 KiB of
+                    // traffic before the first frame is delivered.
+                    let mut buffer = vec![0u8; 8192];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(read) => {
+                                log::trace!("External agent {} stdout: {} raw bytes", stdout_id, read);
+                                stdout_sink
+                                    .stdout_raw(&stdout_id, &BASE64.encode(&buffer[..read]));
+                            }
+                        }
+                    }
+                }
             }
         });
 
@@ -575,6 +632,7 @@ mod tests {
     #[derive(Default)]
     struct CollectorSink {
         stdout: StdMutex<Vec<String>>,
+        stdout_raw: StdMutex<Vec<String>>,
         stderr: StdMutex<Vec<String>>,
         exited: StdMutex<Option<(Option<i32>, Option<String>)>>,
     }
@@ -583,6 +641,9 @@ mod tests {
     impl ExternalAgentEventSink for CollectorSink {
         fn stdout_line(&self, _agent_id: &str, line: &str) {
             self.stdout.lock().unwrap().push(line.to_string());
+        }
+        fn stdout_raw(&self, _agent_id: &str, base64: &str) {
+            self.stdout_raw.lock().unwrap().push(base64.to_string());
         }
         fn stderr_line(&self, _agent_id: &str, line: &str) {
             self.stderr.lock().unwrap().push(line.to_string());
@@ -662,7 +723,74 @@ mod tests {
             args: vec![],
             env: HashMap::new(),
             cwd: None,
+            framing: Default::default(),
         }
+    }
+
+    /// Line framing is the default and stays byte-for-byte what it always was:
+    /// stripped lines on the line sink, nothing on the raw sink.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn line_framing_delivers_stripped_lines_and_no_raw_chunks() {
+        let mgr = ExternalAgentProcessManager::new();
+        let sink = Arc::new(CollectorSink::default());
+        let mut cfg = echo_config("line-framed");
+        cfg.command = "printf".to_string();
+        cfg.args = vec!["one\\ntwo\\n".to_string()];
+
+        mgr.spawn(cfg, sink.clone()).await.expect("spawn");
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        assert_eq!(
+            *sink.stdout.lock().unwrap(),
+            vec!["one".to_string(), "two".to_string()]
+        );
+        assert!(sink.stdout_raw.lock().unwrap().is_empty());
+    }
+
+    /// Raw framing is what makes the desktop usable for `pi-rpc`: the delimiter
+    /// must survive to the renderer, because the adapter's LF codec — not the
+    /// host — decides where a frame ends.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn raw_framing_preserves_the_newline_delimiter_as_base64() {
+        let mgr = ExternalAgentProcessManager::new();
+        let sink = Arc::new(CollectorSink::default());
+        let mut cfg = echo_config("raw-framed");
+        cfg.command = "printf".to_string();
+        cfg.args = vec!["one\\ntwo\\n".to_string()];
+        cfg.framing = ExternalAgentStdoutFraming::Raw;
+
+        mgr.spawn(cfg, sink.clone()).await.expect("spawn");
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        assert!(sink.stdout.lock().unwrap().is_empty());
+        let decoded: String = sink
+            .stdout_raw
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|chunk| {
+                String::from_utf8(BASE64.decode(chunk).expect("valid base64")).expect("utf-8")
+            })
+            .collect();
+        assert_eq!(decoded, "one\ntwo\n");
+    }
+
+    /// The frozen wire contract has no `framing` key. A payload written before
+    /// this field existed must still deserialize, and must mean line framing.
+    #[test]
+    fn framing_defaults_to_line_for_payloads_that_omit_it() {
+        let cfg: ExternalAgentSpawnConfig =
+            serde_json::from_value(serde_json::json!({ "id": "a", "command": "pi" }))
+                .expect("legacy payload still deserializes");
+        assert_eq!(cfg.framing, ExternalAgentStdoutFraming::Line);
+
+        let raw: ExternalAgentSpawnConfig = serde_json::from_value(
+            serde_json::json!({ "id": "a", "command": "pi", "framing": "raw" }),
+        )
+        .expect("raw payload deserializes");
+        assert_eq!(raw.framing, ExternalAgentStdoutFraming::Raw);
     }
 
     #[cfg(unix)]
@@ -777,6 +905,7 @@ mod tests {
             args: vec![],
             env: HashMap::new(),
             cwd: None,
+            framing: Default::default(),
         };
         mgr.spawn(cfg, sink.clone()).await.expect("spawn");
 

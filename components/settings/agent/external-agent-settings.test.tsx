@@ -337,6 +337,48 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(textarea.value).toBe("")
   })
 
+  it("shows the Pi runtime section for pi-rpc and saves an isolated policy by default", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-pi-rpc"))
+    })
+
+    expect(await screen.findByTestId("pi-options-section")).toBeInTheDocument()
+    expect(screen.getByTestId("pi-extension-policy")).toBeInTheDocument()
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+    })
+    const input = addAgentMock.mock.calls[0][0]
+    expect(input.protocol).toBe("pi-rpc")
+    expect(input.process).toMatchObject({ command: "pi" })
+    // Isolation is the default, and it has to reach `metadata` — the adapter
+    // reads it from there when building spawn args.
+    expect(input.metadata.piExtensionPolicy).toBe("isolated")
+  })
+
+  it("shows the exact isolation flags so the claim is inspectable", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-pi-rpc"))
+    })
+    const section = await screen.findByTestId("pi-options-section")
+    // `--no-extensions` alone does NOT isolate Pi; the UI must not imply it does.
+    expect(section).toHaveTextContent("--no-extensions --no-skills --no-prompt-templates")
+  })
+
+  it("does not render the Pi runtime section for other protocols", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-claude-code"))
+    })
+    expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
+    expect(screen.queryByTestId("pi-options-section")).not.toBeInTheDocument()
+  })
+
   it("does not render the Codex options section for non-codex protocols", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)

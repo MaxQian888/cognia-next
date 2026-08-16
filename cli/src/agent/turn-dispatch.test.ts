@@ -49,11 +49,15 @@ describe("registerTurnSubagentContext", () => {
   it("publishes the turn's gate, signal, roots and MCP rows, then clears them", () => {
     const s = session()
     const controller = new AbortController()
+    const resolveSubagentOptions = jest.fn(async () => ({}) as SendOptions)
+    const resolveSubagentGate = jest.fn(() => gate)
     const clear = registerTurnSubagentContext({
       session: s,
       config,
       home: HOME,
       gate,
+      resolveSubagentOptions,
+      resolveSubagentGate,
       signal: controller.signal,
       approvedTools: new Set(["write"]),
       disabledMcpTools: new Set(["mcp__alpha__x"]),
@@ -64,6 +68,8 @@ describe("registerTurnSubagentContext", () => {
     expect(ctx!.cwd).toBe("/work")
     expect(ctx!.home).toBe(HOME)
     expect(ctx!.gate).toBe(gate)
+    expect(ctx!.resolveSubagentOptions).toBe(resolveSubagentOptions)
+    expect(ctx!.resolveSubagentGate).toBe(resolveSubagentGate)
     expect(ctx!.signal).toBe(controller.signal)
     expect(ctx!.mcpServers).toBe(s.mcpServers)
     expect([...ctx!.approvedTools]).toEqual(["write"])

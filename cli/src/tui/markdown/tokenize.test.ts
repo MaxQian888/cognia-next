@@ -167,6 +167,16 @@ describe("tokenizeMarkdown", () => {
     expect(lines[lines.length - 1]?.kind).not.toBe("blank")
   })
 
+  it("hugs a heading to the block beneath it, but keeps the blank above it", () => {
+    const lines = tokenizeMarkdown("Intro.\n\n# Findings\n\nDetails.")
+    expect(lines.map((l) => l.kind)).toEqual(["paragraph", "blank", "heading", "paragraph"])
+  })
+
+  it("suppresses every blank between a heading and its content", () => {
+    const lines = tokenizeMarkdown("# H\n\n\n\nbody")
+    expect(lines.map((l) => l.kind)).toEqual(["heading", "paragraph"])
+  })
+
   it("turns a hard line break into a space span", () => {
     const lines = tokenizeMarkdown("a  \nb")
     const spans = spansOf(lines[0])
@@ -193,8 +203,16 @@ describe("tokenizeMarkdown", () => {
     const lines = tokenizeMarkdown("`&#39;`")
     const spans = spansOf(lines[0])
     expect(spans).toHaveLength(1)
-    // marked escapes the `&` in inline code; our decoder restores the literal.
+    // Code is verbatim: marked@18 hands back the source text unescaped, so the
+    // entity must survive as the five characters the author typed.
     expect(spans[0]).toMatchObject({ text: "&#39;", code: true })
+  })
+
+  it("leaves HTML entities untouched inside fenced code blocks", () => {
+    const lines = tokenizeMarkdown('```html\n<a href="x">&amp;</a>\n```')
+    const code = lines.filter((l) => l.kind === "code")
+    expect(code).toHaveLength(1)
+    expect(code[0]).toMatchObject({ text: '<a href="x">&amp;</a>' })
   })
 
   it("carries nested bold+italic emphasis on a span", () => {

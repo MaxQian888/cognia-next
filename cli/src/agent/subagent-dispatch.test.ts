@@ -146,6 +146,26 @@ describe("handleCliDispatchAgent", () => {
     expect(resp.result).toContain("error_max_turns")
   })
 
+  it("binds child-specific options and permission gates before dispatch", async () => {
+    const childGate = createPermissionGate({ allow: ["Read"] })
+    const resolveSubagentGate = jest.fn(() => childGate)
+    const resolveSubagentOptions = jest.fn(async () => ({ provider: "anthropic" }))
+    const run = jest.fn(
+      async (..._args: Parameters<NonNullable<CliSubagentDispatchContext["run"]>>) => ({
+        text: "safe child",
+      })
+    )
+    registerCliSubagentContext("s1", makeCtx({ run, resolveSubagentGate, resolveSubagentOptions }))
+
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "check" }))
+
+    const deps = run.mock.calls[0]?.[3]
+    expect(resolveSubagentGate).toHaveBeenCalledWith("reviewer")
+    expect(deps?.gate).toBe(childGate)
+    await deps?.resolveOptions?.({} as never)
+    expect(resolveSubagentOptions).toHaveBeenCalledWith("reviewer", {})
+  })
+
   it("reports an unknown subagent id with the available list", async () => {
     registerCliSubagentContext("s1", makeCtx())
     const resp = await handleCliDispatchAgent(req({ subagentId: "ghost", prompt: "go" }))

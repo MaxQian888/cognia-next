@@ -33,10 +33,14 @@ export type ExternalAgentPresetId =
   | "kiro"
   | "qwen-code"
   | "pi"
+  | "pi-rpc"
   | "droid"
   | "opencode-server"
   | "opencode-remote"
   | "opencode-v2-preview"
+  | "deepseek-harness-readonly"
+  | "deepseek-harness-workspace"
+  | "deepseek-harness-acp"
   | "custom"
 
 /**
@@ -174,6 +178,86 @@ const OPENCODE_V2_PREVIEW_PRESET: ExternalAgentPresetConfig = {
   tags: ["opencode", "v2", "beta", "preview", "local-service"],
 }
 
+/**
+ * DeepSeek Harness presets.
+ *
+ * Unlike every other preset here, these name no binary on PATH. DSH publishes
+ * no executable for this transport, so Cognia ships its own host composition
+ * and launcher (`runtime/deepseek-harness/`) into an isolated runtime home. The
+ * installer fills in `process.command` / `process.args` with absolute paths;
+ * until then `isExternalAgentExecutable` reports the agent as not runnable and
+ * the UI offers Install.
+ */
+const DEEPSEEK_HARNESS_READONLY_PRESET: ExternalAgentPresetConfig = {
+  name: "DeepSeek Harness (read-only)",
+  description:
+    "Observation-rich DeepSeek Harness runtime: full tool, reasoning, usage, and subagent events. Reads files but cannot modify them or run commands, and cannot ask for approval mid-turn.",
+  protocol: "dsh-sdk",
+  transport: "stdio",
+  // Filled in by the installer; empty args keep the agent non-executable until
+  // a certified runtime is actually present.
+  process: { command: "", args: [] },
+  metadata: { dshProfileId: "cognia-sdk-readonly", requiresManagedRuntime: true },
+  envVarHint: "DEEPSEEK_API_KEY",
+  setupHint:
+    "Install the managed DeepSeek Harness runtime first (Settings → Agents, or `cognia-agent backend install deepseek-harness`).",
+  docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
+  supportTier: "executable",
+  // The transport cannot carry a permission request, so no mode that depends on
+  // asking would be honest here.
+  defaultPermissionMode: "plan",
+  tags: ["deepseek", "sdk", "read-only", "experimental"],
+}
+
+const DEEPSEEK_HARNESS_WORKSPACE_PRESET: ExternalAgentPresetConfig = {
+  name: "DeepSeek Harness (workspace write)",
+  description:
+    "DeepSeek Harness with workspace-write authority and a shell. Everything it may do is granted at launch and cannot be revoked mid-turn on this transport.",
+  protocol: "dsh-sdk",
+  transport: "stdio",
+  process: { command: "", args: [] },
+  metadata: { dshProfileId: "cognia-sdk-workspace", requiresManagedRuntime: true },
+  envVarHint: "DEEPSEEK_API_KEY",
+  setupHint:
+    "Install the managed runtime first. On Linux this profile also needs a node-gyp toolchain: upstream ships no node-pty prebuild there.",
+  docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
+  supportTier: "executable",
+  defaultPermissionMode: "acceptEdits",
+  tags: ["deepseek", "sdk", "workspace-write", "experimental"],
+}
+
+/**
+ * The interactive DeepSeek Harness channel.
+ *
+ * Uses Cognia's existing `AcpClientAdapter`; upstream's server negotiates
+ * protocol version 1, which is what `SUPPORTED_ACP_PROTOCOL_VERSIONS` accepts.
+ *
+ * The trade against the SDK presets is severe and deliberate. Upstream calls
+ * this server "automation-only": committed assistant text is all that reaches
+ * the wire, so there is no streaming, no tool activity, no reasoning and no
+ * usage. What it buys is the one thing the SDK transport cannot do — answer a
+ * permission request mid-turn, and cancel a single turn without killing the
+ * runtime.
+ */
+const DEEPSEEK_HARNESS_ACP_PRESET: ExternalAgentPresetConfig = {
+  name: "DeepSeek Harness (interactive)",
+  description:
+    "DeepSeek Harness over ACP. Asks you to approve individual tool calls and can cancel a single turn, but reports only committed replies — no streaming, tool activity, reasoning, or usage.",
+  protocol: "acp",
+  transport: "stdio",
+  // Filled in by the installer, like the SDK presets: there is no binary here.
+  process: { command: "", args: [] },
+  metadata: { dshProfileId: "cognia-acp", requiresManagedRuntime: true },
+  envVarHint: "DEEPSEEK_API_KEY",
+  setupHint:
+    "Install the managed DeepSeek Harness runtime first (Settings → Agents, or `cognia-agent backend install deepseek-harness`).",
+  docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
+  supportTier: "executable",
+  // This is the one DSH channel that can actually carry the question.
+  defaultPermissionMode: "default",
+  tags: ["deepseek", "acp", "interactive", "experimental"],
+}
+
 export const EXTERNAL_AGENT_PRESETS: Record<
   ExternalAgentPresetId,
   ExternalAgentPresetConfig | null
@@ -187,10 +271,14 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   kiro: buildPresetConfig("kiro"),
   "qwen-code": buildPresetConfig("qwen-code"),
   pi: buildPresetConfig("pi"),
+  "pi-rpc": buildPresetConfig("pi-rpc"),
   droid: buildPresetConfig("droid"),
   "opencode-server": OPENCODE_SERVER_PRESET,
   "opencode-remote": OPENCODE_REMOTE_PRESET,
   "opencode-v2-preview": OPENCODE_V2_PREVIEW_PRESET,
+  "deepseek-harness-readonly": DEEPSEEK_HARNESS_READONLY_PRESET,
+  "deepseek-harness-workspace": DEEPSEEK_HARNESS_WORKSPACE_PRESET,
+  "deepseek-harness-acp": DEEPSEEK_HARNESS_ACP_PRESET,
   custom: null,
 }
 
@@ -313,11 +401,39 @@ export function listDynamicPresetEntries(): Array<{
  * reached through the capability overlay instead. Derived from the record so it
  * can never drift from `EXTERNAL_AGENT_PRESETS`.
  */
+/**
+ * Presets that name a runnable command directly.
+ *
+ * The DeepSeek Harness presets are excluded: they name no binary on PATH and
+ * only become runnable once the managed runtime is installed, at which point
+ * the installer writes absolute paths into the agent config. Listing them as
+ * executable would offer them as `--backend` choices that cannot spawn.
+ */
+const NON_EXECUTABLE_PRESET_IDS = [
+  "custom",
+  "opencode-v2-preview",
+  "deepseek-harness-readonly",
+  "deepseek-harness-workspace",
+  "deepseek-harness-acp",
+] as const
+
+/**
+ * Preset ids with no fixed executable backend.
+ *
+ * Exported because `TeammateRuntime` is defined as the complement of this set.
+ * It used to hand-copy the exclusion list, which silently absorbed the three
+ * DeepSeek Harness ids the moment they were added here — offering runtimes the
+ * teammate picker (built from {@link BUILTIN_EXECUTABLE_PRESET_IDS}) can never
+ * list. Deriving both from one source keeps them the same set by construction.
+ */
+export type NonExecutablePresetId = (typeof NON_EXECUTABLE_PRESET_IDS)[number]
+
 export const BUILTIN_EXECUTABLE_PRESET_IDS = (
   Object.keys(EXTERNAL_AGENT_PRESETS) as ExternalAgentPresetId[]
 ).filter(
-  (id): id is Exclude<ExternalAgentPresetId, "custom" | "opencode-v2-preview"> =>
-    id !== "custom" && id !== "opencode-v2-preview" && EXTERNAL_AGENT_PRESETS[id] !== null
+  (id): id is Exclude<ExternalAgentPresetId, NonExecutablePresetId> =>
+    !(NON_EXECUTABLE_PRESET_IDS as readonly string[]).includes(id) &&
+    EXTERNAL_AGENT_PRESETS[id] !== null
 )
 
 /**

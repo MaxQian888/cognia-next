@@ -1,10 +1,18 @@
 /**
  * Markdown → styled terminal lines.
  *
- * Uses `marked@4`'s lexer (CJS, loads cleanly under Jest) to parse CommonMark +
- * GFM, then flattens the block/inline token tree into a flat list of display
- * lines the Ink `Markdown` component renders. Tolerant of the partial markdown
- * produced mid-stream (e.g. an unterminated code fence) — never throws.
+ * Uses `marked@18`'s lexer to parse CommonMark + GFM, then flattens the
+ * block/inline token tree into a flat list of display lines the Ink `Markdown`
+ * component renders. Tolerant of the partial markdown produced mid-stream
+ * (e.g. an unterminated code fence) — never throws.
+ *
+ * marked@18 is ESM-only, which Jest's CommonJS loader cannot execute; the root
+ * `jest.config.ts` maps `^marked$` to the package's own UMD build so tests run
+ * against the real lexer. Two behaviours changed from the marked@4 this module
+ * was originally written for, and both are compensated for below:
+ *   - token `text` is no longer HTML-escaped, so code spans/blocks must NOT be
+ *     entity-decoded (see `codespan` / `code`);
+ *   - a heading now emits a trailing `space` token (see `normalizeBlanks`).
  */
 import { lexer } from "marked"
 
@@ -19,7 +27,7 @@ type InlineToken = {
   tokens?: InlineToken[]
 }
 
-/** A GFM table cell as marked@4 emits it. */
+/** A GFM table cell as marked emits it. */
 type TableCell = { text?: string; tokens?: InlineToken[] }
 
 type BlockToken = {
@@ -31,7 +39,7 @@ type BlockToken = {
   start?: number | "" | string
   tokens?: InlineToken[]
   items?: Array<{ text?: string; tokens?: BlockToken[]; task?: boolean; checked?: boolean }>
-  /** GFM table fields (marked@4). */
+  /** GFM table fields. */
   header?: TableCell[]
   rows?: TableCell[][]
   align?: TableAlign[]
@@ -143,7 +151,11 @@ export function inlineToSpans(tokens: InlineToken[] | undefined, style: SpanStyl
         spans.push(...inlineToSpans(t.tokens, { ...style, strike: true }))
         break
       case "codespan":
-        spans.push({ text: decodeHtmlEntities(t.text ?? ""), code: true })
+        // Code is verbatim — never decoded. marked@18 hands back the source
+        // text unescaped, so decoding would turn a literal `&#39;` typed
+        // inside backticks into `'`. (marked@4 escaped it to `&amp;#39;`,
+        // which is the only reason this branch used to decode.)
+        spans.push({ text: t.text ?? "", code: true })
         break
       case "link":
         spans.push({
@@ -192,7 +204,9 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
         out.push({ kind: "paragraph", spans: inlineToSpans(token.tokens) })
         break
       case "code": {
-        const lines = decodeHtmlEntities(token.text ?? "").split("\n")
+        // Verbatim, for the same reason as `codespan` above — a fenced block
+        // containing `&amp;` must render those six characters, not `&`.
+        const lines = (token.text ?? "").split("\n")
         const lang = token.lang || undefined
         // Widest body line (display columns) so the renderer can size the frame
         // to the code instead of a fixed width.
@@ -312,7 +326,13 @@ function normalizeBlanks(lines: MdLine[]): MdLine[] {
   let lastWasBlank = false
   for (const line of lines) {
     if (line.kind === "blank") {
-      if (!lastWasBlank) filtered.push(line)
+      // A heading hugs the block beneath it: the blank line separating them in
+      // the source is structural, not typographic, and spending a terminal row
+      // on it visually detaches a heading from its own content. marked@4 folded
+      // that blank into the heading token; marked@18 emits it as a `space`, so
+      // the rule is now enforced here instead of inherited from the lexer.
+      const afterHeading = filtered[filtered.length - 1]?.kind === "heading"
+      if (!lastWasBlank && !afterHeading) filtered.push(line)
       lastWasBlank = true
     } else {
       filtered.push(line)

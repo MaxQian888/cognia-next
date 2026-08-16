@@ -28,6 +28,10 @@ workspace-runtime-exec = ["dep:reqwest"]
 tauri = { version = "=2.11.5" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
+# Raw stdout framing (`pi-rpc`) ships undecoded chunks to the renderer as
+# base64 — the same encoding the Node backend's raw mode uses.
+base64 = "0.23"
 async-trait = "0.1"
 parking_lot = "0.12"
 log = "0.4"

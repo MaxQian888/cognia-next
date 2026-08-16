@@ -22,9 +22,7 @@ describe("packaged MCP relay role", () => {
       resolveScript: () => "/dist/sidecar/mcp-stdio-relay.mjs",
       importer,
     })
-    expect(importer).toHaveBeenCalledWith(
-      pathToFileURL("/dist/sidecar/mcp-stdio-relay.mjs").href
-    )
+    expect(importer).toHaveBeenCalledWith(pathToFileURL("/dist/sidecar/mcp-stdio-relay.mjs").href)
     expect(runMcpStdioRelay).toHaveBeenCalledTimes(1)
   })
 
@@ -34,4 +32,3 @@ describe("packaged MCP relay role", () => {
     ).rejects.toThrow("does not export")
   })
 })
-

@@ -1,12 +1,5 @@
 export type AgentTaskStatus =
-  | "pending"
-  | "blocked"
-  | "in_progress"
-  | "review"
-  | "paused"
-  | "completed"
-  | "failed"
-  | "cancelled"
+  "pending" | "blocked" | "in_progress" | "review" | "paused" | "completed" | "failed" | "cancelled"
 
 export type AgentTaskPriority = "low" | "normal" | "high" | "critical"
 export type AgentTaskApprovalPolicy = "auto" | "on-risk" | "manual"
@@ -41,14 +34,7 @@ export interface AgentTask {
 }
 
 export type AgentTaskAttemptStatus =
-  | "queued"
-  | "running"
-  | "paused"
-  | "review"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "interrupted"
+  "queued" | "running" | "paused" | "review" | "completed" | "failed" | "cancelled" | "interrupted"
 
 export interface AgentTaskAttempt {
   id: string

@@ -68,8 +68,10 @@ import { BrandIcon } from "@/components/icons/brand-icon"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { DelegationRulesSection } from "./delegation-rules-section"
+import { DeepSeekHarnessCard } from "./deepseek-harness-card"
 import { CodexAppServerStatusCard } from "./codex-app-server-status-card"
 import { OpencodeStatusCard } from "./opencode-status-card"
+import { PiMigrationCard } from "./pi-migration-card"
 import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
@@ -85,6 +87,7 @@ import {
   adaptPermissionMode,
   supportedPermissionModes,
 } from "@/lib/ai/agent/external/permission-modes"
+import { extensionPolicyArgs, type PiExtensionPolicy } from "@/lib/ai/agent/external/pi-rpc-client"
 import type {
   ExternalAgentConnectionStatus,
   ExternalAgentConfig,
@@ -147,6 +150,14 @@ interface AgentFormData {
   opencodeServerUsername: string
   /** Default model as "providerID/modelID"; empty = server default */
   opencodeModel: string
+  // Pi native RPC options (shown only for protocol === "pi-rpc")
+  /**
+   * How much of the user's own Pi installation loads inside a Cognia session.
+   * Defaults to `isolated` because community permission extensions also hook
+   * `tool_call`, and two engines intercepting one call produce double prompts
+   * and unpredictable blocking.
+   */
+  piExtensionPolicy: PiExtensionPolicy
 }
 
 /** Split the newline-separated skill-roots textarea into clean, unique paths. */
@@ -195,6 +206,21 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   opencodeServerPassword: "",
   opencodeServerUsername: "",
   opencodeModel: "",
+  piExtensionPolicy: "isolated",
+}
+
+/**
+ * Read the Pi extension policy off `metadata`, defaulting to the safe end.
+ *
+ * An unrecognised stored value falls back to `isolated` rather than being
+ * trusted: a typo must not silently load the user's whole Pi extension stack
+ * into a Cognia-run session.
+ */
+function piExtensionPolicyFromMetadata(
+  metadata: Record<string, unknown> | undefined
+): PiExtensionPolicy {
+  const value = metadata?.piExtensionPolicy
+  return value === "global" || value === "trusted-project" ? value : "isolated"
 }
 
 /** Pull the OpenCode form fields out of an agent/preset `metadata` bag. */
@@ -285,6 +311,7 @@ const PROTOCOL_OPTIONS: readonly { value: ExternalAgentProtocol; label: string }
   // i18n-exempt: protocol identifiers (brand/technical), matching the manager dialog.
   { value: "acp", label: "ACP (Agent Client Protocol)" },
   { value: "codex-app-server", label: "Codex app-server (JSON-RPC)" },
+  { value: "pi-rpc", label: "Pi native RPC" },
   { value: "opencode", label: "OpenCode (HTTP + SSE)" },
   { value: "opencode-v2", label: "OpenCode V2 (Preview)" },
   { value: "a2a", label: "A2A (Agent-to-Agent)" },
@@ -381,6 +408,7 @@ function AgentEditorDialog({
       codexReasoningSummary: agent.codexOptions?.reasoningSummary ?? "",
       codexExtraSkillRoots: agent.codexOptions?.extraSkillRoots?.join("\n") ?? "",
       ...opencodeFieldsFromMetadata(agent.metadata),
+      piExtensionPolicy: piExtensionPolicyFromMetadata(agent.metadata),
     }
   })
 
@@ -527,6 +555,16 @@ function AgentEditorDialog({
         opencodeMetadata.model = formData.opencodeModel.trim()
       } else delete opencodeMetadata.model
       input.metadata = opencodeMetadata
+    }
+
+    if (formData.protocol === "pi-rpc") {
+      // The adapter reads this off `metadata` when building spawn args, so it
+      // must survive an edit that started from a preset (which supplies its
+      // own metadata bag above).
+      input.metadata = {
+        ...(input.metadata ?? {}),
+        piExtensionPolicy: formData.piExtensionPolicy,
+      }
     }
 
     onSave(input)
@@ -1056,6 +1094,45 @@ function AgentEditorDialog({
             </FormSection>
           )}
 
+          {formData.protocol === "pi-rpc" && (
+            <FormSection title={t("piSectionTitle")} defaultOpen dataTestId="pi-options-section">
+              <div className="space-y-2">
+                <Label htmlFor="pi-extension-policy">{t("piExtensionPolicyLabel")}</Label>
+                <Select
+                  value={formData.piExtensionPolicy}
+                  onValueChange={(v) =>
+                    setFormData({
+                      ...formData,
+                      piExtensionPolicy: v as PiExtensionPolicy,
+                    })
+                  }
+                >
+                  <SelectTrigger id="pi-extension-policy" data-testid="pi-extension-policy">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="isolated">{t("piExtensionPolicyIsolated")}</SelectItem>
+                    <SelectItem value="global">{t("piExtensionPolicyGlobal")}</SelectItem>
+                    <SelectItem value="trusted-project">
+                      {t("piExtensionPolicyTrustedProject")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-muted-foreground text-xs">
+                  {formData.piExtensionPolicy === "trusted-project"
+                    ? t("piExtensionPolicyTrustedProjectWarning")
+                    : t("piExtensionPolicyHint")}
+                </p>
+                {/* The exact flags, so the isolation claim is inspectable
+                    rather than something the user has to take on trust. */}
+                <p className="text-muted-foreground font-mono text-[11px]">
+                  {extensionPolicyArgs(formData.piExtensionPolicy).join(" ")}
+                </p>
+              </div>
+              <p className="text-muted-foreground text-xs">{t("piSandboxNote")}</p>
+            </FormSection>
+          )}
+
           {/* Timeout & retry — tuning knobs almost nobody changes, so they stay
               folded away behind a summary of the values currently in effect. */}
           <FormSection
@@ -1523,6 +1600,15 @@ function AgentDetail({
         {agent.protocol === "opencode" && (
           <OpencodeStatusCard agentId={agent.id} connected={isConnected} />
         )}
+
+        {/* Pi: offer the move off the community ACP bridge, and the way back.
+            Renders only for a legacy or already-migrated Pi agent, so nothing
+            else in the list is touched (ADR-0119 never auto-rewrites). */}
+        <PiMigrationCard
+          agent={agent}
+          blockers={runtimeValidity?.executable === false ? ["command_missing"] : []}
+          onApply={(next) => updateAgent(agent.id, next)}
+        />
       </CardContent>
     </Card>
   )
@@ -1899,14 +1985,19 @@ export function ExternalAgentSettings() {
             {view.kind === "delegation" && <DelegationRulesSection disabled={!enabled} />}
 
             {view.kind === "gallery" && (
-              <PresetGalleryCard
-                disabled={!enabled}
-                onPick={(presetId) => {
-                  setSelectedPresetForNew(presetId)
-                  setEditingAgentId(null)
-                  setEditorOpen(true)
-                }}
-              />
+              <div className="space-y-4">
+                <PresetGalleryCard
+                  disabled={!enabled}
+                  onPick={(presetId) => {
+                    setSelectedPresetForNew(presetId)
+                    setEditingAgentId(null)
+                    setEditorOpen(true)
+                  }}
+                />
+                {/* DeepSeek Harness is the one backend with no binary to detect,
+                    so its install lives here rather than behind a preset pick. */}
+                <DeepSeekHarnessCard />
+              </div>
             )}
 
             {view.kind === "agent" &&

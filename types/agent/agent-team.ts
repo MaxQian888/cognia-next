@@ -15,7 +15,7 @@
 import type { ProviderName } from "@cognia/provider-types/provider"
 import type { SubAgentTokenUsage, SubAgentPriority } from "./sub-agent"
 import type { TwinSettings } from "@/types/twin"
-import type { ExternalAgentPresetId } from "@/lib/ai/agent/external/presets"
+import type { ExternalAgentPresetId, NonExecutablePresetId } from "@/lib/ai/agent/external/presets"
 import type { ProjectEditorSession } from "@/types/editor/project-editor"
 import type {
   AgentTeamEnvironmentRef,
@@ -772,11 +772,16 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
  * dispatches to that external ACP/CLI agent (see
  * `lib/ai/agent/external/presets.ts`; `resolveTeammatePresetId` treats the
  * runtime string as the preset id directly). Covers the full executable preset
- * catalog — `custom` and service-discovered preview integrations are excluded
- * because they have no fixed executable backend.
+ * catalog — `custom`, service-discovered preview integrations, and the managed
+ * DeepSeek Harness profiles are excluded because they have no fixed executable
+ * backend.
+ *
+ * Derived from `NonExecutablePresetId` rather than repeating its members: the
+ * hand-copied exclusion list silently absorbed the three DeepSeek Harness ids
+ * when ADR-0120 added them, which made every `Record<TeammateRuntime, …>` in
+ * the workspace non-exhaustive for runtimes the picker cannot even offer.
  */
-export type TeammateRuntime =
-  "claude" | Exclude<ExternalAgentPresetId, "custom" | "opencode-v2-preview">
+export type TeammateRuntime = "claude" | Exclude<ExternalAgentPresetId, NonExecutablePresetId>
 
 /** Default runtime when a teammate has no explicit runtime configured. */
 export const DEFAULT_TEAMMATE_RUNTIME: TeammateRuntime = "claude"

@@ -82,6 +82,10 @@ export interface AgentSessionParams {
   home?: string
   bootstrap?: (cwd: string) => Promise<SidecarBootstrap>
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
+  /** Resolve one CLI-dispatched child with actor-specific transport overrides. */
+  resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
+  /** Provide an actor-scoped permission script for one CLI-dispatched child. */
+  resolveSubagentGate?: (actorRef: string) => PermissionResponder
   capture?: typeof defaultCapture
   transcriptFs?: TranscriptFs
   /** Assemble multimodal content from a typed prompt — encode `@image` refs,
@@ -356,6 +360,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         config: params.config,
         home,
         gate: opts.gate,
+        ...(params.resolveSubagentOptions
+          ? { resolveSubagentOptions: params.resolveSubagentOptions }
+          : {}),
+        ...(params.resolveSubagentGate ? { resolveSubagentGate: params.resolveSubagentGate } : {}),
         ...(opts.signal ? { signal: opts.signal } : {}),
         approvedTools: resolveApprovedTools(),
         disabledMcpTools: resolveDisabledMcpTools(),

@@ -250,7 +250,14 @@ export function canHostCogniaTools(negotiated: AcpCapabilities | undefined): boo
  */
 export function externalCapabilities(input: ExternalCapabilityInput): BackendCapabilities {
   const codexChannel = usesCodexOptions(input.presetId ?? input.backend)
-  const acpConfigChannel = input.protocol === "acp"
+  // Protocols whose live session exposes a config-options channel (model and
+  // thinking selectors). ACP advertises `configOptions`; `pi-rpc` answers the
+  // equivalent from `get_state` + `get_available_models` /
+  // `get_available_thinking_levels`.
+  const configOptionsChannel = input.protocol === "acp" || input.protocol === "pi-rpc"
+  // Pi exposes a first-class `compact` command and a native thinking-level
+  // control, rather than the slash-command heuristic other agents need.
+  const piRpc = input.protocol === "pi-rpc"
   const unsupported = (reason: string): FeatureSupport => ({ supported: false, reason })
   const host = input.toolHost
   const attachable = host ? host.attachable : canHostCogniaTools(input.negotiated)
@@ -269,7 +276,7 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
       // Forwarded at session/new, so a `/mcp` toggle restarts the agent context.
       mcp: SUPPORTED,
       // Read when the agent is registered, so a change needs a reconnect.
-      thinking: codexChannel ? SUPPORTED : unsupported(REASON.noProtocolSlot),
+      thinking: codexChannel || piRpc ? SUPPORTED : unsupported(REASON.noProtocolSlot),
       // Skills now ride the CANONICAL system prompt (catalog + `load_skill`),
       // which every external backend receives — this was Codex-only back when
       // the only channel was Codex's native skill-root scan.
@@ -277,7 +284,7 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
       // Plugin/web/`ask_user`/`load_skill` reach the agent through the Cognia
       // host bridge, so the honest answer is whatever the bridge produced.
       plugins: projected(host?.hostToolCount ?? 0),
-      compact: unsupported(REASON.noProtocolSlot),
+      compact: piRpc ? SUPPORTED : unsupported(REASON.noProtocolSlot),
       resume: input.negotiated?.multiTurn ? SUPPORTED : unsupported(REASON.noProtocolSlot),
       rateLimits: unsupported(REASON.sidecarOnly),
       mcpLogs: unsupported(REASON.agentOwned),
@@ -289,7 +296,7 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
       // Native Codex enumerates models through `model/list`; ACP agents expose
       // their model selector from the live session's `configOptions` instead.
       modelPicker:
-        supportsModelListing(input.presetId ?? input.backend) || acpConfigChannel
+        supportsModelListing(input.presetId ?? input.backend) || configOptionsChannel
           ? SUPPORTED
           : unsupported(REASON.noProtocolSlot),
     },

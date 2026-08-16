@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
-import { useAgentRuntimeStore } from "./agent-runtime-store"
+import { compositionForSession, useAgentRuntimeStore } from "./agent-runtime-store"
+import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 // Touch the outer agent barrel so its `export *` lines are covered.
 import * as outerAgentBarrel from "./"
 
@@ -61,6 +62,102 @@ describe("useAgentRuntimeStore", () => {
     expect(stored).not.toBeNull()
     const parsed = JSON.parse(stored as string)
     expect(parsed.state.modeId).toBe("persisted-mode")
-    expect(parsed.version).toBe(1)
+    // v2 (ADR-0117): the persisted shape gained `defaultComposition` and
+    // per-session selections; `modeId` stays as the compatibility adapter.
+    expect(parsed.version).toBe(2)
+  })
+
+  it("keeps the legacy mode id and the default composition in step", () => {
+    act(() => useAgentRuntimeStore.getState().setModeId("research"))
+    expect(useAgentRuntimeStore.getState().defaultComposition.presetId).toBe("research")
+
+    act(() => useAgentRuntimeStore.getState().setDefaultComposition({ presetId: "minimal" }))
+    // An unmigrated reader of `modeId` must not see a stale preset.
+    expect(useAgentRuntimeStore.getState().modeId).toBe("minimal")
+  })
+
+  it("maps a legacy permission mode onto the authority axis", () => {
+    act(() => useAgentRuntimeStore.getState().setModeId("build"))
+    const composition = useAgentRuntimeStore.getState().defaultComposition
+    expect(composition.presetId).toBe("standard")
+    expect(composition.authority).toBe("acceptEdits")
+  })
+
+  it("round-trips an axis mode without collapsing it to its preset", () => {
+    // `plan` maps to `{presetId: "standard", authority: "plan"}`, so mirroring
+    // `presetId` back onto `modeId` answered "standard" for a composition that
+    // is still Plan. `resolveActiveAgentMode` has no `standard` record, so the
+    // legacy send path silently lost plan-mode behaviour.
+    act(() => useAgentRuntimeStore.getState().setModeId("plan"))
+    const composition = useAgentRuntimeStore.getState().defaultComposition
+    expect(composition.authority).toBe("plan")
+
+    act(() => useAgentRuntimeStore.getState().setDefaultComposition(composition))
+    expect(useAgentRuntimeStore.getState().modeId).toBe("plan")
+    expect(useAgentRuntimeStore.getState().defaultComposition.authority).toBe("plan")
+  })
+
+  it("still mirrors the preset when a selection carries no legacy id", () => {
+    act(() => useAgentRuntimeStore.getState().setDefaultComposition({ presetId: "minimal" }))
+    expect(useAgentRuntimeStore.getState().modeId).toBe("minimal")
+  })
+
+  it("never elevates an unknown legacy mode", () => {
+    act(() => useAgentRuntimeStore.getState().setModeId("mystery-mode"))
+    expect(useAgentRuntimeStore.getState().defaultComposition.authority).toBe("default")
+  })
+
+  // Regression: the known-id set used to be the built-in catalog only, so every
+  // user-authored mode looked like an unrecognised legacy id and collapsed to
+  // Standard. The composer showed the custom mode, the settings sheet showed
+  // Standard, and the recorded composition agreed with neither.
+  it("keeps a user's custom mode as the preset instead of degrading it", () => {
+    useCustomModeStore.setState({
+      customModes: {
+        "my-reviewer": {
+          id: "my-reviewer",
+          type: "custom",
+          name: "My Reviewer",
+          description: "Reviews things",
+          icon: "Sparkles",
+          isBuiltIn: false,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+        },
+      } as never,
+    })
+
+    act(() => useAgentRuntimeStore.getState().setModeId("my-reviewer"))
+
+    expect(useAgentRuntimeStore.getState().defaultComposition.presetId).toBe("my-reviewer")
+    expect(useAgentRuntimeStore.getState().modeId).toBe("my-reviewer")
+
+    useCustomModeStore.setState({ customModes: {} })
+  })
+
+  it("scopes a composition to one session without touching the default", () => {
+    const store = useAgentRuntimeStore.getState()
+    act(() => store.setDefaultComposition({ presetId: "standard" }))
+    act(() => store.setSessionComposition("s1", { presetId: "minimal" }))
+
+    expect(compositionForSession("s1").presetId).toBe("minimal")
+    // The whole point of per-session scoping: another session is unaffected.
+    expect(compositionForSession("s2").presetId).toBe("standard")
+    expect(useAgentRuntimeStore.getState().defaultComposition.presetId).toBe("standard")
+  })
+
+  it("falls back to the default once a session selection is cleared", () => {
+    const store = useAgentRuntimeStore.getState()
+    act(() => store.setSessionComposition("s1", { presetId: "minimal" }))
+    act(() => store.clearSessionComposition("s1"))
+    expect(compositionForSession("s1").presetId).toBe(
+      useAgentRuntimeStore.getState().defaultComposition.presetId
+    )
+  })
+
+  it("treats an unknown session as the default", () => {
+    expect(compositionForSession(undefined).presetId).toBe(
+      useAgentRuntimeStore.getState().defaultComposition.presetId
+    )
   })
 })

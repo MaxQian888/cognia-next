@@ -24,6 +24,25 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
     ])
   })
 
+  it("offers Pi both a native RPC surface and the legacy ACP bridge", () => {
+    const surfaces = EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS.pi.surfaces
+    expect(surfaces.map((s) => s.presetId)).toEqual(["pi-rpc", "pi"])
+
+    // The native surface must spawn `pi` itself. Routing it back through
+    // `npx pi-acp` would silently reinstate the community bridge this ADR
+    // exists to remove, and nothing downstream would notice.
+    const native = surfaces.find((s) => s.presetId === "pi-rpc")!
+    expect(native.protocol).toBe("pi-rpc")
+    expect(native.transport).toBe("stdio")
+    expect(native.process).toEqual({ command: "pi", args: ["--mode", "rpc"] })
+
+    // The bridge stays reachable and stays ACP — migration is explicit, so
+    // the old surface must keep working until the user opts out of it.
+    const bridged = surfaces.find((s) => s.presetId === "pi")!
+    expect(bridged.protocol).toBe("acp")
+    expect(bridged.process?.args).toContain("pi-acp")
+  })
+
   it("gives every surface a stable shape", () => {
     for (const adapter of Object.values(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS)) {
       expect(adapter.id).toBeTruthy()
@@ -33,9 +52,15 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
       for (const surface of adapter.surfaces) {
         expect(surface.id).toBeTruthy()
         expect(surface.name).toBeTruthy()
-        expect(["acp", "codex-app-server", "custom", "http", "websocket", "opencode"]).toContain(
-          surface.protocol
-        )
+        expect([
+          "acp",
+          "codex-app-server",
+          "pi-rpc",
+          "custom",
+          "http",
+          "websocket",
+          "opencode",
+        ]).toContain(surface.protocol)
         expect(["stdio", "http", "websocket"]).toContain(surface.transport)
         expect(["executable", "guided", "documented-only"]).toContain(surface.supportTier)
       }

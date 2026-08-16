@@ -84,11 +84,9 @@ import { resolveMemoryAgentNamespace } from "@/lib/memory/twin-namespace"
 import { resolveProjectKnowledgeSettings } from "@/types/project-knowledge"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { ConnectorMode } from "@/types/connectors/policy"
-import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
-import { useAgentRuntimeStore } from "@/stores/agent"
-import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
-import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
+import { type AgentModeConfig } from "@/types/agent/agent-mode"
 import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
+import { resolveTurnAgentMode } from "./turn-agent-mode"
 import {
   resolveAgentEnvironment,
   resolveAgentExecutionPolicy,
@@ -132,6 +130,7 @@ import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
 import { resolveProviderAttemptOptions } from "./provider-attempt-options"
+import { resolveTurnCompositionSafely } from "./resolve-turn-composition-safely"
 import {
   applySupportAgentSafety,
   buildSupportAgentContext,
@@ -750,26 +749,6 @@ export interface TwinRuntimeDepsForBuild {
 }
 
 /**
- * Resolve the active Agent Mode by id from the built-in registry, custom-mode
- * store, or enabled plugin contributions. Returns `undefined` when no mode is
- * active or the id is unknown.
- */
-function resolveActiveAgentMode(modeId: string | undefined | null): AgentModeConfig | undefined {
-  if (!modeId) return undefined
-  const builtIn = BUILT_IN_AGENT_MODES.find((m) => m.id === modeId)
-  if (builtIn) return builtIn
-  // Custom modes live in a Zustand store that's persisted to localStorage.
-  // Reading via getState() is safe here because this function only runs
-  // client-side (it's called from React hooks).
-  const custom = useCustomModeStore.getState().customModes[modeId]
-  if (custom) return custom
-  return usePluginStore
-    .getState()
-    .getAllModes()
-    .find((mode) => mode.id === modeId)
-}
-
-/**
  * Resolves the effective per-member configuration inside a team. Each override
  * field on `member` (when present) replaces the corresponding character
  * default; absent fields fall through. `mcpServerIdsOverride` further falls
@@ -1043,14 +1022,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // an explicit override. Modes are a *prompt modifier* — their systemPrompt
   // appends to the base prompt (under the same `---` separator as skills) and
   // their tools union into the allowedTools whitelist.
-  let activeMode: AgentModeConfig | undefined
-  if (ctx.agentMode === null) {
-    activeMode = undefined
-  } else if (ctx.agentMode) {
-    activeMode = ctx.agentMode
-  } else {
-    activeMode = resolveActiveAgentMode(useAgentRuntimeStore.getState().modeId)
-  }
+  // Resolved from THIS SESSION's composition (ADR-0117), not the app-wide
+  // `modeId`. `preset` carries the prompt delta and tool set — including for
+  // Minimal / Code / Creator, which have no mode record at all — while `mode`
+  // stays the legacy record that owns the model / temperature overrides.
+  const turnMode = resolveTurnAgentMode({
+    explicitMode: ctx.agentMode,
+    sessionId: session?.id,
+  })
+  const activeMode = turnMode.mode
+  const activePreset = turnMode.preset
 
   // Centralize mode-derived session fields through the shared helper. The
   // returned `model` is whatever the (possibly custom) mode declares; we
@@ -1208,7 +1189,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           : {
               tools: Boolean(
                 character?.allowedTools?.length ||
-                activeMode?.tools?.length ||
+                activePreset?.defaultToolSet?.length ||
                 skills.some((skill) => (skill.allowedTools?.length ?? 0) > 0)
               ),
               reasoning: Boolean(requestedEffort),
@@ -1717,12 +1698,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Substitute agent-mode prompt template variables ({{date}} / {{tools_list}} /
   // {{mode_name}} / …) the custom-mode editor advertises — without this the
   // literal `{{…}}` tokens are sent to the model verbatim.
-  const rawModeSection = activeMode?.systemPrompt?.trim() || ""
+  // Read off the preset, not the mode record: `presetFromAgentMode` maps
+  // `systemPrompt`/`tools` onto `systemPromptDelta`/`defaultToolSet` 1:1, so
+  // this is identical for every mode-backed preset — and it is the only way
+  // Minimal / Code / Creator, which have no mode record, contribute at all.
+  const rawModeSection = activePreset?.systemPromptDelta?.trim() || ""
   const modeSection = rawModeSection
     ? processPromptTemplateVariables(rawModeSection, {
-        modeName: activeMode?.name,
-        modeDescription: activeMode?.description,
-        tools: activeMode?.tools,
+        modeName: activePreset?.name,
+        modeDescription: activePreset?.description,
+        tools: activePreset?.defaultToolSet ? [...activePreset.defaultToolSet] : undefined,
       })
     : ""
 
@@ -1846,8 +1831,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Per-session override (set via the composer's Shift+Tab cycle) wins, then
   // the character's mode, then the app default. Composer always writes a
   // concrete mode when toggled, so once a user opts in it sticks.
+  // `turnMode.requestedAuthority` sits where the legacy `plan` / `build` mode
+  // ids used to: those are now axis values on the composition rather than mode
+  // records, so without this rung selecting Plan would stop being read-only.
+  // It is deliberately NOT the fully resolved authority — see
+  // `resolveTurnAgentMode`, which withholds a preset's mere *recommendation*
+  // so a preset can never silently shadow the character or the app default.
   const permissionMode =
     session?.permissionMode ??
+    turnMode.requestedAuthority ??
     activeMode?.permissionMode ??
     character?.permissionMode ??
     appSettings?.permissionMode
@@ -1896,7 +1888,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   for (const t of pluginAllowedTools) allowed.add(t)
   // Agent mode tools union in too — picking "Code Generator" should grant
   // execute_code without forcing the user to also tweak the character.
-  for (const t of activeMode?.tools ?? []) allowed.add(t)
+  for (const t of activePreset?.defaultToolSet ?? []) allowed.add(t)
   if (
     imOverrideRow?.allowScheduleTools === true &&
     adapterAllowsHostCapability(imAdapterRow, "schedule_tools")
@@ -2877,18 +2869,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // available so IM agents can still inspect the workspace.
   if (imSession && !allowImComputerUse) {
     const denied = new Set(opts.disallowedTools ?? [])
-    for (const t of [
-      "bash",
-      "edit",
-      "write",
-      "multi_edit",
-      "mcp__cognia-tools__bash",
-      "mcp__cognia-tools__edit",
-      "mcp__cognia-tools__write",
-      "mcp__cognia-tools__multi_edit",
-    ]) {
-      denied.add(t)
-    }
+    // Same derived set as Restricted Mode. Previously this was a hand-written
+    // 8-entry literal covering 4 logical tools, which left `directory_delete`,
+    // `shell_execute_advanced`, `terminal_repl_spawn`, `apply_patch` and every
+    // other approval-gated mutator reachable from an inbound IM message.
+    for (const t of RESTRICTED_MODE_DENIED_TOOLS) denied.add(t)
     opts.disallowedTools = [...denied]
   }
 
@@ -3680,11 +3665,29 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
               routePolicy: spec.route.routePolicy,
             })
           : undefined
+      // ADR-0117: resolve the turn's composition and ride it on the same wire
+      // spec. The sidecar reads `composition.toolPresentation` to decide which
+      // tool surface to register, so this is what makes Code mode reachable at
+      // all — and what makes an unsandboxed host resolve down to `native`
+      // before the sidecar ever sees the request. Best-effort like the rest of
+      // this block: a failure leaves `composition` absent, which the sidecar
+      // treats as `native`.
+      const composition = await resolveTurnCompositionSafely({
+        sessionId: session?.id,
+        systemPrompt: opts.systemPrompt ?? opts.appendSystemPrompt,
+        toolNames: opts.allowedTools,
+        executionFingerprint: spec.executionFingerprint,
+      })
+
       if (minted) {
-        opts.execution = sendSpecFromResolved(spec, {
-          endpoint: minted.endpoint,
-          ticketId: minted.ticketId,
-        })
+        opts.execution = sendSpecFromResolved(
+          spec,
+          {
+            endpoint: minted.endpoint,
+            ticketId: minted.ticketId,
+          },
+          composition
+        )
         // The shape `sidecar/dispatch/subprocess-env.mjs:validateRouteEnv`
         // enforces: the base URL must be the ticket endpoint, and the secret
         // rides the env overlay rather than the (secret-free) wire spec.
@@ -3694,7 +3697,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           ANTHROPIC_API_KEY: minted.secret,
         }
       } else {
-        opts.execution = sendSpecFromResolved(spec)
+        opts.execution = sendSpecFromResolved(spec, undefined, composition)
       }
       if (spec.runtimeAdapter === "claude-agent-sdk") {
         const { claudeSdkRolloutOptions } = await import("./claude-sdk-rollout")

@@ -38,6 +38,10 @@ export const ALL_PERMISSION_MODES: readonly AcpPermissionMode[] = [
  * falls back to the full ACP set for them and lets the adapter clamp at runtime.
  *
  * - `acp` — reference model, all five.
+ * - `pi-rpc` — all five. The bundled Cognia extension intercepts every native
+ *   Pi tool call via `pi.on("tool_call")`, and `plan` / `dontAsk` additionally
+ *   pin Pi's own `--tools` allowlist at spawn time, so the restrictive modes
+ *   have a process-level floor rather than resting on interception alone.
  * - `codex-app-server` / `opencode` / `opencode-v2` — no pre-approval registry, so `dontAsk`
  *   ("deny unless pre-approved") has no distinct behaviour and is dropped; the
  *   other four map onto their native approval policies.
@@ -50,6 +54,8 @@ export const PROTOCOL_PERMISSION_MODE_SUPPORT: Record<
   readonly AcpPermissionMode[]
 > = {
   acp: ALL_PERMISSION_MODES,
+  "dsh-sdk": ALL_PERMISSION_MODES,
+  "pi-rpc": ALL_PERMISSION_MODES,
   "codex-app-server": ["default", "acceptEdits", "bypassPermissions", "plan"],
   opencode: ["default", "acceptEdits", "bypassPermissions", "plan"],
   "opencode-v2": ["default", "acceptEdits", "bypassPermissions", "plan"],

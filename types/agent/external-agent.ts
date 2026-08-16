@@ -16,6 +16,8 @@
 export type ExternalAgentProtocol =
   | "acp" // Agent Client Protocol (Claude Code, etc.)
   | "codex-app-server" // OpenAI Codex native app-server JSON-RPC (thread/turn/item)
+  | "dsh-sdk" // DeepSeek Harness stdio JSON-RPC SDK runtime (observation-rich, no mid-turn approval)
+  | "pi-rpc" // Pi native `pi --mode rpc` JSONL command/event protocol (NOT JSON-RPC, NOT ACP)
   | "opencode" // OpenCode SDK/server protocol
   | "opencode-v2" // OpenCode V2 local-service preview protocol
   | "a2a" // Agent-to-Agent Protocol (Google)
@@ -54,6 +56,24 @@ export type ExternalAgentBranchReasonCode =
   | "execution_failed"
   | "strict_failure"
   | "fallback_to_builtin"
+  // The external runtime is present but its version is below the supported
+  // floor. Distinct from `external_unavailable` (binary missing entirely) so
+  // the UI can say "upgrade Pi" instead of "install Pi".
+  | "runtime_version_unsupported"
+  // The mandatory strict sandbox could not be resolved (launcher missing, or
+  // an unsupported platform). Per ADR-0077 this is terminal: Cognia never
+  // falls back to an unsandboxed external-agent process.
+  | "sandbox_unavailable"
+  // A bundled first-party agent extension failed to complete its versioned
+  // ready handshake, so the permission interception it owns is not proven
+  // live. Fail closed rather than run the agent ungated.
+  | "extension_handshake_failed"
+  // A frame on the runtime's stdout violated the wire contract (unparseable,
+  // or past the frame/buffer ceiling). The stream cannot be resynchronised.
+  | "protocol_frame_invalid"
+  // A per-host runtime budget (concurrent process cap) is exhausted and no
+  // idle process could be reclaimed.
+  | "resource_limit"
 
 /**
  * Canonical branch outcome for external-agent orchestration.

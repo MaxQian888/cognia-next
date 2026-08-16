@@ -72,6 +72,24 @@ function assertSafePluginToolResult<T>(result: T): T {
   return result
 }
 
+// NOTE on the audit's P0-3 ("host-routed tools cannot return a tool error").
+//
+// The finding is accurate as a description: `error` on this response is only
+// ever produced by the outer catch, so a host-routed tool that fails in its
+// payload (`ok: false`, or a string starting with "Error: ") reaches the model
+// as a SUCCESSFUL tool result.
+//
+// It is NOT safe to fix by blanket-mapping `ok: false` onto `error`. That
+// contradicts a deliberate, tested design decision — see
+// `plugin-tool-ipc.test.ts` "returns a structured refusal (not an error) when a
+// permission is missing" and "rejects a team tool from a non-team session":
+// a refusal is meant to be a structured result the model can read and adapt to,
+// not a tool error that aborts the step.
+//
+// Closing this properly needs a per-tool decision about which failures are
+// refusals and which are errors, plus a unified result envelope across the
+// family (audit P1-2). Left open on purpose rather than papered over.
+
 export interface PluginToolExecRequest {
   type: "plugin_tool_exec"
   sessionId: string

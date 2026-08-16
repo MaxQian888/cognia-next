@@ -22,6 +22,8 @@ import type {
   AcpToolInfo,
   AcpPermissionRequest,
   AcpPermissionResponse,
+  AcpElicitationRequest,
+  AcpElicitationResponse,
   AcpAvailableCommand,
   AcpPlanEntry,
   AcpPermissionMode,
@@ -45,6 +47,10 @@ import {
 const externalAgentLogger = loggers.agent.child("external-agent-hook")
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import { normalizeExternalAgentValiditySnapshot } from "@/lib/ai/agent/external/canonical-contract"
+import {
+  clearExternalAgentSelectionIfActive,
+  selectExternalAgent,
+} from "@/lib/agent/external-agent-selection"
 import type {
   SessionCreateOptions,
   SessionListOptions,
@@ -130,6 +136,8 @@ export interface UseExternalAgentState {
   progress: number
   /** Pending permission request */
   pendingPermission: AcpPermissionRequest | null
+  /** Pending blocking question from the agent (not a tool approval) */
+  pendingElicitation: AcpElicitationRequest | null
   /** Available slash commands for the active session */
   availableCommands: AcpAvailableCommand[]
   /** Current plan entries for the active session */
@@ -226,6 +234,8 @@ export interface UseExternalAgentActions {
   cancel: () => Promise<void>
   /** Respond to a permission request */
   respondToPermission: (response: AcpPermissionResponse) => Promise<void>
+  /** Answer a blocking question from the agent */
+  respondToElicitation: (response: AcpElicitationResponse) => Promise<void>
   /** Set session permission mode */
   setSessionMode: (modeId: AcpPermissionMode) => Promise<void>
   /** Set session model */
@@ -319,7 +329,6 @@ function getExternalAgentErrorMessage(error: unknown): string {
  */
 export function useExternalAgent(): UseExternalAgentReturn {
   const storeActiveAgentId = useExternalAgentStore((state) => state.activeAgentId)
-  const storeSetActiveAgent = useExternalAgentStore((state) => state.setActiveAgent)
   const storeGetAllAgents = useExternalAgentStore((state) => state.getAllAgents)
   const storeGetConnectionStatus = useExternalAgentStore((state) => state.getConnectionStatus)
   const storeAddAgent = useExternalAgentStore((state) => state.addAgent)
@@ -341,6 +350,17 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
   const [pendingPermission, setPendingPermission] = useState<AcpPermissionRequest | null>(null)
+  /**
+   * A blocking question from the agent that is NOT a tool approval — Pi's
+   * `confirm`/`select`/`input`/`editor`, or an ACP `elicitation/create`.
+   *
+   * Separate from `pendingPermission` because they are different decisions with
+   * different UI: an approval grants a capability and offers allow/deny/always,
+   * a question collects a value. Until this existed the canonical
+   * `elicitation_request` reached the renderer and was dropped on the floor,
+   * leaving the agent blocked for the whole turn.
+   */
+  const [pendingElicitation, setPendingElicitation] = useState<AcpElicitationRequest | null>(null)
   const [availableCommands, setAvailableCommands] = useState<AcpAvailableCommand[]>([])
   const [planEntries, setPlanEntries] = useState<AcpPlanEntry[]>([])
   const [planStep, setPlanStep] = useState<number | null>(null)
@@ -383,6 +403,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const abortControllerRef = useRef<AbortController | null>(null)
   const managerRef = useRef<ExternalAgentManagerType | null>(null)
   const permissionResolveRef = useRef<((response: AcpPermissionResponse) => void) | null>(null)
+  const elicitationResolveRef = useRef<((response: AcpElicitationResponse) => void) | null>(null)
   const executingSessionIdRef = useRef<string | null>(null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
   const previousActiveAgentIdRef = useRef<string | null>(activeAgentId)
@@ -528,6 +549,12 @@ export function useExternalAgent(): UseExternalAgentReturn {
           reason: "Component unmounted",
         })
         permissionResolveRef.current = null
+      }
+      // Same for an open question: leaving it unanswered parks the agent on a
+      // promise nothing will ever resolve.
+      if (elicitationResolveRef.current) {
+        elicitationResolveRef.current({ requestId: "", action: "cancel" })
+        elicitationResolveRef.current = null
       }
     }
   }, [refresh])
@@ -874,10 +901,10 @@ export function useExternalAgent(): UseExternalAgentReturn {
         }
         storeRemoveAgent(agentId)
 
-        if (activeAgentId === agentId) {
-          storeSetActiveAgent(null)
-          setActiveSession(null)
-        }
+        // Clears BOTH selection stores, so the runtime store cannot keep a
+        // dangling id that chat dispatch would still hand to the manager.
+        clearExternalAgentSelectionIfActive(agentId)
+        if (activeAgentId === agentId) setActiveSession(null)
 
         await refresh()
       } catch (err) {
@@ -888,7 +915,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setIsLoading(false)
       }
     },
-    [getManager, refresh, activeAgentId, storeRemoveAgent, storeSetActiveAgent]
+    [getManager, refresh, activeAgentId, storeRemoveAgent]
   )
 
   // Connect to an agent
@@ -989,16 +1016,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
     [getManager, refresh, storeSetConnectionStatus]
   )
 
-  // Set active agent
-  const setActiveAgent = useCallback(
-    (agentId: string | null) => {
-      storeSetActiveAgent(agentId)
-      setActiveSession(null)
-      executingSessionIdRef.current = null
-      setError(null)
-    },
-    [storeSetActiveAgent]
-  )
+  // Set active agent. Routed through `selectExternalAgent` so chat dispatch —
+  // which reads the runtime store, not this one — follows the manager's
+  // selection instead of staying on whichever agent was picked in the composer.
+  const setActiveAgent = useCallback((agentId: string | null) => {
+    selectExternalAgent(agentId)
+    setActiveSession(null)
+    executingSessionIdRef.current = null
+    setError(null)
+  }, [])
 
   // Create a new session
   const createSession = useCallback(
@@ -1363,6 +1389,21 @@ export function useExternalAgent(): UseExternalAgentReturn {
           })
         }
 
+        // Same promise-bridge shape as the approval above. Supplying this is
+        // half of what makes elicitation work: `BaseProtocolAdapter.execute`
+        // gates the branch on `options?.onElicitationRequest && this.respondToElicitation`,
+        // so a missing callback silently skips the answer and leaves the agent
+        // blocked — no error, no timeout, just a stalled turn.
+        const onElicitationRequest = async (
+          request: AcpElicitationRequest
+        ): Promise<AcpElicitationResponse> => {
+          setPendingElicitation(request)
+
+          return new Promise((resolve) => {
+            elicitationResolveRef.current = resolve
+          })
+        }
+
         // Dispatch external agent execution start hook
         const sessionId = resolvedSessionId || ""
         getPluginEventHooks().dispatchExternalAgentExecutionStart(activeAgentId, sessionId, prompt)
@@ -1375,6 +1416,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
             options?.onProgress?.(p, message)
           },
           onPermissionRequest,
+          onElicitationRequest,
           signal: abortControllerRef.current.signal,
         })
 
@@ -1485,6 +1527,13 @@ export function useExternalAgent(): UseExternalAgentReturn {
             setPendingPermission(event.request)
           }
 
+          // The streaming path has no promise bridge — the caller drives the
+          // iterator — so the answer goes back through the manager. Surfacing
+          // it is what turns a stalled turn into a question the user can see.
+          if (event.type === "elicitation_request") {
+            setPendingElicitation(event.request)
+          }
+
           yield event
         }
       } catch (err) {
@@ -1549,6 +1598,38 @@ export function useExternalAgent(): UseExternalAgentReturn {
       setPendingPermission(null)
     },
     [getManager, activeAgentId, pendingPermission]
+  )
+
+  /**
+   * Answer a blocking question from the agent.
+   *
+   * Mirrors `respondToPermission`: the in-flight promise bridge wins when a
+   * turn is streaming, otherwise the answer is routed through the manager. The
+   * second path matters because a dialog can outlive the `execute` call that
+   * raised it — Pi's dialogs block the extension, not the turn.
+   */
+  const respondToElicitation = useCallback(
+    async (response: AcpElicitationResponse): Promise<void> => {
+      if (elicitationResolveRef.current) {
+        elicitationResolveRef.current(response)
+        elicitationResolveRef.current = null
+        setPendingElicitation(null)
+        return
+      }
+
+      if (activeAgentId) {
+        try {
+          const manager = await getManager()
+          await manager.respondToElicitation(activeAgentId, response)
+        } catch (err) {
+          externalAgentLogger.error("Failed to respond to external agent elicitation", err)
+          setError(getExternalAgentErrorMessage(err))
+        }
+      }
+
+      setPendingElicitation(null)
+    },
+    [getManager, activeAgentId]
   )
 
   const setSessionMode = useCallback(
@@ -1676,6 +1757,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     error,
     progress,
     pendingPermission,
+    pendingElicitation,
     availableCommands,
     planEntries,
     planStep,
@@ -1713,6 +1795,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     executeStreaming,
     cancel,
     respondToPermission,
+    respondToElicitation,
     setSessionMode,
     setSessionModel,
     getSessionModels,

@@ -252,6 +252,9 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
 }))
 
 import { useExternalAgent } from "./use-external-agent"
+// Real store on purpose: the selection module's whole job is keeping this one
+// and the (mocked) external-agent store pointed at the same agent.
+import { useAgentRuntimeStore } from "@/stores/agent"
 
 beforeEach(() => {
   storeStateRef.current = {
@@ -378,6 +381,18 @@ describe("useExternalAgent core actions", () => {
     await flush()
     act(() => result.current.setActiveAgent("a1"))
     expect(storeSetActiveAgent).toHaveBeenCalledWith("a1")
+  })
+
+  // Chat dispatch reads the runtime store, not this one. Before the selection
+  // module, picking an agent here left the composer sending to whatever it had
+  // selected — the manager and the chat disagreed silently.
+  it("setActiveAgent also moves the runtime store's selection", async () => {
+    seedAgent("a1")
+    useAgentRuntimeStore.getState().setExternalAgentId(null)
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    act(() => result.current.setActiveAgent("a1"))
+    expect(useAgentRuntimeStore.getState().externalAgentId).toBe("a1")
   })
 
   it("addAgent: success path forwards to manager", async () => {
@@ -516,6 +531,32 @@ describe("useExternalAgent core actions", () => {
     })
     expect(fakeManager.removeAgent).toHaveBeenCalledWith("a1")
     expect(storeSetActiveAgent).toHaveBeenCalledWith(null)
+  })
+
+  // A deleted agent must not survive as an id in the store chat dispatch reads,
+  // or the next external turn is handed a record that no longer exists.
+  it("removeAgent drops the runtime store's dangling selection", async () => {
+    seedAgent("a1")
+    fakeManager.getAgent.mockReturnValue({ config: { id: "a1", name: "A1", protocol: "acp" } })
+    useAgentRuntimeStore.getState().setExternalAgentId("a1")
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.removeAgent("a1")
+    })
+    expect(useAgentRuntimeStore.getState().externalAgentId).toBeNull()
+  })
+
+  it("removeAgent leaves a selection that names a different agent", async () => {
+    seedAgent("a1")
+    fakeManager.getAgent.mockReturnValue({ config: { id: "a1", name: "A1", protocol: "acp" } })
+    useAgentRuntimeStore.getState().setExternalAgentId("a2")
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.removeAgent("a1")
+    })
+    expect(useAgentRuntimeStore.getState().externalAgentId).toBe("a2")
   })
 
   it("createSession requires an active agent", async () => {

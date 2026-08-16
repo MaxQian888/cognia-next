@@ -16,6 +16,7 @@ import { evalCommand as defaultEval } from "./eval-command"
 import { durabilityCommand as defaultDurability } from "./durability-command"
 import { sdkCommand as defaultSdk } from "./sdk-command"
 import { serveCommand as defaultServe } from "../serve/serve-command"
+import { backendCommand as defaultBackend } from "./backend-command"
 import { xCommand as defaultX } from "./x-command"
 import { rpcCommand as defaultRpc } from "./rpc-command"
 import { workerCommand as defaultWorker } from "./worker-command"
@@ -32,6 +33,9 @@ export { VERSION }
 export const HELP = `cognia-agent — standalone Cognia coding agent
 
 Usage:
+  cognia-agent backend install <backend>               install a Cognia-managed agent runtime
+  cognia-agent backend doctor <backend> [--profile p]  check an installed runtime
+  cognia-agent backend remove <backend>                remove an installed runtime
   cognia-agent x <claude|codex> [--model m] [--bypass]  launch an external coding agent
                     [--resume id] [-- <passthrough args>]   through cognia's gateway
   cognia-agent chat [--continue | --resume [id]]       interactive terminal agent
@@ -118,6 +122,7 @@ const KNOWN_COMMANDS = new Set([
   "attach",
   "detach",
   "sync",
+  "backend",
 ])
 
 export interface MainDeps {
@@ -139,6 +144,7 @@ export interface MainDeps {
   attach?: typeof defaultAttach
   detach?: typeof defaultDetach
   syncStatus?: typeof defaultSyncStatus
+  backend?: typeof defaultBackend
   out?: OutputSink
 }
 
@@ -208,6 +214,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
         out.error(error instanceof Error ? error.message : String(error))
         return 1
       })
+    case "backend":
+      return (deps.backend ?? defaultBackend)(args, { out })
     case "x":
       return (deps.x ?? defaultX)(args, { out })
     case "rpc":

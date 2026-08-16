@@ -188,6 +188,11 @@ import type { FrameBuffer } from "../selection/frame-buffer"
 import { TranscriptRegion } from "./app/TranscriptRegion"
 import { AppOverlays } from "./app/AppOverlays"
 import { BottomRegion } from "./app/BottomRegion"
+import {
+  createTuiInlineComplete,
+  isAiSuggestEnabled,
+  isLocalSuggestEnabled,
+} from "../input/ai-complete"
 import { TuiViewportFrame } from "./app/TuiViewportFrame"
 import type { AgentTreeHit } from "./BottomStatus"
 import { useGlobalKeys } from "./app/use-global-keys"
@@ -934,6 +939,21 @@ export function App({
   // and hand the dialog a resolver that settles the blocked tool call. Without
   // this the tool call never resolves and the turn hangs.
   const askUser = useAskUserOverlay(state.overlay.kind, dispatch)
+
+  // Composer inline-autosuggest tiers. The local one is opt-out; the model one
+  // is opt-in (it bills) and resolves its client lazily on first use, so a
+  // configured-but-unused tier costs nothing. Memoised on the inputs the
+  // completion closure actually captures, so the composer's engine is not torn
+  // down on unrelated config churn.
+  const localSuggestEnabled = isLocalSuggestEnabled(state.config)
+  const aiSuggestEnabled = isAiSuggestEnabled(state.config)
+  const aiComplete = useMemo(
+    () =>
+      aiSuggestEnabled
+        ? createTuiInlineComplete({ sessionId: state.sessionId, config: state.config })
+        : null,
+    [aiSuggestEnabled, state.sessionId, state.config]
+  )
 
   // `@` mention providers — shared by the composer popup and submit-time
   // preprocessing. Reuse the same skill/agent discovery the `/skill` + `/agents`
@@ -2723,6 +2743,9 @@ export function App({
               enabledSkillIds={enabledSkillIds}
               toggleSkillEnabled={toggleSkillEnabled}
               handlePopupOpenChange={handlePopupOpenChange}
+              localSuggestEnabled={localSuggestEnabled}
+              aiComplete={aiComplete}
+              suggestDebounceMs={state.config.autosuggest?.debounceMs}
               footerPlanTitle={footerPlanTitle}
               footerRowRef={footerRowRef}
               footerSegmentsRef={footerSegmentsRef}

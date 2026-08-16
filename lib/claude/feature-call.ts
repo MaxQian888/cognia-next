@@ -316,7 +316,11 @@ export interface McpDiscoveryResult {
   error?: string
 }
 
-function failedMcpDiscovery(error: unknown, startedAt: number, now = Date.now()): McpDiscoveryResult {
+function failedMcpDiscovery(
+  error: unknown,
+  startedAt: number,
+  now = Date.now()
+): McpDiscoveryResult {
   return {
     ok: false,
     toolCount: 0,
@@ -360,20 +364,23 @@ export async function discoverMcpServerViaSidecar(
   })
   if (policy.decision !== "allow") {
     const result = failedMcpDiscovery(new Error(policy.reason), startedAt, now())
-    appendMcpAuditSafely({
-      ts: startedAt,
-      tool: "capabilities/list",
-      scope: "n/a",
-      allowed: false,
-      latencyMs: result.durationMs,
-      direction: "outbound",
-      phase: "discover",
-      serverId: server.id,
-      executionSurface: "settings",
-      decision: policy.decision,
-      durationMs: result.durationMs,
-      errorCode: "policy-denied",
-    }, appendAudit)
+    appendMcpAuditSafely(
+      {
+        ts: startedAt,
+        tool: "capabilities/list",
+        scope: "n/a",
+        allowed: false,
+        latencyMs: result.durationMs,
+        direction: "outbound",
+        phase: "discover",
+        serverId: server.id,
+        executionSurface: "settings",
+        decision: policy.decision,
+        durationMs: result.durationMs,
+        errorCode: "policy-denied",
+      },
+      appendAudit
+    )
     return result
   }
 
@@ -392,36 +399,42 @@ export async function discoverMcpServerViaSidecar(
       },
       abortSignal
     )) as McpDiscoveryResult
-    appendMcpAuditSafely({
-      ts: startedAt,
-      tool: "capabilities/list",
-      scope: "n/a",
-      allowed: true,
-      latencyMs: result.durationMs,
-      direction: "outbound",
-      phase: "discover",
-      serverId: server.id,
-      executionSurface: "settings",
-      decision: "allow",
-      durationMs: result.durationMs,
-    }, appendAudit)
+    appendMcpAuditSafely(
+      {
+        ts: startedAt,
+        tool: "capabilities/list",
+        scope: "n/a",
+        allowed: true,
+        latencyMs: result.durationMs,
+        direction: "outbound",
+        phase: "discover",
+        serverId: server.id,
+        executionSurface: "settings",
+        decision: "allow",
+        durationMs: result.durationMs,
+      },
+      appendAudit
+    )
     return result
   } catch (error) {
     const result = failedMcpDiscovery(error, startedAt, now())
-    appendMcpAuditSafely({
-      ts: startedAt,
-      tool: "capabilities/list",
-      scope: "n/a",
-      allowed: true,
-      latencyMs: result.durationMs,
-      direction: "outbound",
-      phase: "discover",
-      serverId: server.id,
-      executionSurface: "settings",
-      decision: "allow",
-      durationMs: result.durationMs,
-      errorCode: abortSignal?.aborted ? "aborted" : "discovery-failed",
-    }, appendAudit)
+    appendMcpAuditSafely(
+      {
+        ts: startedAt,
+        tool: "capabilities/list",
+        scope: "n/a",
+        allowed: true,
+        latencyMs: result.durationMs,
+        direction: "outbound",
+        phase: "discover",
+        serverId: server.id,
+        executionSurface: "settings",
+        decision: "allow",
+        durationMs: result.durationMs,
+        errorCode: abortSignal?.aborted ? "aborted" : "discovery-failed",
+      },
+      appendAudit
+    )
     return result
   }
 }

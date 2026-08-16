@@ -14,12 +14,16 @@ import { registerCliSubagentContext, clearCliSubagentContext } from "./subagent-
 import type { PermissionResponder } from "./permission-gate"
 import type { ResolvedCliSessionContext } from "./session-context"
 import type { ResolvedConfig } from "../config/schema"
+import type { BuildOptionsContext } from "@/lib/claude/build-options"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 export interface TurnDispatchParams {
   session: ResolvedCliSessionContext
   config: ResolvedConfig
   home: string
   gate: PermissionResponder
+  resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
+  resolveSubagentGate?: (actorRef: string) => PermissionResponder
   signal?: AbortSignal
   approvedTools: Set<string>
   disabledMcpTools: Set<string>
@@ -39,6 +43,10 @@ export function registerTurnSubagentContext(params: TurnDispatchParams): () => v
     home: params.home,
     cwd: session.cwd,
     gate: params.gate,
+    ...(params.resolveSubagentOptions
+      ? { resolveSubagentOptions: params.resolveSubagentOptions }
+      : {}),
+    ...(params.resolveSubagentGate ? { resolveSubagentGate: params.resolveSubagentGate } : {}),
     ...(params.signal ? { signal: params.signal } : {}),
     mcpServers: session.mcpServers,
     approvedTools: params.approvedTools,

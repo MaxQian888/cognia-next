@@ -993,6 +993,7 @@ mod tests {
             args: vec!["--stdio".into()],
             env,
             cwd: Some("/workspaces/ws-1".into()),
+            framing: Default::default(),
         }
     }
 

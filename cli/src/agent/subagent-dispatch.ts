@@ -31,6 +31,8 @@ import {
   type PluginToolExecResponse,
 } from "@/lib/claude/plugin-tool-ipc"
 import type { McpServer } from "@cognia/agent-config-types"
+import type { SendOptions } from "@cognia/agent-config-types"
+import type { BuildOptionsContext } from "@/lib/claude/build-options"
 
 import { type ResolvedConfig } from "../config/schema"
 import { type AgentSummary } from "./discover-agents"
@@ -76,6 +78,10 @@ export interface CliSubagentDispatchContext {
   home: string
   cwd: string
   gate: PermissionResponder
+  /** Replay and other harnesses can bind child transport options to its actor id. */
+  resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
+  /** Actor-scoped approval policy for the dispatched child. */
+  resolveSubagentGate?: (actorRef: string) => PermissionResponder
   signal?: AbortSignal
   mcpServers: McpServer[]
   approvedTools: Set<string>
@@ -274,6 +280,7 @@ export async function handleCliDispatchAgent(
             register: (childSessionId: string) =>
               registerCliSubagentContext(childSessionId, {
                 ...ctx,
+                gate: ctx.resolveSubagentGate?.(d.subagentId) ?? ctx.gate,
                 depth: childDepth,
                 maxDepth,
                 parentChain: [...parentChain, d.subagentId],
@@ -288,7 +295,13 @@ export async function handleCliDispatchAgent(
         config: ctx.config,
         home: ctx.home,
         cwd: ctx.cwd,
-        gate: ctx.gate,
+        gate: ctx.resolveSubagentGate?.(d.subagentId) ?? ctx.gate,
+        ...(ctx.resolveSubagentOptions
+          ? {
+              resolveOptions: (buildContext) =>
+                ctx.resolveSubagentOptions!(d.subagentId, buildContext),
+            }
+          : {}),
         ...(ctx.signal ? { signal: ctx.signal } : {}),
         mcpServers: ctx.mcpServers,
         approvedTools: ctx.approvedTools,

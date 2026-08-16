@@ -16,15 +16,22 @@ import { resolveExternalAgentSurfaceFromMetadata } from "./ecosystem-adapters"
 import { adaptPermissionMode } from "./permission-modes"
 import { protocolAdapterRegistry } from "./protocol-adapter"
 
-// The five protocols with a built-in adapter registered by
+// The protocols with a built-in adapter registered by
 // `ExternalAgentManager.registerDefaultAdapters()`. Keeping this in set-equality
 // with the registered built-ins is what prevents a fresh `codex-app-server` /
 // `a2a` config from being mislabeled `metadata.unsupported` in
 // `normalizeExternalAgentConfigInput` (plugin-contributed protocols still pass
 // the execution gate via the runtime `protocolAdapterRegistry`).
+//
+// `dsh-sdk` and `pi-rpc` are registered by `registerDefaultAdapters()` in
+// `manager.ts` (they were listed-but-unregistered before ADR-0119/0120 landed).
+// Even so, do not treat this list as proof of registration: the execution gate
+// consults the runtime `protocolAdapterRegistry`, which is the source of truth.
 export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = [
   "acp",
   "codex-app-server",
+  "dsh-sdk",
+  "pi-rpc",
   "opencode",
   "opencode-v2",
   "a2a",
@@ -42,6 +49,19 @@ const DEFAULT_RETRY_CONFIG = {
 export interface ExternalAgentExecutionBlockAssessment {
   code: ExternalAgentBranchReasonCode
   reason: string
+  /**
+   * The block may clear itself without the user doing anything, so a caller
+   * must not treat it as a settled verdict.
+   *
+   * Only one block is transient today: a plugin-contributed protocol whose
+   * adapter has not registered yet. The registry is populated asynchronously by
+   * the plugin manager during bootstrap, so a surface that reads a block at
+   * first render sees "blocked" for an agent that becomes runnable moments
+   * later. Rendering that as blocked is fine and self-correcting; *persisting* a
+   * decision from it is not — that is how a user's chosen external agent was
+   * silently rewritten to the built-in runtime on every restart.
+   */
+  transient?: boolean
 }
 
 export interface ExternalAgentEcosystemProbeOptions {
@@ -446,6 +466,16 @@ export function isSupportedExternalAgentProtocol(
   )
 }
 
+/**
+ * A `${pluginId}:${id}` protocol names an adapter contributed by a plugin,
+ * rather than one of the built-in protocols. The namespace separator is the
+ * whole signal — the registry cannot answer for an adapter that has not
+ * registered yet, which is exactly the case callers need to distinguish.
+ */
+export function isPluginContributedProtocol(protocol: ExternalAgentProtocol): boolean {
+  return typeof protocol === "string" && protocol.includes(":")
+}
+
 export function getUnsupportedProtocolReason(protocol: ExternalAgentProtocol): string {
   if (isSupportedExternalAgentProtocol(protocol)) {
     return ""
@@ -453,7 +483,7 @@ export function getUnsupportedProtocolReason(protocol: ExternalAgentProtocol): s
   // A namespaced `${pluginId}:${id}` protocol is contributed by a plugin
   // adapter. Reaching here means it is not currently registered — almost
   // always because the providing plugin is disabled or not installed.
-  if (typeof protocol === "string" && protocol.includes(":")) {
+  if (isPluginContributedProtocol(protocol)) {
     return `Protocol "${protocol}" is provided by a plugin adapter that is not currently registered. Enable the plugin that contributes it, then reconnect.`
   }
   return `Protocol "${protocol}" is not executable yet. Please migrate this configuration to ACP.`
@@ -499,6 +529,10 @@ export function getExternalAgentExecutionBlock(
     return {
       code: "protocol_unsupported",
       reason: getUnsupportedProtocolReason(config.protocol),
+      // A namespaced protocol names a plugin adapter, and the registry fills in
+      // asynchronously at plugin-manager bootstrap — so "not registered" at
+      // this instant does not mean "not registered this session".
+      transient: isPluginContributedProtocol(config.protocol),
     }
   }
   if (!isTransportSupportedOnCurrentPlatform(config.transport, runtimeSupportsExternalAgents)) {

@@ -50,6 +50,10 @@ import { CodexAppServerAdapter } from "./codex-app-server-client"
 import { OpenCodeClientAdapter } from "./opencode-client"
 import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
 import { A2aClientAdapter } from "./a2a-client"
+import { DshSdkClientAdapter } from "./dsh-sdk-client"
+import { PiRpcClientAdapter } from "./pi-rpc-client"
+import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "./dsh-runtime-transport"
+import { supportsExternalAgents } from "./agent-transport"
 import { acpToolsToAgentTools } from "./translators"
 import { createExternalAgentTraceBridge } from "./agent-trace-bridge"
 import {
@@ -817,6 +821,21 @@ export class ExternalAgentManager {
     protocolAdapterRegistry.register("opencode", () => new OpenCodeClientAdapter())
     protocolAdapterRegistry.register("opencode-v2", () => new OpenCodeV2ClientAdapter())
     protocolAdapterRegistry.register("a2a", () => new A2aClientAdapter())
+    // Must stay in set-equality with SUPPORTED_EXTERNAL_AGENT_PROTOCOLS in
+    // config-normalizer.ts; `dsh-sdk-client.test.ts` pins it.
+    protocolAdapterRegistry.register(
+      "dsh-sdk",
+      () =>
+        new DshSdkClientAdapter({
+          createTransport: (config) =>
+            createDshRuntimeTransport(config, resolveDshLaunchFromConfig, supportsExternalAgents()),
+        })
+    )
+    // Pi's own RPC protocol, not ACP (ADR-0119). Registered here rather than
+    // only declared in the protocol union — a protocol that is listed as
+    // supported but never registered makes `addAgent` throw
+    // `Unsupported protocol` at the point of use.
+    protocolAdapterRegistry.register("pi-rpc", () => new PiRpcClientAdapter())
     // Future: Register more adapters
     // protocolAdapterRegistry.register('http', () => new HttpClientAdapter());
   }

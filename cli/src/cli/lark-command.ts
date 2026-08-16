@@ -35,6 +35,8 @@ Usage:
                                                 account-local Cognia user
   cognia-agent lark tenant register             admit this adapter's tenant scope
   cognia-agent lark tenant disable|enable       flip the tenant's admission
+  cognia-agent lark authorize [--redirect <u>]  print the send-as-user OAuth
+                                                URL to open in a browser
   cognia-agent lark sweep                       expire stale bind requests
   cognia-agent lark menu-manifest               bot-menu items to configure in
                                                 the Feishu developer console
@@ -42,6 +44,8 @@ Usage:
 Flags:
   --adapter <id>   Lark adapter id (or COGNIA_LARK_ADAPTER_ID)
   --user <id>      account-local user id for approve (defaults to the account)
+  --redirect <u>   OAuth redirect_uri for authorize (defaults to
+                   $COGNIA_LARK_PUBLIC_BASE/connectors/oauth/lark/callback)
   --server-url <u> companion base URL (or COGNIA_SERVER_URL)
   --json           print the raw result object
 
@@ -59,6 +63,7 @@ interface AdminRequest {
   principalId?: string
   status?: string
   cogniaUserId?: string
+  redirectUri?: string
 }
 
 export interface LarkCommandDeps {
@@ -87,6 +92,14 @@ function buildRequest(args: ParsedArgs, adapterId: string): AdminRequest | { err
       return { op: "list", adapterId }
     case "sweep":
       return { op: "sweep", adapterId }
+    case "authorize":
+      // The brain mints state + PKCE and keeps the verifier; this command only
+      // relays the resulting URL, so nothing secret passes through the CLI.
+      return {
+        op: "oauth-begin",
+        adapterId,
+        ...(stringFlag(args, "redirect") ? { redirectUri: stringFlag(args, "redirect") } : {}),
+      }
     case "approve":
       if (!first) return { error: "lark approve: missing <code>" }
       return {
@@ -131,6 +144,14 @@ function buildRequest(args: ParsedArgs, adapterId: string): AdminRequest | { err
 }
 
 function renderResult(out: OutputSink, op: string, result: Record<string, unknown>): void {
+  if (op === "oauth-begin") {
+    out.write(`redirect_uri (must be registered in the Feishu console):\n`)
+    out.write(`  ${String(result.redirectUri)}\n\n`)
+    out.write("Open this URL in a browser signed in to Feishu:\n")
+    out.write(`  ${String(result.authorizeUrl)}\n\n`)
+    out.write("The link is valid for 10 minutes. Completion lands in the running brain.\n")
+    return
+  }
   if (op !== "list") {
     out.write(JSON.stringify(result) + "\n")
     return

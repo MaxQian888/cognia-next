@@ -79,6 +79,7 @@ import { useAgentTraceAnalytics } from "@/hooks/agent-trace"
 import { ExternalAgentCommands } from "./commands"
 import { ExternalAgentPlan } from "./plan"
 import { ExternalAgentConfigOptions } from "./config-options"
+import { ExternalAgentElicitationDialog } from "./elicitation-dialog"
 import { ToolApprovalDialog, type ToolApprovalRequest } from "./tool-approval-dialog"
 import { TraceHealthBadge } from "./trace-health-badge"
 import { ConnectionStatusBadge } from "./connection-status-badge"
@@ -972,6 +973,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     isLoading,
     error,
     pendingPermission,
+    pendingElicitation,
     availableCommands,
     planEntries,
     planStep,
@@ -984,6 +986,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     execute,
     setActiveAgent,
     respondToPermission,
+    respondToElicitation,
     setConfigOption,
     listSessions,
     forkSession,
@@ -1853,6 +1856,17 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         }}
         onSubmitAnswers={(id, answers) => {
           void handlePermissionSubmitAnswers(id, answers)
+        }}
+      />
+
+      {/* Blocking questions that are NOT tool approvals: Pi's confirm/select/
+          input/editor dialogs and ACP's elicitation/create. Before this the
+          canonical `elicitation_request` reached the renderer and was dropped,
+          leaving the agent blocked for the rest of the turn. */}
+      <ExternalAgentElicitationDialog
+        request={pendingElicitation}
+        onRespond={(response) => {
+          void respondToElicitation(response)
         }}
       />
     </div>

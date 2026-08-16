@@ -1,0 +1,8 @@
+{
+  "maxSourceBytes": 32768,
+  "wallTimeMs": 30000,
+  "maxToolCalls": 64,
+  "maxConcurrency": 8,
+  "maxResultBytes": 1048576,
+  "maxMemoryBytes": 268435456
+}

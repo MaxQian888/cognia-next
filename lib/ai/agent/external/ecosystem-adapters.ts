@@ -325,10 +325,37 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
   pi: {
     id: "pi",
     name: "Pi",
-    description: "Pi coding agent surfaces (via community ACP adapter)",
-    docsUrl: "https://github.com/svkozak/pi-acp",
-    tags: ["coding", "pi", "experimental"],
+    description: "Pi coding agent surfaces (native RPC, or the community ACP adapter)",
+    docsUrl: "https://pi.dev/docs/latest/rpc",
+    tags: ["coding", "pi"],
     surfaces: [
+      {
+        // Native first-party surface: Cognia drives `pi --mode rpc` directly
+        // over Pi's own JSONL command/event protocol. No ACP anywhere in the
+        // path, so thinking levels, the steering/follow-up queues, compaction
+        // lifecycle, session tree/fork and usage detail all survive instead of
+        // being flattened into ACP's smaller vocabulary.
+        id: "rpc-stdio",
+        presetId: "pi-rpc",
+        name: "Pi (native RPC)",
+        description: "Pi coding agent over its native `pi --mode rpc` protocol",
+        protocol: "pi-rpc",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "pi", "native", "preview"],
+        docsUrl: "https://pi.dev/docs/latest/rpc",
+        setupHint:
+          "Requires Pi 0.84.1 (`npm install -g @earendil-works/pi-coding-agent@0.84.1`) on PATH and Node.js >= 22.19.0. Pi owns its own provider credentials in ~/.pi — Cognia never reads or injects them. Newer Pi versions run but are reported as unverified.",
+        limitationNote:
+          "Preview surface. macOS and Linux only: external agents always run inside the strict sandbox and there is no unsandboxed fallback.",
+        process: {
+          command: "pi",
+          args: ["--mode", "rpc"],
+        },
+        icon: "pi",
+      },
       {
         id: "acp-stdio",
         presetId: "pi",

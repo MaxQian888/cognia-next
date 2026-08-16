@@ -22,6 +22,7 @@
  * runs inside the process it is confining.
  */
 
+import fs from "node:fs"
 import path from "node:path"
 
 import type { SendOptions } from "@cognia/agent-config-types"
@@ -116,7 +117,13 @@ export function visibleHostTools(options: SendOptions): string[] {
 
 // ── Workspace confinement (mirror of sidecar/builtin-tools/confinement.mjs) ───
 
-/** Argument keys that carry a filesystem path on the built-in tool surface. */
+/**
+ * Argument keys that carry a filesystem path on the built-in tool surface.
+ *
+ * `workdir` (bash), `oldPath`/`newPath` (file_rename), `pathA`/`pathB`
+ * (file_diff) and `output` (web_clone) were previously absent here, so those
+ * tools escaped the CLI check entirely.
+ */
 const PATH_ARG_KEYS = [
   "path",
   "file_path",
@@ -131,14 +138,32 @@ const PATH_ARG_KEYS = [
   "dir",
   "directory",
   "cwd",
+  "workdir",
   "notebook_path",
+  "output",
   "output_path",
+  "oldPath",
+  "newPath",
+  "pathA",
+  "pathB",
 ]
 
-/** Directory names whose contents are credentials, never workspace material. */
+/** Array-valued keys whose entries are themselves paths (ast_grep, git_stage). */
+const PATH_ARRAY_KEYS = ["paths"]
+
+/**
+ * Directory names whose contents are credentials, never workspace material.
+ *
+ * Kept in union with `sidecar/builtin-tools/confinement.mjs`. The two
+ * enforcement points stay separate on purpose — Cognia must not trust a check
+ * running inside the process it confines — but the DATA must not drift, and it
+ * had: `.gpg`, `.config/gcloud` and `.config/gh` existed only sidecar-side,
+ * while `.pgpass`, `id_rsa`, `id_ed25519` and `known_hosts` existed only here.
+ */
 const SECRET_DIR_SEGMENTS = new Set([
   ".ssh",
   ".gnupg",
+  ".gpg",
   ".aws",
   ".kube",
   ".docker",
@@ -146,9 +171,18 @@ const SECRET_DIR_SEGMENTS = new Set([
   ".cognia",
 ])
 
+/** Two-segment secret directories (`<dir>/<child>`), e.g. `~/.config/gh`. */
+const SECRET_SEGMENT_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  [".config", "gcloud"],
+  [".config", "gh"],
+]
+
 const SECRET_FILE_NAMES = new Set([
   ".netrc",
+  "_netrc",
   ".pgpass",
+  ".pypirc",
+  ".git-credentials",
   "credentials",
   "id_rsa",
   "id_ed25519",
@@ -156,19 +190,76 @@ const SECRET_FILE_NAMES = new Set([
   "known_hosts",
 ])
 
-/** True when `abs` reaches into a credential store, wherever it lives. */
-export function isSecretPath(abs: string): boolean {
-  const segments = abs.split(path.sep).filter(Boolean)
-  if (segments.some((s) => SECRET_DIR_SEGMENTS.has(s))) return true
-  const base = segments[segments.length - 1]
-  return base !== undefined && SECRET_FILE_NAMES.has(base)
+/**
+ * Case-fold on the platforms with case-insensitive filesystems. Without this
+ * `~/.SSH/id_rsa` passed the check on both macOS and Windows.
+ */
+function foldCase(s: string): string {
+  return process.platform === "win32" || process.platform === "darwin" ? s.toLowerCase() : s
 }
 
-/** True when `target` resolves inside one of `roots`. */
+/**
+ * Split on BOTH separators. Splitting on `path.sep` alone meant a Windows path
+ * written with forward slashes (which Node accepts everywhere) collapsed to a
+ * single segment and every check below failed open.
+ */
+function segmentsOf(abs: string): string[] {
+  return foldCase(abs)
+    .split(/[\\/]+/)
+    .filter(Boolean)
+}
+
+/**
+ * Resolve symlinks as far as the path exists, so a link inside the workspace
+ * pointing at `~/.ssh` is judged by where it really lands. The sidecar does the
+ * same via `canonicalisePartial`; this side was purely lexical, so a symlink
+ * defeated both `isSecretPath` and `isInsideRoots`.
+ */
+export function canonicalise(target: string): string {
+  let current = path.resolve(target)
+  // Walk up until an existing ancestor is found, then re-append the tail.
+  const tail: string[] = []
+  for (let i = 0; i < 64; i++) {
+    try {
+      const real = fs.realpathSync.native(current)
+      return tail.length > 0 ? path.join(real, ...tail.reverse()) : real
+    } catch {
+      const parent = path.dirname(current)
+      if (parent === current) return path.resolve(target)
+      tail.push(path.basename(current))
+      current = parent
+    }
+  }
+  return path.resolve(target)
+}
+
+/** True when `abs` reaches into a credential store, wherever it lives. */
+export function isSecretPath(abs: string): boolean {
+  // Judge the lexical path AND its symlink-resolved form.
+  for (const candidate of [abs, canonicalise(abs)]) {
+    const segments = segmentsOf(candidate)
+    if (segments.some((s) => SECRET_DIR_SEGMENTS.has(s))) return true
+    for (let i = 0; i + 1 < segments.length; i++) {
+      for (const [a, b] of SECRET_SEGMENT_PAIRS) {
+        if (segments[i] === a && segments[i + 1] === b) return true
+      }
+    }
+    const base = segments[segments.length - 1]
+    if (base !== undefined && SECRET_FILE_NAMES.has(base)) return true
+  }
+  return false
+}
+
+/**
+ * True when `target` resolves inside one of `roots`.
+ *
+ * Compares the SYMLINK-RESOLVED path so a link inside the workspace that points
+ * outside it is judged by its real destination, not its lexical location.
+ */
 export function isInsideRoots(roots: string[], target: string): boolean {
-  const abs = path.resolve(target)
+  const abs = canonicalise(target)
   return roots.some((root) => {
-    const base = path.resolve(root)
+    const base = canonicalise(root)
     if (abs === base) return true
     return abs.startsWith(base.endsWith(path.sep) ? base : `${base}${path.sep}`)
   })
@@ -183,6 +274,16 @@ export function extractPathArguments(args: unknown, cwd: string): string[] {
     const value = record[key]
     if (typeof value === "string" && value.length > 0) {
       out.push(path.isAbsolute(value) ? path.resolve(value) : path.resolve(cwd, value))
+    }
+  }
+  // Array-of-string path keys (`ast_grep_replace.paths`, `git_stage.paths`).
+  for (const key of PATH_ARRAY_KEYS) {
+    const list = record[key]
+    if (!Array.isArray(list)) continue
+    for (const value of list) {
+      if (typeof value === "string" && value.length > 0) {
+        out.push(path.isAbsolute(value) ? path.resolve(value) : path.resolve(cwd, value))
+      }
     }
   }
   // `edits`/`files` batches carry their own per-entry paths.

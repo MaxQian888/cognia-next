@@ -49,6 +49,15 @@ jest.mock("@/stores/agent", () => ({
   useAgentRuntimeStore: { getState: jest.fn() },
 }))
 
+// Since ADR-0117 the send path resolves the turn's mode from the SESSION's
+// composition, not the app-wide `modeId`. That reads `compositionForSession`
+// off the store module directly, so it needs its own mock — driving `modeId`
+// alone no longer decides anything.
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useAgentRuntimeStore: { getState: jest.fn(() => ({})) },
+  compositionForSession: jest.fn(() => ({ presetId: "standard" })),
+}))
+
 jest.mock("@/stores/agent/custom-mode-store", () => ({
   useCustomModeStore: { getState: jest.fn() },
 }))
@@ -206,6 +215,7 @@ import * as standaloneMode from "@/lib/runtime/standalone-mode"
 import { ProviderRoutingEngine, RoutingNoCandidatesError } from "@cognia/provider-routing"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useAgentRuntimeStore } from "@/stores/agent"
+import { compositionForSession } from "@/stores/agent/agent-runtime-store"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
@@ -244,6 +254,17 @@ const mListMcp = listEnabledMcpServers as jest.Mock
 const mBuildMap = buildMcpServerMapResolved as jest.Mock
 const mGetTeam = getTeam as jest.Mock
 const mRuntimeGet = (useAgentRuntimeStore as unknown as { getState: jest.Mock }).getState
+const mCompositionForSession = compositionForSession as jest.MockedFunction<
+  typeof compositionForSession
+>
+
+/** Point the turn at a preset the way a session selection would. */
+function selectPreset(presetId: string, authority?: string) {
+  mCompositionForSession.mockReturnValue({
+    presetId,
+    ...(authority ? { authority: authority as never } : {}),
+  })
+}
 const mCustomGet = (useCustomModeStore as unknown as { getState: jest.Mock }).getState
 const mPluginGet = (usePluginStore as unknown as { getState: jest.Mock }).getState
 const mBuildModeUpdate = buildAgentModeSessionUpdate as jest.Mock
@@ -308,6 +329,10 @@ beforeEach(() => {
   mBuildMap.mockReturnValue({})
   mGetTeam.mockResolvedValue(undefined)
   mRuntimeGet.mockReturnValue({ modeId: undefined })
+  // Production-faithful default: `defaultComposition` is always populated, so
+  // a session with no explicit choice still runs Standard (→ the `general`
+  // built-in, which contributes no prompt and no tools).
+  mCompositionForSession.mockReturnValue({ presetId: "standard" })
   mCustomGet.mockReturnValue({ customModes: {} })
   mPluginGet.mockReturnValue({ plugins: {}, getAllModes: () => [] })
   mBuildModeUpdate.mockReturnValue(undefined)
@@ -2446,14 +2471,16 @@ describe("resolveSendOptions — agent mode resolution", () => {
     expect(opts.systemPrompt).toBeUndefined()
   })
 
-  it("falls back to the runtime store when ctx.agentMode is undefined", async () => {
-    mRuntimeGet.mockReturnValue({ modeId: "general" })
+  it("falls back to the session composition when ctx.agentMode is undefined", async () => {
+    selectPreset("standard")
     await resolveSendOptions({})
-    // BUILT_IN_AGENT_MODES contains general → buildAgentModeSessionUpdate runs.
+    // Standard projects the `general` built-in → buildAgentModeSessionUpdate runs.
     expect(mBuildModeUpdate).toHaveBeenCalled()
   })
 
-  it("looks up custom modes by id when not built-in", async () => {
+  // The defect this replaced: the send path read the app-wide `modeId`, so a
+  // per-session selection changed the recorded composition and nothing else.
+  it("looks up custom modes named by the session's composition", async () => {
     const custom: AgentModeConfig = {
       id: "custom-1",
       type: "custom",
@@ -2462,7 +2489,7 @@ describe("resolveSendOptions — agent mode resolution", () => {
       icon: "Bot",
       tools: ["tool-x"],
     }
-    mRuntimeGet.mockReturnValue({ modeId: "custom-1" })
+    selectPreset("custom-1")
     mCustomGet.mockReturnValue({ customModes: { "custom-1": custom } })
     mBuildModeUpdate.mockReturnValue({ agentModeId: "custom-1" })
 
@@ -2479,7 +2506,7 @@ describe("resolveSendOptions — agent mode resolution", () => {
       icon: "BriefcaseBusiness",
       systemPrompt: "Use work_create_deliverable after researching with host tools.",
     }
-    mRuntimeGet.mockReturnValue({ modeId: pluginMode.id })
+    selectPreset(pluginMode.id)
     mPluginGet.mockReturnValue({ plugins: {}, getAllModes: () => [pluginMode] })
     mBuildModeUpdate.mockReturnValue({ agentModeId: pluginMode.id })
 
@@ -2489,17 +2516,54 @@ describe("resolveSendOptions — agent mode resolution", () => {
     expect(opts.allowedTools).toBeUndefined()
   })
 
-  it("returns no mode when modeId is unknown in both registries", async () => {
-    mRuntimeGet.mockReturnValue({ modeId: "ghost" })
+  // A deleted custom mode leaves a dangling preset id behind. Falling back to
+  // Standard is the same thing `resolveComposition` does for the picker, so the
+  // turn and the UI agree about what happened.
+  it("falls back to Standard when the composition names a preset that is gone", async () => {
+    selectPreset("ghost")
     mCustomGet.mockReturnValue({ customModes: {} })
-    await resolveSendOptions({})
-    expect(mBuildModeUpdate).not.toHaveBeenCalled()
+    mBuildModeUpdate.mockReturnValue({ agentModeId: "general" })
+
+    const opts = await resolveSendOptions({})
+
+    expect(mBuildModeUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: "general" }))
+    // Standard contributes no prompt delta and no tools.
+    expect(opts.allowedTools).toBeUndefined()
   })
 
-  it("returns no mode when modeId is null/undefined", async () => {
-    mRuntimeGet.mockReturnValue({ modeId: undefined })
-    await resolveSendOptions({})
+  // Minimal / Code / Creator have no `AgentModeConfig` at all. Reading the
+  // prompt and tools off the mode record made them contribute nothing.
+  it("applies a preset that has no legacy mode record behind it", async () => {
+    selectPreset("minimal")
+
+    const opts = await resolveSendOptions({})
+
     expect(mBuildModeUpdate).not.toHaveBeenCalled()
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep"]))
+  })
+
+  // `plan` and `build` stopped being mode records and became authority axis
+  // values. Without carrying the axis through, choosing Plan would silently
+  // stop being read-only.
+  it("carries an explicit authority axis into the permission mode", async () => {
+    selectPreset("standard", "plan")
+
+    const opts = await resolveSendOptions({})
+
+    expect(opts.permissionMode).toBe("plan")
+  })
+
+  // A preset's `recommends.authority` is a default, not an assertion. Letting
+  // it through would shadow the character's permission for every session whose
+  // user never touched a mode.
+  it("does not let Standard's recommended authority shadow the character", async () => {
+    selectPreset("standard")
+
+    const opts = await resolveSendOptions({
+      character: { id: "c1", name: "C", permissionMode: "acceptEdits" } as never,
+    })
+
+    expect(opts.permissionMode).toBe("acceptEdits")
   })
 })
 

@@ -1023,6 +1023,8 @@ describe("createAgentSession", () => {
 
   it("publishes the dispatch context for the turn and clears it afterwards", async () => {
     let ctxDuringTurn: ReturnType<typeof getCliSubagentContext>
+    const resolveSubagentOptions = jest.fn(async () => ({ provider: "anthropic" }) as never)
+    const resolveSubagentGate = jest.fn(() => createPermissionGate({ yes: true }))
     const session = createAgentSession({
       config: cfg({ provider: "opencode-go" }),
       sessionId: "s_ctx",
@@ -1033,6 +1035,8 @@ describe("createAgentSession", () => {
         shutdown: jest.fn().mockResolvedValue(undefined),
       } as unknown as SidecarBootstrap),
       resolveOptions: async () => ({ model: "m", provider: "opencode-go" }) as never,
+      resolveSubagentOptions,
+      resolveSubagentGate,
       capture: async () => {
         ctxDuringTurn = getCliSubagentContext("s_ctx")
         return result("ok")
@@ -1041,6 +1045,8 @@ describe("createAgentSession", () => {
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     expect(ctxDuringTurn?.agents.map((a) => a.id)).toEqual(["reviewer"])
+    expect(ctxDuringTurn?.resolveSubagentOptions).toBe(resolveSubagentOptions)
+    expect(ctxDuringTurn?.resolveSubagentGate).toBe(resolveSubagentGate)
     expect(getCliSubagentContext("s_ctx")).toBeUndefined()
   })
 

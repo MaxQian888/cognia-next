@@ -27,6 +27,11 @@ const ALL_REASON_CODES: ExternalAgentBranchReasonCode[] = [
   "execution_failed",
   "strict_failure",
   "fallback_to_builtin",
+  "runtime_version_unsupported",
+  "sandbox_unavailable",
+  "extension_handshake_failed",
+  "protocol_frame_invalid",
+  "resource_limit",
 ]
 
 describe("REASON_CODE_TO_DIAGNOSTIC", () => {

@@ -37,6 +37,25 @@ describe("externalCapabilities", () => {
     }
   })
 
+  /**
+   * Pi is the first non-Codex backend with a real thinking control and a
+   * first-class `compact` command, so these three would otherwise read as
+   * unsupported and hide working features behind a "no protocol slot" reason.
+   */
+  it("reports Pi's native thinking, compaction and model selection", () => {
+    const pi = externalCapabilities({ backend: "pi-rpc", presetId: "pi-rpc", protocol: "pi-rpc" })
+    expect(supportsFeature(pi, "thinking")).toBe(true)
+    expect(supportsFeature(pi, "compact")).toBe(true)
+    expect(supportsFeature(pi, "modelPicker")).toBe(true)
+  })
+
+  it("keeps compaction unsupported on backends that have no such command", () => {
+    // Guards against the Pi carve-out leaking into every protocol.
+    const acp = externalCapabilities({ backend: "claude-code", protocol: "acp" })
+    expect(supportsFeature(acp, "compact")).toBe(false)
+    expect(supportsFeature(acp, "thinking")).toBe(false)
+  })
+
   it("supports MCP everywhere, since both protocols carry it on session/new", () => {
     for (const backend of ["claude-code", "codex"]) {
       expect(supportsFeature(externalCapabilities({ backend }), "mcp")).toBe(true)

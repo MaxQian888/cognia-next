@@ -19,6 +19,19 @@ export interface ExternalAgentSpawnConfig {
   args?: string[]
   cwd?: string
   env?: Record<string, string>
+  /**
+   * How the host delivers stdout. Defaults to `"line"` (stripped lines on
+   * `external-agent://stdout`); `"raw"` forwards undecoded base64 chunks on
+   * `external-agent://stdout-raw`.
+   *
+   * Only `pi-rpc` opts into `"raw"` — its JSONL frames are delimited by the
+   * `\n` byte alone and its adapter owns a strict LF codec with frame/buffer
+   * ceilings that pre-split lines would put out of reach. Mirrors
+   * `ExternalAgentStdoutFraming` in
+   * `crates/cognia-external-agent/src/process.rs` and
+   * `cli/src/runtime/external/node-backend.ts`.
+   */
+  framing?: "line" | "raw"
 }
 
 /** Terminal state */

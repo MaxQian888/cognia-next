@@ -57,6 +57,10 @@ function baseProps(over: Partial<BottomRegionProps> = {}): BottomRegionProps {
     backtrackArmed: false,
     subagentChipRef: { current: null },
     agentTreeRef: { current: null },
+    // Local completion on (the default), model tier off — no model is
+    // reachable from a unit test.
+    localSuggestEnabled: true,
+    aiComplete: null,
     handleSubmit: jest.fn(),
     handleHistoryPush: jest.fn(),
     listDir: undefined,

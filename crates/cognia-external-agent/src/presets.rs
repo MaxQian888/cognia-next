@@ -2,10 +2,9 @@
 //! external-agent RPC arms (ADR-0059 D6 / R11).
 //!
 //! `spawn_external_agent` over the companion RPC surface is remote code
-//! execution by construction. On the desktop the surface never existed (the
-//! WebView calls the Tauri command locally); headless it is reachable with
-//! the brain's service token, so every spawn request is validated against a
-//! **preset-only** policy before it touches the exec backend:
+//! execution by construction: headless it is reachable with the brain's
+//! service token, so every spawn request is validated against a **preset-only**
+//! policy before it touches the exec backend:
 //!
 //! - the command must be a bare binary name (no path separators) from the
 //!   agent-CLI allowlist, or `npx` with an allowlisted package, or the smoke
@@ -18,6 +17,14 @@
 //!
 //! Every allow AND deny is written to the append-only audit log
 //! (`companion_api::audit`) by the RPC arm.
+//!
+//! The desktop calls the Tauri command locally, which for a long time was read
+//! as "so no policy is needed there". That conflates who *asks* for the spawn
+//! with what the spawned agent then does — the agent is the untrusted party and
+//! it has `bash`. The desktop therefore runs [`SpawnPolicy::validate_desktop`]
+//! (same command allowlist, same default-deny env filter) and then wraps the
+//! result in [`crate::sandbox`]. Only the workspaces-root cwd confinement stays
+//! headless-only; see that method for why.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -45,6 +52,9 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "copilot",
     "kiro-cli",
     "droid",
+    // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119). The
+    // `pi-acp` npx bridge stays in NPX_PACKAGE_ALLOWLIST for the legacy preset.
+    "pi",
 ];
 
 /// Packages `npx` may execute (`npx [-y|--yes] <package> …`).
@@ -70,6 +80,10 @@ const ENV_KEY_ALLOWLIST: &[&str] = &[
     "TERM",
     "LANG",
     "LC_ALL",
+    // Pins the DeepSeek Harness user-data root into Cognia-owned space. Without
+    // it DSH falls back to ~/.dsh, where a user-writable cordis.patch.yml can
+    // inject plugins and arbitrary JS into a certified composition.
+    "DSH_HOME",
 ];
 
 /// Env key prefixes allowed through (provider credentials + agent config).
@@ -91,6 +105,17 @@ const ENV_PREFIX_ALLOWLIST: &[&str] = &[
     "DROID_",
     "ACP_",
     "COGNIA_AGENT_",
+    // DeepSeek Harness: the provider credential plus the composition's own
+    // COGNIA_DSH_* inputs (workspace, session root, model, persona). DSH_HOME is
+    // an exact key below — it is a path, not a prefix family.
+    "DEEPSEEK_",
+    "COGNIA_DSH_",
+    // Tool-host handshake for the bundled Cognia Pi extension. Pi has no
+    // per-session mcpServers parameter, so the socket path and per-attempt
+    // token reach the extension through its process env rather than through an
+    // MCP server spec. The broker's authorize() remains the permission
+    // authority; see ADR-0119.
+    "COGNIA_TOOLHOST_",
 ];
 
 /// A policy violation. The message is safe to surface to the caller and to
@@ -165,6 +190,52 @@ impl SpawnPolicy {
         })
     }
 
+    /// Validate a **desktop** spawn request: same command allowlist and the
+    /// same default-deny env filter, but no workspaces-root confinement.
+    ///
+    /// The confinement in [`Self::validate`] exists because a remote client
+    /// chooses the headless cwd. On the desktop the cwd comes from
+    /// `agent.config.process.cwd` — a path the local user typed into settings —
+    /// and forcing it under `<data_dir>/workspaces` would break running an
+    /// agent in your own project. Write confinement is instead enforced by the
+    /// launcher scope built in [`crate::sandbox`], which is exactly what the
+    /// CLI host relies on.
+    ///
+    /// The cwd is still canonicalized when present: it defeats `..` traversal
+    /// and symlink games before the path becomes a sandbox scope, and it makes
+    /// a non-existent directory fail here rather than inside the launcher.
+    ///
+    /// An absent cwd falls back to the workspaces root rather than failing,
+    /// matching `validateCwd` in `cli/src/runtime/external/node-backend.ts`.
+    /// Agents configured before the sandbox existed have no cwd, and the
+    /// sandbox needs a concrete directory to scope to; refusing them would turn
+    /// this hardening into an outage for configs that used to work (they ran in
+    /// the app process's cwd, which for a bundled app is `/`).
+    pub fn validate_desktop(
+        &self,
+        mut config: ExternalAgentSpawnConfig,
+    ) -> Result<ValidatedSpawn, PolicyViolation> {
+        self.validate_command(&config.command, &config.args)?;
+        config.cwd = match config.cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+            None => Some(self.validate_cwd(None)?),
+            Some(requested) => Some(
+                Path::new(requested)
+                    .canonicalize()
+                    .map_err(|e| {
+                        PolicyViolation(format!("cwd {requested:?} does not resolve: {e}"))
+                    })?
+                    .display()
+                    .to_string(),
+            ),
+        };
+        let (env, dropped) = filter_env(std::mem::take(&mut config.env));
+        config.env = env;
+        Ok(ValidatedSpawn {
+            config,
+            dropped_env_keys: dropped,
+        })
+    }
+
     fn validate_command(&self, command: &str, args: &[String]) -> Result<(), PolicyViolation> {
         let trimmed = command.trim();
         if trimmed.is_empty() {
@@ -192,8 +263,18 @@ impl SpawnPolicy {
             if self.smoke_agent_enabled && is_smoke_stub_invocation(args) {
                 return Ok(());
             }
+            // The DeepSeek Harness runtime has no binary of its own: Cognia
+            // supplies the entry point, so the spawn is `node <launcher> <yml>`.
+            // Admitting bare `node` would defeat the allowlist entirely, so the
+            // exception is pinned to a launcher inside Cognia's own runtime
+            // home. The launcher then refuses to boot unless DSH_HOME is pinned
+            // there too, which is what keeps user-writable patch layers out.
+            if is_dsh_launcher_invocation(args, &self.workspaces_dir) {
+                return Ok(());
+            }
             return Err(PolicyViolation(
-                "node is only admitted for the smoke stub (COGNIA_SMOKE_AGENT=1 + stub-acp-agent.mjs)"
+                "node is only admitted for the smoke stub (COGNIA_SMOKE_AGENT=1 + \
+                 stub-acp-agent.mjs) or the managed DeepSeek Harness launcher"
                     .into(),
             ));
         }
@@ -265,6 +346,46 @@ fn is_smoke_stub_invocation(args: &[String]) -> bool {
         .unwrap_or(false)
 }
 
+/// The managed DeepSeek Harness launcher, spawned as `node <launcher> <composition>`.
+///
+/// Both paths must be absolute and canonicalize under the DSH runtime home, so
+/// a caller cannot point `node` at a script of its own choosing. Rooting the
+/// check at the enclosing data root would not do: that root also contains
+/// `workspaces/`, where every agent cwd is confined and therefore where an
+/// agent can write — it could plant its own `launcher.mjs` + `.yml` and turn
+/// the one `node` exception into arbitrary code execution. Canonicalization is
+/// what defeats `..` traversal and a symlink planted inside the runtime home.
+fn is_dsh_launcher_invocation(args: &[String], workspaces_dir: &Path) -> bool {
+    let (launcher, composition) = match (args.first(), args.get(1)) {
+        (Some(launcher), Some(composition)) if args.len() == 2 => (launcher, composition),
+        _ => return false,
+    };
+    if Path::new(launcher).file_name().map(|f| f != "launcher.mjs").unwrap_or(true) {
+        return false;
+    }
+    if Path::new(composition)
+        .extension()
+        .map(|e| e != "yml")
+        .unwrap_or(true)
+    {
+        return false;
+    }
+    // The runtime home is a sibling of the workspaces dir under the Cognia data
+    // root; both paths must resolve inside the runtime home itself.
+    let Some(data_root) = workspaces_dir.parent() else {
+        return false;
+    };
+    let Ok(root) = crate::dsh_runtime::runtime_home(data_root).canonicalize() else {
+        return false;
+    };
+    [launcher, composition].iter().all(|candidate| {
+        Path::new(candidate)
+            .canonicalize()
+            .map(|resolved| resolved.starts_with(&root))
+            .unwrap_or(false)
+    })
+}
+
 /// Keep allowlisted env keys; drop everything else (default-deny — this is
 /// what keeps `LD_PRELOAD`/`DYLD_*`/`NODE_OPTIONS` out). Returns the kept
 /// map and the dropped key names for the audit record.
@@ -297,6 +418,7 @@ mod tests {
             args: args.iter().map(|s| s.to_string()).collect(),
             env: HashMap::new(),
             cwd: None,
+            framing: Default::default(),
         }
     }
 
@@ -378,6 +500,89 @@ mod tests {
         // Even with the gate, arbitrary node scripts stay denied.
         assert!(with.validate(config("node", &["evil.mjs"])).is_err());
         assert!(with.validate(config("node", &[])).is_err());
+    }
+
+    #[test]
+    fn dsh_launcher_is_admitted_only_inside_the_cognia_data_root() {
+        let (tmp, p) = policy(false);
+        // The runtime home is a sibling of the workspaces dir under the data root.
+        let runtime_home = tmp.path().join("deepseek-harness");
+        std::fs::create_dir_all(&runtime_home).expect("runtime home");
+        let launcher = runtime_home.join("launcher.mjs");
+        let composition = runtime_home.join("host.sdk-readonly.yml");
+        std::fs::write(&launcher, "").expect("launcher");
+        std::fs::write(&composition, "").expect("composition");
+        // The workspaces dir must exist for the data root to canonicalize.
+        std::fs::create_dir_all(tmp.path().join("workspaces")).expect("workspaces");
+
+        let ok = config(
+            "node",
+            &[
+                launcher.to_str().expect("launcher path"),
+                composition.to_str().expect("composition path"),
+            ],
+        );
+        assert!(p.validate(ok).is_ok());
+
+        // A script outside the data root would make `node` a universal escape
+        // from the allowlist.
+        let outside = tempfile::tempdir().expect("outside");
+        let evil = outside.path().join("launcher.mjs");
+        std::fs::write(&evil, "").expect("evil");
+        assert!(p
+            .validate(config(
+                "node",
+                &[
+                    evil.to_str().expect("evil path"),
+                    composition.to_str().expect("composition path"),
+                ],
+            ))
+            .is_err());
+
+        // A launcher the agent planted in its own workspace. The workspaces dir
+        // lives under the same data root, so rooting the check there would
+        // admit this and hand the agent arbitrary code execution.
+        let workspace = tmp.path().join("workspaces").join("ws1");
+        std::fs::create_dir_all(&workspace).expect("workspace");
+        let planted = workspace.join("launcher.mjs");
+        let planted_yml = workspace.join("host.acp.yml");
+        std::fs::write(&planted, "").expect("planted launcher");
+        std::fs::write(&planted_yml, "").expect("planted composition");
+        assert!(p
+            .validate(config(
+                "node",
+                &[
+                    planted.to_str().expect("planted path"),
+                    planted_yml.to_str().expect("planted yml path"),
+                ],
+            ))
+            .is_err());
+
+        // Right location, wrong name.
+        let other = runtime_home.join("evil.mjs");
+        std::fs::write(&other, "").expect("other");
+        assert!(p
+            .validate(config(
+                "node",
+                &[
+                    other.to_str().expect("other path"),
+                    composition.to_str().expect("composition path"),
+                ],
+            ))
+            .is_err());
+
+        // Exactly two arguments: an extra flag could carry something the
+        // launcher never vets, such as --inspect.
+        assert!(p
+            .validate(config(
+                "node",
+                &[
+                    launcher.to_str().expect("launcher path"),
+                    composition.to_str().expect("composition path"),
+                    "--inspect",
+                ],
+            ))
+            .is_err());
     }
 
     // ── Policy matrix: cwd ───────────────────────────────────────────────────
@@ -471,6 +676,48 @@ mod tests {
         assert_eq!(validated.config.env.len(), 6);
     }
 
+    /// Pi runs as a bare allowlisted binary, unlike the `pi-acp` bridge which
+    /// goes through npx. Both must keep working: the native preset spawns
+    /// `pi`, the legacy compatibility preset still spawns `npx -y pi-acp`.
+    #[test]
+    fn pi_runs_as_an_allowlisted_binary_alongside_the_legacy_bridge() {
+        let (_tmp, p) = policy(false);
+        assert!(p.validate(config("pi", &["--mode", "rpc"])).is_ok());
+        assert!(p.validate(config("npx", &["-y", "pi-acp"])).is_ok());
+        // Still a bare name only — a path must never be admitted.
+        assert!(p
+            .validate(config("/usr/local/bin/pi", &["--mode", "rpc"]))
+            .is_err());
+    }
+
+    /// The bundled Cognia Pi extension reads the tool-host handshake from its
+    /// own process env, so these keys have to survive `filter_env`. Without
+    /// them the extension cannot reach the broker and fails closed, which
+    /// looks like an unexplained handshake timeout.
+    #[test]
+    fn tool_host_handshake_env_reaches_the_agent() {
+        let (_tmp, p) = policy(false);
+        let mut cfg = config("pi", &["--mode", "rpc"]);
+        cfg.env = HashMap::from([
+            (
+                "COGNIA_TOOLHOST_SOCKET".to_string(),
+                "/tmp/cognia-toolhost-501/s.sock".to_string(),
+            ),
+            ("COGNIA_TOOLHOST_TOKEN".to_string(), "tok".to_string()),
+            (
+                "COGNIA_TOOLHOST_SERVER".to_string(),
+                "cognia-tools".to_string(),
+            ),
+            ("COGNIA_UNRELATED".to_string(), "nope".to_string()),
+        ]);
+        let validated = p.validate(cfg).expect("valid command");
+        assert!(validated.config.env.contains_key("COGNIA_TOOLHOST_SOCKET"));
+        assert!(validated.config.env.contains_key("COGNIA_TOOLHOST_TOKEN"));
+        assert!(validated.config.env.contains_key("COGNIA_TOOLHOST_SERVER"));
+        // The prefix must not have widened into a general COGNIA_ passthrough.
+        assert_eq!(validated.dropped_env_keys, vec!["COGNIA_UNRELATED"]);
+    }
+
     #[test]
     fn from_env_reads_smoke_gate_and_workspaces_dir() {
         // Only this test touches these vars.
@@ -497,5 +744,96 @@ mod tests {
             Some(v) => std::env::set_var(SMOKE_AGENT_ENV, v),
             None => std::env::remove_var(SMOKE_AGENT_ENV),
         }
+    }
+
+    // ── Desktop policy: same command + env gates, no workspaces confinement ──
+
+    #[test]
+    fn desktop_keeps_the_command_allowlist() {
+        let (_tmp, p) = policy(false);
+        assert!(p.validate_desktop(config("pi", &[])).is_ok());
+        assert!(p.validate_desktop(config("bash", &[])).is_err());
+        assert!(p.validate_desktop(config("/usr/bin/pi", &[])).is_err());
+        // `node` stays gated on the smoke switch here exactly as it is headless.
+        assert!(p
+            .validate_desktop(config("node", &["stub-acp-agent.mjs"]))
+            .is_err());
+    }
+
+    #[test]
+    fn desktop_keeps_the_default_deny_env_filter() {
+        let (_tmp, p) = policy(false);
+        let mut cfg = config("pi", &[]);
+        cfg.env.insert("ANTHROPIC_API_KEY".into(), "keep".into());
+        cfg.env
+            .insert("COGNIA_TOOLHOST_TOKEN".into(), "keep".into());
+        cfg.env.insert("LD_PRELOAD".into(), "/evil.so".into());
+        cfg.env.insert("NODE_OPTIONS".into(), "--require=x".into());
+
+        let validated = p.validate_desktop(cfg).expect("desktop validate");
+
+        assert!(validated.config.env.contains_key("ANTHROPIC_API_KEY"));
+        assert!(validated.config.env.contains_key("COGNIA_TOOLHOST_TOKEN"));
+        assert!(!validated.config.env.contains_key("LD_PRELOAD"));
+        assert!(!validated.config.env.contains_key("NODE_OPTIONS"));
+        assert!(validated.dropped_env_keys.contains(&"LD_PRELOAD".to_string()));
+    }
+
+    /// The whole point of the desktop variant: a real project directory outside
+    /// `<data_dir>/workspaces` is allowed, where `validate` would refuse it.
+    #[test]
+    fn desktop_allows_a_cwd_outside_the_workspaces_root() {
+        let (tmp, p) = policy(false);
+        let project = tmp.path().join("some-project");
+        std::fs::create_dir_all(&project).expect("project dir");
+
+        let mut cfg = config("pi", &[]);
+        cfg.cwd = Some(project.display().to_string());
+
+        let headless = p.validate(cfg.clone());
+        assert!(
+            headless.is_err(),
+            "headless must still confine cwd to the workspaces root"
+        );
+
+        let desktop = p.validate_desktop(cfg).expect("desktop validate");
+        let resolved = PathBuf::from(desktop.config.cwd.expect("cwd"));
+        assert_eq!(resolved, project.canonicalize().expect("canonicalize"));
+    }
+
+    #[test]
+    fn desktop_canonicalizes_cwd_and_rejects_one_that_does_not_resolve() {
+        let (tmp, p) = policy(false);
+        let nested = tmp.path().join("a").join("b");
+        std::fs::create_dir_all(&nested).expect("nested");
+
+        let mut cfg = config("pi", &[]);
+        cfg.cwd = Some(tmp.path().join("a").join("..").join("a").join("b").display().to_string());
+        let validated = p.validate_desktop(cfg).expect("desktop validate");
+        assert_eq!(
+            PathBuf::from(validated.config.cwd.expect("cwd")),
+            nested.canonicalize().expect("canonicalize")
+        );
+
+        let mut missing = config("pi", &[]);
+        missing.cwd = Some(tmp.path().join("nope").display().to_string());
+        assert!(p.validate_desktop(missing).is_err());
+    }
+
+    /// An agent configured before the sandbox existed has no cwd. It must keep
+    /// working, so it lands on the workspaces root exactly as it does on the
+    /// CLI host — not refused, and not left to run in `/`.
+    #[test]
+    fn desktop_defaults_an_absent_cwd_to_the_workspaces_root() {
+        let (tmp, p) = policy(false);
+        let validated = p.validate_desktop(config("pi", &[])).expect("validate");
+        let resolved = PathBuf::from(validated.config.cwd.expect("cwd"));
+        assert_eq!(
+            resolved,
+            tmp.path()
+                .join("workspaces")
+                .canonicalize()
+                .expect("workspaces root is created on demand")
+        );
     }
 }

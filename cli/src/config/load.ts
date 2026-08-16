@@ -206,6 +206,11 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     layout: layer.layout ?? acc.layout,
     mouse: layer.mouse ?? acc.mouse,
     vim: layer.vim ?? acc.vim,
+    // Merged per-key (like `render`/`git`/`clipboard`) so a project layer can
+    // turn on the model tier without also having to restate `local`.
+    autosuggest: layer.autosuggest
+      ? { ...acc.autosuggest, ...stripUndefined(layer.autosuggest) }
+      : acc.autosuggest,
     terminalTitle: layer.terminalTitle ?? acc.terminalTitle,
     notify: layer.notify ?? acc.notify,
     desktopNotifications: layer.desktopNotifications ?? acc.desktopNotifications,

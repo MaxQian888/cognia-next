@@ -5,6 +5,7 @@ import type {
   AcpToolCallLocation,
   ExternalAgentDoneEvent,
   ExternalAgentErrorEvent,
+  ExternalAgentElicitationRequestEvent,
   ExternalAgentEvent,
   ExternalAgentHookFireEvent,
   ExternalAgentPermissionRequestEvent,
@@ -20,6 +21,14 @@ import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execu
 
 export interface ExternalEventMapperOptions {
   onPermissionRequest?: (event: ExternalAgentPermissionRequestEvent) => void
+  /**
+   * A blocking question that is not a tool approval.
+   *
+   * Without this the event fell into `default: return []` below — the canonical
+   * branch mapped it correctly, so it appeared in the log as "Input requested"
+   * while nothing ever asked the user, and the agent stayed blocked.
+   */
+  onElicitationRequest?: (event: ExternalAgentElicitationRequestEvent) => void
 }
 
 /** Preserve protocol events that do not have a legacy reducer action. The
@@ -178,6 +187,9 @@ export function externalAgentEventToActions(
       return diffActions(event)
     case "permission_request":
       options.onPermissionRequest?.(event)
+      return []
+    case "elicitation_request":
+      options.onElicitationRequest?.(event)
       return []
     case "plan_update":
       return planActions(event)

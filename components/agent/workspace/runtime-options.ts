@@ -29,6 +29,7 @@ export const RUNTIME_LABEL_KEYS: Record<TeammateRuntime, string> = {
   kiro: "kiro",
   "qwen-code": "qwenCode",
   pi: "pi",
+  "pi-rpc": "piRpc",
   droid: "droid",
   "opencode-server": "opencodeServer",
   "opencode-remote": "opencodeRemote",

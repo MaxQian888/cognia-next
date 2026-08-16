@@ -27,15 +27,29 @@ describe("runtime-options", () => {
   // runtimes (omitting codex-app-server, so opening the dialog on such a
   // teammate showed a Select with no matching item). The module existed, was
   // tested, and prevented nothing. Assert the importers, not just the exports.
-  describe("both member editors consume this module", () => {
+  describe("every runtime-labelling surface consumes this module", () => {
     const read = (file: string) => readFileSync(join(__dirname, file), "utf8")
 
-    it.each(["members.tsx", "teammate-config-dialog.tsx"])("%s imports it", (file) => {
-      const src = read(file)
-      expect(src).toMatch(/from "\.\/runtime-options"/)
-      // A local re-declaration is the drift this module exists to prevent.
-      expect(src).not.toMatch(/const RUNTIME_OPTIONS\s*[:=]/)
-      expect(src).not.toMatch(/const RUNTIME_LABEL_KEYS\s*[:=]/)
-    })
+    it.each(["members.tsx", "teammate-config-dialog.tsx", "runtime-badge.tsx"])(
+      "%s imports it",
+      (file) => {
+        const src = read(file)
+        expect(src).toMatch(/from "\.\/runtime-options"/)
+        // A local re-declaration is the drift this module exists to prevent.
+        expect(src).not.toMatch(/const RUNTIME_OPTIONS\s*[:=]/)
+        expect(src).not.toMatch(/const RUNTIME_LABEL_KEYS\s*[:=]/)
+      }
+    )
+
+    // runtime-badge.tsx was outside the guard above and duplicated the whole
+    // key set as `RUNTIME_META[x].labelKey`. Both copies then went stale
+    // together. A `labelKey` field anywhere in this directory means someone has
+    // started a second mapping.
+    it.each(["members.tsx", "teammate-config-dialog.tsx", "runtime-badge.tsx"])(
+      "%s declares no label mapping of its own",
+      (file) => {
+        expect(read(file)).not.toMatch(/labelKey\s*:/)
+      }
+    )
   })
 })

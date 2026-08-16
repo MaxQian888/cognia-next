@@ -1,8 +1,8 @@
 /**
  * `ExternalAgentBranchReasonCode` → {@link DiagnosticCode}.
  *
- * The external-agent runtime has produced a perfectly good 18-member reason
- * vocabulary since ADR-0049, and the diagnostics panel rendered it *raw*: users
+ * The external-agent runtime has produced a perfectly good reason vocabulary
+ * since ADR-0049, and the diagnostics panel rendered it *raw*: users
  * were shown the literal string `ecosystem_prerequisite_missing` in a badge.
  * The codes were never wrong, they were just never translated.
  *
@@ -39,6 +39,11 @@ export const REASON_CODE_TO_DIAGNOSTIC: Readonly<
   execution_failed: "executionFailed",
   strict_failure: "strictFailure",
   fallback_to_builtin: "fallbackToBuiltin",
+  runtime_version_unsupported: "runtimeVersionUnsupported",
+  sandbox_unavailable: "sandboxUnavailable",
+  extension_handshake_failed: "extensionHandshakeFailed",
+  protocol_frame_invalid: "protocolFrameInvalid",
+  resource_limit: "resourceLimit",
 }
 
 /**

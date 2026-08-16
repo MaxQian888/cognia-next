@@ -30,8 +30,28 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
     expect(EXTERNAL_AGENT_PRESETS.kiro).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS["qwen-code"]).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS.pi).not.toBeNull()
+    expect(EXTERNAL_AGENT_PRESETS["pi-rpc"]).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS.droid).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS.custom).toBeNull()
+  })
+
+  it("materializes the native Pi preset onto the pi-rpc protocol", () => {
+    const piRpc = EXTERNAL_AGENT_PRESETS["pi-rpc"]!
+    expect(piRpc.protocol).toBe("pi-rpc")
+    expect(piRpc.adapterId).toBe("pi")
+    expect(piRpc.surfaceId).toBe("rpc-stdio")
+    expect(piRpc.process).toEqual({ command: "pi", args: ["--mode", "rpc"] })
+
+    // `pi` and `pi-rpc` are two routes to the same product, so a regression
+    // that collapsed them onto one protocol would still look plausible in
+    // the gallery. Pin the split.
+    expect(EXTERNAL_AGENT_PRESETS.pi!.protocol).toBe("acp")
+  })
+
+  it("offers native Pi as an executable backend", () => {
+    // Gates `--backend pi-rpc` and the teammate runtime picker: a preset that
+    // names a real binary but is missing here is silently unselectable.
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("pi-rpc")
   })
 
   it("each preset carries adapter/surface metadata", () => {
@@ -47,15 +67,24 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
 })
 
 describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
-  it("excludes custom and service-discovered preview integrations", () => {
+  it("excludes custom, preview integrations, and managed-runtime backends", () => {
+    // The DeepSeek Harness presets name no binary on PATH: they become runnable
+    // only after the managed runtime is installed, so offering them as spawnable
+    // backends would produce choices that cannot spawn.
+    const nonExecutable = [
+      "custom",
+      "opencode-v2-preview",
+      "deepseek-harness-readonly",
+      "deepseek-harness-workspace",
+      "deepseek-harness-acp",
+    ]
     const expected = (
       Object.keys(EXTERNAL_AGENT_PRESETS) as Array<keyof typeof EXTERNAL_AGENT_PRESETS>
-    ).filter(
-      (id) => id !== "custom" && id !== "opencode-v2-preview" && EXTERNAL_AGENT_PRESETS[id] !== null
-    )
+    ).filter((id) => !nonExecutable.includes(id) && EXTERNAL_AGENT_PRESETS[id] !== null)
     expect(BUILTIN_EXECUTABLE_PRESET_IDS).toEqual(expected)
-    expect(BUILTIN_EXECUTABLE_PRESET_IDS).not.toContain("custom")
-    expect(BUILTIN_EXECUTABLE_PRESET_IDS).not.toContain("opencode-v2-preview")
+    for (const id of nonExecutable) {
+      expect(BUILTIN_EXECUTABLE_PRESET_IDS).not.toContain(id)
+    }
   })
 
   it("includes both Claude Code and Codex (the named external agents)", () => {

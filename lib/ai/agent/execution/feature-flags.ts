@@ -15,6 +15,7 @@ export type AgentExecutionFlag =
   | "claudeSdkSessionStore"
   | "claudeSdkCheckpoint"
   | "claudeSdkPrewarm"
+  | "durableWorkSubmission"
 
 const AGENT_EXECUTION_FLAGS_KEY = "cognia-agent-execution-flags-v1"
 
@@ -29,6 +30,7 @@ export const AGENT_EXECUTION_FLAGS: readonly AgentExecutionFlag[] = [
   "claudeSdkSessionStore",
   "claudeSdkCheckpoint",
   "claudeSdkPrewarm",
+  "durableWorkSubmission",
 ]
 
 const DEFAULT_AGENT_EXECUTION_FLAGS: Record<AgentExecutionFlag, boolean> = {
@@ -42,6 +44,9 @@ const DEFAULT_AGENT_EXECUTION_FLAGS: Record<AgentExecutionFlag, boolean> = {
   claudeSdkSessionStore: false,
   claudeSdkCheckpoint: false,
   claudeSdkPrewarm: false,
+  // ADR-0123. Off until Direct Chat has run a full shadow cycle: with it off,
+  // the chat send path is byte-for-byte what it is today.
+  durableWorkSubmission: false,
 }
 
 function parseFlagValue(raw: string | undefined): boolean | undefined {
@@ -65,6 +70,7 @@ function readEnvFlags(): Partial<Record<AgentExecutionFlag, boolean>> {
     claudeSdkSessionStore: process.env.NEXT_PUBLIC_CLAUDE_SDK_SESSION_STORE,
     claudeSdkCheckpoint: process.env.NEXT_PUBLIC_CLAUDE_SDK_CHECKPOINT,
     claudeSdkPrewarm: process.env.NEXT_PUBLIC_CLAUDE_SDK_PREWARM,
+    durableWorkSubmission: process.env.NEXT_PUBLIC_DURABLE_WORK_SUBMISSION,
   }
   const result: Partial<Record<AgentExecutionFlag, boolean>> = {}
   for (const flag of AGENT_EXECUTION_FLAGS) {

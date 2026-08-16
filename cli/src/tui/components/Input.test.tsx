@@ -16,6 +16,7 @@ import { completeAtPath, type DirEntry, type ListDir } from "../commands/file-co
 import type { MentionCandidate } from "../mention/types"
 import type { MentionProviders } from "../mention/providers"
 import { MENTION_DEBOUNCE_MS } from "../mention/async-load"
+import type { InlineCompleteFn } from "@/lib/chat/completion/inline/ai-provider"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -559,7 +560,13 @@ describe("Input (rich composer)", () => {
 })
 
 // Seeds composer history so ghost-text autosuggest has something to complete.
-function GhostHarness({ history }: { history: string[] }) {
+function GhostHarness({
+  history,
+  aiComplete,
+}: {
+  history: string[]
+  aiComplete?: InlineCompleteFn | null
+}) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   const seeded = React.useRef(false)
   React.useEffect(() => {
@@ -575,32 +582,95 @@ function GhostHarness({ history }: { history: string[] }) {
       cwd="/work"
       listDir={listDir}
       mentionProviders={stubProviders(listDir)}
+      aiComplete={aiComplete ?? null}
+      suggestDebounceMs={200}
     />
   )
+}
+
+/**
+ * Let the completion providers settle. Suggestions now come from the shared
+ * engine (`lib/chat/completion/inline/`), which resolves even its "sync"
+ * providers through a promise — so the ghost lands a microtask after the
+ * keystroke rather than during the same render pass.
+ */
+async function settleGhost(ms = 0): Promise<void> {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, ms))
+  })
 }
 
 describe("Input ghost-text autosuggest", () => {
   beforeEach(() => __resetInk())
 
-  it("shows the dim completion of a prior history entry", () => {
+  it("shows the dim completion of a prior history entry", async () => {
     const { container } = render(<GhostHarness history={["deploy to staging"]} />)
     type("deploy ")
+    await settleGhost()
     // The buffer shows what was typed plus the ghost remainder.
     expect(container.textContent).toContain("deploy ")
     expect(container.textContent).toContain("to staging")
   })
 
-  it("accepts the suggestion with → at the end of the draft", () => {
+  it("labels the ghost with the source it came from", async () => {
     const { container } = render(<GhostHarness history={["deploy to staging"]} />)
     type("deploy ")
+    await settleGhost()
+    expect(container.textContent).toContain("history")
+  })
+
+  it("accepts the suggestion with → at the end of the draft", async () => {
+    const { container } = render(<GhostHarness history={["deploy to staging"]} />)
+    type("deploy ")
+    await settleGhost()
     key("", { rightArrow: true })
     expect(container.textContent).toContain("deploy to staging")
   })
 
-  it("shows no ghost when nothing matches", () => {
+  it("shows no ghost when nothing matches", async () => {
     const { container } = render(<GhostHarness history={["deploy to staging"]} />)
     type("xyz")
+    await settleGhost()
     expect(container.textContent).not.toContain("staging")
+  })
+
+  it("ranks the most recent of several matching entries first", async () => {
+    const { container } = render(<GhostHarness history={["deploy to staging", "deploy to prod"]} />)
+    type("deploy to ")
+    await settleGhost()
+    expect(container.textContent).toContain("prod")
+  })
+
+  it("cycles to the next candidate with alt+]", async () => {
+    const { container } = render(<GhostHarness history={["deploy to staging", "deploy to prod"]} />)
+    type("deploy to ")
+    await settleGhost()
+    key("]", { meta: true })
+    expect(container.textContent).toContain("staging")
+  })
+
+  it("surfaces a model continuation once the debounce elapses", async () => {
+    const { container } = render(
+      <GhostHarness history={[]} aiComplete={async () => "the release notes"} />
+    )
+    type("write ")
+    await settleGhost(300)
+    expect(container.textContent).toContain("the release notes")
+    expect(container.textContent).toContain("AI")
+  })
+
+  it("falls back to history when the model call fails", async () => {
+    const { container } = render(
+      <GhostHarness
+        history={["write the changelog"]}
+        aiComplete={async () => {
+          throw new Error("no provider")
+        }}
+      />
+    )
+    type("write ")
+    await settleGhost(300)
+    expect(container.textContent).toContain("the changelog")
   })
 })
 

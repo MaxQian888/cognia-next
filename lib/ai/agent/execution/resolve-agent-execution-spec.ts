@@ -21,6 +21,7 @@ import type {
   ResolvedAgentExecutionSpec,
 } from "@cognia/agent-config-types/agent-execution"
 import { RESOLVED_SPEC_VERSION } from "@cognia/agent-config-types/agent-execution"
+import type { ResolvedAgentCompositionV1 } from "@cognia/agent-config-types/agent-composition"
 
 import type { AgentExecutionFlag } from "./feature-flags"
 import { computeExecutionFingerprint } from "./fingerprint"
@@ -414,9 +415,26 @@ export function resolveAgentExecutionSpec(
  */
 export function sendSpecFromResolved(
   spec: ResolvedAgentExecutionSpec,
-  gateway?: { endpoint: string; ticketId: string }
+  gateway?: { endpoint: string; ticketId: string },
+  /**
+   * The turn's resolved composition (ADR-0117). Optional so every existing
+   * caller keeps working; absent means the sidecar assumes `native`, which is
+   * the pre-composition behaviour.
+   */
+  composition?: ResolvedAgentCompositionV1
 ): import("@cognia/agent-config-types/agent-execution").AgentExecutionSendSpec {
   return {
+    ...(composition
+      ? {
+          composition: {
+            authority: composition.authority,
+            toolPresentation: composition.toolPresentation,
+            orchestration: composition.orchestration,
+            compositionDigest: composition.compositionDigest,
+            presetId: composition.presetId,
+          },
+        }
+      : {}),
     // The wire spec advertises the same contract version as the resolved one:
     // the sidecar reads `capabilities.support` to fail closed on its own side,
     // and a v1 wire spec would silently drop those verdicts.

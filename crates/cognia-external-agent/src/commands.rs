@@ -5,7 +5,9 @@
 use super::exec_backend::{
     self, AgentEventEmitter, ExecBackend, LocalProcessBackend, STATE_CHANGE_CHANNEL,
 };
+use super::presets::SpawnPolicy;
 use super::process::{ExternalAgentProcessManager, ExternalAgentSpawnConfig};
+use super::sandbox;
 use super::terminal::{AcpTerminalManager, TerminalExitStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,7 +24,12 @@ pub struct ExternalAgentState(pub Arc<ExternalAgentProcessManager>);
 impl ExternalAgentState {
     /// The desktop's exec backend view over the managed process manager
     /// (ADR-0059 R10) — one code path with the headless RPC arms.
-    fn backend(&self) -> Arc<LocalProcessBackend> {
+    ///
+    /// `pub` because the companion RPC arms reach it through
+    /// `DispatchHost::exec_backend()`: a paired phone driving a DESKTOP host
+    /// must land on the same process manager the local Tauri commands use, or
+    /// it spawns into a registry nothing else can see.
+    pub fn backend(&self) -> Arc<LocalProcessBackend> {
         LocalProcessBackend::from_manager(Arc::clone(&self.0))
     }
 }
@@ -35,8 +42,12 @@ impl Default for ExternalAgentState {
 
 /// Desktop emitter for the `external-agent://*` channels — payload shapes
 /// are the frozen ones in [`exec_backend`].
-struct TauriAgentEmitter {
-    app: AppHandle,
+///
+/// `pub` for the same reason as [`ExternalAgentState::backend`]: the companion
+/// RPC arms need the desktop's emitter when the host is Tauri, so remote spawns
+/// stream on the channels the local UI already listens to.
+pub struct TauriAgentEmitter {
+    pub app: AppHandle,
 }
 
 impl AgentEventEmitter for TauriAgentEmitter {
@@ -57,14 +68,35 @@ impl Default for AcpTerminalState {
 /// Spawn an external agent process. Event choreography lives in
 /// `exec_backend::spawn_with_events` — one code path with the headless RPC
 /// arms (ADR-0059 R10).
+///
+/// Two gates run before the process exists, in this order:
+///
+/// 1. [`SpawnPolicy::validate_desktop`] — command allowlist + default-deny env
+///    filter. Not the workspaces-root cwd confinement, which is a headless
+///    trust boundary (a remote client picks that cwd; here the local user does).
+/// 2. [`sandbox::wrap_with_sandbox`] — rewrites the launch into
+///    `cognia-external-agent-launcher … -- <command>`. Order matters: the
+///    allowlist demands a bare binary name, and the wrap replaces `command`
+///    with the launcher's absolute path.
+///
+/// Both fail closed. Before this existed the desktop ran external agents with
+/// no policy, no sandbox and an inherited environment, while ADR-0077/0119
+/// documented the opposite.
 #[tauri::command]
 pub async fn spawn_external_agent(
     config: ExternalAgentSpawnConfig,
     state: State<'_, ExternalAgentState>,
     app: AppHandle,
 ) -> Result<String, String> {
+    let data_root = crate::dsh_runtime::host_data_root(&app)?;
+    let validated = SpawnPolicy::from_env(&data_root)
+        .validate_desktop(config)
+        .map_err(|violation| violation.to_string())?;
+    let sandboxed = sandbox::wrap_with_sandbox(validated.config, &sandbox::DesktopSandboxHost)
+        .map_err(|error| error.to_string())?;
+
     let emitter: Arc<dyn AgentEventEmitter> = Arc::new(TauriAgentEmitter { app });
-    exec_backend::spawn_with_events(state.backend().as_ref(), emitter, config).await
+    exec_backend::spawn_with_events(state.backend().as_ref(), emitter, sandboxed).await
 }
 
 /// Send a message to an external agent process
@@ -368,4 +400,55 @@ mod tests {
         assert_eq!(value["exitCode"], serde_json::Value::Null);
         assert_eq!(value["exitStatus"]["signal"], serde_json::json!("killed"));
     }
+}
+
+// ── DeepSeek Harness managed runtime ─────────────────────────────────────────
+//
+// The verdict on whether an install is healthy is NOT rendered here: it belongs
+// to `doctorDshRuntime()` in `lib/ai/agent/external/dsh-runtime-install.ts`,
+// which both the desktop and headless hosts share. These commands only gather
+// facts and move bytes, so the two hosts cannot drift on what "healthy" means.
+
+// The host owns the install *locations*, never the renderer: the renderer has
+// no way to know this machine's data root, its Node version, or where the
+// bundled artifacts landed, and letting it name them would make the paths
+// caller-controlled. So every location below is derived here, exactly as the
+// headless Node backend derives its own (`cli/src/runtime/external/
+// node-backend.ts`, `dsh_runtime_*` cases). The renderer passes only what it
+// genuinely owns: the manifest it built, and the live session count.
+
+/// Gather install facts for the shared TypeScript verdict function.
+#[tauri::command]
+pub fn dsh_runtime_facts(app: AppHandle) -> Result<crate::dsh_runtime::DshRuntimeFacts, String> {
+    Ok(crate::dsh_runtime::gather_facts(
+        &crate::dsh_runtime::host_data_root(&app)?,
+        crate::dsh_runtime::host_node_version(),
+    ))
+}
+
+/// Stage a new runtime and install its dependencies.
+///
+/// The live runtime is untouched until `dsh_runtime_finalize`, so a failure
+/// here cannot leave the user without a working runtime.
+#[tauri::command]
+pub async fn dsh_runtime_install(
+    app: AppHandle,
+) -> Result<crate::dsh_runtime::DshInstallDigests, String> {
+    let data_root = crate::dsh_runtime::host_data_root(&app)?;
+    let source_dir = crate::dsh_runtime::host_source_dir(&app)?;
+    crate::dsh_runtime::stage_install(&data_root, &source_dir).await
+}
+
+/// Write the renderer-built channel manifest and activate the staged runtime.
+#[tauri::command]
+pub fn dsh_runtime_finalize(app: AppHandle, manifest_json: String) -> Result<(), String> {
+    crate::dsh_runtime::finalize_install(&crate::dsh_runtime::host_data_root(&app)?, &manifest_json)
+}
+
+#[tauri::command]
+pub fn dsh_runtime_remove(app: AppHandle, active_session_count: u32) -> Result<(), String> {
+    crate::dsh_runtime::remove_runtime(
+        &crate::dsh_runtime::host_data_root(&app)?,
+        active_session_count,
+    )
 }

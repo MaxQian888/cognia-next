@@ -9,7 +9,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import React, { useEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Box, Text, type DOMElement } from "ink"
 
 import { SlashPalette } from "./SlashPalette"
@@ -34,7 +34,9 @@ import {
   PASTE_CHAR_THRESHOLD,
   type PasteResult,
 } from "@/lib/paste-collapse"
-import { suggest } from "../input/autosuggest"
+import { useInlineSuggest } from "../input/inline-suggest"
+import type { InlineCompleteFn } from "@/lib/chat/completion/inline/ai-provider"
+import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 import {
   enterNormalFromInsert,
   handleVimNormalKey,
@@ -154,6 +156,9 @@ function InputImpl({
   onPopupOpenChange,
   placeholder = "Ask, run /commands, @ files, or ! shell",
   vimEnabled = false,
+  localSuggestEnabled = true,
+  aiComplete,
+  suggestDebounceMs,
 }: {
   input: InputState
   dispatch: (action: TuiAction) => void
@@ -194,6 +199,12 @@ function InputImpl({
   /** Vim editing mode (`/vim`): Esc drops to NORMAL, `i`/`a`/… re-enter INSERT.
    * See `input/vim.ts` for the supported motion/operator subset. */
   vimEnabled?: boolean
+  /** Local (history + slash-command) inline completion. Default on. */
+  localSuggestEnabled?: boolean
+  /** Model-backed inline completion. Omit/null → local-only autosuggest. */
+  aiComplete?: InlineCompleteFn | null
+  /** Debounce before querying the model tier, ms. Clamped [200, 2000]. */
+  suggestDebounceMs?: number
 }) {
   const theme = useTheme()
   const buffer = input.buffer
@@ -376,20 +387,56 @@ function InputImpl({
   // click hit-test windows the candidate list exactly as the render does.
   const POPUP_MAX_ROWS = popupRows ?? 8
 
-  // Inline ghost-text autosuggest: a dim completion shown after the cursor when
-  // the single-line draft is a prefix of a prior history entry (or slash name).
-  // Suppressed while a popup owns input (the palette handles `/` and `@`) or the
-  // composer is disabled. `→` at the end of the draft accepts it.
+  // Inline ghost-text autosuggest: a dim completion painted after the cursor,
+  // ranked across command history, slash-command names, and (when configured)
+  // a model continuation. Suppressed while a popup owns input (the palette
+  // handles `/` and `@`), while the composer is disabled, when the cursor is
+  // not at the very end, or on a multi-line draft — the ghost is rendered on
+  // the cursor's row, so it must stay a single-row tail.
+  //
+  // `→` (or Tab) at the end of the draft accepts it; Alt+]/Alt+[ walk the
+  // alternatives, matching the desktop composer's bindings.
   const cursorAtEnd =
     buffer.cursorRow === buffer.lines.length - 1 &&
     buffer.cursorCol === buffer.lines[buffer.cursorRow].length
-  const suggestion =
-    disabled || popupOpen
-      ? null
-      : suggest(text, cursorAtEnd, {
-          history: [...input.history.entries].reverse(),
-          commands: listVisibleCommands().map((c) => `/${c.name}`),
-        })
+  // A getter, not a snapshot: `registerCustomCommands` discovers project/user
+  // commands from disk in a mount effect, and plugin commands register with
+  // their plugin — both after this component's first render. A `useMemo([])`
+  // froze the set at mount, so a user's own `/my-command` never appeared as
+  // ghost text even though the `/` palette (which re-reads the registry every
+  // open) listed it. Resolved at query time instead, which is at most once per
+  // debounce rather than once per keystroke.
+  const suggestCommands = useCallback(
+    (): InlineCommandInfo[] =>
+      listVisibleCommands().map((c) => ({
+        name: c.name,
+        description: c.description,
+        aliases: c.aliases,
+      })),
+    []
+  )
+  const inline = useInlineSuggest({
+    text,
+    suppress: disabled || popupOpen || !cursorAtEnd || text.includes("\n"),
+    history: input.history.entries,
+    commands: suggestCommands,
+    localEnabled: localSuggestEnabled,
+    aiComplete: aiComplete ?? null,
+    debounceMs: suggestDebounceMs,
+    cwd,
+  })
+  const suggestion = inline.ghost.length > 0 ? inline.ghost : null
+  // Tell the user WHERE the ghost came from: a history hit is exact and free,
+  // a model hit is a guess that cost a call, and they look identical as dim
+  // text. Adds the `n/total · alt+] cycles` affordance only when there is
+  // actually somewhere to cycle to.
+  const suggestionBadge = (() => {
+    if (!inline.suggestion) return null
+    const source = inline.suggestion.detail ?? inline.suggestion.source
+    return inline.candidates.length > 1
+      ? `${source} ${inline.index + 1}/${inline.candidates.length} · alt+] cycles`
+      : source
+  })()
 
   const setBuffer = (next: InputBuffer) => {
     setDismissed(null)
@@ -580,11 +627,23 @@ function InputImpl({
         // handled: false → control chords fall through to the default flow.
       }
     }
-    // Accept an inline ghost suggestion: → at the very end of the draft fills
-    // it in (a no-op move otherwise), before normal key interpretation.
-    if (suggestion && key.rightArrow && cursorAtEnd) {
-      setBuffer(bufferFromText(text + suggestion))
-      return
+    // Inline ghost-suggestion keys, handled before normal key interpretation.
+    // `→` at the very end of the draft accepts (a no-op move otherwise), and
+    // Alt+]/Alt+[ walk the ranked alternatives — same bindings as the desktop
+    // composer, so the two surfaces are muscle-memory compatible.
+    if (suggestion && cursorAtEnd) {
+      if (key.rightArrow) {
+        const next = inline.accept()
+        if (next !== null) {
+          setBuffer(bufferFromText(next))
+          return
+        }
+      }
+      if (key.meta && inline.candidates.length > 1 && (inputCh === "]" || inputCh === "[")) {
+        if (inputCh === "]") inline.cycleNext()
+        else inline.cyclePrev()
+        return
+      }
     }
     const intent = interpretKey(
       inputCh,
@@ -771,9 +830,17 @@ function InputImpl({
                 </Text>
               )}
               {visualRow.cursorCol !== null && cursorAtEnd && suggestion && (
-                <Text color={theme.muted} dimColor>
-                  {suggestion}
-                </Text>
+                <>
+                  <Text color={theme.muted} dimColor>
+                    {suggestion}
+                  </Text>
+                  {suggestionBadge ? (
+                    <Text color={theme.muted} dimColor>
+                      {"  "}
+                      {suggestionBadge}
+                    </Text>
+                  ) : null}
+                </>
               )}
             </Box>
           ))}

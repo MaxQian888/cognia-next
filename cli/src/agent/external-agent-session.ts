@@ -3,6 +3,15 @@ import os from "node:os"
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+
+import { useAskUserStore } from "@/stores/agent/ask-user-store"
+
+import { answerElicitationThroughAskUser } from "./elicitation-ask-user"
+import {
+  piExtensionPathForSpawn,
+  piExtensionRefusalReason,
+  verifyPiExtension,
+} from "./tool-host/pi-extension"
 import type {
   AcpConfigOption,
   AcpPermissionMode,
@@ -557,6 +566,34 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       timeout: resolveConnectTimeoutMs(params.config),
     })
     if (!config) throw new Error(`Unknown external-agent backend: ${presetId}`)
+
+    // Pi enforces its native-tool permission matrix inside a bundled
+    // extension, so the adapter needs that file's path. Resolving it here (the
+    // single funnel for CLI external agents) keeps the app-side adapter free of
+    // filesystem access, which it cannot have under static export.
+    //
+    // A tampered file yields no path: the adapter's handshake gate then refuses
+    // the session, which is safer than letting an unverified component hold the
+    // permission gate open.
+    if (config.protocol === "pi-rpc") {
+      const verdict = verifyPiExtension()
+      const extensionPath = piExtensionPathForSpawn(verdict)
+      if (!extensionPath) {
+        // Refuse here rather than starting a session with no extension. The old
+        // comment claimed the adapter's handshake gate would catch it, but that
+        // gate only runs when a path was set (`if (this.extensionPath())`), so
+        // an absent extension skipped the check entirely and Pi ran with its
+        // native tools unintercepted. This message also names the actual cause;
+        // `extension_handshake_failed` did not distinguish "never shipped" from
+        // "tampered" from "timed out".
+        throw new RunAndCaptureError(
+          piExtensionRefusalReason(verdict) ?? "The Cognia Pi extension could not be verified",
+          "session_error"
+        )
+      }
+      config.metadata = { ...config.metadata, piExtensionPath: extensionPath }
+    }
+
     if (config.process) {
       config.process = {
         ...config.process,
@@ -833,6 +870,27 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
             try {
               const decision = await opts.gate(acpPermissionRequestToCli(request, sessionId))
               return captureDecisionToAcp(request, decision)
+            } finally {
+              watchdog.resume()
+            }
+          },
+          /**
+           * A blocking question that is not a tool approval.
+           *
+           * Routed through the existing `ask_user` overlay rather than a second
+           * form widget — see `elicitation-ask-user.ts`. Supplying this callback
+           * is half of what makes elicitation work at all:
+           * `BaseProtocolAdapter.execute` gates the branch on
+           * `options?.onElicitationRequest && this.respondToElicitation`, so a
+           * missing callback silently skips the answer and the agent stays
+           * blocked with no error and no timeout.
+           */
+          onElicitationRequest: async (request) => {
+            watchdog.pause()
+            try {
+              return await answerElicitationThroughAskUser(request, (question) =>
+                useAskUserStore.getState().enqueue(question, sessionId)
+              )
             } finally {
               watchdog.resume()
             }

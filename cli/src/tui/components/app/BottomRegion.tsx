@@ -22,6 +22,7 @@ import { runningSubagents } from "../../format/subagent"
 import type { StatusSegmentView } from "../../format/status-bar"
 import type { ListDir } from "../../commands/file-completer"
 import type { MentionProviders } from "../../mention/providers"
+import type { InlineCompleteFn } from "@/lib/chat/completion/inline/ai-provider"
 import type { TuiState, TuiAction } from "../../state/types"
 import type { Dispatch } from "react"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
@@ -58,6 +59,12 @@ export interface BottomRegionProps {
   enabledSkillIds: Set<string>
   toggleSkillEnabled: (id: string, enabled: boolean) => void
   handlePopupOpenChange: (open: boolean) => void
+  /** Local (history + slash-command) inline completion. */
+  localSuggestEnabled: boolean
+  /** Model-backed inline completion; null when the tier is off. */
+  aiComplete: InlineCompleteFn | null
+  /** Debounce before querying the model tier, ms. */
+  suggestDebounceMs?: number
   // Footer
   footerPlanTitle: string | undefined
   footerRowRef: React.RefObject<DOMElement | null>
@@ -92,6 +99,9 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     enabledSkillIds,
     toggleSkillEnabled,
     handlePopupOpenChange,
+    localSuggestEnabled,
+    aiComplete,
+    suggestDebounceMs,
     footerPlanTitle,
     footerRowRef,
     footerSegmentsRef,
@@ -203,6 +213,9 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
             enabledSkillIds={enabledSkillIds}
             onToggleSkill={toggleSkillEnabled}
             onPopupOpenChange={handlePopupOpenChange}
+            localSuggestEnabled={localSuggestEnabled}
+            aiComplete={aiComplete}
+            suggestDebounceMs={suggestDebounceMs}
           />
         </Box>
       )}

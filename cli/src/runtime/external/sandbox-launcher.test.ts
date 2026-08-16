@@ -99,6 +99,10 @@ describe("external-agent sandbox launcher", () => {
     ["npx", ["-y", "@google/gemini-cli", "--acp"], ".gemini"],
     ["npx", ["-y", "@qwen-code/qwen-code", "--acp"], ".qwen"],
     ["npx", ["-y", "pi-acp"], ".pi"],
+    // Native Pi spawns the `pi` binary directly, not through the npx bridge,
+    // so it needs its own arm of `agentStateWritableRoots` — without it Pi
+    // cannot read its own credentials or write its session files.
+    ["pi", ["--mode", "rpc"], ".pi"],
     ["copilot", ["--acp"], ".copilot"],
     ["kiro-cli", ["acp"], ".kiro"],
     ["droid", ["exec", "--output-format", "acp"], ".factory"],
@@ -169,6 +173,40 @@ describe("external-agent sandbox launcher", () => {
     await expect(
       resolveSandboxedExternalAgentLaunch(
         { id: "a", command: "codex", cwd: "C:\\work" },
+        {
+          platform: "win32",
+          homedir: "C:\\Users\\u",
+          candidates: ["launcher.exe"],
+          isExecutable: () => true,
+        }
+      )
+    ).rejects.toThrow(/not available on win32/)
+  })
+
+  /**
+   * ADR-0119 considered and rejected an unsandboxed escape hatch for Pi (a
+   * desktop one-time confirmation, a CLI flag, a headless env var). This pins
+   * the rejection: Pi gets no exemption from ADR-0077's "never falls back to
+   * an unsandboxed process", on any platform, with or without a launcher.
+   *
+   * A future bypass would most plausibly be added as a per-command special
+   * case, which is exactly what these two assertions would catch.
+   */
+  it("gives native Pi no sandbox exemption", async () => {
+    const piConfig = { id: "pi", command: "pi", args: ["--mode", "rpc"], cwd: "/work/repo" }
+
+    await expect(
+      resolveSandboxedExternalAgentLaunch(piConfig, {
+        platform: "linux",
+        homedir: "/home/user",
+        candidates: [],
+        isExecutable: () => false,
+      })
+    ).rejects.toThrow(/sandbox launcher is unavailable/)
+
+    await expect(
+      resolveSandboxedExternalAgentLaunch(
+        { ...piConfig, cwd: "C:\\work" },
         {
           platform: "win32",
           homedir: "C:\\Users\\u",

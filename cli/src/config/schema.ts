@@ -359,6 +359,31 @@ export const mascotSchema = z
 export type MascotConfig = z.infer<typeof mascotSchema>
 
 /**
+ * Composer inline-autosuggest config — the dim ghost text after the cursor.
+ *
+ * Two independent tiers, served by the shared engine in
+ * `lib/chat/completion/inline/` (the same one the desktop composer uses):
+ *
+ *   - `local` — completion from command history and slash-command names.
+ *     Free and instant, so it is opt-OUT (absent ⇒ on). This is the behaviour
+ *     the TUI always had, only ranked properly.
+ *   - `ai` — a model-generated continuation of the draft, resolved through the
+ *     renderer LLM client. Opt-IN (absent ⇒ off), because it bills a model.
+ */
+export const autosuggestSchema = z
+  .object({
+    /** Local history + command completion. Absent ⇒ on. */
+    local: z.boolean().optional(),
+    /** Model-generated continuation. Absent ⇒ off. */
+    ai: z.boolean().optional(),
+    /** Debounce before querying the model, ms. Absent ⇒ 500. Clamped [200, 2000]. */
+    debounceMs: z.number().int().positive().optional(),
+  })
+  .strict()
+
+export type AutosuggestConfig = z.infer<typeof autosuggestSchema>
+
+/**
  * Digital-twin retrieval config. The CLI has no local twin data — retrieval
  * round-trips through the running desktop app's CLI bridge and returns
  * REDACTED prompt segments. `characterId` names the twin-bound GUI
@@ -803,6 +828,9 @@ export const cliConfigFileSchema = z
     /** Vim editing mode for the composer (`/vim` to toggle): modal NORMAL/INSERT
      * editing with the classic motions/operators. Absent ⇒ off. */
     vim: z.boolean().optional(),
+    /** Composer inline ghost-text autosuggest (local + model tiers). Absent ⇒
+     * local completion on, model completion off. */
+    autosuggest: autosuggestSchema.optional(),
     /** Whether the TUI updates the terminal window/tab title to reflect live
      * session state (working / needs input / background activity / idle). Absent
      * ⇒ enabled; set `false` to leave the terminal title untouched. */
@@ -1020,6 +1048,8 @@ export interface ResolvedConfig {
   selection?: SelectionMode
   /** Vim editing mode for the composer. Absent ⇒ off. */
   vim?: boolean
+  /** Composer inline autosuggest tiers. Absent ⇒ local on, model off. */
+  autosuggest?: AutosuggestConfig
   /** Whether the TUI updates the terminal window/tab title with live session
    * state. Absent ⇒ enabled; `false` leaves the terminal title untouched. */
   terminalTitle?: boolean

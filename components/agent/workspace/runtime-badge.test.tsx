@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { RuntimeBadge } from "./runtime-badge"
+import { RuntimeBadge, safeRuntimeLabel } from "./runtime-badge"
+import { RUNTIME_OPTIONS } from "./runtime-options"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 
 const messages = {
@@ -69,24 +70,68 @@ describe("RuntimeBadge", () => {
     expect(badge.querySelector("span")).toBeNull()
   })
 
-  it("renders a badge for every executable runtime (RUNTIME_META is exhaustive)", () => {
-    const runtimes: TeammateRuntime[] = [
-      "codex-app-server",
-      "copilot-cli",
-      "kiro",
-      "qwen-code",
-      "pi",
-      "droid",
-      "opencode-server",
-      "opencode-remote",
-    ]
-    for (const runtime of runtimes) {
-      const { unmount } = renderBadge(runtime)
-      // Missing i18n keys fall back to the runtime literal, but the badge (and
-      // its per-runtime icon/color meta) must resolve — a missing RUNTIME_META
-      // entry would throw here.
-      expect(screen.getByTestId(`runtime-badge-${runtime}`)).toBeInTheDocument()
-      unmount()
-    }
+  // This used to iterate a hand-written 8-element literal while claiming to be
+  // exhaustive, so it never covered `pi-rpc` when ADR-0119 added it and would
+  // not have covered the DeepSeek Harness ids either. Drive it from
+  // RUNTIME_OPTIONS — the same list the pickers offer — so a new runtime is
+  // covered the moment it becomes selectable.
+  it.each(RUNTIME_OPTIONS)("renders a badge for %s (colors are exhaustive)", (runtime) => {
+    const { unmount } = renderBadge(runtime)
+    // Missing i18n keys fall back to the runtime literal, but the badge and its
+    // per-runtime color must resolve — a missing RUNTIME_CLASSES entry would
+    // render an unstyled pill here.
+    const badge = screen.getByTestId(`runtime-badge-${runtime}`)
+    expect(badge).toBeInTheDocument()
+    expect(badge.className).toMatch(/bg-/)
+    unmount()
+  })
+})
+
+// Tested directly rather than through the component: `jest.setup.ts` mocks
+// next-intl to resolve against the real `en.json`, where every
+// `RUNTIME_LABEL_KEYS` entry exists, so rendering can never take these paths.
+describe("safeRuntimeLabel", () => {
+  const t = (fn: (key: string) => string) => fn as never
+
+  it("returns the translation when one resolves", () => {
+    expect(
+      safeRuntimeLabel(
+        t(() => "Qwen Code"),
+        "qwenCode",
+        "qwen-code"
+      )
+    ).toBe("Qwen Code")
+  })
+
+  it("falls back when the lookup echoes the key back", () => {
+    expect(
+      safeRuntimeLabel(
+        t((key) => key),
+        "qwenCode",
+        "qwen-code"
+      )
+    ).toBe("qwen-code")
+  })
+
+  it("falls back when the lookup returns an empty string", () => {
+    expect(
+      safeRuntimeLabel(
+        t(() => ""),
+        "qwenCode",
+        "qwen-code"
+      )
+    ).toBe("qwen-code")
+  })
+
+  it("falls back when the lookup throws on a missing key", () => {
+    expect(
+      safeRuntimeLabel(
+        t(() => {
+          throw new Error("MISSING_MESSAGE")
+        }),
+        "qwenCode",
+        "qwen-code"
+      )
+    ).toBe("qwen-code")
   })
 })

@@ -6,12 +6,14 @@
 
 pub mod command_resolver;
 pub mod commands;
+pub mod dsh_runtime;
 pub mod container_backend;
 pub mod exec_backend;
 pub mod kube_backend;
 pub mod presets;
 pub mod proc_group;
 pub mod process;
+pub mod sandbox;
 pub mod terminal;
 pub mod workspace_runtime_backend;
 

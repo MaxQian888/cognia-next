@@ -53,6 +53,213 @@ describe("larkCommand", () => {
     expect(stdout.join("")).toContain("cognia-agent lark")
   })
 
+  it("submits authorize as the oauth-begin op and prints the URL to open", async () => {
+    const { out, stdout } = sink()
+    const { doFetch, calls } = fetchScript({
+      status: "done",
+      result: {
+        authorizeUrl: "https://accounts.feishu.cn/open-apis/authen/v1/authorize?x=1",
+        redirectUri: "https://cognia.example/connectors/oauth/lark/callback",
+        state: "lark:lark-1:nonce",
+      },
+    })
+    const code = await larkCommand(parseArgv(["lark", "authorize"]), {
+      out,
+      env: ENV,
+      fetch: doFetch as never,
+      sleep,
+    })
+    expect(code).toBe(0)
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      op: "oauth-begin",
+      adapterId: "lark-1",
+    })
+    const text = stdout.join("")
+    expect(text).toContain("https://accounts.feishu.cn/open-apis/authen/v1/authorize?x=1")
+    expect(text).toContain("https://cognia.example/connectors/oauth/lark/callback")
+    expect(text).toContain("10 minutes")
+  })
+
+  it("forwards an explicit --redirect for a proxied deployment", async () => {
+    const { out } = sink()
+    const { doFetch, calls } = fetchScript({ status: "done", result: { authorizeUrl: "u" } })
+    await larkCommand(
+      parseArgv(["lark", "authorize", "--redirect", "https://proxy.example/x/oauth/lark/callback"]),
+      { out, env: ENV, fetch: doFetch as never, sleep }
+    )
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      op: "oauth-begin",
+      adapterId: "lark-1",
+      redirectUri: "https://proxy.example/x/oauth/lark/callback",
+    })
+  })
+
+  it("surfaces a brain-side authorize refusal", async () => {
+    const { out, stderr } = sink()
+    const { doFetch } = fetchScript({ status: "error", error: "redirect_uri_unresolved" })
+    const code = await larkCommand(parseArgv(["lark", "authorize"]), {
+      out,
+      env: ENV,
+      fetch: doFetch as never,
+      sleep,
+    })
+    expect(code).toBe(1)
+    expect(stderr.join("")).toContain("redirect_uri_unresolved")
+  })
+
+  it("lists authorize in the help text", async () => {
+    const { out, stdout } = sink()
+    await larkCommand(parseArgv(["lark"]), { out, env: ENV })
+    expect(stdout.join("")).toContain("lark authorize")
+  })
+
+  it("maps every tenant sub-verb and rejects an unknown one", async () => {
+    for (const [verb, expected] of [
+      ["register", { op: "register-tenant", adapterId: "lark-1" }],
+      ["disable", { op: "set-tenant-status", adapterId: "lark-1", status: "disabled" }],
+      ["enable", { op: "set-tenant-status", adapterId: "lark-1", status: "active" }],
+    ] as const) {
+      const { out } = sink()
+      const { doFetch, calls } = fetchScript({ status: "done", result: {} })
+      const code = await larkCommand(parseArgv(["lark", "tenant", verb]), {
+        out,
+        env: ENV,
+        fetch: doFetch as never,
+        sleep,
+      })
+      expect(code).toBe(0)
+      expect(JSON.parse(String(calls[0].init?.body))).toEqual(expected)
+    }
+
+    const { out, stderr } = sink()
+    const code = await larkCommand(parseArgv(["lark", "tenant", "nope"]), { out, env: ENV })
+    expect(code).toBe(2)
+    expect(stderr.join("")).toContain("register | disable | enable")
+  })
+
+  it("rejects a subcommand it does not know", async () => {
+    const { out, stderr } = sink()
+    const code = await larkCommand(parseArgv(["lark", "frobnicate"]), { out, env: ENV })
+    expect(code).toBe(2)
+    expect(stderr.join("")).toContain("expected a subcommand")
+  })
+
+  it("refuses to run without a server URL", async () => {
+    const { out, stderr } = sink()
+    const code = await larkCommand(parseArgv(["lark", "list"]), {
+      out,
+      env: { ...ENV, COGNIA_SERVER_URL: undefined },
+    })
+    expect(code).toBe(2)
+    expect(stderr.join("")).toContain("COGNIA_SERVER_URL")
+  })
+
+  it("reports an unreachable companion on submit and on poll", async () => {
+    const submitDown = sink()
+    expect(
+      await larkCommand(parseArgv(["lark", "list"]), {
+        out: submitDown.out,
+        env: ENV,
+        fetch: (async () => {
+          throw new Error("ECONNREFUSED")
+        }) as never,
+        sleep,
+      })
+    ).toBe(1)
+    expect(submitDown.stderr.join("")).toContain("cannot reach the companion API")
+
+    const pollDown = sink()
+    let first = true
+    expect(
+      await larkCommand(parseArgv(["lark", "list"]), {
+        out: pollDown.out,
+        env: ENV,
+        fetch: (async () => {
+          if (first) {
+            first = false
+            return jsonResponse(202, { status: "pending", requestId: "req-1" })
+          }
+          throw new Error("socket hang up")
+        }) as never,
+        sleep,
+      })
+    ).toBe(1)
+    expect(pollDown.stderr.join("")).toContain("poll failed")
+  })
+
+  it("renders a list whose tenant and collections are absent", async () => {
+    const { out, stdout } = sink()
+    const { doFetch } = fetchScript({ status: "done", result: { tenant: null } })
+    await larkCommand(parseArgv(["lark", "list"]), {
+      out,
+      env: ENV,
+      fetch: doFetch as never,
+      sleep,
+    })
+    const text = stdout.join("")
+    expect(text).toContain("tenant: unknown (run whoami)")
+    expect(text).toContain("pending bind requests (0)")
+    expect(text).toContain("bound principals (0)")
+  })
+
+  it("names each verb that needs an argument it did not get", async () => {
+    for (const argv of [
+      ["lark", "reject"],
+      ["lark", "rebind"],
+      ["lark", "unlink"],
+      ["lark", "enable"],
+    ]) {
+      const { out, stderr } = sink()
+      expect(await larkCommand(parseArgv(argv), { out, env: ENV })).toBe(2)
+      expect(stderr.join("")).toContain("missing")
+    }
+  })
+
+  it("falls back to a generic reason when the brain answers without one", async () => {
+    const submit = sink()
+    const { doFetch } = fetchScript({ status: "error" })
+    expect(
+      await larkCommand(parseArgv(["lark", "list"]), {
+        out: submit.out,
+        env: ENV,
+        fetch: doFetch as never,
+        sleep,
+      })
+    ).toBe(1)
+    expect(submit.stderr.join("")).toContain("admin_failed")
+
+    const rejected = sink()
+    expect(
+      await larkCommand(parseArgv(["lark", "list"]), {
+        out: rejected.out,
+        env: ENV,
+        fetch: (async () => jsonResponse(503, {})) as never,
+        sleep,
+      })
+    ).toBe(1)
+    expect(rejected.stderr.join("")).toContain("submit failed (503 unknown)")
+  })
+
+  it("prints help for --help without treating it as a missing subcommand", async () => {
+    const { out, stdout } = sink()
+    expect(await larkCommand(parseArgv(["lark", "list", "--help"]), { out, env: ENV })).toBe(0)
+    expect(stdout.join("")).toContain("cognia-agent lark")
+  })
+
+  it("answers a done frame that carries no result object", async () => {
+    const { out, stdout } = sink()
+    const { doFetch } = fetchScript({ status: "done" })
+    expect(
+      await larkCommand(parseArgv(["lark", "sweep"]), {
+        out,
+        env: ENV,
+        fetch: doFetch as never,
+        sleep,
+      })
+    ).toBe(0)
+    expect(stdout.join("")).toContain("{}")
+  })
+
   it("refuses to run without a service token", async () => {
     const { out, stderr } = sink()
     const code = await larkCommand(parseArgv(["lark", "list"]), {
