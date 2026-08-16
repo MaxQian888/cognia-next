@@ -31,9 +31,15 @@ export interface PermissionModeIndicatorProps {
   onCycle: (next: PermissionMode | null) => void
   /** Disable the indicator externally (e.g. while a turn is streaming). */
   disabled?: boolean
+  /** Host styling; merged before the per-mode tone so the tone colour still wins. */
+  className?: string
 }
 
-export function PermissionModeIndicator({ onCycle, disabled }: PermissionModeIndicatorProps) {
+export function PermissionModeIndicator({
+  onCycle,
+  disabled,
+  className,
+}: PermissionModeIndicatorProps) {
   const t = useTranslations("chat.permissionMode")
   const mode = useChatStore((s) => s.permissionMode)
   const meta = permissionModeMeta(mode ?? "default")
@@ -51,6 +57,7 @@ export function PermissionModeIndicator({ onCycle, disabled }: PermissionModeInd
           onClick={() => onCycle(nextPermissionMode(mode))}
           className={cn(
             "h-auto px-2 py-0.5 font-mono text-[11px] font-normal transition-colors hover:bg-accent",
+            className,
             meta.tone
           )}
           aria-label={t("aria", { label })}

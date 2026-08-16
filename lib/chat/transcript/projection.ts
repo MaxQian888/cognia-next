@@ -146,7 +146,9 @@ function branchSummary(
       const explicit = activeBranchByGroup?.[groupId]
       return {
         groupId,
-        selectedMessageId: members.some((member) => member.id === explicit) ? explicit! : fallback.id,
+        selectedMessageId: members.some((member) => member.id === explicit)
+          ? explicit!
+          : fallback.id,
         messageIds: members.map((member) => member.id),
       }
     }),
@@ -213,7 +215,9 @@ function completedTurn(
   return fitSummary(item)
 }
 
-export function projectTranscriptTimeline(options: ProjectTimelineOptions): TranscriptTimelineItem[] {
+export function projectTranscriptTimeline(
+  options: ProjectTimelineOptions
+): TranscriptTimelineItem[] {
   const { messages, revision, activeTurnKey, activeBranchByGroup } = options
   const items: TranscriptTimelineItem[] = []
   let current: { turnKey: string; messages: StoredMessage[] } | null = null
@@ -254,7 +258,8 @@ export function projectTranscriptTimeline(options: ProjectTimelineOptions): Tran
 
     const explicitKey = message.turnKey
     const startsNewImplicitTurn = message.role === "user" && current !== null && !explicitKey
-    const changesExplicitTurn = explicitKey !== undefined && current !== null && explicitKey !== current.turnKey
+    const changesExplicitTurn =
+      explicitKey !== undefined && current !== null && explicitKey !== current.turnKey
     if (startsNewImplicitTurn || changesExplicitTurn) flush()
 
     if (!current) {
@@ -282,15 +287,11 @@ function decodeCursor(value: string): unknown {
   return JSON.parse(new TextDecoder().decode(bytes))
 }
 
-export function encodeTimelineCursor(
-  value: Omit<TimelineCursorPayload, "version">
-): string {
+export function encodeTimelineCursor(value: Omit<TimelineCursorPayload, "version">): string {
   return encodeCursor({ version: TRANSCRIPT_PROTOCOL_VERSION, ...value })
 }
 
-export function encodeTurnDetailCursor(
-  value: Omit<TurnDetailCursorPayload, "version">
-): string {
+export function encodeTurnDetailCursor(value: Omit<TurnDetailCursorPayload, "version">): string {
   return encodeCursor({ version: TRANSCRIPT_PROTOCOL_VERSION, ...value })
 }
 
@@ -322,10 +323,7 @@ export function validateTimelineCursor(
 
 export function validateTurnDetailCursor(
   cursor: string,
-  expected: Pick<
-    TurnDetailCursorPayload,
-    "sessionId" | "revision" | "turnKey" | "detailRevision"
-  >
+  expected: Pick<TurnDetailCursorPayload, "sessionId" | "revision" | "turnKey" | "detailRevision">
 ): CursorValidation<TurnDetailCursorPayload> {
   try {
     const value = decodeCursor(cursor) as Partial<TurnDetailCursorPayload>
@@ -342,10 +340,7 @@ export function validateTurnDetailCursor(
     }
     if (value.sessionId !== expected.sessionId) return { ok: false, code: "INVALID_PARAMS" }
     if (value.turnKey !== expected.turnKey) return { ok: false, code: "TURN_NOT_FOUND" }
-    if (
-      value.revision !== expected.revision ||
-      value.detailRevision !== expected.detailRevision
-    ) {
+    if (value.revision !== expected.revision || value.detailRevision !== expected.detailRevision) {
       return { ok: false, code: "TRANSCRIPT_STALE" }
     }
     return { ok: true, value: value as TurnDetailCursorPayload }

@@ -269,6 +269,32 @@ describe("useSessions", () => {
     expect(result.current.sessions).toEqual([{ id: "ordinary", kind: "direct" }])
   })
 
+  it("collapses a session the live query emitted twice and warns about it", () => {
+    // A transient duplicate emit (optimistic re-emit mid-transaction, overlapping
+    // subscriptions across a workspace switch) must not reach consumers: every id
+    // becomes a React key in the sidebar and the welcome grid.
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    liveQueryMock.mockReturnValue([
+      { id: "dup", kind: "direct", title: "stale", updatedAt: 1 },
+      { id: "solo", kind: "direct", updatedAt: 3 },
+      { id: "dup", kind: "direct", title: "fresh", updatedAt: 2 },
+    ])
+
+    const { result } = renderHook(() => useSessions())
+
+    expect(result.current.sessions).toEqual([
+      { id: "dup", kind: "direct", title: "fresh", updatedAt: 2 },
+      { id: "solo", kind: "direct", updatedAt: 3 },
+    ])
+    expect(warn).toHaveBeenCalledWith(
+      "useSessions: live query emitted duplicate session rows",
+      expect.objectContaining({ ids: ["dup"], crossWorkspace: false })
+    )
+    warn.mockRestore()
+  })
+
   it("reports isLoadingSessions until the first live query resolves", () => {
     liveQueryMock.mockReturnValue(undefined)
     const { result, rerender } = renderHook(() => useSessions())

@@ -1,15 +1,18 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { EMPTY_CONVERSATION_FILTERS } from "@/lib/chat/conversation-filters"
 import userEvent from "@testing-library/user-event"
 import { createRoot } from "react-dom/client"
 import { flushSync } from "react-dom"
 import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
+import { getAppRegistration, __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
+let mockDragStart: ((event: unknown) => void) | undefined
 let mockDragEnd: ((event: unknown) => void) | undefined
 let mockDragOver: ((event: unknown) => void) | undefined
 let mockDragCancel: (() => void) | undefined
@@ -23,20 +26,26 @@ jest.mock("@dnd-kit/core", () => {
     ...actual,
     DndContext: ({
       children,
+      onDragStart,
       onDragEnd,
       onDragOver,
       onDragCancel,
     }: {
       children: React.ReactNode
+      onDragStart?: (event: unknown) => void
       onDragEnd: (event: unknown) => void
       onDragOver?: (event: unknown) => void
       onDragCancel?: () => void
     }) => {
+      mockDragStart = onDragStart
       mockDragEnd = onDragEnd
       mockDragOver = onDragOver
       mockDragCancel = onDragCancel
       return <>{children}</>
     },
+    // The real overlay reads the active draggable from a real DndContext; the
+    // stub renders whatever the component decided to put in it.
+    DragOverlay: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
     useSensor: (sensor: unknown, options: unknown) => {
       mockSensorOptions.push(options)
       return actual.useSensor(sensor as never, options as never)
@@ -59,10 +68,28 @@ jest.mock("@dnd-kit/sortable", () => {
   }
 })
 
+jest.mock("@/lib/telemetry/conversation-list-events", () => ({
+  trackConversationCreated: jest.fn(() => Promise.resolve(true)),
+  trackConversationFiltered: jest.fn(() => Promise.resolve(true)),
+  trackConversationLayoutChanged: jest.fn(() => Promise.resolve([true])),
+  trackConversationOpened: jest.fn(() => Promise.resolve(true)),
+  trackConversationReordered: jest.fn(() => Promise.resolve(true)),
+  trackConversationRowAction: jest.fn(() => Promise.resolve(true)),
+  trackConversationSearched: jest.fn(() => Promise.resolve(true)),
+  trackConversationSectionToggled: jest.fn(() => Promise.resolve(true)),
+  trackConversationViewChanged: jest.fn(() => Promise.resolve(true)),
+}))
+
 jest.mock("next-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
+  // Rows format their own activity timestamp; a fixed formatter keeps these
+  // assertions locale- and clock-independent.
+  useFormatter: () => ({
+    dateTime: (value: Date) => `dt(${value.getTime()})`,
+  }),
+  useNow: () => new Date(0),
 }))
 
 // Complete logger mock: the import chain (plugin-view-container-panel →
@@ -96,22 +123,62 @@ jest.mock("@/hooks/data", () => ({
 }))
 
 let selectedGuild: SelectedGuild = { kind: "dm" }
+let collapsedFolderIds: string[] = []
+const uiListeners = new Set<() => void>()
+const emitUiChange = () => uiListeners.forEach((listener) => listener())
 let sidebarCollapsed = false
+const setSidebarCollapsed = jest.fn()
+const setSidebarWidth = jest.fn()
 const setGroupCollapsed = jest.fn()
+// Quick filters live in the UI store; default to unfiltered so the existing
+// assertions hold, and let individual tests seed a narrowed list.
+let conversationFilters: Record<string, unknown> = {
+  unread: false,
+  pinned: false,
+  branched: false,
+  kind: "all",
+}
+const setConversationFilters = jest.fn()
+const resetConversationFilters = jest.fn()
 jest.mock("@/stores/ui", () => ({
-  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
-    selector({
+  // A tiny reactive store, not a plain snapshot: folder collapse is read
+  // straight from the store now (no local mirror), so a toggle has to
+  // re-render the list the way zustand would.
+  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T => {
+    const react = jest.requireActual<typeof import("react")>("react")
+    const [, force] = react.useReducer((n: number) => n + 1, 0)
+    react.useEffect(() => {
+      uiListeners.add(force)
+      return () => {
+        uiListeners.delete(force)
+      }
+    }, [force])
+    return selector({
       selectedGuild,
       channelListView: "active",
       setChannelListView: () => {},
-      collapsedFolderIds: [],
-      setCollapsedFolders: () => {},
+      collapsedFolderIds,
+      setCollapsedFolders: (ids: string[]) => {
+        collapsedFolderIds = ids
+        emitUiChange()
+      },
+      toggleCollapsedFolder: (id: string) => {
+        collapsedFolderIds = collapsedFolderIds.includes(id)
+          ? collapsedFolderIds.filter((f) => f !== id)
+          : [...collapsedFolderIds, id]
+        emitUiChange()
+      },
       groupCollapseOverrides: {},
       setGroupCollapsed,
+      conversationFilters,
+      setConversationFilters,
+      resetConversationFilters,
       sidebarWidth: 256,
-      setSidebarWidth: () => {},
+      setSidebarWidth,
       sidebarCollapsed,
-    }),
+      setSidebarCollapsed,
+    })
+  },
   SIDEBAR_WIDTH_DEFAULT: 256,
   SIDEBAR_WIDTH_MIN: 220,
   SIDEBAR_WIDTH_MAX: 420,
@@ -121,11 +188,17 @@ jest.mock("@/stores/ui", () => ({
 // unread badges on, title-only search) so existing assertions hold. Individual
 // tests can override `conversationSidebar` to exercise the settings-driven paths.
 let conversationSidebar: Record<string, unknown> | null = null
+// Which window edge the sidebar takes (`settings.sidebarSide`). Default left,
+// the shipped default; individual tests flip it.
+let sidebarSide: "left" | "right" = "left"
 const saveSettings = jest.fn()
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: { settings: unknown; save: typeof saveSettings }) => T): T =>
     selector({
-      settings: conversationSidebar ? { conversationSidebar } : null,
+      settings:
+        conversationSidebar || sidebarSide !== "left"
+          ? { conversationSidebar: conversationSidebar ?? undefined, sidebarSide }
+          : null,
       save: saveSettings,
     }),
 }))
@@ -151,7 +224,63 @@ jest.mock("@/hooks/ui", () => {
   }
 })
 
+// The expanded rail hosts the shell navigation, the guild accordion headers,
+// the footer and the workspace switcher; each has its own suite under
+// `components/shell/`, so here they are stubs that record what they were given.
+jest.mock("@/components/shell/sidebar-nav-section", () => ({
+  SidebarNavSection: () => <nav data-testid="sidebar-nav" />,
+}))
+jest.mock("@/components/shell/sidebar-guild-sections", () => {
+  const actual = jest.requireActual("@/components/shell/sidebar-guild-sections") as {
+    splitGuildSections: unknown
+  }
+  return {
+    splitGuildSections: actual.splitGuildSections,
+    SidebarGuildSectionRows: ({
+      rows,
+      openKey,
+      archived,
+      openActions,
+      testId,
+    }: {
+      rows: Array<{ key: string }>
+      openKey: string | null
+      archived?: boolean
+      openActions?: React.ReactNode
+      testId?: string
+    }) =>
+      rows.length === 0 ? null : (
+        <div
+          data-testid={testId}
+          data-open={openKey ?? undefined}
+          data-archived={archived || undefined}
+        >
+          {rows.map((row) => (
+            <span key={row.key} data-testid={`guild-row-${row.key}`} />
+          ))}
+          {openKey ? <div data-testid="sidebar-guild-open-actions">{openActions}</div> : null}
+        </div>
+      ),
+    SidebarCreateTeamRow: () => <div data-testid="sidebar-guild-create-team" />,
+  }
+})
+jest.mock("@/components/shell/sidebar-footer", () => ({
+  SidebarFooter: () => <div data-testid="sidebar-footer" />,
+}))
+jest.mock("@/components/shell/workspace-switcher", () => ({
+  WorkspaceSwitcher: ({ variant }: { variant?: string }) => (
+    <div data-testid="workspace-switcher" data-variant={variant} />
+  ),
+}))
+
 import { ChannelList } from "./channel-list"
+import * as listTelemetry from "@/lib/telemetry/conversation-list-events"
+import {
+  TitleBarOutletsProvider,
+  TitleBarProjectionScope,
+  useTitleBarOutletRef,
+} from "@/components/shell/title-bar-outlets"
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { Project } from "@/types"
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable"
@@ -199,6 +328,15 @@ function baseSession(id: string, overrides: Partial<ChatSession> = {}): ChatSess
 beforeEach(() => {
   logInfo.mockReset()
   logWarn.mockReset()
+  jest.mocked(listTelemetry.trackConversationCreated).mockClear()
+  jest.mocked(listTelemetry.trackConversationLayoutChanged).mockClear()
+  jest.mocked(listTelemetry.trackConversationOpened).mockClear()
+  jest.mocked(listTelemetry.trackConversationReordered).mockClear()
+  jest.mocked(listTelemetry.trackConversationRowAction).mockClear()
+  jest.mocked(listTelemetry.trackConversationSearched).mockClear()
+  jest.mocked(listTelemetry.trackConversationSectionToggled).mockClear()
+  jest.mocked(listTelemetry.trackConversationViewChanged).mockClear()
+  mockDragStart = undefined
   mockDragEnd = undefined
   mockDragOver = undefined
   mockDragCancel = undefined
@@ -207,10 +345,18 @@ beforeEach(() => {
   mockDroppableNodes.clear()
   callQueue.length = 0
   selectedGuild = { kind: "dm" }
+  collapsedFolderIds = []
   isNarrow = false
   sidebarCollapsed = false
   conversationSidebar = null
+  sidebarSide = "left"
+  conversationFilters = { unread: false, pinned: false, branched: false, kind: "all" }
+  setSidebarCollapsed.mockReset()
+  setSidebarWidth.mockReset()
   setGroupCollapsed.mockReset()
+  __resetAppRuntimeForTesting()
+  setConversationFilters.mockReset()
+  resetConversationFilters.mockReset()
   saveSettings.mockReset()
   saveSettings.mockResolvedValue(undefined)
   historySearchState = {
@@ -474,8 +620,17 @@ test("desktop history rail opts into the chat wallpaper with sidebar tonality", 
 
   const rail = container.querySelector("aside")
   expect(rail).toHaveAttribute("data-bg-target", "chat")
-  expect(rail).toHaveAttribute("data-slot", "sidebar-inner")
-  expect(container.querySelector("[data-tonality='translucent']")).toBeInTheDocument()
+  // Exactly one tint owner. The rail used to ALSO carry
+  // `data-slot="sidebar-inner"`, whose wallpaper rule stacks a second
+  // `--sidebar`-based slab under this one, so the list read as opaque next to a
+  // chat pane showing the wallpaper.
+  expect(rail).not.toHaveAttribute("data-slot", "sidebar-inner")
+  const surface = container.querySelector("[data-tonality='translucent']")
+  expect(surface).toBeInTheDocument()
+  // A `background-image` gradient would win over the tonality rules, which only
+  // swap `background-color`.
+  expect(surface?.className).not.toContain("bg-gradient-to-b")
+  expect(surface).toHaveClass("bg-background/70")
 })
 
 test("narrow history sheet uses the same chat wallpaper surface", async () => {
@@ -633,8 +788,38 @@ test("typing in the search box filters to a flat result list", async () => {
   // Matching row stays, non-matching row drops (after the 150ms debounce), and
   // the date-bucket header is replaced by the flat search list.
   await waitFor(() => expect(screen.queryByText("Grocery list")).toBeNull())
-  expect(screen.getByText("Trip budget")).toBeInTheDocument()
+  // The title is split across a <mark> and its siblings now that the matched
+  // run is emphasized, so match on the row's accumulated text instead.
+  expect(
+    screen.getByText((_, element) => element?.textContent === "Trip budget", {
+      selector: "[data-slot='hover-scroll-text'] > span",
+    })
+  ).toBeInTheDocument()
   expect(screen.queryByText("bucketOlder")).toBeNull()
+})
+
+test("emphasizes the matched run inside a result title", async () => {
+  const dmMatch = { ...dmSession, id: "s-match", title: "Trip budget" } as ChatSession
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmMatch]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.type(screen.getByLabelText("searchAria"), "budg")
+  // Highlighting is what tells the user WHY a row survived the filter.
+  await waitFor(() => {
+    const mark = document.querySelector("mark")
+    expect(mark).not.toBeNull()
+    expect(mark?.textContent).toBe("budg")
+  })
 })
 
 test("a search that matches nothing shows the empty-search state", async () => {
@@ -723,8 +908,42 @@ test("Escape clears an active search and restores the grouped list", async () =>
   await user.keyboard("{Escape}")
 
   expect(search).toHaveValue("")
-  expect(screen.getByText("/")).toBeInTheDocument()
+  // Still focused after Escape, so the `/` hint stays out of the way; it
+  // returns once focus leaves the field.
+  expect(search).toHaveFocus()
+  expect(screen.queryByText("/")).toBeNull()
   expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
+  await user.tab()
+  expect(search).not.toHaveFocus()
+  expect(screen.getByText("/")).toBeInTheDocument()
+})
+
+test("the `/` shortcut hint is decorative: hidden from AT, explained on hover, and yields to focus", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  const search = screen.getByLabelText("searchAria")
+  // The real shortcut lives on the input for AT; the keycap is only a picture.
+  expect(search).toHaveAttribute("aria-keyshortcuts", "/")
+  const hint = screen.getByText("/")
+  expect(hint).toHaveAttribute("aria-hidden", "true")
+  expect(hint.closest("[title]")).toHaveAttribute("title", "searchShortcutHint")
+
+  await user.click(search)
+  expect(screen.queryByText("/")).toBeNull()
+  await user.tab()
+  expect(screen.getByText("/")).toBeInTheDocument()
 })
 
 test.each([
@@ -973,6 +1192,16 @@ describe("workspace grouping (the default axis)", () => {
       "data-[state=open]:animate-collapsible-down",
       "motion-reduce:animate-none"
     )
+    // One chevron that rotates in place (not an icon swap): open → rotated,
+    // folded → upright. The whole header button is the hit target and carries
+    // its own hover wash + a count pill.
+    const alpha = screen.getByRole("button", { name: "Alpha" })
+    const beta = screen.getByRole("button", { name: "Beta" })
+    expect(within(alpha).getByTestId("section-chevron")).toHaveClass("rotate-90")
+    expect(within(beta).getByTestId("section-chevron")).not.toHaveClass("rotate-90")
+    expect(within(beta).getByTestId("section-chevron")).toHaveAttribute("data-collapsed")
+    expect(alpha).toHaveClass("flex-1", "hover:bg-accent/60")
+    expect(within(alpha).getByText("1")).toHaveClass("rounded-full", "tabular-nums")
   })
 
   it("shows agent metadata for team conversations outside the selected guild", () => {
@@ -1544,6 +1773,132 @@ test("New folder stays in the display menu and invokes onCreateFolder", async ()
   expect(onCreateFolder).toHaveBeenCalledWith("newFolderName")
 })
 
+test("the display menu carries the sort axis beside grouping", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("a", { title: "A" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  // Grouping and sorting are siblings; the menu that offers one offers both.
+  expect(screen.getByText("groupBy.label")).toBeInTheDocument()
+  expect(screen.getByText("sortBy.label")).toBeInTheDocument()
+  expect(screen.getByTestId("channel-list-sort-recent")).toHaveAttribute("aria-checked", "true")
+  await user.click(screen.getByTestId("channel-list-sort-title"))
+  expect(saveSettings).toHaveBeenCalledWith({ conversationSidebar: { sortBy: "title" } })
+})
+
+test("a folder created from the list opens its name for editing straight away", async () => {
+  const folder = {
+    id: "f-new",
+    projectId: "p1",
+    name: "newFolderName",
+    order: 0,
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  // First render: no folders yet. After the create resolves the live query
+  // re-emits with the new folder, the way Dexie does.
+  callQueue.push(characters, [], [])
+  const onCreateFolder = jest.fn(async () => folder)
+  const onRenameFolder = jest.fn()
+  const user = userEvent.setup()
+  const props = {
+    sessions: [baseSession("a", { title: "A", folderId: "f-new" })],
+    activeSessionId: null,
+    onSelect: jest.fn(),
+    onNewDirect: jest.fn(),
+    onNewTeamConversation: jest.fn(),
+    onDelete: jest.fn(),
+    onRename: jest.fn(),
+    onCreateFolder,
+    onRenameFolder,
+  }
+  const { rerender } = render(<ChannelList {...props} folders={[]} />)
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(screen.getByRole("menuitem", { name: "newFolder" }))
+  expect(onCreateFolder).toHaveBeenCalledWith("newFolderName")
+  await act(async () => {})
+  rerender(<ChannelList {...props} folders={[folder]} />)
+
+  // The editor is already open, with the placeholder there to be replaced.
+  const input = screen.getByLabelText("renameFolder")
+  expect(input).toHaveValue("newFolderName")
+  await user.clear(input)
+  await user.type(input, "Research{Enter}")
+  expect(onRenameFolder).toHaveBeenCalledWith("f-new", "Research")
+  // Settled: the editor closes and does not reopen on the next render.
+  expect(screen.queryByLabelText("renameFolder")).toBeNull()
+})
+
+test("folder header menu moves a folder through the manual order", async () => {
+  const folders = [
+    { id: "f1", projectId: "p", name: "First", order: 0, createdAt: 0, updatedAt: 0 },
+    { id: "f2", projectId: "p", name: "Second", order: 1, createdAt: 0, updatedAt: 0 },
+    { id: "f3", projectId: "p", name: "Third", order: 2, createdAt: 0, updatedAt: 0 },
+  ]
+  callQueue.push(characters, [], undefined)
+  const onReorderFolders = jest.fn()
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[
+        baseSession("a", { title: "A", folderId: "f1" }),
+        baseSession("b", { title: "B", folderId: "f2" }),
+        baseSession("c", { title: "C", folderId: "f3" }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={folders}
+      onReorderFolders={onReorderFolders}
+    />
+  )
+  const menus = screen.getAllByRole("button", { name: "folderActions" })
+  await user.click(menus[1])
+  await user.click(screen.getByTestId("folder-move-up-f2"))
+  expect(onReorderFolders).toHaveBeenCalledWith(["f2", "f1", "f3"])
+
+  // The ends are inert rather than silently doing nothing.
+  await user.click(screen.getAllByRole("button", { name: "folderActions" })[0])
+  expect(screen.getByTestId("folder-move-up-f1")).toHaveAttribute("aria-disabled", "true")
+  expect(screen.getByTestId("folder-move-down-f1")).not.toHaveAttribute("aria-disabled", "true")
+})
+
+test("folder move items stay hidden without a reorder handler", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("a", { title: "A", folderId: "f1" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onRenameFolder={jest.fn()}
+      folders={[
+        { id: "f1", projectId: "p", name: "First", order: 0, createdAt: 0, updatedAt: 0 },
+        { id: "f2", projectId: "p", name: "Second", order: 1, createdAt: 0, updatedAt: 0 },
+      ]}
+    />
+  )
+  await user.click(screen.getAllByRole("button", { name: "folderActions" })[0])
+  expect(screen.queryByTestId("folder-move-up-f1")).toBeNull()
+})
+
 test("folder header menu deletes the folder after confirmation", async () => {
   callQueue.push(characters, [], undefined)
   const onDeleteFolder = jest.fn()
@@ -1667,6 +2022,90 @@ describe("interaction upgrades", () => {
     expect(screen.getByLabelText("searchAria")).toHaveFocus()
   })
 
+  test("the app-wide focus-search shortcut expands a collapsed rail, then focuses the field", () => {
+    sidebarCollapsed = true
+    callQueue.push(characters, [], undefined)
+    const { rerender } = render(
+      <ChannelList
+        sessions={[dmA]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const registration = getAppRegistration("app.search.focus")
+    expect(registration).toBeDefined()
+    act(() => registration!.handler(new KeyboardEvent("keydown", { key: "/" })))
+    // Collapsed: the field is inert, so the shortcut asks the store to expand
+    // and defers the focus to the frame that renders the rail back.
+    expect(setSidebarCollapsed).toHaveBeenCalledWith(false)
+    expect(screen.getByLabelText("searchAria")).not.toHaveFocus()
+    sidebarCollapsed = false
+    rerender(
+      <ChannelList
+        sessions={[dmA]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(screen.getByLabelText("searchAria")).toHaveFocus()
+    // Expanded: no store write, straight to the field.
+    setSidebarCollapsed.mockClear()
+    act(() => registration!.handler(new KeyboardEvent("keydown", { key: "/" })))
+    expect(setSidebarCollapsed).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("searchAria")).toHaveFocus()
+  })
+
+  test("⌘⌥] / ⌘⌥[ step the active conversation through the visible order", () => {
+    callQueue.push(characters, [], undefined)
+    const onSelect = jest.fn()
+    const props = {
+      sessions: [dmA, dmB],
+      onSelect,
+      onNewDirect: jest.fn(),
+      onNewTeamConversation: jest.fn(),
+      onDelete: jest.fn(),
+      onRename: jest.fn(),
+    }
+    const { rerender } = render(<ChannelList {...props} activeSessionId={null} />)
+    const next = getAppRegistration("shell.conversation.next")
+    const previous = getAppRegistration("shell.conversation.previous")
+    expect(next).toBeDefined()
+    expect(previous).toBeDefined()
+    // Both fire from inside the composer — that is the point of the chords.
+    expect(next?.allowInEditable).toBe(true)
+    expect(previous?.allowInEditable).toBe(true)
+    const press = (r: typeof next) =>
+      act(() => r!.handler(new KeyboardEvent("keydown", { key: "]", ctrlKey: true, altKey: true })))
+
+    // Nothing active: "next" starts at the top, "previous" at the bottom.
+    press(next)
+    expect(onSelect).toHaveBeenLastCalledWith("s-a")
+    press(previous)
+    expect(onSelect).toHaveBeenLastCalledWith("s-b")
+
+    rerender(<ChannelList {...props} activeSessionId="s-a" />)
+    press(next)
+    expect(onSelect).toHaveBeenLastCalledWith("s-b")
+    onSelect.mockClear()
+    // Clamped at the ends: no wrap, no redundant re-select.
+    press(previous)
+    expect(onSelect).toHaveBeenCalledTimes(0)
+
+    rerender(<ChannelList {...props} activeSessionId="s-b" />)
+    press(next)
+    expect(onSelect).toHaveBeenCalledTimes(0)
+    press(previous)
+    expect(onSelect).toHaveBeenLastCalledWith("s-a")
+  })
+
   test("content-scope search surfaces sessions matched only by message body", async () => {
     conversationSidebar = { searchScope: "titleAndContent" }
     historySearchState = {
@@ -1716,4 +2155,858 @@ test("Canvas guild renders nothing (canvas has its own rail)", () => {
   )
   // The aside renders but its body short-circuits to null.
   expect(container.querySelector("aside")?.textContent).toBe("")
+})
+
+describe("filters and sorting", () => {
+  const renderList = (sessions: ChatSession[]) => {
+    callQueue.push(characters, [], undefined)
+    return render(
+      <ChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+  }
+
+  it("hides the chip row while the list is in its default state", () => {
+    renderList([dmSession])
+    expect(screen.queryByTestId("channel-list-filter-chips")).toBeNull()
+  })
+
+  it("badges the trigger and shows a removable chip once a filter is active", async () => {
+    conversationFilters = { unread: false, pinned: true, branched: false, kind: "all" }
+    const user = userEvent.setup()
+    renderList([dmSession, { ...dmSession, id: "s-pin", pinned: true } as ChatSession])
+
+    const trigger = screen.getByTestId("channel-list-filter-trigger")
+    expect(trigger).toHaveAttribute("data-active-filters", "1")
+    expect(screen.getByTestId("channel-list-filter-chips")).toBeInTheDocument()
+    // 1 of the 2 conversations survives the filter — the count has to say so,
+    // or a narrowed list reads as lost data.
+    expect(screen.getByTestId("channel-list-filter-chips-count")).toHaveTextContent(
+      'count:{"shown":1,"total":2}'
+    )
+
+    await user.click(screen.getByLabelText('remove:{"name":"filters.options.pinned"}'))
+    expect(setConversationFilters).toHaveBeenCalledWith(EMPTY_CONVERSATION_FILTERS)
+  })
+
+  it("applies the unread filter even when unread badges are switched off", async () => {
+    // Hiding a badge is a display choice, not a claim that nothing is unread.
+    conversationSidebar = { showUnreadBadges: false }
+    conversationFilters = { unread: true, pinned: false, branched: false, kind: "all" }
+    callQueue.push(characters, [{ sessionId: "s-unread", unreadCount: 3 }], undefined)
+    render(
+      <ChannelList
+        sessions={[
+          { ...dmSession, id: "s-unread", title: "Has unread" } as ChatSession,
+          { ...dmSession, id: "s-read", title: "All read" } as ChatSession,
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(await screen.findByText("Has unread")).toBeInTheDocument()
+    expect(screen.queryByText("All read")).toBeNull()
+  })
+
+  it("offers a reset when filters hide everything, and says so distinctly", async () => {
+    conversationFilters = { unread: false, pinned: true, branched: false, kind: "all" }
+    const user = userEvent.setup()
+    renderList([dmSession])
+    // Not the search empty state — the exit here is dropping the filter.
+    expect(screen.getByText('emptyFiltered:{"count":1}')).toBeInTheDocument()
+    await user.click(screen.getByTestId("channel-list-empty-clear-filters"))
+    expect(resetConversationFilters).toHaveBeenCalled()
+  })
+
+  it("persists a sort choice to the sidebar settings", async () => {
+    const user = userEvent.setup()
+    renderList([dmSession])
+    await user.click(screen.getByTestId("channel-list-filter-trigger"))
+    // Facets live in hover submenus that open beside the sidebar; items are
+    // activated with fireEvent (see conversation-filter-controls.test.tsx).
+    await user.hover(await screen.findByTestId("channel-list-filter-trigger-section-sort"))
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "sort.options.title" }))
+    // The sidebar routes settings writes through its async save queue.
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({ conversationSidebar: { sortBy: "title" } })
+    )
+  })
+
+  it("reorders rows under a title sort", async () => {
+    conversationSidebar = { sortBy: "title", groupBy: "none" }
+    renderList([
+      { ...dmSession, id: "s-z", title: "Zulu", updatedAt: 3 } as ChatSession,
+      { ...dmSession, id: "s-a", title: "Alpha", updatedAt: 1 } as ChatSession,
+    ])
+    const titles = await screen.findAllByText(/Zulu|Alpha/)
+    expect(titles.map((n) => n.textContent)).toEqual(["Alpha", "Zulu"])
+  })
+
+  it("pins a sort chip so a non-default order is never a mystery", () => {
+    conversationSidebar = { sortBy: "title" }
+    renderList([dmSession])
+    expect(screen.getByTestId("channel-list-filter-chips")).toHaveTextContent("sort.options.title")
+  })
+
+  it("drops the drag handles under a sort that cannot keep a manual order", async () => {
+    conversationSidebar = { sortBy: "title" }
+    renderList([dmSession])
+    // The grip would otherwise promise an order the list discards on the next
+    // render — see `sortSupportsManualOrder`.
+    expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
+    expect(screen.queryByLabelText("dragHandle")).toBeNull()
+  })
+
+  it("keeps the drag handles under the default recency sort", async () => {
+    renderList([dmSession])
+    expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
+    expect(screen.getAllByLabelText("dragHandle").length).toBeGreaterThan(0)
+  })
+})
+
+describe("channel-list branch coverage top-ups", () => {
+  const renderList = (
+    sessions: ChatSession[],
+    extra: Partial<React.ComponentProps<typeof ChannelList>> = {}
+  ) => {
+    callQueue.push(characters, [], undefined)
+    return render(
+      <ChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        {...extra}
+      />
+    )
+  }
+
+  it("narrows to team conversations from the kind facet", async () => {
+    const user = userEvent.setup()
+    renderList([dmSession, teamSession])
+    await user.click(screen.getByTestId("channel-list-filter-trigger"))
+    await user.hover(await screen.findByTestId("channel-list-filter-trigger-section-status"))
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "kind.options.team" }))
+    expect(setConversationFilters).toHaveBeenCalledWith({
+      ...EMPTY_CONVERSATION_FILTERS,
+      kind: "team",
+    })
+  })
+
+  it("renders the kind filter as applied when the store already holds it", async () => {
+    conversationFilters = { unread: false, pinned: false, branched: false, kind: "team" }
+    renderList([dmSession, teamSession])
+    expect(await screen.findByText("Squad meeting")).toBeInTheDocument()
+    expect(screen.queryByText("Hi Alice")).toBeNull()
+  })
+
+  it("Escape drops the keyboard focus ring once nothing is selected", async () => {
+    const user = userEvent.setup()
+    const { container } = renderList([dmSession])
+    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    list.focus()
+    await user.keyboard("{ArrowDown}")
+    await waitFor(() => expect(container.querySelector("li[data-focused]")).not.toBeNull())
+    await user.keyboard("{Escape}")
+    expect(container.querySelector("li[data-focused]")).toBeNull()
+  })
+
+  it("warns that content-search results were clipped", async () => {
+    conversationSidebar = { searchScope: "titleAndContent" }
+    historySearchState = { ...historySearchState, moreOlderHistory: true }
+    const user = userEvent.setup()
+    renderList([dmSession])
+    await user.type(screen.getByLabelText("searchAria"), "alice")
+    // Silently truncated results read as "that conversation is gone".
+    expect(await screen.findByText("searchTruncated")).toBeInTheDocument()
+  })
+
+  it("starts a team conversation from the header CTA inside a team guild", async () => {
+    selectedGuild = { kind: "team", teamId: "t-1" }
+    const onNewTeamConversation = jest.fn()
+    const user = userEvent.setup()
+    callQueue.push(characters, [], [team])
+    render(
+      <ChannelList
+        sessions={[teamSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={onNewTeamConversation}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.click(await screen.findByRole("button", { name: "newConversation" }))
+    expect(onNewTeamConversation).toHaveBeenCalledWith("t-1")
+  })
+
+  it("invites the user to fill an empty folder instead of showing a bare header", async () => {
+    renderList([dmSession], {
+      folders: [{ id: "f-1", name: "Reading", order: 0, createdAt: 0, updatedAt: 0 }],
+    })
+    expect(await screen.findByText("emptyFolder")).toBeInTheDocument()
+  })
+
+  it("abandons a folder rename on Escape without persisting the draft", async () => {
+    const onRenameFolder = jest.fn()
+    const user = userEvent.setup()
+    renderList([dmSession], {
+      folders: [{ id: "f-1", name: "Reading", order: 0, createdAt: 0, updatedAt: 0 }],
+      onRenameFolder,
+    })
+    await user.click(await screen.findByRole("button", { name: "folderActions" }))
+    await user.click(await screen.findByText("renameFolder"))
+    const input = await screen.findByLabelText("renameFolder")
+    await user.clear(input)
+    await user.type(input, "Archive{Escape}")
+    expect(onRenameFolder).not.toHaveBeenCalled()
+  })
+})
+
+describe("unread badges and identity rendering", () => {
+  it("shows the per-row unread count when badges are enabled", async () => {
+    callQueue.push(characters, [{ sessionId: "s-1", unreadCount: 4 }], undefined)
+    render(
+      <ChannelList
+        sessions={[dmSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(await screen.findByText("4")).toBeInTheDocument()
+  })
+
+  it("renders a team's own identity and name on its rows", async () => {
+    selectedGuild = { kind: "team", teamId: "t-1" }
+    conversationSidebar = { metadata: ["agent"] }
+    callQueue.push(characters, [], [team])
+    render(
+      <ChannelList
+        sessions={[teamSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // The team supplies both the row avatar subject and the `agent` detail —
+    // a team conversation must not fall back to a character it has no binding to.
+    expect(await screen.findByTestId("session-row-metadata")).toHaveTextContent("Squad")
+  })
+
+  it("selects the whole visible list with Ctrl+A", async () => {
+    const user = userEvent.setup()
+    callQueue.push(characters, [], undefined)
+    const { container } = render(
+      <ChannelList
+        sessions={[dmSession, { ...dmSession, id: "s-9", title: "Second" } as ChatSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    list.focus()
+    await user.keyboard("{Control>}a{/Control}")
+    await waitFor(() => expect(container.querySelectorAll("li[data-selected]")).toHaveLength(2))
+  })
+
+  it("hands the middle column to a plugin view container instead of the session list", () => {
+    selectedGuild = { kind: "plugin-view", containerId: "pv-1" } as SelectedGuild
+    const { container } = render(
+      <ChannelList
+        sessions={[dmSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // The plugin container owns the column; the session list must not also
+    // render into it.
+    expect(container.querySelector("aside")?.textContent).not.toContain("Hi Alice")
+    expect(screen.queryByLabelText("searchAria")).toBeNull()
+  })
+})
+
+describe("title-bar projection", () => {
+  function StartOutlet() {
+    const ref = useTitleBarOutletRef("start")
+    return <div ref={ref} data-testid="start-outlet" />
+  }
+
+  function renderProjected() {
+    callQueue.push(characters, [], [])
+    return render(
+      <TitleBarOutletsProvider>
+        <StartOutlet />
+        <TitleBarProjectionScope enabled>
+          <ChannelList
+            sessions={[dmSession]}
+            activeSessionId={null}
+            onSelect={jest.fn()}
+            onNewDirect={jest.fn()}
+            onNewTeamConversation={jest.fn()}
+            onDelete={jest.fn()}
+            onRename={jest.fn()}
+          />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+  }
+
+  it("keeps the sidebar unprojected and unmerged on the right edge", () => {
+    sidebarSide = "right"
+    renderProjected()
+    // The bar's start zone is the *leading* column's; a right-docked sidebar
+    // has none to take, so it heads itself and the icon column stays beside
+    // it rather than folding in.
+    expect(screen.getByTestId("start-outlet")).toBeEmptyDOMElement()
+    expect(screen.queryByTestId("sidebar-nav")).toBeNull()
+    expect(screen.queryByTestId("sidebar-footer")).toBeNull()
+    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
+    // Its own 40px header carries the guild title and the list's actions.
+    const header = screen.getByTestId("channel-list-header")
+    expect(header).toHaveTextContent("directMessages")
+    expect(within(header).getByLabelText("newChat")).toBeInTheDocument()
+  })
+
+  it("flips the seam and the resize handle to the inboard edge on the right", () => {
+    sidebarSide = "right"
+    renderProjected()
+    const rail = document.getElementById("conversation-sidebar")!
+    expect(rail.className).toContain("border-l")
+    expect(rail.className).not.toContain("border-r")
+    const handle = screen.getByRole("separator", { name: "resizeHandle" })
+    expect(handle.className).toContain("left-0")
+    expect(handle.className).not.toContain("right-0")
+  })
+
+  it("resizes the right-docked sidebar in the inverted direction", () => {
+    sidebarSide = "right"
+    renderProjected()
+    const handle = screen.getByRole("separator", { name: "resizeHandle" })
+    // A right-docked sidebar grows toward the window centre, so ArrowLeft
+    // widens it (`useEdgeResize({ edge: "left" })`) — the mirror of the
+    // left-docked handle, which the default-side test below pins.
+    fireEvent.keyDown(handle, { key: "ArrowLeft" })
+    expect(setSidebarWidth).toHaveBeenLastCalledWith(272)
+    fireEvent.keyDown(handle, { key: "ArrowRight" })
+    expect(setSidebarWidth).toHaveBeenLastCalledWith(240)
+  })
+
+  it("resizes the left-docked sidebar the other way", () => {
+    renderProjected()
+    const handle = screen.getByRole("separator", { name: "resizeHandle" })
+    fireEvent.keyDown(handle, { key: "ArrowRight" })
+    expect(setSidebarWidth).toHaveBeenLastCalledWith(272)
+    fireEvent.keyDown(handle, { key: "ArrowLeft" })
+    expect(setSidebarWidth).toHaveBeenLastCalledWith(240)
+  })
+
+  it("heads the bar's start outlet with the workspace switcher and hosts the shell navigation", () => {
+    renderProjected()
+    const outlet = screen.getByTestId("start-outlet")
+    const rail = document.getElementById("conversation-sidebar")!
+    // The sidebar's identity — the workspace — is what goes in the bar; the
+    // guild title is the open accordion row inside the sidebar now.
+    expect(outlet).toContainElement(screen.getByTestId("channel-list-header"))
+    expect(outlet).toContainElement(screen.getByTestId("workspace-switcher"))
+    expect(screen.getByTestId("workspace-switcher")).toHaveAttribute("data-variant", "wide")
+    expect(outlet).not.toHaveTextContent("directMessages")
+    // Nav rows on top, DM open above the list, teams + footer below it.
+    expect(rail).toContainElement(screen.getByTestId("sidebar-nav"))
+    expect(screen.getByTestId("sidebar-guild-rows-before")).toHaveAttribute("data-open", "dm")
+    expect(screen.getByTestId("sidebar-guild-rows-before")).toContainElement(
+      screen.getByTestId("guild-row-dm")
+    )
+    expect(screen.queryByTestId("sidebar-guild-rows-after")).toBeNull()
+    expect(rail).toContainElement(screen.getByTestId("sidebar-guild-create-team"))
+    expect(rail).toContainElement(screen.getByTestId("sidebar-footer"))
+    // The list itself stays in the rail.
+    expect(rail).toContainElement(screen.getByText("Hi Alice"))
+    expect(rail).not.toContainElement(screen.getByTestId("channel-list-header"))
+    // …and it claims the navigation, so the shell can drop the icon column.
+    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(true)
+  })
+
+  it("orders the accordion around the list: open team's row above, the rest below", () => {
+    selectedGuild = { kind: "team", teamId: "t-2" }
+    const teams = [
+      { id: "t-1", name: "Alpha" },
+      { id: "t-2", name: "Beta" },
+      { id: "t-3", name: "Gamma" },
+    ]
+    callQueue.length = 0
+    // The projection scope re-renders the rail as the outlet registers; the
+    // live-query stub is drained per call, so seed every pass.
+    for (let i = 0; i < 6; i++) callQueue.push(characters, [], teams)
+    render(
+      <TitleBarOutletsProvider>
+        <StartOutlet />
+        <TitleBarProjectionScope enabled>
+          <ChannelList
+            sessions={[dmSession]}
+            activeSessionId={null}
+            onSelect={jest.fn()}
+            onNewDirect={jest.fn()}
+            onNewTeamConversation={jest.fn()}
+            onDelete={jest.fn()}
+            onRename={jest.fn()}
+          />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+    const before = screen.getByTestId("sidebar-guild-rows-before")
+    const after = screen.getByTestId("sidebar-guild-rows-after")
+    expect(before).toHaveAttribute("data-open", "t-2")
+    expect(before).toContainElement(screen.getByTestId("guild-row-dm"))
+    expect(before).toContainElement(screen.getByTestId("guild-row-t-1"))
+    expect(before).toContainElement(screen.getByTestId("guild-row-t-2"))
+    expect(after).toContainElement(screen.getByTestId("guild-row-t-3"))
+    // The search row (the open section's content) sits between the two runs.
+    const search = screen.getByTestId("channel-list-search")
+    expect(before.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(search.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("stands down while collapsed — an invisible rail leaves nothing in the bar and hands the navigation back", () => {
+    sidebarCollapsed = true
+    renderProjected()
+    expect(screen.getByTestId("start-outlet")).toBeEmptyDOMElement()
+    expect(document.getElementById("conversation-sidebar")).toContainElement(
+      screen.getByTestId("channel-list-header")
+    )
+    expect(screen.queryByTestId("sidebar-nav")).toBeNull()
+    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
+  })
+
+  it("keeps the mobile Sheet's header inline, without the shell navigation", () => {
+    isNarrow = true
+    renderProjected()
+    expect(screen.getByTestId("start-outlet")).toBeEmptyDOMElement()
+    expect(screen.queryByTestId("sidebar-nav")).toBeNull()
+    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
+  })
+
+  it("leaves the icon column in charge while a plugin view replaces the list", () => {
+    selectedGuild = { kind: "plugin-view", containerId: "p:v" }
+    const { unmount } = renderProjected()
+    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
+    unmount()
+  })
+
+  it("puts the list actions on the open section's heading: new stays, the rest fold behind ⋯", async () => {
+    renderProjected()
+    const rail = document.getElementById("conversation-sidebar")!
+    // Nothing but the workspace switcher in the bar.
+    expect(screen.getByTestId("start-outlet")).not.toContainElement(
+      screen.getByLabelText("newChat")
+    )
+    // Search owns its row with the filter; new and ⋯ sit on the heading row.
+    expect(rail).toContainElement(screen.getByLabelText("searchAria"))
+    const heading = screen.getByTestId("sidebar-guild-open-actions")
+    expect(heading).toContainElement(screen.getByLabelText("newChat"))
+    const menu = screen.getByTestId("channel-list-actions-menu")
+    expect(heading).toContainElement(menu)
+    expect(menu).toHaveAccessibleName("listActions")
+    expect(screen.queryByLabelText("viewArchived")).toBeNull()
+
+    const user = userEvent.setup()
+    await user.click(menu)
+    // Archived toggle first, then the display options that were already a menu.
+    expect(await screen.findByTestId("channel-list-toggle-view")).toHaveTextContent("viewArchived")
+    expect(screen.getByText("displayOptions")).toBeInTheDocument()
+  })
+
+  it("takes the whole row while in use, and offers to take the words global", () => {
+    const requests: unknown[] = []
+    const onRequest = (event: Event) => requests.push((event as CustomEvent).detail)
+    window.addEventListener("cognia:command-palette:request", onRequest)
+    try {
+      renderProjected()
+      const search = screen.getByTestId("channel-list-search")
+      const input = screen.getByLabelText("searchAria")
+      expect(search).not.toHaveAttribute("data-expanded")
+      expect(screen.getByLabelText("newChat")).toBeInTheDocument()
+
+      // Focus (what `/` gives it) expands the field; the filter beside it
+      // yields. The list actions live on the heading row now and stay put.
+      act(() => input.focus())
+      expect(search).toHaveAttribute("data-expanded", "true")
+      expect(screen.queryByTestId("channel-list-filter-trigger")).toBeNull()
+      expect(screen.getByLabelText("newChat")).toBeInTheDocument()
+
+      // The global-search hatch sits inside the field, and carries the query.
+      fireEvent.change(input, { target: { value: "budget" } })
+      fireEvent.click(screen.getByTestId("channel-list-global-search"))
+      // …and lands on the Chats scope, where those words belong (ADR-0129).
+      expect(requests).toEqual([{ query: "budget", scope: "chats" }])
+      // ⌘Enter is the keyboard route to the same place.
+      fireEvent.keyDown(input, { key: "Enter", metaKey: true })
+      expect(requests).toHaveLength(2)
+
+      // Text keeps it expanded even unfocused; Escape clears, a second Escape
+      // on the empty field hands the row back.
+      act(() => input.blur())
+      expect(search).toHaveAttribute("data-expanded", "true")
+      act(() => input.focus())
+      fireEvent.keyDown(input, { key: "Escape" })
+      expect(input).toHaveValue("")
+      fireEvent.keyDown(input, { key: "Escape" })
+      act(() => input.blur())
+      expect(search).not.toHaveAttribute("data-expanded")
+      expect(screen.getByLabelText("newChat")).toBeInTheDocument()
+    } finally {
+      window.removeEventListener("cognia:command-palette:request", onRequest)
+    }
+  })
+
+  it("says where you are once the archived toggle is behind ⋯", async () => {
+    renderProjected()
+    expect(screen.getByTestId("sidebar-guild-rows-before")).not.toHaveAttribute("data-archived")
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    await user.click(await screen.findByTestId("channel-list-toggle-view"))
+    // The open accordion row carries the "· Archived" suffix.
+    expect(screen.getByTestId("sidebar-guild-rows-before")).toHaveAttribute("data-archived", "true")
+  })
+
+  it("reports the rail's rendered width for the bar to size its outlet", () => {
+    const rect = jest
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => ({ width: 296, height: 800 }) as DOMRect)
+    try {
+      const { unmount } = renderProjected()
+      expect(useShellColumnsStore.getState().widths.sidebar).toBe(296)
+      unmount()
+      expect(useShellColumnsStore.getState().widths.sidebar).toBe(0)
+    } finally {
+      rect.mockRestore()
+    }
+  })
+})
+
+describe("drop animation, settle mark and list telemetry", () => {
+  const listProps = {
+    activeSessionId: null,
+    onSelect: jest.fn(),
+    onNewDirect: jest.fn(),
+    onNewTeamConversation: jest.fn(),
+    onDelete: jest.fn(),
+    onRename: jest.fn(),
+  }
+  const rowTitles = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll("li[data-density]")).map((li) =>
+      li.textContent?.includes("First")
+        ? "First"
+        : li.textContent?.includes("Second")
+          ? "Second"
+          : "?"
+    )
+  const dropSecondOnFirst = () =>
+    act(() => {
+      mockDragEnd?.({
+        active: {
+          id: "second",
+          data: { current: { type: "session", folderId: null } },
+          rect: { current: { initial: null, translated: null } },
+        },
+        over: { id: "first", data: { current: { type: "session", folderId: null } } },
+        activatorEvent: new MouseEvent("pointerdown"),
+        collisions: null,
+        delta: { x: 0, y: 0 },
+      })
+    })
+
+  test("a drop reorders the rows in the same tick, marks the moved row, and yields to the store once it carries the order", () => {
+    conversationSidebar = { groupBy: "date" }
+    callQueue.push(characters, [], undefined)
+    const onReorderSessions = jest.fn(() => Promise.resolve())
+    const now = Date.now()
+    const first = baseSession("first", { title: "First", updatedAt: now })
+    const second = baseSession("second", { title: "Second", updatedAt: now - 1 })
+    const { container, rerender } = render(
+      <ChannelList
+        {...listProps}
+        sessions={[first, second]}
+        onReorderSessions={onReorderSessions}
+      />
+    )
+    expect(rowTitles(container)).toEqual(["First", "Second"])
+
+    dropSecondOnFirst()
+
+    // Projected before the live query has said anything.
+    expect(rowTitles(container)).toEqual(["Second", "First"])
+    expect(onReorderSessions).toHaveBeenCalledWith(["second", "first"], "date:today")
+    // The moved row carries the landing mark, the other one does not.
+    const settled = container.querySelector("li[data-settled]")
+    expect(settled?.textContent).toContain("Second")
+    expect(settled?.querySelector('[data-testid="jump-flash"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-testid="jump-flash"]')).toHaveLength(1)
+    expect(listTelemetry.trackConversationReordered).toHaveBeenCalledWith({
+      sectionKey: "date:today",
+      before: ["first", "second"],
+      after: ["second", "first"],
+      via: "pointer",
+    })
+
+    // The store catches up with the persisted manual order: still the same
+    // picture, now backed by the model rather than the projection.
+    rerender(
+      <ChannelList
+        {...listProps}
+        sessions={[
+          { ...first, manualOrder: 1, manualOrderSection: "date:today" },
+          { ...second, manualOrder: 0, manualOrderSection: "date:today" },
+        ]}
+        onReorderSessions={onReorderSessions}
+      />
+    )
+    expect(rowTitles(container)).toEqual(["Second", "First"])
+
+    // A later, unrelated store change is the model's to show — the projection
+    // was released and does not re-apply.
+    rerender(
+      <ChannelList
+        {...listProps}
+        sessions={[
+          { ...first, manualOrder: 0, manualOrderSection: "date:today" },
+          { ...second, manualOrder: 1, manualOrderSection: "date:today" },
+        ]}
+        onReorderSessions={onReorderSessions}
+      />
+    )
+    expect(rowTitles(container)).toEqual(["First", "Second"])
+  })
+
+  test("a keyboard drop is reported as such", () => {
+    conversationSidebar = { groupBy: "date" }
+    callQueue.push(characters, [], undefined)
+    const now = Date.now()
+    render(
+      <ChannelList
+        {...listProps}
+        sessions={[
+          baseSession("first", { title: "First", updatedAt: now }),
+          baseSession("second", { title: "Second", updatedAt: now - 1 }),
+        ]}
+        onReorderSessions={jest.fn()}
+      />
+    )
+    act(() => {
+      mockDragEnd?.({
+        active: { id: "second", data: { current: { type: "session", folderId: null } } },
+        over: { id: "first", data: { current: { type: "session", folderId: null } } },
+        activatorEvent: new KeyboardEvent("keydown", { key: " " }),
+      })
+    })
+    expect(listTelemetry.trackConversationReordered).toHaveBeenCalledWith(
+      expect.objectContaining({ via: "keyboard" })
+    )
+  })
+
+  test("the projection is dropped when the store moves somewhere else", () => {
+    conversationSidebar = { groupBy: "date" }
+    callQueue.push(characters, [], undefined)
+    const now = Date.now()
+    const first = baseSession("first", { title: "First", updatedAt: now })
+    const second = baseSession("second", { title: "Second", updatedAt: now - 1 })
+    const { container, rerender } = render(
+      <ChannelList {...listProps} sessions={[first, second]} onReorderSessions={jest.fn()} />
+    )
+    dropSecondOnFirst()
+    expect(rowTitles(container)).toEqual(["Second", "First"])
+    // A third conversation lands in the bucket before the write does: the
+    // snapshot no longer holds, so the list shows the store's truth.
+    rerender(
+      <ChannelList
+        {...listProps}
+        sessions={[first, second, baseSession("third", { title: "Third", updatedAt: now - 2 })]}
+        onReorderSessions={jest.fn()}
+      />
+    )
+    expect(rowTitles(container)).toEqual(["First", "Second", "?"])
+  })
+
+  test("a rejected persist releases the projection instead of showing an order that never landed", async () => {
+    conversationSidebar = { groupBy: "date" }
+    callQueue.push(characters, [], undefined)
+    const now = Date.now()
+    const first = baseSession("first", { title: "First", updatedAt: now })
+    const second = baseSession("second", { title: "Second", updatedAt: now - 1 })
+    const { container } = render(
+      <ChannelList
+        {...listProps}
+        sessions={[first, second]}
+        onReorderSessions={jest.fn(() => Promise.reject(new Error("quota")))}
+      />
+    )
+    dropSecondOnFirst()
+    expect(rowTitles(container)).toEqual(["Second", "First"])
+    await waitFor(() => expect(rowTitles(container)).toEqual(["First", "Second"]))
+    expect(logWarn).toHaveBeenCalledWith(
+      "channel-list reorder persist failed",
+      expect.objectContaining({ error: expect.stringContaining("quota") })
+    )
+  })
+
+  test("a pointer-following clone of the dragged row is shown while a drag is active", () => {
+    conversationSidebar = { groupBy: "date" }
+    callQueue.push(characters, [], undefined)
+    const now = Date.now()
+    render(
+      <ChannelList
+        {...listProps}
+        sessions={[
+          baseSession("first", { title: "First", updatedAt: now }),
+          baseSession("second", { title: "Second", updatedAt: now - 1 }),
+        ]}
+        onReorderSessions={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("conversation-drag-overlay")).toBeNull()
+    act(() => {
+      mockDragStart?.({ active: { id: "second", data: { current: { type: "session" } } } })
+    })
+    const overlay = screen.getByTestId("conversation-drag-overlay")
+    expect(overlay).toHaveTextContent("Second")
+    // The clone is a picture: no grip to grab, no landing mark.
+    expect(overlay.querySelector('[data-testid="jump-flash"]')).toBeNull()
+    act(() => mockDragCancel?.())
+    expect(screen.queryByTestId("conversation-drag-overlay")).toBeNull()
+  })
+
+  test("opening a conversation is tracked by how it was opened", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    const { container } = render(
+      <ChannelList
+        {...listProps}
+        sessions={[baseSession("s-a", { title: "Alpha", updatedAt: 30 })]}
+      />
+    )
+    await user.click(screen.getByText("Alpha"))
+    expect(listTelemetry.trackConversationOpened).toHaveBeenCalledWith("s-a", "click")
+    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    list.focus()
+    await user.keyboard("{ArrowDown}{Enter}")
+    expect(listTelemetry.trackConversationOpened).toHaveBeenCalledWith("s-a", "keyboard")
+  })
+
+  test("view switches, section toggles, display options and new chats are tracked", async () => {
+    conversationSidebar = { groupBy: "workspace" }
+    useProjectStore.setState({
+      projects: [
+        { id: "w1", name: "Alpha" },
+        { id: "w2", name: "Beta" },
+      ] as unknown as Project[],
+      activeProjectId: "w1",
+      loaded: true,
+    } as never)
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        {...listProps}
+        sessions={[
+          baseSession("a", { title: "A", projectId: "w1", updatedAt: 30 }),
+          baseSession("b", { title: "B", projectId: "w2", updatedAt: 20 }),
+        ]}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "Beta" }))
+    expect(listTelemetry.trackConversationSectionToggled).toHaveBeenCalledWith(
+      "workspace:w2",
+      false
+    )
+    await user.click(screen.getByRole("button", { name: "viewArchived" }))
+    expect(listTelemetry.trackConversationViewChanged).toHaveBeenCalledWith("archived")
+    await user.click(screen.getAllByRole("button", { name: "newChat" })[0])
+    expect(listTelemetry.trackConversationCreated).toHaveBeenCalledWith("direct")
+  })
+
+  test("row and bulk actions are tracked with their size", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    const onArchive = jest.fn()
+    const onBulkDelete = jest.fn()
+    render(
+      <ChannelList
+        {...listProps}
+        sessions={[
+          baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+          baseSession("s-b", { title: "Bravo", updatedAt: 20 }),
+        ]}
+        onArchive={onArchive}
+        onBulkDelete={onBulkDelete}
+      />
+    )
+    await user.keyboard("{Control>}")
+    await user.click(screen.getByRole("button", { name: /Alpha/ }))
+    await user.click(screen.getByRole("button", { name: /Bravo/ }))
+    await user.keyboard("{/Control}")
+    await user.click(screen.getByRole("button", { name: "delete" }))
+    const dialog = await screen.findByRole("alertdialog")
+    const dialogDelete = Array.from(dialog.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "delete"
+    )
+    if (!dialogDelete) throw new Error("expected destructive button")
+    await user.click(dialogDelete)
+    expect(onBulkDelete).toHaveBeenCalledWith(["s-a", "s-b"])
+    expect(listTelemetry.trackConversationRowAction).toHaveBeenCalledWith("delete", 2)
+  })
+
+  test("a settled search is reported once per query, by length only", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        {...listProps}
+        sessions={[
+          baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+          baseSession("s-b", { title: "Bravo", updatedAt: 20 }),
+        ]}
+      />
+    )
+    await user.type(screen.getByRole("searchbox"), "Al")
+    await waitFor(() =>
+      expect(listTelemetry.trackConversationSearched).toHaveBeenCalledWith({
+        scope: "title",
+        query: "Al",
+        resultCount: 1,
+        truncated: false,
+      })
+    )
+    expect(listTelemetry.trackConversationSearched).toHaveBeenCalledTimes(1)
+  })
 })

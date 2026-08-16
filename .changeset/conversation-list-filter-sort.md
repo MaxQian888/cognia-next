@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Conversation list: sorting, quick filters, and a legibility pass. The desktop sidebar and the mobile channel list gain a shared filter/sort control — sort by recent activity, oldest activity, date created, title (A–Z), or unread first, plus AND-ed quick filters for unread, pinned, branched, and conversation type (direct / team). Active filters show as removable chips with a shown/total count and one-click reset, and a non-default sort is chipped too, so a narrowed or reordered list can never read as lost data; drag-reordering is hidden under sorts that cannot keep a manual order. Search now ranks title hits by directness (prefix → word-start → anywhere) above content-only hits, emphasizes the matched run inside each result title, and labels results that only matched inside messages. Rows show a compact, locale-formatted last-activity time, the open conversation is now visually distinct from a merely hovered one (accent bar plus its own surface), and section headers stick while scrolling. Sort and the new activity-time toggle are also in Settings → Conversation.

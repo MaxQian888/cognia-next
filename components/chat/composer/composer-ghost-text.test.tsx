@@ -31,4 +31,30 @@ describe("ComposerGhostText", () => {
     render(<ComposerGhostText ref={ref} value="x" ghost=" y" />)
     expect(ref.current).toBeInstanceOf(HTMLDivElement)
   })
+
+  it("names the suggestion's source so a free history hit is not mistaken for a model guess", () => {
+    render(<ComposerGhostText value="x" ghost=" more" sourceLabel="history" />)
+    const overlay = screen.getByTestId("composer-ghost-text")
+    expect(screen.getByTestId("composer-ghost-source")).toHaveTextContent("history")
+    expect(overlay).toHaveAttribute("data-ghost-source", "history")
+  })
+
+  it("omits the source badge when no label is given", () => {
+    render(<ComposerGhostText value="x" ghost=" more" />)
+    expect(screen.queryByTestId("composer-ghost-source")).not.toBeInTheDocument()
+  })
+
+  it("shows the candidate position and cycle hint", () => {
+    render(
+      <ComposerGhostText value="x" ghost=" more" positionLabel="1/3" cycleHint="Alt+] to cycle" />
+    )
+    expect(screen.getByTestId("composer-ghost-position")).toHaveTextContent("1/3")
+    expect(screen.getByTestId("composer-ghost-cycle")).toHaveTextContent("Alt+] to cycle")
+  })
+
+  it("omits the position and cycle affordances when not provided", () => {
+    render(<ComposerGhostText value="x" ghost=" more" />)
+    expect(screen.queryByTestId("composer-ghost-position")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("composer-ghost-cycle")).not.toBeInTheDocument()
+  })
 })

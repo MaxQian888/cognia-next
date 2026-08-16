@@ -28,6 +28,29 @@ describe("ComposerAssistanceCard", () => {
     expect(screen.queryByLabelText("ghostText.debounceLabel")).not.toBeInTheDocument()
   })
 
+  it("defaults the free local completion tier ON", () => {
+    // The model tier is opt-in, so the local tier is what most users get; it
+    // must not inherit the model tier's default-off.
+    render(<ComposerAssistanceCard />)
+    expect(screen.getByLabelText("ghostTextLocal.label")).toBeChecked()
+  })
+
+  it("toggles the local tier off without disturbing the model tier", async () => {
+    const user = userEvent.setup()
+    mockSettings = { composerAssistance: { ghostText: { enabled: true } } }
+    render(<ComposerAssistanceCard />)
+    await user.click(screen.getByLabelText("ghostTextLocal.label"))
+    expect(save).toHaveBeenCalledWith({
+      composerAssistance: { ghostText: { enabled: true, local: false } },
+    })
+  })
+
+  it("honours an explicitly disabled local tier", () => {
+    mockSettings = { composerAssistance: { ghostText: { local: false } } }
+    render(<ComposerAssistanceCard />)
+    expect(screen.getByLabelText("ghostTextLocal.label")).not.toBeChecked()
+  })
+
   it("toggles enhance off", async () => {
     const user = userEvent.setup()
     render(<ComposerAssistanceCard />)

@@ -44,7 +44,9 @@ describe("conversation-labels", () => {
 
     await deleteLabel(lbl.id)
 
-    expect(await getDb().conversationLabels.get(lbl.id)).toBeUndefined()
+    // v170: the catalogue lives in the shared, scope-discriminated `labels`
+    // table; `conversationLabels` is retained but no longer written.
+    expect(await getDb().labels.get(lbl.id)).toBeUndefined()
     const k1 = await getDb().conversationOverrides.where("conversationKey").equals("k1").first()
     const k2 = await getDb().conversationOverrides.where("conversationKey").equals("k2").first()
     expect(k1?.labelIds).toEqual(["other"])
@@ -55,7 +57,7 @@ describe("conversation-labels", () => {
     await seedBuiltinLabels()
     const builtin = (await listLabels()).find((l) => l.builtin)!
     await expect(deleteLabel(builtin.id)).rejects.toThrow(/built-in/i)
-    expect(await getDb().conversationLabels.get(builtin.id)).toBeDefined()
+    expect(await getDb().labels.get(builtin.id)).toBeDefined()
   })
 
   it("seedBuiltinLabels is idempotent", async () => {

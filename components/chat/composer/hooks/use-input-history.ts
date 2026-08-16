@@ -28,6 +28,12 @@ export interface UseInputHistory {
   record: (text: string) => void
   /** Number of history entries currently loaded for the session. */
   size: number
+  /**
+   * The loaded entries, NEWEST FIRST. Exposed so the inline-completion engine
+   * (`hooks/chat/use-composer-ghost-text.ts`) can complete from the same
+   * per-session history ↑/↓ recalls, instead of keeping a second copy.
+   */
+  entries: readonly string[]
 }
 
 export function useInputHistory(sessionId: string | null): UseInputHistory {
@@ -104,5 +110,5 @@ export function useInputHistory(sessionId: string | null): UseInputHistory {
     [sessionId]
   )
 
-  return { recall, noteEdit, record, size: entries.length }
+  return { recall, noteEdit, record, size: entries.length, entries }
 }

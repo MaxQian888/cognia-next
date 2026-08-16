@@ -204,7 +204,13 @@ describe("transcript cursors", () => {
       })
     ).toEqual({
       ok: true,
-      value: { version: 1, sessionId: "session-1", revision: 11, direction: "backward", position: 30 },
+      value: {
+        version: 1,
+        sessionId: "session-1",
+        revision: 11,
+        direction: "backward",
+        position: 30,
+      },
     })
     expect(
       validateTimelineCursor(cursor, {

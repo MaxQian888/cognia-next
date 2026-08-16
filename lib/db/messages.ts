@@ -5,10 +5,7 @@ import { normalizeMessageMedia } from "@/lib/chat/media/normalize-message-media"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 import { getDb, withDbReopenRetry } from "./schema"
 import { resolveScopeProjectId } from "./project-scope"
-import {
-  collectUnreferencedMessageMedia,
-  messageMediaRefRows,
-} from "./message-media-refs"
+import { collectUnreferencedMessageMedia, messageMediaRefRows } from "./message-media-refs"
 
 function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -173,141 +170,141 @@ export async function replaceSessionTranscript(
       transactionDb.messageMediaRefs,
       transactionDb.sessions,
       () => {
-      // Existing ids for this session — used to compute deletions. `primaryKeys`
-      // reads the index only (no row/parts deserialization), so this stays cheap.
-      return transactionDb.messages
-        .where("sessionId")
-        .equals(sessionId)
-        .primaryKeys()
-        .then((existingKeys) => {
-          const existingIds = new Set(existingKeys as string[])
+        // Existing ids for this session — used to compute deletions. `primaryKeys`
+        // reads the index only (no row/parts deserialization), so this stays cheap.
+        return transactionDb.messages
+          .where("sessionId")
+          .equals(sessionId)
+          .primaryKeys()
+          .then((existingKeys) => {
+            const existingIds = new Set(existingKeys as string[])
 
-          if (messages.length === 0) {
-            clearSnapshot = true
-            return transactionDb.messageMediaRefs
-              .where("sessionId")
-              .equals(sessionId)
-              .toArray()
-              .then((refs) => {
-                for (const ref of refs) orphanCandidates.add(ref.hash)
-                return Promise.all([
-                  existingIds.size > 0
-                    ? transactionDb.messages.bulkDelete([...existingIds])
-                    : Promise.resolve(),
-                  transactionDb.messageMediaRefs.where("sessionId").equals(sessionId).delete(),
-                ]).then(async () => {
-                  if (existingIds.size > 0) {
-                    publishedRevision = await bumpTranscriptRevision(transactionDb, sessionId)
-                  }
+            if (messages.length === 0) {
+              clearSnapshot = true
+              return transactionDb.messageMediaRefs
+                .where("sessionId")
+                .equals(sessionId)
+                .toArray()
+                .then((refs) => {
+                  for (const ref of refs) orphanCandidates.add(ref.hash)
+                  return Promise.all([
+                    existingIds.size > 0
+                      ? transactionDb.messages.bulkDelete([...existingIds])
+                      : Promise.resolve(),
+                    transactionDb.messageMediaRefs.where("sessionId").equals(sessionId).delete(),
+                  ]).then(async () => {
+                    if (existingIds.size > 0) {
+                      publishedRevision = await bumpTranscriptRevision(transactionDb, sessionId)
+                    }
+                  })
                 })
-              })
-          }
-
-          // createdAt source: prefer the in-memory snapshot; only fetch rows from
-          // Dexie for ids that exist on disk but aren't cached (cold start). In
-          // steady-state streaming the snapshot covers every existing id, so this
-          // read — the old per-event full-table `bulkGet` — is skipped entirely.
-          const createdAtById = new Map<string, number>()
-          if (snapshot) {
-            for (const [id, entry] of snapshot) createdAtById.set(id, entry.createdAt)
-          }
-          const missingIds = [...existingIds].filter((id) => !createdAtById.has(id))
-
-          const persistRows = (fetched: Array<StoredMessage | undefined>): Promise<void> => {
-            for (const row of fetched) {
-              if (row) createdAtById.set(row.id, row.createdAt)
             }
 
-            // Only changed/new rows are written; unchanged ones are skipped via
-            // ref-equality against the snapshot. `incomingIds` still covers *all*
-            // messages so deletion stays computed against the full set.
-            const rows: StoredMessage[] = []
-            const incomingIds = new Set<string>()
-            nextSnapshot = new Map<string, { ref: UIMessage; createdAt: number }>()
+            // createdAt source: prefer the in-memory snapshot; only fetch rows from
+            // Dexie for ids that exist on disk but aren't cached (cold start). In
+            // steady-state streaming the snapshot covers every existing id, so this
+            // read — the old per-event full-table `bulkGet` — is skipped entirely.
+            const createdAtById = new Map<string, number>()
+            if (snapshot) {
+              for (const [id, entry] of snapshot) createdAtById.set(id, entry.createdAt)
+            }
+            const missingIds = [...existingIds].filter((id) => !createdAtById.has(id))
 
-            for (let i = 0; i < messages.length; i++) {
-              const message = messages[i]
-              const normalizedMessage = normalizedMessages[i] ?? message
-              const id = message.id ?? newId()
-              incomingIds.add(id)
-
-              const createdAt = createdAtById.get(id) ?? now + i
-              nextSnapshot.set(id, { ref: message, createdAt })
-              if (i === messages.length - 1) {
-                lastPreviewSource = { createdAt, parts: message.parts }
+            const persistRows = (fetched: Array<StoredMessage | undefined>): Promise<void> => {
+              for (const row of fetched) {
+                if (row) createdAtById.set(row.id, row.createdAt)
               }
 
-              const prevEntry = snapshot?.get(id)
-              if (prevEntry !== undefined && prevEntry.ref === message && existingIds.has(id)) {
-                continue
+              // Only changed/new rows are written; unchanged ones are skipped via
+              // ref-equality against the snapshot. `incomingIds` still covers *all*
+              // messages so deletion stays computed against the full set.
+              const rows: StoredMessage[] = []
+              const incomingIds = new Set<string>()
+              nextSnapshot = new Map<string, { ref: UIMessage; createdAt: number }>()
+
+              for (let i = 0; i < messages.length; i++) {
+                const message = messages[i]
+                const normalizedMessage = normalizedMessages[i] ?? message
+                const id = message.id ?? newId()
+                incomingIds.add(id)
+
+                const createdAt = createdAtById.get(id) ?? now + i
+                nextSnapshot.set(id, { ref: message, createdAt })
+                if (i === messages.length - 1) {
+                  lastPreviewSource = { createdAt, parts: message.parts }
+                }
+
+                const prevEntry = snapshot?.get(id)
+                if (prevEntry !== undefined && prevEntry.ref === message && existingIds.has(id)) {
+                  continue
+                }
+
+                const meta = (message as { metadata?: Record<string, unknown> }).metadata
+                const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
+                const senderKindRaw = meta?.senderKind
+                const senderKind =
+                  senderKindRaw === "user" ||
+                  senderKindRaw === "assistant" ||
+                  senderKindRaw === "system"
+                    ? senderKindRaw
+                    : undefined
+                rows.push({
+                  id,
+                  sessionId,
+                  projectId,
+                  role: message.role,
+                  parts: normalizedMessage.parts,
+                  turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
+                  senderId,
+                  senderKind,
+                  metadata: stripHoistedMeta(meta),
+                  createdAt,
+                })
+                // `triggerWorkflows: false` opts a message out of the
+                // `trigger.chat.message` fan-out. Live-voice turns set it: the
+                // user spoke to the assistant directly and never went through the
+                // send path, so firing chat-message workflows would surprise
+                // them. The flag must be present on FIRST persist —
+                // `updateMessageMetadata` cannot retract a dispatch that already
+                // happened.
+                if (
+                  !existingIds.has(id) &&
+                  message.role === "user" &&
+                  meta?.triggerWorkflows !== false
+                ) {
+                  newUserMessageIds.push(id)
+                }
               }
 
-              const meta = (message as { metadata?: Record<string, unknown> }).metadata
-              const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
-              const senderKindRaw = meta?.senderKind
-              const senderKind =
-                senderKindRaw === "user" ||
-                senderKindRaw === "assistant" ||
-                senderKindRaw === "system"
-                  ? senderKindRaw
-                  : undefined
-              rows.push({
-                id,
-                sessionId,
-                projectId,
-                role: message.role,
-                parts: normalizedMessage.parts,
-                turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
-                senderId,
-                senderKind,
-                metadata: stripHoistedMeta(meta),
-                createdAt,
+              const toDelete = [...existingIds].filter((id) => !incomingIds.has(id))
+              const changedIds = [...toDelete, ...rows.map((row) => row.id)]
+              const replacementRefs = rows.flatMap((row) =>
+                messageMediaRefRows(row.id, row.sessionId, row.parts)
+              )
+              const oldRefs =
+                changedIds.length > 0
+                  ? transactionDb.messageMediaRefs.where("messageId").anyOf(changedIds).toArray()
+                  : Promise.resolve([])
+              return oldRefs.then(async (refs) => {
+                for (const ref of refs) orphanCandidates.add(ref.hash)
+                if (toDelete.length > 0) await transactionDb.messages.bulkDelete(toDelete)
+                if (rows.length > 0) await transactionDb.messages.bulkPut(rows)
+                if (changedIds.length > 0) {
+                  await transactionDb.messageMediaRefs.where("messageId").anyOf(changedIds).delete()
+                }
+                if (replacementRefs.length > 0) {
+                  await transactionDb.messageMediaRefs.bulkPut(replacementRefs)
+                }
+                if (changedIds.length > 0) {
+                  publishedRevision = await bumpTranscriptRevision(transactionDb, sessionId)
+                }
               })
-              // `triggerWorkflows: false` opts a message out of the
-              // `trigger.chat.message` fan-out. Live-voice turns set it: the
-              // user spoke to the assistant directly and never went through the
-              // send path, so firing chat-message workflows would surprise
-              // them. The flag must be present on FIRST persist —
-              // `updateMessageMetadata` cannot retract a dispatch that already
-              // happened.
-              if (
-                !existingIds.has(id) &&
-                message.role === "user" &&
-                meta?.triggerWorkflows !== false
-              ) {
-                newUserMessageIds.push(id)
-              }
             }
 
-            const toDelete = [...existingIds].filter((id) => !incomingIds.has(id))
-            const changedIds = [...toDelete, ...rows.map((row) => row.id)]
-            const replacementRefs = rows.flatMap((row) =>
-              messageMediaRefRows(row.id, row.sessionId, row.parts)
-            )
-            const oldRefs =
-              changedIds.length > 0
-                ? transactionDb.messageMediaRefs.where("messageId").anyOf(changedIds).toArray()
-                : Promise.resolve([])
-            return oldRefs.then(async (refs) => {
-              for (const ref of refs) orphanCandidates.add(ref.hash)
-              if (toDelete.length > 0) await transactionDb.messages.bulkDelete(toDelete)
-              if (rows.length > 0) await transactionDb.messages.bulkPut(rows)
-              if (changedIds.length > 0) {
-                await transactionDb.messageMediaRefs.where("messageId").anyOf(changedIds).delete()
-              }
-              if (replacementRefs.length > 0) {
-                await transactionDb.messageMediaRefs.bulkPut(replacementRefs)
-              }
-              if (changedIds.length > 0) {
-                publishedRevision = await bumpTranscriptRevision(transactionDb, sessionId)
-              }
-            })
-          }
-
-          return missingIds.length > 0
-            ? transactionDb.messages.bulkGet(missingIds).then(persistRows)
-            : persistRows([])
-        })
+            return missingIds.length > 0
+              ? transactionDb.messages.bulkGet(missingIds).then(persistRows)
+              : persistRows([])
+          })
       }
     )
   })
@@ -448,9 +445,7 @@ export async function commitMessageDelta(
   const newUserMessageIds = rows
     .filter(
       (row) =>
-        !existingById.has(row.id) &&
-        row.role === "user" &&
-        row.metadata?.triggerWorkflows !== false
+        !existingById.has(row.id) && row.role === "user" && row.metadata?.triggerWorkflows !== false
     )
     .map((row) => row.id)
   const orphanCandidates = new Set<string>()
@@ -729,10 +724,16 @@ export async function truncateAfter(
       .between([sessionId, lowerBound], [sessionId, Number.MAX_SAFE_INTEGER])
       .primaryKeys()
     if (ids.length > 0) {
-      const refs = await db.messageMediaRefs.where("messageId").anyOf(ids as string[]).toArray()
+      const refs = await db.messageMediaRefs
+        .where("messageId")
+        .anyOf(ids as string[])
+        .toArray()
       for (const ref of refs) orphanCandidates.add(ref.hash)
       await db.messages.bulkDelete(ids as string[])
-      await db.messageMediaRefs.where("messageId").anyOf(ids as string[]).delete()
+      await db.messageMediaRefs
+        .where("messageId")
+        .anyOf(ids as string[])
+        .delete()
       revision = await bumpTranscriptRevision(db, sessionId)
     }
   })

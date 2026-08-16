@@ -384,7 +384,9 @@ describe("ImageBlock — content-addressed references", () => {
   })
 
   it("retries a missing media reference on demand", async () => {
-    mockGetMessageMedia.mockResolvedValueOnce(undefined as never).mockResolvedValue(storedRow as never)
+    mockGetMessageMedia
+      .mockResolvedValueOnce(undefined as never)
+      .mockResolvedValue(storedRow as never)
 
     renderBlock({ src: mediaRef("retry") })
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument())

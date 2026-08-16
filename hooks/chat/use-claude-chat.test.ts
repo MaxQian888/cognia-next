@@ -78,6 +78,37 @@ jest.mock("@/lib/claude/ipc", () => ({
   steerSession: (...a: unknown[]) => steerSessionMock(...a),
 }))
 
+const acceptChatTurnMock = jest.fn().mockResolvedValue(null)
+const bindChatTurnContextMock = jest.fn().mockResolvedValue(false)
+const claimChatTurnForDispatchMock = jest.fn().mockResolvedValue("disabled")
+const markChatTurnStartedMock = jest.fn().mockResolvedValue(false)
+const settleChatTurnForSessionMock = jest.fn().mockResolvedValue(false)
+jest.mock("@/lib/work-submission/chat-adapter", () => ({
+  acceptChatTurn: (...args: unknown[]) => acceptChatTurnMock(...args),
+  bindChatTurnContext: (...args: unknown[]) => bindChatTurnContextMock(...args),
+  chatSubmissionId: (runId: string) => `work:${runId}`,
+  claimChatTurnForDispatch: (...args: unknown[]) => claimChatTurnForDispatchMock(...args),
+  markChatTurnStarted: (...args: unknown[]) => markChatTurnStartedMock(...args),
+  settleChatTurnForSession: (...args: unknown[]) => settleChatTurnForSessionMock(...args),
+}))
+
+const unregisterInteractiveWorkSubmissionEventsMock = jest.fn()
+const registerInteractiveWorkSubmissionEventsMock = jest.fn(
+  () => unregisterInteractiveWorkSubmissionEventsMock
+)
+jest.mock("@/lib/work-submission/terminal-events", () => ({
+  registerInteractiveWorkSubmissionEvents: () => registerInteractiveWorkSubmissionEventsMock(),
+}))
+
+const stopLeaseHeartbeatMock = jest.fn()
+const startLeaseHeartbeatMock = jest.fn(
+  (_submissionId: string, _leaseOwner: string) => stopLeaseHeartbeatMock
+)
+jest.mock("@/lib/work-submission/lease-heartbeat", () => ({
+  startWorkSubmissionLeaseHeartbeat: (submissionId: string, leaseOwner: string) =>
+    startLeaseHeartbeatMock(submissionId, leaseOwner),
+}))
+
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
 }))
@@ -552,6 +583,15 @@ beforeEach(() => {
   onClaudeMessageMock.mockClear()
   onClaudeUnsub.mockClear()
   sendPromptMock.mockReset().mockResolvedValue(undefined)
+  acceptChatTurnMock.mockReset().mockResolvedValue(null)
+  bindChatTurnContextMock.mockReset().mockResolvedValue(false)
+  claimChatTurnForDispatchMock.mockReset().mockResolvedValue("disabled")
+  markChatTurnStartedMock.mockReset().mockResolvedValue(false)
+  settleChatTurnForSessionMock.mockReset().mockResolvedValue(false)
+  registerInteractiveWorkSubmissionEventsMock.mockClear()
+  unregisterInteractiveWorkSubmissionEventsMock.mockClear()
+  startLeaseHeartbeatMock.mockClear()
+  stopLeaseHeartbeatMock.mockClear()
   enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
   standaloneFlag.value = false
@@ -697,6 +737,91 @@ describe("useClaudeChat — actions", () => {
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
+  })
+
+  it("freezes and claims durable work before handing it to the canonical send command", async () => {
+    acceptChatTurnMock.mockResolvedValueOnce({ submissionId: "work:run-1" })
+    bindChatTurnContextMock.mockResolvedValueOnce(true)
+    claimChatTurnForDispatchMock.mockResolvedValueOnce("claimed")
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("durable")
+    })
+
+    expect(acceptChatTurnMock).toHaveBeenCalled()
+    expect(bindChatTurnContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({ sendOptions: expect.any(Object) }),
+      })
+    )
+    expect(claimChatTurnForDispatchMock).toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "durable", expect.any(Object), {
+      commandId: expect.stringMatching(/^work:/),
+    })
+    expect(markChatTurnStartedMock).toHaveBeenCalled()
+    expect(startLeaseHeartbeatMock).toHaveBeenCalledWith(
+      expect.stringMatching(/^work:/),
+      "live-chat"
+    )
+    expect(stopLeaseHeartbeatMock).not.toHaveBeenCalled()
+    expect(bindChatTurnContextMock.mock.invocationCallOrder[0]).toBeLessThan(
+      sendPromptMock.mock.invocationCallOrder[0]
+    )
+    expect(sendPromptMock.mock.invocationCallOrder[0]).toBeLessThan(
+      markChatTurnStartedMock.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("does not send when another outbox runner already owns the durable claim", async () => {
+    acceptChatTurnMock.mockResolvedValueOnce({ submissionId: "work:run-1" })
+    bindChatTurnContextMock.mockResolvedValueOnce(true)
+    claimChatTurnForDispatchMock.mockResolvedValueOnce("owned_elsewhere")
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("durable")
+    })
+
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(markChatTurnStartedMock).not.toHaveBeenCalled()
+  })
+
+  it("settles a claimed turn when external mode has no selected agent", async () => {
+    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: null })
+    acceptChatTurnMock.mockResolvedValueOnce({ submissionId: "work:run-1" })
+    claimChatTurnForDispatchMock.mockResolvedValueOnce("claimed")
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("durable")
+    })
+
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    expect(settleChatTurnForSessionMock).toHaveBeenCalledWith("sess-1", {
+      outcome: "failed",
+      errorCode: "external_agent_not_selected",
+    })
+    expect(stopLeaseHeartbeatMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the legacy send path available when durable acceptance fails", async () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+    acceptChatTurnMock.mockRejectedValueOnce(new Error("ledger unavailable"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("legacy")
+    })
+
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "legacy", expect.any(Object))
+    expect(consoleError).toHaveBeenCalledWith("acceptChatTurn failed", expect.any(Error))
+    consoleError.mockRestore()
   })
 
   it("persists an attached HostState action before rendering optimism and skips direct RPC", async () => {
@@ -1650,6 +1775,32 @@ describe("useClaudeChat — actions", () => {
     expect(onClaudeMessageMock).not.toHaveBeenCalled()
   })
 
+  it("suppresses the global projector only after the interactive subscription succeeds", async () => {
+    const { unmount } = renderHook(() => useClaudeChat())
+    await flush()
+
+    expect(registerInteractiveWorkSubmissionEventsMock).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(unregisterInteractiveWorkSubmissionEventsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves the global projector active and retries when the interactive subscription fails", async () => {
+    const listenError = new Error("listener unavailable")
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    onClaudeMessageMock.mockRejectedValueOnce(listenError)
+
+    renderHook(() => useClaudeChat())
+    await flush()
+
+    expect(registerInteractiveWorkSubmissionEventsMock).not.toHaveBeenCalled()
+    expect(consoleError).toHaveBeenCalledWith("listen claude events failed", listenError)
+    await new Promise((resolve) => setTimeout(resolve, 1_050))
+    await flush()
+    expect(onClaudeMessageMock).toHaveBeenCalledTimes(2)
+    expect(registerInteractiveWorkSubmissionEventsMock).toHaveBeenCalledTimes(1)
+    consoleError.mockRestore()
+  })
+
   // ── handleEvent paths (driven through the sidecar message subscription) ──
 
   it("incoming sdk_session_id event persists the SDK conversation id", async () => {
@@ -1684,6 +1835,10 @@ describe("useClaudeChat — actions", () => {
         surface: "chat",
       })
     )
+    expect(settleChatTurnForSessionMock).toHaveBeenCalledWith("sess-1", {
+      outcome: "completed",
+      writeTranscript: expect.any(Function),
+    })
   })
 
   it("records a permanent provider failure without exporting its message", async () => {

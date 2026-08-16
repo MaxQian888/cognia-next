@@ -15,9 +15,11 @@ interface Props {
   session: ChatSession | null | undefined
   /** Compact icon button vs labeled button. Default icon-only. */
   variant?: "icon" | "labeled"
+  /** Extra classes for the trigger button (e.g. to stretch it in a grid). */
+  className?: string
 }
 
-export function SingleExportTrigger({ session, variant = "icon" }: Props) {
+export function SingleExportTrigger({ session, variant = "icon", className }: Props) {
   const t = useTranslations("export")
   if (!session) return null
 
@@ -28,11 +30,12 @@ export function SingleExportTrigger({ session, variant = "icon" }: Props) {
         size="icon"
         aria-label={t("singleTitle")}
         tooltip={t("singleTitle")}
+        className={className}
       >
         <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} />
       </TooltipIconButton>
     ) : (
-      <Button variant="outline" size="sm">
+      <Button variant="outline" size="sm" className={className}>
         <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} data-icon="inline-start" />
         {t("singleTitle")}
       </Button>

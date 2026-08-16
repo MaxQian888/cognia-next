@@ -150,6 +150,7 @@ import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overla
 import { ComposerGhostText } from "./composer/composer-ghost-text"
 import { MobileGhostAccept } from "./composer/mobile-ghost-accept"
 import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
+import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 import { useInputHistory } from "./composer/hooks/use-input-history"
 import { CommandParamForm } from "./composer/command-param-form"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
@@ -503,7 +504,6 @@ function ComposerInner(props: InnerProps) {
   const isSendingRef = useRef(false)
   const chipOverlayRef = useRef<HTMLDivElement>(null)
   const ghostOverlayRef = useRef<HTMLDivElement>(null)
-  const ghost = useComposerGhostText(props.session)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
   // Measured composer height — feeds the mobile @-mention popover so it floats
   // exactly above the composer instead of a hardcoded guess (which broke once
@@ -685,6 +685,39 @@ function ComposerInner(props: InnerProps) {
 
   // Shell-style ↑/↓ recall of previously sent messages for this session.
   const history = useInputHistory(sessionId)
+
+  // Inline ghost-text completion. Declared here (rather than beside the other
+  // refs above) because it consumes `history` and `slashCommands` — the same
+  // per-session history ↑/↓ recalls and the same command list the `/` popover
+  // shows, so the ghost can never disagree with either.
+  const ghostCommands = useMemo<InlineCommandInfo[]>(
+    () => slashCommands.map((c) => ({ name: c.name, description: c.description })),
+    [slashCommands]
+  )
+  const ghost = useComposerGhostText({
+    session: props.session,
+    history: history.entries,
+    commands: ghostCommands,
+  })
+  // Translated badge for where the active suggestion came from. A history hit
+  // is exact and free; a model hit is a guess that cost a call — the two look
+  // identical as dim text, so the source has to be stated.
+  const ghostSourceLabel = useMemo(() => {
+    switch (ghost.suggestion?.source) {
+      case "history":
+        return t("ghostSourceHistory")
+      case "command":
+        return t("ghostSourceCommand")
+      case "ai":
+        return t("ghostSourceAi")
+      case "agent":
+        return t("ghostSourceAgent")
+      case "plugin":
+        return t("ghostSourcePlugin")
+      default:
+        return undefined
+    }
+  }, [ghost.suggestion?.source, t])
 
   // Lets `detectTrigger` tell a chained command (`/compact /cl`) from a path
   // argument (`/add-dir /usr/loc`): only a token that could still become a real
@@ -1331,12 +1364,24 @@ function ComposerInner(props: InnerProps) {
         }
       }
       // Inline ghost-text acceptance (only when no `/@!#` popover is open).
-      // Tab accepts the dim continuation; Esc dismisses it. Both fall through
-      // to existing behavior when there is no ghost to act on.
+      // Tab accepts the dim continuation; Esc dismisses it; Alt+]/Alt+[ walk
+      // the ranked alternatives (the same bindings VS Code uses for cycling
+      // inline suggestions). All fall through to existing behavior when there
+      // is no ghost to act on.
       if (!trigger && ghost.ghost) {
         if (e.key === "Tab" && !e.shiftKey) {
           if (acceptGhost()) {
             e.preventDefault()
+            return
+          }
+        }
+        if (e.altKey && (e.key === "]" || e.key === "[")) {
+          // Only meaningful with something to cycle to; otherwise let the
+          // keystroke through so it still types a bracket.
+          if (ghost.candidates.length > 1) {
+            e.preventDefault()
+            if (e.key === "]") ghost.cycleNext()
+            else ghost.cyclePrev()
             return
           }
         }
@@ -2084,6 +2129,18 @@ function ComposerInner(props: InnerProps) {
             ref={ghostOverlayRef}
             value={controller.textInput.value}
             ghost={ghost.ghost}
+            sourceLabel={ghostSourceLabel}
+            // Position + cycle hint only make sense with an alternative to
+            // move to, and Alt+] is unreachable on touch.
+            positionLabel={
+              ghost.candidates.length > 1
+                ? t("ghostPosition", {
+                    index: ghost.index + 1,
+                    total: ghost.candidates.length,
+                  })
+                : undefined
+            }
+            cycleHint={!isMobile && ghost.candidates.length > 1 ? t("ghostCycleHint") : undefined}
             // The "Tab" hint is meaningless on touch — mobile gets the tappable
             // accept/dismiss control below instead.
             acceptHint={isMobile ? undefined : t("ghostAcceptHint")}
@@ -2828,11 +2885,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div
-      className="@container/composer shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pb-3 pt-5 sm:pb-4 sm:pt-6"
-      // Frosted-glass chrome over an active wallpaper (app/globals.css §5),
-      // matching the other toolbar surfaces; bg-background/70 stays the
-      // no-wallpaper fallback.
-      data-tonality="glass"
+      // `composer-scrim` (app/globals.css §4d) owns the fade from the message
+      // list into the input box. It replaces a Tailwind gradient +
+      // `data-tonality="glass"` pair that could not compose: the tonality rules
+      // swap `background-color`, and the gradient is a `background-image`, so
+      // the opaque slab won and the composer stopped matching the message area
+      // as soon as a wallpaper was active.
+      className="composer-scrim @container/composer shrink-0 pb-3 pt-5 sm:pb-4 sm:pt-6"
     >
       {/* Padding lives INSIDE the max-width cap so the composer box and the
           message text share one content edge. With the padding on the bar
@@ -2868,7 +2927,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               compactLayout={compactLayout}
               toolbar={
                 compactLayout ? (
-                  <BottomToolbar session={session ?? null} status={status} variant="embedded" />
+                  <BottomToolbar
+                    session={session ?? null}
+                    status={status}
+                    variant="embedded"
+                    onOpenProviderSettings={() => onOpenSettings("api-key")}
+                  />
                 ) : null
               }
             />
@@ -2876,6 +2940,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               <BottomToolbar
                 session={session ?? null}
                 status={status}
+                onOpenProviderSettings={() => onOpenSettings("api-key")}
                 leading={
                   session?.platformBinding ? (
                     <>

@@ -477,7 +477,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
   })
 
-  it("dismisses the Sheet instead of collapsing when hosted on mobile", () => {
+  it("dismisses the drawer instead of collapsing when hosted on mobile", () => {
     activateArtifact()
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     const onOpenChange = jest.fn()
@@ -488,19 +488,21 @@ describe("ArtifactDock — converged workbench shell", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.collapse" }))
+    // Labelled Close, not Collapse: a bottom drawer has no right edge to fold
+    // away, and this is the surface's only button-shaped exit.
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.close" }))
 
-    // A Sheet has no collapsed rail to shrink to — collapsing must close it,
+    // A drawer has no collapsed rail to shrink to — closing must dismiss it,
     // and must leave the separate desktop dock state alone.
     expect(onOpenChange).toHaveBeenCalledWith(false)
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
   })
 
-  it("dismisses the Sheet from the session surface too", () => {
+  it("dismisses the drawer from the session surface too", () => {
     const onOpenChange = jest.fn()
     render(<SessionContextWorkbench mobile={{ open: true, onOpenChange, panelMode: "mobile" }} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.collapse" }))
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.close" }))
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })

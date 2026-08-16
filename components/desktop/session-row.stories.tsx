@@ -94,3 +94,66 @@ export const Branched: Story = {
     onJumpToParent: fn(),
   },
 }
+
+/**
+ * Timestamp column: the trailing last-activity time that makes a
+ * recency-ordered list legible. Shapes narrow as the row ages — a clock time
+ * today, a weekday inside the week, a date beyond that.
+ */
+export const WithTimestamp: Story = {
+  args: {
+    showTimestamp: true,
+    session: makeSession({
+      title: "Ship the release notes",
+      lastMessageAt: Date.now() - 3_600_000,
+    }),
+  },
+}
+
+export const TimestampAndUnread: Story = {
+  args: {
+    showTimestamp: true,
+    unread: 3,
+    session: makeSession({
+      title: "Standup follow-ups",
+      lastMessageAt: Date.now() - 3 * 86_400_000,
+    }),
+  },
+}
+
+/** Active vs hover used to be the same `bg-accent`; the bar disambiguates. */
+export const ActiveWithTimestamp: Story = {
+  args: {
+    active: true,
+    showTimestamp: true,
+    session: makeSession({ title: "The open conversation", lastMessageAt: Date.now() }),
+  },
+}
+
+/** How a search result reads: the matched run is emphasized in the title. */
+export const SearchHit: Story = {
+  args: {
+    searchQuery: "release",
+    showTimestamp: true,
+    session: makeSession({
+      title: "Release checklist review",
+      lastMessageAt: Date.now() - 86_400_000,
+    }),
+  },
+}
+
+/**
+ * A hit that only matched inside messages. Without the marker, a result whose
+ * title has nothing to do with the query reads as a broken search.
+ */
+export const ContentOnlyHit: Story = {
+  args: {
+    searchQuery: "sqlite",
+    contentMatch: true,
+    showTimestamp: true,
+    session: makeSession({
+      title: "Tuesday debugging",
+      lastMessageAt: Date.now() - 9 * 86_400_000,
+    }),
+  },
+}

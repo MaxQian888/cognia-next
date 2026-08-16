@@ -12,6 +12,10 @@ import {
   WORKSPACE_DOCK_BOUNDS,
   useArtifactDockLayoutStore,
 } from "./artifact-dock-layout-store"
+import {
+  CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP,
+  CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS,
+} from "@/types/context-workbench"
 
 const PERSIST_NAME = "cognia-artifact-dock-layout"
 
@@ -524,6 +528,31 @@ describe("useArtifactDockLayoutStore", () => {
       const before = useArtifactDockLayoutStore.getState()
       act(() => before.clearSessionScopedReveals())
       expect(useArtifactDockLayoutStore.getState()).toBe(before)
+    })
+  })
+
+  describe("mobileSnapPoint", () => {
+    it("defaults to the tallest snap and persists a chosen one", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      expect(result.current.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP)
+
+      // Persisted where `mobileSheetOpen` deliberately is not: a height is a
+      // preference, visibility is a per-session act. It also cannot live in the
+      // drawer, which unmounts on close.
+      act(() => result.current.setMobileSnapPoint(CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0]))
+      expect(result.current.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0])
+      expect(readPersisted()?.state.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0])
+    })
+
+    it("rejects a snap that is not in the shipped set", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      // An unfound `activeSnapPoint` resolves to index -1 in vaul, which feeds
+      // `undefined` into the `--snap-point-height` the drawer is positioned by.
+      // Retiring a snap must therefore fall back, never pass the stale value on.
+      act(() => result.current.setMobileSnapPoint(0.31))
+      expect(result.current.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP)
+      act(() => result.current.setMobileSnapPoint(null))
+      expect(result.current.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP)
     })
   })
 

@@ -5,6 +5,7 @@ import { listSessionBranches } from "@/lib/db/sessions"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { HoverScrollText } from "@/components/chat/ui/hover-scroll-text"
+import { JumpFlash } from "@/components/chat/jump-flash"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import {
   AlertDialog,
@@ -27,6 +28,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import {
+  CONVERSATION_TIMESTAMP_FORMATS,
+  conversationTimestampShape,
+} from "@/lib/chat/conversation-timestamp"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
@@ -50,6 +55,7 @@ import {
   ListChecksIcon,
   Loader2Icon,
   MessageSquareIcon,
+  MessageSquareTextIcon,
   CpuIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -61,7 +67,7 @@ import {
   WaypointsIcon,
 } from "lucide-react"
 import { toast } from "sonner"
-import { useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
   memo,
   useEffect,
@@ -140,6 +146,24 @@ export interface SessionRowProps {
   metadata?: SessionRowMetadataItem[]
   /** Motion policy for overflowing titles. */
   titleMotion?: "hover" | "off"
+  /** Active search query — emphasized inside the title when it matches. */
+  searchQuery?: string
+  /**
+   * True when this row surfaced *only* because the query hit its message
+   * content. Without the marker a result whose title has nothing to do with the
+   * query reads as a broken search rather than a deeper one.
+   */
+  contentMatch?: boolean
+  /**
+   * Show the trailing activity timestamp ("14:32", "Tue", "Aug 3"). Off by
+   * default so surfaces that don't want the column don't pay for it.
+   *
+   * Formatting happens here rather than in the list because the prop stays a
+   * boolean: a pre-formatted string (or a formatter callback) from the parent
+   * would change identity whenever the locale formatter did and bust this
+   * row's `memo` for the whole list.
+   */
+  showTimestamp?: boolean
   /** @dnd-kit node ref from the Sortable wrapper (applied to the `<li>`). */
   dragRef?: (el: HTMLElement | null) => void
   /** @dnd-kit drag listeners — applied to the hover grip handle. */
@@ -154,6 +178,12 @@ export interface SessionRowProps {
   dragging?: boolean
   /** Pending insertion edge while another row is dragged over this one. */
   dropPosition?: "before" | "after"
+  /**
+   * "You just moved this row here": the same landing mark conversation jumps
+   * paint (`JumpFlash`), held for `holdMs`. Bumping `nonce` restarts it, so
+   * dragging the same row twice in a row shows twice.
+   */
+  settleFlash?: { nonce: number; holdMs: number }
 }
 
 /**
@@ -189,6 +219,9 @@ function SessionRowImpl({
   showPreview = false,
   metadata = [],
   titleMotion = "hover",
+  searchQuery,
+  contentMatch = false,
+  showTimestamp = false,
   dragRef,
   dragListeners,
   dragAttributes,
@@ -196,8 +229,14 @@ function SessionRowImpl({
   dragStyle,
   dragging = false,
   dropPosition,
+  settleFlash,
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
+  // Locale-aware timestamp formatting (the previous hand-rolled "3m"/"2d"
+  // helper rendered raw English abbreviations for zh-CN). `useNow()` without an
+  // update interval is a stable read — no per-row timer.
+  const format = useFormatter()
+  const now = useNow()
   const [editing, setEditing] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   // Only queried while the confirm is open — this row renders once per session
@@ -365,16 +404,31 @@ function SessionRowImpl({
   const Icon =
     session.kind === "team" ? UsersIcon : session.characterId ? HashIcon : MessageSquareIcon
   const displayTitle = session.title || t("untitled")
+  // `null` when the session has never been stamped — the column is dropped
+  // rather than rendering the epoch.
+  const timestampAt = showTimestamp ? (session.lastMessageAt ?? session.updatedAt ?? null) : null
+  // Vertical rhythm lives on the interactive child, not the `<li>`, so the
+  // padding is part of the click target.
+  const rowPadding = density === "compact" ? "py-1" : "py-2"
 
   return (
     <li
       ref={setLiRef}
       style={dragStyle}
       className={cn(
-        "group relative flex items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-accent",
-        density === "compact" ? "py-1" : "py-1.5",
-        active && "bg-accent",
-        selected && "bg-accent/60 ring-1 ring-primary/50",
+        // No padding on the `<li>` itself: the select button below owns the
+        // row's inner padding so the whole surface — not just the text — is a
+        // hit target. The left gutter (`pl-3.5`) is reserved for the active
+        // accent bar and the hover-revealed drag grip, which are both overlaid
+        // so titles start at the same x whether or not the list is reorderable.
+        "group relative flex items-stretch rounded-lg pl-3.5 text-sm transition-colors duration-150",
+        // Hover and active were both `bg-accent`, which made every hovered row
+        // look like the open conversation. Active now owns a stronger surface
+        // plus the left accent bar below; hover stays a lighter wash.
+        !active && "hover:bg-accent/60",
+        active &&
+          "bg-accent shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_18%,transparent)]",
+        selected && "bg-primary/10 ring-1 ring-primary/45",
         focused && "ring-2 ring-ring",
         dragging && "opacity-40",
         dropPosition === "before" &&
@@ -384,22 +438,39 @@ function SessionRowImpl({
       )}
       data-selected={selected || undefined}
       data-focused={focused || undefined}
+      data-density={density}
       data-drop-position={dropPosition}
+      data-settled={settleFlash ? "" : undefined}
     >
+      {settleFlash ? (
+        <JumpFlash nonce={settleFlash.nonce} holdMs={settleFlash.holdMs} className="rounded-lg" />
+      ) : null}
+      {/* Left accent bar for the open conversation. A real element rather than
+          a `before:` pseudo — the drop indicator already owns `before:`. */}
+      {active ? (
+        <span
+          aria-hidden
+          data-testid="session-row-active-bar"
+          className="pointer-events-none absolute top-1/2 left-0 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-primary"
+        />
+      ) : null}
       {dragListeners && !editing ? (
         <button
           type="button"
           ref={dragActivatorRef}
           {...dragAttributes}
           {...dragListeners}
-          className="flex size-4 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100"
+          // Overlaid in the row gutter (full row height for an easy grab)
+          // instead of sitting in flow, so a hidden grip never steals 24px of
+          // title width or a click that should have opened the conversation.
+          className="absolute inset-y-0 left-0.5 flex w-3 cursor-grab touch-none items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           aria-label={t("dragHandle")}
         >
-          <GripVerticalIcon className="size-3.5" />
+          <GripVerticalIcon className="size-3" />
         </button>
       ) : null}
       {editing ? (
-        <div className="flex flex-1 items-center gap-2">
+        <div className={cn("flex flex-1 items-center gap-2 pr-1", rowPadding)}>
           <Icon className="size-3.5 shrink-0 text-muted-foreground" />
           <Input
             ref={inputRef}
@@ -415,7 +486,10 @@ function SessionRowImpl({
           type="button"
           onClick={handleSelect}
           onDoubleClick={() => setEditing(true)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2 rounded-lg pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+            rowPadding
+          )}
         >
           {iconSubject ? (
             <AvatarBadge subject={iconSubject} size={18} textClassName="text-[10px]" />
@@ -428,11 +502,54 @@ function SessionRowImpl({
           ) : (
             <Icon className="size-3.5 shrink-0 text-muted-foreground" />
           )}
-          {session.pinned ? (
-            <PinIcon className="size-3 shrink-0 text-muted-foreground" aria-label={t("pinned")} />
-          ) : null}
-          <span className="flex min-w-0 flex-1 flex-col">
-            <HoverScrollText text={displayTitle} motion={titleMotion} />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            {/* Title line: title stretches, status/time pin to the trailing
+                edge so every title in the rail starts at the same x. */}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <HoverScrollText
+                className={cn("flex-1", active && "font-medium")}
+                text={displayTitle}
+                motion={titleMotion}
+                highlight={searchQuery}
+              />
+              {session.pinned ? (
+                <PinIcon
+                  className="size-3 shrink-0 text-muted-foreground"
+                  aria-label={t("pinned")}
+                />
+              ) : null}
+              {timestampAt != null ? (
+                <span
+                  className="shrink-0 text-[10px] leading-4 text-muted-foreground/80 tabular-nums"
+                  data-testid="session-row-timestamp"
+                  title={format.dateTime(new Date(timestampAt), {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                >
+                  {format.dateTime(
+                    new Date(timestampAt),
+                    CONVERSATION_TIMESTAMP_FORMATS[
+                      conversationTimestampShape(now.getTime(), timestampAt)
+                    ]
+                  )}
+                </span>
+              ) : null}
+              {unread && unread > 0 ? (
+                <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              ) : null}
+            </span>
+            {contentMatch ? (
+              <span
+                className="flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted-foreground"
+                data-testid="session-row-content-match"
+              >
+                <MessageSquareTextIcon className="size-2.5 shrink-0" aria-hidden />
+                <span className="truncate">{t("contentMatch")}</span>
+              </span>
+            ) : null}
             {metadata.length > 0 ? (
               <span
                 className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[10px] leading-4 text-muted-foreground"
@@ -458,143 +575,140 @@ function SessionRowImpl({
               </span>
             ) : null}
             {showPreview && session.lastMessagePreview ? (
-              <span className="truncate text-xs text-muted-foreground">
+              <span className="truncate text-xs leading-4 text-muted-foreground">
                 {session.lastMessagePreview}
               </span>
             ) : null}
           </span>
-          {unread && unread > 0 ? (
-            <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
-              {unread > 99 ? "99+" : unread}
-            </span>
-          ) : null}
         </button>
       )}
-      {!editing && session.parentSessionId && onJumpToParent ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-6 shrink-0 text-muted-foreground"
-          title={t("branchedFrom")}
-          aria-label={t("branchedFrom")}
-          onClick={() => onJumpToParent(session.parentSessionId!)}
-        >
-          <GitBranchIcon className="size-3" />
-        </Button>
-      ) : null}
-      {!editing && (
-        <DropdownMenu onOpenChange={handleActionsOpenChange}>
-          <DropdownMenuTrigger asChild>
+      {!editing ? (
+        <div className="flex shrink-0 items-center gap-0.5 self-center pr-1.5">
+          {session.parentSessionId && onJumpToParent ? (
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
-              aria-label={t("actionsMenu")}
+              className="size-6 text-muted-foreground"
+              title={t("branchedFrom")}
+              aria-label={t("branchedFrom")}
+              onClick={() => onJumpToParent(session.parentSessionId!)}
             >
-              <MoreHorizontalIcon className="size-3.5" />
+              <GitBranchIcon className="size-3" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {onToggleSelection ? (
-              <DropdownMenuItem onSelect={() => onToggleSelection(session.id)}>
-                <ListChecksIcon className="mr-2 size-4" />
-                {selected ? t("deselect") : t("select")}
+          ) : null}
+          <DropdownMenu onOpenChange={handleActionsOpenChange}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                aria-label={t("actionsMenu")}
+              >
+                <MoreHorizontalIcon className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {onToggleSelection ? (
+                <DropdownMenuItem onSelect={() => onToggleSelection(session.id)}>
+                  <ListChecksIcon className="mr-2 size-4" />
+                  {selected ? t("deselect") : t("select")}
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem onSelect={() => setEditing(true)}>
+                <PencilIcon className="mr-2 size-4" />
+                {t("rename")}
               </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuItem onSelect={() => setEditing(true)}>
-              <PencilIcon className="mr-2 size-4" />
-              {t("rename")}
-            </DropdownMenuItem>
-            {onTogglePinned ? (
-              <DropdownMenuItem onSelect={handleTogglePinned}>
-                {session.pinned ? (
-                  <PinOffIcon className="mr-2 size-4" />
-                ) : (
-                  <PinIcon className="mr-2 size-4" />
-                )}
-                {session.pinned ? t("unpin") : t("pin")}
-              </DropdownMenuItem>
-            ) : null}
-            {isArchived && onUnarchive ? (
-              <DropdownMenuItem onSelect={handleUnarchive}>
-                <ArchiveRestoreIcon className="mr-2 size-4" />
-                {t("unarchive")}
-              </DropdownMenuItem>
-            ) : null}
-            {!isArchived && onArchive ? (
-              <DropdownMenuItem onSelect={handleArchive}>
-                <ArchiveIcon className="mr-2 size-4" />
-                {t("archive")}
-              </DropdownMenuItem>
-            ) : null}
-            {onAssignToFolder && (folders?.length || session.folderId) ? (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <FolderInputIcon className="mr-2 size-4" />
-                  {t("moveToFolder")}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  {(folders ?? []).map((f) => (
-                    <DropdownMenuItem
-                      key={f.id}
-                      onSelect={() => void onAssignToFolder(session.id, f.id)}
-                    >
-                      {session.folderId === f.id ? (
-                        <CheckIcon className="mr-2 size-4" />
-                      ) : (
-                        <FolderIcon className="mr-2 size-4" />
-                      )}
-                      <span className="truncate">{f.name}</span>
-                    </DropdownMenuItem>
-                  ))}
-                  {session.folderId ? (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={() => void onAssignToFolder(session.id, null)}>
-                        {t("removeFromFolder")}
-                      </DropdownMenuItem>
-                    </>
-                  ) : null}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            ) : null}
-            {isTauri() ? (
-              <>
-                <DropdownMenuItem onSelect={handleOpenInCodexApp} disabled={codexDispatching}>
-                  {codexDispatching ? (
-                    <Loader2Icon className="mr-2 size-4 animate-spin" />
+              {onTogglePinned ? (
+                <DropdownMenuItem onSelect={handleTogglePinned}>
+                  {session.pinned ? (
+                    <PinOffIcon className="mr-2 size-4" />
                   ) : (
-                    <ExternalLinkIcon className="mr-2 size-4" />
+                    <PinIcon className="mr-2 size-4" />
                   )}
-                  {t("openInCodexApp")}
+                  {session.pinned ? t("unpin") : t("pin")}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={handleOpenInTerminal}
-                  disabled={cogniaAgentStatus !== "available"}
-                  title={
-                    cogniaAgentStatus === "missing"
-                      ? t("cogniaAgentNotInstalled")
-                      : cogniaAgentStatus !== "available"
-                        ? t("cogniaAgentChecking")
-                        : undefined
-                  }
-                >
-                  <TerminalIcon className="mr-2 size-4" />
-                  {t("openInTerminal")}
+              ) : null}
+              {isArchived && onUnarchive ? (
+                <DropdownMenuItem onSelect={handleUnarchive}>
+                  <ArchiveRestoreIcon className="mr-2 size-4" />
+                  {t("unarchive")}
                 </DropdownMenuItem>
-              </>
-            ) : null}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() => setDeleteConfirmOpen(true)}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2Icon className="mr-2 size-4" />
-              {t("delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+              ) : null}
+              {!isArchived && onArchive ? (
+                <DropdownMenuItem onSelect={handleArchive}>
+                  <ArchiveIcon className="mr-2 size-4" />
+                  {t("archive")}
+                </DropdownMenuItem>
+              ) : null}
+              {onAssignToFolder && (folders?.length || session.folderId) ? (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <FolderInputIcon className="mr-2 size-4" />
+                    {t("moveToFolder")}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {(folders ?? []).map((f) => (
+                      <DropdownMenuItem
+                        key={f.id}
+                        onSelect={() => void onAssignToFolder(session.id, f.id)}
+                      >
+                        {session.folderId === f.id ? (
+                          <CheckIcon className="mr-2 size-4" />
+                        ) : (
+                          <FolderIcon className="mr-2 size-4" />
+                        )}
+                        <span className="truncate">{f.name}</span>
+                      </DropdownMenuItem>
+                    ))}
+                    {session.folderId ? (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={() => void onAssignToFolder(session.id, null)}>
+                          {t("removeFromFolder")}
+                        </DropdownMenuItem>
+                      </>
+                    ) : null}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ) : null}
+              {isTauri() ? (
+                <>
+                  <DropdownMenuItem onSelect={handleOpenInCodexApp} disabled={codexDispatching}>
+                    {codexDispatching ? (
+                      <Loader2Icon className="mr-2 size-4 animate-spin" />
+                    ) : (
+                      <ExternalLinkIcon className="mr-2 size-4" />
+                    )}
+                    {t("openInCodexApp")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={handleOpenInTerminal}
+                    disabled={cogniaAgentStatus !== "available"}
+                    title={
+                      cogniaAgentStatus === "missing"
+                        ? t("cogniaAgentNotInstalled")
+                        : cogniaAgentStatus !== "available"
+                          ? t("cogniaAgentChecking")
+                          : undefined
+                    }
+                  >
+                    <TerminalIcon className="mr-2 size-4" />
+                    {t("openInTerminal")}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => setDeleteConfirmOpen(true)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2Icon className="mr-2 size-4" />
+                {t("delete")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : null}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
           <AlertDialogHeader>

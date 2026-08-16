@@ -140,10 +140,9 @@ describe("ArtifactPanel", () => {
 
     useArtifactDockLayoutStore.setState({ mobileSheetOpen: false })
     rerender(<ArtifactPanel />)
-    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
-      "data-state",
-      "closed"
-    )
+    // vaul owns its own exit animation and then drops the surface, so "closed"
+    // is an absence rather than a `data-state` on a still-mounted node.
+    expect(screen.queryByTestId("context-workbench-mobile-sheet")).not.toBeInTheDocument()
   })
 
   it("records a dismissal when the Sheet is swiped away", () => {
@@ -198,16 +197,15 @@ describe("ArtifactPanel", () => {
     expect(screen.getByTestId("artifact-tab-preview")).toBeInTheDocument()
   })
 
-  it("dismissing the Sheet closes the artifact panel", async () => {
+  it("dismissing the drawer closes the artifact panel", async () => {
     makeArtifact()
     render(<ArtifactPanel />)
     expect(useArtifactStore.getState().panelOpen).toBe(true)
 
-    // The rail's collapse button is the Sheet's dismiss affordance here — a
-    // Sheet has no collapsed strip to shrink into.
-    fireEvent.click(
-      await screen.findByRole("button", { name: "contextWorkbench.actions.collapse" })
-    )
+    // The rail's trailing button is the drawer's dismiss affordance here — a
+    // drawer has no collapsed strip to shrink into, which is why it reads
+    // "Close" rather than "Collapse" on this placement.
+    fireEvent.click(await screen.findByRole("button", { name: "contextWorkbench.actions.close" }))
 
     expect(useArtifactStore.getState().panelOpen).toBe(false)
   })
@@ -222,21 +220,16 @@ describe("ArtifactPanel", () => {
     expect(useArtifactStore.getState().panelOpen).toBe(false)
   })
 
-  it("overrides the Sheet slide to a snappier pace that honors motion-speed (not the 500/300ms default)", async () => {
+  it("overrides the drawer slide to a snappier pace that honors motion-speed (not vaul's 500ms default)", async () => {
     makeArtifact()
     render(<ArtifactPanel />)
     const content = await screen.findByTestId("context-workbench-mobile-sheet")
-    // Overrides via animation-duration (the property that drives the slide),
-    // scaled by --motion-duration-scale so motion-speed applies.
+    // vaul drives the slide with a *transition* on `[data-vaul-drawer]`, not the
+    // Radix keyframes the Sheet used, and hardcodes it at .5s. Same contract as
+    // before — the pace is scaled by --motion-duration-scale so the appearance
+    // setting applies — expressed on the property vaul actually animates.
     expect(content.className).toContain(
-      "data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))]"
-    )
-    expect(content.className).toContain(
-      "data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
-    )
-    // tailwind-merge must drop the base 500ms enter so the override actually wins.
-    expect(content.className).not.toContain(
-      "data-[state=open]:[animation-duration:calc(500ms*var(--motion-duration-scale,1))]"
+      "[transition-duration:calc(300ms*var(--motion-duration-scale,1))]!"
     )
   })
 })

@@ -11,6 +11,7 @@ import {
   updateSession,
   setSessionActiveBranchSelection,
   listSessions,
+  listAgentThreadSessions,
   listScopedSessions,
   deleteSession,
   listSessionBranches,
@@ -817,6 +818,50 @@ describe("archive / unarchive", () => {
     const afterB = await getSession(b.id)
     expect("archivedAt" in (afterA as object)).toBe(false)
     expect("archivedAt" in (afterB as object)).toBe(false)
+  })
+})
+
+describe("listAgentThreadSessions", () => {
+  const put = (row: Partial<ChatSession> & { id: string }) =>
+    getDb().sessions.put({
+      title: row.id,
+      kind: "direct",
+      projectId: "p1",
+      createdAt: 1,
+      updatedAt: 1,
+      ...row,
+    } as ChatSession)
+
+  it("returns nothing when no subagent session exists", async () => {
+    await put({ id: "plain" })
+    await expect(listAgentThreadSessions()).resolves.toEqual([])
+  })
+
+  it("lists a parentless subagent on its own without a parent lookup", async () => {
+    await put({ id: "plain" })
+    await put({ id: "orphan", kind: "subagent" })
+    await expect(listAgentThreadSessions()).resolves.toMatchObject([{ id: "orphan" }])
+  })
+
+  it("returns every subagent session plus each distinct parent, across projects", async () => {
+    await put({ id: "parent-a", projectId: "p1" })
+    await put({ id: "parent-b", projectId: "p2" })
+    await put({ id: "unrelated" })
+    await put({ id: "child-1", kind: "subagent", parentSessionId: "parent-a" })
+    await put({ id: "child-2", kind: "subagent", parentSessionId: "parent-a" })
+    await put({ id: "child-3", kind: "subagent", parentSessionId: "parent-b", projectId: "p2" })
+    // Orphan: its parent was deleted. Still listed so the forest can root it.
+    await put({ id: "child-4", kind: "subagent", parentSessionId: "gone" })
+    // Nested: a subagent whose parent is itself a subagent — the parent is
+    // already in the children set and must not be listed twice.
+    await put({ id: "child-5", kind: "subagent", parentSessionId: "child-1" })
+
+    const rows = await listAgentThreadSessions()
+    const ids = rows.map((r) => r.id).sort()
+    expect(ids).toEqual(
+      ["child-1", "child-2", "child-3", "child-4", "child-5", "parent-a", "parent-b"].sort()
+    )
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })
 

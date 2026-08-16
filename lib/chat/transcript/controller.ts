@@ -21,7 +21,9 @@ export interface TranscriptControllerSnapshot {
 }
 
 function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" ? String((error as { code?: unknown }).code ?? "") : undefined
+  return error && typeof error === "object"
+    ? String((error as { code?: unknown }).code ?? "")
+    : undefined
 }
 
 export class TranscriptController {
@@ -105,7 +107,10 @@ export class TranscriptController {
       this.nextCursor = page.nextCursor
       const existing = new Set(this.snapshot.items.map((item) => item.itemKey))
       this.update({
-        items: [...page.items.filter((item) => !existing.has(item.itemKey)), ...this.snapshot.items],
+        items: [
+          ...page.items.filter((item) => !existing.has(item.itemKey)),
+          ...this.snapshot.items,
+        ],
         revision: page.revision,
         loadingOlder: false,
         hasMore: page.hasMore,
@@ -139,10 +144,7 @@ export class TranscriptController {
       this.detailCache.pin(key)
       this.emit()
     } catch (error) {
-      if (
-        errorCode(error) === "TRANSCRIPT_STALE" ||
-        errorCode(error) === "TURN_NOT_FOUND"
-      ) {
+      if (errorCode(error) === "TRANSCRIPT_STALE" || errorCode(error) === "TURN_NOT_FOUND") {
         await this.reconcile()
         return
       }

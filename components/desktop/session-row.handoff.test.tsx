@@ -12,6 +12,10 @@ import type { ChatSession } from "@cognia/agent-config-types"
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string, params?: Record<string, unknown>) =>
     params ? `${k}:${JSON.stringify(params)}` : k,
+  // The row formats its own activity timestamp; these tests only care about
+  // the handoff menu, so a stub formatter is enough.
+  useFormatter: () => ({ dateTime: (value: Date) => String(value.getTime()) }),
+  useNow: () => new Date(1_750_000_000_000),
 }))
 jest.mock("@cognia/logging", () => ({ loggers: { ui: { info: jest.fn(), warn: jest.fn() } } }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
@@ -161,4 +165,64 @@ test("a failed Codex App dispatch surfaces an error toast", async () => {
   await user.click(screen.getByRole("button", { name: "actionsMenu" }))
   await user.click(await screen.findByText("openInCodexApp"))
   await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("openInCodexAppFailed"))
+})
+
+test("a denied terminal launch surfaces the failure instead of a success toast", async () => {
+  // `launchCogniaAgent` resolving is not the same as it launching — a denied
+  // or errored outcome must not report success.
+  mockLaunchCogniaAgent.mockResolvedValueOnce({ kind: "denied", reason: "policy" })
+  const user = userEvent.setup()
+  setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  const item = await screen.findByText("openInTerminal")
+  await waitFor(() =>
+    expect(item.closest('[role="menuitem"]')).not.toHaveAttribute("data-disabled")
+  )
+  await user.click(item)
+
+  await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("openInTerminalFailed"))
+  expect(mockToastSuccess).not.toHaveBeenCalled()
+})
+
+test("an errored terminal launch reports the backend message path", async () => {
+  mockLaunchCogniaAgent.mockResolvedValueOnce({ kind: "error", message: "spawn failed" })
+  const user = userEvent.setup()
+  setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  const item = await screen.findByText("openInTerminal")
+  await waitFor(() =>
+    expect(item.closest('[role="menuitem"]')).not.toHaveAttribute("data-disabled")
+  )
+  await user.click(item)
+
+  await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("openInTerminalFailed"))
+})
+
+test("hands the session's own working directory to the terminal launch", async () => {
+  // Only when the session has no working directory does the launch fall back
+  // to $HOME — otherwise `resume` would start in the wrong tree.
+  const user = userEvent.setup()
+  render(
+    <ul>
+      <SessionRow
+        session={{ ...baseSession, workingDir: "  /repos/cognia  " } as ChatSession}
+        active={false}
+        onSelect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    </ul>
+  )
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  const item = await screen.findByText("openInTerminal")
+  await waitFor(() =>
+    expect(item.closest('[role="menuitem"]')).not.toHaveAttribute("data-disabled")
+  )
+  await user.click(item)
+
+  await waitFor(() =>
+    expect(mockLaunchCogniaAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/repos/cognia" })
+    )
+  )
 })

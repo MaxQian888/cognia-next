@@ -343,30 +343,10 @@ describe("ChatHeader", () => {
     expect(screen.queryByRole("button", { name: /insights/i })).not.toBeInTheDocument()
   })
 
-  it("shows the No-API-key badge when neither api key nor subscription bearer exists", async () => {
-    mockCredentialStatus.mockReturnValue({ keyOk: false, plan: null })
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <ChatHeader session={mkSession()} />
-      </Wrapper>
-    )
-    expect(await screen.findByText(/no api key/i)).toBeInTheDocument()
-  })
-
-  it("hides the No-API-key badge when a subscription OAuth bearer is active", () => {
-    // Subscription-reuse users have no ANTHROPIC_API_KEY — auth flows through
-    // the OAuth bearer pushed by `subscription_set_active`. The badge must
-    // treat that as configured.
-    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <ChatHeader session={mkSession()} />
-      </Wrapper>
-    )
-    expect(screen.queryByText(/no api key/i)).not.toBeInTheDocument()
-  })
+  // The No-API-key badge, the live cost badge and the system-prompt preset
+  // pill moved down to the composer's status line (`composer/credential-badge`,
+  // `session-cost-badge-live`, `composer/preset-chip`) when this header became
+  // title-bar chrome; their coverage lives beside them.
 
   // The subscription tier badge and the skills badge moved into
   // SessionSettingsSheet (control-surface consolidation); their coverage now
@@ -506,80 +486,6 @@ describe("ChatHeader", () => {
     // Look for the Select trigger — it carries a stable id.
     await waitFor(() => {
       expect(document.getElementById("session-preset")).not.toBeNull()
-    })
-  })
-
-  describe("system-prompt preset pill (ADR-0127)", () => {
-    const presets: SystemPromptPreset[] = [
-      {
-        id: "p1",
-        name: "pill-preset-one",
-        content: "You are terse.",
-        model: "claude-sonnet-5",
-        isBuiltIn: false,
-        isDefault: false,
-        isFavorite: false,
-        sortOrder: 0,
-        usageCount: 0,
-        createdAt: 0,
-        updatedAt: 0,
-      },
-    ]
-
-    it("self-hides when there are no presets", () => {
-      const Wrapper = withAdapter(makeAdapter())
-      render(
-        <Wrapper>
-          <ChatHeader session={mkSession()} />
-        </Wrapper>
-      )
-      expect(screen.queryByTestId("chat-header-preset-pill")).toBeNull()
-    })
-
-    it("mounts in the header and applies a conflict-free preset in place", async () => {
-      const updateSession = jest.fn(async () => undefined)
-      const recordPresetUsage = jest.fn(async () => undefined)
-      const adapter = makeAdapter({ usePresets: () => presets, updateSession, recordPresetUsage })
-      const Wrapper = withAdapter(adapter)
-      render(
-        <Wrapper>
-          <ChatHeader session={mkSession({ systemPrompt: undefined, model: undefined })} />
-        </Wrapper>
-      )
-      const pill = screen.getByTestId("chat-header-preset-pill")
-      expect(pill).toBeInTheDocument()
-      fireEvent.click(pill)
-      fireEvent.click(await screen.findByText("pill-preset-one"))
-      await waitFor(() => expect(updateSession).toHaveBeenCalledTimes(1))
-      const [id, patch] = updateSession.mock.calls[0] as unknown as [
-        string,
-        Record<string, unknown>,
-      ]
-      expect(id).toBe("ses_1")
-      expect(patch).toMatchObject({
-        activePresetId: "p1",
-        systemPrompt: "You are terse.",
-        model: "claude-sonnet-5",
-      })
-      expect(recordPresetUsage).toHaveBeenCalledWith("p1")
-    })
-
-    it("routes a conflicting pick to the settings sheet instead of overwriting", async () => {
-      const updateSession = jest.fn(async () => undefined)
-      const adapter = makeAdapter({ usePresets: () => presets, updateSession })
-      const Wrapper = withAdapter(adapter)
-      render(
-        <Wrapper>
-          <ChatHeader session={mkSession({ systemPrompt: "Existing prompt", model: "other" })} />
-        </Wrapper>
-      )
-      fireEvent.click(screen.getByTestId("chat-header-preset-pill"))
-      fireEvent.click(await screen.findByText("pill-preset-one"))
-      // The sheet (with its conflict dialog) opens; nothing is written blindly.
-      await waitFor(() => {
-        expect(document.getElementById("session-preset")).not.toBeNull()
-      })
-      expect(updateSession).not.toHaveBeenCalled()
     })
   })
 

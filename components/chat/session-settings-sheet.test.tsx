@@ -589,6 +589,8 @@ describe("SessionSettingsSheet", () => {
       </DataAdapterProvider>
     )
 
+    // Memory starts collapsed on a session without memory overrides.
+    await user.click(screen.getByRole("button", { name: /^memory/i }))
     await user.click(screen.getByRole("combobox", { name: /use memories in this chat/i }))
     await user.click(screen.getByRole("option", { name: /^off$/i }))
     await user.click(screen.getByRole("combobox", { name: /learn from this chat/i }))
@@ -953,5 +955,122 @@ describe("SessionSettingsSheet", () => {
       expect(screen.queryByRole("button", { name: /^apply$/i })).not.toBeInTheDocument()
     )
     expect(recordPresetUsage).not.toHaveBeenCalled()
+  })
+
+  describe("collapsible sections", () => {
+    it("starts the override sections collapsed on a default session, with a defaults summary", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
+        </Wrapper>
+      )
+      // Everyday sections open …
+      expect(screen.getByLabelText(/working directory/i)).toBeInTheDocument()
+      // … low-frequency override sections collapsed, summarized.
+      expect(screen.queryByRole("combobox", { name: /execution effort/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole("combobox", { name: /use memories/i })).not.toBeInTheDocument()
+      expect(screen.getByTestId("session-settings-section-execution-summary")).toHaveTextContent(
+        /using defaults/i
+      )
+      expect(screen.getByTestId("session-settings-section-memory-summary")).toHaveTextContent(
+        /using defaults/i
+      )
+      expect(screen.getByTestId("session-settings-footer-summary")).toHaveTextContent(
+        /using defaults/i
+      )
+    })
+
+    it("auto-expands a section that already carries an override and counts it", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <SessionSettingsSheet
+            session={mkSession({ memoryUse: false, workingDir: "/x", bareMode: true })}
+            open
+            onOpenChange={jest.fn()}
+          />
+        </Wrapper>
+      )
+      expect(screen.getByRole("combobox", { name: /use memories/i })).toBeInTheDocument()
+      expect(screen.getByTestId("session-settings-section-memory-count")).toHaveTextContent("1")
+      expect(screen.getByTestId("session-settings-section-behavior-count")).toHaveTextContent("2")
+      expect(screen.getByTestId("session-settings-footer-summary")).toHaveTextContent(
+        /3 overrides/i
+      )
+    })
+
+    it("expands a collapsed section on click and updates its badge live while editing", async () => {
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
+        </Wrapper>
+      )
+      fireEvent.click(screen.getByRole("button", { name: /execution overrides/i }))
+      const maxTurns = await screen.findByRole("spinbutton", { name: /maximum turns/i })
+      fireEvent.change(maxTurns, { target: { value: "5" } })
+      expect(screen.getByTestId("session-settings-section-execution-count")).toHaveTextContent("1")
+      expect(screen.getByTestId("session-settings-footer-summary")).toHaveTextContent(/1 override/i)
+    })
+
+    it("toggles every section with the header expand/collapse-all button", async () => {
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
+        </Wrapper>
+      )
+      const toggle = screen.getByTestId("session-settings-toggle-all")
+      expect(toggle).toHaveTextContent(/expand all/i)
+      fireEvent.click(toggle)
+      expect(await screen.findByRole("combobox", { name: /execution effort/i })).toBeInTheDocument()
+      expect(screen.getByRole("combobox", { name: /use memories/i })).toBeInTheDocument()
+      expect(toggle).toHaveTextContent(/collapse all/i)
+      fireEvent.click(toggle)
+      await waitFor(() =>
+        expect(screen.queryByLabelText(/working directory/i)).not.toBeInTheDocument()
+      )
+      expect(screen.queryByRole("combobox", { name: /use memories/i })).not.toBeInTheDocument()
+    })
+
+    it("re-derives the section layout from the session each time the sheet opens", async () => {
+      const adapter = makeAdapter()
+      const { rerender } = render(
+        <DataAdapterProvider adapter={adapter}>
+          <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
+        </DataAdapterProvider>
+      )
+      // Manually collapse an everyday section …
+      fireEvent.click(screen.getByRole("button", { name: /^behavior/i }))
+      await waitFor(() =>
+        expect(screen.queryByLabelText(/working directory/i)).not.toBeInTheDocument()
+      )
+      // … close and reopen: defaults are restored.
+      rerender(
+        <DataAdapterProvider adapter={adapter}>
+          <SessionSettingsSheet session={mkSession()} open={false} onOpenChange={jest.fn()} />
+        </DataAdapterProvider>
+      )
+      rerender(
+        <DataAdapterProvider adapter={adapter}>
+          <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
+        </DataAdapterProvider>
+      )
+      expect(await screen.findByLabelText(/working directory/i)).toBeInTheDocument()
+    })
+
+    it("renders the lifecycle actions as a uniform labeled grid", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
+        </Wrapper>
+      )
+      const grid = screen.getByTestId("session-actions")
+      expect(grid).toContainElement(screen.getByTestId("session-open-insights"))
+      expect(grid).toContainElement(screen.getByRole("button", { name: /branch conversation/i }))
+      expect(grid).toContainElement(screen.getByRole("button", { name: /session communication/i }))
+    })
   })
 })

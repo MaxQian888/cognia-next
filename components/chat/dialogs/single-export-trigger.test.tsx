@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -31,4 +31,13 @@ describe("SingleExportTrigger", () => {
       expect(container.querySelector('[data-slot="animated-action-icon"]')).toBeInTheDocument()
     }
   )
+
+  it.each(["icon", "labeled"] as const)("forwards className to the %s trigger", (variant) => {
+    render(
+      <TooltipProvider>
+        <SingleExportTrigger session={session} variant={variant} className="w-full" />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("button")).toHaveClass("w-full")
+  })
 })

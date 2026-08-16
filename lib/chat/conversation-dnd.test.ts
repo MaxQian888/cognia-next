@@ -1,7 +1,12 @@
+import type { ChatSession } from "@cognia/agent-config-types"
+
+import type { ConversationSection } from "./conversation-list-model"
 import {
+  projectPendingReorder,
   resolveConversationDrop,
   resolveConversationDropPreview,
   type DndNode,
+  type PendingReorder,
 } from "./conversation-dnd"
 
 const sess = (id: string, folderId: string | null = null): DndNode => ({
@@ -74,5 +79,77 @@ describe("resolveConversationDropPreview", () => {
   it("does not preview a no-op or a cross-section drop", () => {
     expect(resolveConversationDropPreview("a", "a", ["a", "b"])).toBeNull()
     expect(resolveConversationDropPreview("outside", "a", ["a", "b"])).toBeNull()
+  })
+})
+
+describe("projectPendingReorder", () => {
+  const row = (id: string): ChatSession =>
+    ({ id, title: id, createdAt: 0, updatedAt: 0 }) as unknown as ChatSession
+  const [a, b, c, d] = [row("a"), row("b"), row("c"), row("d")]
+  const sections: ConversationSection[] = [
+    { kind: "pinned", sessions: [a, b, c] },
+    { kind: "date", bucket: "today", sessions: [d] },
+  ]
+  const pending: PendingReorder = {
+    sectionKey: "pinned",
+    baseIds: ["a", "b", "c"],
+    ids: ["b", "a", "c"],
+  }
+
+  it("is idle without a pending reorder and returns the same sections", () => {
+    expect(projectPendingReorder(sections, null)).toEqual({ sections, status: "idle" })
+    expect(projectPendingReorder(sections, null).sections).toBe(sections)
+  })
+
+  it("projects the dropped order over the pre-drop snapshot, leaving other sections alone", () => {
+    const result = projectPendingReorder(sections, pending)
+    expect(result.status).toBe("applied")
+    expect(result.sections[0].sessions).toEqual([b, a, c])
+    // Untouched sections keep their identity — memoized rows do not re-render.
+    expect(result.sections[1]).toBe(sections[1])
+    expect(sections[0].sessions).toEqual([a, b, c])
+  })
+
+  it("settles once the store carries the dropped order", () => {
+    const stored: ConversationSection[] = [{ kind: "pinned", sessions: [b, a, c] }]
+    const result = projectPendingReorder(stored, pending)
+    expect(result).toEqual({ sections: stored, status: "settled" })
+  })
+
+  it("goes stale when the section is gone, its membership changed, or another writer reordered it", () => {
+    expect(projectPendingReorder([{ kind: "recent", sessions: [a, b, c] }], pending).status).toBe(
+      "stale"
+    )
+    expect(projectPendingReorder([{ kind: "pinned", sessions: [a, b] }], pending).status).toBe(
+      "stale"
+    )
+    expect(projectPendingReorder([{ kind: "pinned", sessions: [c, b, a] }], pending).status).toBe(
+      "stale"
+    )
+    // A dropped order that is not a permutation of the snapshot cannot be
+    // projected honestly either.
+    expect(projectPendingReorder(sections, { ...pending, ids: ["b", "a", "zzz"] }).status).toBe(
+      "stale"
+    )
+  })
+
+  it("matches sections by their stable key, so a folder and a date bucket never collide", () => {
+    const foldered: ConversationSection[] = [
+      {
+        kind: "folder",
+        folder: { id: "f1", name: "F", order: 0, createdAt: 0, updatedAt: 0 },
+        sessions: [a, b],
+        collapsed: false,
+      },
+      { kind: "date", bucket: "today", sessions: [c, d] },
+    ]
+    const result = projectPendingReorder(foldered, {
+      sectionKey: "date:today",
+      baseIds: ["c", "d"],
+      ids: ["d", "c"],
+    })
+    expect(result.status).toBe("applied")
+    expect(result.sections[0]).toBe(foldered[0])
+    expect(result.sections[1].sessions).toEqual([d, c])
   })
 })

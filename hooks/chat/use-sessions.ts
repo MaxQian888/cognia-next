@@ -22,6 +22,7 @@ import {
   deleteFolder as deleteFolderDb,
   listFolders,
   renameFolder as renameFolderDb,
+  reorderFolders as reorderFoldersDb,
 } from "@/lib/db/session-folders"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { buildOpeningMessage } from "@/lib/chat/opening-message"
@@ -34,6 +35,7 @@ import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { dedupeSessionsById } from "@/lib/chat/conversation-list-model"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { hydrateSessionHistory } from "@/lib/sync/session-history"
@@ -83,10 +85,27 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
     if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
     return crossWorkspace ? listSessions() : listScopedSessions(activeProjectId)
   }, [activeProjectId, projectStoreLoaded, crossWorkspace])
-  const exposedSessions = useMemo(
-    () => (Array.isArray(sessions) ? filterExposedSessions(sessions, "main-list") : []),
-    [sessions]
-  )
+  const exposedSessions = useMemo(() => {
+    if (!Array.isArray(sessions)) return []
+    const exposed = filterExposedSessions(sessions, "main-list")
+    // One row per conversation, whatever the live query hands us. A duplicate
+    // id here becomes a duplicate React key in every consumer (sidebar rows,
+    // the welcome page's "Continue" grid) and a chat listed twice; the model
+    // guards its own input too, but the welcome grid reads this list directly.
+    // Kept loud: a duplicate is a symptom of an upstream emit that should not
+    // happen, so leave a trail that names the rows instead of hiding it.
+    const unique = dedupeSessionsById(exposed)
+    if (unique !== exposed) {
+      const seen = new Set<string>()
+      const repeated = new Set<string>()
+      for (const row of exposed) (seen.has(row.id) ? repeated : seen).add(row.id)
+      console.warn("useSessions: live query emitted duplicate session rows", {
+        ids: Array.from(repeated),
+        crossWorkspace,
+      })
+    }
+    return unique as ChatSession[]
+  }, [sessions, crossWorkspace])
 
   // Resolve the active session's ROW, rather than leaving every consumer to
   // search `sessions` for it.
@@ -367,6 +386,7 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
   const createFolder = useCallback((name: string) => createFolderDb(name), [])
   const renameFolder = useCallback((id: string, name: string) => renameFolderDb(id, name), [])
   const deleteFolder = useCallback((id: string) => deleteFolderDb(id), [])
+  const reorderFolders = useCallback((ids: string[]) => reorderFoldersDb(ids), [])
   const assignToFolder = useCallback(
     (sessionId: string, folderId: string | null) => assignSessionToFolder(sessionId, folderId),
     []
@@ -397,6 +417,7 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
     createFolder,
     renameFolder,
     deleteFolder,
+    reorderFolders,
     assignToFolder,
     db: typeof window === "undefined" ? null : getDb(),
   }

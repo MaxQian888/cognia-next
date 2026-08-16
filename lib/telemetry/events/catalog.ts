@@ -1,6 +1,12 @@
+import type { SupportReportSurface } from "@/lib/support-report/types"
+
 import type { BehaviorTelemetryCategory } from "./settings"
 
 type AiSurface = "chat" | "agent-team" | "workflow" | "connector"
+
+/** The section kinds a conversation-list row can live in — the prefix of `conversationSectionKey`. */
+export type ConversationListSectionKind =
+  "pinned" | "folder" | "date" | "recent" | "workspace" | "agent" | "search"
 
 export interface TelemetryEventCatalog {
   "chat.message.sent": {
@@ -20,6 +26,67 @@ export interface TelemetryEventCatalog {
     surface: AiSurface
     errorType?: string
     durationMs?: number
+  }
+  // --- Conversation list (desktop sidebar + mobile list) -------------------
+  // Attribute values are ids and enums only: never a title, a query string, a
+  // folder / preset name or anything else the user typed.
+  /** A conversation was activated from the list. */
+  "chat.list.opened": {
+    sessionId: string
+    /** How it was activated: a row click, Enter on the focused row, or the branch-lineage chip. */
+    via: "click" | "keyboard" | "parent-link"
+  }
+  /** A new conversation was started from the list's primary action. */
+  "chat.list.created": { kind: "direct" | "team" }
+  /** A (debounced) search query produced results. Carries the query *length*, never its text. */
+  "chat.list.searched": {
+    scope: "title" | "titleAndContent"
+    queryLength: number
+    resultCount: number
+    /** True when the content index reported more history than it searched. */
+    truncated: boolean
+  }
+  /** A row was dragged to a new position inside a section. */
+  "chat.list.reordered": {
+    section: ConversationListSectionKind
+    from: number
+    to: number
+    size: number
+    via: "pointer" | "keyboard"
+  }
+  /** A per-row or bulk action from the row menu / selection toolbar. */
+  "chat.list.row.action": {
+    action:
+      | "pin"
+      | "unpin"
+      | "archive"
+      | "unarchive"
+      | "delete"
+      | "rename"
+      | "assign-folder"
+      | "unassign-folder"
+      // Opening the multi-conversation share dialog from the selection
+      // toolbar. Reported when the dialog is requested, not when a link is
+      // minted — the share subsystem owns that half (ADR-0037).
+      | "share"
+    /** Rows affected — 1 for a row action, the selection size for a bulk one. */
+    count: number
+    bulk: boolean
+  }
+  /** A display / ordering knob in the list's view menu changed. */
+  "chat.list.layout.changed": {
+    setting: string
+    /** Enum / boolean rendered as a string; array-valued settings report their size. */
+    value: string
+  }
+  /** Active ⇄ archived switch. */
+  "chat.list.view.changed": { view: "active" | "archived" }
+  /** A folder or workspace / agent group was folded or unfolded. */
+  "chat.list.section.toggled": { section: ConversationListSectionKind; collapsed: boolean }
+  /** A quick filter changed. `facet` names the control, `activeCount` the filters now narrowing the list. */
+  "chat.list.filtered": {
+    facet: string
+    activeCount: number
   }
   "voice.connection.ready": { provider: string; durationMs: number }
   "voice.first-audio": { provider: string; eouToAudioMs: number }
@@ -82,11 +149,12 @@ export interface TelemetryEventCatalog {
     surface: "chat" | "settings"
   }
   "support.feedback.draft.opened": {
-    surface: "chat" | "mobile"
+    surface: SupportReportSurface
     sessionId?: string
   }
   "support.feedback.draft.exported": {
-    surface: "chat" | "mobile"
+    surface: SupportReportSurface
+    channel: string
     sessionId?: string
   }
 }
@@ -103,6 +171,15 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "chat.message.sent": { category: "chat" },
   "chat.turn.completed": { category: "chat" },
   "chat.turn.failed": { category: "chat" },
+  "chat.list.opened": { category: "chat" },
+  "chat.list.created": { category: "chat" },
+  "chat.list.searched": { category: "chat" },
+  "chat.list.reordered": { category: "chat" },
+  "chat.list.row.action": { category: "chat" },
+  "chat.list.layout.changed": { category: "chat" },
+  "chat.list.view.changed": { category: "chat" },
+  "chat.list.section.toggled": { category: "chat" },
+  "chat.list.filtered": { category: "chat" },
   "voice.connection.ready": { category: "chat" },
   "voice.first-audio": { category: "chat" },
   "voice.interrupted": { category: "chat" },

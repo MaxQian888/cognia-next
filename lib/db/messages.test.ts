@@ -121,7 +121,11 @@ describe("persistMessages + listMessages", () => {
     const url = (stored?.parts[0] as { url?: string } | undefined)?.url
     expect(isMediaRef(url)).toBe(true)
     expect(await listMessageMediaRefsForSession("s-media")).toEqual([
-      { messageId: "image-message", sessionId: "s-media", hash: url!.slice("cognia-media:".length) },
+      {
+        messageId: "image-message",
+        sessionId: "s-media",
+        hash: url!.slice("cognia-media:".length),
+      },
     ])
   })
 
@@ -140,7 +144,12 @@ describe("persistMessages + listMessages", () => {
 
     const refs = await listMessageMediaRefsForSession("s-media")
     expect(refs).toHaveLength(1)
-    expect(refs[0]?.hash).toBe((getDb().messages && ((await getDb().messages.get("media"))?.parts[0] as { url: string }).url.slice("cognia-media:".length)))
+    expect(refs[0]?.hash).toBe(
+      getDb().messages &&
+        ((await getDb().messages.get("media"))?.parts[0] as { url: string }).url.slice(
+          "cognia-media:".length
+        )
+    )
   })
 
   it("inserts a fresh batch and reads them back in order", async () => {

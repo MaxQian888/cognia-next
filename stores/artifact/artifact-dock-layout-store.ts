@@ -17,7 +17,11 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
-import type { ContextPanelMode } from "@/types/context-workbench"
+import {
+  CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP,
+  CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS,
+  type ContextPanelMode,
+} from "@/types/context-workbench"
 import { SIDECHAT_PANEL_ID } from "@/lib/tasks/spawn-task-core"
 
 /**
@@ -85,6 +89,24 @@ export const CHAT_MIN_PERCENT = {
 } as const
 
 /**
+ * Absolute floor for the conversation column, in px.
+ *
+ * The percentages above are shares of the `ResizablePanelGroup`, and that group
+ * is *not* the window: a right-docked terminal (`TerminalDockRegion slot="right"`,
+ * an outboard flex sibling at the shell row with its own `panelWidthPct`) has
+ * already taken its cut before the dock sees a single pixel, and with
+ * `sidebarSide: "right"` two icon columns are outside it too. On a 1280px screen
+ * with a 30% terminal, the workspace profile's 35% share is ~314px of
+ * conversation — a column that cannot hold a message.
+ *
+ * Nothing coordinates those widths with each other, and a shared budget across
+ * three independently-owned surfaces would be a large change for a rare layout.
+ * A floor is the cheap half: whatever the row has been narrowed to, the dock
+ * cannot take the conversation below a width that still reads.
+ */
+export const CHAT_MIN_PX = 420
+
+/**
  * Width presets the workbench header's narrow/wide buttons map onto. The dock
  * lives inside the outer ResizablePanel and is mounted with
  * `manageOwnWidth={false}`, so the workbench cannot size itself — without this
@@ -130,6 +152,18 @@ export interface ArtifactDockLayoutState {
    * conversation the user had just cleared.
    */
   mobileSheetOpen: boolean
+  /**
+   * Which snap point the narrow-screen drawer sits at — a fraction of the
+   * viewport drawn from `CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS`.
+   *
+   * Persisted, unlike `mobileSheetOpen`: a height is a preference ("I read this
+   * half-open"), where visibility is a per-session act. It has to live out here
+   * rather than inside the drawer because closing *unmounts* the drawer, so
+   * component state could not survive a close/reopen — and the shared
+   * `ContextWorkbench` must not import this store, which is why it takes the
+   * value as a prop.
+   */
+  mobileSnapPoint: number | string | null
   /**
    * Runtime-only: true after the user manually collapsed the dock, so a fresh
    * artifact stops force-expanding it. Cleared whenever the user re-opens.
@@ -222,6 +256,7 @@ export interface ArtifactDockLayoutState {
    */
   clearSessionScopedReveals: () => void
   setMobileSheetOpen: (open: boolean) => void
+  setMobileSnapPoint: (snapPoint: number | string | null) => void
   resetLayout: () => void
 }
 
@@ -230,6 +265,7 @@ interface PersistedArtifactDockLayoutState {
   dockCollapsed: boolean
   dockProfile: DockProfile
   layoutVersion: number
+  mobileSnapPoint: number | string | null
 }
 
 /** v2 shape, still on disk for anyone who ran a build before the convergence. */
@@ -246,6 +282,21 @@ const DEFAULTS = {
   dockCollapsed: true,
   dockProfile: "compact" as DockProfile,
   layoutVersion: 0,
+  mobileSnapPoint: CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP as number | string | null,
+}
+
+/**
+ * Keep a persisted snap point inside the shipped set.
+ *
+ * The list is a design decision, not user data — dropping or renaming a snap
+ * would otherwise leave a stored fraction that vaul cannot find in
+ * `snapPoints`, and an unfound `activeSnapPoint` resolves to index `-1`, which
+ * feeds `undefined` into the `--snap-point-height` the drawer is positioned by.
+ */
+function normalizeSnapPoint(value: unknown): number | string | null {
+  return CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS.includes(value as number)
+    ? (value as number)
+    : CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP
 }
 
 let revealSequence = 0
@@ -453,6 +504,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
             ? state
             : { revealIntent: null, workspaceRevealRequest: null, workspaceContext: null }
         ),
+      setMobileSnapPoint: (snapPoint) => set({ mobileSnapPoint: normalizeSnapPoint(snapPoint) }),
       setMobileSheetOpen: (open) =>
         set(
           open
@@ -486,6 +538,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         dockCollapsed: state.dockCollapsed,
         dockProfile: state.dockProfile,
         layoutVersion: state.layoutVersion,
+        mobileSnapPoint: state.mobileSnapPoint,
       }),
       migrate: (persisted: unknown, version) => {
         const state = (persisted ?? {}) as LegacyPersistedArtifactDockLayoutState &
@@ -507,6 +560,10 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           ...p,
           dockSize: clampDockSize(p.dockSize ?? current.dockSize),
           dockProfile: p.dockProfile === "workspace" ? "workspace" : "compact",
+          // Added after v3 shipped, so it is absent from every layout already on
+          // disk — `normalizeSnapPoint` supplies the default rather than a
+          // `version` bump, which would have thrown away the dock width too.
+          mobileSnapPoint: normalizeSnapPoint(p.mobileSnapPoint),
           // mobileSheetOpen / userDismissed / unreadArtifact / dockSizeRequest /
           // revealIntent are runtime-only — never restore them from disk.
           dockSizeRequest: 0,

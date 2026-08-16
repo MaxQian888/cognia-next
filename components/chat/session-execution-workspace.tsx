@@ -201,7 +201,8 @@ function SessionExecutionWorkspaceContent({
     runOperation(async () => {
       const archive = JSON.parse(await file.text()) as ManagedWorkspaceArchive
       let target = context?.managedWorkspace?.localRoot
-      if (!target) target = (await materializeManagedWorkspace(session.id)).managedWorkspace?.localRoot
+      if (!target)
+        target = (await materializeManagedWorkspace(session.id)).managedWorkspace?.localRoot
       if (!target) throw new Error(t("desktopRequired"))
       setContext(await importManagedWorkspaceArchive(session.id, archive, target))
     })
@@ -287,7 +288,12 @@ function SessionExecutionWorkspaceContent({
           </div>
           <div className="flex flex-wrap gap-1.5">
             {managedAvailability === "missing-on-device" && (
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => void materialize()}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void materialize()}
+              >
                 <FolderPlusIcon className="size-3.5" />
                 {t("managedAssets.createHere")}
               </Button>
@@ -317,11 +323,21 @@ function SessionExecutionWorkspaceContent({
             </Button>
             {managedAvailability === "available" && (
               <>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void exportWorkspace()}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void exportWorkspace()}
+                >
                   <DownloadIcon className="size-3.5" />
                   {t("managedAssets.export")}
                 </Button>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void convertToProject()}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void convertToProject()}
+                >
                   <GitBranchIcon className="size-3.5" />
                   {t("managedAssets.convert")}
                 </Button>
@@ -352,12 +368,16 @@ function SessionExecutionWorkspaceContent({
               </Button>
             )}
           </div>
-          <p className="text-[10px] text-muted-foreground">{t("managedAssets.sessionDeleteNote")}</p>
+          <p className="text-[10px] text-muted-foreground">
+            {t("managedAssets.sessionDeleteNote")}
+          </p>
           <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>{t("managedAssets.deleteTitle")}</AlertDialogTitle>
-                <AlertDialogDescription>{t("managedAssets.deleteDescription")}</AlertDialogDescription>
+                <AlertDialogDescription>
+                  {t("managedAssets.deleteDescription")}
+                </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>

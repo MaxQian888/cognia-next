@@ -1,13 +1,13 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { createPortal } from "react-dom"
+import { cn } from "@/lib/utils"
 import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
 import { useTranslations } from "next-intl"
 import {
   Columns2Icon,
   ExternalLinkIcon,
-  KeyRoundIcon,
   Loader2Icon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -17,20 +17,8 @@ import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
-import { Badge } from "@/components/ui/badge"
-import {
-  useCharacter,
-  usePresets,
-  useRecordPresetUsage,
-  useUpdateSession,
-} from "@/lib/data-hooks/context"
-import { ChatHeaderPresetPill } from "@/components/chat/chat-header-preset-pill"
-import { buildPresetApplicationPlan, detectPresetConflicts } from "@/lib/presets/apply-to-session"
-import { loggers } from "@cognia/logging"
-import type { SystemPromptPreset } from "@cognia/agent-config-types"
+import { useCharacter } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
-import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
-import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
@@ -41,9 +29,16 @@ import { isTauri } from "@/lib/tauri"
 import { useUIStore } from "@/stores/ui"
 import type { ChatSession } from "@cognia/agent-config-types"
 
+/**
+ * Every icon button on this row, one tone. The header sits on the title bar
+ * (`title-bar-outlets.tsx`) beside the bar's own controls, which are drawn
+ * `text-muted-foreground` and brighten on hover — a full-strength glyph among
+ * them read as the odd one out (the sidebar and dock toggles were).
+ */
+const HEADER_ICON_BUTTON = "size-7 text-muted-foreground hover:text-foreground"
+
 interface Props {
   session: ChatSession
-  onOpenSettings?: () => void
   onSplitView?: () => void
   onExitSplit?: () => void
 }
@@ -58,53 +53,22 @@ interface Props {
  * that already had a copy of it, and Insights to a row in the same sheet. The
  * conversation-list toggle stays first so it remains reachable after collapse.
  *
- * What stays is either ambient status that self-hides (live cost, plan-mode
- * tasks, the no-credential badge, the `chat.header` plugin slot) or the single
- * owner of a frequent action: session settings and the two pane toggles.
+ * What stays is either ambient status that self-hides (plan-mode tasks, the
+ * `chat.header` plugin slot) or the single owner of a frequent action: session
+ * settings and the two pane toggles. Session *shape* and session *status* —
+ * the preset pill, the live cost, the no-credential badge — moved to the
+ * composer's status line: this row is title-bar chrome now, and those answer
+ * "what will this run as / what has it cost", which is the input box's
+ * question.
  */
-export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }: Props) {
+export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   const t = useTranslations("chat.header")
   const tConcurrent = useTranslations("chat.concurrent")
   const tChannelList = useTranslations("desktop.channelList")
   const character = useCharacter(session.characterId)
   const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
-  // Reactive credential status (api key OR subscription bearer). Re-reads on
-  // profile unlock and subscription-changed broadcasts, so the badge never
-  // latches a stale "No API key" for a subscription-reuse user whose bearer
-  // lands after boot.
-  const { keyOk } = useCredentialStatus()
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // ADR-0127: the system-prompt preset pill was built for this header and
-  // never mounted. It self-hides without presets. A conflict-free pick applies
-  // in place (fill-empty); a pick that would overwrite session values opens
-  // the settings sheet, which owns the conflict-resolution dialog.
-  const presetsRaw = usePresets()
-  const presets = useMemo(() => presetsRaw ?? [], [presetsRaw])
-  const updateSession = useUpdateSession()
-  const recordPresetUsage = useRecordPresetUsage()
-  const handleSelectPreset = (preset: SystemPromptPreset) => {
-    const conflicts = detectPresetConflicts(preset, session)
-    if (conflicts.length > 0) {
-      setSettingsOpen(true)
-      return
-    }
-    const plan = buildPresetApplicationPlan(preset, session, "fill-empty")
-    void updateSession(session.id, { ...plan.sessionPatch, activePresetId: preset.id }).catch(
-      (err: unknown) => {
-        loggers.chat.error("preset pill apply failed", err, {
-          sessionId: session.id,
-          presetId: preset.id,
-        })
-      }
-    )
-    void recordPresetUsage(preset.id).catch((err: unknown) => {
-      loggers.chat.warn("recordPresetUsage failed", {
-        presetId: preset.id,
-        err: err instanceof Error ? err.message : String(err),
-      })
-    })
-  }
   const [codexDispatching, setCodexDispatching] = useState(false)
 
   const handleOpenInCodexApp = async () => {
@@ -136,7 +100,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
       <Button
         variant="ghost"
         size="icon"
-        className="hidden size-7 shrink-0 md:inline-flex"
+        className={cn(HEADER_ICON_BUTTON, "hidden shrink-0 md:inline-flex")}
         aria-label={tChannelList(sidebarCollapsed ? "expandSidebar" : "collapseSidebar")}
         aria-controls="conversation-sidebar"
         aria-expanded={!sidebarCollapsed}
@@ -176,25 +140,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
         {/* The reverse direction: self-hides unless this session HAS branches.
             Both can show at once on a branch that was itself branched. */}
         <BranchChildrenChip sessionId={session.id} />
-        {keyOk === false && (
-          <Badge variant="destructive" className="cursor-pointer gap-1" onClick={onOpenSettings}>
-            <KeyRoundIcon className="size-3" />
-            {t("noApiKey")}
-          </Badge>
-        )}
       </div>
-
-      <SessionCostBadgeLive
-        sessionId={session.id}
-        {presets.length > 0 && (
-          <ChatHeaderPresetPill
-            session={session}
-            presets={presets}
-            onSelectPreset={handleSelectPreset}
-          />
-        )}
-        tokensLabel={(input, output) => t("tokensLabel", { input, output })}
-      />
 
       {/* Plan-mode tasks for a non-team chat. Self-hides (returns null) when the
           synthetic `solo:<sessionId>` team has no tasks, so it only appears once
@@ -207,7 +153,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
         <Button
           variant="ghost"
           size="icon"
-          className="size-7"
+          className={HEADER_ICON_BUTTON}
           aria-label={t("openInCodexApp")}
           title={t("openInCodexApp")}
           disabled={codexDispatching}
@@ -225,7 +171,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
         <Button
           variant="ghost"
           size="icon"
-          className="size-7"
+          className={HEADER_ICON_BUTTON}
           aria-label={tConcurrent("splitView")}
           onClick={onSplitView}
         >
@@ -237,7 +183,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
         <Button
           variant="ghost"
           size="icon"
-          className="size-7"
+          className={HEADER_ICON_BUTTON}
           aria-label={tConcurrent("exitSplit")}
           onClick={onExitSplit}
         >
@@ -254,7 +200,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
       <Button
         variant="ghost"
         size="icon"
-        className="size-7"
+        className={HEADER_ICON_BUTTON}
         aria-label={t("ariaSettings")}
         onClick={() => setSettingsOpen(true)}
       >
@@ -264,7 +210,7 @@ export function ChatHeader({ session, onOpenSettings, onSplitView, onExitSplit }
       {/* Pointer-width only: below `md` the dock is a Sheet whose opener lives
           in the mobile shell's own top bar, and this header is suppressed
           there anyway (`showHeader={false}`). */}
-      <ArtifactDockToggle className="hidden md:inline-flex" />
+      <ArtifactDockToggle className={cn(HEADER_ICON_BUTTON, "hidden md:inline-flex")} />
 
       <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>

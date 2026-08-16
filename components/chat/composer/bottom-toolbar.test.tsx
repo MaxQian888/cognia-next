@@ -27,10 +27,10 @@ jest.mock("next/navigation", () => ({
 
 // Stub the heavier sibling components — we only care about props.
 const lastSelectorProps: Record<string, unknown> = {}
-jest.mock("@/components/agent/mode/mode-selector", () => ({
-  AgentModeSelector: (props: Record<string, unknown>) => {
+jest.mock("@/components/agent/composition/composition-chip", () => ({
+  CompositionChip: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
-    return <div data-testid="agent-mode-selector" />
+    return <div data-testid="composition-chip" />
   },
 }))
 jest.mock("@/components/agent/mode/runtime-selector", () => ({
@@ -39,11 +39,11 @@ jest.mock("@/components/agent/mode/runtime-selector", () => ({
     return <div data-testid="agent-runtime-selector" />
   },
 }))
-jest.mock("@/components/agent/external-agent/selector", () => ({
-  ExternalAgentSelector: (props: Record<string, unknown>) => {
-    Object.assign(lastSelectorProps, props)
-    return <div data-testid="external-agent-selector" />
-  },
+// The sandbox indicator now renders inline on the wide row, so it mounts in
+// every render here. It reads the character record through Dexie — stub the
+// live query rather than standing up a database for a status glyph.
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => undefined,
 }))
 jest.mock("../permission-mode-indicator", () => ({
   PermissionModeIndicator: (props: Record<string, unknown>) => {
@@ -106,13 +106,6 @@ jest.mock("@/stores/agent", () => ({
     selector(agentRuntimeState),
 }))
 
-const setActiveAgentMock = jest.fn()
-jest.mock("@/stores/agent/external-agent-store", () => ({
-  useExternalAgentStore: {
-    getState: () => ({ setActiveAgent: setActiveAgentMock }),
-  },
-}))
-
 let chatStoreState = {
   messages: [] as unknown[],
   status: "idle" as string,
@@ -141,7 +134,6 @@ const session: ChatSession = {
 
 beforeEach(() => {
   pushSpy.mockClear()
-  setActiveAgentMock.mockClear()
   chatStoreState = {
     messages: [],
     status: "idle",
@@ -160,6 +152,25 @@ beforeEach(() => {
 
 // Stub the workflow toolbar variant so the branching test doesn't need
 // the full workflow context tree.
+// The three session-shape / session-status pieces that moved down from the
+// chat header. Each is covered by its own suite; here they are stubs so this
+// file keeps testing the toolbar's packing, not their data plumbing.
+// In the shipped default state the preset chip (no presets) and the credential
+// badge (a key is configured) render nothing; only the cost badge is on screen.
+// The stubs mirror that so the chrome budget below measures what users get.
+let movedControlsVisible = false
+jest.mock("./preset-chip", () => ({
+  ComposerPresetChip: ({ className }: { className?: string }) =>
+    movedControlsVisible ? <div data-testid="composer-preset-chip" className={className} /> : null,
+}))
+jest.mock("./credential-badge", () => ({
+  ComposerCredentialBadge: () =>
+    movedControlsVisible ? <div data-testid="composer-credential-badge" /> : null,
+}))
+jest.mock("@/components/chat/session-cost-badge-live", () => ({
+  SessionCostBadgeLive: () => <div data-testid="session-cost-badge" />,
+}))
+
 jest.mock("./workflow-bottom-toolbar", () => ({
   WorkflowBottomToolbar: () => <div data-testid="workflow-bottom-toolbar" />,
 }))
@@ -177,7 +188,7 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(screen.getByTestId("workflow-bottom-toolbar")).toBeInTheDocument()
     // Generic-toolbar controls should not be rendered when the branch fires.
     expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
-    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
+    expect(screen.queryByTestId("composition-chip")).toBeNull()
     expect(screen.queryByTestId("web-search-toggle")).toBeNull()
   })
 
@@ -199,21 +210,48 @@ describe("BottomToolbar — session-kind branching", () => {
   it("renders the generic toolbar for a direct session", () => {
     render(<BottomToolbar session={session} />)
     expect(screen.queryByTestId("workflow-bottom-toolbar")).toBeNull()
-    // The execution row keeps the model and Agent runtime visible. Detailed
-    // mode/agent configuration stays behind "\u22ef", and capability toggles
-    // live under the composer's `+`.
+    // The wide row carries the whole session-shape roster inline \u2014 model,
+    // permission, runtime, Agent mode, sandbox. Capability toggles live under
+    // the composer's `+`, not here.
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
+    expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
+    expect(screen.getByTestId("sandbox-shield")).toBeInTheDocument()
     expect(screen.queryByTestId("web-search-toggle")).toBeNull()
     expect(screen.queryByTestId("enhance-button")).toBeNull()
   })
 
-  it("keeps capability toggles out of the advanced-controls overflow", () => {
+  // The "\u22ef" is a packing device for narrow composers. On a row with the space
+  // to show them, hiding the active Agent mode and the sandbox state behind a
+  // button that advertises neither is the collapse this layout removed.
+  it("hosts the preset chip with model + permission and the session status at the right", () => {
+    movedControlsVisible = true
+    try {
+      render(<BottomToolbar session={session} />)
+      // Preset sits inside the execution group (it self-hides, so no divider of its own).
+      expect(screen.getByTestId("composer-execution-controls")).toContainElement(
+        screen.getByTestId("composer-preset-chip")
+      )
+      const cluster = screen.getByTestId("composer-status-cluster")
+      expect(cluster).toContainElement(screen.getByTestId("session-cost-badge"))
+      expect(cluster).toContainElement(screen.getByTestId("composer-credential-badge"))
+    } finally {
+      movedControlsVisible = false
+    }
+  })
+
+  it("collapses nothing into an overflow menu on the wide row", () => {
     render(<BottomToolbar session={session} />)
-    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
-    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
-    expect(screen.queryByTestId("enhance-button")).toBeNull()
+    expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
+  })
+
+  // Agent Modes compose the Claude SDK runtime's preset; an external CLI agent
+  // brings its own, so the chip has nothing to say there.
+  it("drops the Agent-mode chip while an external agent is selected", () => {
+    agentRuntimeState.runtime = "external"
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+    expect(screen.queryByTestId("composition-chip")).toBeNull()
   })
 
   // Effort is a qualifier of the model, meaningless without one, so it renders
@@ -261,28 +299,28 @@ describe("BottomToolbar — narrow-width More menu", () => {
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("composer-toolbar-more"))
-    expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
+    expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
   })
 
-  // Every width now shows the SAME roster — the branches differ only in how the
-  // row is packed. That is what keeps each control mounted in exactly one place.
+  // Every width shows the SAME roster — the branches differ only in how the row
+  // is packed. That is what keeps each control mounted in exactly one place:
+  // wide lays them out, narrow folds the tail into "⋯".
   it("shows the same controls wide as compact, differing only in packing", () => {
     mockToolbarWidth = 600
     const wide = render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
-    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
-    expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
+    expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
+    expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
     wide.unmount()
 
     mockToolbarWidth = 300
     render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
+    expect(screen.queryByTestId("composition-chip")).toBeNull()
     fireEvent.click(screen.getByTestId("composer-toolbar-more"))
-    expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
+    expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
   })
 
   it("keeps a medium-width toolbar on one row instead of splitting status chrome early", () => {
@@ -310,56 +348,55 @@ describe("BottomToolbar — narrow-width More menu", () => {
 })
 
 describe("BottomToolbar — agent-mode wiring", () => {
-  /**
-   * The mode / external-agent selectors moved into the overflow Popover, so
-   * they do not mount until it opens. Render, open, then read the props the
-   * stubs captured.
-   */
-  function renderWithOverflowOpen(node: React.ReactElement) {
-    const result = render(node)
-    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
-    return result
+  /** The wide row mounts the mode selector directly — no menu to open first. */
+  function renderWide(node: React.ReactElement) {
+    return render(node)
   }
 
-  it("passes onSelectTeam routing to /agent-teams/workspace", () => {
-    renderWithOverflowOpen(<BottomToolbar session={session} />)
-    const onSelectTeam = lastSelectorProps.onSelectTeam as (id: string) => void
-    expect(typeof onSelectTeam).toBe("function")
-    onSelectTeam("team-x")
-    expect(pushSpy).toHaveBeenCalledWith("/agent-teams/workspace?teamId=team-x")
+  // The chip is scoped to the session it sits under. Its predecessor took no
+  // session at all and wrote the app-wide default, which is why changing the
+  // mode here stopped affecting a conversation once the settings sheet had
+  // recorded a per-session choice.
+  it("scopes the mode control to the current session", () => {
+    renderWide(<BottomToolbar session={session} />)
+    expect(lastSelectorProps.sessionId).toBe("s1")
   })
 
-  it("passes onCreateTeam routing to /agent-teams", () => {
-    renderWithOverflowOpen(<BottomToolbar session={session} />)
-    const onCreateTeam = lastSelectorProps.onCreateTeam as () => void
-    expect(typeof onCreateTeam).toBe("function")
-    onCreateTeam()
-    expect(pushSpy).toHaveBeenCalledWith("/agent-teams")
+  it("passes no session id before there is a session, so the chip edits the default", () => {
+    renderWide(<BottomToolbar session={null} />)
+    expect(lastSelectorProps.sessionId).toBeUndefined()
   })
 
-  it("still passes selectedModeId + onModeChange (existing wiring intact)", () => {
-    renderWithOverflowOpen(<BottomToolbar session={session} />)
-    expect(lastSelectorProps.selectedModeId).toBe("general")
-    expect(typeof lastSelectorProps.onModeChange).toBe("function")
+  it("disables the mode control while a turn is streaming", () => {
+    chatStoreState = { ...chatStoreState, status: "streaming" }
+    renderWide(<BottomToolbar session={session} />)
+    expect(lastSelectorProps.disabled).toBe(true)
+  })
+
+  it("cycles the permission mode through the chat store", () => {
+    renderWide(<BottomToolbar session={session} />)
+    const onCycle = lastSelectorProps.onCycle as (next: string) => void
+    onCycle("acceptEdits")
+    expect(chatStoreState.setPermissionMode).toHaveBeenCalledWith("acceptEdits")
   })
 
   it("passes disabled=true to child controls when streaming", () => {
     chatStoreState.status = "streaming"
-    renderWithOverflowOpen(<BottomToolbar session={session} />)
+    renderWide(<BottomToolbar session={session} />)
     expect(lastSelectorProps.disabled).toBe(true)
   })
 
   it("passes disabled=false to child controls when idle", () => {
-    renderWithOverflowOpen(<BottomToolbar session={session} />)
+    renderWide(<BottomToolbar session={session} />)
     expect(lastSelectorProps.disabled).toBe(false)
   })
 
-  it("syncs externalAgentId to useExternalAgentStore on agent change", () => {
+  // The runtime chip owns the external-agent record now (one dropdown, one
+  // choice), so the toolbar no longer brokers a second selector's callback.
+  it("mounts no separate external-agent selector", () => {
     agentRuntimeState.runtime = "external"
-    renderWithOverflowOpen(<BottomToolbar session={session} />)
-    const onAgentChange = lastSelectorProps.onAgentChange as (id: string | null) => void
-    expect(typeof onAgentChange).toBe("function")
-    onAgentChange("agent-1")
-    expect(setActiveAgentMock).toHaveBeenCalledWith("agent-1")
+    renderWide(<BottomToolbar session={session} />)
+    expect(screen.queryByTestId("external-agent-selector")).toBeNull()
+    expect(lastSelectorProps.onAgentChange).toBeUndefined()
   })
 })

@@ -198,9 +198,19 @@ describe("Composer — data-hooks integration", () => {
     await waitFor(() =>
       expect(textarea).toHaveValue("Existing draft\n\nPlease explain this selection.")
     )
-    expect(textarea).toHaveFocus()
+    // Focus lands one animation frame after the text does — the intent effect
+    // schedules `textareaRef.current?.focus()` inside a `requestAnimationFrame`,
+    // and jsdom services that on a ~16ms timer. A bare assertion here raced the
+    // frame and failed ~1 run in 4 with the value already correct but focus
+    // still on <body>, so wait for the frame instead of assuming it landed.
+    await waitFor(() => expect(textarea).toHaveFocus())
     expect(useComposerIntentStore.getState().pendingBySession["ses_42"]).toBeUndefined()
-  })
+    // Explicit budget: this mounts the whole composer — every toolbar control,
+    // store subscription and Dexie live query included — and then waits on two
+    // async settle points. It has been sitting just under jsdom's 5s default,
+    // so any control added to the toolbar failed it as a timeout rather than as
+    // the assertion it actually is.
+  }, 20_000)
 
   it("renders without crashing when DataAdapterProvider is mounted", () => {
     const Wrapper = withAdapter(makeAdapter())
@@ -304,7 +314,10 @@ describe("Composer — data-hooks integration", () => {
     const footer = screen.getByTestId("composer-footer")
     expect(footer.className).toContain("flex-nowrap")
     expect(footer).toContainElement(screen.getByTestId("canned-response-trigger"))
-    expect(footer).toContainElement(screen.getByTestId("composer-toolbar-more"))
+    // The wide footer holds the execution controls inline — there is no "⋯" to
+    // fold them into at this width.
+    expect(footer).toContainElement(screen.getByTestId("composer-execution-controls"))
+    expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
   })
 })
 
@@ -620,10 +633,17 @@ describe("Composer — wallpaper-aware tonality", () => {
     expect(pill).toHaveAttribute("data-tonality", "translucent")
   })
 
-  it("flags the bottom bar as a glass tonality surface", () => {
+  // Regression: the bar used to pair a Tailwind `from-background` gradient with
+  // `data-tonality="glass"`. The tonality rules only swap `background-color`, so
+  // the gradient (a `background-image`) painted an opaque slab over the
+  // wallpaper the message list a few pixels above was showing. One class owns
+  // the fade now, and app/globals.css §4d re-mixes it for an active wallpaper.
+  it("fades the bottom bar with the wallpaper-aware composer scrim", () => {
     renderComposer()
     const bar = document.querySelector("[class*='@container/composer']")
-    expect(bar).toHaveAttribute("data-tonality", "glass")
+    expect(bar).toHaveClass("composer-scrim")
+    expect(bar).not.toHaveAttribute("data-tonality")
+    expect(bar?.className).not.toContain("from-background")
   })
 
   it("aligns the composer with the conversation reading column", () => {

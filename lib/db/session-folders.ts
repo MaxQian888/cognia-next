@@ -58,6 +58,43 @@ export async function renameFolder(id: string, name: string): Promise<void> {
 }
 
 /**
+ * Persist a manual order for the workspace's folders.
+ *
+ * `SessionFolder.order` is what the list model sorts sections by; until this
+ * existed it was only ever assigned at create time (append to the end), so the
+ * "manual sort position" the type promised could not actually be changed. Ids
+ * are renumbered from zero in the order given, and ids that are not folders of
+ * this workspace are ignored — a stale list from a concurrent rename/delete
+ * must not renumber someone else's rows.
+ */
+export async function reorderFolders(
+  orderedIds: readonly string[],
+  opts?: { projectId?: string }
+): Promise<void> {
+  const pid = await resolveScopeProjectId(opts?.projectId)
+  const db = getDb()
+  await db.transaction("rw", db.sessionFolders, async () => {
+    const siblings = await db.sessionFolders.where("projectId").equals(pid).toArray()
+    const byId = new Map(siblings.map((folder) => [folder.id, folder]))
+    const requested = orderedIds.filter((id) => byId.has(id))
+    // Anything the caller did not name keeps its relative position after the
+    // ones it did — a folder created mid-drag lands at the end, not at 0.
+    const rest = siblings
+      .filter((folder) => !requested.includes(folder.id))
+      .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+      .map((folder) => folder.id)
+    const now = Date.now()
+    await Promise.all(
+      [...requested, ...rest].map((id, index) => {
+        const folder = byId.get(id)
+        if (!folder || folder.order === index) return Promise.resolve(0)
+        return db.sessionFolders.update(id, { order: index, updatedAt: now })
+      })
+    )
+  })
+}
+
+/**
  * Delete a folder. Member sessions are reverted to loose (their `folderId`
  * cleared) in the SAME transaction — the conversations themselves are never
  * deleted. `folderId` is non-indexed, so members are found by a table scan.

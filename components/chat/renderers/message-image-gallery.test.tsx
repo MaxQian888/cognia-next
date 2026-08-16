@@ -128,9 +128,7 @@ describe("MessageImageGallery", () => {
     })
 
     render(
-      <MessageImageGallery
-        items={[{ id: "stored", src: mediaRef("h"), alt: "stored image" }]}
-      />
+      <MessageImageGallery items={[{ id: "stored", src: mediaRef("h"), alt: "stored image" }]} />
     )
 
     await waitFor(() => {
@@ -158,10 +156,10 @@ describe("MessageImageGallery", () => {
       .mockReturnValueOnce("blob:thumbnail")
       .mockReturnValueOnce("blob:canonical")
 
-    render(
-      <MessageImageGallery items={[{ id: "stored", src: mediaRef("h"), alt: "stored" }]} />
+    render(<MessageImageGallery items={[{ id: "stored", src: mediaRef("h"), alt: "stored" }]} />)
+    await waitFor(() =>
+      expect(screen.getByAltText("stored")).toHaveAttribute("src", "blob:thumbnail")
     )
-    await waitFor(() => expect(screen.getByAltText("stored")).toHaveAttribute("src", "blob:thumbnail"))
     expect(mockGetMessageMedia).toHaveBeenCalledTimes(1)
 
     fireEvent.click(screen.getByRole("button", { name: "previewAria:stored" }))

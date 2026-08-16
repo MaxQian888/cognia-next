@@ -177,4 +177,47 @@ describe("HoverScrollText", () => {
 
     expect(text.style.getPropertyValue("--hover-scroll-duration")).toBe("8000ms")
   })
+
+  describe("search highlighting", () => {
+    it("renders the text verbatim with no query", () => {
+      const { container } = render(<HoverScrollText text="Quarterly planning" />)
+      expect(container.querySelector("mark")).toBeNull()
+      expect(screen.getByText("Quarterly planning")).toBeInTheDocument()
+    })
+
+    it("emphasizes the matched run, case-insensitively", () => {
+      const { container } = render(<HoverScrollText text="Quarterly Planning" highlight="plan" />)
+      const marks = Array.from(container.querySelectorAll("mark"))
+      expect(marks.map((m) => m.textContent)).toEqual(["Plan"])
+    })
+
+    it("emphasizes every occurrence", () => {
+      const { container } = render(<HoverScrollText text="plan the plan" highlight="plan" />)
+      expect(container.querySelectorAll("mark")).toHaveLength(2)
+    })
+
+    it("ignores a whitespace-only query", () => {
+      const { container } = render(<HoverScrollText text="Quarterly planning" highlight="   " />)
+      expect(container.querySelector("mark")).toBeNull()
+    })
+
+    it("leaves the text alone when the query does not match", () => {
+      const { container } = render(<HoverScrollText text="Quarterly planning" highlight="zzz" />)
+      expect(container.querySelector("mark")).toBeNull()
+    })
+
+    it("keeps the scroll measurement working while highlighted", () => {
+      // The marked render is character-identical, so the overflow measurement
+      // must behave exactly as it does on the plain path.
+      const { container } = render(
+        <HoverScrollText text="A long planning title" highlight="plan" />
+      )
+      const viewport = container.querySelector('[data-slot="hover-scroll-text"]') as HTMLElement
+      const text = viewport.firstElementChild as HTMLElement
+      Object.defineProperty(viewport, "clientWidth", { configurable: true, value: 100 })
+      Object.defineProperty(text, "scrollWidth", { configurable: true, value: 244 })
+      fireEvent.mouseEnter(viewport)
+      expect(text).toHaveAttribute("data-scrolling", "true")
+    })
+  })
 })

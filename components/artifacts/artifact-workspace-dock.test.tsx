@@ -192,13 +192,18 @@ import {
   ArtifactWorkspaceDock,
   DOCK_RESIZE_DURATION_MS,
   DOCK_RESIZE_EASE,
+  dockCapForChatFloor,
 } from "./artifact-workspace-dock"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import {
+  CHAT_MIN_PX,
+  WORKSPACE_DOCK_BOUNDS,
+  useArtifactDockLayoutStore,
+} from "@/stores/artifact/artifact-dock-layout-store"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
@@ -499,10 +504,33 @@ describe("ArtifactWorkspaceDock", () => {
           <div data-testid="chat" />
         </ArtifactWorkspaceDock>
       )
+      const requestsBefore = useArtifactDockLayoutStore.getState().dockSizeRequest
 
       dragTo(42)
 
-      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
+      const state = useArtifactDockLayoutStore.getState()
+      expect(state.dockSize).toBe(42)
+      // No magnet moved the drop, so nothing asks the panel to move again: a
+      // request here would run a full snapshot transition over an unchanged
+      // layout at the end of every ordinary drag.
+      expect(state.dockSizeRequest).toBe(requestsBefore)
+      offsetWidth.mockRestore()
+    })
+
+    it("only animates a release when the snap actually moves the divider", () => {
+      const offsetWidth = withGroupWidth(1280)
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      const requestsBefore = useArtifactDockLayoutStore.getState().dockSizeRequest
+
+      dragTo(35.5)
+
+      // The magnet pulled 35.5% onto the 34% preset, and that move is animated.
+      expect(useArtifactDockLayoutStore.getState().dockSizeRequest).toBe(requestsBefore + 1)
       offsetWidth.mockRestore()
     })
 
@@ -1119,6 +1147,40 @@ describe("ArtifactWorkspaceDock", () => {
   })
 })
 
+/**
+ * The dock's percentages are shares of the `ResizablePanelGroup`, and that group
+ * is not the window: a right-docked terminal takes its cut at the shell row
+ * before the dock sees a pixel. Pure, because the interesting inputs are widths
+ * jsdom cannot produce by laying anything out.
+ */
+describe("chat floor cap", () => {
+  it("does not clamp while the group is unmeasured", () => {
+    // jsdom reports every width as 0, and so does the first layout callback. A
+    // cap derived from that would collapse the dock on mount.
+    expect(dockCapForChatFloor(0)).toBe(100)
+    expect(dockCapForChatFloor(Number.NaN)).toBe(100)
+  })
+
+  it("leaves a roomy group to the profile bounds", () => {
+    // 420 of 1920 is 21.9%, so the cap sits above the workspace profile's own
+    // 65% and the existing bounds keep deciding.
+    expect(dockCapForChatFloor(1920)).toBeGreaterThan(WORKSPACE_DOCK_BOUNDS.max)
+  })
+
+  it("caps the dock once the conversation would fall under the floor", () => {
+    // 1280px window with a 30% right-docked terminal leaves a ~900px group.
+    // The workspace profile would take 65% of it and leave 315px of
+    // conversation; the cap holds the chat column at CHAT_MIN_PX instead.
+    const cap = dockCapForChatFloor(900)
+    expect(cap).toBeLessThan(WORKSPACE_DOCK_BOUNDS.max)
+    expect((900 * (100 - cap)) / 100).toBeCloseTo(CHAT_MIN_PX, 5)
+  })
+
+  it("never returns a negative cap when the group is narrower than the floor", () => {
+    expect(dockCapForChatFloor(200)).toBe(0)
+  })
+})
+
 describe("dock motion tokens", () => {
   it("takes its duration and curve from the shared motion tokens", () => {
     expect(DOCK_RESIZE_DURATION_MS).toBe(MOBILE_DURATION.normal * 1000)
@@ -1143,5 +1205,20 @@ describe("dock motion tokens", () => {
     )
     expect(globalStyles).toContain("object-position: left center")
     expect(globalStyles).toContain("object-position: right center")
+  })
+
+  it("draws the panel snapshots at natural size instead of scaling them", () => {
+    // The UA sizes a snapshot `inline-size: 100%; block-size: auto`, so the box
+    // keeps the snapshot's aspect ratio and shrinks with the animating group —
+    // `object-fit: cover` scaled every icon and glyph with the motion instead of
+    // cropping. Pin the geometry-preserving rules and the UA crossfade blend.
+    const globalStyles = readFileSync(join(__dirname, "../../app/globals.css"), "utf8")
+    const start = globalStyles.indexOf("::view-transition-old(cognia-dock-chat)")
+    const end = globalStyles.indexOf("html.reduce-motion::view-transition-group(cognia-dock-chat)")
+    const snapshotRules = globalStyles.slice(start, end).replaceAll(/\s/g, "")
+    expect(snapshotRules).toContain("block-size:100%")
+    expect(snapshotRules).toContain("object-fit:none")
+    expect(snapshotRules).not.toContain("object-fit:cover")
+    expect(snapshotRules).not.toContain("mix-blend-mode:normal")
   })
 })

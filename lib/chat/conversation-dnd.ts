@@ -10,6 +10,8 @@
  *    sections (e.g. between two date buckets) has no manual-order meaning.
  */
 
+import { conversationSectionKey, type ConversationSection } from "./conversation-list-model"
+
 /** Minimal shape of a @dnd-kit draggable/droppable identifier + payload. */
 export interface DndNode {
   id: string
@@ -85,4 +87,71 @@ export function resolveConversationDrop(
   ids.splice(from, 1)
   ids.splice(to, 0, active.id)
   return { type: "reorder", ids }
+}
+
+/**
+ * A reorder the user just dropped, held on screen until the store catches up.
+ *
+ * The persisted order arrives through a live query a few frames after the
+ * drop. Without a projection, @dnd-kit resets its transforms first, so every
+ * row glides *back* to its pre-drop slot and the real reorder then lands as an
+ * instant DOM swap — with two similar-looking rows that reads as "nothing
+ * happened". Applying the dropped order synchronously lets the drop animation
+ * carry the row into the slot it will keep.
+ */
+export interface PendingReorder {
+  /** `conversationSectionKey` of the section the drop happened in. */
+  sectionKey: string
+  /** That section's ids as the *store* had them at drop time — the snapshot the projection overrides. */
+  baseIds: readonly string[]
+  /** The order the user dropped, and the store is about to persist. */
+  ids: readonly string[]
+}
+
+export type PendingReorderStatus =
+  /** No pending reorder. */
+  | "idle"
+  /** The store still shows the pre-drop snapshot; the dropped order is projected over it. */
+  | "applied"
+  /** The store now carries the dropped order — the projection has become a no-op. */
+  | "settled"
+  /**
+   * The store moved somewhere else (the section is gone, its membership changed,
+   * or another writer reordered it). The snapshot no longer holds, so the
+   * projection must be dropped rather than override a truth it never saw.
+   */
+  | "stale"
+
+function sameOrder(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i])
+}
+
+/**
+ * Project a {@link PendingReorder} onto the model's sections. Pure and cheap
+ * (one pass over one section), so the component derives the displayed
+ * sections from it every render and clears the pending reorder as soon as the
+ * status stops being `"applied"`.
+ */
+export function projectPendingReorder<S extends ConversationSection>(
+  sections: readonly S[],
+  pending: PendingReorder | null
+): { sections: readonly S[]; status: PendingReorderStatus } {
+  if (!pending) return { sections, status: "idle" }
+  const index = sections.findIndex(
+    (section) => conversationSectionKey(section) === pending.sectionKey
+  )
+  if (index === -1) return { sections, status: "stale" }
+  const section = sections[index]!
+  const currentIds = section.sessions.map((s) => s.id)
+  if (sameOrder(currentIds, pending.ids)) return { sections, status: "settled" }
+  if (!sameOrder(currentIds, pending.baseIds)) return { sections, status: "stale" }
+  const byId = new Map(section.sessions.map((s) => [s.id, s]))
+  // A dropped order is a permutation of the snapshot by construction
+  // (`resolveConversationDrop`); anything else cannot be projected honestly.
+  if (pending.ids.length !== byId.size || !pending.ids.every((id) => byId.has(id))) {
+    return { sections, status: "stale" }
+  }
+  const projected = sections.slice()
+  projected[index] = { ...section, sessions: pending.ids.map((id) => byId.get(id)!) }
+  return { sections: projected, status: "applied" }
 }

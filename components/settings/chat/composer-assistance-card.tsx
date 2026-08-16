@@ -51,6 +51,10 @@ export function ComposerAssistanceCard() {
 
   const ca: ComposerAssistance = settings?.composerAssistance ?? {}
   const enhanceEnabled = ca.enhance?.enabled !== false
+  // Two independent ghost-text tiers: the local one is free (opt-out), the
+  // model one bills per keystroke burst (opt-in). See `ghostText` in the
+  // AppSettings docs and `lib/chat/completion/inline/engine.ts`.
+  const ghostLocalEnabled = ca.ghostText?.local !== false
   const ghostEnabled = !!ca.ghostText?.enabled
   const debounceMs = ca.ghostText?.debounceMs ?? DEFAULT_DEBOUNCE
   const startersEnabled = ca.suggestions?.starters !== false
@@ -73,6 +77,14 @@ export function ComposerAssistanceCard() {
         hint={t("enhance.hint")}
         checked={enhanceEnabled}
         onChange={(next) => update({ enhance: { enabled: next } })}
+      />
+
+      <ToggleRow
+        id="composer-ghost-local"
+        label={t("ghostTextLocal.label")}
+        hint={t("ghostTextLocal.hint")}
+        checked={ghostLocalEnabled}
+        onChange={(next) => update({ ghostText: { ...ca.ghostText, local: next } })}
       />
 
       <ToggleRow

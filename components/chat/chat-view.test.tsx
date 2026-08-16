@@ -56,6 +56,20 @@ jest.mock("./workspace-changes-card", () => ({
 jest.mock("@/components/agent/external-agent/session-panel", () => ({
   ExternalAgentSessionPanel: () => null,
 }))
+// Transparent spy over the real AnimatePresence: behavior is untouched, but
+// the surface-swap tests can assert the presence mode the pane mounts with.
+const animatePresenceProps: Array<Record<string, unknown>> = []
+jest.mock("motion/react", () => {
+  const actual = jest.requireActual<typeof import("motion/react")>("motion/react")
+  const react = jest.requireActual<typeof import("react")>("react")
+  return {
+    ...actual,
+    AnimatePresence: (props: Record<string, unknown>) => {
+      animatePresenceProps.push(props)
+      return react.createElement(actual.AnimatePresence, props)
+    },
+  }
+})
 jest.mock("next-intl", () => {
   // Stable function reference — prevents useCallback deps from changing across renders
   const t = (k: string) => k
@@ -706,6 +720,52 @@ describe("ChatPane", () => {
 
       expect(screen.queryByRole("status")).not.toBeInTheDocument()
       expect(MessageList).toHaveBeenCalled()
+    })
+
+    // Regression: under `mode="sync"` the exiting loader kept its `flex-1`
+    // slot in the column for the length of its exit, so the transcript
+    // mounted in the lower half of the pane and snapped to full height when
+    // the exit finished. `popLayout` lifts the exiting surface out of flow —
+    // the swap is a crossfade in place.
+    it("swaps surfaces with popLayout so the entering surface never shares the column", () => {
+      animatePresenceProps.length = 0
+      const props = makeProps()
+      const { rerender } = render(<ChatPane {...props} />)
+      act(() => jest.advanceTimersByTime(180))
+      expect(screen.getByRole("status")).toHaveTextContent("loading")
+
+      storeState.messages = [loadedMessage]
+      storeState.messagesLoading = false
+      rerender(<ChatPane {...props} />)
+      act(() => jest.advanceTimersByTime(320))
+      expect(MessageList).toHaveBeenCalled()
+
+      const surfaceSwap = animatePresenceProps.filter(
+        (p) => p.initial === false && typeof p.onExitComplete === "function"
+      )
+      expect(surfaceSwap.length).toBeGreaterThan(0)
+      for (const p of surfaceSwap) expect(p.mode).toBe("popLayout")
+    })
+
+    it("mounts every surface inside one positioned stage that owns the pane height", () => {
+      const props = makeProps()
+      const { container, rerender } = render(<ChatPane {...props} />)
+      act(() => jest.advanceTimersByTime(180))
+
+      const stage = container.querySelector<HTMLElement>('[data-slot="chat-surface-stage"]')
+      expect(stage).not.toBeNull()
+      // `relative`: popLayout pins the exiting surface against this box.
+      // `flex-1 min-h-0`: the stage — not the surfaces — claims the column
+      // height, so whichever surface is present fills it edge to edge.
+      expect(stage).toHaveClass("relative", "flex-1", "min-h-0", "flex-col")
+      expect(stage).toContainElement(screen.getByRole("status"))
+
+      storeState.messages = [loadedMessage]
+      storeState.messagesLoading = false
+      rerender(<ChatPane {...props} />)
+      act(() => jest.advanceTimersByTime(320))
+
+      expect(stage).toContainElement(screen.getByTestId("composer"))
     })
   })
 })

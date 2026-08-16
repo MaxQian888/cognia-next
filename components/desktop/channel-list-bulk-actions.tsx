@@ -2,9 +2,10 @@
 
 import dynamic from "next/dynamic"
 import { useCallback, useMemo, useState } from "react"
-import type { ChatSession } from "@cognia/agent-config-types"
+import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { AnimatePresence, motion } from "motion/react"
 
+import { trackConversationRowAction } from "@/lib/telemetry/conversation-list-events"
 import { useReducedMotionVariants } from "@/lib/ui/motion"
 import { ChannelListBulkToolbar } from "./channel-list-bulk-toolbar"
 
@@ -32,6 +33,9 @@ export interface ChannelListBulkActionsProps {
   onSetPinned?: (ids: string[], pinned: boolean) => void | Promise<void>
   onArchive?: (ids: string[]) => void | Promise<void>
   onUnarchive?: (ids: string[]) => void | Promise<void>
+  /** Folders the selection can be filed into (active view only). */
+  folders?: readonly SessionFolder[]
+  onMoveToFolder?: (ids: string[], folderId: string | null) => void | Promise<void>
   onClear: () => void
 }
 
@@ -45,6 +49,8 @@ export function ChannelListBulkActions({
   onSetPinned,
   onArchive,
   onUnarchive,
+  folders,
+  onMoveToFolder,
   onClear,
 }: ChannelListBulkActionsProps) {
   const toolbarVariants = useReducedMotionVariants(TOOLBAR_VARIANTS)
@@ -103,8 +109,18 @@ export function ChannelListBulkActions({
               onUnarchive={() =>
                 runAndClear(onUnarchive ? () => onUnarchive(selectedIds) : undefined)
               }
+              folders={folders}
+              onMoveToFolder={
+                onMoveToFolder
+                  ? (folderId) => runAndClear(() => onMoveToFolder(selectedIds, folderId))
+                  : undefined
+              }
               onShare={() => {
                 if (shareSessions.length === 0) return
+                // Every sibling action reports itself through the list's
+                // wrapper; share went through a dialog instead and reported
+                // nothing at all.
+                void trackConversationRowAction("share", shareSessions.length)
                 setShareDialogRequested(true)
                 setShareOpen(true)
               }}

@@ -9,6 +9,7 @@ import type {
   ConversationGroupBy,
   ConversationSidebarMetadata,
   ConversationSidebarSettings,
+  ConversationSortBy,
 } from "@cognia/agent-config-types"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -27,6 +28,10 @@ import {
   resolveConversationSidebarMetadata,
   toggleConversationSidebarMetadata,
 } from "@/lib/chat/conversation-grouping"
+import {
+  CONVERSATION_SORT_BY_OPTIONS,
+  resolveConversationSortBy,
+} from "@/lib/chat/conversation-filters"
 import { SettingsCard } from "../common/settings-section"
 
 /**
@@ -47,6 +52,9 @@ export function ConversationSidebarCard() {
   const compact = settings?.density === "compact"
   const showPreview = settings?.showPreview ?? false
   const groupBy = resolveConversationGroupBy(settings)
+  const sortBy = resolveConversationSortBy(settings)
+  const showCustomIcons = settings?.showCustomIcons !== false
+  const showTimestamps = settings?.showTimestamps !== false
   const showUnreadBadges = settings?.showUnreadBadges !== false
   const contentSearch = settings?.searchScope === "titleAndContent"
   const metadata = resolveConversationSidebarMetadata(settings)
@@ -75,6 +83,24 @@ export function ConversationSidebarCard() {
       label: t("preview.label"),
       checked: showPreview,
       onCheckedChange: (v) => saveSidebar({ showPreview: v }),
+    },
+    {
+      // The sidebar's own display menu has always had this; Settings did not,
+      // so a user looking for it here could not find it.
+      id: "sidebar-custom-icons",
+      heading: t("customIcons.heading"),
+      description: t("customIcons.description"),
+      label: t("customIcons.label"),
+      checked: showCustomIcons,
+      onCheckedChange: (v) => saveSidebar({ showCustomIcons: v }),
+    },
+    {
+      id: "sidebar-timestamps",
+      heading: t("timestamps.heading"),
+      description: t("timestamps.description"),
+      label: t("timestamps.label"),
+      checked: showTimestamps,
+      onCheckedChange: (v) => saveSidebar({ showTimestamps: v }),
     },
     {
       id: "sidebar-unread",
@@ -129,6 +155,28 @@ export function ConversationSidebarCard() {
               {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
                 <SelectItem key={option} value={option}>
                   {t(`groupBy.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="sidebar-sort-by">{t("sortBy.heading")}</Label>
+            <p className="text-sm text-muted-foreground">{t("sortBy.description")}</p>
+          </div>
+          <Select
+            value={sortBy}
+            onValueChange={(value) => saveSidebar({ sortBy: value as ConversationSortBy })}
+          >
+            <SelectTrigger id="sidebar-sort-by" className="w-44" aria-label={t("sortBy.label")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CONVERSATION_SORT_BY_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`sortBy.options.${option}`)}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -82,6 +82,7 @@ import {
   finishDirectChatExecutionRun,
   projectDirectChatSdkMessage,
 } from "@/lib/execution/direct-chat-run"
+import { settleChatTurnForSession } from "@/lib/work-submission/chat-adapter"
 import type { UIMessage } from "ai"
 import {
   chatToolCallsById,
@@ -103,6 +104,26 @@ import {
   scheduleLoopContinuation,
 } from "./claude-chat-turn-tasks"
 import type { SendFn } from "./claude-chat-turn-tasks"
+
+async function settleChatTranscript(
+  sessionId: string,
+  messages: UIMessage[] | undefined,
+  outcome: "completed" | "failed",
+  errorCode?: string
+): Promise<void> {
+  const settled = await settleChatTurnForSession(sessionId, {
+    outcome,
+    ...(errorCode ? { errorCode } : {}),
+    ...(messages
+      ? {
+          writeTranscript: () => persistMessages(sessionId, messages),
+        }
+      : {}),
+  })
+  if (!settled && messages) {
+    await persistMessages(sessionId, messages)
+  }
+}
 
 /** Sub-session ids used by team chat embed `::char::` between the team
  * session id and the character id (see hooks/use-team-chat.ts). The direct
@@ -224,7 +245,6 @@ export async function handleEvent(
     case "ready":
     case "log":
       return
-    case "sidecar_exited": {
     case "command_ack": {
       // ADR-0127: the host dropped a retried idempotent command (interrupt /
       // approve / compact / set-model / close) as a duplicate. The first
@@ -235,6 +255,7 @@ export async function handleEvent(
       chatTurnPerformance.markCommandDeduped(evt.sessionId)
       return
     }
+    case "sidecar_exited": {
       // The sidecar process died. It will NOT emit the per-session
       // `session_ended` events for the turns it was serving, so every
       // streaming / awaiting-approval session would otherwise freeze forever
@@ -247,6 +268,7 @@ export async function handleEvent(
       const chat = useChatStore.getState()
       for (const [sid, slice] of Object.entries(chat.sessions)) {
         if (slice.status !== "streaming" && slice.status !== "awaiting_approval") continue
+        const terminalMessages = messagesMirrorRef.current.get(sid) ?? slice.messages
         useInFlightStore.getState().settle(sid)
         clearApprovalBackstops(sid)
         clearToolSpansForSession(sid)
@@ -259,7 +281,7 @@ export async function handleEvent(
         // commit pending but (ADR-0127) may hold a debounced Dexie write and an
         // in-flight mirror — flush + drop those for every streaming session.
         if (isSessionOpen(sid)) registry.get(sid).commit.flush()
-        registry.get(sid).persist.flush()
+        registry.get(sid).persist.cancel()
         registry.release(sid)
         messagesMirrorRef.current.delete(sid)
         chat.setSessionDiagnostic(
@@ -287,6 +309,7 @@ export async function handleEvent(
         }
         chat.clearLastSend(sid)
         await finishDirectChatExecutionRun(sid, "failed", Date.now(), "Sidecar exited")
+        await settleChatTranscript(sid, terminalMessages, "failed", "sidecar_exit")
       }
       return
     }
@@ -310,13 +333,16 @@ export async function handleEvent(
       // have already paired with its tool_result, but cleanup keeps the
       // module-scope map from leaking entries when the SDK aborts mid-turn.
       clearToolSpansForSession(evt.sessionId)
+      const terminalMessages =
+        messagesMirrorRef.current.get(evt.sessionId) ??
+        useChatStore.getState().sessions[evt.sessionId]?.messages
       // Per-session sealing: any *open* session (focused or a background pane)
       // settles its own slice. Closed sessions only settled the in-flight
       // counter above.
       const sealOpen = isSessionOpen(evt.sessionId)
       const sealSession = (sid: string) => {
         registry.get(sid).commit.flush()
-        registry.get(sid).persist.flush()
+        registry.get(sid).persist.cancel()
         registry.release(sid)
         messagesMirrorRef.current.delete(sid)
         releaseSkillLoadContext(sid)
@@ -400,6 +426,7 @@ export async function handleEvent(
             }
             useChatStore.getState().clearLastSend(evt.sessionId)
             await finishDirectChatExecutionRun(evt.sessionId, "failed", Date.now(), evt.error)
+            await settleChatTranscript(evt.sessionId, terminalMessages, "failed", "turn_error")
           }
         } else {
           // Clean end without a content-bearing result event (e.g. tool-only
@@ -419,6 +446,7 @@ export async function handleEvent(
           }
           useChatStore.getState().clearLastSend(evt.sessionId)
           await finishDirectChatExecutionRun(evt.sessionId, "completed")
+          await settleChatTranscript(evt.sessionId, terminalMessages, "completed")
         }
         // Turn settled — replay any steer the user queued mid-run. A clean end
         // always drains; an errored end drains only when an explicit
@@ -438,20 +466,26 @@ export async function handleEvent(
         void drainSessionPeerMessages(evt.sessionId).catch(() => undefined)
       }
       if (!sealOpen) {
+        // ADR-0127: a closed pane now debounces its Dexie writes too, so its
+        // end-of-turn must flush whatever is pending and drop the in-flight
+        // mirror — otherwise the last delta of a background turn could sit in
+        // the debouncer past the session's end.
+        registry.get(evt.sessionId).persist.cancel()
+        registry.release(evt.sessionId)
+        messagesMirrorRef.current.delete(evt.sessionId)
         await finishDirectChatExecutionRun(
           evt.sessionId,
           evt.error ? "failed" : "completed",
           Date.now(),
           evt.error
         )
+        await settleChatTranscript(
+          evt.sessionId,
+          terminalMessages,
+          evt.error ? "failed" : "completed",
+          evt.error ? "turn_error" : undefined
+        )
       }
-        // ADR-0127: a closed pane now debounces its Dexie writes too, so its
-        // end-of-turn must flush whatever is pending and drop the in-flight
-        // mirror — otherwise the last delta of a background turn could sit in
-        // the debouncer past the session's end.
-        registry.get(evt.sessionId).persist.flush()
-        registry.release(evt.sessionId)
-        messagesMirrorRef.current.delete(evt.sessionId)
       return
     }
     case "permission_interrupted": {
@@ -655,6 +689,11 @@ export async function handleEvent(
       // behind (coalesced), so the mirror holds the true latest base. The base
       // is that session's *own* slice — never the focused session's — so a
       // background pane accumulates its own stream.
+      // A closed pane used to re-read Dexie for every event, which is what
+      // forced it to write Dexie for every event too (ADR-0127 §1). It now
+      // keeps the same in-flight mirror as an open pane, so its writes can
+      // ride the debounced persist path; the mirror is dropped once the turn
+      // has been durably persisted.
       const current = isOpen
         ? (messagesMirrorRef.current.get(sessionId) ?? sliceMessages(sessionId))
         : (messagesMirrorRef.current.get(sessionId) ?? (await listMessages(sessionId)))
@@ -666,11 +705,6 @@ export async function handleEvent(
       const {
         messages: appliedMessages,
         turnComplete,
-      // A closed pane used to re-read Dexie for every event, which is what
-      // forced it to write Dexie for every event too (ADR-0127 §1). It now
-      // keeps the same in-flight mirror as an open pane, so its writes can
-      // ride the debounced persist path; the mirror is dropped once the turn
-      // has been durably persisted.
         result: sdkResult,
       } = applySdkEvent(current, env.event)
 
@@ -874,7 +908,7 @@ export async function handleEvent(
             coalesce.commit.cancel()
             coalesce.persist.cancel()
             useChatStore.getState().replaceSessionMessages(sessionId, nextMessages)
-            await persistMessages(sessionId, nextMessages)
+            await settleChatTranscript(sessionId, nextMessages, "completed")
           } else {
             // Mid-stream: coalesce the React commit to ≤1/frame and debounce
             // the Dexie write. The mirror keeps the read path correct.
@@ -892,7 +926,7 @@ export async function handleEvent(
           if (turnComplete) {
             coalesce.persist.cancel()
             chatTurnPerformance.beginFinalPersistence(sessionId)
-            await persistMessages(sessionId, nextMessages)
+            await settleChatTranscript(sessionId, nextMessages, "completed")
             chatTurnPerformance.endFinalPersistence(sessionId)
             messagesMirrorRef.current.delete(sessionId)
             registry.release(sessionId)
@@ -1027,7 +1061,7 @@ export async function handleEvent(
         registry.get(sessionId).commit.flush()
         registry.get(sessionId).persist.cancel()
         chatTurnPerformance.beginFinalPersistence(sessionId)
-        await persistMessages(sessionId, nextMessages)
+        await settleChatTranscript(sessionId, nextMessages, "completed")
         chatTurnPerformance.endFinalPersistence(sessionId)
         registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)

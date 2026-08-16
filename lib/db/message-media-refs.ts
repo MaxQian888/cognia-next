@@ -47,7 +47,9 @@ export async function isMessageMediaReferencedBySession(
   refOrHash: string
 ): Promise<boolean> {
   const hash = parseMediaRef(refOrHash) ?? refOrHash
-  return (await getDb().messageMediaRefs.where("[sessionId+hash]").equals([sessionId, hash]).count()) > 0
+  return (
+    (await getDb().messageMediaRefs.where("[sessionId+hash]").equals([sessionId, hash]).count()) > 0
+  )
 }
 
 export async function collectUnreferencedMessageMedia(

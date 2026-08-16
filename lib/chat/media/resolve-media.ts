@@ -80,9 +80,7 @@ export interface MissingMediaRequest {
   variant: "thumbnail" | "canonical"
 }
 
-export type MissingMediaLoader = (
-  request: MissingMediaRequest
-) => Promise<MessageMediaRow | null>
+export type MissingMediaLoader = (request: MissingMediaRequest) => Promise<MessageMediaRow | null>
 
 /**
  * Resolve `ref` and register a holder. Every successful call must be paired
@@ -126,7 +124,8 @@ export async function acquireMedia(
       let row = await getMessageMedia(hash)
       const needsRemoteVariant = !row || (!thumbnail && row.canonicalAvailable === false)
       if (needsRemoteVariant && loadMissing) {
-        row = (await loadMissing({ hash, variant: thumbnail ? "thumbnail" : "canonical" })) ?? undefined
+        row =
+          (await loadMissing({ hash, variant: thumbnail ? "thumbnail" : "canonical" })) ?? undefined
         if (row && row.hash !== hash) return null
         if (row) {
           // Rendering should still succeed if a quota/transient IndexedDB

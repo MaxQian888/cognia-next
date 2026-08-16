@@ -27,6 +27,35 @@ export async function listSessions(): Promise<ChatSession[]> {
 }
 
 /**
+ * **Unscoped** — every hidden subagent session plus the parent each one hangs
+ * off, across all workspaces. This is the read behind the global agent thread
+ * browser (ADR-0108, `lib/agent/thread-browser.ts:buildAgentThreadForest`),
+ * which by design spans projects: opening a child navigates to its project.
+ *
+ * Reads only the `kind` index plus a `bulkGet` of the parents rather than the
+ * whole table, because the browser is a status-bar segment mounted on every
+ * desktop route and its live query re-runs on each session write. Both reads
+ * are Dexie promises, so the `await` between them keeps the liveQuery zone.
+ */
+export async function listAgentThreadSessions(): Promise<ChatSession[]> {
+  const db = getDb()
+  const children = await db.sessions.where("kind").equals("subagent").toArray()
+  if (children.length === 0) return []
+  const parentIds = Array.from(
+    new Set(
+      children
+        .map((child) => child.parentSessionId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    )
+  )
+  const parents = parentIds.length > 0 ? await db.sessions.bulkGet(parentIds) : []
+  return [
+    ...children,
+    ...parents.filter((row): row is ChatSession => row !== undefined && row.kind !== "subagent"),
+  ]
+}
+
+/**
  * Sessions for one workspace, newest-first. Defaults to the active project via
  * the central scope helper. The chat sidebar and other working-set surfaces
  * read through here so workspaces stay isolated. Uses the `[projectId+updatedAt]`
@@ -45,6 +74,22 @@ export async function listScopedSessions(projectId?: string): Promise<ChatSessio
     .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
     .reverse()
     .toArray()
+}
+
+/**
+ * How many chat sessions exist on this device, across every workspace.
+ *
+ * Exists for the onboarding gate (ADR-0122), which asks only "has this person
+ * ever had a conversation here?" — a long-time user whose settings row predates
+ * the structured onboarding record is identified by having chats, not by any
+ * stored flag. Counting in Dexie rather than materializing {@link listSessions}
+ * keeps that question off the boot path's allocation budget.
+ *
+ * Deliberately unscoped: a session in *any* workspace proves the user is not
+ * on their first run.
+ */
+export async function countSessions(): Promise<number> {
+  return getDb().sessions.count()
 }
 
 export async function getSession(id: string): Promise<ChatSession | undefined> {

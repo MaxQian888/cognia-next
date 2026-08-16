@@ -5,12 +5,22 @@ import { useTranslations } from "next-intl"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
+  FolderIcon,
+  FolderInputIcon,
   Link2Icon,
   PinIcon,
   PinOffIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import type { SessionFolder } from "@cognia/agent-config-types"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +43,13 @@ export interface ChannelListBulkToolbarProps {
   onArchive: () => void | Promise<void>
   onUnarchive: () => void | Promise<void>
   onShare: () => void
+  /**
+   * Folders the selection can be moved into. Empty (or absent `onMoveToFolder`)
+   * hides the control — the per-row menu has always had "Move to folder", and
+   * a selection is just several rows.
+   */
+  folders?: readonly SessionFolder[]
+  onMoveToFolder?: (folderId: string | null) => void | Promise<void>
   onClear: () => void
 }
 
@@ -51,6 +68,8 @@ export function ChannelListBulkToolbar({
   onArchive,
   onUnarchive,
   onShare,
+  folders = [],
+  onMoveToFolder,
   onClear,
 }: ChannelListBulkToolbarProps) {
   const t = useTranslations("desktop.channelList.bulk")
@@ -83,6 +102,41 @@ export function ChannelListBulkToolbar({
         >
           <Link2Icon className="size-3.5" />
         </Button>
+        {onMoveToFolder && !archived ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6"
+                aria-label={t("moveToFolder")}
+                title={t("moveToFolder")}
+                data-testid="channel-list-bulk-move-to-folder"
+              >
+                <FolderInputIcon className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {folders.map((folder) => (
+                <DropdownMenuItem
+                  key={folder.id}
+                  onSelect={() => void onMoveToFolder(folder.id)}
+                  data-testid={`channel-list-bulk-folder-${folder.id}`}
+                >
+                  <FolderIcon className="size-4" />
+                  <span className="truncate">{folder.name}</span>
+                </DropdownMenuItem>
+              ))}
+              {folders.length > 0 ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuItem
+                onSelect={() => void onMoveToFolder(null)}
+                data-testid="channel-list-bulk-folder-none"
+              >
+                {t("removeFromFolder")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         {archived ? (
           <Button
             size="icon"

@@ -1,7 +1,9 @@
 "use client"
 
-import { useRef, useState, type CSSProperties, type MouseEvent } from "react"
+import { useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react"
 
+import { MatchHighlight } from "@/components/chat/completion/match-highlight"
+import { findOccurrences } from "@/lib/chat/message-search"
 import { cn } from "@/lib/utils"
 
 import styles from "./hover-scroll-text.module.css"
@@ -16,6 +18,12 @@ export interface HoverScrollTextProps {
   className?: string
   /** `off` keeps the title static and exposes the complete value as a tooltip. */
   motion?: "hover" | "off"
+  /**
+   * Substring to emphasize (case-insensitive) — the active search query.
+   * Rendering stays character-identical to the plain path, so the scroll
+   * measurement below is unaffected; only the matched runs gain a `<mark>`.
+   */
+  highlight?: string
 }
 
 interface ScrollMotion {
@@ -55,11 +63,27 @@ export function HoverScrollText({
   text,
   className,
   motion: motionMode = "hover",
+  highlight,
 }: HoverScrollTextProps) {
   const contentRef = useRef<HTMLSpanElement>(null)
   const [motion, setMotion] = useState<ScrollMotion | null>(null)
   const [showStaticTitle, setShowStaticTitle] = useState(false)
   const activeMotion = motion?.text === text ? motion : null
+
+  // Character indices of every occurrence of the search term. Computed here
+  // rather than by the row so the (potentially long) title is walked once per
+  // title/query change instead of on every parent render.
+  const highlightPositions = useMemo(() => {
+    const needle = highlight?.trim().toLowerCase()
+    if (!needle) return null
+    const starts = findOccurrences(text.toLowerCase(), needle)
+    if (starts.length === 0) return null
+    const positions: number[] = []
+    for (const start of starts) {
+      for (let offset = 0; offset < needle.length; offset++) positions.push(start + offset)
+    }
+    return positions
+  }, [highlight, text])
 
   const handleMouseEnter = (event: MouseEvent<HTMLSpanElement>) => {
     if (motionMode === "off" || prefersReducedMotion()) {
@@ -119,7 +143,15 @@ export function HoverScrollText({
         data-scrolling={activeMotion ? "true" : undefined}
         style={scrollStyle}
       >
-        {text}
+        {highlightPositions ? (
+          <MatchHighlight
+            text={text}
+            positions={highlightPositions}
+            markClassName="rounded-[2px] bg-primary/20 font-semibold text-foreground"
+          />
+        ) : (
+          text
+        )}
       </span>
     </span>
   )

@@ -38,7 +38,13 @@ function Kpi({ label, value }: { label: string; value: string | number }) {
   )
 }
 
-export function SessionReportView({ report, sessionId }: { report: SessionReport; sessionId?: string }) {
+export function SessionReportView({
+  report,
+  sessionId,
+}: {
+  report: SessionReport
+  sessionId?: string
+}) {
   const t = useTranslations("sessionInsights")
   const totalTokens =
     report.totalInputTokens +

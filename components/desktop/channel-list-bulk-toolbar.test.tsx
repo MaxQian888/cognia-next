@@ -34,6 +34,33 @@ function setup(overrides: Partial<Parameters<typeof ChannelListBulkToolbar>[0]> 
   )
   return { ...utils, onDelete, onPin, onUnpin, onArchive, onUnarchive, onShare, onClear }
 }
+test("files the selection into a folder, and can take it out of one", async () => {
+  const onMoveToFolder = jest.fn()
+  const user = userEvent.setup()
+  setup({
+    folders: [
+      { id: "f1", name: "Research" } as never,
+      { id: "f2", name: "Archive notes" } as never,
+    ],
+    onMoveToFolder,
+  })
+  await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+  await user.click(screen.getByTestId("channel-list-bulk-folder-f1"))
+  expect(onMoveToFolder).toHaveBeenCalledWith("f1")
+
+  await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+  await user.click(screen.getByTestId("channel-list-bulk-folder-none"))
+  expect(onMoveToFolder).toHaveBeenLastCalledWith(null)
+})
+
+test("hides the folder control without a handler, and in the archived view", () => {
+  const { unmount } = setup()
+  expect(screen.queryByTestId("channel-list-bulk-move-to-folder")).toBeNull()
+  unmount()
+  // Archived conversations live in date buckets, not folders.
+  setup({ archived: true, onMoveToFolder: jest.fn() })
+  expect(screen.queryByTestId("channel-list-bulk-move-to-folder")).toBeNull()
+})
 
 test("renders the i18n'd count with the selection size", () => {
   setup({ count: 5 })

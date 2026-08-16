@@ -68,9 +68,9 @@ describe("ingestImage", () => {
   it("rejects images above the persistence input limit", async () => {
     const oversized = new Uint8Array(MAX_IMAGE_INPUT_BYTES + 1)
 
-    await expect(
-      ingestImage({ bytes: oversized, mediaType: "image/png" })
-    ).rejects.toThrow(/10 MiB/)
+    await expect(ingestImage({ bytes: oversized, mediaType: "image/png" })).rejects.toThrow(
+      /10 MiB/
+    )
     expect(await getDb().messageMedia.count()).toBe(0)
   })
 

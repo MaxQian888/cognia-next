@@ -22,12 +22,21 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
+import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat"
 import { useClearMessages } from "@/lib/data-hooks/context"
 import { loggers } from "@cognia/logging"
 
-export function ClearConversationTrigger() {
+interface Props {
+  /** Compact icon button (header) vs labeled button (settings sheet). */
+  variant?: "icon" | "labeled"
+  /** Extra classes for the trigger button (e.g. to stretch it in a grid). */
+  className?: string
+}
+
+export function ClearConversationTrigger({ variant = "icon", className }: Props = {}) {
   const t = useTranslations("chat.list")
   const sessionId = useChatStore((s) => s.activeSessionId)
   const messageCount = useChatStore((s) => s.messages.length)
@@ -50,15 +59,26 @@ export function ClearConversationTrigger() {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <TooltipIconButton
-          variant="ghost"
-          size="icon"
-          aria-label={t("clear")}
-          tooltip={t("clear")}
-          className="text-destructive hover:text-destructive"
-        >
-          <Trash2Icon className="size-4" />
-        </TooltipIconButton>
+        {variant === "labeled" ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn("text-destructive hover:text-destructive", className)}
+          >
+            <Trash2Icon className="size-4" />
+            {t("clear")}
+          </Button>
+        ) : (
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            aria-label={t("clear")}
+            tooltip={t("clear")}
+            className={cn("text-destructive hover:text-destructive", className)}
+          >
+            <Trash2Icon className="size-4" />
+          </TooltipIconButton>
+        )}
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>

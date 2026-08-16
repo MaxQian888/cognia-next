@@ -1,6 +1,12 @@
 import { liveQuery } from "dexie"
 
-import { createFolder, deleteFolder, listFolders, renameFolder } from "./session-folders"
+import {
+  createFolder,
+  deleteFolder,
+  listFolders,
+  renameFolder,
+  reorderFolders,
+} from "./session-folders"
 import { createSession, getSession, assignSessionToFolder } from "./sessions"
 import { saveSettings } from "./settings"
 import { getDb } from "./schema"
@@ -31,6 +37,39 @@ describe("session-folders CRUD", () => {
     expect(b.projectId).toBe("proj-A")
     const list = await listFolders("proj-A")
     expect(list.map((f) => f.id)).toEqual([a.id, b.id])
+  })
+
+  it("persists a manual folder order", async () => {
+    const a = await createFolder("Work")
+    const b = await createFolder("Personal")
+    const c = await createFolder("Reading")
+    await reorderFolders([c.id, a.id, b.id])
+    expect((await listFolders("proj-A")).map((f) => f.name)).toEqual([
+      "Reading",
+      "Work",
+      "Personal",
+    ])
+    expect((await getDb().sessionFolders.get(c.id))?.order).toBe(0)
+  })
+
+  it("ignores unknown ids and keeps unnamed folders after the ones given", async () => {
+    const a = await createFolder("A")
+    const b = await createFolder("B")
+    const c = await createFolder("C")
+    // `gone` was deleted by another surface between the drag and the drop; `b`
+    // simply was not part of the request.
+    await reorderFolders([c.id, "gone", a.id])
+    expect((await listFolders("proj-A")).map((f) => f.name)).toEqual(["C", "A", "B"])
+  })
+
+  it("does not renumber another workspace's folders", async () => {
+    const inA = await createFolder("In A")
+    await saveSettings({ activeProjectId: "proj-B" })
+    const first = await createFolder("B first")
+    const second = await createFolder("B second")
+    await reorderFolders([second.id, first.id])
+    expect((await listFolders("proj-B")).map((f) => f.name)).toEqual(["B second", "B first"])
+    expect((await getDb().sessionFolders.get(inA.id))?.order).toBe(0)
   })
 
   it("scopes folders to their workspace", async () => {

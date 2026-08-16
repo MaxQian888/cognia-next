@@ -60,7 +60,12 @@ import { isEmbeddedSession } from "@/lib/chat/session-exposure"
 import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
 import { clearSessionGrants } from "@/lib/claude/computer-use-session-grants"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
-import { listMessages, persistMessages, persistStreamingMessages } from "@/lib/db/messages"
+import {
+  commitMessageDelta,
+  listMessages,
+  persistMessages,
+  persistStreamingMessages,
+} from "@/lib/db/messages"
 import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import {
@@ -83,6 +88,15 @@ import {
   projectDirectChatCaptureEvent,
   startDirectChatExecutionRun,
 } from "@/lib/execution/direct-chat-run"
+import {
+  acceptChatTurn,
+  bindChatTurnContext,
+  chatSubmissionId,
+  claimChatTurnForDispatch,
+  markChatTurnStarted,
+  settleChatTurnForSession,
+} from "@/lib/work-submission/chat-adapter"
+import { startWorkSubmissionLeaseHeartbeat } from "@/lib/work-submission/lease-heartbeat"
 import {
   canonicalEventFromExternalEvent,
   captureEventFromCanonical,
@@ -136,6 +150,7 @@ import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { chatTurnPerformance } from "@/lib/perf/chat-turn-performance"
 import type { UIMessage } from "ai"
+import { registerInteractiveWorkSubmissionEvents } from "@/lib/work-submission/terminal-events"
 import {
   behaviorTurnStartedAt,
   finishBehaviorTurn,
@@ -346,20 +361,31 @@ export function useClaudeChat() {
   useEffect(() => {
     if (!isTauri() && !isCapacitor() && !hasWebCompanionTarget()) return
     let unlisten: UnlistenFn | null = null
+    let unregisterWorkSubmissionEvents: UnlistenFn | null = null
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
 
-    onClaudeMessage((evt) => enqueueClaudeEvent(evt as ClaudeEvent))
-      .then((u) => {
-        if (cancelled) u()
-        else unlisten = u
-      })
-      .catch((err) => {
-        console.error("listen claude events failed", err)
-      })
+    const subscribe = () => {
+      void onClaudeMessage((evt) => enqueueClaudeEvent(evt as ClaudeEvent))
+        .then((u) => {
+          if (cancelled) u()
+          else {
+            unlisten = u
+            unregisterWorkSubmissionEvents = registerInteractiveWorkSubmissionEvents()
+          }
+        })
+        .catch((err) => {
+          console.error("listen claude events failed", err)
+          if (!cancelled) retryTimer = setTimeout(subscribe, 1_000)
+        })
+    }
+    subscribe()
 
     return () => {
       cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
       unlisten?.()
+      unregisterWorkSubmissionEvents?.()
     }
   }, [enqueueClaudeEvent])
 
@@ -975,6 +1001,62 @@ export function useClaudeChat() {
         ? resolveSessionWorkspaceRoot(executionContext)
         : undefined
       const executionRunId = runIdForTurn(sessionId, chatRunId)
+      // Durable acceptance (ADR-0123), phase A. `effectiveContent` has been
+      // final since the Workbench payload gate — plugin hooks, pipes and
+      // redaction all ran before it, and nothing below reassigns it — so
+      // freezing it here captures exactly what the model will be sent.
+      // `sendOptions` is NOT final yet (cwd, task workspace and routing are
+      // still to come), which is why the context is frozen separately, just
+      // before dispatch. Returns null when the feature is off or no runtime
+      // target is active, in which case the turn proceeds exactly as before.
+      // External-agent turns use their own durable runtime. Register only the
+      // built-in path here; otherwise a long external turn would leave a chat
+      // submission with no replayable SendOptions and the outbox could race it.
+      const durableReceipt = routedExternalAgentId
+        ? null
+        : await acceptChatTurn({
+            sessionId,
+            runId: executionRunId,
+            messageId: userMsg.id,
+            content: effectiveContent,
+            visibleMessageIds: next.map((message) => message.id),
+            ...(session?.projectId ? { projectId: session.projectId } : {}),
+            // The user message lands in the SAME transaction as the submission.
+            // Without this the row would still reach Dexie eventually, via the
+            // debounced transcript writer — but a crash in between would leave a
+            // submission whose message is not in the transcript, which is the
+            // mirror image of the bug this feature exists to remove. A delta
+            // upsert, not `persistMessages`: the latter treats omissions as
+            // deletions and would wipe history we are not holding here.
+            ...(skipAppend
+              ? {}
+              : { writeTranscript: () => commitMessageDelta(sessionId, { upserts: [userMsg] }) }),
+          }).catch((error) => {
+            // Never block a send on the ledger: the legacy path still runs.
+            console.error("acceptChatTurn failed", error)
+            return null
+          })
+      let dispatchClaim: Awaited<ReturnType<typeof claimChatTurnForDispatch>> = "legacy"
+      let stopAssemblyHeartbeat = () => {}
+      let durableLeaseLost = false
+      let abortStaleLocalRuntime = () => {}
+      if (durableReceipt) {
+        dispatchClaim = await claimChatTurnForDispatch(executionRunId)
+        if (dispatchClaim === "owned_elsewhere") return
+        if (dispatchClaim === "claimed") {
+          stopAssemblyHeartbeat = startWorkSubmissionLeaseHeartbeat(
+            chatSubmissionId(executionRunId),
+            "live-chat",
+            {
+              onError: (error) => console.error("work submission lease renewal failed", error),
+              onLeaseLost: () => {
+                durableLeaseLost = true
+                abortStaleLocalRuntime()
+              },
+            }
+          )
+        }
+      }
       try {
         await startDirectChatExecutionRun({
           sessionId,
@@ -993,6 +1075,11 @@ export function useClaudeChat() {
             toDiagnostic(error, { source: "chat", meta: { sessionId } })
           )
         chatTurnPerformance.finish(sessionId, "failed")
+        await settleChatTurnForSession(sessionId, {
+          outcome: "failed",
+          errorCode: "execution_run_start_failed",
+        })
+        stopAssemblyHeartbeat()
         return
       }
       const legacyWorkspaceEnabled =
@@ -1009,6 +1096,11 @@ export function useClaudeChat() {
           store.getState().setSessionStatus(sessionId, "idle")
           store.getState().setSessionError(sessionId, message)
           chatTurnPerformance.finish(sessionId, "failed")
+          await settleChatTurnForSession(sessionId, {
+            outcome: "failed",
+            errorCode: "managed_worktree_unavailable",
+          })
+          stopAssemblyHeartbeat()
           return
         }
         const anchorMessage = skipAppend
@@ -1039,6 +1131,11 @@ export function useClaudeChat() {
           store.getState().setSessionStatus(sessionId, "idle")
           store.getState().setSessionError(sessionId, message)
           chatTurnPerformance.finish(sessionId, "failed")
+          await settleChatTurnForSession(sessionId, {
+            outcome: "failed",
+            errorCode: "task_workspace_unavailable",
+          })
+          stopAssemblyHeartbeat()
           return
         }
         sendOptions = { ...sendOptions, taskWorkspace: taskEnvelope }
@@ -1064,6 +1161,11 @@ export function useClaudeChat() {
           store.getState().setSessionStatus(sessionId, "idle")
           store.getState().setSessionError(sessionId, tInlineErr("environmentUnavailable"))
           chatTurnPerformance.finish(sessionId, "failed")
+          await settleChatTurnForSession(sessionId, {
+            outcome: "failed",
+            errorCode: "environment_unavailable",
+          })
+          stopAssemblyHeartbeat()
           return
         }
         const setup = await executeProjectEnvironment({
@@ -1080,6 +1182,11 @@ export function useClaudeChat() {
             .getState()
             .setSessionError(sessionId, setup.error || tInlineErr("environmentSetupFailed"))
           chatTurnPerformance.finish(sessionId, "failed")
+          await settleChatTurnForSession(sessionId, {
+            outcome: "failed",
+            errorCode: "environment_setup_failed",
+          })
+          stopAssemblyHeartbeat()
           return
         }
       }
@@ -1118,6 +1225,11 @@ export function useClaudeChat() {
           )
           store.getState().setSessionStatus(sessionId, "idle")
           chatTurnPerformance.finish(sessionId, "failed")
+          await settleChatTurnForSession(sessionId, {
+            outcome: "failed",
+            errorCode: "external_agent_not_selected",
+          })
+          stopAssemblyHeartbeat()
           return
         }
         // Record the lane this session's turn is actually on, so a follow-up
@@ -1145,6 +1257,16 @@ export function useClaudeChat() {
         // "fallback"; under "strict" it surfaces the error like a manual run.
         const chatFailurePolicy = useExternalAgentStore.getState().chatFailurePolicy
         const handleExternalFailure = async (message: string, error?: Error): Promise<void> => {
+          // ADR-0127: the external rail streams through the per-session
+          // coalescer, so a failure must drop any pending frame / debounced
+          // write (a late rAF commit would resurrect the partial over the
+          // failure state) and re-pin Dexie to the user turn alone — the
+          // debounced writer may already have stored a partial assistant.
+          const pending = registry.get(sessionId)
+          pending.commit.cancel()
+          pending.persist.cancel()
+          registry.release(sessionId)
+          await persistMessages(sessionId, next).catch(() => undefined)
           if (delegation && chatFailurePolicy === "fallback") {
             await finishDirectChatExecutionRun(
               sessionId,
@@ -1181,16 +1303,6 @@ export function useClaudeChat() {
           if (durationMs !== undefined) {
             void trackEvent("chat.turn.failed", {
               sessionId,
-          // ADR-0127: the external rail streams through the per-session
-          // coalescer, so a failure must drop any pending frame / debounced
-          // write (a late rAF commit would resurrect the partial over the
-          // failure state) and re-pin Dexie to the user turn alone — the
-          // debounced writer may already have stored a partial assistant.
-          const pending = registry.get(sessionId)
-          pending.commit.cancel()
-          pending.persist.cancel()
-          registry.release(sessionId)
-          await persistMessages(sessionId, next).catch(() => undefined)
               provider: "external",
               surface: "chat",
               errorType: error?.name || "ExternalAgentError",
@@ -1227,6 +1339,12 @@ export function useClaudeChat() {
           let assistantParts: UIMessage["parts"] = [] as unknown as UIMessage["parts"]
           const baseList = store.getState().sessions[sessionId]?.messages ?? []
 
+          // ADR-0127 §1: the external rail rides the same per-session
+          // coalescer as the sidecar rail — ≤1 React commit per frame and a
+          // debounced mid-stream Dexie write — instead of a synchronous full
+          // `replaceSessionMessages` per delta and a Dexie write only at the
+          // end (which lost the partial on a mid-turn crash).
+          const coalesce = registry.get(sessionId)
           const writeAssistant = () => {
             // Write into this session's *own* slice — a mid-run focus switch is
             // safe because the slice is keyed by session, so the in-flight
@@ -1270,12 +1388,6 @@ export function useClaudeChat() {
               },
             },
             onEvent: (event) => {
-          // ADR-0127 §1: the external rail rides the same per-session
-          // coalescer as the sidecar rail — ≤1 React commit per frame and a
-          // debounced mid-stream Dexie write — instead of a synchronous full
-          // `replaceSessionMessages` per delta and a Dexie write only at the
-          // end (which lost the partial on a mid-turn crash).
-          const coalesce = registry.get(sessionId)
               const capture = captureEventFromCanonical(canonicalEventFromExternalEvent(event))
               if (capture) void projectDirectChatCaptureEvent(sessionId, capture)
               const nextParts = applyExternalAgentEventToParts(assistantParts, event)
@@ -1286,6 +1398,8 @@ export function useClaudeChat() {
               }
             },
           })
+
+          sealCoalescer()
 
           if (!result) {
             await handleExternalFailure("No external agent available for this request")
@@ -1312,6 +1426,7 @@ export function useClaudeChat() {
             ] as unknown as UIMessage["parts"]
             chatTurnPerformance.markFirstResponse(sessionId)
             writeAssistant()
+            sealCoalescer()
           }
 
           // Persist this session's final list. The slice already holds the
@@ -1323,8 +1438,6 @@ export function useClaudeChat() {
             parts: assistantParts,
             metadata: {
               ...(delegatedMeta ?? {}),
-          sealCoalescer()
-
               run: { providerId: "external", startedAt: externalStartedAt },
             },
           }
@@ -1342,6 +1455,7 @@ export function useClaudeChat() {
           chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, finalMessages)
           chatTurnPerformance.endFinalPersistence(sessionId)
+          registry.release(sessionId)
           store.getState().setSessionStatus(sessionId, "idle")
           await finishDirectChatExecutionRun(sessionId, "completed")
           chatTurnPerformance.finish(sessionId, "completed")
@@ -1350,7 +1464,6 @@ export function useClaudeChat() {
             void trackEvent("chat.turn.completed", {
               sessionId,
               provider: "external",
-            sealCoalescer()
               surface: "chat",
               durationMs,
             })
@@ -1379,7 +1492,6 @@ export function useClaudeChat() {
         // manually renames, which clears the flag).
         await applyInstantTitle(sessionId, displayContent)
         // Open an agent-trace span for this chat turn. The traceId / spanId
-          registry.release(sessionId)
         // are echoed through SendOptions so the sidecar (and later, tool +
         // sub-agent spans) can attach as children. `endSpan` runs in the
         // result / error branches of `handleEvent` keyed off the cached
@@ -1466,11 +1578,28 @@ export function useClaudeChat() {
             })
           }
         }
+        // Durable acceptance (ADR-0123), phase B. This is the last point at
+        // which `sendOptions` is still changing — cwd, task workspace and
+        // routing have all settled by now — so it is the only honest moment to
+        // freeze the execution context. Write-once: on a retry the stored
+        // bundle wins, which is what stops a replay from silently re-resolving
+        // the project root against whatever the host looks like later.
+        if (durableLeaseLost) return
+        await bindChatTurnContext({
+          runId: executionRunId,
+          context: {
+            ...(sendOptions.cwd ? { cwd: sendOptions.cwd } : {}),
+            ...(session?.projectId ? { projectId: session.projectId } : {}),
+            ...(boundWorkspaceRoot ? { workspaceBindingRef: executionRunId } : {}),
+            sendOptions,
+          },
+        })
         if (isStandaloneChatMode()) {
           // Standalone (BYOK): run the turn in-renderer against the user's own
           // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
           // store via the same event queue; the engine emits `session_ended`.
           const controller = new AbortController()
+          abortStaleLocalRuntime = () => controller.abort()
           standaloneAbortRef.current.set(sessionId, controller)
           chatTurnPerformance.markDispatched(sessionId)
           void runStandaloneTurn({
@@ -1486,8 +1615,18 @@ export function useClaudeChat() {
           })
         } else {
           chatTurnPerformance.markDispatched(sessionId)
-          await sendPrompt(sessionId, effectiveContent, sendOptions)
+          if (dispatchClaim === "claimed") {
+            await sendPrompt(sessionId, effectiveContent, sendOptions, {
+              commandId: chatSubmissionId(executionRunId),
+            })
+          } else {
+            await sendPrompt(sessionId, effectiveContent, sendOptions)
+          }
         }
+        if (durableLeaseLost) return
+        // The live handoff won this turn. Recording it keeps the periodic
+        // pending-work sweep from dispatching the same accepted input again.
+        await markChatTurnStarted(executionRunId)
         // Conversation-branching: consume the one-shot context seed now that
         // `resolveSendOptions` has injected it into this send's
         // `appendSystemPrompt`. Provider-agnostic once-only consumption — the
@@ -1548,6 +1687,11 @@ export function useClaudeChat() {
         }
         chatTurnPerformance.finish(sessionId, "failed")
         await finishDirectChatExecutionRun(sessionId, "failed", Date.now(), error.message)
+        await settleChatTurnForSession(sessionId, {
+          outcome: "failed",
+          errorCode: "send_failed",
+        })
+        stopAssemblyHeartbeat()
         const durationMs = finishBehaviorTurn(sessionId)
         if (durationMs !== undefined) {
           void trackEvent("chat.turn.failed", {
@@ -1693,7 +1837,10 @@ export function useClaudeChat() {
       }
       chat.setSessionStatus(sessionId, "idle")
       chatTurnPerformance.finish(sessionId, "cancelled")
-      const finishRun = finishDirectChatExecutionRun(sessionId, "cancelled")
+      const finishRun = Promise.all([
+        finishDirectChatExecutionRun(sessionId, "cancelled"),
+        settleChatTurnForSession(sessionId, { outcome: "cancelled" }),
+      ])
 
       try {
         // Standalone (BYOK) turns are cancelled by aborting the renderer

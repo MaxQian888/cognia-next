@@ -10,12 +10,17 @@
 // qualifier) and the permission chip, with the context ring beside them.
 //
 // Turn capabilities (enhance, web search, skills) live under the composer's `+`
-// on both desktop and mobile. This toolbar's "⋯" is reserved for session-shape
-// controls (sandbox, agent mode, external agent, runtime) and plugin slots.
+// on both desktop and mobile.
+//
+// The "⋯" overflow is a PACKING device, not a tier: it exists only where the
+// row genuinely cannot hold the roster (mobile / the narrow workflow sidebar).
+// On a wide composer the remaining session-shape controls — Agent mode, the
+// sandbox indicator, plugin slots — render inline, because collapsing them
+// there hid state the user is expected to read at a glance (which mode, is the
+// sandbox on) behind a button with no affordance for what it contains.
 
-import { useCallback, useRef, type ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { useRouter } from "next/navigation"
 import { MoreHorizontalIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -31,19 +36,22 @@ import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { ModelPicker } from "./model-picker"
 import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
-import { AgentModeSelector } from "@/components/agent/mode/mode-selector"
-import { ExternalAgentSelector } from "@/components/agent/external-agent/selector"
+import { CompositionChip } from "@/components/agent/composition/composition-chip"
 import { useAgentRuntimeStore } from "@/stores/agent"
-import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
+import { ComposerPresetChip } from "./preset-chip"
+import { ComposerCredentialBadge } from "./credential-badge"
+import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 
 interface BottomToolbarProps {
   session: ChatSession | null
   status?: ChatStatus
   variant?: "default" | "embedded"
   leading?: ReactNode
+  /** Where the "No API key" badge sends the user — provider settings. */
+  onOpenProviderSettings?: () => void
 }
 
 export function BottomToolbar({
@@ -51,6 +59,7 @@ export function BottomToolbar({
   status,
   variant = "default",
   leading,
+  onOpenProviderSettings,
 }: BottomToolbarProps) {
   // The workflow-editor session is the same discriminator that
   // `resolveSendOptions` keys on to inject workflow subagents + the graph
@@ -68,7 +77,13 @@ export function BottomToolbar({
     return <WorkflowBottomToolbar session={session} />
   }
   return (
-    <GenericBottomToolbar session={session} status={status} variant={variant} leading={leading} />
+    <GenericBottomToolbar
+      session={session}
+      status={status}
+      variant={variant}
+      leading={leading}
+      onOpenProviderSettings={onOpenProviderSettings}
+    />
   )
 }
 
@@ -77,9 +92,11 @@ function GenericBottomToolbar({
   status: paneStatus,
   variant = "default",
   leading,
+  onOpenProviderSettings,
 }: BottomToolbarProps) {
   const t = useTranslations("chat.composer.toolbar")
-  const router = useRouter()
+  // The cost badge's token label lived with the header these moved out of.
+  const tHeader = useTranslations("chat.header")
   const focusedStatus = useChatStore((s) => s.status)
   const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
@@ -87,26 +104,11 @@ function GenericBottomToolbar({
   const toolbarWidth = useElementWidth(rootRef)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
-  const modeId = useAgentRuntimeStore((s) => s.modeId)
-  const setModeId = useAgentRuntimeStore((s) => s.setModeId)
   const runtime = useAgentRuntimeStore((s) => s.runtime)
-  const externalAgentId = useAgentRuntimeStore((s) => s.externalAgentId)
-  const setExternalAgentId = useAgentRuntimeStore((s) => s.setExternalAgentId)
 
   // Disable toolbar controls while a turn is in flight so mid-stream
   // configuration changes (model, runtime, mode, etc.) can't race the send.
   const isStreaming = status === "streaming" || status === "awaiting_approval"
-
-  // Bridge externalAgentId between the runtime store (toolbar source of truth)
-  // and the external-agent store (consumed by the execution layer). The two
-  // stores track the active agent independently; this callback keeps them in sync.
-  const handleExternalAgentChange = useCallback(
-    (agentId: string | null) => {
-      setExternalAgentId(agentId)
-      useExternalAgentStore.getState().setActiveAgent(agentId)
-    },
-    [setExternalAgentId]
-  )
 
   // Mirrors `lib/claude/build-options.ts` model resolution: per-session
   // override > app default. (Character / member overrides aren't loaded
@@ -118,45 +120,51 @@ function GenericBottomToolbar({
   // only; falls back to the message-derived estimate inside the indicator).
   const { snapshot: sdkUsage } = useSdkContextUsage(session?.id ?? null, providerId)
 
-  // The measured width now only decides how the same set of controls is
-  // packed, not which of them exist — every branch renders the identical
-  // roster, so no control mounts in two places. (That invariant is why the
-  // overflow is a Popover: re-mounting a trigger-owning control inside a
-  // `DropdownMenuItem` desyncs its open state.) `toolbarWidth === 0`
-  // (pre-measure) takes the wide branch, matching the common chat pane.
+  // The measured width only decides how the same set of controls is packed,
+  // not which of them exist — every branch renders the identical roster, so no
+  // control mounts in two places. (That invariant is why the overflow is a
+  // Popover: re-mounting a trigger-owning control inside a `DropdownMenuItem`
+  // desyncs its open state.) `toolbarWidth === 0` (pre-measure) takes the wide
+  // branch, matching the common chat pane.
   const compact = toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_PX
   const tierActive = runtime !== "claude-sdk"
 
-  const runtimeControl = <AgentRuntimeSelector disabled={isStreaming} />
+  // Runtime AND the external agent it dispatches to are one choice in one
+  // dropdown (see `runtime-selector.tsx`) — there is no second "which agent"
+  // control to place, and no way to sit on an external lane with nothing
+  // selected.
+  const runtimeControl = <AgentRuntimeSelector disabled={isStreaming} className={TOOLBAR_CHIP} />
 
-  const tier3 = (
-    <>
-      {runtime === "claude-sdk" && (
-        <AgentModeSelector
-          selectedModeId={modeId}
-          onModeChange={(mode) => setModeId(mode.id)}
-          onSelectTeam={(teamId) =>
-            router.push(`/agent-teams/workspace?teamId=${encodeURIComponent(teamId)}`)
-          }
-          onCreateTeam={() => router.push("/agent-teams")}
-          disabled={isStreaming}
-        />
-      )}
-      {runtime === "external" && (
-        <ExternalAgentSelector
-          selectedAgentId={externalAgentId}
-          onAgentChange={handleExternalAgentChange}
-          disabled={isStreaming}
-        />
-      )}
-      <SandboxShield session={session} />
-    </>
-  )
+  // Agent Mode composes the preset the Claude SDK runtime runs under; it is
+  // meaningless for an external CLI agent, which brings its own.
+  //
+  // Scoped to THIS session (ADR-0117). The chip it replaced wrote the app-wide
+  // default, so it could not change the conversation it sat under once the
+  // settings sheet had recorded a per-session choice — and it rendered any
+  // session running Minimal/Code/Creator as "General Assistant", because those
+  // presets have no `AgentModeConfig` to look up.
+  //
+  // On the wide row the preset sits directly on the toolbar and the axes get
+  // their own button; inside the "⋯" overflow there is no row to spread over,
+  // so both packings collapse into the single chip.
+  const modeControl =
+    runtime === "claude-sdk" ? (
+      <CompositionChip
+        sessionId={session?.id}
+        disabled={isStreaming}
+        layout={compact || variant === "embedded" ? "combined" : "split"}
+      />
+    ) : null
+
+  // Passive indicator, not a control — it belongs beside the context ring
+  // rather than inside a menu the user has to open to learn whether this turn
+  // is sandboxed.
+  const sandboxIndicator = <SandboxShield session={session} />
 
   // Plugin-contributed composer actions. Each renders arbitrary plugin UI,
-  // often with its own trigger, and this Popover is the container already
-  // proven safe for that. All three self-hide when no plugin contributes, so
-  // the default install pays nothing for them.
+  // often with its own trigger, and the overflow Popover is the container
+  // already proven safe for that. All three self-hide when no plugin
+  // contributes, so the default install pays nothing for them — inline or not.
   const pluginSlots = (
     <>
       <PluginExtensionSlotWithOverflow
@@ -183,21 +191,55 @@ function GenericBottomToolbar({
 
   // The permanent execution row answers the two highest-frequency questions:
   // which model, and which Agent runtime. Permission remains adjacent because
-  // it changes what that runtime may do. Detailed mode/agent selection stays
-  // in More so the row remains compact.
+  // it changes what that runtime may do.
+  //
+  // Every control on the row wears the same quiet chip (`TOOLBAR_CHIP`): no
+  // fill, no border, hover-only affordance. Grouping is carried by thin
+  // dividers, not by boxing some controls and not others.
   const modelAndPermission = (
-    <div className="flex min-w-0 flex-nowrap items-center gap-1">
-      <ModelPicker session={session} disabled={isStreaming} className="max-w-[11rem]" />
-      <PermissionModeIndicator onCycle={(next) => setPermissionMode(next)} disabled={isStreaming} />
+    <div className="flex min-w-0 flex-nowrap items-center gap-0.5">
+      <ModelPicker
+        session={session}
+        disabled={isStreaming}
+        className={cn(TOOLBAR_CHIP, "max-w-[11rem]")}
+      />
+      <PermissionModeIndicator
+        onCycle={(next) => setPermissionMode(next)}
+        disabled={isStreaming}
+        className={TOOLBAR_CHIP}
+      />
+      {/* The system-prompt preset shapes the session the way the model and
+          permission do, so it sits with them (moved down from the chat header,
+          which is title-bar chrome now). Self-hides without presets, which is
+          why it lives inside this group rather than behind its own divider. */}
+      {session && !compact ? (
+        <ComposerPresetChip session={session} disabled={isStreaming} className={TOOLBAR_CHIP} />
+      ) : null}
     </div>
   )
+  // Narrow packings put the preset in the overflow instead of the first row.
+  const presetControl =
+    session && compact ? (
+      <ComposerPresetChip session={session} disabled={isStreaming} className={TOOLBAR_CHIP} />
+    ) : null
+  // Ambient session status that used to crowd the header: what this session
+  // has cost, and the one credential state that would stop the next send.
+  const sessionStatus = session ? (
+    <>
+      <SessionCostBadgeLive
+        sessionId={session.id}
+        tokensLabel={(input, output) => tHeader("tokensLabel", { input, output })}
+      />
+      <ComposerCredentialBadge onOpenSettings={onOpenProviderSettings} />
+    </>
+  ) : null
   const executionGroup = (
     <div
-      className="flex min-w-0 flex-nowrap items-center gap-1 rounded-xl border border-border/50 bg-muted/20 p-0.5"
+      className="flex min-w-0 flex-nowrap items-center gap-0.5"
       data-testid="composer-execution-controls"
     >
       {modelAndPermission}
-      <span aria-hidden className="h-4 w-px shrink-0 bg-border/60" />
+      <ToolbarDivider />
       {runtimeControl}
     </div>
   )
@@ -207,25 +249,27 @@ function GenericBottomToolbar({
       modelId={modelId}
       providerId={providerId}
       sdkUsage={sdkUsage}
-      triggerClassName="ml-auto shrink-0"
+      triggerClassName={cn(TOOLBAR_CHIP, "shrink-0 px-1.5")}
     />
   )
 
-  // Everything that is not "what will this turn run as". A Popover, not a
-  // DropdownMenu: the agent-mode / external-agent selectors and the plugin
-  // slots own their own overlays, and re-mounting those inside a
+  // Narrow packing only. A Popover, not a DropdownMenu: the agent-mode selector
+  // and the plugin slots own their own overlays, and re-mounting those inside a
   // `DropdownMenuItem` desyncs their open state.
   const overflow = (
     <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
       <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">{tier3}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          {presetControl}
+          {modeControl}
+          {sandboxIndicator}
+        </div>
         <div className="flex flex-wrap items-center gap-2">{pluginSlots}</div>
       </div>
     </ToolbarMoreMenu>
   )
 
-  // All three layouts now agree: [model · effort] [permission] … [context] [⋯].
-  // The variants differ only in how the row is packed, not in what it holds.
+  // Both narrow layouts pack the tail into "⋯"; the wide one lays it out.
   if (variant === "embedded") {
     return (
       <div
@@ -234,6 +278,7 @@ function GenericBottomToolbar({
         data-testid="composer-toolbar-embedded"
       >
         {executionGroup}
+        {sessionStatus}
         {contextIndicator}
         {overflow}
       </div>
@@ -254,6 +299,7 @@ function GenericBottomToolbar({
         </div>
         <div className="flex items-center justify-end gap-x-1">
           {runtimeControl}
+          {sessionStatus}
           {contextIndicator}
           {overflow}
         </div>
@@ -261,23 +307,53 @@ function GenericBottomToolbar({
     )
   }
 
-  // Wide (web / desktop): one row, context usage pinned right via `ml-auto`.
+  // Wide (web / desktop): one row, status cluster pinned right via the context
+  // indicator's `ml-auto`. Nothing is collapsed here — the row has the space,
+  // and a "⋯" that hides the active Agent mode costs a click to answer a
+  // question the user asks on every turn.
   return (
     <div
       ref={rootRef}
-      className="mt-2 flex min-w-0 flex-nowrap items-center gap-x-2 px-1 text-[11px] text-muted-foreground"
+      className="mt-2 flex min-w-0 flex-nowrap items-center gap-x-1 px-1 text-[11px] text-muted-foreground"
       data-testid="composer-footer"
     >
       {leading}
       {executionGroup}
-      {contextIndicator}
-      {overflow}
+      {modeControl ? (
+        <>
+          <ToolbarDivider />
+          {modeControl}
+        </>
+      ) : null}
+      <div className="flex shrink-0 items-center gap-1 empty:hidden">{pluginSlots}</div>
+      <div
+        className="ml-auto flex shrink-0 items-center gap-0.5 pl-2"
+        data-testid="composer-status-cluster"
+      >
+        {sessionStatus}
+        {contextIndicator}
+        {sandboxIndicator}
+      </div>
     </div>
   )
 }
 
 /** Below this measured width, split the status line into two compact rows. */
 const COMPACT_TOOLBAR_PX = 384
+
+/**
+ * The one chip style every toolbar control wears. Overrides each control's
+ * own default (outline / muted fill / rounded-lg) so the row reads as a single
+ * quiet strip: same height, same radius, hover-only affordance, no fills or
+ * borders competing with the composer frame above it.
+ */
+export const TOOLBAR_CHIP =
+  "h-7 rounded-md border-transparent bg-transparent px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/60 hover:text-foreground dark:border-transparent dark:bg-transparent dark:hover:bg-muted/60"
+
+/** Thin vertical rule between control groups on the wide row. */
+function ToolbarDivider() {
+  return <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border/60" />
+}
 
 /**
  * Compact "⋯ More" popover holding the toolbar controls that don't fit on a

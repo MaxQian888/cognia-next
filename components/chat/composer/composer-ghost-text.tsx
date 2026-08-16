@@ -1,8 +1,8 @@
 // Inline "ghost text" layer painted over the composer textarea — the chat
 // cousin of the terminal's `terminal-ghost-text.tsx`. The textarea stays the
-// single source of truth; this overlay paints the dim AI continuation after
-// the typed text (suggestions are append-only, so the ghost always follows
-// the caret at the end of the value). Never captures pointer events and is
+// single source of truth; this overlay paints the dim continuation after the
+// typed text (suggestions are append-only, so the ghost always follows the
+// caret at the end of the value). Never captures pointer events and is
 // aria-hidden — the readable text is the textarea on top.
 //
 // Alignment contract: identical typography + box model to the textarea (the
@@ -10,6 +10,12 @@
 // glyph after the typed text. Vertical scroll is mirrored imperatively via
 // `innerRef` (no React state, no re-render on scroll), exactly like the chip
 // overlay.
+//
+// Beyond the ghost itself the badge row tells the user WHERE the suggestion
+// came from (history / a command / the model), because the two tiers behave
+// differently and look identical otherwise: a history completion is exact and
+// free, a model completion is a guess that cost a call. When more than one
+// candidate is ranked it also shows the position and the cycle hint.
 
 import { forwardRef, memo } from "react"
 import { cn } from "@/lib/utils"
@@ -22,10 +28,22 @@ interface ComposerGhostTextProps {
   ghost: string
   /** Translated "Tab" accept hint shown as a small badge. Omit to hide. */
   acceptHint?: string
+  /** Translated source label (e.g. "history", "AI"). Omit to hide. */
+  sourceLabel?: string
+  /** Translated `n/total` position, shown only when more than one candidate. */
+  positionLabel?: string
+  /** Translated "Alt+] to cycle" hint. Omit to hide. */
+  cycleHint?: string
 }
 
+const BADGE_CLASS =
+  "ml-2 whitespace-nowrap rounded border border-border/60 bg-muted/70 px-1 text-[10px] leading-tight text-muted-foreground"
+
 const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>(
-  function ComposerGhostText({ value, ghost, acceptHint }, innerRef) {
+  function ComposerGhostText(
+    { value, ghost, acceptHint, sourceLabel, positionLabel, cycleHint },
+    innerRef
+  ) {
     if (!ghost) return null
     return (
       <div
@@ -33,6 +51,7 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
         className="pointer-events-none absolute inset-0 overflow-hidden"
         data-testid="composer-ghost-text"
         data-ghost={ghost}
+        data-ghost-source={sourceLabel}
       >
         <div
           ref={innerRef}
@@ -44,9 +63,20 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
         >
           <span className="text-transparent">{value}</span>
           <span className="text-muted-foreground/50">{ghost}</span>
-          {acceptHint ? (
-            <span className="ml-2 whitespace-nowrap rounded border border-border/60 bg-muted/70 px-1 text-[10px] leading-tight text-muted-foreground">
-              {acceptHint}
+          {sourceLabel ? (
+            <span className={BADGE_CLASS} data-testid="composer-ghost-source">
+              {sourceLabel}
+            </span>
+          ) : null}
+          {positionLabel ? (
+            <span className={BADGE_CLASS} data-testid="composer-ghost-position">
+              {positionLabel}
+            </span>
+          ) : null}
+          {acceptHint ? <span className={BADGE_CLASS}>{acceptHint}</span> : null}
+          {cycleHint ? (
+            <span className={BADGE_CLASS} data-testid="composer-ghost-cycle">
+              {cycleHint}
             </span>
           ) : null}
         </div>
@@ -55,6 +85,6 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
   }
 )
 
-// Memoised: only re-render when value/ghost/hint change, not on every composer
-// re-render (caret, popover, status churn).
+// Memoised: only re-render when the painted content changes, not on every
+// composer re-render (caret, popover, status churn).
 export const ComposerGhostText = memo(ComposerGhostTextBase)

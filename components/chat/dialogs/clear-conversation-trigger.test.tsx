@@ -76,6 +76,20 @@ describe("ClearConversationTrigger", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("renders a labeled outline button for the sheet variant and still opens the confirm dialog", async () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ClearConversationTrigger variant="labeled" className="w-full" />
+      </Wrapper>
+    )
+    const trigger = screen.getByRole("button", { name: /clear/i })
+    expect(trigger).toHaveClass("w-full")
+    expect(trigger).toHaveTextContent(/clear/i)
+    fireEvent.click(trigger)
+    expect(await screen.findByRole("button", { name: /delete messages/i })).toBeInTheDocument()
+  })
+
   it("confirms then calls adapter.clearMessages with the active sessionId", async () => {
     const clearMessages = jest.fn(async () => undefined)
     const Wrapper = withAdapter(makeAdapter({ clearMessages }))

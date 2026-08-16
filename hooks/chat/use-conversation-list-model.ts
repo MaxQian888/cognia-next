@@ -5,7 +5,14 @@ import {
   type ConversationGroup,
   type ConversationListModel,
 } from "@/lib/chat/conversation-list-model"
-import type { ChatSession, ConversationGroupBy, SessionFolder } from "@cognia/agent-config-types"
+import type { ConversationFilterContext } from "@/lib/chat/conversation-filters"
+import type {
+  ChatSession,
+  ConversationFilters,
+  ConversationGroupBy,
+  ConversationSortBy,
+  SessionFolder,
+} from "@cognia/agent-config-types"
 
 const EMPTY_FOLDERS: readonly SessionFolder[] = []
 const EMPTY_COLLAPSED: ReadonlySet<string> = new Set<string>()
@@ -38,6 +45,14 @@ export interface UseConversationListModelParams {
   groupCollapseOverrides?: Readonly<Record<string, boolean>>
   /** Session ids whose message content matched the query (title OR content). */
   contentMatchIds?: ReadonlySet<string>
+  /** Order inside each section. Defaults to `"recent"` (the model's default). */
+  sortBy?: ConversationSortBy
+  /** Quick filters AND-ed on top of the archive view. Defaults to unfiltered. */
+  filters?: ConversationFilters
+  /** Session ids with unread messages — feeds the unread filter and sort. */
+  unreadIds?: ReadonlySet<string>
+  /** Model / provider fallback chain for the model + provider facets. */
+  filterContext?: Pick<ConversationFilterContext, "modelOf" | "providerOf">
   /** Override the injected clock (tests only); defaults to `Date.now()`. */
   now?: number
 }
@@ -60,6 +75,10 @@ export function useConversationListModel({
   activeWorkspaceId = null,
   groupCollapseOverrides = EMPTY_COLLAPSE_OVERRIDES,
   contentMatchIds,
+  sortBy = "recent",
+  filters,
+  unreadIds,
+  filterContext,
   now,
 }: UseConversationListModelParams): ConversationListModel {
   return useMemo(
@@ -75,6 +94,10 @@ export function useConversationListModel({
         activeWorkspaceId,
         groupCollapseOverrides,
         contentMatchIds,
+        sortBy,
+        filters,
+        unreadIds,
+        filterContext,
       }),
     [
       sessions,
@@ -88,6 +111,10 @@ export function useConversationListModel({
       activeWorkspaceId,
       groupCollapseOverrides,
       contentMatchIds,
+      sortBy,
+      filters,
+      unreadIds,
+      filterContext,
       now,
     ]
   )

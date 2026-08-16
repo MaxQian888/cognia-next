@@ -59,9 +59,7 @@ function GalleryThumbnail({
   const lightboxSrc = canonical.status === "ready" ? canonical.url : resolvedSrc
   const resolvedItem = useMemo(
     () =>
-      lightboxSrc
-        ? { ...item, src: lightboxSrc, ...(isRef ? { sourceRef: item.src } : {}) }
-        : null,
+      lightboxSrc ? { ...item, src: lightboxSrc, ...(isRef ? { sourceRef: item.src } : {}) } : null,
     [isRef, item, lightboxSrc]
   )
   const name = item.filename || item.title || item.alt || t("defaultTitle")
