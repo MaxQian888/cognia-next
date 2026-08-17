@@ -72,6 +72,15 @@ export async function listAgentTasks(agentId: string): Promise<AgentTask[]> {
   return getDb().agentTasks.where("agentId").equals(agentId).sortBy("updatedAt")
 }
 
+/**
+ * Every task stamped with the workspace id — feeds the issue board's
+ * `agent-task` federated source. Rows created before tasks carried
+ * `projectId` are (correctly) not workspace-scoped and are not returned.
+ */
+export async function listAgentTasksByProject(projectId: string): Promise<AgentTask[]> {
+  return getDb().agentTasks.where("projectId").equals(projectId).sortBy("updatedAt")
+}
+
 export function listAgentTaskAttempts(taskId: string): Promise<AgentTaskAttempt[]> {
   return getDb().agentTaskAttempts.where("taskId").equals(taskId).sortBy("attemptNo")
 }

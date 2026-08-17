@@ -27,6 +27,7 @@ import { deriveProjectKey, isValidProjectKey } from "@/lib/issues/identifier"
 import { getDb } from "./schema"
 import { deleteIssueCounter } from "./issue-counters"
 import { deleteIssueEventsForIssues } from "./issue-events"
+import { deleteIssueRunsForIssues } from "./issue-runs"
 
 function newIssueProjectId(): string {
   return `iprj_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -209,8 +210,8 @@ function sameResource(a: IssueProjectResource, b: IssueProjectResource): boolean
 }
 
 /**
- * Delete a project and everything under it: its issues, their events, and its
- * identifier counter. One transaction, so a crash can't strand orphans.
+ * Delete a project and everything under it: its issues, their events, their
+ * runs, and its identifier counter. One transaction, so a crash can't strand orphans.
  *
  * The counter goes too — the project's key is released back to the pool, and
  * a future project reusing that key starts numbering from 1 again.
@@ -222,11 +223,13 @@ export async function deleteIssueProject(id: string): Promise<void> {
     db.issueProjects,
     db.issues,
     db.issueEvents,
+    db.issueRuns,
     db.issueCounters,
     async () => {
       const issues = await db.issues.where("issueProjectId").equals(id).toArray()
       const issueIds = issues.map((issue) => issue.id)
       await deleteIssueEventsForIssues(issueIds)
+      await deleteIssueRunsForIssues(issueIds)
       await db.issues.bulkDelete(issueIds)
       await deleteIssueCounter(id)
       await db.issueProjects.delete(id)

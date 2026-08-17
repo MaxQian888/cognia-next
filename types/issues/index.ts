@@ -31,6 +31,11 @@
  *     (`critical|high|normal|low|background`): "background" is meaningless
  *     for a human-facing issue and the tracker needs an explicit "none".
  *     `lib/issues/run/` maps between the two at the execution boundary.
+ *   - `IssueRun` (Dexie v172) is the issue-side record of one dispatch to an
+ *     execution path (AgentTask / AgentTeam / GitHub issue loop). The issue
+ *     side is the single source of truth for "which runs belong to this
+ *     issue" — the execution engines are never widened with an `issueId`
+ *     column, so the tracker can bind to any engine without a schema bump.
  */
 
 /** Board columns, in display order. Fixed by design — see ADR (slice ①). */
@@ -83,8 +88,11 @@ export function priorityRank(priority: IssuePriority): number {
  * `ConversationOverrideRow.assignee` does.
  *
  *   human → the local user (or, on a GitHub mirror row, the GitHub login)
- *   agent → a Character / external agent id
- *   team  → an `AgentTeam` id
+ *   agent → a `Character` id (`lib/db/characters.ts`). This is what
+ *           `createAgentTask` requires; external-agent ids are NOT accepted
+ *           here — the run adapters refuse an id they cannot resolve rather
+ *           than guess which namespace it belongs to.
+ *   team  → an `AgentTeam` id (`stores/agent/agent-team-store`)
  */
 export type IssueActorKind = "human" | "agent" | "team"
 
@@ -262,4 +270,62 @@ export interface IssueCounter {
   scopeId: string
   /** Next number to hand out. Starts at 1. */
   next: number
+}
+
+/** Which execution path an `IssueRun` was dispatched to. */
+export const ISSUE_RUN_KINDS = ["agent-task", "agent-team", "github-loop"] as const
+
+export type IssueRunKind = (typeof ISSUE_RUN_KINDS)[number]
+
+/**
+ * Lifecycle of one dispatch. `queued`/`running` are "active" — an issue with an
+ * active run is runtime-owned in `lib/issues/state-machine.ts`. Terminal
+ * states never transition again.
+ */
+export const ISSUE_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const
+
+export type IssueRunStatus = (typeof ISSUE_RUN_STATUSES)[number]
+
+/** True for the two non-terminal run states. */
+export function isActiveIssueRunStatus(status: IssueRunStatus): boolean {
+  return status === "queued" || status === "running"
+}
+
+/** A produced thing worth linking from the issue: PR, branch, worktree, session. */
+export interface IssueRunArtifact {
+  label: string
+  href: string
+}
+
+/**
+ * One dispatch of an issue to an execution engine (Dexie v172, `issueRuns`).
+ *
+ * The row is written by `lib/issues/run/` adapters and settled by the same
+ * adapters when the engine reports a terminal state. `targetId` is the
+ * engine-native id (AgentTask id, AgentTeam id, integration job id) so the
+ * federated sources can badge the engine's own board rows with "from KEY-1".
+ */
+export interface IssueRun {
+  id: string
+  issueId: string
+  /** Owning workspace id — mirrored from the issue so workspace-wide queries need no join. */
+  projectId: string
+  /** `IssueRunAdapter.id` that owns this run. */
+  adapterId: string
+  kind: IssueRunKind
+  /** Engine-native id of the dispatched work item. */
+  targetId: string
+  /** Secondary engine ids (e.g. the team task id for an `agent-team` run). */
+  targetRef?: Record<string, string>
+  status: IssueRunStatus
+  /** Who pressed Run. */
+  by: IssueActor
+  /** Unix epoch ms. */
+  startedAt: number
+  updatedAt: number
+  endedAt?: number
+  artifacts: IssueRunArtifact[]
+  /** Short outcome text from the engine (result preview, PR title, …). */
+  summary?: string
+  error?: string
 }

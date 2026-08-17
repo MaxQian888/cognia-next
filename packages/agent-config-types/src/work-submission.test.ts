@@ -49,6 +49,11 @@ describe("validateWorkSubmissionIntentV1", () => {
     expect(result).toEqual({ ok: true, value: intent() })
   })
 
+  it("accepts an issue workItemRef (issue tracker rows are work items too)", () => {
+    const value = intent({ workItemRef: { kind: "issue", id: "iss_abc" } })
+    expect(validateWorkSubmissionIntentV1(value).ok).toBe(true)
+  })
+
   it("accepts an optional workItemRef", () => {
     const value = intent({ workItemRef: { kind: "agent-task", id: "task-1" } })
     expect(validateWorkSubmissionIntentV1(value).ok).toBe(true)

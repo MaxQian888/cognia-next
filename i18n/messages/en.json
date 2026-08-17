@@ -10184,6 +10184,7 @@
       "action": "Commands",
       "character": "Characters",
       "inbox-conversation": "Inbox conversations",
+      "issue": "Issues",
       "mcp-server": "MCP servers",
       "memory": "Memories",
       "message": "Messages",
@@ -11512,6 +11513,11 @@
       "team": "Squad",
       "unassigned": "Unassigned"
     },
+    "assignee": {
+      "agents": "Agents",
+      "missing": "no longer exists",
+      "teams": "Squads"
+    },
     "board": {
       "addIssue": "Add issue to {status}",
       "agentsWorking": "{count, plural, =0 {0 agents working} one {# agent working} other {# agents working}}",
@@ -11612,6 +11618,57 @@
       "targetDate": "Due date",
       "title": "Projects"
     },
+    "run": {
+      "activeHint": "A run is in progress — the issue stays in In progress until the engine finishes or you cancel.",
+      "adapter": {
+        "agent-task": {
+          "description": "Creates a task for the assigned agent and runs it now through the scheduler.",
+          "name": "Agent task"
+        },
+        "agent-team": {
+          "description": "Adds a task to the assigned squad and starts a team run.",
+          "name": "Agent Team"
+        },
+        "github-loop": {
+          "description": "Clones the bound repository, lets an agent work the linked GitHub issue, pushes a branch and opens a pull request.",
+          "name": "GitHub issue loop"
+        }
+      },
+      "baseBranch": "Base branch",
+      "baseBranchHint": "The branch the pull request targets; the head branch is derived from the issue identifier.",
+      "cancel": "Cancel run",
+      "cancelled": "Run cancelled",
+      "description": "Choose the execution engine. This is the confirmation — the engine starts as soon as you press Run.",
+      "engineLabel": "Execution engine",
+      "loading": "Checking which engines can run this issue…",
+      "noAdapters": "No execution engine is registered yet.",
+      "refusal": {
+        "adapter-missing": "That execution engine is not available.",
+        "assignee-kind-mismatch": "Assign this issue to a matching agent or squad first.",
+        "assignee-not-found": "The assignee no longer exists.",
+        "desktop-only": "Available on the desktop app only.",
+        "issue-finished": "Finished issues cannot be run.",
+        "no-github-account": "Connect a GitHub account in Settings → Connections first.",
+        "no-github-ref": "Link this issue to a GitHub issue first.",
+        "no-github-repo": "Bind the project to the issue's GitHub repository first.",
+        "run-active": "A run is already active for this issue.",
+        "team-busy": "The squad is already running; wait for it to finish."
+      },
+      "reviewRule": "When the run ends the issue moves to In review — never straight to Done.",
+      "section": "Runs",
+      "sectionHint": "Dispatch this issue to its assigned agent or squad. A run owns In progress; when it finishes the issue comes back to you at In review.",
+      "started": "{identifier} dispatched to {adapter}",
+      "status": {
+        "cancelled": "Cancelled",
+        "failed": "Failed",
+        "queued": "Queued",
+        "running": "Running",
+        "succeeded": "Succeeded"
+      },
+      "submit": "Run",
+      "title": "Run {identifier}",
+      "trigger": "Run"
+    },
     "source": {
       "agent-task": "Agent Task",
       "agent-team": "Agent Team",
@@ -11680,6 +11737,7 @@
       "agentsWorking": "Agents working",
       "issueSummary": "Issues",
       "manage": "Manage workspace",
+      "manageHint": "Roots have exactly one editor — the workspace manager.",
       "noProjects": "No projects in this workspace yet",
       "openIssues": "Open issues",
       "overview": "Overview",
@@ -11687,7 +11745,10 @@
       "recentActivity": "Recent activity",
       "resources": "Resources",
       "title": "Workspace",
-      "trust": "Workspace trust"
+      "trust": "Workspace trust",
+      "trustUnknown": "Trust undecided",
+      "trusted": "Trusted",
+      "untrusted": "Not trusted"
     },
     "writeback": {
       "account": "Writing as {account}",

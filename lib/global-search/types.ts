@@ -41,6 +41,7 @@ export type GlobalSearchKind =
   | "mcp-server"
   | "inbox-conversation"
   | "workbench-panel"
+  | "issue"
 
 /** The scope tabs across the top of the dialog. */
 export type GlobalSearchScope =
@@ -80,6 +81,7 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   "mcp-server": ["library"],
   "inbox-conversation": ["library"],
   "workbench-panel": ["commands"],
+  issue: ["library"],
 }
 
 /**
@@ -106,6 +108,7 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   "plugin-action": 15,
   "mcp-server": 16,
   "inbox-conversation": 17,
+  issue: 18,
 }
 
 /** What the dialog does when an item is chosen. */

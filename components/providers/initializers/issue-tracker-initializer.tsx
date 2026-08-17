@@ -1,8 +1,9 @@
 "use client"
 
 /**
- * Boots the issue tracker: registers the issue sources (local + the GitHub
- * mirror) and seeds the starter label catalogue.
+ * Boots the issue tracker: registers the issue sources (local, the GitHub
+ * mirror, and the two agent engines), installs the run bridge (adapters +
+ * engine watchers), and seeds the starter label catalogue.
  *
  * Without this the board renders empty forever — `registerLocalIssueSource`
  * exists and is tested, but a registry nobody registers into is the repo's
@@ -19,6 +20,9 @@ import { loggers } from "@cognia/logging"
 
 import { seedBuiltinIssueLabels } from "@/lib/db/labels"
 import { syncGithubIssueSchedule } from "@/lib/issues/github-sync-schedule"
+import { installIssueRunBridge } from "@/lib/issues/run/install"
+import { registerAgentTaskIssueSource } from "@/lib/issues/sources/agent-task-source"
+import { registerAgentTeamIssueSource } from "@/lib/issues/sources/agent-team-source"
 import { registerGithubIssueSource } from "@/lib/issues/sources/github-source"
 import { registerLocalIssueSource } from "@/lib/issues/sources/local-source"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -35,6 +39,13 @@ export async function bootIssueTracker(): Promise<void> {
   // free even with no repo bound — it simply contributes nothing until a
   // project gains a `github-repo` resource and a sync runs.
   registerGithubIssueSource()
+  // Slice ③: the two agent engines project their tasks onto the same board
+  // (read-only), and the run bridge lets an issue be dispatched to them.
+  registerAgentTaskIssueSource()
+  registerAgentTeamIssueSource()
+  installIssueRunBridge({
+    onError: (error) => log.warn("issue-tracker: run bridge error", { error: String(error) }),
+  })
   await seedBuiltinIssueLabels()
   // Reconcile the background refresh against the bindings that already exist.
   // Adding a resource schedules it there and then; this covers the restart

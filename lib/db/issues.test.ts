@@ -10,6 +10,7 @@ import { listIssueComments, listIssueEvents } from "./issue-events"
 import {
   addIssueComment,
   addIssueLabel,
+  applyRuntimeIssueStatus,
   countIssuesByStatus,
   createIssue,
   deleteIssue,
@@ -364,6 +365,48 @@ describe("deleteIssue", () => {
     await deleteIssue(drop.id)
     expect(await getIssue(keep.id)).toBeDefined()
     expect(await listIssueEvents({ issueId: keep.id })).toHaveLength(1)
+  })
+})
+
+describe("applyRuntimeIssueStatus", () => {
+  it("lets the runtime enter in_progress and leave to in_review, with events", async () => {
+    const issue = await make({ status: "todo" })
+    await applyRuntimeIssueStatus(issue.id, "in_progress", AGENT)
+    let row = (await getIssue(issue.id))!
+    expect(row.status).toBe("in_progress")
+    expect(row.statusCategory).toBe("started")
+    expect(row.startedAt).toBeDefined()
+    await applyRuntimeIssueStatus(issue.id, "in_review", AGENT)
+    row = (await getIssue(issue.id))!
+    expect(row.status).toBe("in_review")
+    expect(await kindsOf(issue.id)).toEqual(["created", "status_changed", "status_changed"])
+  })
+
+  it("is a no-op for the same status, a missing row, or a finished issue", async () => {
+    const issue = await make({ status: "in_progress" })
+    await applyRuntimeIssueStatus(issue.id, "in_progress", AGENT)
+    expect(await kindsOf(issue.id)).toEqual(["created"])
+    await applyRuntimeIssueStatus("missing", "in_review", AGENT)
+
+    const done = await make({ status: "done" })
+    await applyRuntimeIssueStatus(done.id, "in_review", AGENT)
+    expect((await getIssue(done.id))!.status).toBe("done")
+    const canceled = await make({ status: "canceled" })
+    await applyRuntimeIssueStatus(canceled.id, "in_progress", AGENT)
+    expect((await getIssue(canceled.id))!.status).toBe("canceled")
+  })
+
+  it("hands a cancelled run's issue back to todo only from in_progress", async () => {
+    const running = await make({ status: "in_progress" })
+    await applyRuntimeIssueStatus(running.id, "todo", AGENT)
+    let row = (await getIssue(running.id))!
+    expect(row.status).toBe("todo")
+    expect(row.startedAt).toBeUndefined()
+
+    const reviewing = await make({ status: "in_review" })
+    await applyRuntimeIssueStatus(reviewing.id, "todo", AGENT)
+    row = (await getIssue(reviewing.id))!
+    expect(row.status).toBe("in_review")
   })
 })
 

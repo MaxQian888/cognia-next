@@ -638,6 +638,26 @@ describe("getDb", () => {
     ).toBe(true)
   })
 
+  it("v172 opens the issue runs table with the indexes the run bridge queries", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(172)
+    expect(db.issueRuns.schema.primKey.name).toBe("id")
+    expect(db.issueRuns.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "issueId",
+        "[issueId+status]",
+        "projectId",
+        "[projectId+status]",
+        "adapterId",
+        "kind",
+        "targetId",
+        "status",
+      ])
+    )
+  })
+
   it("v123 opens the certification projection table", async () => {
     const db = getDb()
     await db.open()

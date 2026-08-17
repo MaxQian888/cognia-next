@@ -186,7 +186,11 @@
     "openIssues": "未完成议题",
     "recentActivity": "最近活动",
     "trust": "工作区信任",
-    "manage": "管理工作区"
+    "manage": "管理工作区",
+    "trusted": "已信任",
+    "untrusted": "未信任",
+    "trustUnknown": "未决定",
+    "manageHint": "目录只有一个编辑入口 —— 工作区管理器。"
   },
   "labels": {
     "title": "标签",
@@ -232,6 +236,62 @@
     "error": {
       "no-account": "没有已启用的 GitHub 账号。请在「设置 → 连接」中连接一个。",
       "plugin-unavailable": "GitHub delivery 插件不可用。请先启用它再试。"
+    }
+  },
+  "assignee": {
+    "agents": "Agent",
+    "teams": "小队",
+    "missing": "已不存在"
+  },
+  "run": {
+    "section": "运行",
+    "sectionHint": "把这个议题派发给指派的 Agent 或小队。运行期间由运行时持有「进行中」；结束后议题回到「待审阅」交还给你。",
+    "activeHint": "运行进行中 —— 在引擎结束或你取消之前，议题会一直停在「进行中」。",
+    "trigger": "运行",
+    "cancel": "取消运行",
+    "cancelled": "运行已取消",
+    "title": "运行 {identifier}",
+    "description": "选择执行引擎。这一步就是确认 —— 按下「运行」后引擎立即启动。",
+    "loading": "正在检查哪些引擎可以运行这个议题…",
+    "noAdapters": "尚未注册任何执行引擎。",
+    "engineLabel": "执行引擎",
+    "submit": "运行",
+    "started": "{identifier} 已派发给 {adapter}",
+    "baseBranch": "基线分支",
+    "baseBranchHint": "Pull request 的目标分支；源分支由议题编号自动推导。",
+    "reviewRule": "运行结束后议题进入「待审阅」—— 绝不会直接置为「完成」。",
+    "adapter": {
+      "agent-task": {
+        "name": "Agent 任务",
+        "description": "为指派的 Agent 创建一个任务并通过调度器立即运行。"
+      },
+      "agent-team": {
+        "name": "Agent 团队",
+        "description": "向指派的小队追加一个任务并启动团队运行。"
+      },
+      "github-loop": {
+        "name": "GitHub issue 循环",
+        "description": "克隆绑定的仓库，让 Agent 处理关联的 GitHub issue，推送分支并创建 pull request。"
+      }
+    },
+    "refusal": {
+      "assignee-kind-mismatch": "请先把议题指派给对应类型的 Agent 或小队。",
+      "assignee-not-found": "受让人已不存在。",
+      "team-busy": "该小队正在运行中，请等它结束。",
+      "no-github-ref": "请先把这个议题关联到一个 GitHub issue。",
+      "no-github-repo": "请先把项目绑定到该议题所在的 GitHub 仓库。",
+      "desktop-only": "仅桌面端可用。",
+      "no-github-account": "请先在 设置 → 连接 中接入 GitHub 账号。",
+      "run-active": "这个议题已有一个运行在进行中。",
+      "issue-finished": "已结束的议题不能运行。",
+      "adapter-missing": "该执行引擎不可用。"
+    },
+    "status": {
+      "queued": "排队中",
+      "running": "运行中",
+      "succeeded": "成功",
+      "failed": "失败",
+      "cancelled": "已取消"
     }
   }
 }

@@ -131,7 +131,7 @@ import type {
   CannedResponseRow,
 } from "./crm-types"
 import type { LabelRow } from "@/types/labels"
-import type { Issue, IssueCounter, IssueEvent, IssueProject } from "@/types/issues"
+import type { Issue, IssueCounter, IssueEvent, IssueProject, IssueRun } from "@/types/issues"
 import type { GithubIssueMirrorRow } from "./github-issue-mirror-types"
 import type {
   WorkflowRow,
@@ -4120,6 +4120,19 @@ export class CogniaDB extends Dexie {
         "&id, repoFullName, &[repoFullName+number], issueProjectId, state, updatedAt, syncedAt",
     })
 
+    // v172 — Issue runs (slice ③ execution bridge). One row per dispatch of a
+    // local issue to an execution engine (AgentTask / AgentTeam / GitHub issue
+    // loop). The ISSUE side owns the binding: engines are never widened with an
+    // `issueId` column, so a new engine binds without a schema bump.
+    // `[projectId+status]` backs the workspace-wide "N agents working" tile;
+    // `[issueId+status]` backs the per-issue runtime-owned guard; `targetId`
+    // lets the agent-task / agent-team federated sources badge engine rows
+    // with the issue they came from.
+    this.version(172).stores({
+      issueRuns:
+        "&id, issueId, [issueId+status], projectId, [projectId+status], adapterId, kind, targetId, status, startedAt, updatedAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -4164,6 +4177,10 @@ export class CogniaDB extends Dexie {
   // federated items and are deliberately excluded from companion sync, since
   // re-fetching is cheaper than reconciling a cache that can drift.
   githubIssueMirror!: Table<GithubIssueMirrorRow, string>
+  // v172 — Issue runs (slice ③). Issue-side record of every dispatch to an
+  // execution engine; settled by `lib/issues/run/` adapters. Local-only, not
+  // companion-synced: the engine rows it points at are not synced either.
+  issueRuns!: Table<IssueRun, string>
   // v100 — Project-scoped RAG chunks (workspace knowledge base). See
   // `lib/db/project-chunks.ts` and `@/types/project-knowledge`.
   projectChunks!: Table<ProjectChunk, string>

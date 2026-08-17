@@ -8,6 +8,7 @@ import { registerGlobalSearchProvider } from "../registry"
 import type { GlobalSearchProvider } from "../types"
 import { actionsProvider } from "./actions"
 import { pluginActionsProvider, workbenchPanelsProvider } from "./host"
+import { issuesProvider } from "./issues"
 import { memoriesProvider, skillsProvider, templatesProvider, workflowsProvider } from "./library"
 import { createMessagesProvider, type MessagesProviderDeps } from "./messages"
 import { navigationProvider } from "./navigation"
@@ -50,6 +51,7 @@ export function builtinGlobalSearchProviders(
     pluginActionsProvider,
     mcpServersProvider,
     inboxProvider,
+    issuesProvider,
   ]
 }
 

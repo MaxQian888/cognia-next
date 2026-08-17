@@ -27,6 +27,7 @@ import { FULL_ISSUE_CAPABILITIES } from "@/types/issues/unified"
 import { getDb } from "./schema"
 import { allocateIssueNumber } from "./issue-counters"
 import { appendIssueEvent, deleteIssueEvents } from "./issue-events"
+import { deleteIssueRuns } from "./issue-runs"
 
 function newIssueId(): string {
   return `iss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -442,9 +443,57 @@ export async function linkIssueToGithub(
  */
 export async function deleteIssue(id: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.issues, db.issueEvents, async () => {
+  await db.transaction("rw", db.issues, db.issueEvents, db.issueRuns, async () => {
     await deleteIssueEvents(id)
+    await deleteIssueRuns(id)
     await db.issues.delete(id)
+  })
+}
+
+/**
+ * Runtime-owned status write, used ONLY by `lib/issues/run/` adapters.
+ *
+ * `moveIssue` applies the human guard, which (correctly) refuses to move an
+ * issue into or out of `in_progress` while a run is active — that is the
+ * runtime's column. This is the runtime's own door: it may enter
+ * `in_progress` when a run starts, leave to `in_review` when the run
+ * finishes, or hand the issue back to `todo` when the run is cancelled before
+ * producing anything — and NOTHING else. `done` is never reachable from here;
+ * promoting a reviewed issue is the human's call (`lib/issues/state-machine.ts`).
+ */
+export async function applyRuntimeIssueStatus(
+  id: string,
+  to: Extract<IssueStatus, "in_progress" | "in_review" | "todo">,
+  by: IssueActor
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.issues, db.issueEvents, async () => {
+    const existing = await db.issues.get(id)
+    if (!existing || existing.status === to) return
+    // A finished/cancelled issue is not dragged back into the pipeline by a
+    // late engine callback.
+    if (existing.statusCategory === "completed" || existing.statusCategory === "canceled") return
+    // The cancel hand-back only relinquishes the runtime's own column; it never
+    // demotes an issue a human has already moved elsewhere.
+    if (to === "todo" && existing.status !== "in_progress") return
+    const now = Date.now()
+    const timestamps = statusTimestampPatch(to, now, existing)
+    const next: Issue = {
+      ...existing,
+      status: to,
+      statusCategory: statusCategoryOf(to),
+      updatedAt: now,
+    }
+    for (const key of ["startedAt", "completedAt", "canceledAt"] as const) {
+      const value = timestamps[key]
+      if (value === undefined) delete next[key]
+      else next[key] = value
+    }
+    await db.issues.put(next)
+    await appendIssueEvent({
+      issueId: existing.id,
+      payload: { kind: "status_changed", from: existing.status, to, by },
+    })
   })
 }
 

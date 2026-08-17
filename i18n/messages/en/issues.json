@@ -186,7 +186,11 @@
     "openIssues": "Open issues",
     "recentActivity": "Recent activity",
     "trust": "Workspace trust",
-    "manage": "Manage workspace"
+    "manage": "Manage workspace",
+    "trusted": "Trusted",
+    "untrusted": "Not trusted",
+    "trustUnknown": "Trust undecided",
+    "manageHint": "Roots have exactly one editor — the workspace manager."
   },
   "labels": {
     "title": "Labels",
@@ -232,6 +236,62 @@
     "error": {
       "no-account": "No enabled GitHub account is connected. Connect one in Settings → Connections.",
       "plugin-unavailable": "The GitHub delivery plugin is unavailable. Enable it, then try again."
+    }
+  },
+  "assignee": {
+    "agents": "Agents",
+    "teams": "Squads",
+    "missing": "no longer exists"
+  },
+  "run": {
+    "section": "Runs",
+    "sectionHint": "Dispatch this issue to its assigned agent or squad. A run owns In progress; when it finishes the issue comes back to you at In review.",
+    "activeHint": "A run is in progress — the issue stays in In progress until the engine finishes or you cancel.",
+    "trigger": "Run",
+    "cancel": "Cancel run",
+    "cancelled": "Run cancelled",
+    "title": "Run {identifier}",
+    "description": "Choose the execution engine. This is the confirmation — the engine starts as soon as you press Run.",
+    "loading": "Checking which engines can run this issue…",
+    "noAdapters": "No execution engine is registered yet.",
+    "engineLabel": "Execution engine",
+    "submit": "Run",
+    "started": "{identifier} dispatched to {adapter}",
+    "baseBranch": "Base branch",
+    "baseBranchHint": "The branch the pull request targets; the head branch is derived from the issue identifier.",
+    "reviewRule": "When the run ends the issue moves to In review — never straight to Done.",
+    "adapter": {
+      "agent-task": {
+        "name": "Agent task",
+        "description": "Creates a task for the assigned agent and runs it now through the scheduler."
+      },
+      "agent-team": {
+        "name": "Agent Team",
+        "description": "Adds a task to the assigned squad and starts a team run."
+      },
+      "github-loop": {
+        "name": "GitHub issue loop",
+        "description": "Clones the bound repository, lets an agent work the linked GitHub issue, pushes a branch and opens a pull request."
+      }
+    },
+    "refusal": {
+      "assignee-kind-mismatch": "Assign this issue to a matching agent or squad first.",
+      "assignee-not-found": "The assignee no longer exists.",
+      "team-busy": "The squad is already running; wait for it to finish.",
+      "no-github-ref": "Link this issue to a GitHub issue first.",
+      "no-github-repo": "Bind the project to the issue's GitHub repository first.",
+      "desktop-only": "Available on the desktop app only.",
+      "no-github-account": "Connect a GitHub account in Settings → Connections first.",
+      "run-active": "A run is already active for this issue.",
+      "issue-finished": "Finished issues cannot be run.",
+      "adapter-missing": "That execution engine is not available."
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
     }
   }
 }

@@ -4,6 +4,9 @@
 
 const mockRegisterLocalIssueSource = jest.fn()
 const mockRegisterGithubIssueSource = jest.fn()
+const mockRegisterAgentTaskIssueSource = jest.fn()
+const mockRegisterAgentTeamIssueSource = jest.fn()
+const mockInstallIssueRunBridge = jest.fn((..._args: unknown[]) => () => {})
 const mockSeedBuiltinIssueLabels = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/issues/sources/local-source", () => ({
@@ -11,6 +14,15 @@ jest.mock("@/lib/issues/sources/local-source", () => ({
 }))
 jest.mock("@/lib/issues/sources/github-source", () => ({
   registerGithubIssueSource: (...args: unknown[]) => mockRegisterGithubIssueSource(...args),
+}))
+jest.mock("@/lib/issues/sources/agent-task-source", () => ({
+  registerAgentTaskIssueSource: (...args: unknown[]) => mockRegisterAgentTaskIssueSource(...args),
+}))
+jest.mock("@/lib/issues/sources/agent-team-source", () => ({
+  registerAgentTeamIssueSource: (...args: unknown[]) => mockRegisterAgentTeamIssueSource(...args),
+}))
+jest.mock("@/lib/issues/run/install", () => ({
+  installIssueRunBridge: (...args: unknown[]) => mockInstallIssueRunBridge(...args),
 }))
 jest.mock("@/lib/db/labels", () => ({
   seedBuiltinIssueLabels: (...args: unknown[]) => mockSeedBuiltinIssueLabels(...args),
@@ -45,7 +57,22 @@ describe("bootIssueTracker", () => {
     await bootIssueTracker()
     expect(mockRegisterLocalIssueSource).toHaveBeenCalledTimes(1)
     expect(mockRegisterGithubIssueSource).toHaveBeenCalledTimes(1)
+    expect(mockRegisterAgentTaskIssueSource).toHaveBeenCalledTimes(1)
+    expect(mockRegisterAgentTeamIssueSource).toHaveBeenCalledTimes(1)
     expect(mockSeedBuiltinIssueLabels).toHaveBeenCalledTimes(1)
+  })
+
+  it("installs the run bridge (adapters + engine watchers) with an error sink", async () => {
+    await bootIssueTracker()
+    expect(mockInstallIssueRunBridge).toHaveBeenCalledTimes(1)
+    const options = (mockInstallIssueRunBridge.mock.calls as unknown as unknown[][])[0]![0] as {
+      onError: (error: unknown) => void
+    }
+    options.onError(new Error("bridge boom"))
+    expect(mockWarn).toHaveBeenCalledWith(
+      "issue-tracker: run bridge error",
+      expect.objectContaining({ error: expect.stringContaining("bridge boom") })
+    )
   })
 
   it("registers the GitHub source even with no repo bound — it reads the mirror only", async () => {
