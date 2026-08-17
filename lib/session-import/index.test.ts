@@ -79,6 +79,8 @@ describe("session-import runner", () => {
       codexHome: "/relocated/codex",
       opencodeConfigDir: "",
       opencodeDataDir: "",
+      piAgentDir: "",
+      piSessionDir: "",
     }
     const resolved = await resolveScanInput({ fs, roots })
     expect(resolved.roots).toBe(roots)

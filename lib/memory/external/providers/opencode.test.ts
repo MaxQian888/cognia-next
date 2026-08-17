@@ -37,6 +37,8 @@ describe("discoverOpencode", () => {
             codexHome: "/codex",
             opencodeConfigDir: "/custom/opencode",
             opencodeDataDir: "/data/opencode",
+            piAgentDir: "",
+            piSessionDir: "",
           },
         })
       )

@@ -1,6 +1,6 @@
 /**
- * Where Claude Code / Codex / OpenCode keep their config and data trees on
- * this host.
+ * Where Claude Code / Codex / OpenCode / Pi keep their config and data trees
+ * on this host.
  *
  * Every importer in the app — sessions (`lib/session-import/`), MCP
  * (`lib/claude/agents/`), subagents (`lib/claude/subagent-importers/`),
@@ -40,6 +40,17 @@ export interface VendorRoots {
   opencodeDataDir: string
   /** Platform data fallback retained alongside XDG (e.g. redirected `%APPDATA%`). */
   opencodePlatformDataDir?: string
+  /**
+   * `$PI_CODING_AGENT_DIR` or `<home>/.pi/agent` — Pi's user-scope config dir
+   * (`settings.json`, `mcp.json`, `subagents.json`, per-extension configs).
+   *
+   * Note this is the *agent* dir, not `~/.pi`: Pi's own `getAgentDir()` is
+   * env-first, else `join(homedir(), ".pi", "agent")`. Pi's project scope is
+   * always `<cwd>/.pi` and is NOT relocated by the variable.
+   */
+  piAgentDir: string
+  /** `$PI_CODING_AGENT_SESSION_DIR` or `<piAgentDir>/sessions`. */
+  piSessionDir: string
 }
 
 /** All roots unresolvable — what web mode gets, and the shape of a failed IPC. */
@@ -49,6 +60,8 @@ export const EMPTY_VENDOR_ROOTS: VendorRoots = {
   opencodeConfigDir: "",
   opencodeDataDir: "",
   opencodePlatformDataDir: "",
+  piAgentDir: "",
+  piSessionDir: "",
 }
 
 /** True when at least one vendor tree is locatable. */
@@ -65,6 +78,8 @@ export interface VendorRootEnv {
   CODEX_HOME?: string
   XDG_CONFIG_HOME?: string
   XDG_DATA_HOME?: string
+  PI_CODING_AGENT_DIR?: string
+  PI_CODING_AGENT_SESSION_DIR?: string
   /** Windows roaming app data; only consulted when `platform === "windows"`. */
   APPDATA?: string
 }
@@ -104,12 +119,21 @@ export function vendorRootsFromEnv(
         ? joinPath(base, "Library/Application Support")
         : (xdgData ?? (base ? joinPath(base, ".local/share") : null))
 
+  // Pi is home-relative on every OS (no XDG/APPDATA convention), and the
+  // session tree hangs off whatever the agent dir resolves to unless it is
+  // separately overridden.
+  const piAgentDir = envDir(env.PI_CODING_AGENT_DIR) ?? (base ? joinPath(base, ".pi/agent") : "")
+  const piSessionDir =
+    envDir(env.PI_CODING_AGENT_SESSION_DIR) ?? (piAgentDir ? joinPath(piAgentDir, "sessions") : "")
+
   return {
     claudeConfigDir: envDir(env.CLAUDE_CONFIG_DIR) ?? (base ? joinPath(base, ".claude") : ""),
     codexHome: envDir(env.CODEX_HOME) ?? (base ? joinPath(base, ".codex") : ""),
     opencodeConfigDir: under(xdgConfig ?? appData, ".config/opencode"),
     opencodeDataDir: under(xdgData ?? appData, ".local/share/opencode"),
     opencodePlatformDataDir: under(platformData, ".local/share/opencode"),
+    piAgentDir,
+    piSessionDir,
   }
 }
 
@@ -138,6 +162,8 @@ function asVendorRoots(value: unknown): VendorRoots | null {
     codexHome: read("codexHome"),
     opencodeConfigDir: read("opencodeConfigDir"),
     opencodeDataDir: read("opencodeDataDir"),
+    piAgentDir: read("piAgentDir"),
+    piSessionDir: read("piSessionDir"),
   }
   const platformDataDir = read("opencodePlatformDataDir")
   if (platformDataDir) roots.opencodePlatformDataDir = platformDataDir

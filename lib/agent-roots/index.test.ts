@@ -27,6 +27,8 @@ const DESKTOP_ROOTS: VendorRoots = {
   codexHome: "/custom/codex",
   opencodeConfigDir: "/xdg/config/opencode",
   opencodeDataDir: "/xdg/data/opencode",
+  piAgentDir: "/custom/pi-agent",
+  piSessionDir: "/custom/pi-agent/sessions",
 }
 
 beforeEach(() => {
@@ -45,6 +47,8 @@ describe("vendorRootsFromHome", () => {
       opencodeConfigDir: "/home/u/.config/opencode",
       opencodeDataDir: "/home/u/.local/share/opencode",
       opencodePlatformDataDir: "/home/u/.local/share/opencode",
+      piAgentDir: "/home/u/.pi/agent",
+      piSessionDir: "/home/u/.pi/agent/sessions",
     })
   })
 
@@ -109,11 +113,41 @@ describe("vendorRootsFromEnv", () => {
       CODEX_HOME: "",
       XDG_CONFIG_HOME: "/xdg/config/",
       XDG_DATA_HOME: "\t",
+      PI_CODING_AGENT_DIR: "  ",
+      PI_CODING_AGENT_SESSION_DIR: "",
     })
     expect(roots.claudeConfigDir).toBe("/home/u/.claude")
     expect(roots.codexHome).toBe("/home/u/.codex")
     expect(roots.opencodeConfigDir).toBe("/xdg/config/opencode")
     expect(roots.opencodeDataDir).toBe("/home/u/.local/share/opencode")
+    expect(roots.piAgentDir).toBe("/home/u/.pi/agent")
+    expect(roots.piSessionDir).toBe("/home/u/.pi/agent/sessions")
+  })
+
+  // Pi's own getAgentDir() is `join(homedir(), ".pi", "agent")` — the config
+  // dir is the `agent` subdir, not `~/.pi`, and the session tree hangs off it.
+  // These mirror `paths.rs:pi_roots_*`; the two resolvers must not drift.
+  it("hangs the Pi session dir off an overridden agent dir", () => {
+    const roots = vendorRootsFromEnv("/home/u", { PI_CODING_AGENT_DIR: "/custom/pi-agent" })
+    expect(roots.piAgentDir).toBe("/custom/pi-agent")
+    expect(roots.piSessionDir).toBe("/custom/pi-agent/sessions")
+  })
+
+  it("lets the Pi session override win independently of the agent dir", () => {
+    const roots = vendorRootsFromEnv("/home/u", {
+      PI_CODING_AGENT_DIR: "/custom/pi-agent",
+      PI_CODING_AGENT_SESSION_DIR: "/elsewhere/sessions",
+    })
+    expect(roots.piAgentDir).toBe("/custom/pi-agent")
+    expect(roots.piSessionDir).toBe("/elsewhere/sessions")
+  })
+
+  it("keeps the Pi roots home-relative on Windows", () => {
+    // Pi has no XDG/%APPDATA% convention — `.pi/agent` is home-relative on
+    // every OS, same as Claude and Codex.
+    const roots = vendorRootsFromEnv("C:\\Users\\u", { APPDATA: "D:\\Roaming" }, "windows")
+    expect(roots.piAgentDir).toBe("C:\\Users\\u\\.pi\\agent")
+    expect(roots.piSessionDir).toBe("C:\\Users\\u\\.pi\\agent\\sessions")
   })
 
   it("prefers %APPDATA% over the assembled path on Windows", () => {

@@ -49,7 +49,7 @@ pub fn cognia_home() -> Option<PathBuf> {
 // ---------------------------------------------------------------------------
 // Vendor roots
 //
-// The three coding agents cognia imports from (Claude Code, Codex, OpenCode)
+// The coding agents cognia imports from (Claude Code, Codex, OpenCode, Pi)
 // each let the user relocate their whole config tree with an environment
 // variable. Every importer — sessions, MCP, subagents, skills, memory,
 // settings, commands — must agree on where those trees live, so the
@@ -70,6 +70,18 @@ pub struct RootEnv {
     pub xdg_config_home: Option<String>,
     /// `$XDG_DATA_HOME` — where OpenCode keeps its session database.
     pub xdg_data_home: Option<String>,
+    /// `$PI_CODING_AGENT_DIR` — relocates Pi's `~/.pi/agent`.
+    ///
+    /// This overrides the *agent* directory, NOT `~/.pi`. Pi's own resolver
+    /// (`getAgentDir()` in `@earendil-works/pi-coding-agent`) is env-first and
+    /// otherwise `join(homedir(), ".pi", "agent")`. Pi's project scope is
+    /// always `<cwd>/.pi` and is deliberately unaffected by this variable.
+    pub pi_coding_agent_dir: Option<String>,
+    /// `$PI_CODING_AGENT_SESSION_DIR` — relocates Pi's session JSONL tree.
+    /// Pi layers a `sessionDir` settings key underneath this; that lives in
+    /// `settings.json` and so is resolved by the reader, not here — these
+    /// roots are environment-only by design.
+    pub pi_coding_agent_session_dir: Option<String>,
 }
 
 /// Absolute per-vendor root directories. An empty string means "not
@@ -88,6 +100,12 @@ pub struct VendorRoots {
     pub opencode_data_dir: String,
     /// Platform data fallback (`dirs::data_dir()/opencode`), retained alongside XDG.
     pub opencode_platform_data_dir: String,
+    /// `$PI_CODING_AGENT_DIR` or `<home>/.pi/agent` — Pi's user-scope config
+    /// directory, holding `settings.json` (packages), `mcp.json`,
+    /// `subagents.json` and the per-extension `<name>.json` files.
+    pub pi_agent_dir: String,
+    /// `$PI_CODING_AGENT_SESSION_DIR` or `<pi_agent_dir>/sessions`.
+    pub pi_session_dir: String,
 }
 
 /// A non-blank env override as a path.
@@ -144,12 +162,21 @@ pub fn vendor_roots_from(
             }
         });
 
+    // Pi: the env var replaces `<home>/.pi/agent` wholesale, and the session
+    // tree hangs off whatever that resolves to unless separately overridden.
+    let pi_agent = env_path(env.pi_coding_agent_dir)
+        .or_else(|| home_dir.as_ref().map(|h| h.join(".pi").join("agent")));
+    let pi_session = env_path(env.pi_coding_agent_session_dir)
+        .or_else(|| pi_agent.as_ref().map(|d| d.join("sessions")));
+
     VendorRoots {
         claude_config_dir: to_string(claude),
         codex_home: to_string(codex),
         opencode_config_dir: to_string(opencode_config),
         opencode_data_dir: to_string(opencode_data),
         opencode_platform_data_dir: to_string(opencode_platform_data),
+        pi_agent_dir: to_string(pi_agent),
+        pi_session_dir: to_string(pi_session),
     }
 }
 
@@ -165,6 +192,8 @@ pub fn vendor_roots() -> VendorRoots {
             codex_home: env_var("CODEX_HOME"),
             xdg_config_home: env_var("XDG_CONFIG_HOME"),
             xdg_data_home: env_var("XDG_DATA_HOME"),
+            pi_coding_agent_dir: env_var("PI_CODING_AGENT_DIR"),
+            pi_coding_agent_session_dir: env_var("PI_CODING_AGENT_SESSION_DIR"),
         },
         home(),
         dirs::config_dir(),
@@ -180,6 +209,16 @@ fn codex_home() -> Option<PathBuf> {
         None
     } else {
         Some(PathBuf::from(roots.codex_home))
+    }
+}
+
+/// `$PI_CODING_AGENT_DIR` or `~/.pi/agent`, as a path.
+fn pi_agent_dir() -> Option<PathBuf> {
+    let roots = vendor_roots();
+    if roots.pi_agent_dir.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(roots.pi_agent_dir))
     }
 }
 
@@ -371,6 +410,16 @@ pub fn spec_for(agent: &str) -> Option<AgentSpec> {
             format = AgentFormat::Json;
             writable = true;
         }
+        "pi" => {
+            // $PI_CODING_AGENT_DIR/settings.json, else ~/.pi/agent/settings.json.
+            // This file holds Pi's `packages[]` next to its provider
+            // credentials, so every reader must go through the key allowlist in
+            // `lib/pi-packages/settings-io.ts` and every writer must keep the
+            // "existing but unparseable => refuse" guard (lib/claude/sync.ts).
+            path = pi_agent_dir().map(|d| d.join("settings.json"));
+            format = AgentFormat::Json;
+            writable = true;
+        }
         "cline" => {
             path = cline_path();
             format = AgentFormat::Json;
@@ -457,16 +506,23 @@ mod tests {
 
     #[test]
     fn vendor_roots_ignore_blank_overrides() {
+        // Deliberately exhaustive (no `..RootEnv::default()`): adding an env
+        // override without deciding how it treats a blank value should break
+        // this test rather than silently inherit someone else's answer.
         let got = unix_roots(RootEnv {
             claude_config_dir: Some("   ".to_string()),
             codex_home: Some(String::new()),
             xdg_config_home: Some("  ".to_string()),
             xdg_data_home: Some("\t".to_string()),
+            pi_coding_agent_dir: Some("  ".to_string()),
+            pi_coding_agent_session_dir: Some(String::new()),
         });
         assert_eq!(got.claude_config_dir, "/h/.claude");
         assert_eq!(got.codex_home, "/h/.codex");
         assert_eq!(got.opencode_config_dir, "/h/.config/opencode");
         assert_eq!(got.opencode_data_dir, "/h/.local/share/opencode");
+        assert_eq!(got.pi_agent_dir, "/h/.pi/agent");
+        assert_eq!(got.pi_session_dir, "/h/.pi/agent/sessions");
     }
 
     #[test]
@@ -511,6 +567,54 @@ mod tests {
         assert_eq!(got.codex_home, "");
         assert_eq!(got.opencode_config_dir, "");
         assert_eq!(got.opencode_data_dir, "");
+        assert_eq!(got.pi_agent_dir, "");
+        assert_eq!(got.pi_session_dir, "");
+    }
+
+    #[test]
+    fn pi_roots_default_to_agent_subdir() {
+        // Pi's own getAgentDir() is join(homedir(), ".pi", "agent") — the
+        // config dir is NOT `~/.pi`, and sessions hang off the agent dir.
+        let got = unix_roots(RootEnv::default());
+        assert_eq!(got.pi_agent_dir, "/h/.pi/agent");
+        assert_eq!(got.pi_session_dir, "/h/.pi/agent/sessions");
+    }
+
+    #[test]
+    fn pi_agent_dir_override_moves_sessions_with_it() {
+        let got = unix_roots(RootEnv {
+            pi_coding_agent_dir: Some("/custom/pi-agent".to_string()),
+            ..RootEnv::default()
+        });
+        assert_eq!(got.pi_agent_dir, "/custom/pi-agent");
+        assert_eq!(got.pi_session_dir, "/custom/pi-agent/sessions");
+    }
+
+    #[test]
+    fn pi_session_dir_override_is_independent_of_agent_dir() {
+        let got = unix_roots(RootEnv {
+            pi_coding_agent_dir: Some("/custom/pi-agent".to_string()),
+            pi_coding_agent_session_dir: Some("/elsewhere/sessions".to_string()),
+            ..RootEnv::default()
+        });
+        assert_eq!(got.pi_agent_dir, "/custom/pi-agent");
+        assert_eq!(got.pi_session_dir, "/elsewhere/sessions");
+    }
+
+    #[test]
+    fn pi_roots_stay_home_relative_on_windows() {
+        // Pi has no XDG/APPDATA convention — `.pi/agent` is home-relative on
+        // every OS, same as Claude and Codex.
+        let got = vendor_roots_from(
+            RootEnv::default(),
+            Some(PathBuf::from("C:\\Users\\u")),
+            Some(PathBuf::from("C:\\Users\\u\\AppData\\Roaming")),
+            Some(PathBuf::from("C:\\Users\\u\\AppData\\Roaming")),
+            true,
+        );
+        assert!(got.pi_agent_dir.ends_with("agent"));
+        assert!(got.pi_agent_dir.contains(".pi"));
+        assert!(!got.pi_agent_dir.contains("AppData"));
     }
 
     #[test]
@@ -518,6 +622,23 @@ mod tests {
         let json = serde_json::to_value(unix_roots(RootEnv::default())).expect("serialize");
         assert!(json.get("claudeConfigDir").is_some());
         assert!(json.get("opencodeDataDir").is_some());
+        // The TS mirror (lib/agent-roots/index.ts:asVendorRoots) narrows on
+        // these exact camelCase keys; a rename here silently blanks them there.
+        assert!(json.get("piAgentDir").is_some());
+        assert!(json.get("piSessionDir").is_some());
+    }
+
+    #[test]
+    fn spec_for_pi_is_writable_user_settings() {
+        let spec = spec_for("pi").expect("pi spec");
+        assert!(spec.writable);
+        assert_eq!(spec.format, AgentFormat::Json);
+        let path = spec.path.expect("pi path");
+        assert!(path.ends_with("settings.json"));
+        assert!(
+            path.to_string_lossy().contains(".pi")
+                || std::env::var("PI_CODING_AGENT_DIR").is_ok()
+        );
     }
 
     #[test]

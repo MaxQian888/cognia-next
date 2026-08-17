@@ -205,16 +205,29 @@ pub(crate) fn resolve_git_workspace_relative_path(
 }
 
 /// Seed the structurally-trusted directories at startup: appdata, the home
-/// config trees Claude Code / Codex / Gemini read & write, and the documents dir
-/// (the default export target). Called once from `lib.rs` `.setup`.
+/// config trees Claude Code / Codex / Gemini / Pi read & write, and the
+/// documents dir (the default export target). Called once from `lib.rs`
+/// `.setup`.
+///
+/// Anything missing here still *works* on desktop — `enforce_check_path` only
+/// hard-fails remote writes — but every access logs an `fs_shadow_denial`, and
+/// a paired companion device is blocked outright.
 pub fn seed_default_allowed_roots() {
     if let Some(data) = dirs::data_dir() {
         add_allowed_root(data.join("cognia").to_string_lossy().to_string());
     }
     if let Some(home) = dirs::home_dir() {
-        for sub in [".claude", ".codex", ".gemini"] {
+        for sub in [".claude", ".codex", ".gemini", ".pi"] {
             add_allowed_root(home.join(sub).to_string_lossy().to_string());
         }
+    }
+    // `$PI_CODING_AGENT_DIR` relocates Pi's config tree out of `~/.pi`
+    // entirely, so seed the resolved dir too. (The other vendors' overrides —
+    // `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME` — are likewise unseeded above; that
+    // predates this and is deliberately left alone here.)
+    let pi_agent_dir = crate::agents::paths::vendor_roots().pi_agent_dir;
+    if !pi_agent_dir.is_empty() {
+        add_allowed_root(pi_agent_dir);
     }
     if let Some(docs) = dirs::document_dir() {
         add_allowed_root(docs.to_string_lossy().to_string());

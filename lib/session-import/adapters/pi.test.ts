@@ -316,9 +316,281 @@ describe("parsePiSession", () => {
   })
 })
 
+describe("parsePiSession content blocks", () => {
+  const withBlocks = (content: unknown[]) =>
+    fixture([
+      {
+        type: "message",
+        id: "e6",
+        parentId: "e5",
+        timestamp: "2026-08-14T10:00:06.000Z",
+        message: { role: "assistant", content },
+      },
+    ])
+
+  it("maps an image block onto a base64 data-URL file part", () => {
+    const { messages } = parsePiSession(
+      REF,
+      withBlocks([{ type: "image", mimeType: "image/webp", data: "QUJD" }])
+    )
+    const part = messages.at(-1)!.parts.find((p) => (p as { type: string }).type === "file") as {
+      mediaType?: string
+      url?: string
+    }
+    expect(part).toMatchObject({
+      mediaType: "image/webp",
+      url: "data:image/webp;base64,QUJD",
+    })
+  })
+
+  it("defaults a mime-less image to image/png", () => {
+    const { messages } = parsePiSession(REF, withBlocks([{ type: "image", data: "QUJD" }]))
+    expect(
+      messages.at(-1)!.parts.find((p) => (p as { type: string }).type === "file")
+    ).toMatchObject({ mediaType: "image/png", url: "data:image/png;base64,QUJD" })
+  })
+
+  /**
+   * A data-less image and a block type Pi adds after this build must both be
+   * dropped silently rather than rendered as an empty attachment or crashing
+   * the whole import.
+   */
+  it("drops a data-less image and an unknown block type", () => {
+    const { messages } = parsePiSession(
+      REF,
+      withBlocks([
+        { type: "image", mimeType: "image/png" },
+        { type: "sparkle", glitter: true },
+        { type: "text", text: "kept" },
+      ])
+    )
+    const kinds = messages.at(-1)!.parts.map((p) => (p as { type: string }).type)
+    expect(kinds).toEqual(["text"])
+  })
+
+  /**
+   * Pi always stamps a tool call with an id; one without is malformed. It
+   * yields no parts, so the turn carrying it is dropped rather than rendered
+   * as an empty assistant bubble.
+   */
+  it("ignores a tool call with no id", () => {
+    const base = parsePiSession(REF, fixture()).messages.length
+    const { messages } = parsePiSession(
+      REF,
+      withBlocks([{ type: "toolCall", name: "bash", arguments: { command: "ls" } }])
+    )
+    expect(messages).toHaveLength(base)
+  })
+})
+
+describe("parsePiSession bashExecution", () => {
+  const withEntry = (message: unknown) =>
+    fixture([
+      {
+        type: "message",
+        id: "e6",
+        parentId: "e5",
+        timestamp: "2026-08-14T10:00:06.000Z",
+        message,
+      },
+    ])
+
+  /** `!command` is run by the user but Pi records it under its own role. */
+  it("renders a bash execution as an assistant turn", () => {
+    const { messages } = parsePiSession(
+      REF,
+      withEntry({ role: "bashExecution", command: "ls -la", output: "a.ts\nb.ts" })
+    )
+    const last = messages.at(-1)!
+    expect(last.role).toBe("assistant")
+    expect(last.parts).toMatchObject([{ type: "text", text: "ls -la\na.ts\nb.ts" }])
+  })
+
+  it("omits a missing output instead of emitting a blank line", () => {
+    const { messages } = parsePiSession(REF, withEntry({ role: "bashExecution", command: "pwd" }))
+    expect(messages.at(-1)!.parts).toMatchObject([{ type: "text", text: "pwd" }])
+  })
+})
+
+describe("parsePiSession unknown entries", () => {
+  it("records an unknown entry type as a loss note rather than dropping it silently", () => {
+    const { messages } = parsePiSession(
+      REF,
+      fixture([
+        { type: "teleport", id: "e6", parentId: "e5" },
+        { id: "e7", parentId: "e6" },
+      ])
+    )
+    expect(notesOf(messages)).toMatchObject({ "unknown:teleport": 1, "unknown:untyped": 1 })
+  })
+})
+
+/**
+ * Pi omits optional fields rather than writing nulls, and older files predate
+ * fields entirely. Every `?? default` in the adapter is therefore a real code
+ * path a genuine transcript takes, not defensive padding.
+ */
+describe("parsePiSession sparse entries", () => {
+  const sparse = [
+    line({ type: "session", id: "sparse", cwd: "/w" }),
+    line({ type: "message", id: "a", parentId: null, message: { role: "user" } }),
+    line({
+      type: "message",
+      id: "b",
+      parentId: "a",
+      message: {
+        role: "assistant",
+        content: [{ type: "thinking" }, { type: "text" }, { type: "toolCall", id: "c1" }],
+      },
+    }),
+    line({
+      type: "message",
+      id: "c",
+      parentId: "b",
+      message: { role: "toolResult", toolCallId: "c1" },
+    }),
+    line({ type: "model_change", id: "d", parentId: "c" }),
+  ].join("\n")
+
+  it("parses a session with no version, no model and no optional block fields", () => {
+    const { session, messages } = parsePiSession(REF, sparse)
+    expect(session.model).toBeUndefined()
+    expect(messages.length).toBeGreaterThan(0)
+  })
+
+  it("summarizes a sparse session without timestamps", () => {
+    const summary = summarizePiFile(sparse, "sparse.jsonl")
+    expect(summary).not.toBeNull()
+    expect(Number.isFinite(summary!.updatedAt)).toBe(true)
+  })
+})
+
+/**
+ * Degenerate-but-real entries: a provider-less model, a message entry with no
+ * `message`, a tool result with no call id, a `custom` entry with no subtype.
+ * Pi writes all of these; the import must degrade rather than throw.
+ */
+describe("parsePiSession degenerate entries", () => {
+  const degenerate = [
+    line({ type: "session", version: 3, id: "deg", cwd: "/w" }),
+    line({ type: "message", id: "a", parentId: null, message: { role: "user", content: "hi" } }),
+    line({ type: "message", id: "b", parentId: "a", message: { role: "assistant", content: 42 } }),
+    line({ type: "message", id: "c", parentId: "b" }),
+    line({ type: "message", id: "d", parentId: "c", message: { role: "toolResult" } }),
+    line({
+      type: "message",
+      id: "e",
+      parentId: "d",
+      message: { role: "assistant", content: [{ type: "text", text: "x" }], model: "m-only" },
+    }),
+    line({ type: "model_change", id: "f", parentId: "e", modelId: "just-model" }),
+    line({ type: "custom", id: "g", parentId: "f" }),
+  ].join("\n")
+
+  it("degrades instead of throwing, and keeps a provider-less model id", () => {
+    const { session, messages } = parsePiSession(REF, degenerate)
+    expect(session.model).toBe("just-model")
+    expect(messages.length).toBeGreaterThan(0)
+  })
+
+  it("records a subtype-less custom entry as a loss note", () => {
+    const { messages } = parsePiSession(REF, degenerate)
+    expect(notesOf(messages)).toMatchObject({ "custom:unknown": 1 })
+  })
+})
+
+describe("parsePiSession forks", () => {
+  /** `/fork` leaves two leaves under one parent; the inactive one must survive. */
+  const forked = fixture([
+    {
+      type: "message",
+      id: "f1",
+      parentId: "e3",
+      timestamp: "2026-08-14T10:00:07.000Z",
+      message: { role: "assistant", content: [{ type: "text", text: "abandoned branch" }] },
+    },
+  ])
+
+  it("keeps every leaf, the active one and the abandoned one", () => {
+    const conversation = parsePiSession(REF, forked)
+    // The newest leaf becomes the main conversation; the previously-active
+    // chain survives as a nested one. Which is which matters less than the
+    // invariant: forking must never silently discard a branch.
+    expect(conversation.nested?.length).toBeGreaterThan(0)
+    const everything = JSON.stringify([conversation.messages, conversation.nested])
+    expect(everything).toContain("abandoned branch")
+    expect(everything).toContain("Listing now.")
+  })
+})
+
+describe("piSessionSource.parseSession", () => {
+  const scanInput = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    home: "/home/u",
+    fs: { readTextFile: jest.fn(async () => fixture()) },
+    ...overrides,
+  })
+
+  it("parses a hand-picked file without touching the filesystem", async () => {
+    const input = scanInput({
+      pickedFiles: [{ name: "s.jsonl", path: REF.locator, content: fixture() }],
+    })
+    const conversation = await piSessionSource.parseSession(REF, input as never)
+    expect(conversation.session.title).toBe("list the files")
+    expect(input.fs.readTextFile).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the filesystem when the locator was not hand-picked", async () => {
+    const input = scanInput({
+      pickedFiles: [{ name: "other.jsonl", path: "/elsewhere.jsonl", content: "" }],
+    })
+    const conversation = await piSessionSource.parseSession(REF, input as never)
+    expect(conversation.session.title).toBe("list the files")
+    expect(input.fs.readTextFile).toHaveBeenCalledWith(REF.locator)
+  })
+
+  it("reads from the filesystem when nothing was picked at all", async () => {
+    const input = scanInput()
+    await piSessionSource.parseSession(REF, input as never)
+    expect(input.fs.readTextFile).toHaveBeenCalledWith(REF.locator)
+  })
+})
+
 describe("piSessionSource", () => {
   it("scans Pi's documented session root", () => {
     expect(piSessionSource.scanRoots("/home/u")).toEqual(["/home/u/.pi/agent/sessions"])
+    // No home and no roots means "cannot be scanned" — never a path walking
+    // from the filesystem root.
+    expect(piSessionSource.scanRoots("")).toEqual([])
+  })
+
+  it("prefers the resolved Pi session root over the home-relative default", () => {
+    // `piSessionDir` already folds in $PI_CODING_AGENT_SESSION_DIR and
+    // $PI_CODING_AGENT_DIR, which only Rust can see.
+    const roots = {
+      claudeConfigDir: "",
+      codexHome: "",
+      opencodeConfigDir: "",
+      opencodeDataDir: "",
+      piAgentDir: "/relocated/pi-agent",
+      piSessionDir: "/relocated/pi-agent/sessions",
+    }
+    expect(piSessionSource.scanRoots("/home/u", roots)).toEqual(["/relocated/pi-agent/sessions"])
+    // A blank resolution falls back to the home-relative default.
+    expect(piSessionSource.scanRoots("/home/u", { ...roots, piSessionDir: "" })).toEqual([
+      "/home/u/.pi/agent/sessions",
+    ])
+  })
+
+  it("detects a Windows-separated path hint", () => {
+    expect(
+      piSessionSource.detect([
+        {
+          name: "x.jsonl",
+          path: "C:\\Users\\u\\.pi\\agent\\sessions\\--w--\\x.jsonl",
+          content: "",
+        },
+      ])
+    ).toBe("match")
   })
 
   it("detects by path hint", () => {

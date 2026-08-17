@@ -25,6 +25,7 @@
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { UIMessage } from "ai"
 import type { StoredMessage } from "@cognia/agent-config-types"
+import { joinPath } from "@/lib/claude/instructions/paths"
 
 type Part = UIMessage["parts"][number]
 
@@ -526,11 +527,13 @@ export const piSessionSource: AgentSessionSourceAdapter = {
   labelKey: "pi",
   acceptedExtensions: [".jsonl"],
 
-  scanRoots(home) {
-    // `PI_CODING_AGENT_SESSION_DIR` is not read here: the renderer has no env,
-    // and `VendorRoots` has no Pi entry yet. The conventional path is the one
-    // Pi itself documents.
-    return [`${home}/.pi/agent/sessions`]
+  scanRoots(home, roots) {
+    // `piSessionDir` already folds in both `$PI_CODING_AGENT_SESSION_DIR` and
+    // `$PI_CODING_AGENT_DIR` (sessions hang off the agent dir), resolved in
+    // Rust where the environment is actually visible. The home-relative
+    // fallback is only for web mode / tests, which have no IPC.
+    const sessions = roots?.piSessionDir || (home ? joinPath(home, ".pi/agent/sessions") : "")
+    return sessions ? [sessions] : []
   },
 
   detect(files: PickedSessionFile[]): SessionDetectVerdict {

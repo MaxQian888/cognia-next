@@ -8,6 +8,8 @@ describe("probeVendors", () => {
         codexHome: "/codex",
         opencodeConfigDir: "/opencode",
         opencodeDataDir: "/opencode-data",
+        piAgentDir: "",
+        piSessionDir: "",
       }),
       exists: async (path) => path === "/opencode-data",
       readAgentConfig: async (vendor) => ({

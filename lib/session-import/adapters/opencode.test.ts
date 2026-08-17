@@ -222,6 +222,8 @@ describe("opencodeSessionSource", () => {
       codexHome: "",
       opencodeConfigDir: "",
       opencodeDataDir: "/xdg/data/opencode",
+      piAgentDir: "",
+      piSessionDir: "",
     })
     expect(scanned[0]).toBe("/xdg/data/opencode")
     expect(scanned).toContain("/home/u/.local/share/opencode")
@@ -232,6 +234,8 @@ describe("opencodeSessionSource", () => {
         codexHome: "",
         opencodeConfigDir: "",
         opencodeDataDir: "/xdg/data/opencode",
+        piAgentDir: "",
+        piSessionDir: "",
       })
     ).toEqual(["/xdg/data/opencode"])
   })
@@ -242,6 +246,8 @@ describe("opencodeSessionSource", () => {
       codexHome: "",
       opencodeConfigDir: "",
       opencodeDataDir: "/home/u/.local/share/opencode",
+      piAgentDir: "",
+      piSessionDir: "",
     })
     expect(scanned.filter((r) => r === "/home/u/.local/share/opencode")).toHaveLength(1)
   })
@@ -252,6 +258,8 @@ describe("opencodeSessionSource", () => {
       codexHome: "",
       opencodeConfigDir: "",
       opencodeDataDir: "D:\\XDG\\opencode",
+      piAgentDir: "",
+      piSessionDir: "",
       opencodePlatformDataDir: "E:\\Profiles\\u\\Roaming\\opencode",
     })
     expect(scanned).toEqual(

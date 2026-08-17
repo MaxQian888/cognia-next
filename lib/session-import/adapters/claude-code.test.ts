@@ -419,6 +419,8 @@ describe("claudeCodeSessionSource", () => {
       codexHome: "",
       opencodeConfigDir: "",
       opencodeDataDir: "",
+      piAgentDir: "",
+      piSessionDir: "",
     }
     expect(claudeCodeSessionSource.scanRoots("/home/u", roots)).toEqual([
       "/relocated/claude/projects",
