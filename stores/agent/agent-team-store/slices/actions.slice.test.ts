@@ -1964,6 +1964,29 @@ describe("workspace (project) isolation", () => {
     expect(team.projectId).toBe("proj-A")
   })
 
+  it("updateTeam stamps a workspace on a team that still lacks one, and keeps an existing one", () => {
+    mockActiveProjectId = "proj-A"
+    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "t" })
+    // Simulate a pre-isolation row that slipped past the persist backfill.
+    useAgentTeamStore.setState((state) => ({
+      teams: { ...state.teams, [team.id]: { ...state.teams[team.id], projectId: undefined } },
+    }))
+    mockActiveProjectId = "proj-B"
+    useAgentTeamStore.getState().updateTeam(team.id, { name: "T2" })
+    expect(useAgentTeamStore.getState().teams[team.id].projectId).toBe("proj-B")
+    mockActiveProjectId = "proj-C"
+    useAgentTeamStore.getState().updateTeam(team.id, { name: "T3" })
+    expect(useAgentTeamStore.getState().teams[team.id].projectId).toBe("proj-B")
+    // No active workspace at all → the default workspace, never undefined.
+    useAgentTeamStore.setState((state) => ({
+      teams: { ...state.teams, [team.id]: { ...state.teams[team.id], projectId: undefined } },
+    }))
+    mockActiveProjectId = null
+    useAgentTeamStore.getState().updateTeam(team.id, { name: "T4" })
+    expect(useAgentTeamStore.getState().teams[team.id].projectId).toBe("project-default")
+    useAgentTeamStore.getState().updateTeam("missing", { name: "x" })
+  })
+
   it("purgeProject removes only the target workspace's teams, teammates, and tasks", () => {
     mockActiveProjectId = "proj-A"
     const teamA = useAgentTeamStore.getState().createTeam({ name: "A", task: "a" })

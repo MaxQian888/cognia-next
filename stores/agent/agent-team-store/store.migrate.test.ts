@@ -12,7 +12,9 @@
 
 import "fake-indexeddb/auto"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
+import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import {
+  backfillTeamProjectIds,
   migrateAgentTeamPersisted,
   resetStaleTeamStatuses,
   rehydrateResetStaleTeams,
@@ -31,8 +33,36 @@ describe("migrateAgentTeamPersisted", () => {
       lastAdapterSyncVersion: {},
       editorSession: {},
     }
-    const out = migrateAgentTeamPersisted(current, 6)
+    const out = migrateAgentTeamPersisted(current, 7)
     expect(out).toBe(current)
+  })
+
+  it("upgrades v6 → v7: stamps DEFAULT_PROJECT_ID on every team without a workspace", () => {
+    const v6 = {
+      defaultConfig: { governancePolicy: DEFAULT_TEAM_CONFIG.governancePolicy },
+      lastAdapterSyncVersion: {},
+      editorSession: {},
+      teams: {
+        legacy: { id: "legacy", status: "idle" },
+        blank: { id: "blank", status: "idle", projectId: "" },
+        scoped: { id: "scoped", status: "idle", projectId: "proj-A" },
+      },
+      teammates: {},
+      tasks: {},
+    }
+    const out = migrateAgentTeamPersisted(v6, 6) as unknown as {
+      teams: Record<string, { projectId?: string }>
+    }
+    expect(out.teams.legacy.projectId).toBe(DEFAULT_PROJECT_ID)
+    expect(out.teams.blank.projectId).toBe(DEFAULT_PROJECT_ID)
+    expect(out.teams.scoped.projectId).toBe("proj-A")
+    // Idempotent: a second pass changes nothing.
+    expect(backfillTeamProjectIds(out.teams)).toBe(0)
+  })
+
+  it("backfillTeamProjectIds tolerates missing / malformed maps and reports the count", () => {
+    expect(backfillTeamProjectIds(undefined)).toBe(0)
+    expect(backfillTeamProjectIds({ x: undefined, y: { projectId: "p" }, z: {} })).toBe(1)
   })
 
   it("upgrades v5 → v6: backfills an empty editorSession map", () => {

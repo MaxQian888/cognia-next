@@ -37,6 +37,9 @@ it("purges loaded stores and every persisted account bucket for one project", ()
         teams: {
           removeTeam: { id: "removeTeam", projectId: "A" },
           keepTeam: { id: "keepTeam", projectId: "B" },
+          // A pre-isolation row (no projectId): not this workspace's, so the
+          // purge leaves it — persist v7 stamps it DEFAULT_PROJECT_ID on load.
+          legacyTeam: { id: "legacyTeam" },
         },
         teammates: {
           removeMate: { id: "removeMate", teamId: "removeTeam" },
@@ -65,6 +68,7 @@ it("purges loaded stores and every persisted account bucket for one project", ()
     activeCanvasId: null,
   })
   const teams = JSON.parse(window.localStorage.getItem("cognia-agent-teams")!)
+  expect(Object.keys(teams.state.teams).sort()).toEqual(["keepTeam", "legacyTeam"])
   expect(teams.state).toMatchObject({
     teams: { keepTeam: expect.any(Object) },
     teammates: { keepMate: expect.any(Object) },

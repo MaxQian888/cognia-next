@@ -19,6 +19,7 @@ import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/task
 import { assignAgentTeamAvatarId, resolveAgentTeamAvatarId } from "@/lib/agent-team/avatar"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
+import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import { initialState, builtInTemplatesMap } from "../initial-state"
 import type { AgentTeamState } from "../types"
 import type {
@@ -202,8 +203,15 @@ export const createAgentTeamActionsSlice = (
     set((state) => {
       const team = state.teams[teamId]
       if (!team) return state
+      const next = { ...team, ...updates }
+      // Every team belongs to a workspace (persist v7). A row that somehow
+      // still lacks one is stamped on its next save rather than left to leak
+      // across workspaces.
+      if (!next.projectId) {
+        next.projectId = useProjectStore.getState().activeProjectId ?? DEFAULT_PROJECT_ID
+      }
       return {
-        teams: { ...state.teams, [teamId]: { ...team, ...updates } },
+        teams: { ...state.teams, [teamId]: next },
       }
     })
   },
