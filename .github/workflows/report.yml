@@ -54,7 +54,7 @@ jobs:
           node-version: 26.x
 
       - name: Download this run's artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
@@ -78,7 +78,7 @@ jobs:
 
       - name: Download the baseline artifacts
         if: steps.baseline.outputs.run_id != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           run-id: ${{ steps.baseline.outputs.run_id }}
           github-token: ${{ github.token }}
