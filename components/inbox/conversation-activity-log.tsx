@@ -50,6 +50,9 @@ const KIND_LABEL_KEY: Partial<Record<AuditKind, string>> = {
   "notify.im_pii_blocked": "notifyImPiiBlocked",
   "workflow.dispatched": "workflowDispatched",
   "team.dispatched": "teamDispatched",
+  // SLA escalation chain (slice 1B) — one row per fired step / failed action.
+  "sla.escalated": "slaEscalated",
+  "sla.escalation_action_failed": "slaEscalationActionFailed",
   "dispatch.rule_matched": "dispatchRuleMatched",
   // Chat management (W2 multi-bot).
   "conversation.created": "conversationCreated",
@@ -74,6 +77,27 @@ const ASSIGNMENT_LABEL_KEY: Record<AssignmentEventKind, string> = {
   "status.resolved": "statusResolved",
   "label.added": "labelAdded",
   "label.removed": "labelRemoved",
+}
+
+/**
+ * Render the routing-sync summary recorded on an assignment-trail event
+ * (`AssignmentRoutingSync` from `lib/db/conversation-overrides.ts`).
+ * Returns undefined when the event carried no routing change.
+ */
+function describeRoutingSync(routing: unknown, label: string): string | undefined {
+  if (!routing || typeof routing !== "object") return undefined
+  const r = routing as { kind?: string; characterId?: string; teamId?: string; mode?: unknown }
+  const detail =
+    r.kind === "character" && r.characterId
+      ? `character:${r.characterId}`
+      : r.kind === "team" && r.teamId
+        ? `team:${r.teamId}`
+        : r.kind === "manual-mode"
+          ? "mode:manual"
+          : r.kind === "restored"
+            ? "restored"
+            : undefined
+  return detail ? `${label} (${detail})` : label
 }
 
 interface ActivityRow {
@@ -109,6 +133,10 @@ export function ConversationActivityNotice({
     ...assignmentEvents.map((e) => ({
       id: e.id,
       label: t(`assignment.${ASSIGNMENT_LABEL_KEY[e.kind]}`),
+      // Assignment ↔ routing sync (slice 1A): `setAssignee` stamps
+      // `fields.routing` when it also rewrote routing / mode, so the trail
+      // says "Assigned · routing synced" instead of hiding the side effect.
+      reason: describeRoutingSync(e.fields?.routing, t("assignment.routingSynced")),
       at: e.at,
     })),
   ].sort((a, b) => b.at - a.at)

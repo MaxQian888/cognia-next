@@ -21,7 +21,13 @@ import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { DINGTALK_A2UI_CAPABILITY, DINGTALK_CAPS } from "./capability"
 import { clearDingTalkTokenCache, DINGTALK_API_BASE, dingtalkAuthHeaders } from "./auth"
 import { parseDingTalkBotMessage, type DingTalkBotMessage } from "./parse"
-import { serializeOutbound, type DingTalkSerialized } from "./serialize"
+import {
+  decodeDingTalkMessageId,
+  encodeDingTalkMessageId,
+  serializeOutbound,
+  serializeRecall,
+  type DingTalkSerialized,
+} from "./serialize"
 import { startDingTalkStream, TOPIC_BOT_MESSAGE } from "./stream-client"
 
 export interface DingTalkAdapterOptions {
@@ -272,6 +278,10 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
     const robotCode = ref.robotCode || ""
     const msgParam = JSON.stringify(serialized.msgParam)
     const isGroup = ref.conversationType === "2"
+    // The proactive-send endpoints answer with a `processQueryKey`; encoded
+    // with the robot + scene it becomes the platformMessageId `delete()`
+    // needs to route the recall. Session-webhook sends have no key.
+    let platformMessageId: string | undefined
 
     try {
       if (isGroup) {
@@ -286,12 +296,21 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
             },
           }
         }
-        await dingtalkPost("/v1.0/robot/groupMessages/send", {
+        const body = await dingtalkPost("/v1.0/robot/groupMessages/send", {
           robotCode,
           openConversationId,
           msgKey: serialized.msgKey,
           msgParam,
         })
+        const processQueryKey = typeof body.processQueryKey === "string" ? body.processQueryKey : ""
+        if (processQueryKey && robotCode) {
+          platformMessageId = encodeDingTalkMessageId({
+            scope: "group",
+            robotCode,
+            openConversationId,
+            processQueryKey,
+          })
+        }
       } else {
         const rawUserId = ref.userId ?? ""
         // Union ids (external/inter-corp senders without a staffId) are
@@ -301,12 +320,21 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
             ? rawUserId
             : ""
         if (staffId) {
-          await dingtalkPost("/v1.0/robot/oToMessages/batchSend", {
+          const body = await dingtalkPost("/v1.0/robot/oToMessages/batchSend", {
             robotCode,
             userIds: [staffId],
             msgKey: serialized.msgKey,
             msgParam,
           })
+          const processQueryKey =
+            typeof body.processQueryKey === "string" ? body.processQueryKey : ""
+          if (processQueryKey && robotCode) {
+            platformMessageId = encodeDingTalkMessageId({
+              scope: "oto",
+              robotCode,
+              processQueryKey,
+            })
+          }
         } else {
           const webhook = ref.sessionWebhook ?? ""
           const webhookExpiry =
@@ -327,10 +355,29 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
         }
       }
       lastActivityAt = Date.now()
-      return { ok: true }
+      return { ok: true, platformMessageId }
     } catch (err) {
       return errorToResult(err)
     }
+  }
+
+  /**
+   * Recall (撤回) a bot message. `messageId` must be the composite id
+   * `send()` returned (robot + scene + processQueryKey); a bare / foreign id
+   * cannot be routed and is rejected loudly. Session-webhook sends never get
+   * an id and are therefore not recallable. Auth failures retry once through
+   * `dingtalkPost` (token cache eviction), any other failure throws.
+   */
+  async function deleteMessage(messageId: string): Promise<void> {
+    const decoded = decodeDingTalkMessageId(messageId)
+    if (!decoded) {
+      throw new Error(
+        `DingTalk delete: expected a "dt:<scope>:<robotCode>:<openConversationId>:<processQueryKey>" id, got "${messageId}"`
+      )
+    }
+    const call = serializeRecall(decoded)
+    await dingtalkPost(call.path, call.payload)
+    lastActivityAt = Date.now()
   }
 
   async function refreshCredentials(): Promise<void> {
@@ -354,6 +401,7 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
     stop,
     health,
     send,
+    delete: deleteMessage,
     refreshCredentials,
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("dingtalk"),
     a2uiCapability: () => DINGTALK_A2UI_CAPABILITY,

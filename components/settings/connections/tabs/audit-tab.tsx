@@ -49,6 +49,9 @@ const ALL_AUDIT_KINDS: AuditKind[] = [
   "adapter.started",
   "adapter.stopped",
   "adapter.error",
+  // SLA escalation chain (slice 1B).
+  "sla.escalated",
+  "sla.escalation_action_failed",
 ]
 
 type TimeRange = "1h" | "24h" | "7d" | "all"

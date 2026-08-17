@@ -488,6 +488,58 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     expect(row!.nextResponseDueAt!).toBeLessThanOrEqual(Date.now() + 30 * 60_000 + 1000)
   })
 
+  it("falls back to the bot-wide default SLA when the conversation has none (slice 1B)", async () => {
+    const bus = getBus()
+    await updateAdapterInstance(autoAdapterId, { defaultSlaResponseMinutes: 15 } as never)
+    const conversationKey = `telegram:${autoAdapterId}:private`
+    await upsertByConversationKey({ conversationKey, sessionId: "s_default_sla" })
+
+    const before = Date.now()
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_sla_default_1"))
+
+    const row = await readForResolution(conversationKey)
+    expect(row?.nextResponseDueAt).toBeDefined()
+    expect(row!.nextResponseDueAt!).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1000)
+    expect(row!.nextResponseDueAt!).toBeLessThanOrEqual(Date.now() + 15 * 60_000 + 1000)
+  })
+
+  it("stamps the bot-default SLA on a conversation without an override row when a session is bound", async () => {
+    const bus = getBus()
+    await updateAdapterInstance(autoAdapterId, { defaultSlaResponseMinutes: 10 } as never)
+    const conversationKey = `telegram:${autoAdapterId}:private`
+    // No override row, but a bound platform session → the bus can create the row.
+    await getDb().sessions.add({
+      id: "s_bound_sla",
+      title: "bound",
+      kind: "direct",
+      createdAt: 1,
+      updatedAt: 1,
+      platformBinding: {
+        platform: "telegram",
+        adapterId: autoAdapterId,
+        conversationKey,
+        conversationRef: { platform: "telegram", adapterId: autoAdapterId },
+      },
+      platformConversationKey: conversationKey,
+    } as never)
+
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_sla_default_2"))
+
+    const row = await readForResolution(conversationKey)
+    expect(row?.sessionId).toBe("s_bound_sla")
+    expect(row?.nextResponseDueAt).toBeDefined()
+  })
+
+  it("leaves the SLA deadline unset for a first-ever inbound with no session (runtime backfills it)", async () => {
+    const bus = getBus()
+    await updateAdapterInstance(autoAdapterId, { defaultSlaResponseMinutes: 10 } as never)
+    const conversationKey = `telegram:${autoAdapterId}:private`
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_sla_default_3"))
+    expect(await readForResolution(conversationKey)).toBeUndefined()
+    // The pipeline still reached the route handler.
+    expect(routeHandler).toHaveBeenCalled()
+  })
+
   it("records the inbound sender in the platform-identity directory", async () => {
     const bus = getBus()
     await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_identity_1"))

@@ -1,4 +1,10 @@
-import { serializeOutbound, a2uiToDingTalkMarkdown } from "./serialize"
+import {
+  a2uiToDingTalkMarkdown,
+  decodeDingTalkMessageId,
+  encodeDingTalkMessageId,
+  serializeOutbound,
+  serializeRecall,
+} from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 
@@ -181,5 +187,57 @@ describe("a2uiToDingTalkMarkdown", () => {
     expect(md).toContain("操作 / Available actions:")
     expect(md).toContain("- Approve")
     expect(md).toContain("- Name: ___")
+  })
+})
+
+describe("encodeDingTalkMessageId / decodeDingTalkMessageId / serializeRecall", () => {
+  it("round-trips a group id and builds the group recall call", () => {
+    const id = encodeDingTalkMessageId({
+      scope: "group",
+      robotCode: "ding_r1",
+      openConversationId: "cid+abc==",
+      processQueryKey: "pqk:1/2",
+    })
+    expect(id).toBe("dt:group:ding_r1:cid%2Babc%3D%3D:pqk%3A1%2F2")
+    const decoded = decodeDingTalkMessageId(id)
+    expect(decoded).toEqual({
+      scope: "group",
+      robotCode: "ding_r1",
+      openConversationId: "cid+abc==",
+      processQueryKey: "pqk:1/2",
+    })
+    expect(serializeRecall(decoded!)).toEqual({
+      path: "/v1.0/robot/groupMessages/recall",
+      payload: {
+        robotCode: "ding_r1",
+        openConversationId: "cid+abc==",
+        processQueryKeys: ["pqk:1/2"],
+      },
+    })
+  })
+
+  it("round-trips an oto id and builds the batchRecall call", () => {
+    const id = encodeDingTalkMessageId({
+      scope: "oto",
+      robotCode: "ding_r1",
+      processQueryKey: "k9",
+    })
+    expect(id).toBe("dt:oto:ding_r1:-:k9")
+    const decoded = decodeDingTalkMessageId(id)
+    expect(decoded).toEqual({ scope: "oto", robotCode: "ding_r1", processQueryKey: "k9" })
+    expect(serializeRecall(decoded!)).toEqual({
+      path: "/v1.0/robot/otoMessages/batchRecall",
+      payload: { robotCode: "ding_r1", processQueryKeys: ["k9"] },
+    })
+  })
+
+  it("returns null for bare keys, foreign prefixes, unknown scopes and missing parts", () => {
+    expect(decodeDingTalkMessageId("k9")).toBeNull()
+    expect(decodeDingTalkMessageId("qq:oto:r:-:k")).toBeNull()
+    expect(decodeDingTalkMessageId("dt:channel:r:-:k")).toBeNull()
+    expect(decodeDingTalkMessageId("dt:oto:r:-")).toBeNull()
+    expect(decodeDingTalkMessageId("dt:oto::-:k")).toBeNull()
+    expect(decodeDingTalkMessageId("dt:oto:r:-:")).toBeNull()
+    expect(decodeDingTalkMessageId("dt:group:r::k")).toBeNull()
   })
 })

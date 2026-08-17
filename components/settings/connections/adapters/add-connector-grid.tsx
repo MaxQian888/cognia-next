@@ -9,6 +9,10 @@
  * no form state, it just routes the chosen kind back to the AdaptersTab via
  * `onPick`. Keeps the shadcn Dialog + Card + Badge + Input vocabulary so it
  * matches the rest of the Connections settings.
+ *
+ * `plannedKinds` (from `listConnectorMetadata()` where `status === "planned"`)
+ * render as disabled cards with a "Planned" badge and no `onPick` — the UI
+ * axis of the planned-platform dormancy label (see `ConnectorMeta.status`).
  */
 
 import { useMemo, useState } from "react"
@@ -33,16 +37,25 @@ export interface AddConnectorGridProps {
   onOpenChange: (open: boolean) => void
   /** Platform kinds that have a configuration dialog wired in. */
   kinds: readonly PlatformKind[]
+  /**
+   * Platform kinds reserved by the union but without a factory / dialog yet
+   * (`ConnectorMeta.status === "planned"`). Rendered disabled with a
+   * "Planned" badge; never passed to `onPick`.
+   */
+  plannedKinds?: readonly PlatformKind[]
   /** Count of already-configured instances per platform kind. */
   configuredCounts: Map<PlatformKind, number>
   /** Called with the chosen kind; the parent opens its config dialog. */
   onPick: (kind: PlatformKind) => void
 }
 
+const NO_PLANNED_KINDS: readonly PlatformKind[] = []
+
 export function AddConnectorGrid({
   open,
   onOpenChange,
   kinds,
+  plannedKinds = NO_PLANNED_KINDS,
   configuredCounts,
   onPick,
 }: AddConnectorGridProps) {
@@ -50,7 +63,7 @@ export function AddConnectorGrid({
   const [query, setQuery] = useState("")
 
   const items = useMemo(() => {
-    const all = kinds.map((kind) => {
+    const toItem = (kind: PlatformKind, planned: boolean) => {
       const meta = getPlatformMeta(kind)
       return {
         kind,
@@ -58,8 +71,16 @@ export function AddConnectorGrid({
         description: t(`platformDescriptions.${meta.labelKey}`),
         Icon: meta.Icon,
         count: configuredCounts.get(kind) ?? 0,
+        planned,
       }
-    })
+    }
+    // Configurable kinds first, planned kinds after — a planned card must
+    // never shadow a buildable one with the same id.
+    const configurable = new Set(kinds)
+    const all = [
+      ...kinds.map((kind) => toItem(kind, false)),
+      ...plannedKinds.filter((kind) => !configurable.has(kind)).map((kind) => toItem(kind, true)),
+    ]
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter(
@@ -68,7 +89,7 @@ export function AddConnectorGrid({
         it.description.toLowerCase().includes(q) ||
         it.kind.toLowerCase().includes(q)
     )
-  }, [kinds, configuredCounts, query, t])
+  }, [kinds, plannedKinds, configuredCounts, query, t])
 
   const handlePick = (kind: PlatformKind) => {
     setQuery("")
@@ -111,17 +132,22 @@ export function AddConnectorGrid({
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {items.map(({ kind, label, description, Icon, count }) => (
+              {items.map(({ kind, label, description, Icon, count, planned }) => (
                 <Button
                   key={kind}
                   type="button"
                   variant="outline"
-                  onClick={() => handlePick(kind)}
+                  onClick={planned ? undefined : () => handlePick(kind)}
+                  disabled={planned}
+                  aria-disabled={planned || undefined}
+                  title={planned ? t("addConnector.plannedHint") : undefined}
                   data-testid={`add-connector-card-${kind}`}
+                  data-planned={planned ? "true" : undefined}
                   className={cn(
                     "group h-auto items-start justify-start gap-3 whitespace-normal rounded-lg bg-transparent p-3 text-left font-normal",
                     "transition-colors hover:border-primary/40 hover:bg-muted/40",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    planned && "border-dashed opacity-70 hover:border-input hover:bg-transparent"
                   )}
                 >
                   <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
@@ -130,14 +156,24 @@ export function AddConnectorGrid({
                   <span className="min-w-0 flex-1 space-y-0.5">
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-medium">{label}</span>
-                      {count > 0 && (
+                      {planned ? (
                         <Badge
-                          variant="secondary"
+                          variant="outline"
                           className="shrink-0 gap-1 text-[10px]"
-                          data-testid={`add-connector-count-${kind}`}
+                          data-testid={`add-connector-planned-${kind}`}
                         >
-                          {t("addConnector.configuredCount", { count })}
+                          {t("addConnector.planned")}
                         </Badge>
+                      ) : (
+                        count > 0 && (
+                          <Badge
+                            variant="secondary"
+                            className="shrink-0 gap-1 text-[10px]"
+                            data-testid={`add-connector-count-${kind}`}
+                          >
+                            {t("addConnector.configuredCount", { count })}
+                          </Badge>
+                        )
                       )}
                     </span>
                     <span className="block text-xs text-muted-foreground">{description}</span>

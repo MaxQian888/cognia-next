@@ -48,9 +48,11 @@ import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
 import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
 import { AdapterBehaviorDefaults } from "../../forms/adapter-behavior-defaults"
+import { SlaEscalationDefaults } from "../../forms/sla-escalation-defaults"
 import { AdapterPermissions } from "../../forms/adapter-permissions"
 import { DispatchRules } from "../../forms/dispatch-rules"
 import { OutboundTuning } from "../../forms/outbound-tuning"
+import { ReplyQuotingDefault } from "../../forms/reply-quoting-default"
 import { UsagePresence } from "../../forms/usage-presence"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterTransportLabelKey } from "../platform-meta"
@@ -126,6 +128,10 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
       <h3 className="pt-2 text-sm font-semibold">{t("sections.behavior")}</h3>
       <AdapterBehaviorDefaults adapterId={row.id} />
 
+      {/* Bot-wide response SLA + escalation chain defaults (slice 1B). */}
+      <h3 className="pt-2 text-sm font-semibold">{t("sections.slaEscalation")}</h3>
+      <SlaEscalationDefaults adapterId={row.id} />
+
       {/* Mention strategy + chat allow/blocklist — applies to every
        * platform that distinguishes private / group / channel contexts.
        * The components were originally written for Lark but the body is
@@ -186,6 +192,10 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
       {/* Per-bot outbound throttle/breaker tuning + circuit-open failover
        * targets (multi-bot). Self-managing, one mount covers every platform. */}
       <OutboundTuning adapterId={row.id} />
+
+      {/* Bot-wide default for quoting the triggering message in group / thread
+       * replies (ADR-0009 §3A.3). Self-hides on platforms without `send.reply`. */}
+      <ReplyQuotingDefault adapterId={row.id} />
 
       <h3 className="pt-2 text-sm font-semibold">{t("sections.platform")}</h3>
 

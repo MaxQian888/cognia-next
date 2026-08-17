@@ -356,6 +356,42 @@ describe("installRuntime — ai-run (happy path)", () => {
     expect(sessions[0].characterId).toBe("char_abc")
   })
 
+  it("stamps the bot-default SLA deadline right after the first platform session is created (slice 1B)", async () => {
+    await seedAdapter("adapter_sla", { defaultSlaResponseMinutes: 20 } as never)
+    const event = makeEvent({
+      adapterId: "adapter_sla",
+      conversationKey: "telegram:adapter_sla:chat_first",
+      timestamp: 1_000_000,
+    })
+    await callHandler(event, "ai-run")
+    const row = await readForResolution("telegram:adapter_sla:chat_first")
+    expect(row?.nextResponseDueAt).toBe(1_000_000 + 20 * 60_000)
+
+    // Second inbound: the session exists, so the runtime does not re-stamp
+    // (the bus owns the per-inbound refresh); the deadline is untouched.
+    await callHandler(
+      makeEvent({
+        adapterId: "adapter_sla",
+        conversationKey: "telegram:adapter_sla:chat_first",
+        messageId: "msg_second",
+        timestamp: 2_000_000,
+      }),
+      "ai-run"
+    )
+    expect((await readForResolution("telegram:adapter_sla:chat_first"))?.nextResponseDueAt).toBe(
+      1_000_000 + 20 * 60_000
+    )
+  })
+
+  it("does not create an SLA deadline when the adapter has no default SLA", async () => {
+    await seedAdapter("adapter_nosla")
+    await callHandler(
+      makeEvent({ adapterId: "adapter_nosla", conversationKey: "telegram:adapter_nosla:c" }),
+      "ai-run"
+    )
+    expect((await readForResolution("telegram:adapter_nosla:c"))?.nextResponseDueAt).toBeUndefined()
+  })
+
   it("inserts a user StoredMessage with platformMessage metadata", async () => {
     const event = makeEvent({
       conversationKey: "telegram:adapter_1:chat_ai",
@@ -2199,6 +2235,130 @@ async function putInstance(id: string, patch: Partial<AdapterInstanceRow> = {}):
 // NOTE: unit coverage for `resolveRespondViaTarget` lives in
 // `runtime.respond-via.test.ts` — a light suite that doesn't stand up the
 // full installRuntime harness. Only the end-to-end ai-run wiring is here.
+
+describe("installRuntime — ai-run reply quoting (ADR-0009 §3A.3)", () => {
+  const groupEvent = (over: Partial<NormalizedInboundEvent> = {}) =>
+    makeEvent({
+      conversationKey: "telegram:adapter_1:group_9",
+      messageId: "msg_group_trigger",
+      channel: { id: "ch_g9", name: "Ops group", kind: "group" },
+      ...over,
+    })
+
+  it("quotes the triggering message in a group when the platform declares send.reply", async () => {
+    await seedAdapter("adapter_1")
+    await callHandler(groupEvent(), "ai-run")
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.request.replyTo).toEqual({ messageId: "msg_group_trigger" })
+  })
+
+  it("does not quote in a private chat", async () => {
+    await seedAdapter("adapter_1")
+    await callHandler(
+      makeEvent({ conversationKey: "telegram:adapter_1:chat_priv", messageId: "msg_priv" }),
+      "ai-run"
+    )
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.request.replyTo).toBeUndefined()
+  })
+
+  it("does not quote when the reply is rewired through a respond-via sibling", async () => {
+    await seedAdapter("adapter_1", {
+      dispatchRules: [{ id: "r_via", match: {}, action: { respondViaAdapterId: "adapter_2" } }],
+    })
+    await putInstance("adapter_2")
+    await callHandler(
+      groupEvent({
+        conversationAddress: {
+          conversationKey: "telegram:adapter_1:group_9",
+          platform: "telegram",
+          adapterId: "adapter_1",
+          scopeKind: "group",
+          containerId: "group_9",
+        },
+      }),
+      "ai-run"
+    )
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.adapterId).toBe("adapter_2")
+    expect(job.request.replyTo).toBeUndefined()
+  })
+
+  it("honours the override / bot-default opt-outs (override wins over the bot default)", async () => {
+    await seedAdapter("adapter_1", { replyQuoting: false } as never)
+    await callHandler(groupEvent(), "ai-run")
+    let jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].request.replyTo).toBeUndefined()
+
+    // Conversation override re-enables quoting for this group only.
+    await upsertByConversationKey({
+      conversationKey: "telegram:adapter_1:group_9",
+      sessionId: "ses_placeholder",
+      replyQuoting: true,
+    })
+    await getDb().outboundQueue.clear()
+    await callHandler(groupEvent({ messageId: "msg_group_trigger_2" }), "ai-run")
+    jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].request.replyTo).toEqual({ messageId: "msg_group_trigger_2" })
+
+    // And an override `false` wins over an (implicit) bot default of ON.
+    await getDb().outboundQueue.clear()
+    await putInstance("adapter_off")
+    await upsertByConversationKey({
+      conversationKey: "telegram:adapter_off:group_x",
+      sessionId: "ses_placeholder",
+      replyQuoting: false,
+    })
+    await callHandler(
+      groupEvent({
+        adapterId: "adapter_off",
+        conversationKey: "telegram:adapter_off:group_x",
+        messageId: "msg_off",
+      }),
+      "ai-run"
+    )
+    const [offJob] = await getDb().outboundQueue.toArray()
+    expect(offJob.request.replyTo).toBeUndefined()
+  })
+
+  it("does not quote on a platform whose adapter lacks send.reply", async () => {
+    await getDb().adapterInstances.put({
+      id: "adapter_wxoa",
+      type: "wechat-oa",
+      displayName: "WeChat OA",
+      enabled: true,
+      transportMode: "webhook",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+      createdAt: 0,
+      updatedAt: 0,
+    } as AdapterInstanceRow)
+    await callHandler(
+      groupEvent({
+        platform: "wechat-oa",
+        adapterId: "adapter_wxoa",
+        conversationKey: "wechat-oa:adapter_wxoa:group_1",
+        conversationRef: { platform: "wechat-oa", adapterId: "adapter_wxoa" },
+        sender: {
+          id: "u_alice",
+          platform: "wechat-oa",
+          adapterId: "adapter_wxoa",
+          remoteUserId: "u_alice",
+          displayName: "Alice",
+        },
+        messageId: "msg_wxoa",
+      }),
+      "ai-run"
+    )
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job).toBeDefined()
+    expect(job.request.replyTo).toBeUndefined()
+  })
+})
 
 describe("installRuntime — ai-run respond-via rule", () => {
   it("delivers the reply through the rule's respondViaAdapterId sibling", async () => {

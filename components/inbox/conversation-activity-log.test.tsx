@@ -145,6 +145,84 @@ describe("ConversationActivityNotice", () => {
     expect(screen.getByTestId("activity-row-w3")).toHaveTextContent("Team posted as bot")
   })
 
+  it("appends the routing-sync detail recorded on assignment events (slice 1A)", () => {
+    show(
+      [],
+      [
+        {
+          id: "r1",
+          conversationKey: "ck",
+          kind: "assigned",
+          at: 1_700_000_002_000,
+          fields: { routing: { kind: "character", characterId: "char-1" } },
+        },
+        {
+          id: "r2",
+          conversationKey: "ck",
+          kind: "assigned",
+          at: 1_700_000_003_000,
+          fields: { routing: { kind: "team", teamId: "team-9" } },
+        },
+        {
+          id: "r3",
+          conversationKey: "ck",
+          kind: "reassigned",
+          at: 1_700_000_004_000,
+          fields: { routing: { kind: "manual-mode", mode: "manual" } },
+        },
+        {
+          id: "r4",
+          conversationKey: "ck",
+          kind: "unassigned",
+          at: 1_700_000_005_000,
+          fields: { routing: { kind: "restored" } },
+        },
+        {
+          id: "r5",
+          conversationKey: "ck",
+          kind: "unassigned",
+          at: 1_700_000_006_000,
+          fields: { routing: { kind: "mystery" } },
+        },
+        { id: "r6", conversationKey: "ck", kind: "unassigned", at: 1_700_000_007_000 },
+      ]
+    )
+    expect(screen.getByTestId("activity-row-r1")).toHaveTextContent(
+      "Assigned · routing synced (character:char-1)"
+    )
+    expect(screen.getByTestId("activity-row-r2")).toHaveTextContent("routing synced (team:team-9)")
+    expect(screen.getByTestId("activity-row-r3")).toHaveTextContent(
+      "Reassigned · routing synced (mode:manual)"
+    )
+    expect(screen.getByTestId("activity-row-r4")).toHaveTextContent(
+      "Unassigned · routing synced (restored)"
+    )
+    expect(screen.getByTestId("activity-row-r5")).toHaveTextContent("Unassigned · routing synced")
+    expect(screen.getByTestId("activity-row-r5")).not.toHaveTextContent("(")
+    expect(screen.getByTestId("activity-row-r6")).toHaveTextContent("Unassigned")
+    expect(screen.getByTestId("activity-row-r6")).not.toHaveTextContent("routing synced")
+  })
+
+  it("labels the SLA escalation kinds (slice 1B)", () => {
+    show(
+      [
+        { id: "s1", kind: "sla.escalated", at: 1_700_000_000_000, adapterId: "a1" },
+        {
+          id: "s2",
+          kind: "sla.escalation_action_failed",
+          at: 1_700_000_001_000,
+          adapterId: "a1",
+          reason: "unsupported_platform",
+        },
+      ],
+      []
+    )
+    expect(screen.getByTestId("activity-row-s1")).toHaveTextContent("SLA escalated")
+    expect(screen.getByTestId("activity-row-s2")).toHaveTextContent(
+      "SLA escalation action failed · unsupported_platform"
+    )
+  })
+
   it("falls back to the raw kind for an unmapped audit kind", () => {
     show([{ id: "e9", kind: "some.unmapped.kind", at: 1_700_000_009_000, adapterId: "a1" }])
     expect(screen.getByTestId("activity-row-e9")).toHaveTextContent("some.unmapped.kind")

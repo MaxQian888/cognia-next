@@ -14,14 +14,25 @@
  * Passive-reply constraints enforced here (per the v2 send docs):
  *   - `msg_seq` pairs with `msg_id` on group/C2C sends; it defaults to 1 when
  *     omitted and the same msg_id+msg_seq combo is rejected as a duplicate,
- *     so any second reply to the same inbound message needs a monotonic seq.
+ *     so every distinct reply to the same inbound message needs its own seq.
  *   - Each msg_id accepts at most 5 passive replies.
  *   - msg_id expires: group / channel / direct after 5 minutes, C2C after
  *     60 minutes. An expired msg_id fails the whole send.
+ *
+ * Platform idempotency (ADR-0009): `msg_seq` is DERIVED from the outbound
+ * job's `idempotencyKey` (`1 + fnv1a(key) % 65535`), not from a per-send
+ * counter. A retry of the same job therefore re-sends the same
+ * `msg_id + msg_seq` pair and the platform rejects it as a duplicate instead
+ * of delivering twice. QQ stays `reconciliation_required` because the
+ * rejection is an error, not the original message id (UNVERIFIED: the exact
+ * error code QQ returns for a duplicate pair). The per-msg_id bookkeeping
+ * that remains only tracks how many DISTINCT replies (idempotency keys) a
+ * msg_id has consumed, to honour the 5-reply cap.
  */
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { fnv1a32 } from "../_shared/fnv1a"
 import type { QQScene } from "./parse"
 
 export interface QQSendCall {
@@ -41,37 +52,63 @@ export const QQ_PASSIVE_WINDOW_MS: Record<QQScene, number> = {
 }
 
 /** QQ accepts at most 5 passive replies per inbound msg_id. */
-const MAX_PASSIVE_REPLIES = 5
+export const QQ_MAX_PASSIVE_REPLIES = 5
 
-/** Bound on the per-msg_id seq map — old inbound msg_ids age out anyway. */
+/** Bound on the per-msg_id reply-key map — old inbound msg_ids age out anyway. */
 const MSG_SEQ_MAP_CAP = 300
 
-/**
- * Per-msg_id monotonic `msg_seq` counter. Module-level so consecutive
- * `send()` calls correlated to the same inbound message get 1, 2, 3, … —
- * without it every reply defaults to seq 1 and the platform rejects the
- * second one as a duplicate. Bounded: entries are kept in insertion order
- * and the oldest is evicted past `MSG_SEQ_MAP_CAP` (an evicted msg_id is by
- * then far outside its passive window, so a reset counter is harmless).
- */
-const msgSeqByMsgId = new Map<string, number>()
+/** `msg_seq` is a positive integer; keep it inside a 16-bit range. */
+const MSG_SEQ_MODULUS = 65535
 
-function nextMsgSeq(msgId: string): number {
-  const next = (msgSeqByMsgId.get(msgId) ?? 0) + 1
+/**
+ * Deterministic passive `msg_seq` for one outbound job. Same idempotencyKey
+ * → same seq on every retry (the platform then rejects the duplicate pair
+ * rather than delivering twice). Two distinct keys colliding on the same seq
+ * for the same msg_id has probability 1/65535 per pair — the send would be
+ * rejected as a duplicate and dead-lettered as `platform_4xx`, visible in
+ * the audit; acceptable versus a silent double delivery.
+ */
+export function qqPassiveMsgSeq(idempotencyKey: string): number {
+  return 1 + (fnv1a32(idempotencyKey) % MSG_SEQ_MODULUS)
+}
+
+/**
+ * Per-msg_id set of distinct reply keys (insertion-ordered for eviction).
+ * Module-level so consecutive `send()` calls correlated to the same inbound
+ * message are counted against the 5-reply cap, while a RETRY of the same
+ * job (same key) does not consume a second slot. Bounded: the oldest msg_id
+ * is evicted past `MSG_SEQ_MAP_CAP` (an evicted msg_id is by then far
+ * outside its passive window, so a reset count is harmless).
+ */
+const passiveKeysByMsgId = new Map<string, Set<string>>()
+
+/**
+ * Register `key` as a passive reply to `msgId` and return how many distinct
+ * replies that msg_id has now consumed (including this one). Idempotent for
+ * a repeated key.
+ */
+export function registerQQPassiveReply(msgId: string, key: string): number {
+  const keys = passiveKeysByMsgId.get(msgId) ?? new Set<string>()
+  keys.add(key)
   // Re-insert to refresh recency in the insertion-ordered eviction queue.
-  msgSeqByMsgId.delete(msgId)
-  msgSeqByMsgId.set(msgId, next)
-  while (msgSeqByMsgId.size > MSG_SEQ_MAP_CAP) {
-    const oldest = msgSeqByMsgId.keys().next().value
+  passiveKeysByMsgId.delete(msgId)
+  passiveKeysByMsgId.set(msgId, keys)
+  while (passiveKeysByMsgId.size > MSG_SEQ_MAP_CAP) {
+    const oldest = passiveKeysByMsgId.keys().next().value
     if (oldest === undefined) break
-    msgSeqByMsgId.delete(oldest)
+    passiveKeysByMsgId.delete(oldest)
   }
-  return next
+  return keys.size
+}
+
+/** How many distinct passive replies `msgId` has consumed so far (0 when unknown). */
+export function qqPassiveReplyCount(msgId: string): number {
+  return passiveKeysByMsgId.get(msgId)?.size ?? 0
 }
 
 /** Test-only: reset the module-level msg_seq state. */
 export function __resetQQMsgSeqForTesting(): void {
-  msgSeqByMsgId.clear()
+  passiveKeysByMsgId.clear()
 }
 
 /** Flatten segments into the plain text QQ `msg_type: 0` accepts. */
@@ -119,11 +156,21 @@ export function buildQQContent(segments: MessageSegment[]): string {
  * proactive quota. `send()` in index.ts cannot retry a 5-reply rejection any
  * better, so degrading here is the design that still delivers.
  */
-function passiveReplyFields(msgId: string | undefined): Record<string, unknown> {
+function passiveReplyFields(
+  msgId: string | undefined,
+  idempotencyKey: string
+): Record<string, unknown> {
   if (!msgId) return {}
-  const seq = nextMsgSeq(msgId)
-  if (seq > MAX_PASSIVE_REPLIES) return {}
-  return { msg_id: msgId, msg_seq: seq }
+  // A request without an idempotency key (should not happen — the runner
+  // always stamps one) still needs a unique seq per send; fall back to a
+  // synthetic key that is unique per registration.
+  const key = idempotencyKey || `anon:${msgId}:${qqPassiveReplyCount(msgId) + 1}`
+  const fields = { msg_id: msgId, msg_seq: qqPassiveMsgSeq(key) }
+  // A retry (same key) reproduces the same pair without consuming a slot.
+  if (passiveKeysByMsgId.get(msgId)?.has(key)) return fields
+  if (qqPassiveReplyCount(msgId) >= QQ_MAX_PASSIVE_REPLIES) return {}
+  registerQQPassiveReply(msgId, key)
+  return fields
 }
 
 export function serializeOutbound(req: OutboundRequest): QQSendCall | null {
@@ -138,6 +185,7 @@ export function serializeOutbound(req: OutboundRequest): QQSendCall | null {
   if (!scene || !sceneId) return null
 
   const content = buildQQContent(req.segments)
+  const idempotencyKey = req.metadata?.idempotencyKey ?? ""
   let msgId = req.replyTo?.messageId ?? ref.msgId
 
   // Drop an expired msg_id so the send degrades to proactive instead of
@@ -157,12 +205,12 @@ export function serializeOutbound(req: OutboundRequest): QQSendCall | null {
     case "group":
       return {
         path: `/v2/groups/${encodeURIComponent(sceneId)}/messages`,
-        payload: { content, msg_type: 0, ...passiveReplyFields(msgId) },
+        payload: { content, msg_type: 0, ...passiveReplyFields(msgId, idempotencyKey) },
       }
     case "c2c":
       return {
         path: `/v2/users/${encodeURIComponent(sceneId)}/messages`,
-        payload: { content, msg_type: 0, ...passiveReplyFields(msgId) },
+        payload: { content, msg_type: 0, ...passiveReplyFields(msgId, idempotencyKey) },
       }
     // The guild (channel/direct) v1 endpoints take msg_id only — no msg_seq.
     case "channel":
@@ -175,5 +223,129 @@ export function serializeOutbound(req: OutboundRequest): QQSendCall | null {
         path: `/dms/${encodeURIComponent(sceneId)}/messages`,
         payload: { content, ...(msgId ? { msg_id: msgId } : {}) },
       }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Platform message ids — `${scene}:${sceneId}:${id}`
+// ---------------------------------------------------------------------------
+
+/**
+ * `send()` returns a composite platform message id because every QQ mutation
+ * endpoint (delete / reaction) is scene-scoped: the bare `id` QQ returns is
+ * useless without the scene and the addressing id it was posted under.
+ */
+export function encodeQQMessageId(scene: QQScene, sceneId: string, id: string): string {
+  return `${scene}:${sceneId}:${id}`
+}
+
+export interface DecodedQQMessageId {
+  scene: QQScene
+  sceneId: string
+  id: string
+}
+
+const QQ_SCENES: readonly QQScene[] = ["group", "c2c", "channel", "direct"]
+
+/**
+ * Decode a composite id produced by {@link encodeQQMessageId}. Returns null
+ * for a bare id (pre-existing rows sent before the composite encoding, or a
+ * caller passing QQ's raw id) — the caller must fail loudly, not guess.
+ */
+export function decodeQQMessageId(messageId: string): DecodedQQMessageId | null {
+  const first = messageId.indexOf(":")
+  if (first <= 0) return null
+  const scene = messageId.slice(0, first)
+  if (!QQ_SCENES.includes(scene as QQScene)) return null
+  const rest = messageId.slice(first + 1)
+  const second = rest.indexOf(":")
+  if (second <= 0 || second === rest.length - 1) return null
+  return { scene: scene as QQScene, sceneId: rest.slice(0, second), id: rest.slice(second + 1) }
+}
+
+export interface QQMutationCall {
+  method: "POST" | "PUT" | "DELETE"
+  path: string
+  payload?: Record<string, unknown>
+}
+
+/**
+ * Recall (撤回) an already-sent message. Per-scene endpoints:
+ *   - group   → DELETE /v2/groups/{group_openid}/messages/{message_id}
+ *   - c2c     → DELETE /v2/users/{openid}/messages/{message_id}
+ *   - channel → DELETE /channels/{channel_id}/messages/{message_id}?hidetip=false
+ *   - direct  → DELETE /dms/{guild_id}/messages/{message_id}?hidetip=false
+ * The guild endpoints take `hidetip` (whether to hide the "message recalled"
+ * tip); we keep the tip visible so the recall is not silent for the user.
+ */
+export function serializeDelete(decoded: DecodedQQMessageId): QQMutationCall {
+  const sceneId = encodeURIComponent(decoded.sceneId)
+  const id = encodeURIComponent(decoded.id)
+  switch (decoded.scene) {
+    case "group":
+      return { method: "DELETE", path: `/v2/groups/${sceneId}/messages/${id}` }
+    case "c2c":
+      return { method: "DELETE", path: `/v2/users/${sceneId}/messages/${id}` }
+    case "channel":
+      return { method: "DELETE", path: `/channels/${sceneId}/messages/${id}?hidetip=false` }
+    case "direct":
+      return { method: "DELETE", path: `/dms/${sceneId}/messages/${id}?hidetip=false` }
+  }
+}
+
+/**
+ * Parse the adapter-level `emojiType` for QQ channel reactions. QQ addresses
+ * an emoji by `{type}/{id}` (type 1 = system emoji, type 2 = emoji character
+ * code point); the connector contract carries it as a single string
+ * `"<type>:<id>"`. Throws on anything else.
+ */
+export function parseQQEmojiType(emojiType: string): { type: string; id: string } {
+  const idx = emojiType.indexOf(":")
+  if (idx <= 0 || idx === emojiType.length - 1) {
+    throw new Error(`QQ reaction emojiType must be "<type>:<id>", got "${emojiType}"`)
+  }
+  return { type: emojiType.slice(0, idx), id: emojiType.slice(idx + 1) }
+}
+
+/**
+ * Reactions exist ONLY in the guild `channel` scene:
+ *   PUT    /channels/{channel_id}/messages/{message_id}/reactions/{type}/{id}
+ *   DELETE /channels/{channel_id}/messages/{message_id}/reactions/{type}/{id}
+ * Group / C2C / direct messages cannot be reacted to by a bot — the adapter
+ * throws `unsupported` for those scenes before reaching this helper.
+ */
+export function serializeReaction(
+  channelId: string,
+  messageId: string,
+  emojiType: string,
+  action: "add" | "remove"
+): QQMutationCall {
+  const emoji = parseQQEmojiType(emojiType)
+  return {
+    method: action === "add" ? "PUT" : "DELETE",
+    path: `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(emoji.type)}/${encodeURIComponent(emoji.id)}`,
+  }
+}
+
+/** Seconds the "正在输入" bubble stays visible on the C2C client. */
+export const QQ_TYPING_INPUT_SECONDS = 60
+
+/**
+ * Typing indicator ("输入状态") — C2C ONLY. It is a passive reply of
+ * `msg_type: 6` (`input_notify`), so it needs a live inbound `msg_id` inside
+ * the 60-minute C2C window and CONSUMES one of that msg_id's 5 passive-reply
+ * slots. `msg_seq` is derived from a synthetic key so the indicator's pair
+ * never collides with the actual reply's.
+ */
+export function serializeTyping(openid: string, msgId: string, msgSeq: number): QQMutationCall {
+  return {
+    method: "POST",
+    path: `/v2/users/${encodeURIComponent(openid)}/messages`,
+    payload: {
+      msg_type: 6,
+      input_notify: { input_type: 1, input_second: QQ_TYPING_INPUT_SECONDS },
+      msg_id: msgId,
+      msg_seq: msgSeq,
+    },
   }
 }

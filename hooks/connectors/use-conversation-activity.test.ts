@@ -47,8 +47,13 @@ describe("isActivityKind", () => {
     expect(isActivityKind("adapter.heartbeat")).toBe(false)
   })
 
-  it("covers exactly the 27 curated kinds", () => {
-    expect(ACTIVITY_KINDS.size).toBe(27)
+  it("surfaces the SLA escalation kinds", () => {
+    expect(isActivityKind("sla.escalated")).toBe(true)
+    expect(isActivityKind("sla.escalation_action_failed")).toBe(true)
+  })
+
+  it("covers exactly the 29 curated kinds", () => {
+    expect(ACTIVITY_KINDS.size).toBe(29)
   })
 })
 

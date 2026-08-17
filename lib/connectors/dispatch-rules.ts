@@ -111,11 +111,20 @@ export function matchDispatchRule(
   return null
 }
 
+/**
+ * Provenance of one effective routing value. `"assignment"` is the override
+ * layer written by `setAssignee` (slice 1A: assignee ↔ routing sync) — it
+ * wins exactly like an explicit override, but is labelled separately so
+ * `/status`, the behavior editor and the audit trail can tell "an operator
+ * assigned this conversation" from "an operator edited the routing".
+ */
+export type RoutingSource = "override" | "assignment" | "rule" | "instance-default" | "none"
+
 export interface EffectiveRouting {
   teamId: string | undefined
   /** Where the effective team came from — audited so operators can tell a
    * `/team`-bound chat from a rule hit from a bot-default dispatch. */
-  teamSource: "override" | "rule" | "instance-default" | "none"
+  teamSource: RoutingSource
   workflowId: string | undefined
   workflowSource: "override" | "rule" | "instance-default" | "none"
   /**
@@ -125,7 +134,7 @@ export interface EffectiveRouting {
    * the adapter default).
    */
   characterId: string | undefined
-  characterSource: "override" | "rule" | "instance-default" | "none"
+  characterSource: RoutingSource
   /**
    * Bot instance the reply should be delivered through (multi-bot
    * cross-account send). Only a rule can set this in v1 — there is no
@@ -151,6 +160,10 @@ export interface EffectiveRouting {
  *
  * Character: `override.characterId` → the matched rule's `characterId` →
  * none (caller falls back to the resolved binding).
+ *
+ * Source label: when the override value wins AND
+ * `override.routingSource === "assignment"`, the team / character source is
+ * reported as `"assignment"` instead of `"override"`.
  */
 export function resolveEffectiveRouting(
   adapter: Pick<AdapterInstanceRow, "defaultTeamId" | "defaultWorkflowId" | "defaultCharacterId">,
@@ -162,9 +175,14 @@ export function resolveEffectiveRouting(
     | "workflowDisabled"
     | "characterId"
     | "characterDisabled"
+    | "routingSource"
   > | null,
   ruleHit: DispatchRuleHit | null
 ): EffectiveRouting {
+  // The override layer is labelled "assignment" when `setAssignee` wrote it
+  // (slice 1A) so consumers can render the provenance distinctly.
+  const overrideSource: RoutingSource =
+    override?.routingSource === "assignment" ? "assignment" : "override"
   // ── team ──────────────────────────────────────────────────────────────────
   let teamId: string | undefined
   let teamSource: EffectiveRouting["teamSource"] = "none"
@@ -174,7 +192,7 @@ export function resolveEffectiveRouting(
     const instanceTeamId = adapter.defaultTeamId?.trim()
     if (overrideTeamId) {
       teamId = overrideTeamId
-      teamSource = "override"
+      teamSource = overrideSource
     } else if (ruleTeamId) {
       teamId = ruleTeamId
       teamSource = "rule"
@@ -212,7 +230,7 @@ export function resolveEffectiveRouting(
     const instanceCharacterId = adapter.defaultCharacterId?.trim()
     if (overrideCharacterId) {
       characterId = overrideCharacterId
-      characterSource = "override"
+      characterSource = overrideSource
     } else if (ruleCharacterId) {
       characterId = ruleCharacterId
       characterSource = "rule"

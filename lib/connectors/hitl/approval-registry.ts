@@ -27,9 +27,46 @@ interface PendingApproval {
   onExpire?: () => void
 }
 
-const pending = new Map<string, PendingApproval>()
+interface PendingEntry extends PendingApproval {
+  /** Owning session — kept so per-session counts don't have to parse the key. */
+  sessionId: string
+}
+
+const pending = new Map<string, PendingEntry>()
 // sessionId → set of toolNames the user chose to "allow for this session".
 const sessionBypass = new Map<string, Set<string>>()
+
+/**
+ * Listeners notified whenever the pending set changes (register / resolve /
+ * supersede / TTL expiry). Feeds `useSyncExternalStore` consumers such as
+ * `hooks/connectors/use-pending-approval-count.ts` — the registry is a
+ * module singleton, so a plain listener set is the whole subscription seam.
+ */
+const listeners = new Set<() => void>()
+
+function notify(): void {
+  for (const cb of Array.from(listeners)) {
+    try {
+      cb()
+    } catch (err) {
+      // A throwing subscriber must never break the approval flow itself.
+      console.warn("[approval-registry] listener threw", err)
+    }
+  }
+}
+
+/**
+ * Subscribe to pending-set changes. Returns the unsubscribe function.
+ * `useSyncExternalStore`-compatible: the callback carries no payload; read
+ * the current value via `pendingApprovalCount()` /
+ * `pendingApprovalCountForSession()`.
+ */
+export function subscribePendingApprovals(cb: () => void): () => void {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
 
 function key(sessionId: string, requestId: string): string {
   return `${sessionId}:${requestId}`
@@ -84,16 +121,21 @@ export function awaitApproval(
   // disable the watchdog entirely, leaving the tool waiting for a button press
   // forever. There must always be a TTL backstop, so fall back to the default.
   const ttlMs = opts.ttlMs !== undefined && opts.ttlMs > 0 ? opts.ttlMs : DEFAULT_APPROVAL_TTL_MS
-  return new Promise<CapturePermissionDecision>((resolve) => {
+  const promise = new Promise<CapturePermissionDecision>((resolve) => {
     const timer = setTimeout(() => {
       const entry = pending.get(k)
       if (!entry) return
       pending.delete(k)
+      notify()
       entry.onExpire?.()
       resolve({ decision: "deny", message: "approval timed out" })
     }, ttlMs)
-    pending.set(k, { resolve, timer, onExpire: opts.onExpire })
+    pending.set(k, { sessionId, resolve, timer, onExpire: opts.onExpire })
   })
+  // Notify after the entry is registered (the Promise executor runs
+  // synchronously, so `pending` already holds the new entry here).
+  notify()
+  return promise
 }
 
 /**
@@ -111,13 +153,26 @@ export function resolveApproval(
   if (!entry) return false
   if (entry.timer) clearTimeout(entry.timer)
   pending.delete(k)
+  notify()
   entry.resolve(decision)
   return true
 }
 
-/** Number of approvals currently awaiting a decision (test/diagnostics). */
+/** Number of approvals currently awaiting a decision (all sessions). */
 export function pendingApprovalCount(): number {
   return pending.size
+}
+
+/**
+ * Number of approvals awaiting a decision for one session. Drives the
+ * per-conversation "N pending approvals" chip in the Inbox header.
+ */
+export function pendingApprovalCountForSession(sessionId: string): number {
+  let n = 0
+  for (const entry of pending.values()) {
+    if (entry.sessionId === sessionId) n += 1
+  }
+  return n
 }
 
 /** Reset all registry state. Test-only. */
@@ -127,4 +182,5 @@ export function __resetApprovalRegistryForTesting(): void {
   }
   pending.clear()
   sessionBypass.clear()
+  listeners.clear()
 }

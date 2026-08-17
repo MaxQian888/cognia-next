@@ -31,13 +31,15 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
+import { useLatestOutboundJob } from "@/hooks/connectors/use-latest-outbound-job"
 import { decideBadge } from "./adapter-health-decision"
 import { effectiveStatus } from "@/lib/db/conversation-overrides"
-import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import type { ConversationOverrideRow, OutboundJobStatus } from "@/lib/db/connector-types"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 import { LifecycleStatusChip } from "./lifecycle-status-chip"
 import { AssigneeChip } from "./assignee-chip"
 import { SlaBadge } from "./sla-badge"
+import { PendingApprovalChip } from "./pending-approval-chip"
 import { LabelPicker } from "./label-picker"
 import { LastInboundChip } from "./last-inbound-chip"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
@@ -46,19 +48,32 @@ import { AtStrategyChip } from "./at-strategy-chip"
 import { TopicRuntimeChip } from "./topic-runtime-chip"
 import { PolicyInfo } from "./policy-info"
 import { AdapterHealthBadge } from "./adapter-health-badge"
+import { OutboundStatusPill } from "./outbound-status-pill"
 import { ComputerUseToggle } from "./overrides/computer-use-toggle"
 import { ComputerUseChip } from "./computer-use-chip"
+
+/** Outbound statuses that mean "the last reply did NOT (verifiably) go out". */
+const OUTBOUND_ATTENTION_STATUSES: ReadonlySet<OutboundJobStatus> = new Set([
+  "failed",
+  "deadlettered",
+  "delivery_unknown",
+])
 
 /**
  * Whether the `⋯` should carry an attention dot — i.e. whether anything behind
  * it differs from the quiet default. Pure so it can be covered without
- * driving the popover open.
+ * driving the popover open. `latestOutboundStatus` is the newest outbound
+ * job's status for this conversation (ADR-0009 §3A.2): a failed /
+ * dead-lettered / ambiguous delivery lights the dot so the operator opens the
+ * popover and finds the delivery pill.
  */
 export function hasOverflowAttention(
   row: ConversationOverrideRow | undefined,
-  healthDegraded: boolean
+  healthDegraded: boolean,
+  latestOutboundStatus?: OutboundJobStatus | null
 ): boolean {
   if (healthDegraded) return true
+  if (latestOutboundStatus && OUTBOUND_ATTENTION_STATUSES.has(latestOutboundStatus)) return true
   if (effectiveStatus(row) !== "open") return true
   if (row?.assignee) return true
   if ((row?.labelIds?.length ?? 0) > 0) return true
@@ -110,7 +125,14 @@ export function ConversationHeaderOverflow({
   // Resolved here rather than inside AdapterHealthBadge so the attention dot
   // can reflect a degraded adapter while the popover is still closed.
   const health = useAdapterHealth(adapterId || null)
-  const attention = hasOverflowAttention(overrideRow, decideBadge(health) !== null)
+  // Newest outbound job — resolved here (not inside the pill) for the same
+  // reason as health: the dot must light while the popover is closed.
+  const latestOutbound = useLatestOutboundJob(conversationKey)
+  const attention = hasOverflowAttention(
+    overrideRow,
+    decideBadge(health) !== null,
+    latestOutbound?.status ?? null
+  )
   const label = attention ? t("moreAttention") : t("more")
 
   return (
@@ -154,12 +176,15 @@ export function ConversationHeaderOverflow({
           <AssigneeChip
             conversationKey={conversationKey}
             sessionId={sessionId}
+            adapterId={adapterId || undefined}
             assignee={overrideRow?.assignee}
           />
           <SlaBadge
             nextResponseDueAt={overrideRow?.nextResponseDueAt}
             status={effectiveStatus(overrideRow)}
+            escalatedStep={overrideRow?.escalatedStep}
           />
+          <PendingApprovalChip sessionId={sessionId} />
           <LabelPicker
             conversationKey={conversationKey}
             sessionId={sessionId}
@@ -192,6 +217,11 @@ export function ConversationHeaderOverflow({
                 rate-bucket signals from the heartbeat snapshots, not just
                 `current.state`. */}
             <AdapterHealthBadge adapterId={adapterId} />
+            {/* Delivery state of the newest outbound job (ADR-0009 §3A.2).
+                Mounted once here — never per conversation row — so it costs
+                one liveQuery, not one per row, and its retry button is not
+                nested inside another interactive element. */}
+            <OutboundStatusPill conversationKey={conversationKey} />
           </OverflowGroup>
         )}
 

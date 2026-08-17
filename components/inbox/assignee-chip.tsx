@@ -3,9 +3,12 @@
 /**
  * Conversation assignee control (CRM, schema v83). A compact chip showing who
  * owns the conversation (kind dot + label) and, on click, lets the operator
- * (re)assign it to themselves ("Me"), to one of the bound characters, or
- * unassign it. Writes via setAssignee, which records the transition on the
- * assignment-event trail. The app is single-user, so "human" carries no id.
+ * (re)assign it to themselves ("Me"), to one of the bound characters, to an
+ * Agent Team, or unassign it. Writes via setAssignee, which records the
+ * transition on the assignment-event trail AND syncs routing (slice 1A:
+ * character / team → override routing, human → manual mode, unassign →
+ * restore); the Notification Center is told afterwards. The app is
+ * single-user, so "human" carries no id.
  *
  * Mirrors LifecycleStatusChip's shape (DropdownMenu + write + toast on error).
  */
@@ -24,7 +27,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { useCharacters } from "@/lib/data-hooks/context"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { setAssignee, type ConversationAssignee } from "@/lib/db/conversation-overrides"
+import { notifyAssignmentChanged } from "@/lib/connectors/assignment/notify-assignment"
 
 const KIND_DOT: Record<ConversationAssignee["kind"], string> = {
   human: "bg-indigo-500",
@@ -35,16 +40,31 @@ const KIND_DOT: Record<ConversationAssignee["kind"], string> = {
 export interface AssigneeChipProps {
   conversationKey: string
   sessionId: string
+  /** Bus-level adapter id — stamped on the routing-sync audit row. */
+  adapterId?: string
   assignee?: ConversationAssignee
 }
 
-export function AssigneeChip({ conversationKey, sessionId, assignee }: AssigneeChipProps) {
+export function AssigneeChip({
+  conversationKey,
+  sessionId,
+  adapterId,
+  assignee,
+}: AssigneeChipProps) {
   const t = useTranslations("inbox.assignee")
   const characters = useCharacters() ?? []
+  const teamsById = useAgentTeamStore((s) => s.teams)
+  const teams = Object.values(teamsById ?? {}).sort((a, b) => a.name.localeCompare(b.name))
 
   const apply = async (next: ConversationAssignee | null) => {
     try {
-      await setAssignee(conversationKey, next, { sessionId, via: "manual" })
+      await setAssignee(conversationKey, next, { sessionId, via: "manual", adapterId })
+      await notifyAssignmentChanged({
+        conversationKey,
+        from: assignee ?? null,
+        to: next,
+        via: "manual",
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
@@ -103,10 +123,32 @@ export function AssigneeChip({ conversationKey, sessionId, assignee }: AssigneeC
             </DropdownMenuGroup>
           </>
         )}
+        {teams.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                {t("team")}
+              </DropdownMenuLabel>
+              {teams.map((team) => (
+                <DropdownMenuItem
+                  key={team.id}
+                  data-testid={`assignee-team-${team.id}`}
+                  onClick={() => void apply({ kind: "team", id: team.id, label: team.name })}
+                >
+                  {team.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem onClick={() => void apply(null)}>{t("unassign")}</DropdownMenuItem>
         </DropdownMenuGroup>
+        <p className="px-2 pb-1 pt-1.5 text-[10px] leading-snug text-muted-foreground">
+          {t("routingSynced")}
+        </p>
       </DropdownMenuContent>
     </DropdownMenu>
   )

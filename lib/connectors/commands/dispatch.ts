@@ -24,6 +24,7 @@ import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-ga
 import { appendAudit } from "@/lib/connectors/audit"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
 import {
+  ASSIGNMENT_ROUTING_MARKER_CLEAR,
   patchConversationOverride,
   updateConversationConfigSection,
 } from "@/lib/db/conversation-overrides"
@@ -253,6 +254,7 @@ export async function maybeHandleControlCommand(
       return
     }
     await updateConversationConfigSection({
+      adapterId: event.adapterId,
       conversationKey: event.conversationKey,
       sessionId: s.id,
       section: "responder",
@@ -335,7 +337,7 @@ export async function maybeHandleControlCommand(
           team: routing.teamId
             ? routing.teamSource === "instance-default"
               ? R.withBotDefault(routing.teamId)
-              : routing.teamSource === "rule"
+              : routing.teamSource === "rule" || routing.teamSource === "assignment"
                 ? R.withSource(routing.teamId, routing.teamSource)
                 : routing.teamId
             : override?.teamDisabled
@@ -358,6 +360,7 @@ export async function maybeHandleControlCommand(
           enabledRules,
           sessionTitle: active?.title ?? "无 / none",
           sessionIdPrefix: active ? idPrefix(active.id) : "—",
+          assignee: R.renderAssignee(override?.assignee),
         }),
         "applied"
       )
@@ -466,7 +469,9 @@ export async function maybeHandleControlCommand(
         return true
       }
       if (CONNECTOR_MODES.has(v)) {
-        await persist({ mode: v as ConnectorMode })
+        // Explicit mode edit: drop the assignment marker so a later unassign
+        // does not undo the operator's choice (slice 1A).
+        await persist({ mode: v as ConnectorMode, ...ASSIGNMENT_ROUTING_MARKER_CLEAR })
         await reply(R.confirmMode(v), "applied")
         return true
       }
@@ -492,12 +497,20 @@ export async function maybeHandleControlCommand(
       }
       const normalized = arg.toLowerCase()
       if (normalized === "off" || normalized === "none") {
-        await persist({ characterId: undefined, characterDisabled: true })
+        await persist({
+          characterId: undefined,
+          characterDisabled: true,
+          ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
+        })
         await reply(R.confirmCharacterDisabled(), "applied")
         return true
       }
       if (normalized === "inherit") {
-        await persist({ characterId: undefined, characterDisabled: undefined })
+        await persist({
+          characterId: undefined,
+          characterDisabled: undefined,
+          ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
+        })
         await reply(R.confirmCharacterInherited(), "applied")
         return true
       }
@@ -511,7 +524,13 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("character"), "applied")
         return true
       }
-      await persist({ characterId: match.id, characterDisabled: undefined })
+      // Explicit routing edit: the assignment ↔ routing marker is dropped so
+      // unassign no longer restores the pre-assignment routing (slice 1A).
+      await persist({
+        characterId: match.id,
+        characterDisabled: undefined,
+        ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
+      })
       await reply(R.confirmCharacter(match.name), "applied")
       return true
     }
@@ -521,7 +540,7 @@ export async function maybeHandleControlCommand(
         // `teamDisabled` is the explicit sentinel: with a bot-level
         // `defaultTeamId` in play, merely clearing `teamId` would silently
         // fall back to the bot default instead of turning teams off.
-        await persist({ teamId: undefined, teamDisabled: true })
+        await persist({ teamId: undefined, teamDisabled: true, ...ASSIGNMENT_ROUTING_MARKER_CLEAR })
         await reply(
           adapterRow.defaultTeamId?.trim() ? R.confirmTeamDisabled() : R.confirmTeamCleared(),
           "applied"
@@ -538,6 +557,7 @@ export async function maybeHandleControlCommand(
         teamDisabled: undefined,
         workflowId: undefined,
         workflowDisabled: true,
+        ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
       })
       await reply(R.confirmTeam(team.name), "applied")
       return true

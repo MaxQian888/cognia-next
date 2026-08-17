@@ -141,6 +141,15 @@ jest.mock("@/lib/connectors/daily-schedule", () => ({
   startDailySchedule: () => ({ dispose: jest.fn(), runNow: jest.fn(async () => undefined) }),
 }))
 
+// ── Mock the SLA escalation sweep driver (slice 1B; the real one reads Dexie) ─
+const mockSlaSweepDispose = jest.fn()
+const mockStartSlaEscalationSweep = jest
+  .fn()
+  .mockImplementation(() => ({ dispose: mockSlaSweepDispose, runNow: jest.fn() }))
+jest.mock("@/lib/connectors/escalation/schedule", () => ({
+  startSlaEscalationSweep: (...args: unknown[]) => mockStartSlaEscalationSweep(...args),
+}))
+
 // ── Mock the immediate per-boot heartbeat (writes to Dexie; jsdom has no IDB) ─
 const mockRecordHeartbeatNow = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/connectors/health/heartbeat", () => ({
@@ -264,6 +273,10 @@ beforeEach(() => {
   lifecycleRegistry.clear()
   suspendedLifecycleRegistry.clear()
   mockStartHeartbeatSweep.mockImplementation(() => ({ dispose: mockSweepDispose }))
+  mockStartSlaEscalationSweep
+    .mockClear()
+    .mockImplementation(() => ({ dispose: mockSlaSweepDispose, runNow: jest.fn() }))
+  mockSlaSweepDispose.mockClear()
   mockInstallHousekeepingSchedule.mockResolvedValue(undefined)
 })
 
@@ -925,6 +938,32 @@ describe("installConnectorRuntime", () => {
     await waitFor(() => {
       expect(mockSweepDispose).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it("starts the SLA escalation sweep once after boot and disposes it with the runtime (slice 1B)", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeTelegramRow("cai_sla")
+    const adapter = makeFakeAdapter(row.id)
+    adapter.start.mockResolvedValue(undefined)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    const dispose = install()
+    await waitFor(() => {
+      expect(mockStartSlaEscalationSweep).toHaveBeenCalledTimes(1)
+    })
+    expect(mockSlaSweepDispose).not.toHaveBeenCalled()
+    dispose()
+    await waitFor(() => {
+      expect(mockSlaSweepDispose).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("does not start the SLA escalation sweep in web mode (no runtime ownership)", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    install()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mockStartSlaEscalationSweep).not.toHaveBeenCalled()
   })
 
   it("installs the durable low-frequency housekeeping schedule", async () => {

@@ -17,6 +17,7 @@ import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { ConversationHeader } from "@/components/inbox/conversation-header"
+import { HistoryLoadEarlier } from "@/components/inbox/history-load-earlier"
 import { PageLoading } from "@/components/ui/loading-states"
 import { ChatPane } from "@/components/chat/chat-view"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
@@ -25,6 +26,8 @@ import { useResolvedConnectorMode } from "@/components/chat/use-resolved-connect
 import { useActiveConversationStore } from "@/stores/inbox/active-conversation-store"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import { hasCapability } from "@/types/connectors/capability"
+import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 
 function ConversationInner() {
@@ -93,6 +96,9 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
 
   const platform = session.platformBinding!.platform as PlatformKind
   const adapterId = session.platformBinding!.adapterId
+  // "Load earlier messages" only makes sense on channels whose adapter
+  // declares `history.fetch` (static per-platform capability table).
+  const canFetchHistory = hasCapability(getPlatformCapabilities(platform), "history.fetch")
   const isTeamSession = session.kind === "team" && Boolean(session.teamId)
   const currentMode = resolvedMode ?? "auto"
 
@@ -128,6 +134,9 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
           policy={defaultPrivateChatPolicy()}
           characterId={session.characterId}
         />
+        {canFetchHistory && (
+          <HistoryLoadEarlier conversationKey={conversationKey} adapterId={adapterId} />
+        )}
         <ArtifactWorkspaceDock>
           <ChatPane
             showHeader={false}

@@ -108,9 +108,15 @@ export type AdapterInstancePatch = Partial<
     // Multi-bot outbound: per-bot throttle/breaker tuning + circuit-open
     // failover targets (settings OutboundTuning card).
     | "outboundTuning"
+    // ADR-0009 §3A.3 — bot-wide reply-quoting default (settings
+    // ReplyQuotingDefault card).
+    | "replyQuoting"
     | "failoverAdapterIds"
     // Multi-bot outbound: rate-limit spillover targets (load balancing).
     | "balanceAdapterIds"
+    // Slice 1B — bot-wide response SLA + escalation chain defaults.
+    | "defaultSlaResponseMinutes"
+    | "defaultEscalation"
   >
 >
 
@@ -129,6 +135,7 @@ export type AdapterConfigSource =
   | "settings.adapter.behavior"
   | "settings.adapter.permissions"
   | "settings.adapter.responder"
+  | "settings.adapter.sla-escalation"
   | "conversation-promotion"
   | "mobile"
 

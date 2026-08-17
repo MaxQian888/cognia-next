@@ -621,6 +621,78 @@ describe("maybeHandleControlCommand", () => {
     expect(text).toMatch(/Main/)
   })
 
+  it("/status shows the assignee and labels assignment-written routing (slice 1A)", async () => {
+    const h = harness({ active: session("s1", "Main") })
+    const override = {
+      teamId: "team_r",
+      characterId: "char_known",
+      routingSource: "assignment",
+      assignee: { kind: "team", id: "team_r", label: "Researchers" },
+      assigneeKind: "team",
+    } as ConversationOverrideRow
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/status" }),
+      makeAdapter(),
+      override,
+      RESOLVED,
+      h.deps
+    )
+    const text = h.enqueued[0].text
+    expect(text).toMatch(/source: 会话分配 \/ assignment/)
+    expect(text).toMatch(/team: team_r（会话分配 \/ assignment）/)
+    expect(text).toMatch(/character: Helper（会话分配 \/ assignment）/)
+    expect(text).toMatch(/assignee: 团队 \/ team: Researchers/)
+  })
+
+  it("/character, /team and /mode drop the assignment routing marker (slice 1A)", async () => {
+    const marker = {
+      routingSource: undefined,
+      assignmentPreviousMode: undefined,
+      assignmentPreviousRouting: undefined,
+    }
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["/character Helper", { characterId: "char_known", characterDisabled: undefined }],
+      ["/character off", { characterId: undefined, characterDisabled: true }],
+      ["/character inherit", { characterId: undefined, characterDisabled: undefined }],
+      [
+        "/team Researchers",
+        {
+          teamId: "team_r",
+          teamDisabled: undefined,
+          workflowId: undefined,
+          workflowDisabled: true,
+        },
+      ],
+      ["/team off", { teamId: undefined, teamDisabled: true }],
+      ["/mode draft", { mode: "draft" }],
+    ]
+    for (const [text, expected] of cases) {
+      const h = harness({ active: session("s1") })
+      await maybeHandleControlCommand(
+        makeEvent({ plainText: text }),
+        makeAdapter(),
+        undefined,
+        RESOLVED,
+        h.deps
+      )
+      expect(h.patches).toHaveLength(1)
+      // The marker keys are present (explicitly undefined) so the merge in
+      // `updateConversationConfigSection` overwrites a stale marker.
+      expect(Object.keys(h.patches[0].patch)).toEqual(expect.arrayContaining(Object.keys(marker)))
+      expect(h.patches[0].patch).toEqual({ ...expected, ...marker })
+    }
+    // `/mode yolo` edits approval, not routing — no marker.
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/mode yolo" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(Object.keys(h.patches[0].patch)).toEqual(["approvalMode"])
+  })
+
   it("/status surfaces bot-instance defaults (annotated) when no override is set", async () => {
     const h = harness({ active: session("s1", "Main") })
     await maybeHandleControlCommand(

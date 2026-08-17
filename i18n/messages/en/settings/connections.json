@@ -25,6 +25,8 @@
       "configuredCount": "{count} configured",
       "description": "Pick a messaging platform to configure.",
       "noResults": "No platforms match your search.",
+      "planned": "Planned",
+      "plannedHint": "Not configurable yet — this platform is on the roadmap.",
       "searchPlaceholder": "Search platforms…",
       "title": "Add a connector"
     },
@@ -45,7 +47,8 @@
         "delivery": "Delivery",
         "permissions": "Permissions",
         "platform": "Platform",
-        "responder": "Responder"
+        "responder": "Responder",
+        "slaEscalation": "SLA & escalation"
       }
     },
     "detailTabs": {
@@ -137,8 +140,12 @@
     "platformDescriptions": {
       "dingtalk": "DingTalk bot via Stream Mode",
       "discord": "Bot via gateway or socket mode",
+      "email": "IMAP / SMTP mailbox bridge",
+      "kook": "KOOK bot via gateway",
       "lark": "Feishu / Lark bot via long connection",
+      "line": "LINE Messaging API bot via webhook",
       "matrix": "Matrix homeserver via /sync",
+      "mattermost": "Mattermost bot via WebSocket",
       "onebot": "QQ via NapCat / Lagrange (OneBot)",
       "qq-official": "QQ official bot via gateway",
       "slack": "App via Socket Mode or Events API",
@@ -151,8 +158,12 @@
     "platforms": {
       "dingtalk": "DingTalk / 钉钉",
       "discord": "Discord",
+      "email": "Email",
+      "kook": "KOOK",
       "lark": "Lark / Feishu",
+      "line": "LINE",
       "matrix": "Matrix",
+      "mattermost": "Mattermost",
       "onebot": "QQ (OneBot / NapCat)",
       "qq-official": "QQ (Official Bot)",
       "slack": "Slack",
@@ -379,6 +390,10 @@
         "import": "Messages imported",
         "import_denied": "Message import denied"
       },
+      "sla": {
+        "escalated": "SLA escalated",
+        "escalation_action_failed": "SLA escalation action failed"
+      },
       "sso": {
         "session_seen": "Web SSO session seen"
       },
@@ -430,6 +445,7 @@
     "responseMode": "Response mode",
     "save": "Save",
     "source_adapter-default": "Adapter default",
+    "source_assignment": "Assignment",
     "source_conversation-override": "Conversation override",
     "source_dispatch-rule": "Dispatch rule",
     "source_system-default": "System default",
@@ -1270,6 +1286,11 @@
     "toAria": "Quiet hours to",
     "toLabel": "To (HH:MM)"
   },
+  "replyQuotingDefault": {
+    "description": "Default for every conversation of this bot: in group and thread chats, replies quote the message that triggered the bot. Individual conversations can override this in their settings.",
+    "label": "Quote the triggering message in group chats",
+    "title": "Reply quoting"
+  },
   "runOperators": {
     "countLabel": "{count, plural, =0 {no operators} =1 {1 operator} other {# operators}}",
     "empty": "No operators configured — only a run's own requester can act on it.",
@@ -1321,6 +1342,18 @@
     "title": "Send a test message",
     "unsupportedReplyOnly": "This adapter can only reply to inbound messages; it can't send a standalone test message."
   },
+  "slaEscalation": {
+    "cancel": "Cancel",
+    "description": "Bot-wide defaults. Conversations inherit both values unless their override sets its own SLA minutes or escalation chain.",
+    "escalationHint": "Runs when a conversation is past its SLA deadline; each step fires once per breach. No steps = no escalation.",
+    "escalationTitle": "Default escalation chain",
+    "save": "Save",
+    "saveFailed": "Could not save: {error}",
+    "slaMinutes": "Default response SLA (minutes)",
+    "slaMinutesHint": "When set, every conversation on this bot gets a reply deadline this many minutes after each inbound message (quiet hours excluded). Leave empty for no default SLA.",
+    "slaMinutesPlaceholder": "e.g. 30",
+    "title": "Response SLA & escalation defaults"
+  },
   "slack": {
     "adapterCreated": "Adapter created.",
     "adapterUpdated": "Adapter updated.",
@@ -1328,6 +1361,8 @@
     "appTokenLabel": "App Token",
     "appTokenPlaceholder": "xapp-...",
     "appTokenRequired": "App token is required for Socket Mode.",
+    "assistantAppHint": "Enables the typing indicator, suggested prompts, and streamed run presentation. Requires the \"Agents & AI Apps\" feature to be turned on for this app in the Slack app console; leave off otherwise.",
+    "assistantAppLabel": "Slack Agents & AI Apps",
     "botTokenHelp": "xoxb-... token from the Slack App OAuth page. Stored encrypted in the OS keyring.",
     "botTokenLabel": "Bot Token",
     "botTokenPlaceholder": "xoxb-...",
@@ -1342,6 +1377,9 @@
     "displayNameLabel": "Display name",
     "displayNamePlaceholder": "My Slack Bot",
     "displayNameRequired": "Display name is required.",
+    "historyMaxPagesHint": "Max conversations.history pages fetched per \"Load earlier messages\" ({min}–{max}, default {defaultValue}).",
+    "historyMaxPagesInvalid": "History pages must be a whole number between {min} and {max}.",
+    "historyMaxPagesLabel": "History pages per load",
     "oauthButton": "Connect via OAuth",
     "oauthButtonAria": "Connect via OAuth",
     "oauthClientIdMissing": "NEXT_PUBLIC_SLACK_CLIENT_ID is not set.",

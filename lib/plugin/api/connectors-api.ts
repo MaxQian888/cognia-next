@@ -65,11 +65,11 @@ import {
 import {
   createAdapterInstance,
   updateAdapterInstance,
-  deleteAdapterInstance,
   getAdapterInstance,
   listAdapterInstances,
   type AdapterInstanceInput,
 } from "@/lib/db/adapter-instances"
+import { removeAdapterInstance } from "@/lib/connectors/remove-adapter-instance"
 import {
   getAdapterRuntimeStateSnapshot,
   type AdapterRuntimeStateSnapshot,
@@ -435,7 +435,12 @@ export interface PluginConnectorsAPI {
   updateInstance(id: string, patch: PluginAdapterInstancePatch): Promise<void>
   /** Enable or disable a configured instance. */
   setInstanceEnabled(id: string, enabled: boolean): Promise<void>
-  /** Delete a configured instance (also reaps its heartbeat rows). */
+  /**
+   * Delete a configured instance. Goes through the shared removal path
+   * (`lib/connectors/remove-adapter-instance.ts`): keyring secrets are purged
+   * (desktop, best-effort), the attachment cache is pruned, then the row and
+   * its heartbeat rows are deleted — the same seam the Settings UI uses.
+   */
   deleteInstance(id: string): Promise<void>
   /**
    * Replace an instance's inbound dispatch-rule table (declarative routing:
@@ -649,7 +654,13 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     createInstance: async (input) => toInstanceInfo(await createAdapterInstance(input)),
     updateInstance: (id, patch) => updateAdapterInstance(id, patch),
     setInstanceEnabled: (id, enabled) => updateAdapterInstance(id, { enabled }),
-    deleteInstance: (id) => deleteAdapterInstance(id),
+    deleteInstance: async (id) => {
+      // Resolve the row so the keyring purge knows which accounts to drop;
+      // an unknown id still runs the delete (idempotent no-op) so a plugin
+      // retrying a removal never errors on the second attempt.
+      const row = await getAdapterInstance(id)
+      await removeAdapterInstance(row ?? { id })
+    },
     setDispatchRules: async (instanceId, rules) => {
       await requireInstance(instanceId)
       await updateAdapterInstance(instanceId, { dispatchRules: rules })

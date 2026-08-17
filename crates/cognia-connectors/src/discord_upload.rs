@@ -48,6 +48,12 @@ pub struct ConnectorDiscordUploadRequest {
     /// Message flags bitfield (e.g. IS_VOICE_MESSAGE = 1 << 13).
     #[serde(default)]
     pub flags: Option<u32>,
+    /// Deterministic idempotency nonce (≤25 chars, derived from the outbound
+    /// job's idempotency key on the TS side). When present the payload carries
+    /// `nonce` + `enforce_nonce: true` so Discord returns the already-created
+    /// message on a retry instead of creating a duplicate.
+    #[serde(default)]
+    pub nonce: Option<String>,
 }
 
 /// Build a reqwest client that honours the same proxy bypass / TLS config as the
@@ -112,6 +118,10 @@ fn build_payload_json(req: &ConnectorDiscordUploadRequest) -> serde_json::Value 
     }
     if let Some(mid) = &req.reply_to_message_id {
         payload["message_reference"] = serde_json::json!({ "message_id": mid });
+    }
+    if let Some(nonce) = req.nonce.as_deref().filter(|n| !n.is_empty()) {
+        payload["nonce"] = serde_json::json!(nonce);
+        payload["enforce_nonce"] = serde_json::json!(true);
     }
     payload
 }
@@ -193,6 +203,7 @@ mod tests {
             files: vec![file("http://x/a.png"), file("http://x/b.png")],
             reply_to_message_id: Some("m9".into()),
             flags: None,
+            nonce: None,
         };
         let p = build_payload_json(&req);
         assert_eq!(p["content"], "hi");
@@ -220,12 +231,61 @@ mod tests {
             }],
             reply_to_message_id: None,
             flags: Some(1 << 13),
+            nonce: None,
         };
         let p = build_payload_json(&req);
         assert_eq!(p["flags"], 1 << 13);
         assert!(p.get("content").is_none());
         assert_eq!(p["attachments"][0]["duration_secs"], 3.5);
         assert_eq!(p["attachments"][0]["waveform"], "AAAA");
+    }
+
+    #[test]
+    fn build_payload_json_omits_nonce_when_absent_or_empty() {
+        let mut req = ConnectorDiscordUploadRequest {
+            bot_token: "T".into(),
+            channel_id: "c1".into(),
+            content: None,
+            files: vec![file("http://x/a.png")],
+            reply_to_message_id: None,
+            flags: None,
+            nonce: None,
+        };
+        let p = build_payload_json(&req);
+        assert!(p.get("nonce").is_none());
+        assert!(p.get("enforce_nonce").is_none());
+        req.nonce = Some(String::new());
+        let p = build_payload_json(&req);
+        assert!(p.get("nonce").is_none());
+        assert!(p.get("enforce_nonce").is_none());
+    }
+
+    #[test]
+    fn build_payload_json_emits_nonce_with_enforce_flag() {
+        let req = ConnectorDiscordUploadRequest {
+            bot_token: "T".into(),
+            channel_id: "c1".into(),
+            content: Some("hi".into()),
+            files: vec![file("http://x/a.png")],
+            reply_to_message_id: None,
+            flags: None,
+            nonce: Some("1a2b3c4d5e6f".into()),
+        };
+        let p = build_payload_json(&req);
+        assert_eq!(p["nonce"], "1a2b3c4d5e6f");
+        assert_eq!(p["enforce_nonce"], true);
+    }
+
+    #[test]
+    fn request_deserializes_camel_case_nonce() {
+        let req: ConnectorDiscordUploadRequest = serde_json::from_str(
+            r#"{"botToken":"T","channelId":"c1","files":[],"nonce":"abc"}"#,
+        )
+        .unwrap();
+        assert_eq!(req.nonce.as_deref(), Some("abc"));
+        let without: ConnectorDiscordUploadRequest =
+            serde_json::from_str(r#"{"botToken":"T","channelId":"c1","files":[]}"#).unwrap();
+        assert!(without.nonce.is_none());
     }
 
     #[test]
@@ -245,6 +305,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_bytes_returns_body() {
+        proxy_config::apply_current(proxy_config::ProxyConfig::default()).unwrap();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/a.png"))
@@ -259,6 +320,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_bytes_propagates_http_error() {
+        proxy_config::apply_current(proxy_config::ProxyConfig::default()).unwrap();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/missing.png"))
@@ -280,6 +342,7 @@ mod tests {
             files: vec![],
             reply_to_message_id: None,
             flags: None,
+            nonce: None,
         };
         assert!(upload(req).await.unwrap_err().contains("at least one file"));
     }

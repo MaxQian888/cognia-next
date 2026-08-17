@@ -17,6 +17,18 @@
  * Platforms without a dedicated `*_CAPS` const (email, kook, line,
  * mattermost, github) resolve to `[]` — treated as "declares no
  * capabilities", which conservatively drops any skill that `requires` one.
+ *
+ * A declared flag is platform-wide; a few are SCENE-LIMITED at the wire and
+ * the adapter throws `unsupported` (or silently no-ops for `typing`) outside
+ * the scene — callers must not infer "works everywhere" from the flag alone:
+ *   - qq-official `typing`        → C2C only (`msg_type: 6 input_notify`,
+ *                                   a passive reply that consumes one of the
+ *                                   inbound msg_id's 5 slots).
+ *   - qq-official `send.reaction` → guild `channel` scene only.
+ *   - dingtalk `delete`           → only messages sent through the proactive
+ *                                   endpoints (session-webhook sends return no
+ *                                   `processQueryKey` and cannot be recalled).
+ *   - wechat-oa `typing`          → same 48h customer-service window as sends.
  */
 
 import type { Capability } from "@/types/connectors/capability"

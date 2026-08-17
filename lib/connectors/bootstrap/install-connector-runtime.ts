@@ -91,6 +91,7 @@ import {
   startBindRequestExpirySweep,
   startLarkSurfaceSweep,
 } from "@/lib/connectors/adapters/lark/surface-schedule"
+import { startSlaEscalationSweep } from "@/lib/connectors/escalation/schedule"
 import { startWorkflowExecutionBridge } from "@/lib/execution/workflow-bridge"
 import { startExecutionRunPresentationRunner } from "@/lib/connectors/run-presentation/runner"
 import { installExecutionRunControlHandlers } from "@/lib/execution/control-handlers"
@@ -320,6 +321,7 @@ export function installConnectorRuntime(
   const serverAdapterIds = new Set<string>()
   let larkSurfaceSweep: DailyScheduleHandle | null = null
   let larkBindRequestSweep: DailyScheduleHandle | null = null
+  let slaEscalationSweep: DailyScheduleHandle | null = null
   let heartbeatSweep: HeartbeatSweepHandle | null = null
   let resumeReconnect: ResumeReconnectHandle | null = null
   let stopWorkflowExecutionBridge: (() => void) | null = null
@@ -437,6 +439,8 @@ export function installConnectorRuntime(
       larkSurfaceSweep = null
       larkBindRequestSweep?.dispose()
       larkBindRequestSweep = null
+      slaEscalationSweep?.dispose()
+      slaEscalationSweep = null
       heartbeatSweep?.dispose()
       heartbeatSweep = null
       resumeReconnect?.dispose()
@@ -721,6 +725,11 @@ export function installConnectorRuntime(
     if (!cancelled) {
       larkSurfaceSweep = startLarkSurfaceSweep()
       larkBindRequestSweep = startBindRequestExpirySweep()
+      // SLA escalation chain (slice 1B): the runtime-owning host is the only
+      // place overdue conversations are escalated (desktop + headless brain
+      // share this path); disposed with the runtime so a released lease can
+      // never double-escalate from two hosts.
+      slaEscalationSweep = startSlaEscalationSweep()
     }
 
     // Resume-reconnect (G3): the single owner of the OS/browser wake signals.

@@ -188,6 +188,64 @@ describe("startQQGateway", () => {
     expect(mockWsOpen).toHaveBeenCalledTimes(2)
   }, 10000)
 
+  it("fires onAuthInvalid on OP 9 INVALID_SESSION, drops the session and reconnects", async () => {
+    const sessions = createMultiWsSessions()
+    mockListen.mockImplementation(sessions.listenImpl)
+    const ctrl = new AbortController()
+    const onAuthInvalid = jest.fn().mockRejectedValue(new Error("evict blew up"))
+
+    const client = startQQGateway({
+      accessToken: async () => "TOK",
+      gatewayUrl: async () => "wss://fake",
+      signal: ctrl.signal,
+      onAuthInvalid,
+      _backoffBaseMs: 1,
+    })
+
+    const out: Array<{ t: string }> = []
+    const collector = (async () => {
+      for await (const d of client.dispatches) {
+        out.push(d)
+        if (out.length >= 1) break
+      }
+    })()
+
+    await sessions.waitForConnection(1)
+    sessions.push(1, { op: 10, d: { heartbeat_interval: 100000 } })
+    await new Promise((r) => setTimeout(r, 20))
+    sessions.push(1, { op: 0, t: "READY", s: 1, d: { user: { id: "bot-1" }, session_id: "s1" } })
+    await new Promise((r) => setTimeout(r, 10))
+    // Platform rejects the session — callback fires (its rejection is swallowed).
+    sessions.push(1, { op: 9, d: false })
+    await sessions.waitForConnection(2)
+    expect(onAuthInvalid).toHaveBeenCalledTimes(1)
+
+    // The reconnect IDENTIFYs afresh (no RESUME with the dropped session).
+    sessions.push(2, { op: 10, d: { heartbeat_interval: 100000 } })
+    await new Promise((r) => setTimeout(r, 20))
+    const ops = mockWsSend.mock.calls.map((c) => {
+      try {
+        return JSON.parse(c[1]).op as number
+      } catch {
+        return -1
+      }
+    })
+    expect(ops.filter((op) => op === 2)).toHaveLength(2)
+    expect(ops).not.toContain(6)
+
+    sessions.push(2, { op: 0, t: "READY", s: 1, d: { user: { id: "bot-1" }, session_id: "s2" } })
+    sessions.push(2, {
+      op: 0,
+      t: "C2C_MESSAGE_CREATE",
+      s: 2,
+      d: { id: "m1", content: "hi", author: { user_openid: "UO" } },
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    ctrl.abort()
+    await collector
+    expect(out).toHaveLength(1)
+  }, 10000)
+
   it("closes a zombie socket after two heartbeats without an ACK and reconnects", async () => {
     const sessions = createMultiWsSessions()
     mockListen.mockImplementation(sessions.listenImpl)

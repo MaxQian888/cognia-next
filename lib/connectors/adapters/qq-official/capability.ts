@@ -14,8 +14,24 @@ import {
  * markdown segments degrade to text via the default chain, which is honest
  * about what the adapter actually delivers. Outbound media (rich media upload)
  * is also deferred.
+ *
+ * Scene-limited mutations (the flag is declared platform-wide; the adapter
+ * throws `unsupported` outside the scene):
+ *   - `delete`        — all four scenes (group / c2c / channel / direct recall).
+ *   - `typing`        — C2C ONLY (`msg_type: 6 input_notify` passive reply);
+ *                       silently no-ops elsewhere.
+ *   - `send.reaction` — guild `channel` scene ONLY
+ *                       (`PUT/DELETE /channels/{c}/messages/{m}/reactions/{type}/{id}`).
+ * Absent on purpose: `edit` and `history.fetch` — the QQ bot API has neither
+ * a message-edit nor a history-read endpoint.
  */
-export const QQ_OFFICIAL_CAPS: readonly Capability[] = ["send.reply", "send.text"] as const
+export const QQ_OFFICIAL_CAPS: readonly Capability[] = [
+  "send.reply",
+  "send.text",
+  "delete",
+  "typing",
+  "send.reaction",
+] as const
 
 /**
  * A2UI matrix — every component falls back to `plainTextMirror`. QQ's

@@ -27,7 +27,7 @@ import { createWechatPersonalAdapter } from "./adapters/wechat-personal"
 import { createMatrixAdapter } from "./adapters/matrix"
 import { matrixWhoamiDetailed } from "./adapters/matrix/auth"
 import { createQQOfficialAdapter } from "./adapters/qq-official"
-import { getQQAccessToken } from "./adapters/qq-official/auth"
+import { clearQQTokenCache, getQQAccessToken } from "./adapters/qq-official/auth"
 import { createWechatOaAdapter } from "./adapters/wechat-oa"
 import { getWechatOaAccessToken } from "./adapters/wechat-oa/auth"
 import { createDingTalkAdapter } from "./adapters/dingtalk"
@@ -421,14 +421,23 @@ export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<Platf
  * keeping the adapter, inbound server, fingerprint, and UI in agreement.
  */
 export async function buildQQOfficialAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  const credentials = async () => ({
+    appId: (await connectorsKeyringGet(row.id, "appId")) ?? "",
+    secret: (await connectorsKeyringGet(row.id, "clientSecret")) ?? "",
+  })
   return createQQOfficialAdapter({
     id: row.id,
     displayName: row.displayName,
     transportMode: row.transportMode === "webhook" ? "webhook" : "gateway",
     accessToken: async () => {
-      const appId = (await connectorsKeyringGet(row.id, "appId")) ?? ""
-      const secret = (await connectorsKeyringGet(row.id, "clientSecret")) ?? ""
+      const { appId, secret } = await credentials()
       return getQQAccessToken(appId, secret)
+    },
+    // Lets `refreshCredentials()` and the gateway's INVALID_SESSION path
+    // evict the cached mint for THIS row's credential pair.
+    clearTokenCache: async () => {
+      const { appId, secret } = await credentials()
+      clearQQTokenCache(appId, secret)
     },
   })
 }

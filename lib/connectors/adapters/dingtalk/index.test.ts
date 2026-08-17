@@ -128,6 +128,8 @@ describe("send routing", () => {
     const a = makeAdapter()
     const res = await a.send(req(ref({ conversationType: "1", userId: "staff_1" })))
     expect(res.ok).toBe(true)
+    // The processQueryKey travels with robot + scope so delete() can recall.
+    expect(res.platformMessageId).toBe("dt:oto:robot_1:-:ok")
     const call = mockHttp.mock.calls[0][0]
     expect(call.url).toContain("/v1.0/robot/oToMessages/batchSend")
     const body = JSON.parse(call.body)
@@ -143,9 +145,17 @@ describe("send routing", () => {
     const a = makeAdapter()
     const res = await a.send(req(ref({ conversationType: "2", openConversationId: "cid_1" })))
     expect(res.ok).toBe(true)
+    expect(res.platformMessageId).toBe("dt:group:robot_1:cid_1:ok")
     const call = mockHttp.mock.calls[0][0]
     expect(call.url).toContain("/v1.0/robot/groupMessages/send")
     expect(JSON.parse(call.body).openConversationId).toBe("cid_1")
+  })
+
+  it("leaves platformMessageId undefined when the platform returns no processQueryKey", async () => {
+    mockHttp.mockResolvedValue({ status: 200, headers: {}, body: "{}" })
+    const res = await makeAdapter().send(req(ref({ conversationType: "1", userId: "staff_1" })))
+    expect(res.ok).toBe(true)
+    expect(res.platformMessageId).toBeUndefined()
   })
 
   it("validates missing target ids", async () => {
@@ -246,6 +256,22 @@ describe("send — sessionWebhook fallback (no staffId)", () => {
     })
   }
 
+  it("session-webhook sends return no platformMessageId (not recallable)", async () => {
+    mockHttp.mockResolvedValue({ status: 200, headers: {}, body: JSON.stringify({ errcode: 0 }) })
+    const res = await makeAdapter().send(
+      req(
+        ref({
+          conversationType: "1",
+          userId: "$:LWCP_v1:$abc",
+          sessionWebhook: "https://oapi.dingtalk.com/robot/sendBySession?session=x",
+          sessionWebhookExpiredTime: Date.now() + 60_000,
+        })
+      )
+    )
+    expect(res.ok).toBe(true)
+    expect(res.platformMessageId).toBeUndefined()
+  })
+
   it("posts text to the unexpired session webhook instead of batchSend", async () => {
     mockHttp.mockResolvedValue({ status: 200, headers: {}, body: JSON.stringify({ errcode: 0 }) })
     const a = makeAdapter()
@@ -318,6 +344,56 @@ describe("send — sessionWebhook fallback (no staffId)", () => {
     const call = mockHttp.mock.calls[0][0]
     expect(call.url).toContain("/v1.0/robot/oToMessages/batchSend")
     expect(JSON.parse(call.body).userIds).toEqual(["staff_1"])
+  })
+})
+
+describe("delete (recall)", () => {
+  it("recalls a group message via groupMessages/recall with the encoded scope", async () => {
+    mockHttp.mockResolvedValue({ status: 200, headers: {}, body: "{}" })
+    await makeAdapter().delete!("dt:group:robot_1:cid_1:pqk_1")
+    const call = mockHttp.mock.calls[0][0]
+    expect(call.method).toBe("POST")
+    expect(call.url).toContain("/v1.0/robot/groupMessages/recall")
+    expect(JSON.parse(call.body)).toEqual({
+      robotCode: "robot_1",
+      openConversationId: "cid_1",
+      processQueryKeys: ["pqk_1"],
+    })
+    expect(call.headers["x-acs-dingtalk-access-token"]).toBe("tok")
+  })
+
+  it("recalls a 1:1 message via otoMessages/batchRecall", async () => {
+    mockHttp.mockResolvedValue({ status: 200, headers: {}, body: "{}" })
+    await makeAdapter().delete!("dt:oto:robot_1:-:pqk_2")
+    const call = mockHttp.mock.calls[0][0]
+    expect(call.url).toContain("/v1.0/robot/otoMessages/batchRecall")
+    expect(JSON.parse(call.body)).toEqual({ robotCode: "robot_1", processQueryKeys: ["pqk_2"] })
+  })
+
+  it("throws on an undecodable id without calling the platform", async () => {
+    await expect(makeAdapter().delete!("pqk_bare")).rejects.toThrow(/processQueryKey/)
+    expect(mockHttp).not.toHaveBeenCalled()
+  })
+
+  it("retries a 401 once with a fresh token and surfaces a persistent failure", async () => {
+    mockHttp
+      .mockResolvedValueOnce({
+        status: 401,
+        headers: {},
+        body: JSON.stringify({ message: "expired" }),
+      })
+      .mockResolvedValueOnce({ status: 200, headers: {}, body: "{}" })
+    await expect(makeAdapter().delete!("dt:oto:robot_1:-:pqk_2")).resolves.toBeUndefined()
+    expect(mockClearTokenCache).toHaveBeenCalledWith("ak", "as")
+    expect(mockHttp).toHaveBeenCalledTimes(2)
+
+    mockHttp.mockReset()
+    mockHttp.mockResolvedValue({
+      status: 404,
+      headers: {},
+      body: JSON.stringify({ message: "gone" }),
+    })
+    await expect(makeAdapter().delete!("dt:oto:robot_1:-:pqk_2")).rejects.toThrow(/gone/)
   })
 })
 

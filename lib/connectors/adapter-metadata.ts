@@ -15,7 +15,21 @@
 
 import { ALL_PLATFORM_KINDS, type PlatformKind } from "@/types/connectors/platform-kind"
 
-/** Ship status drives "available" / "beta" / "coming soon" badges in the inspector. */
+/**
+ * Ship status drives "available" / "beta" / "coming soon" badges in the inspector.
+ *
+ * `planned` is an **intentional dormancy** marker (CLAUDE.md working rule 7 —
+ * documented at the type, labelled in the UI, pinned by a test): the
+ * `PlatformKind` union reserves the id, but there is no adapter-registry
+ * factory, no config dialog, and no i18n abbreviation. UI surfaces that read
+ * this status:
+ *   - `components/settings/connections/adapters/add-connector-grid.tsx` —
+ *     planned kinds render as a disabled "Planned" card with no `onPick`
+ *     (wired from `tabs/adapters-tab.tsx` via `listConnectorMetadata()`).
+ *   - `components/inbox/platform-badge.tsx` — planned kinds render the generic
+ *     two-letter fallback with a "Planned platform" title.
+ * `platform-badge.test.tsx` + `add-connector-grid.test.tsx` pin both.
+ */
 export type ConnectorStatus = "stable" | "beta" | "planned"
 
 export interface ConnectorMeta {

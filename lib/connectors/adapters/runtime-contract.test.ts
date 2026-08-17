@@ -11,9 +11,36 @@ import { createWechatOaAdapter } from "./wechat-oa"
 import { createDingTalkAdapter } from "./dingtalk"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
+import { invoke } from "@tauri-apps/api/core"
 import { serializeSend as serializeLarkSend } from "./lark/serialize"
+import { discordNonce } from "./discord/serialize"
 
+// The Matrix adapter constructs its E2EE runtime eagerly; a passthrough stub
+// lets `send()` reach the HTTP layer without a Rust crypto store.
+jest.mock("./matrix/e2ee", () => ({
+  MatrixE2EERuntime: jest.fn().mockImplementation(() => ({
+    initialize: jest.fn(async () => undefined),
+    close: jest.fn(async () => undefined),
+    receiveSync: jest.fn(async () => undefined),
+    prepareRoomEvent: jest.fn(async (_roomId: string, eventType: string, content: unknown) => ({
+      eventType,
+      content,
+    })),
+    decryptOrQueue: jest.fn(async (_roomId: string, event: unknown) => event),
+    isRoomEncrypted: jest.fn(async () => false),
+    canAdvanceCursor: () => true,
+  })),
+}))
+
+const mockInvoke = invoke as jest.Mock
 const secret = async () => "test"
+
+/** Every `connectors_http_request` the adapters issued, oldest first. */
+function httpRequests(): Array<{ method: string; url: string; body?: string }> {
+  return mockInvoke.mock.calls
+    .filter(([cmd]: [string]) => cmd === "connectors_http_request")
+    .map((c) => (c[1] as { req: { method: string; url: string; body?: string } }).req)
+}
 
 function adapters(): PlatformAdapter[] {
   return [
@@ -96,31 +123,74 @@ function adapters(): PlatformAdapter[] {
 }
 
 describe("built-in connector runtime contract", () => {
-  it("allows remote_idempotent only when the real serializer propagates the stable key", () => {
+  it("allows remote_idempotent only when the real serializer propagates the stable key", async () => {
     const remoteIdempotent = adapters().filter(
       (adapter) => adapter.runtimeCapabilities?.ambiguousDelivery === "remote_idempotent"
     )
+    // Sorted so the assertion below is order-independent.
+    expect(remoteIdempotent.map((adapter) => adapter.meta.type).sort()).toEqual([
+      "discord",
+      "lark",
+      "matrix",
+    ])
 
     for (const adapter of remoteIdempotent) {
-      const request = {
-        conversationRef: {
-          platform: adapter.meta.type,
-          adapterId: adapter.id,
-          channelId: "oc_contract",
-        },
-        segments: [{ type: "text" as const, text: "contract" }],
-        metadata: { idempotencyKey: "stable-contract-key" },
-      }
+      mockInvoke.mockReset()
+      const key = "stable-contract-key"
       if (adapter.meta.type === "lark") {
-        expect(serializeLarkSend(request).payload["uuid"]).toBe("stable-contract-key")
+        const request = {
+          conversationRef: { platform: "lark" as const, adapterId: adapter.id, channelId: "oc_c" },
+          segments: [{ type: "text" as const, text: "contract" }],
+          metadata: { idempotencyKey: key },
+        }
+        // Lark: message-create `uuid` IS the idempotency key.
+        expect(serializeLarkSend(request).payload["uuid"]).toBe(key)
+        continue
+      }
+      if (adapter.meta.type === "discord") {
+        mockInvoke.mockResolvedValue({
+          status: 200,
+          headers: {},
+          body: JSON.stringify({ id: "1" }),
+        })
+        const result = await adapter.send({
+          conversationRef: { platform: "discord", adapterId: adapter.id, channelId: "c1" },
+          segments: [{ type: "text", text: "contract" }],
+          metadata: { idempotencyKey: key },
+        })
+        expect(result.ok).toBe(true)
+        const [call] = httpRequests()
+        expect(call.method).toBe("POST")
+        expect(call.url).toMatch(/\/channels\/c1\/messages$/)
+        // Discord: `nonce` derived from the key + `enforce_nonce: true`.
+        expect(JSON.parse(call.body!)).toMatchObject({
+          nonce: discordNonce(key, 0),
+          enforce_nonce: true,
+        })
+        continue
+      }
+      if (adapter.meta.type === "matrix") {
+        mockInvoke.mockResolvedValue({
+          status: 200,
+          headers: {},
+          body: JSON.stringify({ event_id: "$e" }),
+        })
+        const result = await adapter.send({
+          conversationRef: { platform: "matrix", adapterId: adapter.id, roomId: "!r:example" },
+          segments: [{ type: "text", text: "contract" }],
+          metadata: { idempotencyKey: key },
+        })
+        expect(result.ok).toBe(true)
+        const [call] = httpRequests()
+        expect(call.method).toBe("PUT")
+        // Matrix: the txnId path segment IS the idempotency key (+ chunk index).
+        expect(call.url).toContain(`/send/m.room.message/${encodeURIComponent(`${key}:0`)}`)
         continue
       }
       throw new Error(
         `${adapter.meta.type} declares remote_idempotent without a serializer contract assertion`
       )
     }
-
-    expect(remoteIdempotent.map((adapter) => adapter.meta.type)).toEqual(["lark"])
   })
 
   it.each(adapters().map((adapter) => [adapter.meta.type, adapter] as const))(

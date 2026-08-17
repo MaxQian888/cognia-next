@@ -10,6 +10,7 @@
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { fnv1a32 } from "../_shared/fnv1a"
 import { buildDiscordA2UIPayload } from "./a2ui-mapper"
 
 const DISCORD_API_BASE = "https://discord.com/api/v10"
@@ -22,6 +23,58 @@ export interface SerializedDiscordCall {
 
 /** Discord rejects message `content` longer than 2000 characters with a 400. */
 export const DISCORD_MAX_CONTENT_LENGTH = 2000
+
+/** Discord caps a message `nonce` at 25 characters. */
+export const DISCORD_NONCE_MAX_LENGTH = 25
+
+/**
+ * Deterministic Discord `nonce` for one message-create call of an outbound
+ * job (ADR-0009 platform idempotency contract).
+ *
+ * Discord de-duplicates message creation when the same `nonce` is posted
+ * again with `enforce_nonce: true` — it returns the already-created message
+ * instead of a second one. That closes the crash window between a
+ * successful POST and our `markSent`: a retried job re-sends the SAME nonce
+ * and Discord hands back the original message id. Two FNV-1a passes over
+ * `<idempotencyKey>#<index>` (base36) keep the value well under the 25-char
+ * cap; `index` distinguishes the chunks/lanes one job fans out into (chunk
+ * 0..n of the REST serializer, `voice:<i>`, `media`).
+ *
+ * UNVERIFIED (Discord docs only say "a few minutes"): the de-dup window is
+ * shorter than the runner's stale-`sending` recovery (≥5 min), so a very
+ * late retry can still produce a duplicate; the runner keeps its row-evidence
+ * dedupe for that residue.
+ */
+export function discordNonce(idempotencyKey: string, index: number | string): string {
+  const material = `${idempotencyKey}#${index}`
+  const first = fnv1a32(material)
+  const second = fnv1a32(material, first ^ 0x9e3779b9)
+  return `${first.toString(36)}${second.toString(36)}`.slice(0, DISCORD_NONCE_MAX_LENGTH)
+}
+
+/**
+ * Stamp `nonce` + `enforce_nonce` on every message-create POST of a job so a
+ * retry re-posts the same nonces. Calls are indexed in emission order — the
+ * order is deterministic for a given request, so a retry reproduces it. Any
+ * non-create call (edit/delete/reaction/history) is left untouched.
+ */
+function stampNonces(
+  calls: SerializedDiscordCall[],
+  idempotencyKey: string
+): SerializedDiscordCall[] {
+  if (!idempotencyKey) return calls
+  return calls.map((call, index) => {
+    if (call.method !== "POST" || !call.url.endsWith("/messages")) return call
+    return {
+      ...call,
+      payload: {
+        ...call.payload,
+        nonce: discordNonce(idempotencyKey, index),
+        enforce_nonce: true,
+      },
+    }
+  })
+}
 
 /**
  * Split `text` into ≤`max`-char chunks, preferring to cut at the last
@@ -168,7 +221,7 @@ export function serializeOutbound(req: OutboundRequest): SerializedDiscordCall[]
     calls.push(...serializeSegment(seg, channelId, messageReference))
   }
 
-  return calls
+  return stampNonces(calls, req.metadata?.idempotencyKey ?? "")
 }
 
 /**
@@ -213,7 +266,7 @@ export async function serializeOutboundAsync(
     calls.push(...serializeSegment(seg, channelId, messageReference))
   }
 
-  return calls
+  return stampNonces(calls, req.metadata?.idempotencyKey ?? "")
 }
 
 function extractConversationKey(req: OutboundRequest, channelId: string): string | undefined {

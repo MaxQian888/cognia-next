@@ -203,6 +203,18 @@ jest.mock("@/components/settings/connections/forms/lark/lark-whitelist-editor", 
   ),
 }))
 
+jest.mock("@/components/settings/connections/forms/sla-escalation-defaults", () => ({
+  SlaEscalationDefaults: ({ adapterId }: { adapterId: string }) => (
+    <div data-testid="sla-escalation-defaults" data-adapter-id={adapterId} />
+  ),
+}))
+
+jest.mock("@/components/settings/connections/forms/reply-quoting-default", () => ({
+  ReplyQuotingDefault: ({ adapterId }: { adapterId: string }) => (
+    <div data-testid="reply-quoting-default" data-adapter-id={adapterId} />
+  ),
+}))
+
 jest.mock("@/components/settings/connections/forms/shared/send-test-message-section", () => ({
   SendTestMessageSection: ({ adapterId, platform }: { adapterId: string; platform: string }) => (
     <div
@@ -378,6 +390,23 @@ describe("ConfigDetail — shared sub-sections", () => {
   it("renders the DispatchRules section for every platform (W3 multi-bot)", () => {
     render(withIntl(<ConfigDetail row={makeRow("telegram")} />))
     expect(screen.getByTestId("dispatch-rules")).toBeInTheDocument()
+  })
+
+  it("mounts the SLA & escalation defaults card after the behavior defaults (slice 1B)", () => {
+    render(withIntl(<ConfigDetail row={makeRow("telegram")} />))
+    const card = screen.getByTestId("sla-escalation-defaults")
+    expect(card).toHaveAttribute("data-adapter-id", "telegram-1")
+    // Sits right after the behavior defaults card in the document.
+    const behavior = screen.getByTestId("adapter-behavior-defaults")
+    expect(behavior.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("mounts the reply-quoting default in the delivery section (ADR-0009 §3A.3)", () => {
+    render(withIntl(<ConfigDetail row={makeRow("telegram")} />))
+    expect(screen.getByTestId("reply-quoting-default")).toHaveAttribute(
+      "data-adapter-id",
+      "telegram-1"
+    )
   })
 })
 

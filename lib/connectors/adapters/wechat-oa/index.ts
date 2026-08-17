@@ -22,6 +22,7 @@ import type { OutboundRequest, OutboundResult } from "@/types/connectors/outboun
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
+import { parseConversationKey } from "@/types/connectors/event"
 import { WECHAT_OA_A2UI_CAPABILITY, WECHAT_OA_CAPS } from "./capability"
 import { WECHAT_API_BASE, clearWechatOaTokenCache } from "./auth"
 import { extractXmlField, parseWechatOaXml } from "./parse"
@@ -68,7 +69,17 @@ const AUTH_ERRCODES = new Set([40001, 40014, 42001])
  */
 const NON_RETRYABLE_ERRCODES = new Set([45015, 45047, 48001, 50002])
 
-/** Outcome of a single 客服 send attempt, before retry / health handling. */
+/**
+ * Typing-indicator errcodes that are NOT failures worth surfacing: the
+ * indicator is best-effort, and both mean "this user cannot receive 客服
+ * messages right now" — the actual reply will report the same condition
+ * through `send()` with a proper error, so the indicator stays silent.
+ *   45015 — outside the 48h customer-service window
+ *   45047 — customer-service message count over limit for this user
+ */
+const TYPING_SWALLOWED_ERRCODES = new Set([45015, 45047])
+
+/** Outcome of a single 客服 API call, before retry / health handling. */
 type SendAttempt =
   | { kind: "ok" }
   | { kind: "auth"; errcode: number; errmsg?: string }
@@ -126,16 +137,24 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     return { state: healthState, reason: healthReason, lastActivityAt }
   }
 
-  /** POST one 客服 message and classify the platform response. */
-  async function attemptSend(msg: WechatCustomMessage): Promise<SendAttempt> {
+  /**
+   * POST one 客服 API call (`/cgi-bin/message/custom/<path>`) and classify
+   * the platform response. Shared by `send()` (`custom/send`) and
+   * `setTyping()` (`custom/typing`); both carry the app access token as a
+   * query parameter and answer `{ errcode, errmsg }`.
+   */
+  async function postCustomApi(
+    path: string,
+    payload: Record<string, unknown>
+  ): Promise<SendAttempt> {
     const token = await opts.accessToken()
     const resp = await connectorsHttpRequest({
-      url: `${apiBase}/cgi-bin/message/custom/send?access_token=${encodeURIComponent(token)}`,
+      url: `${apiBase}${path}?access_token=${encodeURIComponent(token)}`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // WeChat requires the raw UTF-8 JSON; emoji/Chinese must not be escaped
       // away — JSON.stringify keeps them as UTF-8 which the proxy forwards.
-      body: JSON.stringify(msg),
+      body: JSON.stringify(payload),
       timeoutMs: 15_000,
     })
     let body: { errcode?: number; errmsg?: string } | undefined
@@ -196,7 +215,10 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     }
   }
 
-  // GAP: typing indicator (/cgi-bin/message/custom/typing) is not implemented.
+  /** POST one 客服 message and classify the platform response. */
+  const attemptSend = (msg: WechatCustomMessage): Promise<SendAttempt> =>
+    postCustomApi("/cgi-bin/message/custom/send", msg as unknown as Record<string, unknown>)
+
   // GAP: passive-reply fast path (replying inside the webhook HTTP response
   // within 5s) is not implemented — every reply goes through the 客服 send API.
   async function send(req: OutboundRequest): Promise<OutboundResult> {
@@ -242,6 +264,54 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     }
   }
 
+  /**
+   * Typing indicator ("对方正在输入"): `POST /cgi-bin/message/custom/typing`
+   * `{ touser, command: "Typing" | "CancelTyping" }`. The openid is the
+   * conversation key's remote chat id (`wechat-oa:<adapterId>:<openid>`).
+   * Same auth retry-once as `send()`. Best-effort: 45015 / 45047 (user
+   * outside the 48h window / over the 客服 quota) are swallowed because the
+   * real reply will surface the same condition with a proper error; every
+   * other failure throws so the bus can audit it. UNVERIFIED: whether the
+   * typing call itself counts against the per-user 客服 message quota.
+   */
+  async function setTyping(conversationKey: string, on: boolean): Promise<void> {
+    let openId: string
+    try {
+      openId = parseConversationKey(conversationKey).remoteChatId
+    } catch {
+      throw new Error(`WeChat OA setTyping: unparseable conversationKey "${conversationKey}"`)
+    }
+    if (!openId) throw new Error("WeChat OA setTyping: missing openid")
+    const payload = { touser: openId, command: on ? "Typing" : "CancelTyping" }
+    let attempt = await postCustomApi("/cgi-bin/message/custom/typing", payload)
+    if (attempt.kind === "auth") {
+      clearWechatOaTokenCache()
+      attempt = await postCustomApi("/cgi-bin/message/custom/typing", payload)
+      if (attempt.kind === "auth") {
+        healthState = "degraded"
+        healthReason = "auth_failed"
+        throw new Error(
+          `WeChat OA typing auth failed after token refresh: ${attempt.errmsg ?? attempt.errcode} (errcode ${attempt.errcode})`
+        )
+      }
+    }
+    if (attempt.kind === "ok") {
+      lastActivityAt = Date.now()
+      return
+    }
+    if (attempt.kind === "errcode") {
+      if (TYPING_SWALLOWED_ERRCODES.has(attempt.errcode)) return
+      throw new Error(
+        `WeChat OA typing failed: ${attempt.errmsg ?? attempt.errcode} (errcode ${attempt.errcode})`
+      )
+    }
+    throw new Error(
+      attempt.unparseable
+        ? `WeChat OA typing returned a non-JSON body (status ${attempt.status}): ${attempt.bodySnippet}`
+        : `WeChat OA typing failed with HTTP ${attempt.status}: ${attempt.bodySnippet}`
+    )
+  }
+
   async function refreshCredentials(): Promise<void> {
     // Drop cached access tokens so the next send re-fetches with the
     // (possibly rotated) keyring credentials.
@@ -264,6 +334,7 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     stop,
     health,
     send,
+    setTyping,
     refreshCredentials,
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("wechat-oa"),
     a2uiCapability: () => WECHAT_OA_A2UI_CAPABILITY,

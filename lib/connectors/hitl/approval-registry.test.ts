@@ -9,6 +9,8 @@ import {
   grantSessionBypass,
   clearSessionBypass,
   pendingApprovalCount,
+  pendingApprovalCountForSession,
+  subscribePendingApprovals,
   __resetApprovalRegistryForTesting,
   DEFAULT_APPROVAL_TTL_MS,
 } from "./approval-registry"
@@ -83,5 +85,79 @@ describe("approval-registry", () => {
 
   it("exposes a sane default TTL", () => {
     expect(DEFAULT_APPROVAL_TTL_MS).toBeGreaterThan(0)
+  })
+
+  describe("per-session count + subscription", () => {
+    it("counts pending approvals per session", () => {
+      void awaitApproval("s1", "r1")
+      void awaitApproval("s1", "r2")
+      void awaitApproval("s2", "r1")
+      expect(pendingApprovalCountForSession("s1")).toBe(2)
+      expect(pendingApprovalCountForSession("s2")).toBe(1)
+      expect(pendingApprovalCountForSession("s3")).toBe(0)
+      resolveApproval("s1", "r1", { decision: "allow" })
+      expect(pendingApprovalCountForSession("s1")).toBe(1)
+    })
+
+    it("notifies subscribers on register and resolve, and stops after unsubscribe", () => {
+      const cb = jest.fn()
+      const unsubscribe = subscribePendingApprovals(cb)
+      void awaitApproval("s1", "r1")
+      expect(cb).toHaveBeenCalledTimes(1)
+      resolveApproval("s1", "r1", { decision: "allow" })
+      expect(cb).toHaveBeenCalledTimes(2)
+      // Unknown request → nothing changed → no notification.
+      resolveApproval("s1", "missing", { decision: "deny" })
+      expect(cb).toHaveBeenCalledTimes(2)
+      unsubscribe()
+      void awaitApproval("s1", "r2")
+      expect(cb).toHaveBeenCalledTimes(2)
+    })
+
+    it("notifies subscribers when the TTL expires an approval", async () => {
+      jest.useFakeTimers()
+      try {
+        const cb = jest.fn()
+        subscribePendingApprovals(cb)
+        const p = awaitApproval("s1", "r1", { ttlMs: 500 })
+        expect(cb).toHaveBeenCalledTimes(1)
+        jest.advanceTimersByTime(500)
+        await expect(p).resolves.toEqual({ decision: "deny", message: "approval timed out" })
+        expect(cb).toHaveBeenCalledTimes(2)
+        expect(pendingApprovalCountForSession("s1")).toBe(0)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("notifies subscribers when a request is superseded", async () => {
+      const cb = jest.fn()
+      subscribePendingApprovals(cb)
+      const first = awaitApproval("s1", "r1")
+      void awaitApproval("s1", "r1")
+      await expect(first).resolves.toMatchObject({ decision: "deny" })
+      // register + supersede-register — the count stays at 1 either way.
+      expect(cb).toHaveBeenCalledTimes(2)
+      expect(pendingApprovalCountForSession("s1")).toBe(1)
+    })
+
+    it("a throwing listener does not break the approval flow or other listeners", () => {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        const bad = jest.fn(() => {
+          throw new Error("boom")
+        })
+        const good = jest.fn()
+        subscribePendingApprovals(bad)
+        subscribePendingApprovals(good)
+        const p = awaitApproval("s1", "r1")
+        expect(good).toHaveBeenCalledTimes(1)
+        expect(warn).toHaveBeenCalled()
+        expect(resolveApproval("s1", "r1", { decision: "allow" })).toBe(true)
+        return expect(p).resolves.toEqual({ decision: "allow" })
+      } finally {
+        warn.mockRestore()
+      }
+    })
   })
 })

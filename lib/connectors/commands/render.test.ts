@@ -50,3 +50,47 @@ describe("team confirmations", () => {
     expect(R.confirmTeam("Researchers")).toMatch(/Team bound: Researchers/)
   })
 })
+
+describe("assignment provenance (slice 1A)", () => {
+  it("sourceLabel knows the assignment source and falls back to the raw key", () => {
+    expect(R.sourceLabel("assignment")).toBe("会话分配 / assignment")
+    expect(R.sourceLabel("override")).toBe("会话覆盖 / conversation override")
+    expect(R.sourceLabel("mystery")).toBe("mystery")
+    expect(R.withSource("team_1", "assignment")).toBe("team_1（会话分配 / assignment）")
+  })
+
+  it("renderAssignee describes human / character / team and hides when unassigned", () => {
+    expect(R.renderAssignee(undefined)).toBeUndefined()
+    expect(R.renderAssignee({ kind: "human" })).toBe("人工 / me")
+    expect(R.renderAssignee({ kind: "character", id: "c1", label: "Ava" })).toBe(
+      "角色 / character: Ava"
+    )
+    expect(R.renderAssignee({ kind: "team", id: "t1" })).toBe("团队 / team: t1")
+    expect(R.renderAssignee({ kind: "team" })).toBe("团队 / team: ?")
+  })
+
+  it("renderStatus adds the assignee line only when assigned", () => {
+    const base = {
+      mode: "manual",
+      model: "m",
+      provider: "p",
+      character: "c",
+      reasoning: "r",
+      approvalMode: "prompt",
+      team: "t",
+      workflow: "w",
+      routeSource: "会话分配 / assignment",
+      matchedRule: "无 / none",
+      responseAdapter: "tg",
+      enabledRules: [],
+      sessionTitle: "Main",
+      sessionIdPrefix: "abc",
+    }
+    expect(R.renderStatus(base)).not.toContain("assignee:")
+    const text = R.renderStatus({ ...base, assignee: "人工 / me" })
+    expect(text).toContain("• 分配 / assignee: 人工 / me")
+    // Sits right after the mode line.
+    const lines = text.split("\n")
+    expect(lines[lines.indexOf("• 模式 / mode: manual") + 1]).toBe("• 分配 / assignee: 人工 / me")
+  })
+})

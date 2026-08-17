@@ -46,6 +46,16 @@ describe("sendDiscordVoiceMessage", () => {
     )
   })
 
+  it("forwards the idempotency nonce to the upload bridge", async () => {
+    await sendDiscordVoiceMessage({
+      botToken: async () => "TOKEN",
+      channelId: "c1",
+      voiceUrl: "https://cdn/x/v.ogg",
+      nonce: "abc123",
+    })
+    expect(mockUpload).toHaveBeenCalledWith(expect.objectContaining({ nonce: "abc123" }))
+  })
+
   it("defaults durationSecs to 0 when omitted", async () => {
     await sendDiscordVoiceMessage({
       botToken: async () => "TOKEN",

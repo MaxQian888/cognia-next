@@ -116,6 +116,20 @@ const backoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** job.attempts) + 
 
 常量：`MAX_ATTEMPTS=5`（`outbound-runner.ts:137`）、`BASE_BACKOFF_MS=1_000`（`:138`）、`MAX_BACKOFF_MS=60_000`（`:139`）、默认 `jitter = () => Math.random() * 500`（`:287`）。`startOutboundRunner` 在其 `AbortSignal` 中止时**解决（resolve）**，且**从不拒绝（reject）**（`outbound-runner.ts:284`）——每个投递错误都通过审计日志浮现，从不抛给调用方。空闲休眠是一张安全网，而非轮询：循环通常会精确唤醒（`DEFAULT_IDLE_CAP_MS=60_000`，`:147`）。
 
+## 平台幂等
+
+内存 LRU 与行证据去重（上文关卡 4）都关不上 `adapter.send()` 成功与 `markSent` 之间的崩溃窗口 —— ack 随 runner 一起死了，本地没有任何证据。这个窗口由每个 adapter 在 `ambiguousDelivery`（`types/connectors/runtime-capability.ts`）中声明的**平台侧**契约来关闭，且每个已上线平台都必须显式声明（`hasExplicitRuntimeCapabilityOverride`，由 `runtime-capability.test.ts` 钉住）：
+
+| 平台 | `ambiguousDelivery` | adapter 透传的每消息令牌 | ack 丢失后的重试 |
+| --- | --- | --- | --- |
+| **lark** | `remote_idempotent` | 消息创建 `uuid` = `idempotencyKey` | 平台返回原消息 |
+| **matrix** | `remote_idempotent` | `PUT …/send/{type}/{txnId}`，`txnId = idempotencyKey:<chunk>` | homeserver 返回同一 event id |
+| **discord** | `remote_idempotent` | 每次消息创建都带 `nonce` + `enforce_nonce: true`（`discordNonce(idempotencyKey, index)`，FNV-1a → base36，≤25 字符，每个 REST 分片 / 语音 / 媒体通道各一个；Rust multipart 上传输出同样字段） | Discord 返回原消息（去重窗口“几分钟”—— 相对 ≥5 min 的 stale-`sending` 恢复 UNVERIFIED，因此行证据去重保留） |
+| **qq-official** | `reconciliation_required` | 被动 `msg_seq = 1 + fnv1a(idempotencyKey) % 65535`（同一任务 → 同一 `msg_id + msg_seq`） | 平台**拒绝**重复对（死信 `platform_4xx`，错误码 UNVERIFIED）—— 不会静默双发，但也拿不到原 id |
+| **slack / telegram / onebot / wecom / wechat-personal / wechat-oa / dingtalk** | `reconciliation_required` | 无 | 可能重复；审计轨迹 + `delivery_unknown` 状态是运营者对账的依据 |
+
+契约测试 `lib/connectors/adapters/runtime-contract.test.ts` 断言每个 `remote_idempotent` adapter 确实把 key 打到了线上（Lark `uuid`、Matrix `txnId` 路径段、Discord `nonce` body 字段）。
+
 ## 按会话的 FIFO 通道
 
 同一会话内的消息必须按 `createdAt` 顺序到达，但跨会话发送应当并行运行。runner 用一个 `Map<conversationKey, ConversationLane>` 同时实现两者。一个 `ConversationLane`（`outbound-runner.ts:189`）是一条 promise 链尾——每个入队的工作项都在前一个结算后运行：
@@ -209,7 +223,7 @@ runner 把 `onStateChange` 接线为发出 `breaker.open` / `breaker.close` 遥�
 
 四个支持模块保持队列健康且可观测：
 
-- **`daily-schedule.ts`** —— 通用的 `startDailySchedule(options)`（`lib/connectors/daily-schedule.ts:50`）：一个 `setTimeout` 初始延迟（默认 60 s，使其不与应用启动争抢）交接给一个 `setInterval`（默认 24 h）。返回一个 `{ dispose, runNow }` 句柄；抛出的任务会被捕获并记录，因此一次失败绝不会终结整个计划。被跨适配器扫描共享。
+- **`daily-schedule.ts`** —— 通用的 `startDailySchedule(options)`（`lib/connectors/daily-schedule.ts`）：一个 `setTimeout` 初始延迟（默认 60 s，使其不与应用启动争抢）交接给一个 `setInterval`（默认 24 h）。返回一个 `{ dispose, runNow }` 句柄；抛出的任务会被捕获并记录，因此一次失败绝不会终结整个计划。终态行保留清理（`sweepTerminalOutboundRows`）**不再**在此调度 —— 它是 `housekeeping-scheduler.ts` 中的托管调度任务 `connection:housekeeping:outbound-retention`，可跨重启存活并出现在调度器 UI 中。
 - **`callback-binding-cleanup.ts`** —— `cleanupExpiredCallbackBindings(options?)`（`lib/connectors/callback-binding-cleanup.ts:60`）修剪 `expiresAt < now` 的 `connectorCallbackBindings` 行，外加没有 `expiresAt` 且早于 60 天宽限窗口（`LEGACY_GRACE_MS`，`:44`）的遗留行。`startCallbackBindingCleanupSchedule`（`:174`）以其自己的 24 h 定时器运行它，并将每次修剪审计为 `callback.binding_expired`。
 - **`dlq-export.ts`** —— `buildDlqDownload(rows, format)`（`lib/connectors/dlq-export.ts:105`）把死信行渲染为 CSV 或 JSON，供设置面板交给浏览器下载流程。CSV 列集（`CSV_FIELDS`，`:13`）以 RFC-4180 转义往返 id / adapter / conversation / status / attempts / 时间戳 / `lastError` / `idempotencyKey`。
 - **`derive-job-badge.ts`** —— `deriveJobBadge(inputs)`（`lib/connectors/derive-job-badge.ts:76`）是一个纯 UI 辅助函数，为一个队列行计算 `normal | paused-muted | paused-quiet-hours | circuit-blocked` 之一。它**复用 runner 的 `isInQuietHours` / `msUntilQuietEnd`**（`derive-job-badge.ts:25`），因此操作者看到的徽标与运行时应用的延后始终一致——同一个 `etaMs`（"42 分钟后恢复"）来自同一个安排了延后的函数。

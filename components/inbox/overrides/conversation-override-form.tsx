@@ -34,9 +34,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  ASSIGNMENT_ROUTING_MARKER_CLEAR,
   upsertByConversationKey,
   updateConversationConfigSection,
 } from "@/lib/db/conversation-overrides"
+import { parseConversationKey } from "@/types/connectors/event"
+import type { EscalationPolicy } from "@/types/connectors/escalation"
+import { EscalationPolicyEditor } from "./escalation-policy-editor"
 import { updateAdapterConfigSection, type AdapterInstancePatch } from "@/lib/db/adapter-instances"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
@@ -200,6 +204,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   // persist `false` only to suppress for noisy channels.
   const [liveActivity, setLiveActivity] = useState(initialRow?.liveActivity !== false)
   const [appendActivity, setAppendActivity] = useState(initialRow?.appendActivity !== false)
+  const [replyQuoting, setReplyQuoting] = useState(initialRow?.replyQuoting !== false)
   const [providerOverride, setProviderOverride] = useState(initialRow?.providerOverride ?? "")
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
   const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
@@ -211,6 +216,15 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const [slaMinutes, setSlaMinutes] = useState<string>(
     initialRow?.slaResponseMinutes != null ? String(initialRow.slaResponseMinutes) : ""
   )
+  // SLA escalation chain (slice 1B). `undefined` = inherit the bot default.
+  const [escalation, setEscalation] = useState<EscalationPolicy | undefined>(initialRow?.escalation)
+  const platform = useMemo(() => {
+    try {
+      return parseConversationKey(conversationKey).platform
+    } catch {
+      return undefined
+    }
+  }, [conversationKey])
   const [saving, setSaving] = useState(false)
 
   // Quiet hours — toggle + three inputs. The "enabled" boolean tracks
@@ -280,25 +294,44 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         quietHours.enabled && quietHours.from && quietHours.to && quietHours.tz
           ? { from: quietHours.from, to: quietHours.to, tz: quietHours.tz }
           : undefined
+      const nextMode = mode === "unset" ? undefined : mode
+      const nextCharacterId =
+        characterState === "character" ? characterId.trim() || undefined : undefined
+      const nextCharacterDisabled = characterState === "none" ? true : undefined
+      const nextTeamId = targetKind === "team" ? teamId.trim() || undefined : undefined
+      const nextTeamDisabled =
+        targetKind === "workflow" || targetKind === "direct" ? true : undefined
+      // Explicit routing / mode edit → drop the assignment ↔ routing marker
+      // (slice 1A) so a later unassign keeps what the operator chose here.
+      // The assignee itself is untouched.
+      const routingEdited =
+        nextMode !== initialRow?.mode ||
+        nextCharacterId !== initialRow?.characterId ||
+        nextCharacterDisabled !== initialRow?.characterDisabled ||
+        nextTeamId !== initialRow?.teamId ||
+        nextTeamDisabled !== initialRow?.teamDisabled
       await updateConversationConfigSection({
+        adapterId,
         conversationKey,
         sessionId,
         section: "responder",
         source: "inbox.override.editor",
         patch: {
-          mode: mode === "unset" ? undefined : mode,
+          ...(routingEdited ? ASSIGNMENT_ROUTING_MARKER_CLEAR : {}),
+          mode: nextMode,
           inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
           activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
           activationTtlMs: parseActivationTtlMs(activationTtlHours),
-          characterId: characterState === "character" ? characterId.trim() || undefined : undefined,
-          characterDisabled: characterState === "none" ? true : undefined,
-          teamId: targetKind === "team" ? teamId.trim() || undefined : undefined,
-          teamDisabled: targetKind === "workflow" || targetKind === "direct" ? true : undefined,
+          characterId: nextCharacterId,
+          characterDisabled: nextCharacterDisabled,
+          teamId: nextTeamId,
+          teamDisabled: nextTeamDisabled,
           workflowId: targetKind === "workflow" ? workflowId.trim() || undefined : undefined,
           workflowDisabled: targetKind === "team" || targetKind === "direct" ? true : undefined,
           proactivePush: proactivePush ? true : undefined,
           liveActivity: liveActivity ? undefined : false,
           appendActivity: appendActivity ? undefined : false,
+          replyQuoting: replyQuoting ? undefined : false,
           allowComputerUse: allowComputerUse ? true : undefined,
           allowGoalDriving: allowGoalDriving ? true : undefined,
           allowScheduleTools: allowScheduleTools ? true : undefined,
@@ -322,6 +355,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         pinned: pinned ? true : undefined,
         archived: archived ? true : undefined,
         slaResponseMinutes: parseSlaMinutes(slaMinutes),
+        // undefined = inherit the adapter default (`defaultEscalation`).
+        escalation,
       })
       onDone?.()
     } finally {
@@ -636,6 +671,22 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         <p className="text-xs text-muted-foreground">{t("fields.slaResponseMinutesHint")}</p>
       </div>
 
+      {/* SLA escalation chain (slice 1B): per-conversation override of the
+       * bot-wide `defaultEscalation`; `undefined` inherits. */}
+      <div className="space-y-2 border-b pb-5" data-testid="conv-override-escalation">
+        <Label>{t("escalation.title")}</Label>
+        <p className="text-xs text-muted-foreground">{t("escalation.sectionHint")}</p>
+        <EscalationPolicyEditor
+          scope="conversation"
+          platform={platform}
+          value={escalation}
+          onChange={setEscalation}
+          characters={(characters ?? []).map((c) => ({ id: c.id, name: c.name }))}
+          disabled={saving}
+          idPrefix="conv-override-escalation"
+        />
+      </div>
+
       {/* Proactive IM push opt-in (control-plane notifications). Off by default
        * so a customer-facing channel never gets surprise pushes. */}
       <div className="flex items-start gap-3 border-b pb-5">
@@ -692,6 +743,26 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             />
           </div>
           <p className="text-xs text-muted-foreground">{t("fields.appendActivityHint")}</p>
+        </div>
+      </div>
+
+      {/* Reply quoting opt-OUT (ADR-0009 §3A.3). DEFAULT ON — group / thread
+       * ai-run replies quote the triggering message on platforms that declare
+       * `send.reply`. Flip OFF to send un-quoted replies in this conversation. */}
+      <div className="flex items-start gap-3 border-b pb-5">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-reply-quoting" className="cursor-pointer">
+              {t("fields.replyQuoting")}
+            </Label>
+            <Switch
+              id="conv-override-reply-quoting"
+              checked={replyQuoting}
+              onCheckedChange={setReplyQuoting}
+              data-testid="conv-override-reply-quoting"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.replyQuotingHint")}</p>
         </div>
       </div>
 
@@ -787,8 +858,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
                 id="conv-override-quiet-tz"
                 value={quietHours.tz}
                 onChange={(e) => setQuietHours((prev) => ({ ...prev, tz: e.target.value }))}
-                // i18n-exempt: example IANA timezone id, not translatable UI copy
-                placeholder="Asia/Shanghai"
+                placeholder={t("fields.quietHours.tzPlaceholder")}
                 data-testid="conv-override-quiet-tz"
               />
             </div>

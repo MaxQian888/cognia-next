@@ -41,6 +41,13 @@ export interface QQGatewayOptions {
   gatewayUrl: () => Promise<string>
   intents?: number
   signal: AbortSignal
+  /**
+   * Fired when the platform answers OP 9 INVALID_SESSION (our IDENTIFY /
+   * RESUME was rejected). The adapter uses it to evict its cached app token
+   * so the reconnect re-mints instead of retrying a rejected credential.
+   * Errors are swallowed — the reconnect loop must never die on a callback.
+   */
+  onAuthInvalid?: () => void | Promise<void>
   _backoffBaseMs?: number
 }
 
@@ -240,6 +247,11 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
                 session.sessionId = null
                 session.sequence = null
                 wsEnded = true
+                try {
+                  await opts.onAuthInvalid?.()
+                } catch {
+                  /* best-effort — never break the reconnect loop */
+                }
                 break
               case OP_HEARTBEAT_ACK:
                 unackedHeartbeats = 0

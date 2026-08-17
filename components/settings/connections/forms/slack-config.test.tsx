@@ -32,6 +32,19 @@ jest.mock("@/lib/connectors/adapters/slack/oauth", () => ({
   buildSlackOAuthUrl: jest.fn().mockReturnValue("https://slack.com/oauth/v2/authorize?mock=1"),
 }))
 
+const mockOpenUrl = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/native/opener", () => ({
+  openUrl: (...args: unknown[]) => mockOpenUrl(...args),
+}))
+
+const mockTunnel = { running: false, url: null as string | null, loading: false }
+jest.mock("@/hooks/use-tunnel-status", () => ({ useTunnelStatus: () => mockTunnel }))
+
+const mockRouterPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockRouterPush, replace: jest.fn() }),
+}))
+
 // Mock window.open
 const mockWindowOpen = jest.fn()
 Object.defineProperty(window, "open", { value: mockWindowOpen, writable: true })
@@ -44,7 +57,7 @@ const mockToastError = toast.error as jest.Mock
 // Import component after mocks
 // ---------------------------------------------------------------------------
 
-import { SlackConfigDialog } from "./slack-config"
+import { SlackConfigDialog, parseSlackHistoryMaxPages } from "./slack-config"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 
@@ -66,6 +79,10 @@ function makeAuthTestFailResponse(error = "invalid_auth") {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockTunnel.running = false
+  mockTunnel.url = null
+  mockTunnel.loading = false
+  delete process.env.NEXT_PUBLIC_SLACK_CLIENT_ID
 })
 
 // ---------------------------------------------------------------------------
@@ -194,6 +211,25 @@ describe("SlackConfigDialog — create new", () => {
     })
   })
 
+  it("writes the assistant-app + history defaults into a new adapter's settings", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByTestId("slack-assistant-app-switch")).toHaveAttribute(
+      "aria-checked",
+      "false"
+    )
+    expect(screen.getByTestId("slack-history-max-pages")).toHaveValue(10)
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-t" } })
+    fireEvent.change(screen.getByLabelText(/app token/i), { target: { value: "xapp-t" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: { transport: "socket-mode", assistantAppEnabled: false, historyMaxPages: 10 },
+        })
+      )
+    })
+  })
+
   it("fires onCreated with the new adapter id after a successful create", async () => {
     const onCreated = jest.fn()
     render(
@@ -304,6 +340,113 @@ describe("SlackConfigDialog — create new", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Tests — OAuth + auth.test transport failure
+// ---------------------------------------------------------------------------
+
+describe("SlackConfigDialog — OAuth + errors", () => {
+  it("errors when NEXT_PUBLIC_SLACK_CLIENT_ID is unset", () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.click(screen.getByRole("button", { name: /connect via oauth/i }))
+    expect(mockToastError).toHaveBeenCalledWith(
+      expect.stringContaining("NEXT_PUBLIC_SLACK_CLIENT_ID")
+    )
+    expect(mockOpenUrl).not.toHaveBeenCalled()
+  })
+
+  it("opens the OAuth URL and stores the CSRF state when a client id is configured", () => {
+    process.env.NEXT_PUBLIC_SLACK_CLIENT_ID = "client-1"
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.click(screen.getByRole("button", { name: /connect via oauth/i }))
+    expect(mockOpenUrl).toHaveBeenCalledWith("https://slack.com/oauth/v2/authorize?mock=1")
+    expect(sessionStorage.getItem("slack_oauth_state")).toBeTruthy()
+  })
+
+  it("errors when Test is pressed with no bot token", () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }))
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("Enter a bot token"))
+    expect(mockConnectorsHttpRequest).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a transport error from auth.test as a failed status", async () => {
+    mockConnectorsHttpRequest.mockRejectedValue(new Error("network down"))
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-x" } })
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("network down"))
+    expect(screen.getByRole("status")).toHaveTextContent("network down")
+  })
+
+  it("requires a display name", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "   " } })
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-t" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("Display name"))
+    )
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("requires an app token for a new Socket Mode adapter", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-t" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("App token"))
+    )
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("rejects incomplete quiet hours", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-t" } })
+    fireEvent.change(screen.getByLabelText(/app token/i), { target: { value: "xapp-t" } })
+    // The Advanced section is collapsed by default — expand it first.
+    fireEvent.click(screen.getByTestId("adapter-form-section-advanced").querySelector("button")!)
+    // Enable quiet hours (defaults 22:00 → 08:00 UTC) then blank the "to" field.
+    await waitFor(() => expect(document.getElementById("qhm-enable")).not.toBeNull())
+    fireEvent.click(document.getElementById("qhm-enable")!)
+    await waitFor(() => expect(document.getElementById("qhm-to")).not.toBeNull())
+    fireEvent.change(document.getElementById("qhm-to")!, { target: { value: "" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("Quiet hours"))
+    )
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("falls back to a generic message when auth.test fails without an error code", async () => {
+    mockConnectorsHttpRequest.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ ok: false }),
+    })
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-x" } })
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Unknown error"))
+  })
+
+  it("stringifies a non-Error auth.test rejection", async () => {
+    mockConnectorsHttpRequest.mockRejectedValue("boom")
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-x" } })
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("boom"))
+  })
+
+  it("surfaces a save failure as an error toast", async () => {
+    mockCreateAdapterInstance.mockRejectedValueOnce(new Error("quota"))
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-t" } })
+    fireEvent.change(screen.getByLabelText(/app token/i), { target: { value: "xapp-t" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("quota"))
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Tests — edit existing
 // ---------------------------------------------------------------------------
 
@@ -352,6 +495,84 @@ describe("SlackConfigDialog — edit existing", () => {
     })
   })
 
+  it("pre-fills assistantAppEnabled + historyMaxPages from persisted settings", () => {
+    render(
+      <SlackConfigDialog
+        open={true}
+        onOpenChange={jest.fn()}
+        row={{
+          ...existingRow,
+          settings: { transport: "socket-mode", assistantAppEnabled: true, historyMaxPages: 25 },
+        }}
+      />
+    )
+    expect(screen.getByTestId("slack-assistant-app-switch")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("slack-history-max-pages")).toHaveValue(25)
+  })
+
+  it("coerces a legacy string historyMaxPages and falls back to 10 when out of range", () => {
+    const { unmount } = render(
+      <SlackConfigDialog
+        open={true}
+        onOpenChange={jest.fn()}
+        row={{ ...existingRow, settings: { transport: "socket-mode", historyMaxPages: "7" } }}
+      />
+    )
+    expect(screen.getByTestId("slack-history-max-pages")).toHaveValue(7)
+    unmount()
+    render(
+      <SlackConfigDialog
+        open={true}
+        onOpenChange={jest.fn()}
+        row={{ ...existingRow, settings: { transport: "socket-mode", historyMaxPages: 999 } }}
+      />
+    )
+    expect(screen.getByTestId("slack-history-max-pages")).toHaveValue(10)
+  })
+
+  it("toggling the assistant-app switch dirties the form and persists the flag", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+    const toggle = screen.getByTestId("slack-assistant-app-switch")
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+        "sl-existing",
+        expect.objectContaining({
+          settings: { transport: "socket-mode", assistantAppEnabled: true, historyMaxPages: 10 },
+        })
+      )
+    })
+  })
+
+  it("persists an edited historyMaxPages as a number", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+    fireEvent.change(screen.getByTestId("slack-history-max-pages"), { target: { value: "20" } })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+        "sl-existing",
+        expect.objectContaining({
+          settings: expect.objectContaining({ historyMaxPages: 20, assistantAppEnabled: false }),
+        })
+      )
+    })
+  })
+
+  it("rejects an out-of-range historyMaxPages with a toast and no write", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+    const input = screen.getByTestId("slack-history-max-pages")
+    fireEvent.change(input, { target: { value: "0" } })
+    expect(input).toHaveAttribute("aria-invalid", "true")
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/between 1 and 50/))
+    })
+    expect(mockUpdateAdapterInstance).not.toHaveBeenCalled()
+  })
+
   it("does not fire onCreated when editing an existing adapter", async () => {
     const onCreated = jest.fn()
     render(
@@ -371,6 +592,98 @@ describe("SlackConfigDialog — edit existing", () => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalled()
     })
     expect(onCreated).not.toHaveBeenCalled()
+  })
+})
+
+describe("parseSlackHistoryMaxPages", () => {
+  it.each([
+    ["1", 1],
+    ["50", 50],
+    [" 10 ", 10],
+    ["0", null],
+    ["51", null],
+    ["-3", null],
+    ["2.5", null],
+    ["abc", null],
+    ["", null],
+  ])("parses %p → %p", (raw, expected) => {
+    expect(parseSlackHistoryMaxPages(raw)).toBe(expected)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests — Events API request URL (existing row)
+// ---------------------------------------------------------------------------
+
+describe("SlackConfigDialog — Events API request URL", () => {
+  const webhookRow: AdapterInstanceRow = {
+    id: "sl-hook",
+    type: "slack",
+    displayName: "Hook Bot",
+    enabled: true,
+    transportMode: "webhook",
+    settings: { transport: "events-api-webhook" },
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["botToken"] },
+    trigger: defaultPrivateChatPolicy(),
+    defaultMode: "auto",
+    createdAt: 1000,
+    updatedAt: 2000,
+  }
+
+  it("shows the tunnel-off hint and routes to Companion settings when no tunnel is running", () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    expect(screen.getByTestId("slack-webhook-url-tunnel-off")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /open companion settings/i }))
+    expect(mockRouterPush).toHaveBeenCalledWith(
+      "/settings?section=connections&connectionsTab=tunnel"
+    )
+  })
+
+  it("shows a loading hint while the tunnel status resolves", () => {
+    mockTunnel.loading = true
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    expect(screen.getByText(/checking tunnel status/i)).toBeInTheDocument()
+  })
+
+  it("renders the request URL, copies it, and opens the Slack console when the tunnel is up", async () => {
+    mockTunnel.running = true
+    mockTunnel.url = "https://tunnel.example/"
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    expect(screen.getByTestId("slack-webhook-url-input")).toHaveValue(
+      "https://tunnel.example/webhook/slack/sl-hook"
+    )
+    fireEvent.click(screen.getByRole("button", { name: /copy request url/i }))
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("https://tunnel.example/webhook/slack/sl-hook")
+    )
+    expect(mockToastSuccess).toHaveBeenCalledWith(expect.stringContaining("copied"))
+    fireEvent.click(screen.getByRole("button", { name: /open slack app console/i }))
+    expect(mockWindowOpen).toHaveBeenCalledWith(
+      "https://api.slack.com/apps",
+      "_blank",
+      "noopener,noreferrer"
+    )
+  })
+
+  it("reports a clipboard failure as an error toast", async () => {
+    mockTunnel.running = true
+    mockTunnel.url = "https://tunnel.example"
+    Object.assign(navigator, {
+      clipboard: { writeText: jest.fn().mockRejectedValue(new Error("denied")) },
+    })
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    fireEvent.click(screen.getByRole("button", { name: /copy request url/i }))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("denied"))
+  })
+
+  it("tells a new adapter the request URL appears after the first save", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.click(screen.getByRole("combobox"))
+    await waitFor(() => screen.getByRole("option", { name: /events api webhook/i }))
+    fireEvent.click(screen.getByRole("option", { name: /events api webhook/i }))
+    expect(screen.getByText(/save the adapter first/i)).toBeInTheDocument()
   })
 })
 

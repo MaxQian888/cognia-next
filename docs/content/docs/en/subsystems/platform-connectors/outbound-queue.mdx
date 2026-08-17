@@ -116,6 +116,20 @@ const backoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** job.attempts) + 
 
 Constants: `MAX_ATTEMPTS=5` (`outbound-runner.ts:137`), `BASE_BACKOFF_MS=1_000` (`:138`), `MAX_BACKOFF_MS=60_000` (`:139`), default `jitter = () => Math.random() * 500` (`:287`). `startOutboundRunner` **resolves** when its `AbortSignal` aborts and **never rejects** (`outbound-runner.ts:284`) — every delivery error is surfaced via the audit log, never thrown to the caller. The idle-sleep is a safety net, not a poll: the loop normally wakes precisely (`DEFAULT_IDLE_CAP_MS=60_000`, `:147`).
 
+## Platform Idempotency
+
+The in-memory LRU and the row-evidence dedupe (gate 4 above) cannot close the crash window between a successful `adapter.send()` and `markSent` — the ack died with the runner, so no local evidence exists. That window is closed **platform-side** by the contract each adapter declares in `ambiguousDelivery` (`types/connectors/runtime-capability.ts`), and every shipped platform must declare it explicitly (`hasExplicitRuntimeCapabilityOverride`, pinned by `runtime-capability.test.ts`):
+
+| platform | `ambiguousDelivery` | per-message token the adapter forwards | retry after a lost ack |
+| --- | --- | --- | --- |
+| **lark** | `remote_idempotent` | message-create `uuid` = `idempotencyKey` | platform returns the original message |
+| **matrix** | `remote_idempotent` | `PUT …/send/{type}/{txnId}` with `txnId = idempotencyKey:<chunk>` | homeserver returns the same event id |
+| **discord** | `remote_idempotent` | `nonce` + `enforce_nonce: true` on every message-create (`discordNonce(idempotencyKey, index)`, FNV-1a → base36, ≤25 chars, one per REST chunk / voice / media lane; the Rust multipart upload emits the same fields) | Discord returns the original message (window "a few minutes" — UNVERIFIED vs the ≥5 min stale-`sending` recovery, so row-evidence dedupe stays) |
+| **qq-official** | `reconciliation_required` | passive `msg_seq = 1 + fnv1a(idempotencyKey) % 65535` (same job → same `msg_id + msg_seq`) | platform **rejects** the duplicate pair (dead-lettered `platform_4xx`, error code UNVERIFIED) — never a silent double, but not the original id either |
+| **slack / telegram / onebot / wecom / wechat-personal / wechat-oa / dingtalk** | `reconciliation_required` | none | may duplicate; the audit trail + `delivery_unknown` status are what the operator reconciles against |
+
+The contract test `lib/connectors/adapters/runtime-contract.test.ts` asserts that every `remote_idempotent` adapter really threads the key onto the wire (Lark `uuid`, Matrix `txnId` path segment, Discord `nonce` body field).
+
 ## Per-conversation FIFO Lanes
 
 Messages within one conversation must arrive in `createdAt` order, but cross-conversation sends should run in parallel. The runner achieves both with a `Map<conversationKey, ConversationLane>`. A `ConversationLane` (`outbound-runner.ts:189`) is a promise-chain tail — each enqueued work item runs after the previous one settles:
@@ -209,7 +223,7 @@ Proactive sends don't wait for an inbound event. `installScheduledOutboundHandle
 
 Four supporting modules keep the queue healthy and observable:
 
-- **`daily-schedule.ts`** — generic `startDailySchedule(options)` (`lib/connectors/daily-schedule.ts:50`): a `setTimeout` initial delay (default 60 s, so it doesn't fight app boot) hands off to a `setInterval` (default 24 h). Returns a `{ dispose, runNow }` handle; a thrown task is caught and logged so one failure never kills the schedule. Shared by cross-adapter sweeps.
+- **`daily-schedule.ts`** — generic `startDailySchedule(options)` (`lib/connectors/daily-schedule.ts`): a `setTimeout` initial delay (default 60 s, so it doesn't fight app boot) hands off to a `setInterval` (default 24 h). Returns a `{ dispose, runNow }` handle; a thrown task is caught and logged so one failure never kills the schedule. The terminal-row retention sweep (`sweepTerminalOutboundRows`) is **not** scheduled here any more — it is the managed scheduler task `connection:housekeeping:outbound-retention` in `housekeeping-scheduler.ts`, so it survives restarts and shows in the scheduler UI.
 - **`callback-binding-cleanup.ts`** — `cleanupExpiredCallbackBindings(options?)` (`lib/connectors/callback-binding-cleanup.ts:60`) prunes `connectorCallbackBindings` rows whose `expiresAt < now`, plus legacy rows with no `expiresAt` older than the 60-day grace window (`LEGACY_GRACE_MS`, `:44`). `startCallbackBindingCleanupSchedule` (`:174`) runs it on its own 24 h timer and audits each prune as `callback.binding_expired`.
 - **`dlq-export.ts`** — `buildDlqDownload(rows, format)` (`lib/connectors/dlq-export.ts:105`) renders dead-letter rows as CSV or JSON for the Settings panel to hand to the browser download flow. The CSV column set (`CSV_FIELDS`, `:13`) round-trips id / adapter / conversation / status / attempts / timestamps / `lastError` / `idempotencyKey` with RFC-4180 escaping.
 - **`derive-job-badge.ts`** — `deriveJobBadge(inputs)` (`lib/connectors/derive-job-badge.ts:76`) is a pure UI helper computing one of `normal | paused-muted | paused-quiet-hours | circuit-blocked` for a queue row. It **reuses `isInQuietHours` / `msUntilQuietEnd` from the runner** (`derive-job-badge.ts:25`) so the badge the operator sees and the deferral the runtime applies always agree — the same `etaMs` ("resumes in 42 min") comes from the same function that scheduled the defer.

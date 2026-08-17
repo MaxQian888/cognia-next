@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { createDiscordAdapter } from "./index"
+import { discordNonce } from "./serialize"
 import { getBus } from "@/lib/connectors/bus"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 
@@ -376,6 +377,60 @@ describe("createDiscordAdapter", () => {
     expect(uploadReq.channelId).toBe("channel-abc")
     // image filename derives from the URL basename; file uses seg.name.
     expect(uploadReq.files.map((f) => f.filename)).toEqual(["pic.png", "report.pdf"])
+    // Platform idempotency: the media lane carries its own deterministic nonce.
+    expect((uploadReq as { nonce?: string }).nonce).toBe(discordNonce("k", "media"))
+  })
+
+  it("send() stamps deterministic nonces on REST chunks and the voice lane", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_discord_upload") return "voice-msg-id"
+      return makeSendOkResp("text-id")
+    })
+
+    const adapter = makeAdapter()
+    const req = {
+      conversationRef: {
+        platform: "discord" as const,
+        adapterId: "dc-1",
+        channelId: "channel-abc",
+      },
+      segments: [
+        { type: "voice" as const, url: "https://cdn/x/v.ogg", durationSec: 2 },
+        { type: "text" as const, text: "after voice" },
+      ],
+      metadata: { idempotencyKey: "job-77" },
+    }
+
+    const first = await adapter.send(req)
+    expect(first.ok).toBe(true)
+
+    const uploadReq = (
+      mockInvoke.mock.calls.find(([cmd]: [string]) => cmd === "connectors_discord_upload")![1] as {
+        req: { nonce?: string; flags?: number }
+      }
+    ).req
+    expect(uploadReq.flags).toBe(1 << 13)
+    expect(uploadReq.nonce).toBe(discordNonce("job-77", "voice:0"))
+
+    const restBody = JSON.parse(
+      (
+        mockInvoke.mock.calls.find(([cmd]: [string]) => cmd === "connectors_http_request")![1] as {
+          req: { body: string }
+        }
+      ).req.body
+    ) as { nonce?: string; enforce_nonce?: boolean }
+    expect(restBody.nonce).toBe(discordNonce("job-77", 0))
+    expect(restBody.enforce_nonce).toBe(true)
+
+    // A retry of the same job re-posts identical nonces.
+    mockInvoke.mockClear()
+    await adapter.send(req)
+    const retryUpload = (
+      mockInvoke.mock.calls.find(([cmd]: [string]) => cmd === "connectors_discord_upload")![1] as {
+        req: { nonce?: string }
+      }
+    ).req
+    expect(retryUpload.nonce).toBe(uploadReq.nonce)
   })
 
   it("uploads a reply-only video with a fallback filename and threads the reply", async () => {

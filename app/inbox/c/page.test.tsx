@@ -10,12 +10,14 @@ import { render, screen } from "@testing-library/react"
 
 let mockKey: string | null = "ck1"
 
+const mockRouterPush = jest.fn()
+const mockNotFound = jest.fn()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: mockRouterPush, replace: jest.fn() }),
   useSearchParams: () => ({ get: (k: string) => (k === "key" ? mockKey : null) }),
   usePathname: () => "/inbox/c",
   redirect: jest.fn(),
-  notFound: jest.fn(),
+  notFound: (...args: unknown[]) => mockNotFound(...args),
 }))
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
@@ -38,8 +40,25 @@ jest.mock("@/components/inbox/conversation-header", () => ({
   ),
 }))
 
+jest.mock("@/components/inbox/history-load-earlier", () => ({
+  HistoryLoadEarlier: ({
+    conversationKey,
+    adapterId,
+  }: {
+    conversationKey: string
+    adapterId: string
+  }) => (
+    <div data-testid="history-load-earlier" data-key={conversationKey} data-adapter={adapterId} />
+  ),
+}))
+
+// Capture ChatPane props so the route's send/stop/regenerate wiring is testable.
+let lastChatPaneProps: Record<string, unknown> | null = null
 jest.mock("@/components/chat/chat-view", () => ({
-  ChatPane: () => <div data-testid="chat-pane-stub" />,
+  ChatPane: (props: Record<string, unknown>) => {
+    lastChatPaneProps = props
+    return <div data-testid="chat-pane-stub" />
+  },
 }))
 
 jest.mock("@/components/chat/use-resolved-connector-mode", () => ({
@@ -47,20 +66,22 @@ jest.mock("@/components/chat/use-resolved-connector-mode", () => ({
 }))
 
 const mockSelect = jest.fn()
+const directChat = {
+  send: jest.fn(),
+  stop: jest.fn(),
+  regenerate: jest.fn(),
+  editAndResend: jest.fn(),
+}
+const teamChat = {
+  send: jest.fn(),
+  stop: jest.fn(),
+  regenerate: jest.fn(),
+  editAndResend: jest.fn(),
+}
 jest.mock("@/hooks/chat", () => ({
   useSessions: () => ({ select: mockSelect }),
-  useClaudeChat: () => ({
-    send: jest.fn(),
-    stop: jest.fn(),
-    regenerate: jest.fn(),
-    editAndResend: jest.fn(),
-  }),
-  useTeamChat: () => ({
-    send: jest.fn(),
-    stop: jest.fn(),
-    regenerate: jest.fn(),
-    editAndResend: jest.fn(),
-  }),
+  useClaudeChat: () => directChat,
+  useTeamChat: () => teamChat,
 }))
 
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -81,26 +102,97 @@ import ConversationPage from "./page"
 // Tests
 // ---------------------------------------------------------------------------
 
-function makeSession(id: string, ck: string): ChatSession {
+function makeSession(
+  id: string,
+  ck: string,
+  platform = "telegram",
+  extra: Partial<ChatSession> = {}
+): ChatSession {
   return {
+    ...extra,
     id,
     title: "Bot chat",
-    kind: "direct",
+    kind: (extra as { kind?: string }).kind ?? "direct",
     createdAt: 1000,
     updatedAt: 2000,
     platformBinding: {
       adapterId: "a1",
       conversationKey: ck,
-      platform: "telegram",
-      conversationRef: { platform: "telegram", adapterId: "a1" },
+      platform,
+      conversationRef: { platform, adapterId: "a1" },
     },
   } as unknown as ChatSession
 }
 
 describe("ConversationPage (/inbox/c?key=)", () => {
   beforeEach(() => {
+    jest.clearAllMocks()
     mockSession = undefined
     mockKey = "ck1"
+    lastChatPaneProps = null
+  })
+
+  it("calls notFound when the key query param is missing", () => {
+    mockKey = null
+    render(<ConversationPage />)
+    expect(mockNotFound).toHaveBeenCalled()
+  })
+
+  it("calls notFound when no session matches the key", () => {
+    // The real `notFound()` throws to abort rendering; mirror that so the
+    // route does not fall through to the platform-bound branch.
+    // (React replays a throwing render once, so the throw must persist.)
+    mockNotFound.mockImplementation(() => {
+      throw new Error("NEXT_NOT_FOUND")
+    })
+    const spy = jest.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      mockSession = null
+      expect(() => render(<ConversationPage />)).toThrow("NEXT_NOT_FOUND")
+      expect(mockNotFound).toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+      mockNotFound.mockReset()
+    }
+  })
+
+  it("wires the direct-chat handlers into ChatPane for a direct session", () => {
+    mockSession = makeSession("s1", "ck1")
+    render(<ConversationPage />)
+    const props = lastChatPaneProps!
+    expect(props.showHeader).toBe(false)
+    ;(props.onSend as (c: string, m?: unknown[]) => void)("hi", [{ id: "att" }])
+    expect(directChat.send).toHaveBeenCalledWith("hi", undefined, {
+      attachmentManifest: [{ id: "att" }],
+    })
+    expect(teamChat.send).not.toHaveBeenCalled()
+    expect(props.onStop).toBe(directChat.stop)
+    expect(props.onRegenerate).toBe(directChat.regenerate)
+    expect(props.onEditResend).toBe(directChat.editAndResend)
+    ;(props.onUseSample as (t: string) => void)("sample")
+    expect(directChat.send).toHaveBeenCalledWith("sample")
+    ;(props.onCreate as () => void)()
+    ;(props.onOpenSettings as (tab?: string) => void)("connections")
+    expect(mockRouterPush).toHaveBeenCalledWith("/settings?section=connections")
+    ;(props.onOpenSettings as (tab?: string) => void)()
+    expect(mockRouterPush).toHaveBeenCalledWith("/settings")
+  })
+
+  it("wires the team-chat handlers into ChatPane for a team session", () => {
+    mockSession = makeSession("s2", "ck1", "telegram", {
+      kind: "team",
+      teamId: "team-1",
+    } as Partial<ChatSession>)
+    render(<ConversationPage />)
+    const props = lastChatPaneProps!
+    ;(props.onSend as (c: string, m?: unknown[]) => void)("go")
+    expect(teamChat.send).toHaveBeenCalledWith("go", { attachmentManifest: undefined })
+    expect(directChat.send).not.toHaveBeenCalled()
+    expect(props.onStop).toBe(teamChat.stop)
+    expect(props.onRegenerate).toBe(teamChat.regenerate)
+    expect(props.onEditResend).toBe(teamChat.editAndResend)
+    ;(props.onUseSample as (t: string) => void)("sample")
+    expect(teamChat.send).toHaveBeenCalledWith("sample")
   })
 
   it("renders InboxShell in loading state when session is undefined", () => {
@@ -134,5 +226,26 @@ describe("ConversationPage (/inbox/c?key=)", () => {
     mockSession = makeSession("s1", "ck1")
     render(<ConversationPage />)
     expect(mockSelect).toHaveBeenCalledWith("s1")
+  })
+
+  it("mounts HistoryLoadEarlier under the header for a history.fetch-capable platform", () => {
+    mockSession = makeSession("s1", "ck1", "slack")
+    render(<ConversationPage />)
+    const bar = screen.getByTestId("history-load-earlier")
+    expect(bar).toHaveAttribute("data-key", "ck1")
+    expect(bar).toHaveAttribute("data-adapter", "a1")
+    // Directly below the header, inside the detail column.
+    const detail = screen.getByTestId("conversation-detail")
+    const header = screen.getByTestId("conversation-header")
+    expect(detail.contains(bar)).toBe(true)
+    expect(header.nextElementSibling).toBe(bar)
+  })
+
+  it("does not mount HistoryLoadEarlier when the platform lacks history.fetch", () => {
+    // Telegram's Bot API has no history endpoint, so its capability list
+    // deliberately omits `history.fetch`.
+    mockSession = makeSession("s1", "ck1", "telegram")
+    render(<ConversationPage />)
+    expect(screen.queryByTestId("history-load-earlier")).not.toBeInTheDocument()
   })
 })

@@ -48,6 +48,11 @@ export const ACTIVITY_KINDS: ReadonlySet<AuditKind> = new Set<AuditKind>([
   "notify.im_pii_blocked",
   "workflow.dispatched",
   "team.dispatched",
+  // SLA escalation chain (slice 1B): which step fired, and which action could
+  // not run (e.g. `urgent` outside Lark) — otherwise an escalated conversation
+  // shows an assignee / mode flip with no explanation.
+  "sla.escalated",
+  "sla.escalation_action_failed",
 ])
 
 export function isActivityKind(kind: AuditKind): boolean {

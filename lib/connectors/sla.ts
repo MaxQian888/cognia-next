@@ -6,8 +6,9 @@
  * quiet-hours math so the two subsystems agree on "when is the channel asleep".
  */
 
-import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import { isInQuietHours, msUntilQuietEnd } from "@/lib/connectors/outbound-runner"
+import { readForResolution, setSlaDue } from "@/lib/db/conversation-overrides"
 
 export interface QuietHours {
   from: string
@@ -44,4 +45,54 @@ export function isOverdue(
   if (!row?.nextResponseDueAt) return false
   if (row.status === "resolved") return false
   return row.nextResponseDueAt < now
+}
+
+/**
+ * Stamp `nextResponseDueAt` for a conversation from
+ * `override.slaResponseMinutes ?? adapter.defaultSlaResponseMinutes`
+ * (IM delegation slice 1B — bot-wide SLA default). Idempotent: only writes
+ * when the row has no pending deadline (`nextResponseDueAt === undefined`),
+ * so calling it from BOTH the bus inbound step (which cannot create the
+ * override row before the first platform session exists) and the runtime
+ * right after `createPlatformSession` never double-stamps. Quiet hours: the
+ * conversation window first, then the adapter window (same precedence the
+ * outbound runner uses). Returns true when a deadline was written.
+ *
+ * Deps are injectable so the runtime test can pin the call without Dexie.
+ */
+export async function stampSlaDeadline(
+  input: {
+    conversationKey: string
+    sessionId: string
+    adapter: Pick<AdapterInstanceRow, "defaultSlaResponseMinutes" | "quietHours">
+    now?: number
+  },
+  deps: {
+    readOverride?: (conversationKey: string) => Promise<ConversationOverrideRow | undefined>
+    setSlaDue?: (
+      conversationKey: string,
+      due: { nextResponseDueAt?: number },
+      sessionId?: string
+    ) => Promise<void>
+  } = {}
+): Promise<boolean> {
+  const readOverride = deps.readOverride ?? readForResolution
+  const write = deps.setSlaDue ?? setSlaDue
+  const row = await readOverride(input.conversationKey)
+  if (row?.nextResponseDueAt !== undefined) return false
+  const minutes = row?.slaResponseMinutes ?? input.adapter.defaultSlaResponseMinutes
+  if (!minutes || minutes <= 0) return false
+  const now = input.now ?? Date.now()
+  await write(
+    input.conversationKey,
+    {
+      nextResponseDueAt: computeDueAt(
+        now,
+        minutes,
+        row?.quietHours ?? input.adapter.quietHours ?? null
+      ),
+    },
+    input.sessionId
+  )
+  return true
 }

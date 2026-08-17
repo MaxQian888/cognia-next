@@ -198,3 +198,85 @@ function deriveTitle(markdown: string): string {
   }
   return ""
 }
+
+// ---------------------------------------------------------------------------
+// Platform message ids + recall (撤回)
+// ---------------------------------------------------------------------------
+
+/**
+ * What `send()` encodes into `platformMessageId` so a later `delete()` can
+ * route the recall. DingTalk's proactive-send endpoints answer with a
+ * `processQueryKey` (not a message id) and the recall endpoints are scoped by
+ * robot + scene, so all three must travel together:
+ *   - group → `POST /v1.0/robot/groupMessages/recall`
+ *             `{ robotCode, openConversationId, processQueryKeys: [key] }`
+ *   - oto   → `POST /v1.0/robot/otoMessages/batchRecall`
+ *             `{ robotCode, processQueryKeys: [key] }`
+ * A message posted through the transient `sessionWebhook` returns no key and
+ * therefore cannot be recalled (send() leaves `platformMessageId` undefined).
+ * UNVERIFIED: whether the recall accepts a `robotCode` other than the one
+ * that sent the message — we always echo the sending robotCode.
+ */
+export interface DingTalkMessageId {
+  robotCode: string
+  scope: "group" | "oto"
+  /** Required for `scope: "group"`; ignored for `oto`. */
+  openConversationId?: string
+  processQueryKey: string
+}
+
+const DINGTALK_MESSAGE_ID_PREFIX = "dt"
+
+/** `dt:<scope>:<robotCode>:<openConversationId|->:<processQueryKey>` — parts URI-encoded. */
+export function encodeDingTalkMessageId(id: DingTalkMessageId): string {
+  return [
+    DINGTALK_MESSAGE_ID_PREFIX,
+    id.scope,
+    encodeURIComponent(id.robotCode),
+    id.scope === "group" ? encodeURIComponent(id.openConversationId ?? "") : "-",
+    encodeURIComponent(id.processQueryKey),
+  ].join(":")
+}
+
+/**
+ * Decode an id produced by {@link encodeDingTalkMessageId}. Returns null for
+ * anything else (a bare processQueryKey, a foreign id) — callers fail loudly.
+ */
+export function decodeDingTalkMessageId(messageId: string): DingTalkMessageId | null {
+  const parts = messageId.split(":")
+  if (parts.length !== 5 || parts[0] !== DINGTALK_MESSAGE_ID_PREFIX) return null
+  const scope = parts[1]
+  if (scope !== "group" && scope !== "oto") return null
+  const robotCode = decodeURIComponent(parts[2])
+  const processQueryKey = decodeURIComponent(parts[4])
+  if (!robotCode || !processQueryKey) return null
+  if (scope === "group") {
+    const openConversationId = decodeURIComponent(parts[3])
+    if (!openConversationId) return null
+    return { scope, robotCode, openConversationId, processQueryKey }
+  }
+  return { scope, robotCode, processQueryKey }
+}
+
+export interface DingTalkRecallCall {
+  path: string
+  payload: Record<string, unknown>
+}
+
+/** Build the recall call for a decoded message id (see {@link DingTalkMessageId}). */
+export function serializeRecall(id: DingTalkMessageId): DingTalkRecallCall {
+  if (id.scope === "group") {
+    return {
+      path: "/v1.0/robot/groupMessages/recall",
+      payload: {
+        robotCode: id.robotCode,
+        openConversationId: id.openConversationId,
+        processQueryKeys: [id.processQueryKey],
+      },
+    }
+  }
+  return {
+    path: "/v1.0/robot/otoMessages/batchRecall",
+    payload: { robotCode: id.robotCode, processQueryKeys: [id.processQueryKey] },
+  }
+}

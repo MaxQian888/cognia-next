@@ -47,10 +47,28 @@ jest.mock("@/hooks/connectors/use-last-inbound", () => ({
   useLastInboundForConversation: (key: string | null | undefined) => mockUseLastInbound(key),
 }))
 
+const mockUseLatestOutboundJob = jest.fn<
+  { id: string; status: string } | null,
+  [string | null | undefined]
+>(() => null)
+jest.mock("@/hooks/connectors/use-latest-outbound-job", () => ({
+  useLatestOutboundJob: (key: string | null | undefined) => mockUseLatestOutboundJob(key),
+}))
+jest.mock("./outbound-status-pill", () => ({
+  OutboundStatusPill: ({ conversationKey }: { conversationKey?: string }) => (
+    <div data-testid="outbound-status-pill" data-conversation-key={conversationKey} />
+  ),
+}))
+
 jest.mock("./provider-model-switcher", () => ({
   ProviderModelSwitcher: () => <div data-testid="provider-model-switcher" />,
 }))
 jest.mock("./quiet-hours-chip", () => ({ QuietHoursChip: () => <div data-testid="quiet-hours" /> }))
+jest.mock("./pending-approval-chip", () => ({
+  PendingApprovalChip: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="pending-approval-chip" data-session={sessionId} />
+  ),
+}))
 jest.mock("./at-strategy-chip", () => ({ AtStrategyChip: () => <div data-testid="at-strategy" /> }))
 jest.mock("./topic-runtime-chip", () => ({
   TopicRuntimeChip: () => <div data-testid="topic-runtime" />,
@@ -94,6 +112,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockDecideBadge.mockReturnValue(null)
   mockUseLastInbound.mockReturnValue(null)
+  mockUseLatestOutboundJob.mockReturnValue(null)
 })
 
 describe("hasOverflowAttention", () => {
@@ -123,6 +142,17 @@ describe("hasOverflowAttention", () => {
   })
 
   // A high-blast-radius opt-in must never be silently on behind a closed menu.
+  it("flags a failed / dead-lettered / ambiguous newest outbound job, not a healthy one", () => {
+    for (const status of ["failed", "deadlettered", "delivery_unknown"] as const) {
+      expect(hasOverflowAttention(undefined, false, status)).toBe(true)
+    }
+    for (const status of ["pending", "sending", "sent"] as const) {
+      expect(hasOverflowAttention(undefined, false, status)).toBe(false)
+    }
+    expect(hasOverflowAttention(undefined, false, null)).toBe(false)
+    expect(hasOverflowAttention(undefined, false, undefined)).toBe(false)
+  })
+
   it("flags an active computer-use opt-in", () => {
     expect(hasOverflowAttention(row({ allowComputerUse: true }), false)).toBe(true)
     expect(hasOverflowAttention(row({ allowComputerUse: false }), false)).toBe(false)
@@ -173,6 +203,12 @@ describe("ConversationHeaderOverflow", () => {
     expect(screen.getByTestId("computer-use-toggle")).toBeInTheDocument()
   })
 
+  it("mounts the pending-approval chip in the status group for the conversation session", () => {
+    renderOverflow({ desktop: true })
+    expect(screen.getByTestId("pending-approval-chip")).toBeInTheDocument()
+    expect(screen.getByTestId("pending-approval-chip")).toHaveAttribute("data-session")
+  })
+
   it("keeps desktop-only routing and diagnostics off the web build", () => {
     renderOverflow({ desktop: false })
     expect(screen.queryByTestId("provider-model-switcher")).not.toBeInTheDocument()
@@ -212,5 +248,29 @@ describe("ConversationHeaderOverflow", () => {
     mockUseLastInbound.mockReturnValue(Date.now() - 5 * 60_000)
     renderOverflow()
     expect(screen.getByTestId("conversation-header-last-inbound")).toBeInTheDocument()
+  })
+
+  it("mounts the delivery-status pill for this conversation inside the health group", () => {
+    renderOverflow()
+    const pill = screen.getByTestId("outbound-status-pill")
+    expect(pill).toHaveAttribute("data-conversation-key", CK)
+    expect(mockUseLatestOutboundJob).toHaveBeenCalledWith(CK)
+  })
+
+  it("omits the pill together with the health group when the adapter id is unparseable", () => {
+    renderOverflow({ adapterId: "" })
+    expect(screen.queryByTestId("outbound-status-pill")).not.toBeInTheDocument()
+  })
+
+  // The dot must reflect a failed delivery while the popover is closed, so the
+  // overflow resolves the newest outbound job itself.
+  it("raises the dot for a failed newest outbound job and stays quiet for a sent one", () => {
+    mockUseLatestOutboundJob.mockReturnValue({ id: "j1", status: "failed" })
+    const { unmount } = renderOverflow()
+    expect(screen.getByTestId("conversation-header-more-dot")).toBeInTheDocument()
+    unmount()
+    mockUseLatestOutboundJob.mockReturnValue({ id: "j2", status: "sent" })
+    renderOverflow()
+    expect(screen.queryByTestId("conversation-header-more-dot")).not.toBeInTheDocument()
   })
 })

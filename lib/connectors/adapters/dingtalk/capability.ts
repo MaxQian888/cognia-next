@@ -13,8 +13,14 @@ import {
  * `sampleText` / `sampleMarkdown` message templates. Markdown (headings,
  * bold/italic, links, lists, quotes, images) renders natively.
  *
+ * `delete` IS supported: the proactive-send endpoints return a
+ * `processQueryKey`, and `POST /v1.0/robot/groupMessages/recall` /
+ * `POST /v1.0/robot/otoMessages/batchRecall` retract by that key (the adapter
+ * encodes robot + scene + key into the platform message id). Messages posted
+ * through the transient session webhook return no key and stay unrecallable.
+ *
  * What DingTalk does NOT support on the bot surface (kept off the matrix):
- *   - `edit` / `delete`: no public API to edit or retract a sent bot message.
+ *   - `edit`: no public API to edit a sent bot message.
  *   - `typing`: no typing-indicator API.
  *   - `fetchHistory`: the robot surface has no message-timeline read.
  *   - `send.reaction` / threads: not exposed to bots.
@@ -29,6 +35,7 @@ import {
  * Kept in alphabetical order for stable diffs.
  */
 export const DINGTALK_CAPS: readonly Capability[] = [
+  "delete",
   "send.a2ui",
   "send.markdown",
   "send.text",

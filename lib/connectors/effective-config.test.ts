@@ -76,6 +76,51 @@ describe("resolveImEffectiveConfig", () => {
     })
   })
 
+  it("labels assignment-driven routing and mode as source 'assignment' (slice 1A)", () => {
+    const assigned = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultTeamId: "team_a" },
+      override: {
+        conversationKey: "c",
+        teamId: "team_asg",
+        characterId: "char_asg",
+        routingSource: "assignment",
+        mode: "manual",
+        assignmentPreviousMode: "auto",
+      },
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(assigned.target).toMatchObject({
+      effective: { kind: "team", id: "team_asg" },
+      source: "assignment",
+    })
+    expect(assigned.character).toMatchObject({ effective: "char_asg", source: "assignment" })
+    expect(assigned.mode).toEqual({
+      requested: "manual",
+      effective: "manual",
+      source: "assignment",
+    })
+
+    // A human assignment on a row that had NO explicit mode records `null` —
+    // still assignment provenance.
+    const inheritPrev = resolveImEffectiveConfig({
+      adapter,
+      override: { conversationKey: "c", mode: "manual", assignmentPreviousMode: null },
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(inheritPrev.mode.source).toBe("assignment")
+
+    // Explicit mode edit (marker cleared) → conversation-override again.
+    const explicit = resolveImEffectiveConfig({
+      adapter,
+      override: { conversationKey: "c", mode: "manual" },
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(explicit.mode.source).toBe("conversation-override")
+  })
+
   it("keeps Character independent and marks invalid explicit references blocked", () => {
     const result = resolveImEffectiveConfig({
       adapter: { ...adapter, defaultTeamId: "team_a" },

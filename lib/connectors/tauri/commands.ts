@@ -109,6 +109,12 @@ export interface ConnectorDiscordUploadRequest {
   replyToMessageId?: string
   /** Message flags bitfield (e.g. IS_VOICE_MESSAGE = 1 << 13). */
   flags?: number
+  /**
+   * Deterministic idempotency nonce (≤25 chars). When present the Rust side
+   * emits `nonce` + `enforce_nonce: true` in `payload_json` so a retried
+   * upload returns the original message instead of a duplicate.
+   */
+  nonce?: string
 }
 
 export interface MatrixCryptoInitRequest {

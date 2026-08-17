@@ -40,6 +40,7 @@ import type {
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution, setStatus, setSlaDue } from "@/lib/db/conversation-overrides"
 import { computeDueAt } from "@/lib/connectors/sla"
+import { findSessionByConversationKey } from "./session-bindings"
 import { upsertIdentity } from "@/lib/db/platform-identities"
 import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
@@ -666,19 +667,29 @@ export class ConnectorBus {
     const charId = override?.characterDisabled
       ? undefined
       : (override?.characterId ?? adapterRow.defaultCharacterId)
+    // Slice 1B: the SLA target falls back to the bot-wide default. Without an
+    // override row the write needs the bound session id (`ensureRow`); a
+    // first-ever inbound has none yet, so the runtime re-stamps right after
+    // `createPlatformSession` via `stampSlaDeadline` (idempotent).
+    const slaMinutes = override?.slaResponseMinutes ?? adapterRow.defaultSlaResponseMinutes
     const [, , character] = await Promise.all([
-      override?.slaResponseMinutes && override.slaResponseMinutes > 0
-        ? setSlaDue(
-            event.conversationKey,
-            {
-              nextResponseDueAt: computeDueAt(
-                now,
-                override.slaResponseMinutes,
-                override.quietHours ?? null
-              ),
-            },
-            override.sessionId
-          ).catch(() => undefined)
+      slaMinutes && slaMinutes > 0
+        ? (async () => {
+            const sessionId =
+              override?.sessionId ?? (await findSessionByConversationKey(event.conversationKey))?.id
+            if (!sessionId) return
+            await setSlaDue(
+              event.conversationKey,
+              {
+                nextResponseDueAt: computeDueAt(
+                  now,
+                  slaMinutes,
+                  override?.quietHours ?? adapterRow.quietHours ?? null
+                ),
+              },
+              sessionId
+            )
+          })().catch(() => undefined)
         : Promise.resolve(undefined),
       upsertIdentity({
         platform: event.platform,

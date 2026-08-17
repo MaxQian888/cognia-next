@@ -195,6 +195,20 @@ describe("AdaptersTab", () => {
     expect(screen.getByTestId("add-connector-card-matrix")).toBeInTheDocument()
   })
 
+  it("shows the planned platforms as disabled cards in the picker", async () => {
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    await waitFor(() => screen.getByTestId("add-connector-card-telegram"))
+    for (const kind of ["email", "kook", "line", "mattermost"]) {
+      const card = screen.getByTestId(`add-connector-card-${kind}`)
+      expect(card).toBeDisabled()
+      expect(screen.getByTestId(`add-connector-planned-${kind}`)).toBeInTheDocument()
+    }
+    // Clicking a planned card opens no dialog.
+    fireEvent.click(screen.getByTestId("add-connector-card-kook"))
+    expect(screen.queryByText(/add kook/i)).not.toBeInTheDocument()
+  })
+
   it("filters the picker grid by search query", async () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByTestId("add-adapter-button"))

@@ -1,4 +1,4 @@
-import type { DispatchRuleMatch } from "@/lib/connectors/dispatch-rules"
+import type { DispatchRuleHit, RoutingSource } from "@/lib/connectors/dispatch-rules"
 import { resolveEffectiveRouting } from "@/lib/connectors/dispatch-rules"
 import {
   resolveImHostCapabilities,
@@ -9,6 +9,11 @@ import type { ConnectorMode } from "@/types/connectors/policy"
 
 export type ImConfigSource =
   | "conversation-override"
+  /**
+   * The value lives on the conversation override row but was written by an
+   * assignment (`setAssignee`, slice 1A) rather than an explicit routing edit.
+   */
+  | "assignment"
   | "dispatch-rule"
   | "adapter-default"
   | "system-default"
@@ -24,8 +29,9 @@ export interface EffectiveConfigValue<T> {
 export type ImExecutionTarget =
   { kind: "direct" } | { kind: "team"; id: string } | { kind: "workflow"; id: string }
 
-function sourceOf(source: "override" | "rule" | "instance-default" | "none"): ImConfigSource {
+function sourceOf(source: RoutingSource): ImConfigSource {
   if (source === "override") return "conversation-override"
+  if (source === "assignment") return "assignment"
   if (source === "rule") return "dispatch-rule"
   if (source === "instance-default") return "adapter-default"
   return "system-default"
@@ -39,7 +45,7 @@ function sourceOf(source: "override" | "rule" | "instance-default" | "none"): Im
 export function resolveImEffectiveConfig(input: {
   adapter: AdapterInstanceRow
   override: ConversationOverrideRow | null
-  rule: DispatchRuleMatch | null
+  rule: DispatchRuleHit | null
   system: { mode: ConnectorMode; characterId?: string }
   characterComputerUseEnabled?: boolean
   references?: {
@@ -131,7 +137,13 @@ export function resolveImEffectiveConfig(input: {
     mode: {
       requested: override?.mode,
       effective: override?.mode ?? system.mode,
-      source: override?.mode ? "conversation-override" : "adapter-default",
+      // A human assignment forces `mode = "manual"` and remembers the prior
+      // mode in `assignmentPreviousMode` (slice 1A) — label that provenance.
+      source: override?.mode
+        ? override.assignmentPreviousMode !== undefined
+          ? "assignment"
+          : "conversation-override"
+        : "adapter-default",
     } satisfies EffectiveConfigValue<ConnectorMode>,
     behavior: {
       inboundActivationPolicy: {

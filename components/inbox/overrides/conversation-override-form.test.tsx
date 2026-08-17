@@ -169,6 +169,56 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.requireHitlForWrites).toBe(false)
   })
 
+  it("reply-quoting switch defaults on, persists false when turned off and clears when turned back on", async () => {
+    const onDone = jest.fn()
+    const { unmount } = render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_quote"
+        sessionId="s_quote"
+        onDone={onDone}
+      />
+    )
+    expect(screen.getByTestId("conv-override-reply-quoting")).toHaveAttribute(
+      "data-state",
+      "checked"
+    )
+    fireEvent.click(screen.getByTestId("conv-override-reply-quoting"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_quote")
+      .first()
+    expect(persisted?.replyQuoting).toBe(false)
+    unmount()
+
+    // Re-open seeded from the persisted row: the switch reflects the opt-out,
+    // and turning it back on stores `undefined` (inherit the bot default).
+    const onDone2 = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_quote"
+        sessionId="s_quote"
+        initialRow={persisted}
+        onDone={onDone2}
+      />
+    )
+    expect(screen.getByTestId("conv-override-reply-quoting")).toHaveAttribute(
+      "data-state",
+      "unchecked"
+    )
+    fireEvent.click(screen.getByTestId("conv-override-reply-quoting"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone2).toHaveBeenCalled())
+    const cleared = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_quote")
+      .first()
+    expect(cleared?.replyQuoting).toBeUndefined()
+  })
+
   it("renders inherited Character and target state when no initialRow is supplied", () => {
     render(
       <ConversationOverrideForm
@@ -330,6 +380,147 @@ describe("ConversationOverrideForm", () => {
       .equals("lark:lark-1:oc_sla")
       .first()
     expect(persisted?.slaResponseMinutes).toBe(45)
+  })
+
+  it("persists an escalation override and clears it back to inherit (slice 1B)", async () => {
+    const user = userEvent.setup()
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_esc"
+        sessionId="s_esc"
+        onDone={onDone}
+      />
+    )
+    // Lark conversation → the urgent controls are live (dormancy pin lives in
+    // escalation-policy-editor.test.tsx; here we only pin the wiring).
+    await user.click(screen.getByTestId("conv-override-escalation-override"))
+    await user.click(screen.getByTestId("conv-override-escalation-add-step"))
+    expect(screen.getByTestId("conv-override-escalation-step-0-urgent")).toBeEnabled()
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_esc")
+      .first()
+    expect(persisted?.escalation).toEqual({
+      steps: [{ afterOverdueMinutes: 0, actions: [{ type: "notify" }] }],
+    })
+    // Neither routing nor mode changed on this save → no marker clear needed,
+    // and the row was created without one anyway.
+    expect(persisted?.routingSource).toBeUndefined()
+  })
+
+  it("seeds the escalation editor from initialRow, disables urgent off-Lark, and writes undefined on inherit", async () => {
+    const initial: ConversationOverrideRow = {
+      id: "co-esc",
+      conversationKey: "telegram:tg-1:chat_esc",
+      sessionId: "s_esc2",
+      escalation: {
+        steps: [{ afterOverdueMinutes: 10, actions: [{ type: "urgent", userIds: ["ou_1"] }] }],
+      },
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.add(initial)
+    const user = userEvent.setup()
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="tg-1"
+        conversationKey="telegram:tg-1:chat_esc"
+        sessionId="s_esc2"
+        initialRow={initial}
+        onDone={onDone}
+      />
+    )
+    expect(screen.getByTestId("conv-override-escalation-override")).toHaveAttribute(
+      "data-state",
+      "checked"
+    )
+    expect(screen.getByTestId("conv-override-escalation-step-0-minutes")).toHaveValue(10)
+    expect(screen.getByTestId("conv-override-escalation-step-0-urgent")).toBeDisabled()
+    expect(
+      screen.getByTestId("conv-override-escalation-step-0-urgent-lark-only")
+    ).toBeInTheDocument()
+    await user.click(screen.getByTestId("conv-override-escalation-override"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb().conversationOverrides.get("co-esc")
+    expect(persisted?.escalation).toBeUndefined()
+  })
+
+  it("clears the assignment routing marker on an explicit routing edit but keeps the assignee (slice 1A)", async () => {
+    const initial: ConversationOverrideRow = {
+      id: "co-marker",
+      conversationKey: "lark:lark-1:oc_marker",
+      sessionId: "s_marker",
+      characterId: "char_assigned",
+      routingSource: "assignment",
+      assignmentPreviousRouting: { characterId: "char_old" },
+      assignee: { kind: "character", id: "char_assigned", label: "Assigned" },
+      assigneeKind: "character",
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.add(initial)
+    await getDb().characters.put({ id: "char_manual", name: "Manual" } as never)
+    const user = userEvent.setup()
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_marker"
+        sessionId="s_marker"
+        initialRow={initial}
+        onDone={onDone}
+      />
+    )
+    await user.click(screen.getByTestId("conv-override-character"))
+    await user.click(await screen.findByRole("option", { name: "Manual" }))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb().conversationOverrides.get("co-marker")
+    expect(persisted?.characterId).toBe("char_manual")
+    expect(persisted?.routingSource).toBeUndefined()
+    expect(persisted?.assignmentPreviousRouting).toBeUndefined()
+    expect(persisted?.assignee).toEqual({
+      kind: "character",
+      id: "char_assigned",
+      label: "Assigned",
+    })
+  })
+
+  it("keeps the assignment routing marker when the save touches no routing field", async () => {
+    const initial: ConversationOverrideRow = {
+      id: "co-marker-keep",
+      conversationKey: "lark:lark-1:oc_marker_keep",
+      sessionId: "s_marker_keep",
+      characterId: "char_assigned",
+      routingSource: "assignment",
+      assignmentPreviousRouting: {},
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.add(initial)
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_marker_keep"
+        sessionId="s_marker_keep"
+        initialRow={initial}
+        onDone={onDone}
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-muted"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb().conversationOverrides.get("co-marker-keep")
+    expect(persisted?.muted).toBe(true)
+    expect(persisted?.routingSource).toBe("assignment")
+    expect(persisted?.assignmentPreviousRouting).toEqual({})
   })
 
   it("persists topic activation, queue/steer dispatch, and TTL overrides", async () => {

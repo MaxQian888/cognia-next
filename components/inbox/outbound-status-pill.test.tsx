@@ -41,9 +41,17 @@ function makeJob(id: string, status: OutboundJobRow["status"]): OutboundJobRow {
 }
 
 let mockJob: OutboundJobRow | undefined = undefined
+let mockLatestJob: OutboundJobRow | null = null
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: jest.fn().mockImplementation(() => mockJob),
+}))
+
+// The conversationKey mode resolves the newest job through this hook; mock
+// it so both addressing modes are independently controllable.
+const mockUseLatestOutboundJob = jest.fn((_key: string | null | undefined) => mockLatestJob)
+jest.mock("@/hooks/connectors/use-latest-outbound-job", () => ({
+  useLatestOutboundJob: (key: string | null | undefined) => mockUseLatestOutboundJob(key),
 }))
 
 // ---------------------------------------------------------------------------
@@ -59,7 +67,42 @@ import { OutboundStatusPill } from "./outbound-status-pill"
 describe("OutboundStatusPill", () => {
   beforeEach(() => {
     mockJob = undefined
+    mockLatestJob = null
+    mockUseLatestOutboundJob.mockClear()
     mockDbUpdate.mockReset().mockResolvedValue(1)
+  })
+
+  describe("conversationKey mode (newest job of a conversation)", () => {
+    it("renders nothing when the conversation has no outbound job", () => {
+      mockLatestJob = null
+      const { container } = render(<OutboundStatusPill conversationKey="ck1" />)
+      expect(container.firstChild).toBeNull()
+      expect(mockUseLatestOutboundJob).toHaveBeenCalledWith("ck1")
+    })
+
+    it("renders the newest job's status and retries by that job's id", async () => {
+      mockLatestJob = makeJob("latest-1", "failed")
+      render(<OutboundStatusPill conversationKey="ck1" />)
+      const pill = screen.getByTestId("outbound-status-pill-latest-1")
+      expect(pill).toHaveAttribute("data-status", "failed")
+      fireEvent.click(screen.getByTestId("outbound-retry-btn-latest-1"))
+      await waitFor(() => {
+        expect(mockDbUpdate).toHaveBeenCalledWith(
+          "latest-1",
+          expect.objectContaining({ status: "pending" })
+        )
+      })
+    })
+
+    it("does not consult the by-id query and jobId mode ignores the latest job", () => {
+      // jobId mode: the conversation hook is passed null and the by-id row wins.
+      mockLatestJob = makeJob("latest-2", "deadlettered")
+      mockJob = makeJob("byid", "sent")
+      render(<OutboundStatusPill jobId="byid" />)
+      expect(screen.getByTestId("outbound-status-pill-byid")).toHaveAttribute("data-status", "sent")
+      expect(screen.queryByTestId("outbound-status-pill-latest-2")).not.toBeInTheDocument()
+      expect(mockUseLatestOutboundJob).toHaveBeenCalledWith(null)
+    })
   })
 
   it("renders nothing when job is not found", () => {

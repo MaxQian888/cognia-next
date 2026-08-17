@@ -97,6 +97,16 @@ export type AuditKind =
   | "adapter.credentials_rotated"
   | "adapter.config_changed"
   | "override.config_changed"
+  // SLA escalation (IM delegation slice 1B). `sla.escalated` — one escalation
+  // step fired for an overdue conversation; carries `fields.step` (0-based),
+  // `fields.overdueMinutes`, `fields.actions` (the action types that ran) and
+  // `fields.policySource` ("override" | "adapter-default").
+  // `sla.escalation_action_failed` — one action inside a step could not run;
+  // carries `fields.step`, `fields.action`, and `reason`
+  // (`unsupported_platform` for `urgent` outside Lark, `adapter_offline`,
+  // `notice_not_delivered`, or the thrown error code). The chain continues.
+  | "sla.escalated"
+  | "sla.escalation_action_failed"
   // The OS / browser resumed from sleep (or the network came back online)
   // after a long absence, so the resume-reconnect watcher re-queued the
   // running adapter to heal a socket that may have gone half-open while the

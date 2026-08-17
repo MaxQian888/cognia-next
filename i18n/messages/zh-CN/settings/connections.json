@@ -25,6 +25,8 @@
       "configuredCount": "已配置 {count} 个",
       "description": "选择要配置的消息平台。",
       "noResults": "没有匹配的平台。",
+      "planned": "计划中",
+      "plannedHint": "暂不可配置——该平台已列入路线图。",
       "searchPlaceholder": "搜索平台…",
       "title": "添加连接器"
     },
@@ -45,7 +47,8 @@
         "delivery": "投递",
         "permissions": "权限",
         "platform": "平台",
-        "responder": "响应者"
+        "responder": "响应者",
+        "slaEscalation": "SLA 与升级"
       }
     },
     "detailTabs": {
@@ -137,8 +140,12 @@
     "platformDescriptions": {
       "dingtalk": "通过 Stream 模式的钉钉机器人",
       "discord": "通过网关或 Socket 模式的机器人",
+      "email": "IMAP / SMTP 邮箱桥接",
+      "kook": "通过网关的 KOOK 机器人",
       "lark": "通过长连接的飞书 / Lark 机器人",
+      "line": "通过 Webhook 的 LINE Messaging API 机器人",
       "matrix": "通过 /sync 的 Matrix homeserver",
+      "mattermost": "通过 WebSocket 的 Mattermost 机器人",
       "onebot": "通过 NapCat / Lagrange 的 QQ（OneBot）",
       "qq-official": "通过网关的 QQ 官方机器人",
       "slack": "通过 Socket Mode 或 Events API 的应用",
@@ -151,8 +158,12 @@
     "platforms": {
       "dingtalk": "钉钉 / DingTalk",
       "discord": "Discord",
+      "email": "邮件 / Email",
+      "kook": "KOOK",
       "lark": "飞书 / Lark",
+      "line": "LINE",
       "matrix": "Matrix",
+      "mattermost": "Mattermost",
       "onebot": "QQ（OneBot / NapCat）",
       "qq-official": "QQ 官方机器人",
       "slack": "Slack",
@@ -379,6 +390,10 @@
         "import": "已导入消息",
         "import_denied": "消息导入被拒绝"
       },
+      "sla": {
+        "escalated": "SLA 已升级",
+        "escalation_action_failed": "SLA 升级动作失败"
+      },
       "sso": {
         "session_seen": "已识别 Web SSO 会话"
       },
@@ -430,6 +445,7 @@
     "responseMode": "响应模式",
     "save": "保存",
     "source_adapter-default": "Adapter 默认值",
+    "source_assignment": "会话分配",
     "source_conversation-override": "会话覆盖",
     "source_dispatch-rule": "调度规则",
     "source_system-default": "系统默认值",
@@ -1270,6 +1286,11 @@
     "toAria": "勿扰时段结束",
     "toLabel": "结束（HH:MM）"
   },
+  "replyQuotingDefault": {
+    "description": "该机器人所有会话的默认值：在群聊 / 话题中，回复引用触发它的消息。单个会话可在其设置中覆盖。",
+    "label": "群聊中引用触发消息",
+    "title": "回复引用"
+  },
   "runOperators": {
     "countLabel": "{count, plural, =0 {无操作员} other {# 位操作员}}",
     "empty": "未配置操作员——只有运行的发起人本人可以操作。",
@@ -1321,6 +1342,18 @@
     "title": "发送测试消息",
     "unsupportedReplyOnly": "该适配器仅支持回复入站消息，无法发送独立的测试消息。"
   },
+  "slaEscalation": {
+    "cancel": "取消",
+    "description": "机器人级默认值。除非会话覆盖设置了自己的 SLA 分钟数或升级链，否则会话继承这两个值。",
+    "escalationHint": "会话超过 SLA 截止后执行；每次超时每步只触发一次。无步骤 = 不升级。",
+    "escalationTitle": "默认升级链",
+    "save": "保存",
+    "saveFailed": "保存失败：{error}",
+    "slaMinutes": "默认响应 SLA（分钟）",
+    "slaMinutesHint": "设置后，此机器人的每个会话在每条入站消息后都会得到一个回复截止时间（不含静默时段）。留空表示无默认 SLA。",
+    "slaMinutesPlaceholder": "例如 30",
+    "title": "响应 SLA 与升级默认值"
+  },
   "slack": {
     "adapterCreated": "适配器已创建。",
     "adapterUpdated": "适配器已更新。",
@@ -1328,6 +1361,8 @@
     "appTokenLabel": "App Token",
     "appTokenPlaceholder": "xapp-...",
     "appTokenRequired": "Socket Mode 下 App Token 不能为空。",
+    "assistantAppHint": "启用输入中指示、建议提示词与流式运行呈现。需要先在 Slack 应用控制台为该应用开启“Agents & AI Apps”功能；否则请保持关闭。",
+    "assistantAppLabel": "Slack Agents & AI Apps",
     "botTokenHelp": "Slack App OAuth 页面颁发的 xoxb-... Token。加密存放在系统钥匙串中。",
     "botTokenLabel": "Bot Token",
     "botTokenPlaceholder": "xoxb-...",
@@ -1342,6 +1377,9 @@
     "displayNameLabel": "显示名称",
     "displayNamePlaceholder": "我的 Slack 机器人",
     "displayNameRequired": "显示名称不能为空。",
+    "historyMaxPagesHint": "每次“加载更早消息”最多拉取的 conversations.history 页数（{min}–{max}，默认 {defaultValue}）。",
+    "historyMaxPagesInvalid": "历史页数必须是 {min} 到 {max} 之间的整数。",
+    "historyMaxPagesLabel": "每次加载的历史页数",
     "oauthButton": "通过 OAuth 连接",
     "oauthButtonAria": "通过 OAuth 连接",
     "oauthClientIdMissing": "未设置 NEXT_PUBLIC_SLACK_CLIENT_ID。",

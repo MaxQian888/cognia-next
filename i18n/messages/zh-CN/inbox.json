@@ -5,6 +5,7 @@
       "labelAdded": "已添加标签",
       "labelRemoved": "已移除标签",
       "reassigned": "已重新分配",
+      "routingSynced": "已同步路由",
       "statusOpen": "已重新打开",
       "statusPending": "已标记为待处理",
       "statusResolved": "已解决",
@@ -45,6 +46,8 @@
       "pluginTransformPiiBlocked": "插件改写被拦截——PII",
       "siblingBotBudgetExhausted": "同群机器人回复额度已用尽",
       "siblingBotIgnored": "已忽略同群机器人消息",
+      "slaEscalated": "SLA 已升级",
+      "slaEscalationActionFailed": "SLA 升级动作失败",
       "taskDispatched": "任务已派发",
       "teamDispatched": "已路由到团队",
       "teamPostedAsBot": "团队以机器人身份发送",
@@ -57,6 +60,7 @@
     "aria": "负责人：{assignee}",
     "character": "角色",
     "me": "我",
+    "routingSynced": "分配会同步路由：分配给角色或团队后由其接管回复，分配给“我”会切换为人工模式，取消分配则恢复原路由。",
     "team": "团队",
     "unassign": "取消分配",
     "unassigned": "未分配",
@@ -94,9 +98,12 @@
   },
   "cannedResponses": {
     "empty": "没有匹配的快捷回复。",
+    "insertVariableAria": "插入 {name}",
     "manage": "管理快捷回复",
     "searchPlaceholder": "搜索快捷回复……",
-    "triggerAria": "插入快捷回复"
+    "triggerAria": "插入快捷回复",
+    "variableUnavailable": "当前会话没有 {name} 的值",
+    "variablesHint": "变量"
   },
   "connectionLoss": {
     "dismiss": "关闭",
@@ -236,6 +243,51 @@
     "deleteOverride": "删除覆盖",
     "deleteOverrideConfirm": "删除该会话的覆盖？该会话将回退到适配器默认配置。",
     "dialogTitle": "会话覆盖设置",
+    "escalation": {
+      "actions": {
+        "notify": "通知我（通知中心 + 弹窗）",
+        "reassign": "改派给",
+        "reassignCharacter": "角色",
+        "reassignHuman": "我（人工——会话切换为人工模式）",
+        "reassignNone": "不改派",
+        "reassignPickCharacter": "选择角色…",
+        "reassignTeam": "Agent 团队",
+        "referenceMissing": "{id}（缺失）",
+        "switchMode": "切换模式",
+        "switchModeDraft": "草稿（AI 起草待审批）",
+        "switchModeManual": "人工（AI 停止自动回复）",
+        "switchModeNone": "保持当前模式",
+        "urgent": "飞书加急",
+        "urgentLarkOnly": "加急升级仅支持飞书 / Lark 机器人——在当前平台不生效。",
+        "urgentUserIds": "飞书用户 open_id（每行一个）",
+        "urgentUserIdsPlaceholder": "ou_…",
+        "urgentVia": "加急渠道",
+        "urgentVia_app": "应用内",
+        "urgentVia_phone": "电话",
+        "urgentVia_sms": "短信"
+      },
+      "addStep": "添加步骤",
+      "afterOverdueMinutes": "超过 SLA 截止后的分钟数",
+      "afterOverdueMinutesHint": "0 表示到期即触发；各步骤必须递增。",
+      "empty": "暂无步骤——升级已关闭。",
+      "issues": {
+        "actionTypeUnknown": "第 {step} 步：未知动作。",
+        "reassignTargetMissing": "第 {step} 步：请选择改派对象。",
+        "stepMinutesInvalid": "第 {step} 步：分钟数必须是 ≥ 0 的整数。",
+        "stepWithoutActions": "第 {step} 步：至少选择一个动作。",
+        "stepsNotAscending": "第 {step} 步：分钟数必须大于上一步。",
+        "switchModeInvalid": "第 {step} 步：模式无效。",
+        "tooManySteps": "最多 {max} 步。",
+        "urgentUsersMissing": "第 {step} 步：至少填写一个飞书用户 open_id。"
+      },
+      "maxSteps": "最多 {max} 步。",
+      "overrideHint": "关闭 = 继承机器人级默认；开启但无步骤 = 此会话关闭升级。",
+      "overrideToggle": "为此会话覆盖机器人的升级策略",
+      "removeStep": "删除第 {n} 步",
+      "sectionHint": "升级步骤在持有连接器运行时的桌面 / 无头宿主上执行，每次 SLA 超时每步只触发一次；回复或解决会话后重新计数。",
+      "stepLabel": "第 {n} 步",
+      "title": "SLA 与升级"
+    },
     "fields": {
       "activationPolicy": {
         "label": "激活策略"
@@ -320,13 +372,16 @@
         "from": "起始",
         "help": "启用后，该会话的外发消息会在此时段内延迟。覆盖适配器级静默时段。",
         "to": "结束",
-        "tz": "时区"
+        "tz": "时区",
+        "tzPlaceholder": "例如 Asia/Shanghai"
       },
       "quietHoursFrom": "从",
       "quietHoursOverride": "勿扰时段 (本会话)",
       "quietHoursTo": "到",
       "quietHoursTz": "时区",
       "referenceMissing": "{id}（已缺失）",
+      "replyQuoting": "引用触发消息",
+      "replyQuotingHint": "在群聊 / 话题中，机器人的回复引用触发它的那条消息，方便他人看出在回答什么。仅在支持回复引用的平台生效；私聊从不引用。默认开启；保持开启时继承机器人默认值。",
       "requireHitlForWrites": {
         "help": "关闭后写入类 skill 无需 A2UI 确认卡片即可执行。破坏性 skill 始终需要 HITL。默认开启。",
         "label": "写入类 Skill 需要二次确认"
@@ -431,6 +486,15 @@
       "snoozed": "已暂停"
     }
   },
+  "loadEarlier": {
+    "aria": "加载更早消息",
+    "button": "加载更早消息",
+    "desktopOnly": "加载历史需要桌面应用",
+    "error": "无法加载更早消息",
+    "loaded": "{count, plural, =1 {已加载 1 条更早消息} other {已加载 # 条更早消息}}",
+    "loading": "加载中……",
+    "none": "没有更早的消息"
+  },
   "modeSwitcher": {
     "aria": "切换模式",
     "modes": {
@@ -469,6 +533,25 @@
       "sent": "已发送"
     },
     "unknownError": "未知错误"
+  },
+  "pendingApprovals": {
+    "count": "{count, plural, =1 {1 个待审批} other {# 个待审批}}"
+  },
+  "platformBadge": {
+    "abbr": {
+      "dingtalk": "DT",
+      "discord": "DC",
+      "lark": "LK",
+      "matrix": "MX",
+      "onebot": "OB",
+      "qq-official": "QQ",
+      "slack": "SL",
+      "telegram": "TG",
+      "wechat-oa": "WO",
+      "wechat-personal": "WX",
+      "wecom": "WC"
+    },
+    "planned": "计划中的平台"
   },
   "policyInfo": {
     "aria": "策略信息",
@@ -533,6 +616,8 @@
   "sla": {
     "dueAria": "服务时限：需在 {time} 内回复",
     "dueIn": "{time} 内回复",
+    "escalated": " · L{level}",
+    "escalatedAria": "升级等级 {level}",
     "overdue": "已超时",
     "overdueAria": "已违反服务时限——回复超时"
   },

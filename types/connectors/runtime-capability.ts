@@ -78,6 +78,11 @@ const BUILT_IN_OVERRIDES: Partial<Record<PlatformKind, Partial<ConnectorRuntimeC
       historyPagination: true,
       messageEditing: true,
       interactiveControls: true,
+      // Every message-create carries a deterministic `nonce` +
+      // `enforce_nonce: true` derived from the job idempotency key
+      // (`discordNonce` in adapters/discord/serialize.ts), so a retry after
+      // a lost ack returns the original message instead of a duplicate.
+      ambiguousDelivery: "remote_idempotent",
     },
     telegram: {
       topicIsolation: "native",
@@ -89,11 +94,35 @@ const BUILT_IN_OVERRIDES: Partial<Record<PlatformKind, Partial<ConnectorRuntimeC
       unmentionedDelivery: true,
       historyPagination: true,
       messageEditing: true,
+      // `PUT /rooms/{room}/send/{type}/{txnId}` with txnId = idempotency key:
+      // the homeserver de-duplicates on txnId and returns the same event id.
+      ambiguousDelivery: "remote_idempotent",
     },
     onebot: { unmentionedDelivery: true, historyPagination: true },
     wecom: { unmentionedDelivery: true, textStreaming: true },
     "wechat-personal": { unmentionedDelivery: true },
+    // Explicit (not implicit FINAL_ONLY) so a reviewer can see the verdict:
+    // DingTalk stream-mode bots only receive @-messages / DMs, and neither
+    // the group nor the oto send API takes an idempotency token.
+    dingtalk: { unmentionedDelivery: false, ambiguousDelivery: "reconciliation_required" },
+    // QQ pushes only @-messages / C2C; passive `msg_seq` is derived from the
+    // idempotency key so a retry is REJECTED (not delivered twice), but the
+    // rejection is an error rather than the original id → still reconcile.
+    "qq-official": { unmentionedDelivery: false, ambiguousDelivery: "reconciliation_required" },
+    // Every subscriber message reaches the official account (no @ concept);
+    // customer-service sends carry no idempotency token.
+    "wechat-oa": { unmentionedDelivery: true, ambiguousDelivery: "reconciliation_required" },
   }
+
+/**
+ * True when `platform` has an explicit entry in the built-in override table
+ * (even an empty one), i.e. its runtime contract was reviewed rather than
+ * silently inheriting `FINAL_ONLY`. Every shipped (non-`planned`) platform
+ * must be explicit — pinned by runtime-capability.test.ts.
+ */
+export function hasExplicitRuntimeCapabilityOverride(platform: PlatformKind): boolean {
+  return isPlatformKind(platform) && Object.hasOwn(BUILT_IN_OVERRIDES, platform)
+}
 
 export function builtInConnectorRuntimeCapabilities(
   platform: PlatformKind

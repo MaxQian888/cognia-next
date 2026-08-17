@@ -65,6 +65,7 @@ import {
   findActiveSessionForConversation,
   refreshPlatformSessionBinding,
 } from "./session-bindings"
+import { stampSlaDeadline } from "./sla"
 import { startTeamRunFromIM } from "./team-dispatch"
 import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
 import { buildImPermissionCeiling } from "@/lib/connectors/im-permission-ceiling"
@@ -96,6 +97,8 @@ import {
   canonicalEventFromCaptureEvent,
   createEnvelopeSequencer,
 } from "@/lib/ai/agent/execution/event-envelope"
+import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
+import { hasCapability } from "@/types/connectors/capability"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -848,6 +851,15 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
     )
     if (!session) {
       session = await createPlatformSession(event, resolved.characterId)
+      // Slice 1B: the bus could not stamp the bot-default SLA deadline for a
+      // first-ever inbound (no session → no override row); now that the
+      // session exists, backfill it. Idempotent + best-effort.
+      await stampSlaDeadline({
+        conversationKey: event.conversationKey,
+        sessionId: session.id,
+        adapter: adapterRow,
+        now: event.timestamp,
+      }).catch(() => undefined)
     } else {
       session = await refreshPlatformSessionBinding(session, event)
     }
@@ -1576,6 +1588,19 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           },
         })
         const idempotencyKey = `airun:${captured.messageId}`
+        // ── Reply quoting (ADR-0009 §3A.3) ──
+        // In group / thread scopes, quote the triggering message so a busy
+        // channel can tell which message the bot is answering. Only when the
+        // reply goes back through the RECEIVING conversation (a respond-via
+        // sibling posts into a conversation where `event.messageId` does not
+        // exist), the platform declares `send.reply`, and neither the
+        // conversation override nor the bot default opted out. Private chats
+        // never quote — there is a single interlocutor.
+        const quoteReply =
+          streamsThroughReceiver &&
+          event.channel.kind !== "private" &&
+          hasCapability(getPlatformCapabilities(event.platform), "send.reply") &&
+          (override?.replyQuoting ?? adapterRow.replyQuoting ?? true)
         // Deliver through the respond-via target resolved above (falls back to
         // the receiving bot on any invalid target).
         await enqueueOutbound({
@@ -1585,6 +1610,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             conversationRef: outboundTarget.conversationRef,
             deliveryTarget: outboundTarget.deliveryTarget,
             segments: outboundSegments,
+            ...(quoteReply ? { replyTo: { messageId: event.messageId } } : {}),
             metadata: {
               idempotencyKey,
               sourceMessageId: storedMsg.id,

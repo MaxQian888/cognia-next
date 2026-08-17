@@ -51,6 +51,11 @@ jest.mock("./adapters/dingtalk/auth", () => ({
   getDingTalkAccessToken: jest.fn().mockResolvedValue("dt-token"),
 }))
 
+jest.mock("./adapters/qq-official/auth", () => ({
+  getQQAccessToken: jest.fn().mockResolvedValue("qq-token"),
+  clearQQTokenCache: jest.fn(),
+}))
+
 import {
   buildAdapterFromRow,
   buildDiscordAdapter,
@@ -173,6 +178,33 @@ describe("buildQQOfficialAdapter", () => {
     expect(mockCreateQQOfficialAdapter).toHaveBeenCalledWith(
       expect.objectContaining({ id: row.id, transportMode: "gateway" })
     )
+  })
+
+  it("injects clearTokenCache that evicts THIS row's appId/clientSecret mint", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args: { credential?: string }) => {
+      if (cmd === "connectors_keyring_get") {
+        return args.credential === "appId"
+          ? "APP"
+          : args.credential === "clientSecret"
+            ? "SECRET"
+            : null
+      }
+      return null
+    })
+    const row = makeRow({ id: "qq-clear", type: "qq-official" })
+    await buildQQOfficialAdapter(row)
+    const opts = mockCreateQQOfficialAdapter.mock.calls.at(-1)![0] as {
+      accessToken: () => Promise<string>
+      clearTokenCache?: () => Promise<void>
+    }
+    expect(typeof opts.clearTokenCache).toBe("function")
+    await opts.clearTokenCache!()
+    const { clearQQTokenCache, getQQAccessToken } = jest.requireMock(
+      "./adapters/qq-official/auth"
+    ) as { clearQQTokenCache: jest.Mock; getQQAccessToken: jest.Mock }
+    expect(clearQQTokenCache).toHaveBeenCalledWith("APP", "SECRET")
+    await expect(opts.accessToken()).resolves.toBe("qq-token")
+    expect(getQQAccessToken).toHaveBeenCalledWith("APP", "SECRET")
   })
 })
 

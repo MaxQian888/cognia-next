@@ -201,6 +201,57 @@ describe("createWechatOaAdapter", () => {
     expect(res.error?.retryable).toBe(true)
   })
 
+  describe("setTyping()", () => {
+    it("POSTs custom/typing with Typing / CancelTyping for the conversation's openid", async () => {
+      mockInvoke.mockResolvedValue(httpResp(200, { errcode: 0 }))
+      const a = adapter()
+      await a.setTyping!("wechat-oa:wxoa-1:oUser", true)
+      await a.setTyping!("wechat-oa:wxoa-1:oUser", false)
+      const calls = mockInvoke.mock.calls.map((c) => c[1].req as { url: string; body: string })
+      expect(calls).toHaveLength(2)
+      expect(calls[0].url).toBe(
+        "https://api.weixin.qq.com/cgi-bin/message/custom/typing?access_token=tok"
+      )
+      expect(JSON.parse(calls[0].body)).toEqual({ touser: "oUser", command: "Typing" })
+      expect(JSON.parse(calls[1].body)).toEqual({ touser: "oUser", command: "CancelTyping" })
+      expect(a.health().lastActivityAt).toBeDefined()
+    })
+
+    it("swallows 45015 / 45047 (best-effort) but throws other errcodes and transport failures", async () => {
+      const a = adapter()
+      mockInvoke.mockResolvedValue(httpResp(200, { errcode: 45015, errmsg: "out of window" }))
+      await expect(a.setTyping!("wechat-oa:wxoa-1:oUser", true)).resolves.toBeUndefined()
+      mockInvoke.mockResolvedValue(httpResp(200, { errcode: 45047, errmsg: "over limit" }))
+      await expect(a.setTyping!("wechat-oa:wxoa-1:oUser", true)).resolves.toBeUndefined()
+      mockInvoke.mockResolvedValue(httpResp(200, { errcode: 48001, errmsg: "api unauthorized" }))
+      await expect(a.setTyping!("wechat-oa:wxoa-1:oUser", true)).rejects.toThrow(/48001/)
+      mockInvoke.mockResolvedValue(httpResp(502, "<html>bad gateway</html>"))
+      await expect(a.setTyping!("wechat-oa:wxoa-1:oUser", true)).rejects.toThrow(/non-JSON/)
+      mockInvoke.mockResolvedValue(httpResp(500, { errcode: 0 }))
+      await expect(a.setTyping!("wechat-oa:wxoa-1:oUser", true)).rejects.toThrow(/HTTP 500/)
+    })
+
+    it("retries once on an auth errcode with a fresh token, then degrades and throws", async () => {
+      mockInvoke
+        .mockResolvedValueOnce(httpResp(200, { errcode: 40001, errmsg: "invalid credential" }))
+        .mockResolvedValueOnce(httpResp(200, { errcode: 0 }))
+      const a = adapter()
+      await expect(a.setTyping!("wechat-oa:wxoa-1:oUser", true)).resolves.toBeUndefined()
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+
+      mockInvoke.mockReset()
+      mockInvoke.mockResolvedValue(httpResp(200, { errcode: 42001, errmsg: "expired" }))
+      await expect(a.setTyping!("wechat-oa:wxoa-1:oUser", true)).rejects.toThrow(/auth failed/)
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+      expect(a.health()).toMatchObject({ state: "degraded", reason: "auth_failed" })
+    })
+
+    it("rejects an unparseable conversation key without calling the platform", async () => {
+      await expect(adapter().setTyping!("nope", true)).rejects.toThrow(/unparseable/)
+      expect(mockInvoke).not.toHaveBeenCalled()
+    })
+  })
+
   it("refreshCredentials() clears the cached access token", async () => {
     mockInvoke.mockResolvedValue(httpResp(200, { access_token: "tk", expires_in: 7200 }))
     await getWechatOaAccessToken("app", "sec")

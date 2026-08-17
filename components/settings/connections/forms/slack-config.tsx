@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -75,9 +76,51 @@ async function testSlackToken(token: string): Promise<AuthTestResult> {
   }
 }
 
+/**
+ * Settings persisted on the adapter row. `assistantAppEnabled` and
+ * `historyMaxPages` are read verbatim by `buildSlackAdapter` in
+ * `lib/connectors/adapter-registry.ts` (`settings.assistantAppEnabled === true`
+ * / `Number(settings.historyMaxPages)`), so the key names + types here are the
+ * contract the factory depends on.
+ */
 interface SlackPersistedSettings {
   transport?: TransportMode
+  /**
+   * Opt into the Slack "Agents & AI Apps" surface — enables the typing
+   * indicator (`assistant.threads.setStatus`), suggested prompts, and the
+   * run-presentation streaming driver. Off by default because those APIs
+   * fail on apps without the feature enabled in the Slack app console.
+   */
+  assistantAppEnabled?: boolean
+  /** Max `conversations.history` pages pulled per history hydration (1–50). */
+  historyMaxPages?: number
   [key: string]: unknown
+}
+
+/** Bounds + default for `historyMaxPages` (mirrors the adapter's own default). */
+export const SLACK_HISTORY_MAX_PAGES_MIN = 1
+export const SLACK_HISTORY_MAX_PAGES_MAX = 50
+export const SLACK_HISTORY_MAX_PAGES_DEFAULT = 10
+
+/**
+ * Parse a form value into a valid `historyMaxPages` integer, or `null` when
+ * the value is not an integer within [1, 50].
+ */
+export function parseSlackHistoryMaxPages(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const n = Number(trimmed)
+  if (n < SLACK_HISTORY_MAX_PAGES_MIN || n > SLACK_HISTORY_MAX_PAGES_MAX) return null
+  return n
+}
+
+/** Coerce a persisted `historyMaxPages` (number, or a legacy string) to a valid value. */
+function persistedHistoryMaxPages(value: unknown): number {
+  const parsed =
+    typeof value === "number" || typeof value === "string"
+      ? parseSlackHistoryMaxPages(String(value))
+      : null
+  return parsed ?? SLACK_HISTORY_MAX_PAGES_DEFAULT
 }
 
 interface SlackConfigDialogProps {
@@ -101,6 +144,11 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
   const [signingSecret, setSigningSecret] = useState("")
   const [appToken, setAppToken] = useState("")
   const [transport, setTransport] = useState<TransportMode>(persisted.transport ?? "socket-mode")
+  const [assistantAppEnabled, setAssistantAppEnabled] = useState<boolean>(
+    persisted.assistantAppEnabled === true
+  )
+  const persistedPages = persistedHistoryMaxPages(persisted.historyMaxPages)
+  const [historyMaxPagesInput, setHistoryMaxPagesInput] = useState<string>(String(persistedPages))
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [testing, setTesting] = useState(false)
@@ -117,6 +165,8 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
     signingSecret.length > 0 ||
     appToken.length > 0 ||
     transport !== (persisted.transport ?? "socket-mode") ||
+    assistantAppEnabled !== (persisted.assistantAppEnabled === true) ||
+    parseSlackHistoryMaxPages(historyMaxPagesInput) !== persistedPages ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
@@ -192,12 +242,26 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
       toast.error(t("quietHoursIncomplete"))
       return
     }
+    const historyMaxPages = parseSlackHistoryMaxPages(historyMaxPagesInput)
+    if (historyMaxPages === null) {
+      toast.error(
+        t("historyMaxPagesInvalid", {
+          min: SLACK_HISTORY_MAX_PAGES_MIN,
+          max: SLACK_HISTORY_MAX_PAGES_MAX,
+        })
+      )
+      return
+    }
 
     setSaving(true)
     try {
       let adapterId: string
       const transportMode = transport === "socket-mode" ? "gateway" : "webhook"
-      const nextSettings: SlackPersistedSettings = { transport }
+      const nextSettings: SlackPersistedSettings = {
+        transport,
+        assistantAppEnabled,
+        historyMaxPages,
+      }
 
       if (isNew) {
         const newRow = await createAdapterInstance({
@@ -496,6 +560,53 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
             )}
           </div>
         )}
+
+        {/* Slack "Agents & AI Apps" opt-in. Read by `buildSlackAdapter`
+            (adapter-registry) as `settings.assistantAppEnabled === true` and
+            gates setTyping / suggested prompts / run-presentation streaming. */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
+            <Label htmlFor="sl-assistant-app" className="text-sm">
+              {t("assistantAppLabel")}
+            </Label>
+            <p className="text-xs leading-relaxed text-muted-foreground">{t("assistantAppHint")}</p>
+          </div>
+          <Switch
+            id="sl-assistant-app"
+            checked={assistantAppEnabled}
+            onCheckedChange={setAssistantAppEnabled}
+            disabled={saving}
+            aria-label={t("assistantAppLabel")}
+            data-testid="slack-assistant-app-switch"
+          />
+        </div>
+
+        {/* History hydration page cap. Read by `buildSlackAdapter` as
+            `Number(settings.historyMaxPages)`; the adapter itself defaults to 10. */}
+        <div className="space-y-1.5">
+          <Label htmlFor="sl-history-max-pages">{t("historyMaxPagesLabel")}</Label>
+          <Input
+            id="sl-history-max-pages"
+            type="number"
+            inputMode="numeric"
+            min={SLACK_HISTORY_MAX_PAGES_MIN}
+            max={SLACK_HISTORY_MAX_PAGES_MAX}
+            step={1}
+            value={historyMaxPagesInput}
+            onChange={(e) => setHistoryMaxPagesInput(e.target.value)}
+            disabled={saving}
+            aria-invalid={parseSlackHistoryMaxPages(historyMaxPagesInput) === null}
+            className="w-32"
+            data-testid="slack-history-max-pages"
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("historyMaxPagesHint", {
+              min: SLACK_HISTORY_MAX_PAGES_MIN,
+              max: SLACK_HISTORY_MAX_PAGES_MAX,
+              defaultValue: SLACK_HISTORY_MAX_PAGES_DEFAULT,
+            })}
+          </p>
+        </div>
       </div>
     ),
   }

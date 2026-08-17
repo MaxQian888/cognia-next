@@ -1,11 +1,18 @@
 "use client"
 
 /**
- * Outbound status pill — rendered next to assistant messages when
- * `metadata.outboundJobId` is set. Subscribes to the matching outboundQueue
- * row via useLiveQuery.
+ * Outbound status pill — the delivery state of one outbound job.
  *
- * States: queued / sending / sent / failed (with retry button) / deadlettered.
+ * Two addressing modes (ADR-0009 §3A.2):
+ *   - `{ jobId }` — a specific outboundQueue row (message-level provenance,
+ *     e.g. `metadata.outboundJobId` on an assistant message).
+ *   - `{ conversationKey }` — the NEWEST job of a conversation, resolved by
+ *     `useLatestOutboundJob`. This is what the Inbox conversation header's
+ *     `⋯` overflow mounts under "Health", so an operator sees at a glance
+ *     whether the last reply actually left the building.
+ *
+ * States: queued / sending / sent / failed (with retry button) /
+ * delivery_unknown / deadlettered.
  */
 
 import Link from "next/link"
@@ -26,11 +33,11 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { getDb } from "@/lib/db/schema"
 import type { OutboundJobRow, OutboundJobStatus } from "@/lib/db/connector-types"
+import { useLatestOutboundJob } from "@/hooks/connectors/use-latest-outbound-job"
 
-interface OutboundStatusPillProps {
-  jobId: string
-  className?: string
-}
+export type OutboundStatusPillProps = { className?: string } & (
+  { jobId: string; conversationKey?: never } | { conversationKey: string; jobId?: never }
+)
 
 const STATUS_CONFIG: Record<
   OutboundJobStatus,
@@ -47,13 +54,19 @@ const STATUS_CONFIG: Record<
   deadlettered: { icon: BanIcon, variant: "destructive" },
 }
 
-export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps) {
+export function OutboundStatusPill(props: OutboundStatusPillProps) {
   const t = useTranslations("inbox.outboundStatus")
-  const job = useLiveQuery<OutboundJobRow | undefined>(
+  const jobId = props.jobId ?? null
+  const byId = useLiveQuery<OutboundJobRow | undefined>(
     () =>
-      typeof window === "undefined" ? Promise.resolve(undefined) : getDb().outboundQueue.get(jobId),
+      typeof window === "undefined" || !jobId
+        ? Promise.resolve(undefined)
+        : getDb().outboundQueue.get(jobId),
     [jobId]
   )
+  const latest = useLatestOutboundJob(props.conversationKey ?? null)
+  const job = jobId ? byId : (latest ?? undefined)
+  const className = props.className
 
   if (!job) return null
 
@@ -62,7 +75,7 @@ export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps
   const statusLabel = t(`status.${job.status}`)
 
   const handleRetry = async () => {
-    await getDb().outboundQueue.update(jobId, {
+    await getDb().outboundQueue.update(job.id, {
       status: "pending",
       nextAttemptAt: Date.now(),
     })
@@ -75,7 +88,7 @@ export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps
           <Badge
             variant={config.variant}
             className={cn("h-5 gap-1 px-1.5 text-[10px]", className)}
-            data-testid={`outbound-status-pill-${jobId}`}
+            data-testid={`outbound-status-pill-${job.id}`}
             data-status={job.status}
           >
             <Icon className={cn("size-3", job.status === "sending" && "animate-spin")} />
@@ -86,7 +99,7 @@ export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps
                 variant="ghost"
                 className="h-5 px-1 text-xs"
                 onClick={() => void handleRetry()}
-                data-testid={`outbound-retry-btn-${jobId}`}
+                data-testid={`outbound-retry-btn-${job.id}`}
               >
                 <RefreshCwIcon className="h-3 w-3" />
                 <span className="sr-only">{t("retry")}</span>

@@ -13,11 +13,16 @@ const mockUseCharacters = jest.fn()
 jest.mock("@/lib/data-hooks/context", () => ({
   useCharacters: () => mockUseCharacters(),
 }))
+const mockNotifyAssignmentChanged = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/connectors/assignment/notify-assignment", () => ({
+  notifyAssignmentChanged: (...a: unknown[]) => mockNotifyAssignmentChanged(...a),
+}))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 import { toast } from "sonner"
 import { AssigneeChip } from "./assignee-chip"
 import type { ConversationAssignee } from "@/lib/db/conversation-overrides"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 
 const mockToastError = toast.error as jest.Mock
 
@@ -27,6 +32,7 @@ beforeEach(() => {
     { id: "char-1", name: "Ava" },
     { id: "char-2", name: "Bo" },
   ])
+  useAgentTeamStore.setState({ teams: {} })
 })
 
 describe("AssigneeChip", () => {
@@ -56,8 +62,16 @@ describe("AssigneeChip", () => {
       expect(mockSetAssignee).toHaveBeenCalledWith(
         "k",
         { kind: "human" },
-        { sessionId: "s", via: "manual" }
+        { sessionId: "s", via: "manual", adapterId: undefined }
       )
+    )
+    await waitFor(() =>
+      expect(mockNotifyAssignmentChanged).toHaveBeenCalledWith({
+        conversationKey: "k",
+        from: null,
+        to: { kind: "human" },
+        via: "manual",
+      })
     )
   })
 
@@ -70,9 +84,46 @@ describe("AssigneeChip", () => {
       expect(mockSetAssignee).toHaveBeenCalledWith(
         "k",
         { kind: "character", id: "char-2", label: "Bo" },
-        { sessionId: "s", via: "manual" }
+        { sessionId: "s", via: "manual", adapterId: undefined }
       )
     )
+  })
+
+  it("lists Agent Teams from the store and assigns a team (passing adapterId through)", async () => {
+    useAgentTeamStore.setState({
+      teams: {
+        t2: { id: "t2", name: "Zed team" },
+        t1: { id: "t1", name: "Alpha team" },
+      } as never,
+    })
+    const user = userEvent.setup()
+    render(<AssigneeChip conversationKey="k" sessionId="s" adapterId="adp-1" />)
+    await user.click(screen.getByTestId("assignee-chip"))
+    expect(await screen.findByText("Team")).toBeInTheDocument()
+    const items = screen.getAllByTestId(/assignee-team-/)
+    expect(items.map((el) => el.textContent)).toEqual(["Alpha team", "Zed team"])
+    await user.click(screen.getByTestId("assignee-team-t1"))
+    await waitFor(() =>
+      expect(mockSetAssignee).toHaveBeenCalledWith(
+        "k",
+        { kind: "team", id: "t1", label: "Alpha team" },
+        { sessionId: "s", via: "manual", adapterId: "adp-1" }
+      )
+    )
+    await waitFor(() =>
+      expect(mockNotifyAssignmentChanged).toHaveBeenCalledWith(
+        expect.objectContaining({ to: { kind: "team", id: "t1", label: "Alpha team" } })
+      )
+    )
+  })
+
+  it("hides the team section when the store has no teams", async () => {
+    const user = userEvent.setup()
+    render(<AssigneeChip conversationKey="k" sessionId="s" />)
+    await user.click(screen.getByTestId("assignee-chip"))
+    expect(await screen.findByText("Me")).toBeInTheDocument()
+    expect(screen.queryByTestId(/assignee-team-/)).not.toBeInTheDocument()
+    expect(screen.getByText("Assigning also syncs routing", { exact: false })).toBeInTheDocument()
   })
 
   it("unassigns from the menu", async () => {
@@ -85,6 +136,15 @@ describe("AssigneeChip", () => {
       expect(mockSetAssignee).toHaveBeenCalledWith("k", null, {
         sessionId: "s",
         via: "manual",
+        adapterId: undefined,
+      })
+    )
+    await waitFor(() =>
+      expect(mockNotifyAssignmentChanged).toHaveBeenCalledWith({
+        conversationKey: "k",
+        from: assigned,
+        to: null,
+        via: "manual",
       })
     )
   })
@@ -96,6 +156,7 @@ describe("AssigneeChip", () => {
     await user.click(screen.getByTestId("assignee-chip"))
     await user.click(await screen.findByText("Me"))
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("boom"))
+    expect(mockNotifyAssignmentChanged).not.toHaveBeenCalled()
   })
 
   it("stringifies non-Error rejections in the toast", async () => {

@@ -27,6 +27,7 @@ import {
 } from "./parse"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import {
+  discordNonce,
   serializeOutboundAsync,
   serializeDelete,
   serializeEdit,
@@ -507,15 +508,21 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     )
 
     let platformMessageId: string | undefined
+    // Platform idempotency (ADR-0009): every message-create of this job —
+    // voice lane, media lane and each REST chunk — carries a deterministic
+    // `nonce` derived from the job's idempotencyKey, so a retry after a lost
+    // ack re-posts the same nonces and Discord returns the original message.
+    const idempotencyKey = req.metadata?.idempotencyKey ?? ""
 
     try {
-      for (const seg of voiceSegments) {
+      for (const [voiceIndex, seg] of voiceSegments.entries()) {
         const result = await sendDiscordVoiceMessage({
           botToken: opts.botToken,
           channelId,
           voiceUrl: seg.url,
           durationSec: seg.durationSec,
           replyToMessageId: req.replyTo?.messageId,
+          nonce: idempotencyKey ? discordNonce(idempotencyKey, `voice:${voiceIndex}`) : undefined,
         })
         if (result.messageId) platformMessageId = result.messageId
       }
@@ -529,6 +536,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
           channelId,
           files: mediaSegmentsToFiles(mediaSegments),
           replyToMessageId: otherSegments.length === 0 ? req.replyTo?.messageId : undefined,
+          nonce: idempotencyKey ? discordNonce(idempotencyKey, "media") : undefined,
         })
         if (id) platformMessageId = id
       }

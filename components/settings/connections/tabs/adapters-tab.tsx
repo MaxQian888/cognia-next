@@ -27,6 +27,7 @@ import { AdapterSidebar, type AdapterStatusFilter } from "../adapters/adapter-si
 import { getPlatformMeta } from "../adapters/platform-meta"
 import { AddConnectorGrid } from "../adapters/add-connector-grid"
 import { useSelectedAdapter } from "../adapters/use-selected-adapter"
+import { listConnectorMetadata } from "@/lib/connectors/adapter-metadata"
 
 // Platform kinds whose configuration dialog is wired into this tab. Each ships
 // with a dialog under `../forms/`; the dispatcher below picks the right one by
@@ -57,6 +58,13 @@ const CONFIGURABLE_KINDS: ConfigurableKind[] = [
   "wechat-oa",
   "dingtalk",
 ]
+
+// Platforms the union reserves but that have no factory / dialog yet
+// (`ConnectorMeta.status === "planned"`). Shown in the picker as disabled
+// "Planned" cards so the roadmap is visible without a dead click target.
+const PLANNED_KINDS: readonly PlatformKind[] = listConnectorMetadata()
+  .filter((meta) => meta.status === "planned")
+  .map((meta) => meta.type)
 
 function isConfigurableKind(kind: PlatformKind): kind is ConfigurableKind {
   return (CONFIGURABLE_KINDS as PlatformKind[]).includes(kind)
@@ -266,6 +274,7 @@ export function AdaptersTab() {
         open={addOpen}
         onOpenChange={setAddOpen}
         kinds={CONFIGURABLE_KINDS}
+        plannedKinds={PLANNED_KINDS}
         configuredCounts={configuredCounts}
         onPick={onPickPlatform}
       />

@@ -99,6 +99,22 @@ export interface StatusView {
   enabledRules: string[]
   sessionTitle: string
   sessionIdPrefix: string
+  /**
+   * Optional "assignee" line (slice 1A). Rendered between mode and model
+   * when the conversation is assigned so the reader can connect a routing
+   * source of "assignment" to who holds the conversation.
+   */
+  assignee?: string
+}
+
+/** Render the current assignee for `/status` (bilingual, no i18n at this layer). */
+export function renderAssignee(
+  assignee: { kind: "human" | "character" | "team"; id?: string; label?: string } | undefined
+): string | undefined {
+  if (!assignee) return undefined
+  if (assignee.kind === "human") return "人工 / me"
+  const name = assignee.label?.trim() || assignee.id?.trim() || "?"
+  return assignee.kind === "team" ? `团队 / team: ${name}` : `角色 / character: ${name}`
 }
 
 export interface AgentTopicStatusView {
@@ -141,6 +157,7 @@ export function renderStatus(v: StatusView): string {
     `• 匹配规则 / matched rule: ${v.matchedRule}`,
     `• 回复 Adapter / response adapter: ${v.responseAdapter}`,
     `• 模式 / mode: ${v.mode}`,
+    ...(v.assignee ? [`• 分配 / assignee: ${v.assignee}`] : []),
     `• 模型 / model: ${v.model}`,
     `• 提供商 / provider: ${v.provider}`,
     `• 审批 / approval: ${v.approvalMode}`,
@@ -159,6 +176,7 @@ export function renderStatus(v: StatusView): string {
 export function sourceLabel(source: string): string {
   const labels: Record<string, string> = {
     override: "会话覆盖 / conversation override",
+    assignment: "会话分配 / assignment",
     rule: "路由规则 / dispatch rule",
     "instance-default": "Adapter 默认 / adapter default",
     none: "系统默认 / system default",

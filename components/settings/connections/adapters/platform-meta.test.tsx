@@ -20,6 +20,11 @@ describe("getPlatformMeta", () => {
     ["qq-official", "qq-official"],
     ["matrix", "matrix"],
     ["dingtalk", "dingtalk"],
+    // Planned kinds carry a label too, so the "Planned" grid card is readable.
+    ["email", "email"],
+    ["kook", "kook"],
+    ["line", "line"],
+    ["mattermost", "mattermost"],
   ])("maps %s to its label key + shared brand icon", (kind, labelKey) => {
     const meta = getPlatformMeta(kind)
     expect(meta.labelKey).toBe(labelKey)
@@ -27,9 +32,9 @@ describe("getPlatformMeta", () => {
     expect(meta.Icon).toBe(getPlatformIcon(kind))
   })
 
-  it("falls back to the 'unknown' label for kinds without a dialog", () => {
+  it("falls back to the 'unknown' label for non-built-in kinds", () => {
     expect(getPlatformMeta("github").labelKey).toBe("unknown")
-    expect(getPlatformMeta("kook").labelKey).toBe("unknown")
+    expect(getPlatformMeta("acme-chat").labelKey).toBe("unknown")
   })
 
   it("always returns a renderable icon, even for fallback kinds", () => {

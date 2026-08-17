@@ -146,7 +146,14 @@ const createAdapterInstance = jest.fn(async (..._a: unknown[]) => ({
   id: "cai_new",
 }))
 const updateAdapterInstance = jest.fn(async (..._a: unknown[]) => undefined)
-const deleteAdapterInstance = jest.fn(async (..._a: unknown[]) => undefined)
+const removeAdapterInstance = jest.fn(async (..._a: unknown[]) => ({
+  purgedCredentials: [],
+  failedCredentials: [],
+  prunedAttachments: 0,
+}))
+jest.mock("@/lib/connectors/remove-adapter-instance", () => ({
+  removeAdapterInstance: (...a: unknown[]) => removeAdapterInstance(...(a as [never])),
+}))
 const RULE = {
   id: "r1",
   enabled: true,
@@ -162,7 +169,6 @@ const listAdapterInstances = jest.fn(async () => [INSTANCE_ROW, DISABLED_ROW])
 jest.mock("@/lib/db/adapter-instances", () => ({
   createAdapterInstance: (...a: unknown[]) => createAdapterInstance(...(a as [never])),
   updateAdapterInstance: (...a: unknown[]) => updateAdapterInstance(...(a as [never, never])),
-  deleteAdapterInstance: (...a: unknown[]) => deleteAdapterInstance(...(a as [never])),
   getAdapterInstance: (...a: unknown[]) => getAdapterInstance(...(a as [string])),
   listAdapterInstances: () => listAdapterInstances(),
 }))
@@ -359,7 +365,7 @@ describe("createConnectorsAPI", () => {
       expect(() => api.setInstanceEnabled("cai_1", false)).toThrow(PermissionError)
       expect(() => api.deleteInstance("cai_1")).toThrow(PermissionError)
       expect(createAdapterInstance).not.toHaveBeenCalled()
-      expect(deleteAdapterInstance).not.toHaveBeenCalled()
+      expect(removeAdapterInstance).not.toHaveBeenCalled()
     })
   })
 
@@ -619,10 +625,16 @@ describe("createConnectorsAPI", () => {
       expect(updateAdapterInstance).toHaveBeenCalledWith("cai_1", { enabled: false })
     })
 
-    it("deleteInstance delegates to the db layer", async () => {
+    it("deleteInstance goes through the shared removal seam with the resolved row", async () => {
       const api = createConnectorsAPI(PLUGIN)
       await api.deleteInstance("cai_1")
-      expect(deleteAdapterInstance).toHaveBeenCalledWith("cai_1")
+      expect(removeAdapterInstance).toHaveBeenCalledWith(INSTANCE_ROW)
+    })
+
+    it("deleteInstance still runs the seam for an unknown id (idempotent removal)", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      await api.deleteInstance("cai_missing")
+      expect(removeAdapterInstance).toHaveBeenCalledWith({ id: "cai_missing" })
     })
   })
 

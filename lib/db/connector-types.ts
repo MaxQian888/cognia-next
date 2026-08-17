@@ -32,6 +32,7 @@ import type {
   PlatformIdentity,
 } from "@/types/connectors/event"
 import type { AuditEntry } from "@/types/connectors/audit"
+import type { EscalationPolicy } from "@/types/connectors/escalation"
 import type { UsagePresenceConfig, UsagePresenceState } from "@/types/connectors/presence"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
@@ -179,6 +180,16 @@ export interface AdapterInstanceRow {
    * on the next delivery without restarting the runner.
    */
   outboundTuning?: OutboundTuningConfig
+  /**
+   * Bot-wide default for quoting the triggering message on ai-run replies in
+   * group / thread scopes (ADR-0009 §3A.3). DEFAULT ON (`undefined`/`true`);
+   * `false` turns quoting off for every conversation of this bot unless a
+   * `ConversationOverrideRow.replyQuoting` says otherwise. Only meaningful on
+   * platforms whose adapter declares `send.reply`. Edited by
+   * `components/settings/connections/forms/reply-quoting-default.tsx`.
+   * Non-indexed additive.
+   */
+  replyQuoting?: boolean
   /**
    * Ordered failover targets (multi-bot): when THIS adapter's circuit
    * breaker is open at delivery time, the outbound runner re-enqueues the
@@ -445,6 +456,22 @@ export interface AdapterInstanceRow {
    * / "Revoke" (defined). The actual token never lives in this row.
    */
   userTokenStoredAt?: number
+  /**
+   * Bot-wide response-SLA target in minutes (IM delegation slice 1B). Used
+   * when a conversation has no `ConversationOverrideRow.slaResponseMinutes`
+   * of its own: the bus stamps `nextResponseDueAt` from this value on every
+   * fresh inbound (`bus.ts` step 3.6) and the runtime backfills it right after
+   * the first platform session is created (`stampSlaDeadline`). Non-indexed
+   * additive — no Dexie bump. Absent / <= 0 = no default SLA.
+   */
+  defaultSlaResponseMinutes?: number
+  /**
+   * Bot-wide SLA escalation chain (slice 1B). Resolved by the escalation
+   * sweep as `override.escalation ?? adapter.defaultEscalation`; `undefined`
+   * = no escalation. Edited by `sla-escalation-defaults.tsx`. Non-indexed
+   * additive — no Dexie bump.
+   */
+  defaultEscalation?: EscalationPolicy
   createdAt: number
   updatedAt: number
 }
@@ -808,6 +835,17 @@ export interface ConversationOverrideRow {
    */
   appendActivity?: boolean
   /**
+   * Per-conversation switch for QUOTING the triggering message on ai-run
+   * replies in group / thread scopes (ADR-0009 §3A.3). DEFAULT ON
+   * (`undefined`/`true`): when the platform declares `send.reply` and the
+   * reply streams back through the receiving conversation, the runtime sets
+   * `replyTo: { messageId }` so a busy group can tell which message the bot
+   * is answering. Private chats never quote (there is one interlocutor).
+   * `false` opts this conversation out; `undefined` inherits
+   * `AdapterInstanceRow.replyQuoting`. Non-indexed additive.
+   */
+  replyQuoting?: boolean
+  /**
    * Per-conversation allowlist for built-in skills (ADR-0026 / schema v43).
    *
    *   - `undefined` / `"all"` — fall back to per-skill `imAccess` defaults
@@ -883,6 +921,51 @@ export interface ConversationOverrideRow {
    * runner clears it (markResponded) on reply. Non-indexed; absent = no SLA.
    */
   slaResponseMinutes?: number
+  /**
+   * Per-conversation SLA escalation chain (slice 1B). `undefined` inherits
+   * `AdapterInstanceRow.defaultEscalation`; an explicit `{ steps: [] }`
+   * disables escalation for this conversation only. Non-indexed additive.
+   */
+  escalation?: EscalationPolicy
+  /**
+   * Index of the LAST escalation step that fired for the current overdue
+   * window (0-based). The sweep only fires steps with a higher index, so each
+   * step runs exactly once per breach. Cleared (with `escalatedAt`) by
+   * `markResponded` and by `setStatus("resolved")`. Non-indexed additive.
+   */
+  escalatedStep?: number
+  /** Epoch ms at which `escalatedStep` fired. */
+  escalatedAt?: number
+  /**
+   * Assignment ↔ routing sync marker (slice 1A). Set to `"assignment"` by
+   * `setAssignee` when a character / team assignment wrote `characterId` /
+   * `teamId` on this row, so `resolveEffectiveRouting` can label the source
+   * "assignment" and unassign can restore `assignmentPreviousRouting`.
+   * Cleared by `clearAssignmentRoutingMarker` whenever the operator edits the
+   * routing explicitly (override form / `/character` / `/team` / `/mode`),
+   * after which unassign leaves the routing alone.
+   */
+  routingSource?: "assignment"
+  /**
+   * The row's `mode` before a HUMAN assignment forced `mode = "manual"`
+   * (slice 1A). `null` records "no explicit mode (inherit adapter default)";
+   * `undefined` means no human assignment is in force. Restored on unassign
+   * or when the conversation is reassigned to a character / team.
+   */
+  assignmentPreviousMode?: ConnectorMode | null
+  /**
+   * Snapshot of the routing fields taken ONCE when the first assignment-driven
+   * routing write happened (slice 1A). Restored verbatim on unassign while
+   * `routingSource === "assignment"`; discarded by
+   * `clearAssignmentRoutingMarker`.
+   */
+  assignmentPreviousRouting?: {
+    characterId?: string
+    characterDisabled?: boolean
+    teamId?: string
+    teamDisabled?: boolean
+    workflowDisabled?: boolean
+  }
   createdAt: number
   updatedAt: number
 }

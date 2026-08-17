@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event"
 
 import { ConversationBehaviorEditor } from "./conversation-behavior-editor"
 
-jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars && typeof vars.source === "string" ? `${key}:${vars.source}` : key,
+}))
 
 describe("ConversationBehaviorEditor", () => {
   it("shows inheritance and effective sources for conversation scope", () => {
@@ -15,8 +18,24 @@ describe("ConversationBehaviorEditor", () => {
         sources={{ mode: "adapter-default" }}
       />
     )
-    expect(screen.getByTestId("behavior-source-mode")).toHaveTextContent("effectiveSource")
+    expect(screen.getByTestId("behavior-source-mode")).toHaveTextContent(
+      "effectiveSource:source_adapter-default"
+    )
     expect(screen.getByTestId("behavior-mode")).toHaveTextContent("inherit")
+  })
+
+  it("labels an assignment-driven mode with the source_assignment key (slice 1A)", () => {
+    render(
+      <ConversationBehaviorEditor
+        scope="conversation"
+        value={{ mode: "manual" }}
+        onChange={jest.fn()}
+        sources={{ mode: "assignment" }}
+      />
+    )
+    expect(screen.getByTestId("behavior-source-mode")).toHaveTextContent(
+      "effectiveSource:source_assignment"
+    )
   })
 
   it("emits one shared draft shape", async () => {

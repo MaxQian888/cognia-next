@@ -10779,6 +10779,7 @@
         "labelAdded": "Label added",
         "labelRemoved": "Label removed",
         "reassigned": "Reassigned",
+        "routingSynced": "routing synced",
         "statusOpen": "Reopened",
         "statusPending": "Marked pending",
         "statusResolved": "Resolved",
@@ -10819,6 +10820,8 @@
         "pluginTransformPiiBlocked": "Plugin transform blocked — PII",
         "siblingBotBudgetExhausted": "Sibling bot reply budget exhausted",
         "siblingBotIgnored": "Sibling bot message ignored",
+        "slaEscalated": "SLA escalated",
+        "slaEscalationActionFailed": "SLA escalation action failed",
         "taskDispatched": "Task dispatched",
         "teamDispatched": "Routed to team",
         "teamPostedAsBot": "Team posted as bot",
@@ -10831,6 +10834,7 @@
       "aria": "Assignee: {assignee}",
       "character": "Character",
       "me": "Me",
+      "routingSynced": "Assigning also syncs routing: a character or team takes over replies, \"Me\" switches the conversation to manual mode, and Unassign restores the previous routing.",
       "team": "Team",
       "unassign": "Unassign",
       "unassigned": "Unassigned",
@@ -10868,9 +10872,12 @@
     },
     "cannedResponses": {
       "empty": "No canned responses match.",
+      "insertVariableAria": "Insert {name}",
       "manage": "Manage canned responses",
       "searchPlaceholder": "Search canned responses…",
-      "triggerAria": "Insert a canned response"
+      "triggerAria": "Insert a canned response",
+      "variableUnavailable": "No value for {name} in this conversation",
+      "variablesHint": "Variables"
     },
     "connectionLoss": {
       "dismiss": "Dismiss",
@@ -11010,6 +11017,51 @@
       "deleteOverride": "Remove override",
       "deleteOverrideConfirm": "Remove the override for this conversation? It will fall back to the adapter defaults.",
       "dialogTitle": "Conversation settings",
+      "escalation": {
+        "actions": {
+          "notify": "Notify me (Notification Center + toast)",
+          "reassign": "Reassign to",
+          "reassignCharacter": "Character",
+          "reassignHuman": "Me (human — switches the conversation to manual)",
+          "reassignNone": "No reassignment",
+          "reassignPickCharacter": "Pick a character…",
+          "reassignTeam": "Agent Team",
+          "referenceMissing": "{id} (missing)",
+          "switchMode": "Switch mode",
+          "switchModeDraft": "Draft (AI drafts for approval)",
+          "switchModeManual": "Manual (AI stops auto-replying)",
+          "switchModeNone": "Keep the current mode",
+          "urgent": "Lark urgent (加急)",
+          "urgentLarkOnly": "Urgent escalation is only available on Lark / Feishu bots — inert on this platform.",
+          "urgentUserIds": "Lark user open_ids (one per line)",
+          "urgentUserIdsPlaceholder": "ou_…",
+          "urgentVia": "Urgent channel",
+          "urgentVia_app": "App",
+          "urgentVia_phone": "Phone",
+          "urgentVia_sms": "SMS"
+        },
+        "addStep": "Add step",
+        "afterOverdueMinutes": "Minutes past the SLA deadline",
+        "afterOverdueMinutesHint": "0 fires at the deadline. Steps must be in ascending order.",
+        "empty": "No steps — escalation is off.",
+        "issues": {
+          "actionTypeUnknown": "Step {step}: unknown action.",
+          "reassignTargetMissing": "Step {step}: pick who to reassign to.",
+          "stepMinutesInvalid": "Step {step}: minutes must be a whole number ≥ 0.",
+          "stepWithoutActions": "Step {step}: pick at least one action.",
+          "stepsNotAscending": "Step {step}: minutes must be greater than the previous step.",
+          "switchModeInvalid": "Step {step}: invalid mode.",
+          "tooManySteps": "At most {max} steps.",
+          "urgentUsersMissing": "Step {step}: add at least one Lark user open_id."
+        },
+        "maxSteps": "At most {max} steps.",
+        "overrideHint": "Off = inherit the bot-wide default. On with no steps = escalation disabled for this conversation.",
+        "overrideToggle": "Override the bot's escalation policy for this conversation",
+        "removeStep": "Remove step {n}",
+        "sectionHint": "Escalation steps run on the desktop / headless host that owns the connector runtime, once per step per SLA breach; a reply or resolving the conversation resets the chain.",
+        "stepLabel": "Step {n}",
+        "title": "SLA & escalation"
+      },
       "fields": {
         "activationPolicy": {
           "label": "Activation policy"
@@ -11094,13 +11146,16 @@
           "from": "From",
           "help": "When enabled, outbound traffic on this conversation defers during this window. Overrides the adapter-level quiet hours.",
           "to": "To",
-          "tz": "Time zone"
+          "tz": "Time zone",
+          "tzPlaceholder": "e.g. Asia/Shanghai"
         },
         "quietHoursFrom": "From",
         "quietHoursOverride": "Quiet hours (this conversation)",
         "quietHoursTo": "To",
         "quietHoursTz": "Time zone",
         "referenceMissing": "{id} (missing)",
+        "replyQuoting": "Quote the triggering message",
+        "replyQuotingHint": "In group and thread chats, reply as a quote of the message that triggered the bot so people can tell what it is answering. Only on platforms that support replies; private chats never quote. On by default; inherits the bot's default when left on.",
         "requireHitlForWrites": {
           "help": "When off, write-tier skills run without the A2UI confirm card. Destructive skills always require HITL regardless. Defaults on.",
           "label": "Require HITL for write skills"
@@ -11205,6 +11260,15 @@
         "snoozed": "Snoozed"
       }
     },
+    "loadEarlier": {
+      "aria": "Load earlier messages",
+      "button": "Load earlier messages",
+      "desktopOnly": "Loading history requires the desktop app",
+      "error": "Couldn't load earlier messages",
+      "loaded": "{count, plural, =1 {Loaded 1 earlier message} other {Loaded # earlier messages}}",
+      "loading": "Loading…",
+      "none": "No earlier messages"
+    },
     "modeSwitcher": {
       "aria": "Switch mode",
       "modes": {
@@ -11243,6 +11307,25 @@
         "sent": "Sent"
       },
       "unknownError": "Unknown error"
+    },
+    "pendingApprovals": {
+      "count": "{count, plural, =1 {1 pending approval} other {# pending approvals}}"
+    },
+    "platformBadge": {
+      "abbr": {
+        "dingtalk": "DT",
+        "discord": "DC",
+        "lark": "LK",
+        "matrix": "MX",
+        "onebot": "OB",
+        "qq-official": "QQ",
+        "slack": "SL",
+        "telegram": "TG",
+        "wechat-oa": "WO",
+        "wechat-personal": "WX",
+        "wecom": "WC"
+      },
+      "planned": "Planned platform"
     },
     "policyInfo": {
       "aria": "Policy info",
@@ -11307,6 +11390,8 @@
     "sla": {
       "dueAria": "SLA: reply due in {time}",
       "dueIn": "Due in {time}",
+      "escalated": " · L{level}",
+      "escalatedAria": "escalation level {level}",
       "overdue": "Overdue",
       "overdueAria": "SLA breached — reply overdue"
     },
@@ -25261,6 +25346,8 @@
           "configuredCount": "{count} configured",
           "description": "Pick a messaging platform to configure.",
           "noResults": "No platforms match your search.",
+          "planned": "Planned",
+          "plannedHint": "Not configurable yet — this platform is on the roadmap.",
           "searchPlaceholder": "Search platforms…",
           "title": "Add a connector"
         },
@@ -25281,7 +25368,8 @@
             "delivery": "Delivery",
             "permissions": "Permissions",
             "platform": "Platform",
-            "responder": "Responder"
+            "responder": "Responder",
+            "slaEscalation": "SLA & escalation"
           }
         },
         "detailTabs": {
@@ -25373,8 +25461,12 @@
         "platformDescriptions": {
           "dingtalk": "DingTalk bot via Stream Mode",
           "discord": "Bot via gateway or socket mode",
+          "email": "IMAP / SMTP mailbox bridge",
+          "kook": "KOOK bot via gateway",
           "lark": "Feishu / Lark bot via long connection",
+          "line": "LINE Messaging API bot via webhook",
           "matrix": "Matrix homeserver via /sync",
+          "mattermost": "Mattermost bot via WebSocket",
           "onebot": "QQ via NapCat / Lagrange (OneBot)",
           "qq-official": "QQ official bot via gateway",
           "slack": "App via Socket Mode or Events API",
@@ -25387,8 +25479,12 @@
         "platforms": {
           "dingtalk": "DingTalk / 钉钉",
           "discord": "Discord",
+          "email": "Email",
+          "kook": "KOOK",
           "lark": "Lark / Feishu",
+          "line": "LINE",
           "matrix": "Matrix",
+          "mattermost": "Mattermost",
           "onebot": "QQ (OneBot / NapCat)",
           "qq-official": "QQ (Official Bot)",
           "slack": "Slack",
@@ -25615,6 +25711,10 @@
             "import": "Messages imported",
             "import_denied": "Message import denied"
           },
+          "sla": {
+            "escalated": "SLA escalated",
+            "escalation_action_failed": "SLA escalation action failed"
+          },
           "sso": {
             "session_seen": "Web SSO session seen"
           },
@@ -25666,6 +25766,7 @@
         "responseMode": "Response mode",
         "save": "Save",
         "source_adapter-default": "Adapter default",
+        "source_assignment": "Assignment",
         "source_conversation-override": "Conversation override",
         "source_dispatch-rule": "Dispatch rule",
         "source_system-default": "System default",
@@ -26506,6 +26607,11 @@
         "toAria": "Quiet hours to",
         "toLabel": "To (HH:MM)"
       },
+      "replyQuotingDefault": {
+        "description": "Default for every conversation of this bot: in group and thread chats, replies quote the message that triggered the bot. Individual conversations can override this in their settings.",
+        "label": "Quote the triggering message in group chats",
+        "title": "Reply quoting"
+      },
       "runOperators": {
         "countLabel": "{count, plural, =0 {no operators} =1 {1 operator} other {# operators}}",
         "empty": "No operators configured — only a run's own requester can act on it.",
@@ -26557,6 +26663,18 @@
         "title": "Send a test message",
         "unsupportedReplyOnly": "This adapter can only reply to inbound messages; it can't send a standalone test message."
       },
+      "slaEscalation": {
+        "cancel": "Cancel",
+        "description": "Bot-wide defaults. Conversations inherit both values unless their override sets its own SLA minutes or escalation chain.",
+        "escalationHint": "Runs when a conversation is past its SLA deadline; each step fires once per breach. No steps = no escalation.",
+        "escalationTitle": "Default escalation chain",
+        "save": "Save",
+        "saveFailed": "Could not save: {error}",
+        "slaMinutes": "Default response SLA (minutes)",
+        "slaMinutesHint": "When set, every conversation on this bot gets a reply deadline this many minutes after each inbound message (quiet hours excluded). Leave empty for no default SLA.",
+        "slaMinutesPlaceholder": "e.g. 30",
+        "title": "Response SLA & escalation defaults"
+      },
       "slack": {
         "adapterCreated": "Adapter created.",
         "adapterUpdated": "Adapter updated.",
@@ -26564,6 +26682,8 @@
         "appTokenLabel": "App Token",
         "appTokenPlaceholder": "xapp-...",
         "appTokenRequired": "App token is required for Socket Mode.",
+        "assistantAppHint": "Enables the typing indicator, suggested prompts, and streamed run presentation. Requires the \"Agents & AI Apps\" feature to be turned on for this app in the Slack app console; leave off otherwise.",
+        "assistantAppLabel": "Slack Agents & AI Apps",
         "botTokenHelp": "xoxb-... token from the Slack App OAuth page. Stored encrypted in the OS keyring.",
         "botTokenLabel": "Bot Token",
         "botTokenPlaceholder": "xoxb-...",
@@ -26578,6 +26698,9 @@
         "displayNameLabel": "Display name",
         "displayNamePlaceholder": "My Slack Bot",
         "displayNameRequired": "Display name is required.",
+        "historyMaxPagesHint": "Max conversations.history pages fetched per \"Load earlier messages\" ({min}–{max}, default {defaultValue}).",
+        "historyMaxPagesInvalid": "History pages must be a whole number between {min} and {max}.",
+        "historyMaxPagesLabel": "History pages per load",
         "oauthButton": "Connect via OAuth",
         "oauthButtonAria": "Connect via OAuth",
         "oauthClientIdMissing": "NEXT_PUBLIC_SLACK_CLIENT_ID is not set.",

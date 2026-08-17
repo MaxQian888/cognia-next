@@ -292,7 +292,7 @@ describe("MatrixE2EERuntime", () => {
       if (name === "connectors_matrix_crypto_decrypt_event") throw new Error("missing room key")
       return undefined
     })
-    const persist = jest
+    jest
       .spyOn(matrixPendingEvents, "persistMatrixPendingEncryptedEvent")
       .mockResolvedValueOnce({ ok: false, reason: "capacity" })
       .mockResolvedValueOnce({

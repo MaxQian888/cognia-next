@@ -172,6 +172,36 @@ describe("resolveEffectiveRouting — precedence", () => {
     })
   })
 
+  it("labels an assignment-written override as source 'assignment' (slice 1A)", () => {
+    const ruleHit = { ...HIT, action: { teamId: "team_rule", characterId: "char_rule" } }
+    // Team + character both written by setAssignee → both labelled assignment.
+    expect(
+      resolveEffectiveRouting(
+        { defaultTeamId: "team_inst" },
+        { teamId: "team_asg", characterId: "char_asg", routingSource: "assignment" } as never,
+        ruleHit
+      )
+    ).toMatchObject({
+      teamId: "team_asg",
+      teamSource: "assignment",
+      characterId: "char_asg",
+      characterSource: "assignment",
+    })
+    // The marker only relabels the OVERRIDE layer — a rule / instance value
+    // that wins keeps its own source even while the marker is set.
+    expect(
+      resolveEffectiveRouting(
+        { defaultTeamId: "team_inst" },
+        { characterId: "char_asg", routingSource: "assignment" } as never,
+        ruleHit
+      )
+    ).toMatchObject({ teamId: "team_rule", teamSource: "rule", characterSource: "assignment" })
+    // Without the marker the same row is a plain override.
+    expect(
+      resolveEffectiveRouting({}, { teamId: "team_over", characterId: "c" } as never, null)
+    ).toMatchObject({ teamSource: "override", characterSource: "override" })
+  })
+
   it("teamDisabled kills override, rule, and instance-default teams", () => {
     const ruleHit = { ...HIT, action: { teamId: "team_rule" } }
     const routing = resolveEffectiveRouting(

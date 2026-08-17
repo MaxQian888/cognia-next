@@ -6,7 +6,10 @@ import {
   serializeReactionRemoval,
   serializeFetchHistory,
   chunkDiscordContent,
+  discordNonce,
+  serializeOutboundAsync,
   DISCORD_MAX_CONTENT_LENGTH,
+  DISCORD_NONCE_MAX_LENGTH,
 } from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -26,6 +29,91 @@ function makeReq(
     ...extra,
   }
 }
+
+// ---------------------------------------------------------------------------
+// discordNonce — platform idempotency (ADR-0009)
+// ---------------------------------------------------------------------------
+
+describe("discordNonce", () => {
+  it("is deterministic for the same key + index and ≤25 chars", () => {
+    const a = discordNonce("job-abc", 0)
+    const b = discordNonce("job-abc", 0)
+    expect(a).toBe(b)
+    expect(a.length).toBeGreaterThan(0)
+    expect(a.length).toBeLessThanOrEqual(DISCORD_NONCE_MAX_LENGTH)
+    expect(a).toMatch(/^[0-9a-z]+$/)
+  })
+
+  it("differs per index and per key (numeric and string indexes)", () => {
+    expect(discordNonce("job-abc", 0)).not.toBe(discordNonce("job-abc", 1))
+    expect(discordNonce("job-abc", 0)).not.toBe(discordNonce("job-xyz", 0))
+    expect(discordNonce("job-abc", "media")).not.toBe(discordNonce("job-abc", "voice:0"))
+  })
+
+  it("stays under the cap even for very long keys", () => {
+    expect(discordNonce("k".repeat(500), 99).length).toBeLessThanOrEqual(DISCORD_NONCE_MAX_LENGTH)
+  })
+})
+
+describe("serializeOutbound — nonce stamping", () => {
+  it("stamps nonce + enforce_nonce on every message-create call, indexed per call", () => {
+    const calls = serializeOutbound(
+      makeReq([
+        { type: "text", text: "one" },
+        { type: "markdown", md: "two" },
+      ])
+    )
+    expect(calls).toHaveLength(2)
+    expect(calls[0].payload).toMatchObject({
+      nonce: discordNonce("test-key", 0),
+      enforce_nonce: true,
+    })
+    expect(calls[1].payload).toMatchObject({
+      nonce: discordNonce("test-key", 1),
+      enforce_nonce: true,
+    })
+    expect(calls[0].payload["nonce"]).not.toBe(calls[1].payload["nonce"])
+  })
+
+  it("re-serializing the same request reproduces identical nonces (retry-safe)", () => {
+    const req = makeReq([{ type: "text", text: "a".repeat(4500) }])
+    const first = serializeOutbound(req).map((c) => c.payload["nonce"])
+    const second = serializeOutbound(req).map((c) => c.payload["nonce"])
+    expect(first).toHaveLength(3)
+    expect(first).toEqual(second)
+    expect(new Set(first).size).toBe(3)
+  })
+
+  it("skips stamping when the request has no idempotency key", () => {
+    const calls = serializeOutbound(
+      makeReq([{ type: "text", text: "x" }], {
+        metadata: { idempotencyKey: "" },
+      })
+    )
+    expect(calls[0].payload).not.toHaveProperty("nonce")
+    expect(calls[0].payload).not.toHaveProperty("enforce_nonce")
+  })
+
+  it("async serializer stamps nonces on a2ui and plain calls alike", async () => {
+    const calls = await serializeOutboundAsync(
+      makeReq([
+        { type: "text", text: "hello" },
+        {
+          type: "a2ui",
+          surfaceId: "s1",
+          content: { root: "r", components: [] } as never,
+          plainTextMirror: "mirror",
+        },
+      ]),
+      "dc-1"
+    )
+    expect(calls.length).toBeGreaterThanOrEqual(2)
+    for (const [i, call] of calls.entries()) {
+      expect(call.payload["nonce"]).toBe(discordNonce("test-key", i))
+      expect(call.payload["enforce_nonce"]).toBe(true)
+    }
+  })
+})
 
 // ---------------------------------------------------------------------------
 // serializeOutbound

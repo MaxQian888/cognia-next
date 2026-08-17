@@ -17,6 +17,8 @@ import {
   removeLabel,
   setSlaDue,
   markResponded,
+  clearAssignmentRoutingMarker,
+  ASSIGNMENT_ROUTING_MARKER_CLEAR,
 } from "./conversation-overrides"
 import { listAssignmentEvents } from "./conversation-assignment-events"
 import { getDb } from "./schema"
@@ -345,6 +347,218 @@ describe("conversation-overrides — CRM (v83)", () => {
 
   it("markResponded is a no-op when no override row exists", async () => {
     await expect(markResponded("absent:key")).resolves.toBeUndefined()
+  })
+
+  it("markResponded and setStatus(resolved) reset the SLA escalation chain", async () => {
+    await upsertByConversationKey({
+      conversationKey: KEY,
+      sessionId: "s1",
+      nextResponseDueAt: 100,
+      escalatedStep: 1,
+      escalatedAt: 90,
+    })
+    await markResponded(KEY, 150)
+    let row = await readForResolution(KEY)
+    expect(row?.escalatedStep).toBeUndefined()
+    expect(row?.escalatedAt).toBeUndefined()
+
+    await upsertByConversationKey({
+      conversationKey: KEY,
+      sessionId: "s1",
+      escalatedStep: 0,
+      escalatedAt: 90,
+    })
+    await setStatus(KEY, "resolved", { sessionId: "s1" })
+    row = await readForResolution(KEY)
+    expect(row?.escalatedStep).toBeUndefined()
+    expect(row?.escalatedAt).toBeUndefined()
+    // Non-resolved transitions leave the chain alone.
+    await upsertByConversationKey({ conversationKey: KEY, sessionId: "s1", escalatedStep: 2 })
+    await setStatus(KEY, "pending", { sessionId: "s1" })
+    expect((await readForResolution(KEY))?.escalatedStep).toBe(2)
+  })
+
+  describe("assignment ↔ routing sync (slice 1A)", () => {
+    const AKEY = "telegram:adp_a:chat_assign"
+    const auditRows = () =>
+      getDb()
+        .connectorAudit.filter((r) => r.conversationKey === AKEY)
+        .toArray()
+
+    it("assigning a character writes characterId + marker, snapshots the previous routing, and audits", async () => {
+      await upsertByConversationKey({
+        conversationKey: AKEY,
+        sessionId: "s1",
+        characterId: "char-old",
+        teamDisabled: true,
+      })
+      await setAssignee(AKEY, { kind: "character", id: "char-new" }, { via: "manual" })
+      const row = await readForResolution(AKEY)
+      expect(row?.characterId).toBe("char-new")
+      expect(row?.characterDisabled).toBeUndefined()
+      expect(row?.routingSource).toBe("assignment")
+      expect(row?.assignmentPreviousRouting).toEqual({
+        characterId: "char-old",
+        teamDisabled: true,
+      })
+      const audits = await auditRows()
+      expect(audits).toHaveLength(1)
+      expect(audits[0]).toMatchObject({
+        adapterId: "adp_a",
+        kind: "override.config_changed",
+        fields: {
+          source: "assignment",
+          via: "manual",
+          changedKeys: ["assignmentPreviousRouting", "characterId", "routingSource"],
+        },
+      })
+      const trail = await listAssignmentEvents(AKEY)
+      expect(trail.at(-1)?.fields?.routing).toEqual({ kind: "character", characterId: "char-new" })
+    })
+
+    it("assigning a character clears the characterDisabled sentinel and restores it on unassign", async () => {
+      await upsertByConversationKey({
+        conversationKey: AKEY,
+        sessionId: "s1",
+        characterDisabled: true,
+      })
+      await setAssignee(AKEY, { kind: "character", id: "char-1" })
+      expect((await readForResolution(AKEY))?.characterDisabled).toBeUndefined()
+      await setAssignee(AKEY, null)
+      const row = await readForResolution(AKEY)
+      expect(row?.characterDisabled).toBe(true)
+      expect(row?.characterId).toBeUndefined()
+      expect(row?.routingSource).toBeUndefined()
+      expect(row?.assignmentPreviousRouting).toBeUndefined()
+    })
+
+    it("assigning a team writes teamId, clears teamDisabled, and character ⇄ team reassignment re-applies the snapshot", async () => {
+      await upsertByConversationKey({
+        conversationKey: AKEY,
+        sessionId: "s1",
+        teamDisabled: true,
+      })
+      await setAssignee(AKEY, { kind: "team", id: "team-1" })
+      let row = await readForResolution(AKEY)
+      expect(row?.teamId).toBe("team-1")
+      expect(row?.teamDisabled).toBeUndefined()
+      expect(row?.assignmentPreviousRouting).toEqual({ teamDisabled: true })
+
+      // Reassign to a character: the assignment-written teamId must NOT keep
+      // winning the routing — the snapshot is re-applied first.
+      await setAssignee(AKEY, { kind: "character", id: "char-2" })
+      row = await readForResolution(AKEY)
+      expect(row?.teamId).toBeUndefined()
+      expect(row?.teamDisabled).toBe(true)
+      expect(row?.characterId).toBe("char-2")
+      // Snapshot is taken once and preserved across reassignment.
+      expect(row?.assignmentPreviousRouting).toEqual({ teamDisabled: true })
+
+      await setAssignee(AKEY, null)
+      row = await readForResolution(AKEY)
+      expect(row?.characterId).toBeUndefined()
+      expect(row?.teamDisabled).toBe(true)
+      expect(row?.assignee).toBeUndefined()
+    })
+
+    it("assigning a human forces manual mode, records the previous mode, and unassign restores it", async () => {
+      await upsertByConversationKey({ conversationKey: AKEY, sessionId: "s1", mode: "auto" })
+      await setAssignee(AKEY, { kind: "human" }, { adapterId: "adp_explicit" })
+      let row = await readForResolution(AKEY)
+      expect(row?.mode).toBe("manual")
+      expect(row?.assignmentPreviousMode).toBe("auto")
+      const audits = await auditRows()
+      expect(audits[0]?.adapterId).toBe("adp_explicit")
+      expect(audits[0]?.fields?.changedKeys).toEqual(["assignmentPreviousMode", "mode"])
+      const trail = await listAssignmentEvents(AKEY)
+      expect(trail.at(-1)?.fields?.routing).toEqual({ kind: "manual-mode", mode: "manual" })
+
+      await setAssignee(AKEY, null)
+      row = await readForResolution(AKEY)
+      expect(row?.mode).toBe("auto")
+      expect(row?.assignmentPreviousMode).toBeUndefined()
+      const restored = (await listAssignmentEvents(AKEY)).at(-1)
+      expect(restored?.kind).toBe("unassigned")
+      expect(restored?.fields?.routing).toMatchObject({ kind: "restored", mode: "auto" })
+    })
+
+    it("human assignment on a row without an explicit mode records null and restores inherit", async () => {
+      await upsertByConversationKey({ conversationKey: AKEY, sessionId: "s1" })
+      await setAssignee(AKEY, { kind: "human" })
+      let row = await readForResolution(AKEY)
+      expect(row?.mode).toBe("manual")
+      expect(row?.assignmentPreviousMode).toBeNull()
+      // Reassigning to a character hands the mode back (AI target replies).
+      await setAssignee(AKEY, { kind: "character", id: "char-3" })
+      row = await readForResolution(AKEY)
+      expect(row?.mode).toBeUndefined()
+      expect(row?.assignmentPreviousMode).toBeUndefined()
+      expect(row?.characterId).toBe("char-3")
+      const trail = await listAssignmentEvents(AKEY)
+      expect(trail.at(-1)?.fields?.routing).toEqual({
+        kind: "character",
+        characterId: "char-3",
+        mode: null,
+      })
+    })
+
+    it("unassign after an explicit routing edit (marker cleared) does NOT restore the snapshot", async () => {
+      await upsertByConversationKey({
+        conversationKey: AKEY,
+        sessionId: "s1",
+        characterId: "char-old",
+      })
+      await setAssignee(AKEY, { kind: "character", id: "char-assigned" })
+      // Operator edits routing by hand → the form / command clears the marker.
+      await patchConversationOverride(AKEY, {
+        characterId: "char-manual",
+        ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
+      })
+      await setAssignee(AKEY, null)
+      const row = await readForResolution(AKEY)
+      expect(row?.characterId).toBe("char-manual")
+      expect(row?.assignee).toBeUndefined()
+      const trail = await listAssignmentEvents(AKEY)
+      expect(trail.at(-1)?.kind).toBe("unassigned")
+      expect(trail.at(-1)?.fields?.routing).toBeUndefined()
+    })
+
+    it("clearAssignmentRoutingMarker drops the marker but keeps the assignee (no-op without marker / row)", async () => {
+      await expect(clearAssignmentRoutingMarker("never:seen:key")).resolves.toBeUndefined()
+      await upsertByConversationKey({ conversationKey: AKEY, sessionId: "s1" })
+      const before = await readForResolution(AKEY)
+      await clearAssignmentRoutingMarker(AKEY)
+      expect((await readForResolution(AKEY))?.updatedAt).toBe(before?.updatedAt)
+
+      await setAssignee(AKEY, { kind: "human" })
+      await clearAssignmentRoutingMarker(AKEY)
+      const row = await readForResolution(AKEY)
+      expect(row?.assignee).toEqual({ kind: "human" })
+      expect(row?.mode).toBe("manual")
+      expect(row?.assignmentPreviousMode).toBeUndefined()
+      expect(row?.routingSource).toBeUndefined()
+    })
+
+    it("skips the audit row (but still syncs) when the adapter id cannot be resolved", async () => {
+      await upsertByConversationKey({ conversationKey: "opaque-key", sessionId: "s1" })
+      await setAssignee("opaque-key", { kind: "character", id: "char-9" })
+      const row = await readForResolution("opaque-key")
+      expect(row?.characterId).toBe("char-9")
+      expect(
+        await getDb()
+          .connectorAudit.filter((r) => r.conversationKey === "opaque-key")
+          .count()
+      ).toBe(0)
+    })
+
+    it("no routing/mode change → no audit row and no routing field on the trail", async () => {
+      await upsertByConversationKey({ conversationKey: AKEY, sessionId: "s1" })
+      await setAssignee(AKEY, null)
+      expect(await auditRows()).toHaveLength(0)
+      const trail = await listAssignmentEvents(AKEY)
+      expect(trail).toHaveLength(1)
+      expect(trail[0].fields?.routing).toBeUndefined()
+    })
   })
 
   describe("workspace (project) scoping", () => {

@@ -27,6 +27,12 @@ export interface VoiceUploadInput {
   waveform?: string
   /** Optional reply_to message id; threaded under it when present. */
   replyToMessageId?: string
+  /**
+   * Deterministic idempotency `nonce` (≤25 chars, see `discordNonce`); posted
+   * with `enforce_nonce: true` so a retried upload returns the original
+   * message instead of creating a duplicate.
+   */
+  nonce?: string
 }
 
 export interface VoiceUploadResult {
@@ -53,6 +59,7 @@ export async function sendDiscordVoiceMessage(input: VoiceUploadInput): Promise<
       },
     ],
     replyToMessageId: input.replyToMessageId,
+    nonce: input.nonce,
   })
   return { messageId }
 }

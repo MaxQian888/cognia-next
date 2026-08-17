@@ -1,4 +1,5 @@
-import { computeDueAt, isOverdue } from "./sla"
+import { computeDueAt, isOverdue, stampSlaDeadline } from "./sla"
+import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 
 // 2026-06-10T08:00:00Z baseline for deterministic math.
 const BASE = Date.UTC(2026, 5, 10, 8, 0, 0)
@@ -42,5 +43,89 @@ describe("isOverdue", () => {
   it("is false at exactly the due time and false once resolved", () => {
     expect(isOverdue({ nextResponseDueAt: BASE, status: "open" }, BASE)).toBe(false)
     expect(isOverdue({ nextResponseDueAt: BASE - 10_000, status: "resolved" }, BASE)).toBe(false)
+  })
+})
+
+describe("stampSlaDeadline (slice 1B)", () => {
+  const adapter = { defaultSlaResponseMinutes: 30 }
+  function harness(row?: Partial<ConversationOverrideRow>) {
+    const setSlaDue = jest.fn(async () => undefined)
+    const readOverride = jest.fn(async () => row as ConversationOverrideRow | undefined)
+    return { setSlaDue, readOverride }
+  }
+
+  it("uses the adapter default when the conversation has no SLA of its own", async () => {
+    const h = harness({ sessionId: "s" })
+    const wrote = await stampSlaDeadline(
+      { conversationKey: "k", sessionId: "s", adapter, now: 1_000 },
+      h
+    )
+    expect(wrote).toBe(true)
+    expect(h.setSlaDue).toHaveBeenCalledWith("k", { nextResponseDueAt: 1_000 + 30 * 60_000 }, "s")
+  })
+
+  it("prefers the conversation SLA over the adapter default", async () => {
+    const h = harness({ slaResponseMinutes: 5 })
+    await stampSlaDeadline({ conversationKey: "k", sessionId: "s", adapter, now: 0 }, h)
+    expect(h.setSlaDue).toHaveBeenCalledWith("k", { nextResponseDueAt: 5 * 60_000 }, "s")
+  })
+
+  it("is idempotent — never overwrites a pending deadline", async () => {
+    const h = harness({ nextResponseDueAt: 42 })
+    expect(
+      await stampSlaDeadline({ conversationKey: "k", sessionId: "s", adapter, now: 0 }, h)
+    ).toBe(false)
+    expect(h.setSlaDue).not.toHaveBeenCalled()
+  })
+
+  it("no-ops without any SLA target (absent row, no adapter default, or <= 0)", async () => {
+    const none = harness(undefined)
+    expect(
+      await stampSlaDeadline({ conversationKey: "k", sessionId: "s", adapter: {}, now: 0 }, none)
+    ).toBe(false)
+    const zero = harness(undefined)
+    expect(
+      await stampSlaDeadline(
+        { conversationKey: "k", sessionId: "s", adapter: { defaultSlaResponseMinutes: 0 }, now: 0 },
+        zero
+      )
+    ).toBe(false)
+    expect(none.setSlaDue).not.toHaveBeenCalled()
+    expect(zero.setSlaDue).not.toHaveBeenCalled()
+  })
+
+  it("applies the conversation quiet hours first, then the adapter window", async () => {
+    // 10:00 UTC + 30 min = 10:30, inside a 10:00–12:00 window → pushed to 12:00.
+    const at = Date.UTC(2026, 0, 1, 10, 0, 0)
+    const conv = harness({ quietHours: { from: "10:00", to: "12:00", tz: "UTC" } })
+    await stampSlaDeadline(
+      {
+        conversationKey: "k",
+        sessionId: "s",
+        adapter: { ...adapter, quietHours: { from: "00:00", to: "01:00", tz: "UTC" } },
+        now: at,
+      },
+      conv
+    )
+    expect(conv.setSlaDue).toHaveBeenCalledWith(
+      "k",
+      { nextResponseDueAt: Date.UTC(2026, 0, 1, 12, 0, 0) },
+      "s"
+    )
+    const adapterOnly = harness({})
+    await stampSlaDeadline(
+      {
+        conversationKey: "k",
+        sessionId: "s",
+        adapter: { ...adapter, quietHours: { from: "10:00", to: "11:00", tz: "UTC" } },
+        now: at,
+      },
+      adapterOnly
+    )
+    expect(adapterOnly.setSlaDue).toHaveBeenCalledWith(
+      "k",
+      { nextResponseDueAt: Date.UTC(2026, 0, 1, 11, 0, 0) },
+      "s"
+    )
   })
 })

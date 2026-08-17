@@ -180,7 +180,6 @@
     "lib/connectivity/lan-classify.ts",
     "lib/connectors/activity/diff-types.ts",
     "lib/connectors/adapters/onebot/transport.ts",
-    "lib/connectors/adapters/qq-official/transport-webhook.ts",
     "lib/connectors/quick-commands/index.ts",
     "lib/data-hooks/context.tsx",
     "lib/data-hooks/types.ts",

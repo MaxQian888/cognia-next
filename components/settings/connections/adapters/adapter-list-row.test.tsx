@@ -11,19 +11,24 @@ import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 // ---------------------------------------------------------------------------
 
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
-const mockDeleteAdapterInstance = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/adapter-instances", () => ({
   updateAdapterInstance: (...args: unknown[]) => mockUpdateAdapterInstance(...args),
-  deleteAdapterInstance: (...args: unknown[]) => mockDeleteAdapterInstance(...args),
 }))
 
-const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
-jest.mock("@/lib/connectors/tauri/commands", () => ({
-  connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
+// The row delegates removal (keyring purge → attachment prune → row delete)
+// to the shared `removeAdapterInstance` seam; its internals are covered by
+// lib/connectors/remove-adapter-instance.test.ts.
+const mockRemoveAdapterInstance = jest.fn().mockResolvedValue({
+  purgedCredentials: [],
+  failedCredentials: [],
+  prunedAttachments: 0,
+})
+jest.mock("@/lib/connectors/remove-adapter-instance", () => ({
+  removeAdapterInstance: (...args: unknown[]) => mockRemoveAdapterInstance(...args),
 }))
 
-const mockIsTauri = jest.fn().mockReturnValue(true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
 
 const mockHealth = { current: { state: "running" }, breaker: null, rateBucket: null }
 jest.mock("@/hooks/connectors/use-adapter-health", () => ({
@@ -68,7 +73,17 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
 jest.mock("@/components/ui/alert-dialog", () => ({
   AlertDialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
     open ? <div role="alertdialog">{children}</div> : null,
-  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogContent: ({
+    children,
+    onClick,
+  }: {
+    children: React.ReactNode
+    onClick?: (e: React.MouseEvent) => void
+  }) => (
+    <div data-testid="alert-dialog-content" onClick={onClick}>
+      {children}
+    </div>
+  ),
   AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -127,7 +142,6 @@ function renderRow(overrides: Partial<AdapterInstanceRow> = {}, pendingCount = 0
 beforeEach(() => {
   jest.clearAllMocks()
   selectedAdapterId = null
-  mockIsTauri.mockReturnValue(true)
   mockHealth.current = { state: "running" }
   mockHealth.breaker = null
   mockHealth.rateBucket = null
@@ -181,27 +195,23 @@ describe("AdapterListRow", () => {
     expect(mockSetActiveTab).toHaveBeenCalledWith("config")
   })
 
-  it("removes the adapter: clears keyring secrets then deletes the row", async () => {
+  it("removes the adapter through the shared removal seam with the full row", async () => {
     selectedAdapterId = "tg-1"
     renderRow()
     fireEvent.click(screen.getByText("Remove"))
     // Confirm button inside the alert dialog
     const confirm = screen.getAllByText("Remove").at(-1)!
     fireEvent.click(confirm)
-    await waitFor(() => expect(mockDeleteAdapterInstance).toHaveBeenCalledWith("tg-1"))
-    expect(mockKeyringDelete).toHaveBeenCalledWith("tg-1", "botToken")
-    expect(mockKeyringDelete).toHaveBeenCalledWith("tg-1", "extra")
+    await waitFor(() =>
+      expect(mockRemoveAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "tg-1",
+          credentialsRef: expect.objectContaining({ accounts: ["botToken", "extra"] }),
+        })
+      )
+    )
     // Was the selected row → selection cleared
     expect(mockSetSelected).toHaveBeenCalledWith(null)
-  })
-
-  it("skips keyring cleanup off-desktop but still deletes", async () => {
-    mockIsTauri.mockReturnValue(false)
-    renderRow()
-    fireEvent.click(screen.getByText("Remove"))
-    fireEvent.click(screen.getAllByText("Remove").at(-1)!)
-    await waitFor(() => expect(mockDeleteAdapterInstance).toHaveBeenCalledWith("tg-1"))
-    expect(mockKeyringDelete).not.toHaveBeenCalled()
   })
 
   it("does not clear selection on remove when a different row was selected", async () => {
@@ -209,7 +219,7 @@ describe("AdapterListRow", () => {
     renderRow()
     fireEvent.click(screen.getByText("Remove"))
     fireEvent.click(screen.getAllByText("Remove").at(-1)!)
-    await waitFor(() => expect(mockDeleteAdapterInstance).toHaveBeenCalled())
+    await waitFor(() => expect(mockRemoveAdapterInstance).toHaveBeenCalled())
     expect(mockSetSelected).not.toHaveBeenCalledWith(null)
   })
 
@@ -250,6 +260,23 @@ describe("AdapterListRow", () => {
     expect(badge.textContent).toMatch(/3/)
   })
 
+  it("tints the pending chip for the selected row", () => {
+    selectedAdapterId = "tg-1"
+    renderRow({}, 2)
+    expect(screen.getByTestId("adapter-pending-tg-1").className).toContain(
+      "text-primary-foreground"
+    )
+  })
+
+  it("stops clicks inside the remove dialog from bubbling to the row", () => {
+    renderRow()
+    fireEvent.click(screen.getByText("Remove"))
+    mockSetSelected.mockClear()
+    fireEvent.click(screen.getByTestId("alert-dialog-content"))
+    // A bubbling click would have re-selected the row via the outer button.
+    expect(mockSetSelected).not.toHaveBeenCalled()
+  })
+
   it("hides the pending chip when count is zero", () => {
     renderRow({}, 0)
     expect(screen.queryByTestId("adapter-pending-tg-1")).not.toBeInTheDocument()
@@ -276,12 +303,22 @@ describe("AdapterListRow", () => {
     expect(onAfterSelect).toHaveBeenCalled()
   })
 
-  it("swallows keyring delete failures and still deletes the row", async () => {
-    mockKeyringDelete.mockRejectedValueOnce(new Error("already gone"))
+  it("stringifies a non-Error removal rejection into the toast", async () => {
+    mockRemoveAdapterInstance.mockRejectedValueOnce("nope")
+    renderRow()
+    fireEvent.click(screen.getByText("Remove"))
+    fireEvent.click(screen.getAllByText("Remove").at(-1)!)
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("nope"))
+  })
+
+  it("re-enables the dialog when the removal seam rejects (row stays visible)", async () => {
+    mockRemoveAdapterInstance.mockRejectedValueOnce(new Error("db closed"))
     selectedAdapterId = "tg-1"
     renderRow()
     fireEvent.click(screen.getByText("Remove"))
     fireEvent.click(screen.getAllByText("Remove").at(-1)!)
-    await waitFor(() => expect(mockDeleteAdapterInstance).toHaveBeenCalledWith("tg-1"))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("db closed"))
+    // Selection must not be cleared when the delete did not happen.
+    expect(mockSetSelected).not.toHaveBeenCalledWith(null)
   })
 })

@@ -850,11 +850,22 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     //   2. A sibling row with the same idempotencyKey already delivered
     //      (indexed lookup): serve this row from that evidence, exactly
     //      like an LRU hit.
-    // GAP: neither closes the crash window between a successful
-    // `adapter.send()` and `markSent` — the ack died with the runner, so no
-    // local evidence exists and a retry duplicates. Fully closing it needs
-    // platform-side idempotency keys (e.g. Lark message create `uuid`)
-    // passed through the adapters; adapters are intentionally untouched here.
+    // Neither closes the crash window between a successful `adapter.send()`
+    // and `markSent` (the ack died with the runner, so no local evidence
+    // exists). That window is closed PLATFORM-SIDE by the idempotency
+    // contract declared in `ambiguousDelivery` (types/connectors/
+    // runtime-capability.ts):
+    //   - `remote_idempotent` — the adapter forwards `idempotencyKey` as the
+    //     platform's per-message token, so a retry returns the ORIGINAL
+    //     message instead of a duplicate: Lark message-create `uuid`,
+    //     Matrix `PUT …/send/{type}/{txnId}`, Discord `nonce` +
+    //     `enforce_nonce: true` (`discordNonce`, one per chunk / lane).
+    //   - `reconciliation_required` — no such token (Slack, Telegram, OneBot,
+    //     WeCom, WeChat, DingTalk, QQ): a retry after a lost ack MAY
+    //     duplicate; the audit trail + `delivery_unknown` status are what the
+    //     operator reconciles against. QQ is a special case — its passive
+    //     `msg_seq` is derived from the key, so the retry is REJECTED by the
+    //     platform (dead-lettered `platform_4xx`) rather than delivered twice.
     const rowEvidence =
       job.platformMessageId ??
       (await findDeliveredByIdempotencyKey(idempotencyKey, job.id).catch(() => undefined))

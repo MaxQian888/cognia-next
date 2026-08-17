@@ -3,8 +3,19 @@ import type { MessageSegment } from "@/types/connectors/segment"
 import {
   __resetQQMsgSeqForTesting,
   buildQQContent,
+  decodeQQMessageId,
+  encodeQQMessageId,
+  parseQQEmojiType,
+  QQ_MAX_PASSIVE_REPLIES,
   QQ_PASSIVE_WINDOW_MS,
+  QQ_TYPING_INPUT_SECONDS,
+  qqPassiveMsgSeq,
+  qqPassiveReplyCount,
+  registerQQPassiveReply,
+  serializeDelete,
   serializeOutbound,
+  serializeReaction,
+  serializeTyping,
 } from "./serialize"
 import type { QQScene } from "./parse"
 
@@ -54,7 +65,7 @@ describe("serializeOutbound", () => {
     const call = serializeOutbound(req("group", "GO", HI, {}, "m1"))
     expect(call).toEqual({
       path: "/v2/groups/GO/messages",
-      payload: { content: "hi", msg_type: 0, msg_id: "m1", msg_seq: 1 },
+      payload: { content: "hi", msg_type: 0, msg_id: "m1", msg_seq: qqPassiveMsgSeq("k") },
     })
   })
 
@@ -62,7 +73,7 @@ describe("serializeOutbound", () => {
     const call = serializeOutbound(req("c2c", "UO", HI, {}, "m2"))
     expect(call?.path).toBe("/v2/users/UO/messages")
     expect(call?.payload.msg_type).toBe(0)
-    expect(call?.payload.msg_seq).toBe(1)
+    expect(call?.payload.msg_seq).toBe(qqPassiveMsgSeq("k"))
   })
 
   it("addresses a channel message without msg_type or msg_seq", () => {
@@ -90,55 +101,101 @@ describe("serializeOutbound", () => {
   })
 })
 
+describe("qqPassiveMsgSeq", () => {
+  it("is deterministic, positive and inside the 16-bit range", () => {
+    const seq = qqPassiveMsgSeq("job-1")
+    expect(seq).toBe(qqPassiveMsgSeq("job-1"))
+    expect(Number.isInteger(seq)).toBe(true)
+    expect(seq).toBeGreaterThanOrEqual(1)
+    expect(seq).toBeLessThanOrEqual(65535)
+    expect(qqPassiveMsgSeq("job-1")).not.toBe(qqPassiveMsgSeq("job-2"))
+  })
+})
+
 describe("serializeOutbound — msg_seq", () => {
-  it("increments msg_seq for consecutive replies to the same msg_id", () => {
-    const first = serializeOutbound(req("group", "GO", HI, {}, "m1"))
-    const second = serializeOutbound(req("group", "GO", HI, {}, "m1"))
-    const third = serializeOutbound(req("group", "GO", HI, {}, "m1"))
-    expect(first?.payload.msg_seq).toBe(1)
-    expect(second?.payload.msg_seq).toBe(2)
-    expect(third?.payload.msg_seq).toBe(3)
+  const withKey = (key: string, msgId = "m1", scene: QQScene = "group", sceneId = "GO") =>
+    req(scene, sceneId, HI, { metadata: { idempotencyKey: key } }, msgId)
+
+  it("derives msg_seq from the idempotency key so distinct replies get distinct seqs", () => {
+    const first = serializeOutbound(withKey("job-a"))
+    const second = serializeOutbound(withKey("job-b"))
+    const third = serializeOutbound(withKey("job-c"))
+    expect(first?.payload.msg_seq).toBe(qqPassiveMsgSeq("job-a"))
+    expect(second?.payload.msg_seq).toBe(qqPassiveMsgSeq("job-b"))
+    expect(third?.payload.msg_seq).toBe(qqPassiveMsgSeq("job-c"))
+    expect(new Set([first, second, third].map((c) => c?.payload.msg_seq)).size).toBe(3)
   })
 
-  it("keeps independent counters per msg_id", () => {
-    serializeOutbound(req("group", "GO", HI, {}, "m1"))
-    serializeOutbound(req("group", "GO", HI, {}, "m1"))
-    const other = serializeOutbound(req("c2c", "UO", HI, {}, "m2"))
-    expect(other?.payload.msg_seq).toBe(1)
+  it("a retry (same idempotency key) re-sends the same msg_id + msg_seq pair", () => {
+    const first = serializeOutbound(withKey("job-a"))
+    const retry = serializeOutbound(withKey("job-a"))
+    expect(retry?.payload).toEqual(first?.payload)
+    expect(qqPassiveReplyCount("m1")).toBe(1)
   })
 
-  it("drops msg_id past the 5-reply cap so the send degrades to proactive", () => {
-    for (let i = 1; i <= 5; i++) {
-      const call = serializeOutbound(req("group", "GO", HI, {}, "m1"))
-      expect(call?.payload.msg_seq).toBe(i)
+  it("keeps independent reply counts per msg_id", () => {
+    serializeOutbound(withKey("job-a", "m1"))
+    serializeOutbound(withKey("job-b", "m1"))
+    const other = serializeOutbound(withKey("job-c", "m2", "c2c", "UO"))
+    expect(other?.payload.msg_seq).toBe(qqPassiveMsgSeq("job-c"))
+    expect(qqPassiveReplyCount("m1")).toBe(2)
+    expect(qqPassiveReplyCount("m2")).toBe(1)
+  })
+
+  it("drops msg_id past the 5 distinct-reply cap so the send degrades to proactive", () => {
+    for (let i = 1; i <= QQ_MAX_PASSIVE_REPLIES; i++) {
+      const call = serializeOutbound(withKey(`job-${i}`))
+      expect(call?.payload.msg_seq).toBe(qqPassiveMsgSeq(`job-${i}`))
     }
-    const sixth = serializeOutbound(req("group", "GO", HI, {}, "m1"))
+    const sixth = serializeOutbound(withKey("job-6"))
     expect(sixth?.payload).not.toHaveProperty("msg_id")
     expect(sixth?.payload).not.toHaveProperty("msg_seq")
     expect(sixth?.payload.content).toBe("hi")
+    // The rejected job does not consume a slot; a retry of an earlier job still passes.
+    expect(qqPassiveReplyCount("m1")).toBe(QQ_MAX_PASSIVE_REPLIES)
+    expect(serializeOutbound(withKey("job-1"))?.payload.msg_seq).toBe(qqPassiveMsgSeq("job-1"))
   })
 
-  it("evicts the oldest counters when the bounded map overflows", () => {
-    serializeOutbound(req("group", "GO", HI, {}, "evict-me"))
+  it("falls back to a per-send synthetic key when the request has no idempotency key", () => {
+    const first = serializeOutbound(withKey("", "m1"))
+    const second = serializeOutbound(withKey("", "m1"))
+    expect(first?.payload.msg_id).toBe("m1")
+    expect(second?.payload.msg_id).toBe("m1")
+    expect(first?.payload.msg_seq).not.toBe(second?.payload.msg_seq)
+    expect(qqPassiveReplyCount("m1")).toBe(2)
+  })
+
+  it("evicts the oldest msg_ids when the bounded map overflows", () => {
+    serializeOutbound(withKey("job-a", "evict-me"))
     // Push 300 other msg_ids through — "evict-me" falls off the front.
     for (let i = 0; i < 300; i++) {
-      serializeOutbound(req("group", "GO", HI, {}, `other-${i}`))
+      serializeOutbound(withKey(`job-${i}`, `other-${i}`))
     }
-    const again = serializeOutbound(req("group", "GO", HI, {}, "evict-me"))
-    expect(again?.payload.msg_seq).toBe(1)
+    expect(qqPassiveReplyCount("evict-me")).toBe(0)
+    serializeOutbound(withKey("job-z", "evict-me"))
+    expect(qqPassiveReplyCount("evict-me")).toBe(1)
   })
 
   it("refreshes recency on reuse so hot msg_ids survive eviction", () => {
-    serializeOutbound(req("group", "GO", HI, {}, "hot"))
+    serializeOutbound(withKey("job-a", "hot"))
     for (let i = 0; i < 299; i++) {
-      serializeOutbound(req("group", "GO", HI, {}, `filler-${i}`))
+      serializeOutbound(withKey(`job-${i}`, `filler-${i}`))
     }
     // Touch "hot" again — moves it to the back of the eviction queue.
-    expect(serializeOutbound(req("group", "GO", HI, {}, "hot"))?.payload.msg_seq).toBe(2)
+    serializeOutbound(withKey("job-b", "hot"))
+    expect(qqPassiveReplyCount("hot")).toBe(2)
     for (let i = 0; i < 200; i++) {
-      serializeOutbound(req("group", "GO", HI, {}, `filler2-${i}`))
+      serializeOutbound(withKey(`job2-${i}`, `filler2-${i}`))
     }
-    expect(serializeOutbound(req("group", "GO", HI, {}, "hot"))?.payload.msg_seq).toBe(3)
+    serializeOutbound(withKey("job-c", "hot"))
+    expect(qqPassiveReplyCount("hot")).toBe(3)
+  })
+
+  it("registerQQPassiveReply is idempotent per key and counts distinct keys", () => {
+    expect(registerQQPassiveReply("mx", "k1")).toBe(1)
+    expect(registerQQPassiveReply("mx", "k1")).toBe(1)
+    expect(registerQQPassiveReply("mx", "k2")).toBe(2)
+    expect(qqPassiveReplyCount("mx")).toBe(2)
   })
 })
 
@@ -183,5 +240,88 @@ describe("serializeOutbound — passive window expiry", () => {
   it("treats refs without receivedAt as fresh (pre-existing rows)", () => {
     const call = serializeOutbound(req("group", "GO", HI, {}, "m1"))
     expect(call?.payload.msg_id).toBe("m1")
+  })
+})
+
+describe("encodeQQMessageId / decodeQQMessageId", () => {
+  it("round-trips every scene", () => {
+    for (const scene of ["group", "c2c", "channel", "direct"] as const) {
+      const id = encodeQQMessageId(scene, "S:1", "MSG")
+      expect(id).toBe(`${scene}:S:1:MSG`)
+      expect(decodeQQMessageId(id)).toEqual({ scene, sceneId: "S", id: "1:MSG" })
+    }
+    expect(decodeQQMessageId("channel:CH:m9")).toEqual({
+      scene: "channel",
+      sceneId: "CH",
+      id: "m9",
+    })
+  })
+
+  it("returns null for bare ids, unknown scenes and truncated composites", () => {
+    expect(decodeQQMessageId("m9")).toBeNull()
+    expect(decodeQQMessageId("guild:CH:m9")).toBeNull()
+    expect(decodeQQMessageId("group:GO")).toBeNull()
+    expect(decodeQQMessageId("group:GO:")).toBeNull()
+    expect(decodeQQMessageId(":GO:m")).toBeNull()
+    expect(decodeQQMessageId("group::m")).toBeNull()
+  })
+})
+
+describe("serializeDelete", () => {
+  it("maps each scene to its recall endpoint (hidetip=false on guild scenes)", () => {
+    expect(serializeDelete({ scene: "group", sceneId: "GO", id: "m1" })).toEqual({
+      method: "DELETE",
+      path: "/v2/groups/GO/messages/m1",
+    })
+    expect(serializeDelete({ scene: "c2c", sceneId: "UO", id: "m1" }).path).toBe(
+      "/v2/users/UO/messages/m1"
+    )
+    expect(serializeDelete({ scene: "channel", sceneId: "CH", id: "m1" }).path).toBe(
+      "/channels/CH/messages/m1?hidetip=false"
+    )
+    expect(serializeDelete({ scene: "direct", sceneId: "G", id: "m1" }).path).toBe(
+      "/dms/G/messages/m1?hidetip=false"
+    )
+  })
+
+  it("URL-encodes ids", () => {
+    expect(serializeDelete({ scene: "group", sceneId: "a/b", id: "c d" }).path).toBe(
+      "/v2/groups/a%2Fb/messages/c%20d"
+    )
+  })
+})
+
+describe("serializeReaction / parseQQEmojiType", () => {
+  it("builds PUT for add and DELETE for remove on the channel reaction path", () => {
+    expect(serializeReaction("CH", "m1", "1:4", "add")).toEqual({
+      method: "PUT",
+      path: "/channels/CH/messages/m1/reactions/1/4",
+    })
+    expect(serializeReaction("CH", "m1", "2:128512", "remove")).toEqual({
+      method: "DELETE",
+      path: "/channels/CH/messages/m1/reactions/2/128512",
+    })
+  })
+
+  it("rejects emoji types that are not <type>:<id>", () => {
+    expect(() => parseQQEmojiType("👍")).toThrow(/<type>:<id>/)
+    expect(() => parseQQEmojiType(":4")).toThrow(/<type>:<id>/)
+    expect(() => parseQQEmojiType("1:")).toThrow(/<type>:<id>/)
+    expect(parseQQEmojiType("1:4")).toEqual({ type: "1", id: "4" })
+  })
+})
+
+describe("serializeTyping", () => {
+  it("builds the c2c input_notify passive reply", () => {
+    expect(serializeTyping("UO", "in-1", 77)).toEqual({
+      method: "POST",
+      path: "/v2/users/UO/messages",
+      payload: {
+        msg_type: 6,
+        input_notify: { input_type: 1, input_second: QQ_TYPING_INPUT_SECONDS },
+        msg_id: "in-1",
+        msg_seq: 77,
+      },
+    })
   })
 })

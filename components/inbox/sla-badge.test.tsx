@@ -32,6 +32,23 @@ describe("SlaBadge", () => {
     expect(screen.getByTestId("sla-badge")).toHaveTextContent(/Overdue/i)
   })
 
+  it("suffixes the escalation level when the chain has fired (slice 1B)", () => {
+    render(<SlaBadge status="open" nextResponseDueAt={Date.now() - HOUR} escalatedStep={1} />)
+    const badge = screen.getByTestId("sla-badge")
+    expect(badge).toHaveTextContent(/Overdue/i)
+    expect(screen.getByTestId("sla-badge-escalation")).toHaveTextContent("· L2")
+    expect(badge.getAttribute("aria-label")).toMatch(/escalation level 2/)
+  })
+
+  it("omits the escalation suffix when no step has fired or the value is invalid", () => {
+    const { rerender } = render(<SlaBadge status="open" nextResponseDueAt={Date.now() + HOUR} />)
+    expect(screen.queryByTestId("sla-badge-escalation")).not.toBeInTheDocument()
+    rerender(<SlaBadge status="open" nextResponseDueAt={Date.now() + HOUR} escalatedStep={-1} />)
+    expect(screen.queryByTestId("sla-badge-escalation")).not.toBeInTheDocument()
+    rerender(<SlaBadge status="open" nextResponseDueAt={Date.now() + HOUR} escalatedStep={0} />)
+    expect(screen.getByTestId("sla-badge-escalation")).toHaveTextContent("· L1")
+  })
+
   it("humanizes a sub-minute deadline in seconds", () => {
     render(<SlaBadge status="open" nextResponseDueAt={Date.now() + 10_000} />)
     expect(screen.getByTestId("sla-badge")).toHaveTextContent(/\d+s/)

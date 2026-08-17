@@ -15,6 +15,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { InboxIcon, MoreVerticalIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,10 +38,9 @@ import {
 } from "@/components/ui/alert-dialog"
 
 import { cn } from "@/lib/utils"
-import { isTauri } from "@/lib/tauri"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
-import { deleteAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsKeyringDelete } from "@/lib/connectors/tauri/commands"
+import { updateAdapterInstance } from "@/lib/db/adapter-instances"
+import { removeAdapterInstance } from "@/lib/connectors/remove-adapter-instance"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 import { getAdapterTransportLabelKey, getPlatformMeta } from "./platform-meta"
@@ -98,22 +98,16 @@ export function AdapterListRow({
   const onConfirmRemove = async () => {
     setRemoving(true)
     try {
-      // `deleteAdapterInstance` removes the row + heartbeats but NOT the
-      // keyring secrets — clear those here so credentials don't outlive the
-      // adapter. Desktop-only (keyring is a Tauri command); best-effort so a
-      // single failed credential never blocks the delete.
-      if (isTauri()) {
-        for (const account of row.credentialsRef.accounts) {
-          try {
-            await connectorsKeyringDelete(row.id, account)
-          } catch {
-            // ignore — credential may already be gone
-          }
-        }
-      }
-      await deleteAdapterInstance(row.id)
+      // Shared removal path: keyring purge (desktop, best-effort) → attachment
+      // cache prune (best-effort) → row + heartbeat delete. Same seam the
+      // plugin API's `deleteInstance` uses, so the two can't drift.
+      await removeAdapterInstance(row)
       if (selected) setSelectedAdapterId(null)
       setRemoveOpen(false)
+    } catch (err) {
+      // Row delete failed — the adapter is still listed, so keep the
+      // selection and surface the reason instead of an unhandled rejection.
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setRemoving(false)
     }

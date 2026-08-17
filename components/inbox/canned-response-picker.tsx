@@ -27,7 +27,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { usePromptInputController } from "@/components/ai-elements/prompt-input"
 import { useCannedResponses } from "@/hooks/connectors/use-canned-responses"
 import { incrementUsage } from "@/lib/db/canned-responses"
-import { interpolate, type CannedContext } from "@/lib/connectors/canned-interpolate"
+import {
+  CANNED_VARIABLES,
+  interpolate,
+  type CannedContext,
+} from "@/lib/connectors/canned-interpolate"
 
 export interface CannedResponsePickerProps {
   conversationKey: string
@@ -50,15 +54,30 @@ export function CannedResponsePicker({ context }: CannedResponsePickerProps) {
       )
     : canned
 
-  const pick = (id: string, body: string) => {
-    const text = interpolate(body, context)
+  /** Append `text` to the composer draft with a single-space separator. */
+  const insertText = (text: string) => {
     const cur = controller.textInput.value
     const sep = cur && !cur.endsWith(" ") ? " " : ""
     controller.textInput.setInput(cur ? cur + sep + text : text)
-    void incrementUsage(id)
     setOpen(false)
     setQuery("")
   }
+
+  const pick = (id: string, body: string) => {
+    insertText(interpolate(body, context))
+    void incrementUsage(id)
+  }
+
+  // Variable chips: each `{{token}}` from CANNED_VARIABLES resolved against the
+  // live conversation context. Clicking inserts the *resolved value* (never
+  // the raw token — nothing downstream of the composer interpolates, so a
+  // literal `{{contact.name}}` would reach the recipient). Tokens with no
+  // value in this conversation render disabled rather than inserting "".
+  const variables = CANNED_VARIABLES.map((name) => ({
+    name,
+    token: `{{${name}}}`,
+    value: interpolate(`{{${name}}}`, context),
+  }))
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -100,6 +119,30 @@ export function CannedResponsePicker({ context }: CannedResponsePickerProps) {
               ))}
             </CommandGroup>
           </CommandList>
+          <div className="border-t px-2 py-1.5" data-testid="canned-response-variables">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t("variablesHint")}
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {variables.map(({ name, token, value }) => {
+                const unavailable = value.length === 0
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    disabled={unavailable}
+                    onClick={() => insertText(value)}
+                    aria-label={t("insertVariableAria", { name: token })}
+                    title={unavailable ? t("variableUnavailable", { name: token }) : value}
+                    data-testid={`canned-variable-${name}`}
+                    className="rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <code>{token}</code>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           <div className="border-t p-2">
             <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
               <a href="/settings?section=connections&connectionsTab=assets">{t("manage")}</a>

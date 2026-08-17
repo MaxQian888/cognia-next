@@ -7,6 +7,8 @@
 
 import type { ConversationOverrideRow } from "./connector-types"
 import type { AssignmentEventKind } from "./crm-types"
+import type { ConnectorMode } from "@/types/connectors/policy"
+import { parseConversationKey } from "@/types/connectors/event"
 import { getDb } from "./schema"
 import { appendAssignmentEvent } from "./conversation-assignment-events"
 import { resolveSessionProjectId } from "./project-scope"
@@ -119,7 +121,17 @@ export async function patchConversationOverride(
 
 export type ConversationConfigSection = "behavior" | "responder" | "permissions" | "delivery"
 
-export type ConversationConfigSource = "inbox" | "inbox.override.editor" | "mobile" | "command"
+export type ConversationConfigSource =
+  | "inbox"
+  | "inbox.override.editor"
+  | "mobile"
+  | "command"
+  /** In-chat control command (`/mode`, `/character`, `/team`, …) — `command.<name>`. */
+  | `command.${string}`
+  /** `setAssignee` synced routing / mode from an assignment (slice 1A). */
+  | "assignment"
+  /** The SLA escalation sweep applied a `switchMode` step (slice 1B). */
+  | "sla-escalation"
 
 /**
  * Persist one conversation configuration section and its audit entry in the
@@ -218,6 +230,9 @@ export async function setStatus(
   await db.conversationOverrides.update(row.id, {
     status,
     snoozeUntil: status === "snoozed" ? opts.snoozeUntil : undefined,
+    // Resolving closes the SLA breach window: the escalation chain restarts
+    // from step 0 if the conversation later reopens and goes overdue again.
+    ...(status === "resolved" ? { escalatedStep: undefined, escalatedAt: undefined } : {}),
     updatedAt: Date.now(),
   })
   if (fromStatus !== status) {
@@ -259,30 +274,249 @@ export async function wakeSnoozedConversations(now: number = Date.now()): Promis
 
 export interface SetAssigneeOptions {
   sessionId?: string
-  /** Free-form provenance (e.g. "manual", "auto-route") recorded on the trail. */
+  /** Free-form provenance (e.g. "manual", "auto-route", "sla-escalation") recorded on the trail. */
   via?: string
+  /**
+   * Bus-level adapter id for the `override.config_changed` audit row. Falls
+   * back to `parseConversationKey(conversationKey).adapterId`; when neither
+   * resolves the routing sync still happens but no audit row is written.
+   */
+  adapterId?: string
 }
 
-/** Set or clear the assignee; emits assigned / reassigned / unassigned. */
+/**
+ * How `setAssignee` synced routing for one assignment transition — recorded
+ * on the assignment-trail event as `fields.routing` (slice 1A) so the inbox
+ * activity log can say "routing synced" next to Assigned / Unassigned.
+ */
+export interface AssignmentRoutingSync {
+  kind: "character" | "team" | "manual-mode" | "restored"
+  characterId?: string
+  teamId?: string
+  mode?: ConnectorMode | null
+}
+
+type AssignmentRoutingSnapshot = NonNullable<ConversationOverrideRow["assignmentPreviousRouting"]>
+
+const ROUTING_SNAPSHOT_KEYS = [
+  "characterId",
+  "characterDisabled",
+  "teamId",
+  "teamDisabled",
+  "workflowDisabled",
+] as const satisfies readonly (keyof AssignmentRoutingSnapshot)[]
+
+/**
+ * Patch fragment that drops the assignment ↔ routing marker (slice 1A).
+ * Spread into an explicit routing edit (`/character`, `/team`, `/mode`, the
+ * override form) so a later unassign no longer restores the pre-assignment
+ * routing the operator has since overridden by hand.
+ */
+export const ASSIGNMENT_ROUTING_MARKER_CLEAR: Pick<
+  ConversationOverrideRow,
+  "routingSource" | "assignmentPreviousMode" | "assignmentPreviousRouting"
+> = {
+  routingSource: undefined,
+  assignmentPreviousMode: undefined,
+  assignmentPreviousRouting: undefined,
+}
+
+/**
+ * Clear the assignment ↔ routing marker on a conversation (no-op without a
+ * row). The assignee itself is untouched — the operator keeps the assignment
+ * but has taken over routing explicitly, so unassign will only clear the
+ * assignee from now on.
+ */
+export async function clearAssignmentRoutingMarker(conversationKey: string): Promise<void> {
+  const row = await readForResolution(conversationKey)
+  if (!row) return
+  if (
+    row.routingSource === undefined &&
+    row.assignmentPreviousMode === undefined &&
+    row.assignmentPreviousRouting === undefined
+  ) {
+    return
+  }
+  await getDb().conversationOverrides.update(row.id, {
+    ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
+    updatedAt: Date.now(),
+  })
+}
+
+function snapshotRouting(row: ConversationOverrideRow): AssignmentRoutingSnapshot {
+  const snap: AssignmentRoutingSnapshot = {}
+  for (const key of ROUTING_SNAPSHOT_KEYS) {
+    if (row[key] !== undefined) (snap as Record<string, unknown>)[key] = row[key]
+  }
+  return snap
+}
+
+function resolveAuditAdapterId(conversationKey: string, explicit?: string): string | undefined {
+  if (explicit) return explicit
+  try {
+    return parseConversationKey(conversationKey).adapterId
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Set or clear the assignee; emits assigned / reassigned / unassigned.
+ *
+ * Assignment ↔ routing sync (slice 1A) — inside ONE transaction over
+ * `conversationOverrides` + `connectorAudit` + `conversationAssignmentEvents`:
+ *   - character → `characterId` written, `characterDisabled` sentinel cleared,
+ *     `routingSource = "assignment"`; the previous routing fields are
+ *     snapshotted ONCE (`assignmentPreviousRouting`) the first time an
+ *     assignment writes routing. A later character ⇄ team reassignment
+ *     re-applies the snapshot before writing the new target so a stale
+ *     `teamId` cannot keep winning over the newly assigned character.
+ *   - team → same with `teamId` / `teamDisabled`.
+ *   - human → `assignmentPreviousMode = row.mode ?? null`, `mode = "manual"`
+ *     (the AI stops auto-replying; routing fields are left alone).
+ *   - null (unassign) → while `routingSource === "assignment"` the snapshot is
+ *     restored and the marker dropped; while `assignmentPreviousMode` is set
+ *     the mode is restored. After `clearAssignmentRoutingMarker` (explicit
+ *     routing edit) unassign only clears the assignee.
+ * Every routing/mode write is audited as `override.config_changed` with
+ * `fields.source = "assignment"` + `changedKeys`; the trail event carries
+ * `fields.routing` describing the sync.
+ */
 export async function setAssignee(
   conversationKey: string,
   assignee: ConversationAssignee | null,
   opts: SetAssigneeOptions = {}
 ): Promise<void> {
   const db = getDb()
-  const row = await ensureRow(conversationKey, opts.sessionId)
-  const had = row.assignee
-  await db.conversationOverrides.update(row.id, {
-    assignee: assignee ?? undefined,
-    assigneeKind: assignee?.kind,
-    updatedAt: Date.now(),
-  })
-  const kind: AssignmentEventKind = !assignee ? "unassigned" : had ? "reassigned" : "assigned"
-  await appendAssignmentEvent({
-    conversationKey,
-    kind,
-    fields: { from: had ?? null, to: assignee ?? null, via: opts.via },
-  })
+  const ensured = await ensureRow(conversationKey, opts.sessionId)
+  const adapterId = resolveAuditAdapterId(conversationKey, opts.adapterId)
+  const now = Date.now()
+
+  await db.transaction(
+    "rw",
+    [db.conversationOverrides, db.connectorAudit, db.conversationAssignmentEvents],
+    async () => {
+      const row = (await db.conversationOverrides.get(ensured.id)) ?? ensured
+      const had = row.assignee
+      const patch: Partial<ConversationOverrideRow> = {
+        assignee: assignee ?? undefined,
+        assigneeKind: assignee?.kind,
+        updatedAt: now,
+      }
+      const routingPatch: Partial<ConversationOverrideRow> = {}
+      let routing: AssignmentRoutingSync | undefined
+
+      const restoreMode = (): void => {
+        if (row.assignmentPreviousMode === undefined) return
+        routingPatch.mode = row.assignmentPreviousMode ?? undefined
+        routingPatch.assignmentPreviousMode = undefined
+      }
+      const restoreRouting = (): void => {
+        if (row.routingSource !== "assignment") return
+        const snap = row.assignmentPreviousRouting ?? {}
+        for (const key of ROUTING_SNAPSHOT_KEYS) {
+          ;(routingPatch as Record<string, unknown>)[key] = snap[key]
+        }
+        routingPatch.routingSource = undefined
+        routingPatch.assignmentPreviousRouting = undefined
+      }
+      const applyTargetRouting = (): void => {
+        // Re-apply the snapshot first so a character ⇄ team reassignment
+        // starts from the pre-assignment routing, and snapshot ONCE.
+        if (row.routingSource === "assignment") {
+          const snap = row.assignmentPreviousRouting ?? {}
+          for (const key of ROUTING_SNAPSHOT_KEYS) {
+            ;(routingPatch as Record<string, unknown>)[key] = snap[key]
+          }
+          routingPatch.assignmentPreviousRouting = row.assignmentPreviousRouting ?? {}
+        } else {
+          routingPatch.assignmentPreviousRouting = snapshotRouting(row)
+        }
+        routingPatch.routingSource = "assignment"
+        // A human assignment forced manual mode; handing the conversation to
+        // an AI target hands the mode back too.
+        restoreMode()
+      }
+
+      if (assignee?.kind === "character" && assignee.id) {
+        applyTargetRouting()
+        routingPatch.characterId = assignee.id
+        routingPatch.characterDisabled = undefined
+        routing = { kind: "character", characterId: assignee.id }
+        if (routingPatch.mode !== undefined || row.assignmentPreviousMode !== undefined) {
+          routing.mode = routingPatch.mode ?? null
+        }
+      } else if (assignee?.kind === "team" && assignee.id) {
+        applyTargetRouting()
+        routingPatch.teamId = assignee.id
+        routingPatch.teamDisabled = undefined
+        routing = { kind: "team", teamId: assignee.id }
+        if (routingPatch.mode !== undefined || row.assignmentPreviousMode !== undefined) {
+          routing.mode = routingPatch.mode ?? null
+        }
+      } else if (assignee?.kind === "human") {
+        if (row.assignmentPreviousMode === undefined) {
+          routingPatch.assignmentPreviousMode = row.mode ?? null
+        }
+        routingPatch.mode = "manual"
+        routing = { kind: "manual-mode", mode: "manual" }
+      } else if (!assignee) {
+        restoreRouting()
+        restoreMode()
+        if (Object.keys(routingPatch).length > 0) {
+          routing = {
+            kind: "restored",
+            characterId: routingPatch.characterId,
+            teamId: routingPatch.teamId,
+            ...(row.assignmentPreviousMode !== undefined
+              ? { mode: row.assignmentPreviousMode }
+              : {}),
+          }
+        }
+      }
+
+      const changedKeys = Object.keys(routingPatch)
+        .filter((key) => {
+          const before = (row as unknown as Record<string, unknown>)[key]
+          const after = (routingPatch as Record<string, unknown>)[key]
+          return before !== after
+        })
+        .sort()
+
+      await db.conversationOverrides.update(row.id, { ...patch, ...routingPatch })
+
+      if (changedKeys.length > 0 && adapterId) {
+        await db.connectorAudit.add({
+          id: crypto.randomUUID(),
+          adapterId,
+          projectId: row.projectId,
+          conversationKey,
+          kind: "override.config_changed",
+          at: now,
+          fields: {
+            scope: "conversation",
+            section: "responder",
+            changedKeys,
+            source: "assignment",
+            via: opts.via,
+            assigneeKind: assignee?.kind ?? null,
+          },
+        })
+      }
+
+      const kind: AssignmentEventKind = !assignee ? "unassigned" : had ? "reassigned" : "assigned"
+      await appendAssignmentEvent({
+        conversationKey,
+        kind,
+        fields: {
+          from: had ?? null,
+          to: assignee ?? null,
+          via: opts.via,
+          ...(routing ? { routing } : {}),
+        },
+      })
+    }
+  )
 }
 
 /** Add a label to a conversation (idempotent); emits `label.added`. */
@@ -343,7 +577,14 @@ export async function markResponded(
 ): Promise<void> {
   const row = await readForResolution(conversationKey)
   if (!row) return
-  const patch: Partial<ConversationOverrideRow> = { nextResponseDueAt: undefined, updatedAt: now }
+  const patch: Partial<ConversationOverrideRow> = {
+    nextResponseDueAt: undefined,
+    // A reply ends the overdue window — reset the escalation chain so the
+    // next breach starts again at step 0.
+    escalatedStep: undefined,
+    escalatedAt: undefined,
+    updatedAt: now,
+  }
   if (row.firstRespondedAt === undefined) patch.firstRespondedAt = now
   await getDb().conversationOverrides.update(row.id, patch)
 }
