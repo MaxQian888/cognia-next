@@ -4120,7 +4120,11 @@ export class CogniaDB extends Dexie {
         "&id, repoFullName, &[repoFullName+number], issueProjectId, state, updatedAt, syncedAt",
     })
 
-    // v172 — Issue runs (slice ③ execution bridge). One row per dispatch of a
+    // v174 — Issue runs (slice ③ execution bridge). Claimed as 174, not 172,
+    // because two concurrent branches hold uncommitted claims on 172
+    // (ADR-0130 cost metering: sessionUsage/agentTraces) and 173 (IM
+    // delegation); Dexie tolerates the gap and the merged file stays monotonic.
+    // One row per dispatch of a
     // local issue to an execution engine (AgentTask / AgentTeam / GitHub issue
     // loop). The ISSUE side owns the binding: engines are never widened with an
     // `issueId` column, so a new engine binds without a schema bump.
@@ -4128,7 +4132,7 @@ export class CogniaDB extends Dexie {
     // `[issueId+status]` backs the per-issue runtime-owned guard; `targetId`
     // lets the agent-task / agent-team federated sources badge engine rows
     // with the issue they came from.
-    this.version(172).stores({
+    this.version(174).stores({
       issueRuns:
         "&id, issueId, [issueId+status], projectId, [projectId+status], adapterId, kind, targetId, status, startedAt, updatedAt",
     })
@@ -4177,7 +4181,7 @@ export class CogniaDB extends Dexie {
   // federated items and are deliberately excluded from companion sync, since
   // re-fetching is cheaper than reconciling a cache that can drift.
   githubIssueMirror!: Table<GithubIssueMirrorRow, string>
-  // v172 — Issue runs (slice ③). Issue-side record of every dispatch to an
+  // v174 — Issue runs (slice ③). Issue-side record of every dispatch to an
   // execution engine; settled by `lib/issues/run/` adapters. Local-only, not
   // companion-synced: the engine rows it points at are not synced either.
   issueRuns!: Table<IssueRun, string>

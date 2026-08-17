@@ -174,7 +174,7 @@ impl From<ReplayBounds> for HostReplayBounds {
 }
 
 /// One attached client of a session, as seen by every other attachment — the
-/// roster behind terminal session sharing (ADR-0131). `role` mirrors the
+/// roster behind terminal session sharing (ADR-0133). `role` mirrors the
 /// controller lease: exactly one attachment may be `controller`; the rest are
 /// read-only `viewer`s (the host enforces this via `NotController`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

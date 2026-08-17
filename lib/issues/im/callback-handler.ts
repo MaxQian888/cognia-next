@@ -1,5 +1,5 @@
 /**
- * Bus-side dispatcher for `issue_action` callback bindings (ADR-0130 slice ③).
+ * Bus-side dispatcher for `issue_action` callback bindings (ADR-0132 slice ③).
  *
  * Companion to `lib/a2ui/workflow-approval-handler.ts`: `ConnectorBus.
  * runConnectorCallback` short-circuits `issue_action` bindings here so the

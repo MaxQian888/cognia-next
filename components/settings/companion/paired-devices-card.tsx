@@ -220,7 +220,7 @@ export function PairedDevicesCard() {
     [guard, refreshGrants, tAc]
   )
 
-  // Shared with the terminal share dialog (ADR-0131) so both surfaces drive
+  // Shared with the terminal share dialog (ADR-0133) so both surfaces drive
   // the one enforcement point identically.
   const onToggleRemoteTerminal = useRemoteTerminalGrantToggle(refreshGrants)
 

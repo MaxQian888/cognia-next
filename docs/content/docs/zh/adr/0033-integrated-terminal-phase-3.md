@@ -76,7 +76,7 @@ agent 驱动的终端 tab 已带 `agentSpawner`（chat session id，由 `dock-to
 3. **服务端工作流执行 + consent 桥** — ADR-0031 follow-up #3。
 4. ~~**dock 内 AI 命令辅助**~~ — 已由 ADR-0039（终端自动补全）取代并上线。
 5. ~~**消息级定位回对话**~~ — **已上线**：会话行携带 `agentSpawnerMessageId`，dock 走 `messagePermalinkQuery`（scroll-to-message 锚点由 ADR-0094 提供）。
-6. ~~**会话分享**~~ — **已上线**，见 ADR-0131：已配对设备直接接入宿主会话并共用其控制权租约；宿主广播参与者名单，dock 新增「分享」对话框。同一改动删除了从未接线的 `lib/terminal/collaboration/share-manager` 邀请/令牌模型。
+6. ~~**会话分享**~~ — **已上线**，见 ADR-0133：已配对设备直接接入宿主会话并共用其控制权租约；宿主广播参与者名单，dock 新增「分享」对话框。同一改动删除了从未接线的 `lib/terminal/collaboration/share-manager` 邀请/令牌模型。
 
 ## Phase 4 — dock 可用性（本次改动）
 

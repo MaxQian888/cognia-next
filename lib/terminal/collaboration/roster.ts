@@ -1,5 +1,5 @@
 /**
- * Terminal session sharing — renderer-side roster projection (ADR-0131).
+ * Terminal session sharing — renderer-side roster projection (ADR-0133).
  *
  * Sharing a terminal is NOT a new transport. A paired device that holds the
  * `terminal.open` grant attaches to the durable host through the existing

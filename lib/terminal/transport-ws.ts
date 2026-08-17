@@ -436,7 +436,7 @@ export class RemoteTerminalSession extends BaseTerminalSession {
         break
       case TerminalFrameKind.SessionSnapshot:
         // Sequence 0 is the host's unsolicited roster / lease refresh
-        // (ADR-0131); replies to our own requests carry the request's
+        // (ADR-0133); replies to our own requests carry the request's
         // sequence and are settled by `sendCommand`.
         if (frame.sequence === BigInt(0)) {
           this.applySessionSnapshot(decodeTerminalJson<SessionInfo>(frame))

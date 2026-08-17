@@ -12,7 +12,7 @@ GitHub-linked issue whose project is bound to that repository, the GitHub issue
 loop that opens a pull request — and a run history with artifacts (sessions,
 branches, PRs). A run owns _In progress_ while it works; when it finishes the
 issue comes back to you at _In review_, never straight to _Done_. Runs are
-tracked in a new local `issueRuns` table (Dexie v172), reconciled from the
+tracked in a new local `issueRuns` table (Dexie v174), reconciled from the
 engines' own state so a reload never strands an issue.
 
 Agent tasks and Agent Team tasks are projected onto the board as read-only

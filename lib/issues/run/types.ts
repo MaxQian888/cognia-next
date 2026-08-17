@@ -1,5 +1,5 @@
 /**
- * Issue run bridge — contracts (ADR-0130, slice ③).
+ * Issue run bridge — contracts (ADR-0132, slice ③).
  *
  * An `IssueRunAdapter` dispatches a local issue to one existing execution
  * engine and reports back when the engine reaches a terminal state. The bridge

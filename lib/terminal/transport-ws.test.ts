@@ -353,7 +353,7 @@ describe("RemoteTerminalSession canonical LAN transport", () => {
     expect(exit).toBe(7)
   })
 
-  it("applies unsolicited (sequence 0) session snapshots as roster refreshes (ADR-0131)", async () => {
+  it("applies unsolicited (sequence 0) session snapshots as roster refreshes (ADR-0133)", async () => {
     const session = await completeSpawn()
     const before = session.info
     const infos: number[] = []

@@ -68,7 +68,7 @@ interface SessionFacts {
   currentController: string | null
   degradedReason: string | null
   /**
-   * Remote (non-desktop) participants attached right now (ADR-0131). Empty
+   * Remote (non-desktop) participants attached right now (ADR-0133). Empty
    * when nobody else is attached, or when the host predates the roster.
    */
   remoteParticipants: readonly TerminalParticipant[]
@@ -147,7 +147,7 @@ export function TerminalSessionChip({
   if (info?.degradedReason) {
     states.push({ key: "degraded", label: t("integrationDegraded"), severity: "warn" })
   }
-  // Someone else is watching (ADR-0131). Surfaced as a state so the chip
+  // Someone else is watching (ADR-0133). Surfaced as a state so the chip
   // re-expands when a device attaches, and so a controller knows a viewer
   // will see whatever they type next.
   if (info && info.remoteParticipants.length > 0) {

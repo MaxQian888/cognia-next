@@ -1,5 +1,5 @@
 /**
- * "File this as an issue?" — the IM-side proposal (ADR-0130 slice ③).
+ * "File this as an issue?" — the IM-side proposal (ADR-0132 slice ③).
  *
  * Both IM entry points — the assistant's `issue_create` tool (a natural-
  * language ask) and a quoted message — converge here: resolve the candidate

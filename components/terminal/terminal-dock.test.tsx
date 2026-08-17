@@ -470,7 +470,7 @@ describe("TerminalDock", () => {
     expect(mockSpawnFromDock).toHaveBeenCalled()
   })
 
-  it("offers Share on the desktop host and opens the share dialog for the active session (ADR-0131)", () => {
+  it("offers Share on the desktop host and opens the share dialog for the active session (ADR-0133)", () => {
     seedProjectAndSession({ sessionId: "s-1" })
     render(<TerminalDock />)
     expect(screen.queryByTestId("terminal-share-dialog")).toBeNull()

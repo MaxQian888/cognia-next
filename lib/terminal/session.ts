@@ -230,7 +230,7 @@ export class TerminalSession extends BaseTerminalSession {
         break
       }
       case "session_snapshot": {
-        // Roster / lease refresh (ADR-0131). The bridge only forwards the
+        // Roster / lease refresh (ADR-0133). The bridge only forwards the
         // host's unsolicited (sequence 0) snapshots here, so this is never a
         // reply to one of our own requests.
         this.applySessionSnapshot(event.session)

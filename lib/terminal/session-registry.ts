@@ -25,7 +25,7 @@ const infoSubscriptions = new Map<string, () => void>()
 export function registerLiveSession(session: BaseTerminalSession): void {
   infoSubscriptions.get(session.id)?.()
   sessions.set(session.id, session)
-  // A host snapshot (roster / lease change, ADR-0131) mutates `session.info`
+  // A host snapshot (roster / lease change, ADR-0133) mutates `session.info`
   // in place; re-broadcast so `useSyncExternalStore` consumers of the
   // registry (chip, share dialog) re-read it without polling.
   const off = typeof session.onInfo === "function" ? session.onInfo(() => notify()) : undefined

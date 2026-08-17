@@ -172,7 +172,7 @@ export function TerminalDock() {
     []
   )
   const [searchOpen, setSearchOpen] = useState(false)
-  // ADR-0131: share the focused session with paired devices.
+  // ADR-0133: share the focused session with paired devices.
   const [shareOpen, setShareOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
   // Anchor id of the tab awaiting close confirmation (running-command guard).
@@ -597,7 +597,7 @@ export function TerminalDock() {
                 <Columns2Icon className="h-3 w-3" />
               </DockToolbarButton>
             ) : null}
-            {/* Sharing (ADR-0131) rides the durable host: it needs a hosted
+            {/* Sharing (ADR-0133) rides the durable host: it needs a hosted
                 session, and only the desktop can grant paired devices. */}
             {activeRow && transport === "tauri-channel" ? (
               <DockToolbarButton

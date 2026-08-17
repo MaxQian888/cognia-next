@@ -1,5 +1,5 @@
 /**
- * Issue runs — Dexie table `issueRuns` (schema v172, ADR-0130).
+ * Issue runs — Dexie table `issueRuns` (schema v174, ADR-0132).
  *
  * One row per dispatch of a local issue to an execution engine — an AgentTask,
  * an AgentTeam run, or the GitHub issue loop. The ISSUE side owns this

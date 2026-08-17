@@ -153,7 +153,7 @@ export interface WorkScopeV1 {
 
 /**
  * Which business object this work reports back into, if any. `issue` is the
- * issue tracker's row (`types/issues`, ADR-0130) — the id is the opaque
+ * issue tracker's row (`types/issues`, ADR-0132) — the id is the opaque
  * `Issue.id`, never the printed `KEY-n` identifier.
  */
 export interface WorkItemRefV1 {

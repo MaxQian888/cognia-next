@@ -1,6 +1,6 @@
 /**
  * Agent-team source — READ-ONLY federated adapter over Agent Team tasks
- * (`stores/agent/agent-team-store`; ADR-0130 slice ③, ADR-0066 for the board
+ * (`stores/agent/agent-team-store`; ADR-0132 slice ③, ADR-0066 for the board
  * it mirrors).
  *
  * Reads the zustand store, NOT the `agentTeamBoard` Dexie projection: the

@@ -2,7 +2,7 @@
 
 /**
  * The per-device **remote terminal** grant, shared by the paired-devices card
- * (Settings → Companion) and the terminal share dialog (ADR-0131).
+ * (Settings → Companion) and the terminal share dialog (ADR-0133).
  *
  * One grant, one enforcement point: `terminal.open` in the host's
  * SecurityStore, rechecked every second by the LAN/WAN terminal adapters so

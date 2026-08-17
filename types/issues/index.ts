@@ -31,7 +31,7 @@
  *     (`critical|high|normal|low|background`): "background" is meaningless
  *     for a human-facing issue and the tracker needs an explicit "none".
  *     `lib/issues/run/` maps between the two at the execution boundary.
- *   - `IssueRun` (Dexie v172) is the issue-side record of one dispatch to an
+ *   - `IssueRun` (Dexie v174) is the issue-side record of one dispatch to an
  *     execution path (AgentTask / AgentTeam / GitHub issue loop). The issue
  *     side is the single source of truth for "which runs belong to this
  *     issue" — the execution engines are never widened with an `issueId`
@@ -313,7 +313,7 @@ export interface IssueRunArtifact {
 }
 
 /**
- * One dispatch of an issue to an execution engine (Dexie v172, `issueRuns`).
+ * One dispatch of an issue to an execution engine (Dexie v174, `issueRuns`).
  *
  * The row is written by `lib/issues/run/` adapters and settled by the same
  * adapters when the engine reports a terminal state. `targetId` is the

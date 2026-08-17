@@ -779,7 +779,7 @@ export interface ConversationOverrideRow {
    */
   proactivePush?: boolean
   /**
-   * Issue tracker binding (ADR-0130 slice ③): the delivery container an issue
+   * Issue tracker binding (ADR-0132 slice ③): the delivery container an issue
    * created from this conversation lands in by default. Written when the
    * user picks a project on the "create issue" confirmation card, so the next
    * card preselects it; also lets `lib/issues/notify.ts` push that project's

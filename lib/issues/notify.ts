@@ -1,5 +1,5 @@
 /**
- * Issue lifecycle → Notification Center (+ IM push) — ADR-0130 slice ③.
+ * Issue lifecycle → Notification Center (+ IM push) — ADR-0132 slice ③.
  *
  * One funnel: `notify()` (`lib/notifications/runtime.ts`), the app's only
  * notification entry. Every emitted record carries `source: "issue"`, a

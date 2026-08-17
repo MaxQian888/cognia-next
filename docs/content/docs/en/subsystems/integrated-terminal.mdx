@@ -70,7 +70,7 @@ lib/terminal/
   spawn-orchestrator.ts   # walks the chain, owns retry
   session.ts              # foreground session; base-session.ts is the shared core
   session-registry.ts     # live sessions; headless-session-registry.ts for agent runs
-  collaboration/roster.ts # participant roster projection for sharing (ADR-0131)
+  collaboration/roster.ts # participant roster projection for sharing (ADR-0133)
   transport-ws.ts         # the ws client
   command-markers.ts      # OSC 633 consumption on the TS side
   command-output.ts       # per-command output capture (feeds quick-fix + agent reads)
@@ -96,7 +96,7 @@ stores/terminal/        # terminal-store · file-viewer-store
 ## Sharing a session with a paired device
 
 A hosted session can be watched — or driven — from a paired phone or another Cognia
-([ADR-0131](../adr/0131-terminal-session-sharing)). There is no share link and no second transport:
+([ADR-0133](../adr/0133-terminal-session-sharing)). There is no share link and no second transport:
 the device attaches to the same durable host over the companion `ws`/WebRTC adapters and takes part
 in the host's **controller lease** — one controller at a time, everyone else read-only, "Take
 control" / "Release control" from the session chip. The dock's **Share** button (desktop host only)
@@ -121,7 +121,7 @@ interactive tab. To drive an *interactive* tab it must first clear `requestAgent
 <Cards>
   <Card title="ADR-0031" href="../adr/0031-integrated-terminal" description="The original terminal decision record" />
   <Card title="ADR-0033" href="../adr/0033-integrated-terminal-phase-3" description="Phase 3 — completion, quick-fix, sticky scroll" />
-  <Card title="ADR-0131" href="../adr/0131-terminal-session-sharing" description="Sharing a session with paired devices" />
+  <Card title="ADR-0133" href="../adr/0133-terminal-session-sharing" description="Sharing a session with paired devices" />
   <Card title="CLI ↔ App Bridge" href="./cli-app-bridge" description="The other place a shell and the app meet" />
   <Card title="Companion API" href="./companion-api" description="The ws transport the mobile and remote paths ride" />
 </Cards>

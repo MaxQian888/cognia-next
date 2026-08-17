@@ -1,6 +1,6 @@
 /**
  * Agent-task source — READ-ONLY federated adapter over single-agent tasks
- * (`agentTasks`, `lib/db/agent-tasks.ts`; ADR-0130 slice ③).
+ * (`agentTasks`, `lib/db/agent-tasks.ts`; ADR-0132 slice ③).
  *
  * Projects each workspace-scoped AgentTask onto the board so the "one total
  * board" promise holds: a task an agent is running shows up next to the issue

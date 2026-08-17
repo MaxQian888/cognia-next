@@ -66,7 +66,7 @@ pub enum HostChannelEvent {
     },
     /// An unsolicited session snapshot (sequence 0) — the host re-sends it
     /// whenever the attachment roster or the controller lease changes, so the
-    /// renderer's `info.participants` stays current (ADR-0131).
+    /// renderer's `info.participants` stays current (ADR-0133).
     SessionSnapshot {
         session: HostSessionInfo,
     },
@@ -1357,7 +1357,7 @@ mod tests {
     #[test]
     fn unsolicited_session_snapshots_reach_the_channel_as_roster_refreshes() {
         // The host re-sends `SessionSnapshot` (sequence 0) whenever the
-        // participant roster or the controller lease changes (ADR-0131). The
+        // participant roster or the controller lease changes (ADR-0133). The
         // bridge must surface it as a `session_snapshot` channel event
         // carrying the full `HostSessionInfo`, not drop it as an unknown kind.
         let session_id = Uuid::new_v4();

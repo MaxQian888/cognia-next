@@ -17,7 +17,7 @@ export type NotificationSource =
   | "session"
   | "workflow"
   | "system"
-  /** Issue tracker lifecycle (ADR-0130): assignments, run outcomes, review-ready, comments. */
+  /** Issue tracker lifecycle (ADR-0132): assignments, run outcomes, review-ready, comments. */
   | "issue"
 
 /** Severity / obtrusiveness tier. `critical` bypasses DND + per-source mute. */

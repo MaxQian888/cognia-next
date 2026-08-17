@@ -171,7 +171,7 @@ describe("TerminalSessionChip", () => {
     expect(screen.getByTestId("terminal-session-chip")).toHaveAttribute("data-severity", "info")
   })
 
-  it("surfaces remote participants as a state and lists them in the popover (ADR-0131)", () => {
+  it("surfaces remote participants as a state and lists them in the popover (ADR-0133)", () => {
     registry.info = sessionInfo({
       currentController: "desktop",
       participants: [

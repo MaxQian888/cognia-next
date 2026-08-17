@@ -1,5 +1,5 @@
 /**
- * `issue.create` — file an issue from chat (ADR-0130 slice ③).
+ * `issue.create` — file an issue from chat (ADR-0132 slice ③).
  *
  * Two shapes, one rule ("不点不落库" — nothing is saved until the user picks):
  *

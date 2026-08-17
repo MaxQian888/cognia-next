@@ -244,7 +244,7 @@ export type AuditKind =
   | "notify.im_pushed"
   | "notify.im_skipped"
   | "notify.im_pii_blocked"
-  // Issue tracker IM side (ADR-0130 slice ③). `card_action` when an
+  // Issue tracker IM side (ADR-0132 slice ③). `card_action` when an
   // `issue_action` button was applied (move / run / create / cancel);
   // `card_action_denied` when the state machine or run registry refused it;
   // `im_pii_blocked` when the PII gate dropped a card or reply text.

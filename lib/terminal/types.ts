@@ -54,7 +54,7 @@ export interface SpawnRequest {
   sandboxNetwork?: boolean
 }
 
-/** Lease role of one attached client, as the host reports it (ADR-0131). */
+/** Lease role of one attached client, as the host reports it (ADR-0133). */
 export type TerminalParticipantRole = "controller" | "viewer"
 
 /**
@@ -103,7 +103,7 @@ export interface SessionInfo {
   currentController?: string | null
   attachedClients?: number
   /**
-   * Every attached client with its lease role (ADR-0131). Additive: hosts
+   * Every attached client with its lease role (ADR-0133). Additive: hosts
    * that predate the roster omit it, and `undefined` renders as "just me".
    */
   participants?: TerminalParticipant[]
@@ -159,7 +159,7 @@ export type TerminalEvent =
   | { kind: "controller_changed"; controller: string | null }
   /**
    * The host re-sent the session's info block unsolicited — the participant
-   * roster or the controller lease changed (ADR-0131). Carries the full,
+   * roster or the controller lease changed (ADR-0133). Carries the full,
    * current `SessionInfo`; the session replaces its own copy in place.
    */
   | { kind: "session_snapshot"; session: SessionInfo }

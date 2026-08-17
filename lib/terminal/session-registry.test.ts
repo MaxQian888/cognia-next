@@ -42,7 +42,7 @@ describe("session-registry", () => {
     expect(listener).toHaveBeenCalledTimes(2)
   })
 
-  it("re-notifies subscribers when a registered session's info is refreshed (ADR-0131)", () => {
+  it("re-notifies subscribers when a registered session's info is refreshed (ADR-0133)", () => {
     let infoListener: (() => void) | undefined
     const off = jest.fn()
     const live = {

@@ -1,5 +1,5 @@
 /**
- * Issue tracker built-in skill family (ADR-0130 slice ③).
+ * Issue tracker built-in skill family (ADR-0132 slice ③).
  *
  * | id                  | mutation | imAccess | requires |
  * |---------------------|----------|----------|----------|

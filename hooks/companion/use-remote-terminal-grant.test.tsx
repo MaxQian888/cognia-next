@@ -1,6 +1,6 @@
 /**
  * The remote-terminal grant flow shared by the paired-devices card and the
- * terminal share dialog (ADR-0131). Pins: provision → mirror → host ordering,
+ * terminal share dialog (ADR-0133). Pins: provision → mirror → host ordering,
  * rollback when the host refuses, the biometric gate on the enabling side,
  * host-first read of grants with the mirror as fallback.
  */

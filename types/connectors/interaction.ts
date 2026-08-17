@@ -211,7 +211,7 @@ export type ConnectorCallbackBindingKind =
   // button's `value` / action carries the decision (allow | deny |
   // allow_session). See `lib/connectors/hitl/`.
   | "tool_approve"
-  // Issue tracker card (ADR-0130 slice ③). A button on an issue card: move
+  // Issue tracker card (ADR-0132 slice ③). A button on an issue card: move
   // the issue to a legal human-owned status, dispatch it to its assigned
   // engine, or (on the create-issue confirmation card) file it into a
   // project. Payload carries `{ issueId, action, to? }` or, for creation,

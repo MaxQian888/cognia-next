@@ -3,7 +3,7 @@
  */
 
 /**
- * Terminal share dialog (ADR-0131): renders the host roster live from the
+ * Terminal share dialog (ADR-0133): renders the host roster live from the
  * session registry, lists paired devices with their remote-terminal grant,
  * drives the shared grant flow, and points at Settings for the two things it
  * must not flip itself (host remote access, pairing).

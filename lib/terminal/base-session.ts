@@ -175,7 +175,7 @@ export abstract class BaseTerminalSession {
   /**
    * Subscribe to `info` refreshes. The host re-sends the session snapshot
    * whenever the participant roster or the controller lease changes
-   * (ADR-0131); `info` is updated in place BEFORE listeners run, so a
+   * (ADR-0133); `info` is updated in place BEFORE listeners run, so a
    * listener may read `session.info.participants` directly.
    */
   onInfo(listener: InfoListener): () => void {

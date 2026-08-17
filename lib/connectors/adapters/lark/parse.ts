@@ -84,7 +84,7 @@ export interface LarkMessage {
   /**
    * Reply linkage (Lark "reply"/quote): `parent_id` is the message being
    * replied to, `root_id` the thread root. Both absent on top-level messages.
-   * Surfaced as `replyTo` so quote-message → issue (ADR-0130 slice ③) and the
+   * Surfaced as `replyTo` so quote-message → issue (ADR-0132 slice ③) and the
    * reply-aware policies work on Lark like they do on Telegram / Discord.
    */
   parent_id?: string | null

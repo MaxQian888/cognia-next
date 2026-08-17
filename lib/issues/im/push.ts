@@ -1,5 +1,5 @@
 /**
- * Outbound helpers for the issue tracker's IM side (ADR-0130 slice ③).
+ * Outbound helpers for the issue tracker's IM side (ADR-0132 slice ③).
  *
  * Everything leaves through `enqueueGoverned` (`lib/connectors/delivery-gateway`),
  * the one governed outbound queue, tagged `source: "skill"` (an automated

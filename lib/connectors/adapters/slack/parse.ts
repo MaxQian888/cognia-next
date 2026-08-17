@@ -361,7 +361,7 @@ export function parseSlackEventCallback(
     plainText,
     // A threaded reply's `thread_ts` IS the parent message id. Slack sends no
     // quoted text, so the snippet is empty by contract; the id is what the
-    // reply-aware paths (quote → issue, ADR-0130) need.
+    // reply-aware paths (quote → issue, ADR-0132) need.
     ...(threadTs ? { replyTo: { messageId: threadTs, snippet: "" } } : { replyTo: undefined }),
     mentions: { selfMentioned, users },
     timestamp: Math.round(parseFloat(event.ts) * 1000),

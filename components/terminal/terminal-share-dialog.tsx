@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * Share a hosted terminal session with paired devices (ADR-0131, design A).
+ * Share a hosted terminal session with paired devices (ADR-0133, design A).
  *
  * Sharing is not a new transport and mints no links: a paired device that
  * holds the remote-terminal grant attaches to the durable host through the

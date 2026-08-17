@@ -305,7 +305,7 @@ describe("BaseTerminalSession flow control", () => {
   })
 })
 
-describe("BaseTerminalSession session snapshots (ADR-0131)", () => {
+describe("BaseTerminalSession session snapshots (ADR-0133)", () => {
   it("refreshes info in place, drops keys the host stopped sending, and notifies onInfo", () => {
     const session = new TestableTerminalSession({ ...info, sshHostKeyStatus: "learned" })
     const before = session.info

@@ -1,5 +1,5 @@
 /**
- * Issues (ADR-0129 roster addition, ADR-0130): the local issue tracker's rows
+ * Issues (ADR-0129 roster addition, ADR-0132): the local issue tracker's rows
  * for the active workspace. Matches on identifier (`MERC-2`) and title, with
  * the description as secondary text; opens the issue on `/issues?id=…`.
  *

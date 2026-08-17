@@ -202,7 +202,7 @@ describe("event dispatch", () => {
     ])
   })
 
-  it("applies unsolicited session snapshots to info and notifies onInfo (ADR-0131)", async () => {
+  it("applies unsolicited session snapshots to info and notifies onInfo (ADR-0133)", async () => {
     const session = await spawn()
     const infos: number[] = []
     session.onInfo((info) => infos.push(info.participants?.length ?? -1))
