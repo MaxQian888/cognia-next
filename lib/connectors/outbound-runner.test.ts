@@ -40,6 +40,7 @@ import {
   STALE_SENDING_GRACE_MS,
 } from "@/lib/db/outbound-jobs"
 import { listRecent } from "@/lib/db/connector-audit"
+import { wasDeliveredByUs } from "./delivered-messages"
 import {
   __resetAdapterRuntimeStateForTesting,
   ConversationLane,
@@ -237,9 +238,14 @@ describe("outbound-runner — successful delivery", () => {
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs[0].status).toBe("sent")
     // Phase 6 — `markSent` now persists the returned platformMessageId
-    // so the workflow-progress-runner can correlate the entry card
+    // so the run-presentation runner can correlate the entry card
     // back to its platform handle for in-place edits.
     expect(jobs[0].platformMessageId).toBe("pm_1")
+    // …and the delivered-message ledger learns the real platform id so a
+    // later reply to "pm_1" is recognised as a reply to the bot.
+    await expect(wasDeliveredByUs(adapterId, `telegram:${adapterId}:chat`, "pm_1")).resolves.toBe(
+      true
+    )
 
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.success")).toBe(true)
@@ -248,6 +254,19 @@ describe("outbound-runner — successful delivery", () => {
       platform: "telegram",
       outcome: "succeeded",
     })
+  })
+
+  it("does not record an idempotency-key fallback in the delivered-message ledger", async () => {
+    const adapterId = "a_no_pmid"
+    // Adapter reports success without a platform id (e.g. fire-and-forget bridge).
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true }))
+    const adapters = new Map([[adapterId, adapter]])
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+    await runOnce(adapters)
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs[0].status).toBe("sent")
+    const ledger = await getDb().inboundLedger.where("namespace").equals("outbound").toArray()
+    expect(ledger).toHaveLength(0)
   })
 
   it("yields the job without sending when it loses the atomic claim to another runner", async () => {

@@ -355,7 +355,9 @@ export function collectGraphIntegrityIssues(wf: VisualWorkflow): GraphIntegrityI
 
   // Connector payloads may contain personal data. Surface reachable external
   // sinks still relying on an implicit/default policy before publication.
-  const connectorTriggers = wf.nodes.filter((node) => node.type === "trigger.connector.inbound")
+  const connectorTriggers = wf.nodes.filter(
+    (node) => node.type === "trigger.connector.inbound" || node.type === "trigger.connector.system"
+  )
   const externalSinks = new Set<WorkflowNodeKind>([
     "action.agent.turn",
     "action.connector.send",

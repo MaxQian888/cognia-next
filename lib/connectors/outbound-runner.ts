@@ -80,6 +80,7 @@ import {
   type CircuitBreakerSnapshot,
 } from "./circuit-breaker"
 import { createTokenBucket, type TokenBucket, type TokenBucketSnapshot } from "./rate-limit"
+import { recordDeliveredMessage } from "./delivered-messages"
 
 // ── Quiet hours helpers ────────────────────────────────────────────────────────
 
@@ -1135,6 +1136,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     if (result.ok) {
       const platformMsgId = result.platformMessageId ?? idempotencyKey
       await markSent(job.id, platformMsgId)
+      // Delivered-message ledger (exact `reply-to-bot` rule): only a REAL
+      // platform id counts — the idempotencyKey fallback is never something a
+      // user can reply to. Best-effort, never throws.
+      if (result.platformMessageId) {
+        await recordDeliveredMessage(adapterId, conversationKey, result.platformMessageId)
+      }
       try {
         opts.onDelivered?.(conversationKey)
       } catch {

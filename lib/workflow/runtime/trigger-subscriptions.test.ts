@@ -261,6 +261,45 @@ describe("trigger-subscriptions", () => {
     expect(level.map((m) => m.workflowId)).toEqual(expect.arrayContaining(["wf_any", "wf_level"]))
   })
 
+  it("indexes trigger.connector.system and matches by kinds + targetSelfOnly", () => {
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_any", [trigger("n", "trigger.connector.system", { adapterId: "a1" })]),
+      wf("wf_react", [
+        trigger("n", "trigger.connector.system", { adapterId: "a1", kinds: ["reaction_added"] }),
+      ]),
+      wf("wf_self", [
+        trigger("n", "trigger.connector.system", { adapterId: "a1", targetSelfOnly: true }),
+      ]),
+      wf("wf_other_adapter", [trigger("n", "trigger.connector.system", { adapterId: "a2" })]),
+    ])
+    expect(_peekTriggerSubscriptions().get("trigger.connector.system")).toHaveLength(4)
+
+    const reactionOnOurs = findMatchingWorkflows("trigger.connector.system", {
+      adapterId: "a1",
+      connectorSystemKind: "reaction_added",
+      targetDeliveredByUs: true,
+    })
+    expect(reactionOnOurs.map((m) => m.workflowId).sort()).toEqual([
+      "wf_any",
+      "wf_react",
+      "wf_self",
+    ])
+
+    const pokeOnTheirs = findMatchingWorkflows("trigger.connector.system", {
+      adapterId: "a1",
+      connectorSystemKind: "poke",
+      targetDeliveredByUs: false,
+    })
+    expect(pokeOnTheirs.map((m) => m.workflowId)).toEqual(["wf_any"])
+
+    // No target at all (lifecycle) → targetSelfOnly nodes never fire.
+    const lifecycle = findMatchingWorkflows("trigger.connector.system", {
+      adapterId: "a1",
+      connectorSystemKind: "lifecycle",
+    })
+    expect(lifecycle.map((m) => m.workflowId)).toEqual(["wf_any"])
+  })
+
   it("indexes terminal.command and matches by session / project / status / substring", () => {
     _seedTriggerSubscriptionsForTest([
       wf("wf_any", [trigger("n", "trigger.terminal.command", {})]),

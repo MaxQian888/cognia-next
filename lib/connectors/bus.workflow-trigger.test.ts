@@ -10,6 +10,7 @@ import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance } from "@/lib/db/adapter-instances"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetPruneCounterForTesting } from "./dedup"
+import { recordDeliveredMessage } from "./delivered-messages"
 import type { NormalizedInboundEvent, PlatformAdapter } from "@/types/connectors"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 
@@ -125,6 +126,104 @@ describe("ConnectorBus workflow trigger fan-out", () => {
     for (const c of calls) {
       expect(c.kind).toBe("trigger.connector.inbound")
     }
+  })
+
+  it("fans gesture-class system events out to trigger.connector.system nodes", async () => {
+    const adapterId = await seedAutoAdapter()
+    const conversationKey = `telegram:${adapterId}:private`
+    // The reacted-to message was delivered by us → targetDeliveredByUs=true.
+    await recordDeliveredMessage(adapterId, conversationKey, "bot_out_1")
+    findMatchingWorkflowsMock.mockReturnValue([
+      { workflowId: "wf_react", nodeId: "n1", params: {} },
+    ])
+
+    const evt: NormalizedInboundEvent = {
+      ...privateEvent(adapterId, "sys_reaction_1"),
+      kind: "system",
+      systemKind: "reaction_added",
+      replacesMessageId: "bot_out_1",
+      segments: [{ type: "emoji", code: "👍" }],
+      plainText: "",
+    }
+    await getBus().dispatchInboundFull(evt)
+    await getBus().flushInboundTurns()
+    // fan-out is fire-and-forget; let the microtask chain settle.
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(findMatchingWorkflowsMock).toHaveBeenCalledWith("trigger.connector.system", {
+      adapterId,
+      conversationKey,
+      connectorSystemKind: "reaction_added",
+      targetDeliveredByUs: true,
+    })
+    expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
+    const [arg] = dispatchTriggerMock.mock.calls[0] as [{ kind: string; workflowId: string }]
+    expect(arg.kind).toBe("trigger.connector.system")
+    expect(arg.workflowId).toBe("wf_react")
+
+    // …and the gesture is audited under its own kind (never adapter.error).
+    const audits = await getDb().connectorAudit.where("adapterId").equals(adapterId).toArray()
+    const reaction = audits.find((a) => a.kind === "inbound.reaction_added")
+    expect(reaction).toBeDefined()
+    expect(reaction!.fields).toEqual(
+      expect.objectContaining({
+        systemKind: "reaction_added",
+        actorOpenId: "u_alice",
+        targetMessageId: "bot_out_1",
+        targetDeliveredByUs: true,
+        emoji: "👍",
+      })
+    )
+    expect(audits.some((a) => a.kind === "adapter.error")).toBe(false)
+  })
+
+  it("passes targetDeliveredByUs=false for a reaction on someone else's message", async () => {
+    const adapterId = await seedAutoAdapter()
+    findMatchingWorkflowsMock.mockReturnValue([])
+    const evt: NormalizedInboundEvent = {
+      ...privateEvent(adapterId, "sys_reaction_2"),
+      kind: "system",
+      systemKind: "reaction_removed",
+      replacesMessageId: "human_msg_9",
+      segments: [],
+      plainText: "",
+    }
+    await getBus().dispatchInboundFull(evt)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(findMatchingWorkflowsMock).toHaveBeenCalledWith("trigger.connector.system", {
+      adapterId,
+      conversationKey: evt.conversationKey,
+      connectorSystemKind: "reaction_removed",
+      targetDeliveredByUs: false,
+    })
+    expect(dispatchTriggerMock).not.toHaveBeenCalled()
+  })
+
+  it("omits targetDeliveredByUs for lifecycle / request gestures (no target message)", async () => {
+    const adapterId = await seedAutoAdapter()
+    findMatchingWorkflowsMock.mockReturnValue([])
+    for (const systemKind of ["lifecycle", "request", "poke"] as const) {
+      const evt: NormalizedInboundEvent = {
+        ...privateEvent(adapterId, `sys_${systemKind}`),
+        kind: "system",
+        systemKind,
+        segments: [],
+        plainText: "",
+      }
+      await getBus().dispatchInboundFull(evt)
+    }
+    await new Promise((r) => setTimeout(r, 0))
+    for (const systemKind of ["lifecycle", "request", "poke"] as const) {
+      expect(findMatchingWorkflowsMock).toHaveBeenCalledWith("trigger.connector.system", {
+        adapterId,
+        conversationKey: `telegram:${adapterId}:private`,
+        connectorSystemKind: systemKind,
+      })
+    }
+    const audits = await getDb().connectorAudit.where("adapterId").equals(adapterId).toArray()
+    expect(audits.map((a) => a.kind).sort()).toEqual(
+      expect.arrayContaining(["inbound.lifecycle", "inbound.poke", "inbound.request"])
+    )
   })
 
   it("skips dispatch when the event is dropped (group without self-mention)", async () => {

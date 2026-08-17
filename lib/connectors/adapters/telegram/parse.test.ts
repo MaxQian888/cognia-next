@@ -103,6 +103,18 @@ describe("parseTelegramUpdate", () => {
       expect(result!.replyTo!.snippet).toBe("You are welcome!")
     })
 
+    it("carries the parent author so `reply-to-bot` can match exactly", () => {
+      expect(result!.replyTo!.parentSenderId).toBe(SELF_ID)
+    })
+
+    it("omits parentSenderId when the replied-to message has no `from`", () => {
+      const anonymous = structuredClone(update) as TelegramUpdate
+      delete (anonymous.message!.reply_to_message as { from?: unknown }).from
+      const parsed = parseTelegramUpdate(ADAPTER_ID, SELF_ID, anonymous)
+      expect(parsed!.replyTo!.messageId).toBe("999")
+      expect(parsed!.replyTo!.parentSenderId).toBeUndefined()
+    })
+
     it("selfMentioned is true when replying to bot's message", () => {
       expect(result!.mentions.selfMentioned).toBe(true)
     })

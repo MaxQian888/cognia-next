@@ -28,6 +28,16 @@ export type AuditKind =
   | "inbound.read_indicator"
   | "inbound.member_added"
   | "inbound.member_removed"
+  // Non-message platform gestures surfaced by `bus.applySystemEvent` (2026-08).
+  // fields: { systemKind, actorOpenId, targetMessageId?, targetDeliveredByUs?,
+  // emoji?, rawType? }. Reactions/pokes arrive on every user gesture, so these
+  // are their own kinds (they used to be either dropped or mis-filed as
+  // `adapter.error`).
+  | "inbound.reaction_added"
+  | "inbound.reaction_removed"
+  | "inbound.poke"
+  | "inbound.request"
+  | "inbound.lifecycle"
   | "inbound.deferred_quiet_hours"
   | "inbound.deferred_muted"
   | "inbound.deferred_manual_mode"

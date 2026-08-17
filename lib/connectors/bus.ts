@@ -45,6 +45,7 @@ import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
 import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 import { recordAndCheckInbound, isRecordedInbound } from "./dedup"
+import { recordDeliveredMessage, wasDeliveredByUs } from "./delivered-messages"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
 import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
@@ -740,11 +741,28 @@ export class ConnectorBus {
       console.error("[connector-bus] onConnectorInbound dispatch failed", err)
     }
 
+    // ── Step 4.7: resolve the replied-to author for `reply-to-bot` ──────────
+    // Adapters fill `replyTo.parentSenderId` when the wire shape carries the
+    // parent author. When it doesn't, consult the delivered-message ledger:
+    // a hit means the parent is one of OUR messages, so stamp `selfId`. Done
+    // before the payload update so the persisted job stays self-describing
+    // and `evaluatePolicy` remains pure.
+    let replyParentResolvedBy: "ledger" | undefined
+    if (
+      event.replyTo &&
+      event.replyTo.parentSenderId === undefined &&
+      (await wasDeliveredByUs(event.adapterId, event.conversationKey, event.replyTo.messageId))
+    ) {
+      event = { ...event, replyTo: { ...event.replyTo, parentSenderId: event.selfId } }
+      replyParentResolvedBy = "ledger"
+    }
+
     event = {
       ...event,
       channelData: {
         ...event.channelData,
         activeRunDispatchMode: dispatchMode,
+        ...(replyParentResolvedBy ? { replyParentResolvedBy } : {}),
       },
     }
     await updateConnectorInboundJobPayload(inboundJob.id, event, dispatchMode, { now })
@@ -1364,11 +1382,34 @@ export class ConnectorBus {
       sk === "request" ||
       sk === "lifecycle"
     ) {
-      // Declared systemKinds that arrive on every user gesture. They carry no
-      // message body and the closed AuditKind union has no reaction/poke kind;
-      // routing them to `adapter.error` (as the pre-fix code did) flooded the
-      // audit trail with a false error per emoji reaction. Deliberate silent
-      // no-op until a dedicated audit kind ships in types/connectors/audit.ts.
+      // Gesture-class system events (a reaction on every emoji, a poke, a
+      // join request, a bot lifecycle change). They carry no message body and
+      // never enter the AI turn; they get their own audit kind and fan out to
+      // `trigger.connector.system` workflow nodes so operators can react to
+      // them (e.g. "👍 on the bot's answer → mark resolved").
+      const targetMessageId = event.replacesMessageId ?? event.replyTo?.messageId
+      const targetDeliveredByUs =
+        (sk === "reaction_added" || sk === "reaction_removed" || sk === "poke") && targetMessageId
+          ? await wasDeliveredByUs(event.adapterId, event.conversationKey, targetMessageId)
+          : undefined
+      const emojiSeg = event.segments.find((seg) => seg.type === "emoji")
+      const emoji = emojiSeg && emojiSeg.type === "emoji" ? emojiSeg.code : undefined
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: `inbound.${sk}`,
+        at: now,
+        conversationKey: event.conversationKey,
+        fields: {
+          systemKind: sk,
+          actorOpenId: event.sender.remoteUserId,
+          ...(targetMessageId ? { targetMessageId } : {}),
+          ...(targetDeliveredByUs !== undefined ? { targetDeliveredByUs } : {}),
+          ...(emoji ? { emoji } : {}),
+          rawType: (event.raw as { header?: { event_type?: string } } | undefined)?.header
+            ?.event_type,
+        },
+      })
+      void this.fanOutSystemTriggers(event, sk, targetDeliveredByUs)
       return
     } else {
       // Unknown system variant — surface it as adapter.error so the
@@ -1413,6 +1454,65 @@ export class ConnectorBus {
         // swallow — welcome is best-effort
       }
     }
+  }
+
+  /**
+   * Fan a gesture-class system event (reaction / poke / request / lifecycle)
+   * out to every matching `trigger.connector.system` workflow node. Fire-and-
+   * forget — no durable inbound job is created for gestures, and a failing
+   * workflow never breaks system-event bookkeeping.
+   */
+  private async fanOutSystemTriggers(
+    event: NormalizedInboundEvent,
+    systemKind: NonNullable<NormalizedInboundEvent["systemKind"]>,
+    targetDeliveredByUs: boolean | undefined
+  ): Promise<void> {
+    let matches: Array<{ workflowId: string; nodeId: string; params: Record<string, unknown> }> = []
+    try {
+      matches = findMatchingWorkflows("trigger.connector.system", {
+        adapterId: event.adapterId,
+        conversationKey: event.conversationKey,
+        connectorSystemKind: systemKind,
+        ...(targetDeliveredByUs !== undefined ? { targetDeliveredByUs } : {}),
+      })
+    } catch (err) {
+      console.warn("[connector-bus] findMatchingWorkflows (system) failed", err)
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "workflow_match_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
+      return
+    }
+    if (matches.length === 0) return
+    const originAt = Date.now()
+    await Promise.all(
+      matches.map(async (m) => {
+        try {
+          await dispatchTrigger({
+            workflowId: m.workflowId,
+            kind: "trigger.connector.system",
+            triggerId: m.nodeId,
+            payload: event,
+            originAt,
+            binding: { adapterId: event.adapterId, conversationKey: event.conversationKey },
+          })
+        } catch (err) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "adapter.error",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            reason: "workflow_dispatch_failed",
+            message: err instanceof Error ? err.message : String(err),
+            fields: { workflowId: m.workflowId, nodeId: m.nodeId },
+          }).catch(() => undefined)
+        }
+      })
+    )
   }
 
   /**
@@ -1503,6 +1603,12 @@ export class ConnectorBus {
         outcome: result.ok ? "succeeded" : "failed",
         ...(!result.ok && result.error?.code ? { errorCode: result.error.code } : {}),
       })
+      // Direct-wire sends bypass the outbound runner, so record the delivered
+      // id here for the exact `reply-to-bot` rule (best-effort, never throws).
+      const directTargetKey = req.deliveryTarget?.address.conversationKey
+      if (result.ok && result.platformMessageId && directTargetKey) {
+        await recordDeliveredMessage(adapterId, directTargetKey, result.platformMessageId)
+      }
       return result
     } catch (error) {
       void trackEvent("connector.message.sent", {

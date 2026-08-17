@@ -117,6 +117,22 @@ describe("parseDiscordDispatch", () => {
       expect(result!.replyTo).toBeDefined()
       expect(result!.replyTo!.messageId).toBe("9999999999999999999")
     })
+
+    it("leaves parentSenderId undefined when Discord did not inline referenced_message", () => {
+      expect(result!.replyTo!.parentSenderId).toBeUndefined()
+    })
+
+    it("fills parentSenderId from referenced_message.author when present", () => {
+      const withParent = structuredClone(dispatch) as DiscordDispatch
+      ;(withParent.d as Record<string, unknown>).referenced_message = {
+        id: "9999999999999999999",
+        content: "parent text",
+        author: { id: SELF_ID, username: "bot" },
+      }
+      const parsed = parseDiscordDispatch(ADAPTER_ID, SELF_ID, withParent)
+      expect(parsed!.replyTo!.parentSenderId).toBe(SELF_ID)
+      expect(parsed!.replyTo!.snippet).toBe("parent text")
+    })
   })
 
   describe("attachment image (attachment-image.json)", () => {

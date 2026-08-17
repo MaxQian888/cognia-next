@@ -612,6 +612,10 @@
       "inbound": {
         "description": "Fires when a message arrives on a connected platform (Telegram, Slack, ...).",
         "label": "Incoming message"
+      },
+      "system": {
+        "description": "Fires on non-message platform events — reactions, pokes, join requests, bot lifecycle — from a connected platform.",
+        "label": "On platform event"
       }
     },
     "cron": {

@@ -726,6 +726,31 @@
       "label": "送达等待超时（毫秒）"
     }
   },
+  "connectorSystem": {
+    "adapter": {
+      "hint": "要监听平台事件的适配器实例 ID。",
+      "label": "适配器"
+    },
+    "conversationKey": {
+      "hint": "可选。限定到某个会话；留空则任意会话都会触发。",
+      "label": "会话键"
+    },
+    "kinds": {
+      "hint": "仅在选中的事件类型触发；不选表示全部。",
+      "label": "事件类型（可选）",
+      "options": {
+        "lifecycle": "机器人生命周期",
+        "poke": "戳一戳",
+        "reaction_added": "添加表情回应",
+        "reaction_removed": "移除表情回应",
+        "request": "加群 / 好友请求"
+      }
+    },
+    "targetSelfOnly": {
+      "hint": "仅当被回应 / 被戳的消息是本机器人发出的才触发。",
+      "label": "仅限机器人自己的消息"
+    }
+  },
   "connectorWaitReply": {
     "conversationKey": {
       "hint": "组合键 platform:adapterId:chatId——要监听的会话。",

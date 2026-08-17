@@ -335,12 +335,16 @@ describe("parseMatrixEvent", () => {
       ownEventIds: new Set(["$botMsg"]),
     })
     expect(withOwn!.mentions.selfMentioned).toBe(true)
+    // …and stamps the parent author for the exact `reply-to-bot` rule.
+    expect(withOwn!.replyTo?.parentSenderId).toBe(SELF)
 
-    // Replies to OTHER users' messages stay unflagged.
+    // Replies to OTHER users' messages stay unflagged and the parent author
+    // stays unknown (the bus may still resolve it from the delivered ledger).
     const withoutOwn = parseMatrixEvent(ADAPTER, SELF, ROOM, ev, {
       ownEventIds: new Set(["$someoneElse"]),
     })
     expect(withoutOwn!.mentions.selfMentioned).toBe(false)
+    expect(withoutOwn!.replyTo?.parentSenderId).toBeUndefined()
   })
 
   it("ignores already-redacted and unknown event types", () => {

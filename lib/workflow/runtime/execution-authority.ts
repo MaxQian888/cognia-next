@@ -231,7 +231,9 @@ export async function executeDeployedWorkflow(
       : {}),
   }
   const securityContext: WorkflowRunSecurityContext = input.securityContext ?? {
-    piiEgressRequired: input.triggerKind === "trigger.connector.inbound",
+    piiEgressRequired:
+      input.triggerKind === "trigger.connector.inbound" ||
+      input.triggerKind === "trigger.connector.system",
     sourceTriggerKind: input.triggerKind,
   }
 
@@ -417,7 +419,9 @@ async function executeLegacyPublishedWorkflow(
       : {}),
   }
   const securityContext: WorkflowRunSecurityContext = input.securityContext ?? {
-    piiEgressRequired: input.triggerKind === "trigger.connector.inbound",
+    piiEgressRequired:
+      input.triggerKind === "trigger.connector.inbound" ||
+      input.triggerKind === "trigger.connector.system",
     sourceTriggerKind: input.triggerKind,
   }
   const executionBinding: WorkflowExecutionBinding = {

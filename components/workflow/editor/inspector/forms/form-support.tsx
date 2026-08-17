@@ -1274,6 +1274,12 @@ export const DESKTOP_EVENT_KINDS = [
   "property-changed",
 ] as const
 
+// ── trigger.connector.system ──────────────────────────────────────────────
+// Platform system-event kinds the connector bus surfaces (`applySystemEvent`).
+// Single source of truth is the params schema so the form and the validator
+// can never drift.
+export { CONNECTOR_SYSTEM_EVENT_KINDS } from "@/lib/workflow/nodes/params-schemas"
+
 // ── trigger.pet.event ─────────────────────────────────────────────────────
 // Pet lifecycle event bridge. Mirrors `lib/workflow/runtime/pet-event-trigger.ts`.
 export const PET_EVENT_KINDS = ["levelUp", "evolved", "achievementUnlocked", "unwell"] as const

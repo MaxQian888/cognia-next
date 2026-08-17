@@ -95,6 +95,13 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Inbox",
     keywords: ["telegram", "slack", "discord", "lark", "onebot", "platform", "message", "inbound"],
   },
+  "trigger.connector.system": {
+    label: "On platform event",
+    description:
+      "Fires on non-message platform events — reactions, pokes, join requests, bot lifecycle — from a connected platform.",
+    iconName: "Bell",
+    keywords: ["reaction", "emoji", "poke", "request", "lifecycle", "platform", "system", "event"],
+  },
   "trigger.chat.message": {
     label: "On chat message",
     description: "Fires when a user sends a message in a bound character session.",

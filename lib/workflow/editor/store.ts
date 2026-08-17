@@ -521,6 +521,7 @@ const labelByKind: Partial<Record<WorkflowNodeKind, string>> = {
   "trigger.manual": "Run manually",
   "trigger.cron": "On schedule",
   "trigger.connector.inbound": "Incoming message",
+  "trigger.connector.system": "On platform event",
   "trigger.chat.message": "On chat message",
   "trigger.webhook": "On webhook",
   "action.character.send": "Send as character",

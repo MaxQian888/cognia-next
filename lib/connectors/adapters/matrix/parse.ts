@@ -391,15 +391,22 @@ export function parseMatrixEvent(
   const inReplyTo = rel?.["m.in_reply_to"]?.event_id
   // replyTo stays a BARE event id — it is echoed back onto the wire as an
   // `m.in_reply_to` target by the serializer.
+  // A reply whose target is one of the bot's own recent messages addresses
+  // the bot (mention-gated rooms would otherwise drop it).
+  const replyToSelf = inReplyTo !== undefined && (options.ownEventIds?.has(inReplyTo) ?? false)
   const replyTo = inReplyTo
-    ? { messageId: inReplyTo, snippet: (renderContent.body ?? "").slice(0, 100) }
+    ? {
+        messageId: inReplyTo,
+        snippet: (renderContent.body ?? "").slice(0, 100),
+        // Matrix events don't inline the parent author; the adapter's own
+        // sent-event set is the cheap source. Unknown otherwise (the bus may
+        // still resolve it from the delivered-message ledger).
+        ...(replyToSelf ? { parentSenderId: selfId } : {}),
+      }
     : undefined
 
   const segments = buildSegments(renderContent, options)
   const plainText = segmentsToPlainText(segments)
-  // A reply whose target is one of the bot's own recent messages addresses
-  // the bot (mention-gated rooms would otherwise drop it).
-  const replyToSelf = inReplyTo !== undefined && (options.ownEventIds?.has(inReplyTo) ?? false)
   const { selfMentioned, users } = detectMentions(selfId, renderContent, replyToSelf)
 
   // NOTE: inbound `m.notice` (bot-convention messages) parses like a normal

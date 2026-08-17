@@ -20,6 +20,11 @@ describe("isActivityKind", () => {
   it("accepts curated system-event kinds", () => {
     expect(isActivityKind("inbound.edited")).toBe(true)
     expect(isActivityKind("inbound.member_added")).toBe(true)
+    expect(isActivityKind("inbound.reaction_added")).toBe(true)
+    expect(isActivityKind("inbound.reaction_removed")).toBe(true)
+    expect(isActivityKind("inbound.poke")).toBe(true)
+    expect(isActivityKind("inbound.request")).toBe(true)
+    expect(isActivityKind("inbound.lifecycle")).toBe(true)
     expect(isActivityKind("override.computer_use_changed")).toBe(true)
   })
 
@@ -42,8 +47,8 @@ describe("isActivityKind", () => {
     expect(isActivityKind("adapter.heartbeat")).toBe(false)
   })
 
-  it("covers exactly the 22 curated kinds", () => {
-    expect(ACTIVITY_KINDS.size).toBe(22)
+  it("covers exactly the 27 curated kinds", () => {
+    expect(ACTIVITY_KINDS.size).toBe(27)
   })
 })
 

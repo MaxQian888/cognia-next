@@ -34,6 +34,7 @@ const SYNCED_TRIGGER_KINDS = new Set<WorkflowNode["type"]>([
   "trigger.manual",
   "trigger.cron",
   "trigger.connector.inbound",
+  "trigger.connector.system",
   "trigger.chat.message",
   "trigger.goal.completed",
   "trigger.webhook",
@@ -150,6 +151,7 @@ async function syncOneTrigger(
       return
     }
     case "trigger.connector.inbound":
+    case "trigger.connector.system":
     case "trigger.chat.message":
     case "trigger.goal.completed":
     case "trigger.workflow.completed":

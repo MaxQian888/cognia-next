@@ -66,6 +66,24 @@ describe("ConversationActivityNotice", () => {
     expect(screen.getByTestId("activity-row-as2")).toHaveTextContent("Resolved")
   })
 
+  it("labels gesture-class platform events (reaction / poke / request / lifecycle)", () => {
+    show(
+      [
+        { id: "g1", kind: "inbound.reaction_added", at: 1_700_000_000_000, adapterId: "a1" },
+        { id: "g2", kind: "inbound.reaction_removed", at: 1_700_000_001_000, adapterId: "a1" },
+        { id: "g3", kind: "inbound.poke", at: 1_700_000_002_000, adapterId: "a1" },
+        { id: "g4", kind: "inbound.request", at: 1_700_000_003_000, adapterId: "a1" },
+        { id: "g5", kind: "inbound.lifecycle", at: 1_700_000_004_000, adapterId: "a1" },
+      ],
+      []
+    )
+    expect(screen.getByTestId("activity-row-g1")).toHaveTextContent("Reaction added")
+    expect(screen.getByTestId("activity-row-g2")).toHaveTextContent("Reaction removed")
+    expect(screen.getByTestId("activity-row-g3")).toHaveTextContent("Poke")
+    expect(screen.getByTestId("activity-row-g4")).toHaveTextContent("Join / friend request")
+    expect(screen.getByTestId("activity-row-g5")).toHaveTextContent("Bot lifecycle event")
+  })
+
   it("sorts the merged timeline newest-first across both sources", () => {
     show(
       [{ id: "e1", kind: "inbound.edited", at: 1_700_000_000_000, adapterId: "a1" }],

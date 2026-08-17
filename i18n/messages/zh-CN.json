@@ -10802,10 +10802,15 @@
         "inboundDeleted": "消息已撤回",
         "inboundEdited": "消息已编辑",
         "inboundHelpServed": "已发送帮助卡片",
+        "inboundLifecycle": "机器人生命周期事件",
         "inboundMemberAdded": "成员加入",
         "inboundMemberRemoved": "成员退出",
+        "inboundPoke": "戳一戳",
         "inboundPolicyBlocked": "被策略拦截",
+        "inboundReactionAdded": "添加表情回应",
+        "inboundReactionRemoved": "移除表情回应",
         "inboundReadIndicator": "消息已读",
+        "inboundRequest": "加群 / 好友请求",
         "inboundWelcomeSent": "已发送欢迎卡片",
         "notifyImPiiBlocked": "通知被拦截——PII",
         "overrideComputerUseChanged": "电脑操作权限变更",
@@ -25547,12 +25552,17 @@
             "deleted": "消息已删除",
             "edited": "消息已编辑",
             "help_served": "已发送帮助卡片",
+            "lifecycle": "机器人生命周期事件",
             "member_added": "成员加入",
             "member_removed": "成员退出",
             "ocr_failed": "OCR 失败",
+            "poke": "戳一戳",
             "policy_blocked": "策略拦截",
+            "reaction_added": "添加表情回应",
+            "reaction_removed": "移除表情回应",
             "read_indicator": "已读回执",
             "received": "已接收消息",
+            "request": "加群 / 好友请求",
             "signature_failed": "签名校验失败",
             "welcome_sent": "已发送欢迎卡片"
           },
@@ -36968,6 +36978,31 @@
           "label": "送达等待超时（毫秒）"
         }
       },
+      "connectorSystem": {
+        "adapter": {
+          "hint": "要监听平台事件的适配器实例 ID。",
+          "label": "适配器"
+        },
+        "conversationKey": {
+          "hint": "可选。限定到某个会话；留空则任意会话都会触发。",
+          "label": "会话键"
+        },
+        "kinds": {
+          "hint": "仅在选中的事件类型触发；不选表示全部。",
+          "label": "事件类型（可选）",
+          "options": {
+            "lifecycle": "机器人生命周期",
+            "poke": "戳一戳",
+            "reaction_added": "添加表情回应",
+            "reaction_removed": "移除表情回应",
+            "request": "加群 / 好友请求"
+          }
+        },
+        "targetSelfOnly": {
+          "hint": "仅当被回应 / 被戳的消息是本机器人发出的才触发。",
+          "label": "仅限机器人自己的消息"
+        }
+      },
       "connectorWaitReply": {
         "conversationKey": {
           "hint": "组合键 platform:adapterId:chatId——要监听的会话。",
@@ -40121,6 +40156,10 @@
           "inbound": {
             "description": "当外部平台（Telegram、Slack 等）收到消息时触发。",
             "label": "收到消息"
+          },
+          "system": {
+            "description": "当已连接平台产生非消息事件（表情回应、戳一戳、加群请求、机器人生命周期）时触发。",
+            "label": "平台事件"
           }
         },
         "cron": {

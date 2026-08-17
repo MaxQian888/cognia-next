@@ -31,6 +31,7 @@ export interface SubscribedTrigger {
 /** Kinds we actually index — cron/webhook triggers go through the Rust router. */
 const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.connector.inbound",
+  "trigger.connector.system",
   "trigger.chat.message",
   "trigger.goal.completed",
   "trigger.terminal.command",
@@ -152,6 +153,18 @@ export interface TriggerMatchContext {
    */
   petEventKind?: string
   /**
+   * Platform system-event kind (trigger.connector.system) — reaction_added /
+   * reaction_removed / poke / request / lifecycle, matched against the node's
+   * `kinds` array param. A node without a `kinds` filter matches every kind.
+   */
+  connectorSystemKind?: string
+  /**
+   * Whether the system event's target message was delivered by the bot
+   * (trigger.connector.system) — a node with `targetSelfOnly: true` only
+   * fires when this is true.
+   */
+  targetDeliveredByUs?: boolean
+  /**
    * Command line (terminal.command) — matched as a *substring* against the
    * node's `commandContains` param. Already PII-gated by the dispatcher;
    * an empty string only matches nodes without a `commandContains` filter.
@@ -236,7 +249,7 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   if (Array.isArray(p.kinds) && p.kinds.length > 0) {
     // Shared `kinds` filter shape — desktop and pet triggers each pass their
     // own ctx field, and entries are already partitioned per trigger kind.
-    const eventKind = ctx.desktopEventKind ?? ctx.petEventKind
+    const eventKind = ctx.desktopEventKind ?? ctx.petEventKind ?? ctx.connectorSystemKind
     if (typeof eventKind !== "string" || !p.kinds.includes(eventKind)) {
       return false
     }
@@ -261,6 +274,7 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
     if (!hit) return false
   }
   if (p.requireMention === true && ctx.selfMentioned !== true) return false
+  if (p.targetSelfOnly === true && ctx.targetDeliveredByUs !== true) return false
   if (typeof p.pluginId === "string" && p.pluginId.length > 0 && ctx.pluginId !== p.pluginId) {
     return false
   }

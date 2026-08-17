@@ -612,6 +612,10 @@
       "inbound": {
         "description": "当外部平台（Telegram、Slack 等）收到消息时触发。",
         "label": "收到消息"
+      },
+      "system": {
+        "description": "当已连接平台产生非消息事件（表情回应、戳一戳、加群请求、机器人生命周期）时触发。",
+        "label": "平台事件"
       }
     },
     "cron": {

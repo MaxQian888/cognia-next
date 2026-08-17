@@ -10802,10 +10802,15 @@
         "inboundDeleted": "Message deleted",
         "inboundEdited": "Message edited",
         "inboundHelpServed": "Help card sent",
+        "inboundLifecycle": "Bot lifecycle event",
         "inboundMemberAdded": "Member joined",
         "inboundMemberRemoved": "Member left",
+        "inboundPoke": "Poke",
         "inboundPolicyBlocked": "Blocked by policy",
+        "inboundReactionAdded": "Reaction added",
+        "inboundReactionRemoved": "Reaction removed",
         "inboundReadIndicator": "Message read",
+        "inboundRequest": "Join / friend request",
         "inboundWelcomeSent": "Welcome card sent",
         "notifyImPiiBlocked": "Notification blocked — PII",
         "overrideComputerUseChanged": "Computer Use changed",
@@ -25547,12 +25552,17 @@
             "deleted": "Message deleted",
             "edited": "Message edited",
             "help_served": "Help card sent",
+            "lifecycle": "Bot lifecycle event",
             "member_added": "Member added",
             "member_removed": "Member removed",
             "ocr_failed": "OCR failed",
+            "poke": "Poke",
             "policy_blocked": "Blocked by policy",
+            "reaction_added": "Reaction added",
+            "reaction_removed": "Reaction removed",
             "read_indicator": "Read receipt",
             "received": "Message received",
+            "request": "Join / friend request",
             "signature_failed": "Signature check failed",
             "welcome_sent": "Welcome card sent"
           },
@@ -36968,6 +36978,31 @@
           "label": "Delivery wait timeout (ms)"
         }
       },
+      "connectorSystem": {
+        "adapter": {
+          "hint": "Adapter instance id whose platform events should fire this trigger.",
+          "label": "Adapter"
+        },
+        "conversationKey": {
+          "hint": "Optional. Limit to a specific conversation; empty fires on any.",
+          "label": "Conversation key"
+        },
+        "kinds": {
+          "hint": "Fires only for the selected event kinds; none selected means all.",
+          "label": "Event kinds (optional)",
+          "options": {
+            "lifecycle": "Bot lifecycle",
+            "poke": "Poke / nudge",
+            "reaction_added": "Reaction added",
+            "reaction_removed": "Reaction removed",
+            "request": "Join / friend request"
+          }
+        },
+        "targetSelfOnly": {
+          "hint": "Only fire when the reacted-to / poked message was sent by this bot.",
+          "label": "Only the bot's own messages"
+        }
+      },
       "connectorWaitReply": {
         "conversationKey": {
           "hint": "Composite key platform:adapterId:chatId — the conversation to listen on.",
@@ -40121,6 +40156,10 @@
           "inbound": {
             "description": "Fires when a message arrives on a connected platform (Telegram, Slack, ...).",
             "label": "Incoming message"
+          },
+          "system": {
+            "description": "Fires on non-message platform events — reactions, pokes, join requests, bot lifecycle — from a connected platform.",
+            "label": "On platform event"
           }
         },
         "cron": {

@@ -273,6 +273,11 @@ function messageToEvent(
       ? {
           messageId: msg.message_reference.message_id,
           snippet: (msg.referenced_message?.content ?? "").slice(0, 100),
+          // `referenced_message.author` is the parent author when Discord
+          // inlines the referenced message (absent for deleted parents).
+          ...(msg.referenced_message?.author?.id !== undefined
+            ? { parentSenderId: msg.referenced_message.author.id }
+            : {}),
         }
       : undefined
 

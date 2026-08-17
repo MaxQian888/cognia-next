@@ -726,6 +726,31 @@
       "label": "Delivery wait timeout (ms)"
     }
   },
+  "connectorSystem": {
+    "adapter": {
+      "hint": "Adapter instance id whose platform events should fire this trigger.",
+      "label": "Adapter"
+    },
+    "conversationKey": {
+      "hint": "Optional. Limit to a specific conversation; empty fires on any.",
+      "label": "Conversation key"
+    },
+    "kinds": {
+      "hint": "Fires only for the selected event kinds; none selected means all.",
+      "label": "Event kinds (optional)",
+      "options": {
+        "lifecycle": "Bot lifecycle",
+        "poke": "Poke / nudge",
+        "reaction_added": "Reaction added",
+        "reaction_removed": "Reaction removed",
+        "request": "Join / friend request"
+      }
+    },
+    "targetSelfOnly": {
+      "hint": "Only fire when the reacted-to / poked message was sent by this bot.",
+      "label": "Only the bot's own messages"
+    }
+  },
   "connectorWaitReply": {
     "conversationKey": {
       "hint": "Composite key platform:adapterId:chatId — the conversation to listen on.",

@@ -65,6 +65,16 @@ export interface ChannelDescriptor {
 export interface ReplyDescriptor {
   messageId: string
   snippet: string
+  /**
+   * Platform user id of the replied-to message's AUTHOR, when the wire shape
+   * carries it (Telegram `reply_to_message.from`, Discord
+   * `referenced_message.author`, Matrix own-event tracking). Adapters that
+   * cannot resolve it cheaply leave it undefined; the bus then consults the
+   * delivered-message ledger (`lib/connectors/delivered-messages.ts`) and
+   * fills `selfId` when the parent was one of ours. The `reply-to-bot`
+   * trigger rule matches ONLY when this equals `event.selfId`.
+   */
+  parentSenderId?: string
 }
 
 export interface MentionDescriptor {

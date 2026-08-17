@@ -20,6 +20,7 @@ import { listRecentGovernanceAuditGaps } from "@/lib/db/governance-ledger"
 import { getBus, __resetBusForTesting } from "./bus"
 import { LarkFollowUpControlDispatchError } from "./follow-up-control"
 import { __resetPruneCounterForTesting } from "./dedup"
+import { recordDeliveredMessage } from "./delivered-messages"
 import type { NormalizedInboundEvent, PlatformAdapter } from "@/types/connectors"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
@@ -657,6 +658,64 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
 
     const auditRows = await listRecent(autoAdapterId)
     expect(auditRows.some((r) => r.kind === "inbound.received")).toBe(true)
+  })
+
+  it("resolves the replied-to author from the delivered-message ledger before policy eval", async () => {
+    // A third adapter whose ONLY trigger rule is `reply-to-bot`.
+    const replyRow = await createAdapterInstance({
+      type: "telegram",
+      displayName: "Reply Bot",
+      enabled: true,
+      transportMode: "stub",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: {
+        rules: [{ kind: "reply-to-bot" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+      defaultMode: "auto",
+    })
+    const bus = getBus()
+    bus.registerAdapter(makeAdapter(replyRow.id))
+
+    const conversationKey = `telegram:${replyRow.id}:group`
+    // We delivered platform message "bot_out_7" into this group earlier.
+    await recordDeliveredMessage(replyRow.id, conversationKey, "bot_out_7")
+
+    const replyToOurs: NormalizedInboundEvent = {
+      ...groupEvent(replyRow.id, "msg_reply_ours", false),
+      conversationKey,
+      replyTo: { messageId: "bot_out_7", snippet: "…" },
+    }
+    await bus.dispatchInboundFull(replyToOurs)
+    await bus.flushInboundTurns()
+    expect(routeHandler).toHaveBeenCalledTimes(1)
+    const [seen, decision] = routeHandler.mock.calls[0] as [NormalizedInboundEvent, RouteDecision]
+    expect(decision).toBe("ai-run")
+    expect(seen.replyTo?.parentSenderId).toBe("bot_1")
+    expect(seen.channelData?.replyParentResolvedBy).toBe("ledger")
+
+    // A reply to a message we never sent stays unknown → not a reply to the bot → dropped.
+    routeHandler.mockClear()
+    const replyToHuman: NormalizedInboundEvent = {
+      ...groupEvent(replyRow.id, "msg_reply_human", false),
+      conversationKey,
+      replyTo: { messageId: "human_msg_1", snippet: "…" },
+    }
+    await bus.dispatchInboundFull(replyToHuman)
+    await bus.flushInboundTurns()
+    expect(routeHandler).not.toHaveBeenCalled()
+
+    // Adapter-supplied parent authors are trusted as-is (no ledger stamp).
+    const replyWithParent: NormalizedInboundEvent = {
+      ...groupEvent(replyRow.id, "msg_reply_parent", false),
+      conversationKey,
+      replyTo: { messageId: "x", snippet: "…", parentSenderId: "u_other" },
+    }
+    await bus.dispatchInboundFull(replyWithParent)
+    await bus.flushInboundTurns()
+    expect(routeHandler).not.toHaveBeenCalled()
   })
 
   it("scenario 5: private message in manual mode → manual-store, regardless of match", async () => {

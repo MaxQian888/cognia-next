@@ -252,7 +252,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const securityContext: WorkflowRunSecurityContext = input.securityContext ??
     existingRow?.securityContext ?? {
       piiEgressRequired:
-        input.executionBinding !== undefined && trigger.kind === "trigger.connector.inbound",
+        input.executionBinding !== undefined &&
+        (trigger.kind === "trigger.connector.inbound" ||
+          trigger.kind === "trigger.connector.system"),
       sourceTriggerKind: trigger.kind,
     }
   if (existingRow && TERMINAL_RUN_STATUSES.has(existingRow.status)) {

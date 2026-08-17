@@ -36,6 +36,11 @@ jest.mock("./audit", () => ({
 jest.mock("./adapters/_shared/a2ui-mapper", () => ({
   resolveCallbackBinding: jest.fn().mockResolvedValue(undefined),
 }))
+const mockRecordDelivered = jest.fn().mockResolvedValue(undefined)
+jest.mock("./delivered-messages", () => ({
+  recordDeliveredMessage: (...args: unknown[]) => mockRecordDelivered(...args),
+  wasDeliveredByUs: jest.fn().mockResolvedValue(false),
+}))
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -93,6 +98,7 @@ function makeRequest(): OutboundRequest {
 beforeEach(() => {
   __resetBusForTesting()
   mockTrackEvent.mockClear()
+  mockRecordDelivered.mockClear()
 })
 
 describe("ConnectorBus — adapter registry", () => {
@@ -286,6 +292,34 @@ describe("ConnectorBus — sendOutbound", () => {
     const result = await bus.sendOutbound("missing", makeRequest())
     expect(result.ok).toBe(false)
     expect(result.error?.code).toBe("adapter_not_found")
+  })
+
+  it("records a successful direct-wire send in the delivered-message ledger", async () => {
+    const bus = getBus()
+    bus.registerAdapter(makeAdapter("a1"))
+    const req: OutboundRequest = {
+      ...makeRequest(),
+      deliveryTarget: {
+        address: {
+          conversationKey: "telegram:a1:42",
+          platform: "telegram",
+          adapterId: "a1",
+          scopeKind: "group",
+          containerId: "42",
+        },
+        conversationRef: { platform: "telegram", adapterId: "a1" },
+        refreshedAt: Date.now(),
+      },
+    }
+    await bus.sendOutbound("a1", req)
+    expect(mockRecordDelivered).toHaveBeenCalledWith("a1", "telegram:a1:42", "pm_1")
+  })
+
+  it("does not record when the send has no delivery target or no platform id", async () => {
+    const bus = getBus()
+    bus.registerAdapter(makeAdapter("a1"))
+    await bus.sendOutbound("a1", makeRequest())
+    expect(mockRecordDelivered).not.toHaveBeenCalled()
   })
 })
 

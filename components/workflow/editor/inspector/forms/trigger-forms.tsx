@@ -21,6 +21,7 @@ import { CronBuilder } from "./shared/cron-builder"
 import { OutputSchemaField } from "./output-schema-field"
 import {
   CONNECTOR_CHANNEL_KINDS,
+  CONNECTOR_SYSTEM_EVENT_KINDS,
   DESKTOP_EVENT_KINDS,
   PET_EVENT_KINDS,
   WebhookUrlBanner,
@@ -198,6 +199,77 @@ export function ConnectorInboundConfig({ params, onChange }: ConfigProps) {
             data-testid="ci-require-mention"
           />
           <span className="text-muted-foreground">{t("requireMention.hint")}</span>
+        </label>
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── trigger.connector.system ─────────────────────────────────────────────
+export function ConnectorSystemTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.connectorSystem")
+  const adapterId = readString(params, "adapterId")
+  const conversationKey = readString(params, "conversationKey")
+  const kinds = Array.isArray(params.kinds) ? (params.kinds as string[]) : []
+  const targetSelfOnly = readBoolean(params, "targetSelfOnly", false)
+  const toggleKind = (kind: string) => {
+    const next = kinds.includes(kind) ? kinds.filter((k) => k !== kind) : [...kinds, kind]
+    onChange(patchParam(params, "kinds", next.length > 0 ? next : undefined))
+  }
+  return (
+    <FieldGroup>
+      <Field
+        label={t("adapter.label")}
+        htmlFor="cs-adapter"
+        hint={t("adapter.hint")}
+        name="adapterId"
+        required
+      >
+        <AdapterInstancePicker
+          id="cs-adapter"
+          value={adapterId}
+          onChange={(v) => onChange(patchParam(params, "adapterId", v))}
+        />
+      </Field>
+      <Field
+        label={t("conversationKey.label")}
+        htmlFor="cs-conv"
+        hint={t("conversationKey.hint")}
+        name="conversationKey"
+      >
+        <Input
+          id="cs-conv"
+          value={conversationKey}
+          onChange={(e) => onChange(patchParam(params, "conversationKey", e.target.value))}
+        />
+      </Field>
+      <Field label={t("kinds.label")} hint={t("kinds.hint")} name="kinds">
+        <div className="space-y-1.5">
+          {CONNECTOR_SYSTEM_EVENT_KINDS.map((kind) => (
+            <label
+              key={kind}
+              className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-sm hover:bg-muted/40"
+            >
+              <Checkbox
+                checked={kinds.includes(kind)}
+                onCheckedChange={() => toggleKind(kind)}
+                data-testid={`cs-kind-${kind}`}
+              />
+              <span>{t(`kinds.options.${kind}` as never)}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
+      <Field label={t("targetSelfOnly.label")} name="targetSelfOnly">
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={targetSelfOnly}
+            onCheckedChange={(v) =>
+              onChange(patchParam(params, "targetSelfOnly", v === true ? true : undefined))
+            }
+            data-testid="cs-target-self-only"
+          />
+          <span className="text-muted-foreground">{t("targetSelfOnly.hint")}</span>
         </label>
       </Field>
     </FieldGroup>

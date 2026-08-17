@@ -21,6 +21,13 @@ export const ACTIVITY_KINDS: ReadonlySet<AuditKind> = new Set<AuditKind>([
   "inbound.read_indicator",
   "inbound.member_added",
   "inbound.member_removed",
+  // Gesture-class platform events (reaction / poke / request / lifecycle) —
+  // surfaced so an operator can see "👍 on the bot's answer" in the trail.
+  "inbound.reaction_added",
+  "inbound.reaction_removed",
+  "inbound.poke",
+  "inbound.request",
+  "inbound.lifecycle",
   "inbound.deferred_quiet_hours",
   "inbound.deferred_muted",
   "inbound.help_served",

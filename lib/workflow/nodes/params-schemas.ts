@@ -66,6 +66,26 @@ const CronParams = z.object({
   timezone: optionalString,
 })
 
+export const CONNECTOR_SYSTEM_EVENT_KINDS = [
+  "reaction_added",
+  "reaction_removed",
+  "poke",
+  "request",
+  "lifecycle",
+] as const
+
+const ConnectorSystemTriggerParams = z.object({
+  adapterId: requiredString("required"),
+  conversationKey: optionalString,
+  /** Only fire for these system kinds (OR); empty = every kind. */
+  kinds: z.array(z.enum(CONNECTOR_SYSTEM_EVENT_KINDS)).optional(),
+  /**
+   * Only fire when the target message (reaction / poke) was one the bot
+   * itself delivered — resolved from the delivered-message ledger.
+   */
+  targetSelfOnly: z.boolean().optional(),
+})
+
 const ConnectorInboundParams = z.object({
   adapterId: requiredString("required"),
   conversationKey: optionalString,
@@ -1644,6 +1664,7 @@ export const PARAMS_SCHEMAS = {
   "trigger.manual": ManualTriggerParams,
   "trigger.cron": CronParams,
   "trigger.connector.inbound": ConnectorInboundParams,
+  "trigger.connector.system": ConnectorSystemTriggerParams,
   "trigger.chat.message": ChatMessageTriggerParams,
   "trigger.goal.completed": GoalCompletedTriggerParams,
   "trigger.workflow.completed": WorkflowCompletedTriggerParams,

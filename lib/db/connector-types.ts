@@ -478,7 +478,12 @@ export interface PlatformIdentityRow extends PlatformIdentity {
  * pre-v38 rows keep the original `${adapterId}:${platformMessageId}` id
  * — the row is queryable either way via the compound index.
  */
-export type InboundLedgerNamespace = "inbound" | "callback" | "welcome"
+/**
+ * `"outbound"` is the delivered-message ledger (`lib/connectors/delivered-messages.ts`):
+ * platform ids WE sent, scoped by conversation, consulted by the exact
+ * `reply-to-bot` trigger rule.
+ */
+export type InboundLedgerNamespace = "inbound" | "callback" | "welcome" | "outbound"
 
 export interface InboundLedgerRow {
   /** `${adapterId}:${namespace}:${platformMessageId}` (or legacy form). */

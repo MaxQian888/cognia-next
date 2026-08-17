@@ -34,6 +34,9 @@ export type WorkflowNodeKind =
   | "trigger.manual"
   | "trigger.cron"
   | "trigger.connector.inbound"
+  // Non-message platform events (reaction added/removed, poke, request,
+  // lifecycle) surfaced by the connector bus's `applySystemEvent`.
+  | "trigger.connector.system"
   | "trigger.chat.message"
   | "trigger.webhook"
   | "trigger.integration.event"
@@ -286,6 +289,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.manual",
   "trigger.cron",
   "trigger.connector.inbound",
+  "trigger.connector.system",
   "trigger.chat.message",
   "trigger.webhook",
   "trigger.integration.event",

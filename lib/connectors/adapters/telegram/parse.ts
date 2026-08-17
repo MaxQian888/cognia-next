@@ -431,6 +431,11 @@ function messageToEvent(
       ? {
           messageId: String(msg.reply_to_message.message_id),
           snippet: (msg.reply_to_message.text ?? msg.reply_to_message.caption ?? "").slice(0, 100),
+          // Telegram carries the parent author inline — lets the exact
+          // `reply-to-bot` rule match without a ledger lookup.
+          ...(msg.reply_to_message.from?.id !== undefined
+            ? { parentSenderId: String(msg.reply_to_message.from.id) }
+            : {}),
         }
       : undefined
 

@@ -62,17 +62,15 @@ function matchRule(rule: TriggerRule, event: NormalizedInboundEvent): boolean {
     case "self-mention":
       return event.mentions.selfMentioned
 
-    case "reply-to-bot":
-      // KNOWN LIMITATION: this fires on a reply to ANY message, not only to
-      // one of the bot's. `ReplyDescriptor` (types/connectors/event.ts) only
-      // carries { messageId, snippet } — the replied-to message's SENDER id is
-      // not on the wire shape, so there is nothing to match against
-      // `event.selfId` here. Adapters that can cheaply resolve the parent
-      // sender are expected to omit `replyTo` for replies to non-bot messages;
-      // where they can't, this rule over-matches (a reply to a human also
-      // counts as "reply-to-bot"). Tightening it requires adding the parent
-      // sender to the shared ReplyDescriptor type + every adapter parser.
-      return Boolean(event.replyTo?.messageId)
+    case "reply-to-bot": {
+      // Exact match: the replied-to message must have been authored by this
+      // bot. `parentSenderId` is filled either by the adapter parser (when the
+      // wire shape carries the parent author) or by the bus from the
+      // delivered-message ledger before evaluation. Unknown parent ⇒ NOT a
+      // reply to the bot (strict, never over-matches).
+      const parent = event.replyTo?.parentSenderId
+      return parent !== undefined && parent !== "" && parent === event.selfId
+    }
 
     case "slash-command": {
       const text = event.plainText.trimStart()

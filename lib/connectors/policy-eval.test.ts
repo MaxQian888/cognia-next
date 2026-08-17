@@ -77,11 +77,30 @@ describe("evaluatePolicy — rules", () => {
     expect(result.matched).toBe(false)
   })
 
-  it("reply-to-bot matches when replyTo.messageId is present", () => {
+  it("reply-to-bot matches only when the parent author is the bot itself", () => {
     const policy = noBlockPolicy([{ kind: "reply-to-bot" }])
-    const event = baseEvent({ replyTo: { messageId: "bot_msg_1", snippet: "..." } })
-    const result = evaluatePolicy(policy, event, emptyState())
+    const event = baseEvent({
+      replyTo: { messageId: "bot_msg_1", snippet: "...", parentSenderId: "bot_self" },
+    })
+    const result = evaluatePolicy(policy, { ...event, selfId: "bot_self" }, emptyState())
     expect(result.matched).toBe(true)
+  })
+
+  it("reply-to-bot does NOT match a reply to another user's message", () => {
+    const policy = noBlockPolicy([{ kind: "reply-to-bot" }])
+    const event = baseEvent({
+      replyTo: { messageId: "human_msg_1", snippet: "...", parentSenderId: "u_someone_else" },
+    })
+    const result = evaluatePolicy(policy, { ...event, selfId: "bot_self" }, emptyState())
+    expect(result.matched).toBe(false)
+  })
+
+  it("reply-to-bot does NOT match when the parent author is unknown (strict)", () => {
+    const policy = noBlockPolicy([{ kind: "reply-to-bot" }])
+    const event = baseEvent({ replyTo: { messageId: "msg_1", snippet: "..." } })
+    expect(evaluatePolicy(policy, event, emptyState()).matched).toBe(false)
+    const empty = baseEvent({ replyTo: { messageId: "msg_1", snippet: "...", parentSenderId: "" } })
+    expect(evaluatePolicy(policy, empty, emptyState()).matched).toBe(false)
   })
 
   it("reply-to-bot does NOT match when replyTo is absent", () => {

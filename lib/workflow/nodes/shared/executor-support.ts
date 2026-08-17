@@ -72,6 +72,7 @@ export const PASSTHROUGH_TRIGGER_KINDS = [
   "trigger.manual",
   "trigger.cron",
   "trigger.connector.inbound",
+  "trigger.connector.system",
   "trigger.chat.message",
   "trigger.goal.completed",
   "trigger.webhook",
