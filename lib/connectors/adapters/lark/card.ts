@@ -12,12 +12,12 @@
  */
 
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
-import type { ConnectorCallbackBindingKind } from "@/types/connectors/interaction"
 import {
   buildActionId,
   recordCallbackBinding,
   walkA2UISurface,
   type A2UIWalkNode,
+  bindingHintFields,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
 // ---------------------------------------------------------------------------
@@ -357,22 +357,13 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
         // present we record under that kind so the bus routes the click
         // to the matching short-circuit; absent, the default
         // `callback_query` kind keeps every existing button working.
-        const bindingKind =
-          typeof node.raw.bindingKind === "string"
-            ? (node.raw.bindingKind as ConnectorCallbackBindingKind)
-            : undefined
-        const bindingPayload =
-          node.raw.bindingPayload && typeof node.raw.bindingPayload === "object"
-            ? (node.raw.bindingPayload as Record<string, unknown>)
-            : undefined
         await recordCallbackBinding({
           adapterId: input.adapterId,
           actionId: fullId,
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
-          ...(bindingKind ? { kind: bindingKind } : {}),
-          ...(bindingPayload ? { payload: bindingPayload } : {}),
+          ...bindingHintFields(node.raw),
         })
         const variant = stringValue(node.raw.variant)
         const type =

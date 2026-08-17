@@ -21,6 +21,7 @@ import {
   walkA2UISurface,
   buildActionId,
   recordCallbackBinding,
+  bindingHintFields,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import type { WeComTemplateCard, WeComInboundEventBody } from "./protocol"
 
@@ -79,6 +80,7 @@ export async function buildWeComTemplateCard(
             surfaceId: seg.surfaceId,
             componentId: node.id,
             conversationKey,
+            ...bindingHintFields(node.raw),
           })
         )
         break

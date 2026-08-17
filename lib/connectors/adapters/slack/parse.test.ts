@@ -97,6 +97,10 @@ describe("parseSlackEventCallback", () => {
     it("conversationKey includes the thread_ts", () => {
       expect(result!.conversationKey).toBe(`slack:${ADAPTER_ID}:C555CHANNEL:1714900000.000100`)
     })
+
+    it("surfaces the thread parent as replyTo (quote → issue needs the id)", () => {
+      expect(result!.replyTo).toEqual({ messageId: "1714900000.000100", snippet: "" })
+    })
   })
 
   describe("file share (file-share.json)", () => {

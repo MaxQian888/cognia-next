@@ -31,6 +31,7 @@ import {
   truncateActionId,
   walkA2UISurface,
   type A2UIWalkNode,
+  bindingHintFields,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { escapeMdV2, escapeMdV2Code, escapeMdV2Url, TELEGRAM_CAPTION_LIMIT } from "./markdown-v2"
 import type { SerializedTelegramCall } from "./serialize"
@@ -164,6 +165,7 @@ export async function buildTelegramA2UICalls(
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
+          ...bindingHintFields(node.raw),
         })
         const { wireId } = await truncateActionId(fullActionId, 64)
         const button: InlineKeyboardButton = href

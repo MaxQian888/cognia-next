@@ -21,6 +21,7 @@ import {
   UsersIcon,
   WorkflowIcon,
   type LucideIcon,
+  CircleDotIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -47,6 +48,7 @@ const SOURCE_ICON: Record<NotificationSource, LucideIcon> = {
   session: SparklesIcon,
   workflow: WorkflowIcon,
   system: SettingsIcon,
+  issue: CircleDotIcon,
 }
 
 const LEVEL_CLASS: Record<NotificationLevel, string> = {

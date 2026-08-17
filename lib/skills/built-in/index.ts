@@ -48,3 +48,5 @@ import "./lark"
 import "./im"
 // Desktop-only, workspace-confined plugin conversion tools.
 import "./plugin-conversion"
+// Issue tracker (ADR-0130 slice ③): file issues from chat, resolve projects.
+import "./issues"

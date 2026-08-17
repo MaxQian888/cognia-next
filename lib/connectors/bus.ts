@@ -2173,6 +2173,35 @@ export class ConnectorBus {
       return true
     }
 
+    // ── Step 4-pre-b2: issue_action short-circuit (issue tracker cards) ──
+    //
+    // A button on an issue card (move / run) or on the create-issue
+    // confirmation card (file into project / cancel). Applied directly through
+    // the same guards the desktop board uses and answered with a tight reply
+    // or a refreshed card — no model digest turn. See `lib/issues/im/`.
+    if (resolvedBinding?.kind === "issue_action") {
+      try {
+        const { handleIssueActionCallback } = await import("@/lib/issues/im/callback-handler")
+        await handleIssueActionCallback({
+          binding: resolvedBinding,
+          adapterId: event.adapterId,
+          conversationKey: resolvedConversationKey ?? undefined,
+          user: event.user,
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "issue.card_action_denied",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+      }
+      return true
+    }
+
     // ── Step 4-pre-c: tool_approve short-circuit (control-plane HITL) ──
     //
     // A button on an A2UI tool-permission card. Resolve the pending approval

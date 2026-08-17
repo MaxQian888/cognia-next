@@ -11566,6 +11566,43 @@
       "remove": "Remove {name}",
       "title": "Labels"
     },
+    "notify": {
+      "actor": {
+        "agent": "an agent",
+        "human": "you",
+        "team": "a squad"
+      },
+      "assigned": {
+        "body": "{title}",
+        "title": "{identifier} assigned to {to}"
+      },
+      "commented": {
+        "body": "{body}",
+        "title": "New comment on {identifier} from {by}"
+      },
+      "open": "Open issue",
+      "reassigned": {
+        "body": "{title}",
+        "title": "{identifier} reassigned to {to}"
+      },
+      "run_failed": {
+        "body": "{error}",
+        "title": "{identifier} run failed"
+      },
+      "run_succeeded": {
+        "body": "{title}",
+        "title": "{identifier} run finished — ready for review"
+      },
+      "status": {
+        "canceled": "Canceled",
+        "done": "Done",
+        "in_review": "In review"
+      },
+      "status_changed": {
+        "body": "{title}",
+        "title": "{identifier} moved to {to}"
+      }
+    },
     "priority": {
       "high": "High",
       "low": "Low",
@@ -15579,6 +15616,7 @@
     "sources": {
       "agent-team": "Agent team",
       "connector": "Messages",
+      "issue": "Issues",
       "plugin": "Plugins",
       "scheduler": "Scheduler",
       "session": "Sessions",

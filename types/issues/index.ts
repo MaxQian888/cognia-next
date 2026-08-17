@@ -154,6 +154,19 @@ export interface IssueProject {
   updatedAt: number
 }
 
+/**
+ * Where an issue was filed from, when not the desktop board. Non-indexed and
+ * additive (no schema bump). The IM origin is what lets `lib/issues/notify.ts`
+ * push the issue's lifecycle back to the conversation that created it.
+ */
+export type IssueOrigin = {
+  kind: "im"
+  /** Connector conversation key (`<adapterId>:<conversationRef>`). */
+  conversationKey: string
+  /** Platform message that was turned into (or asked for) the issue. */
+  messageId?: string
+}
+
 /** Link from a local issue to its GitHub counterpart. */
 export interface IssueGithubRef {
   repoFullName: string
@@ -194,6 +207,8 @@ export interface Issue {
   order: number
   /** Set when this local issue is linked to a GitHub issue. */
   githubRef?: IssueGithubRef
+  /** Set when the issue was filed from an IM conversation. */
+  origin?: IssueOrigin
   createdAt: number
   updatedAt: number
   startedAt?: number

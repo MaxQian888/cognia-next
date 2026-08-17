@@ -10,7 +10,15 @@
 
 /** Which subsystem emitted the notification. Extensible union. */
 export type NotificationSource =
-  "scheduler" | "agent-team" | "plugin" | "connector" | "session" | "workflow" | "system"
+  | "scheduler"
+  | "agent-team"
+  | "plugin"
+  | "connector"
+  | "session"
+  | "workflow"
+  | "system"
+  /** Issue tracker lifecycle (ADR-0130): assignments, run outcomes, review-ready, comments. */
+  | "issue"
 
 /** Severity / obtrusiveness tier. `critical` bypasses DND + per-source mute. */
 export type NotificationLevel = "info" | "success" | "warning" | "error" | "critical"
@@ -38,6 +46,7 @@ export const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   "session",
   "workflow",
   "system",
+  "issue",
 ] as const
 
 export const NOTIFICATION_LEVELS: readonly NotificationLevel[] = [

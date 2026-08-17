@@ -16,6 +16,7 @@ import {
   recordCallbackBinding,
   walkA2UISurface,
   type A2UIWalkNode,
+  bindingHintFields,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
 // ---------------------------------------------------------------------------
@@ -301,6 +302,7 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
+          ...bindingHintFields(node.raw),
         })
         const variant = stringValue(node.raw.variant)
         const style =

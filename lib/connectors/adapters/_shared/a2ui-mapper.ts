@@ -170,6 +170,32 @@ export async function truncateActionId(
  */
 export const DEFAULT_CALLBACK_BINDING_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
+/**
+ * Binding-kind hints a surface author may put on a raw interactive component
+ * (`bindingKind` + `bindingPayload`), so the platform mapper records the
+ * button's binding under a specific kind the bus short-circuits on
+ * (`help_quick_command`, `issue_action`, …) instead of the default
+ * `callback_query`. Mappers spread the result into `recordCallbackBinding`.
+ * Absent hints yield `{}` — every existing button keeps working.
+ */
+export function bindingHintFields(raw: Record<string, unknown> | undefined): {
+  kind?: ConnectorCallbackBindingRow["kind"]
+  payload?: Record<string, unknown>
+} {
+  if (!raw) return {}
+  const kind =
+    typeof raw.bindingKind === "string"
+      ? (raw.bindingKind as ConnectorCallbackBindingRow["kind"])
+      : undefined
+  const payload =
+    raw.bindingPayload &&
+    typeof raw.bindingPayload === "object" &&
+    !Array.isArray(raw.bindingPayload)
+      ? (raw.bindingPayload as Record<string, unknown>)
+      : undefined
+  return { ...(kind ? { kind } : {}), ...(payload ? { payload } : {}) }
+}
+
 export async function recordCallbackBinding(input: {
   adapterId: string
   actionId: string

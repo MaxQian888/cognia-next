@@ -11566,6 +11566,43 @@
       "remove": "移除 {name}",
       "title": "标签"
     },
+    "notify": {
+      "actor": {
+        "agent": "一个 Agent",
+        "human": "你",
+        "team": "一个小队"
+      },
+      "assigned": {
+        "body": "{title}",
+        "title": "{identifier} 已指派给 {to}"
+      },
+      "commented": {
+        "body": "{body}",
+        "title": "{by} 在 {identifier} 上发表了新评论"
+      },
+      "open": "打开议题",
+      "reassigned": {
+        "body": "{title}",
+        "title": "{identifier} 已改派给 {to}"
+      },
+      "run_failed": {
+        "body": "{error}",
+        "title": "{identifier} 运行失败"
+      },
+      "run_succeeded": {
+        "body": "{title}",
+        "title": "{identifier} 运行完成 —— 等待审阅"
+      },
+      "status": {
+        "canceled": "已取消",
+        "done": "完成",
+        "in_review": "待审阅"
+      },
+      "status_changed": {
+        "body": "{title}",
+        "title": "{identifier} 已移至 {to}"
+      }
+    },
     "priority": {
       "high": "高",
       "low": "低",
@@ -15579,6 +15616,7 @@
     "sources": {
       "agent-team": "智能体团队",
       "connector": "消息",
+      "issue": "议题",
       "plugin": "插件",
       "scheduler": "计划任务",
       "session": "会话",

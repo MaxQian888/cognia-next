@@ -26,6 +26,14 @@ import { registerRunControlHandler } from "@/lib/execution/run-control"
 jest.mock("@/lib/workflow/runtime/start-from-im", () => ({
   startWorkflowFromIM: jest.fn(async () => ({ ok: true, runId: "run_test" })),
 }))
+// The issue-card handler has its own suite (`lib/issues/im/callback-handler.test.ts`);
+// here only the bus routing to it is under test.
+const mockHandleIssueAction = jest.fn(async (_input: unknown): Promise<unknown> => ({
+  kind: "moved",
+}))
+jest.mock("@/lib/issues/im/callback-handler", () => ({
+  handleIssueActionCallback: (input: unknown) => mockHandleIssueAction(input),
+}))
 
 const sender: PlatformIdentity = {
   id: "id-1",
@@ -477,6 +485,69 @@ describe("ConnectorBus.dispatchConnectorCallback — wf_approve / wf_cancel kind
     expect((jobs[0].request.segments[0] as { text: string }).text).toContain("已取消")
     const runs = await getDb().workflowRuns.toArray()
     expect(runs.find((r) => r.workflowId === wf.id)).toBeUndefined()
+  })
+})
+
+describe("ConnectorBus.dispatchConnectorCallback — issue_action kind", () => {
+  it("routes an issue card click to the issue handler with the binding, never the generic handler", async () => {
+    mockHandleIssueAction.mockResolvedValueOnce({ kind: "moved" })
+    const conversationKey = "telegram:adp_tg:c1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "a2ui:issue:1:move_done:move:done",
+      kind: "issue_action",
+      surfaceId: "issue:1",
+      componentId: "move_done",
+      conversationKey,
+      payload: { action: "move", issueId: "iss-1", to: "done" },
+    })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        triggerId: "a2ui:issue:1:move_done:move:done",
+        value: "move:done",
+        conversationKey,
+      })
+    )
+    expect(handler).not.toHaveBeenCalled()
+    expect(mockHandleIssueAction).toHaveBeenCalledTimes(1)
+    expect(mockHandleIssueAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterId: "adp_tg",
+        conversationKey,
+        user: expect.objectContaining({ remoteUserId: "u_999" }),
+        binding: expect.objectContaining({
+          kind: "issue_action",
+          payload: { action: "move", issueId: "iss-1", to: "done" },
+        }),
+      })
+    )
+  })
+
+  it("audits and swallows a handler failure instead of falling through to the model", async () => {
+    mockHandleIssueAction.mockRejectedValueOnce(new Error("engine down"))
+    const conversationKey = "telegram:adp_tg:c1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "a2ui:issue:2:run:run",
+      kind: "issue_action",
+      surfaceId: "issue:2",
+      conversationKey,
+      payload: { action: "run", issueId: "iss-2" },
+    })
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "a2ui:issue:2:run:run", value: "run", conversationKey })
+    )
+    expect(handler).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    const denied = audit.find((r) => r.kind === "issue.card_action_denied")
+    expect(denied).toMatchObject({ reason: "Error", message: "engine down" })
   })
 })
 

@@ -57,6 +57,18 @@ async function kindsOf(issueId: string) {
 }
 
 describe("createIssue", () => {
+  it("records an IM origin when given one", async () => {
+    const issue = await make({
+      origin: { kind: "im", conversationKey: "lark:oc_1", messageId: "m1" },
+    })
+    expect((await getIssue(issue.id))!.origin).toEqual({
+      kind: "im",
+      conversationKey: "lark:oc_1",
+      messageId: "m1",
+    })
+    expect((await make()).origin).toBeUndefined()
+  })
+
   it("allocates a printable identifier from the project key", async () => {
     expect((await make()).identifier).toBe("MERC-1")
     expect((await make()).identifier).toBe("MERC-2")

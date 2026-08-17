@@ -62,6 +62,7 @@
   "sources": {
     "agent-team": "智能体团队",
     "connector": "消息",
+    "issue": "议题",
     "plugin": "插件",
     "scheduler": "计划任务",
     "session": "会话",

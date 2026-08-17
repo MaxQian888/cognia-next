@@ -293,5 +293,42 @@
       "failed": "失败",
       "cancelled": "已取消"
     }
+  },
+  "notify": {
+    "open": "打开议题",
+    "assigned": {
+      "title": "{identifier} 已指派给 {to}",
+      "body": "{title}"
+    },
+    "reassigned": {
+      "title": "{identifier} 已改派给 {to}",
+      "body": "{title}"
+    },
+    "run_succeeded": {
+      "title": "{identifier} 运行完成 —— 等待审阅",
+      "body": "{title}"
+    },
+    "run_failed": {
+      "title": "{identifier} 运行失败",
+      "body": "{error}"
+    },
+    "status_changed": {
+      "title": "{identifier} 已移至 {to}",
+      "body": "{title}"
+    },
+    "commented": {
+      "title": "{by} 在 {identifier} 上发表了新评论",
+      "body": "{body}"
+    },
+    "status": {
+      "in_review": "待审阅",
+      "done": "完成",
+      "canceled": "已取消"
+    },
+    "actor": {
+      "human": "你",
+      "agent": "一个 Agent",
+      "team": "一个小队"
+    }
   }
 }

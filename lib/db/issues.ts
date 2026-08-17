@@ -19,7 +19,14 @@
  * with the row.
  */
 
-import type { Issue, IssueActor, IssueGithubRef, IssuePriority, IssueStatus } from "@/types/issues"
+import type {
+  Issue,
+  IssueActor,
+  IssueGithubRef,
+  IssueOrigin,
+  IssuePriority,
+  IssueStatus,
+} from "@/types/issues"
 import { statusCategoryOf } from "@/types/issues"
 import { formatIssueIdentifier } from "@/lib/issues/identifier"
 import { canMoveIssue, statusTimestampPatch, type IssueMoveError } from "@/lib/issues/state-machine"
@@ -67,6 +74,8 @@ export interface CreateIssueInput {
   createdBy: IssueActor
   labelIds?: string[]
   githubRef?: IssueGithubRef
+  /** Where the issue was filed from (IM); omitted for board-created issues. */
+  origin?: IssueOrigin
 }
 
 /**
@@ -115,6 +124,7 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
         labelIds: input.labelIds ?? [],
         order,
         ...(input.githubRef ? { githubRef: input.githubRef } : {}),
+        ...(input.origin ? { origin: input.origin } : {}),
         createdAt: now,
         updatedAt: now,
       }

@@ -24,6 +24,7 @@ import {
   recordCallbackBinding,
   walkA2UISurface,
   type A2UIWalkNode,
+  bindingHintFields,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
 const MAX_BUTTONS_PER_ROW = 5
@@ -202,6 +203,7 @@ export async function buildDiscordA2UIPayload(
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
+          ...bindingHintFields(node.raw),
         })
         const href = stringValue(node.raw.href) || stringValue(node.raw.url)
         const row = ensureRow(false)

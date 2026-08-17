@@ -293,5 +293,42 @@
       "failed": "Failed",
       "cancelled": "Cancelled"
     }
+  },
+  "notify": {
+    "open": "Open issue",
+    "assigned": {
+      "title": "{identifier} assigned to {to}",
+      "body": "{title}"
+    },
+    "reassigned": {
+      "title": "{identifier} reassigned to {to}",
+      "body": "{title}"
+    },
+    "run_succeeded": {
+      "title": "{identifier} run finished — ready for review",
+      "body": "{title}"
+    },
+    "run_failed": {
+      "title": "{identifier} run failed",
+      "body": "{error}"
+    },
+    "status_changed": {
+      "title": "{identifier} moved to {to}",
+      "body": "{title}"
+    },
+    "commented": {
+      "title": "New comment on {identifier} from {by}",
+      "body": "{body}"
+    },
+    "status": {
+      "in_review": "In review",
+      "done": "Done",
+      "canceled": "Canceled"
+    },
+    "actor": {
+      "human": "you",
+      "agent": "an agent",
+      "team": "a squad"
+    }
   }
 }

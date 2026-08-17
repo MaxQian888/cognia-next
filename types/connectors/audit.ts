@@ -244,6 +244,13 @@ export type AuditKind =
   | "notify.im_pushed"
   | "notify.im_skipped"
   | "notify.im_pii_blocked"
+  // Issue tracker IM side (ADR-0130 slice ③). `card_action` when an
+  // `issue_action` button was applied (move / run / create / cancel);
+  // `card_action_denied` when the state machine or run registry refused it;
+  // `im_pii_blocked` when the PII gate dropped a card or reply text.
+  | "issue.card_action"
+  | "issue.card_action_denied"
+  | "issue.im_pii_blocked"
   // Live in-turn activity card (control-plane visibility — cc-connect-style
   // "the agent is working" live card). `card_dispatched` when the cumulative
   // activity card's first frame is enqueued; `card_finalized` when the card
