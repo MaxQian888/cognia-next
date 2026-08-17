@@ -321,7 +321,7 @@ time = { version = "0.3", features = ["std"] }
 # mDNS (Wave 1.5 / M2.9) — service advertisement for `_cognia._tcp.local.`
 # so the mobile app can pick the desktop server out of the LAN without
 # manual baseUrl entry.
-mdns-sd = "0.20"
+mdns-sd = "0.21"
 
 # Cloudflared launcher (Wave 1.6) — runs the cloudflared subprocess and
 # parses the trycloudflare URL out of stderr. We use std::process via
