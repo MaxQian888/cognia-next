@@ -5,8 +5,8 @@
  * digest turn). The workflow approval kind is special-cased upstream in
  * `lib/connectors/bus.ts:dispatchConnectorCallback` so the assistant turn
  * isn't synthesised — we want the user to see a tight "✅ Started" / "⊘
- * Cancelled" reply, then progress lines streamed by
- * `workflow-progress-runner`, NOT a long model recap.
+ * Cancelled" reply, then progress cards driven by the execution bridge +
+ * run-presentation runner, NOT a long model recap.
  *
  * Approve path: kick off `startWorkflowFromIM` (fire-and-forget) and
  * enqueue a single "started" outbound. Cancel path: skip the start and

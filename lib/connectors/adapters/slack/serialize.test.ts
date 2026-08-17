@@ -6,7 +6,6 @@ import {
   serializeDeleteMessage,
   serializeReaction,
   serializeReactionRemoval,
-  serializeTyping,
   serializeAssistantStatus,
   serializeAssistantSuggestedPrompts,
   SlackEmptyMessageError,
@@ -168,13 +167,6 @@ describe("serializeReactionRemoval", () => {
       timestamp: "1714900000.000100",
       name: "thumbsup",
     })
-  })
-})
-
-describe("serializeTyping (deprecated alias)", () => {
-  it("still returns null so existing call sites remain safe", () => {
-    expect(serializeTyping("C123")).toBeNull()
-    expect(serializeTyping("C123", "1714900000.000100")).toBeNull()
   })
 })
 

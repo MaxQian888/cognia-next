@@ -14,13 +14,6 @@ import { buildDiscordA2UIPayload } from "./a2ui-mapper"
 
 const DISCORD_API_BASE = "https://discord.com/api/v10"
 
-/** Characters that open Discord markdown formatting. */
-const DISCORD_MD_SPECIALS = /([*_~|>\\])/g
-
-export function escapeDiscordMd(text: string): string {
-  return text.replace(DISCORD_MD_SPECIALS, "\\$1")
-}
-
 export interface SerializedDiscordCall {
   method: "POST" | "PATCH" | "DELETE" | "PUT"
   url: string

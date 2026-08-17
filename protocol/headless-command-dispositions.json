@@ -348,8 +348,6 @@
         "companion_tunnel_stop",
         "companion_unrevoke_device",
         "connectors_discord_upload",
-        "connectors_matrix_crypto_decrypt_attachment",
-        "connectors_matrix_crypto_encrypt_attachment",
         "connectors_onebot_probe",
         "connectors_register_adapter",
         "connectors_start_server",

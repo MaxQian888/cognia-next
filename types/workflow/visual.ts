@@ -752,9 +752,9 @@ export interface WorkflowTriggerBinding {
  * from an IM session, or a desktop UI button, or an HTTP API call. Distinct
  * from `WorkflowTriggerBinding` (which describes the trigger node payload):
  * a manual run from IM has `triggerKind: "trigger.manual"` AND
- * `triggeredBy.source: "im"`. The IM-side progress-runner subscribes to
- * runs where `triggeredBy.source === "im"` and fans `workflowRunEvents` out
- * to `triggeredBy.conversationKey` via `enqueueOutbound`.
+ * `triggeredBy.source: "im"`. The execution bridge mirrors such runs into
+ * `executionRuns` and the run-presentation runner projects them back to
+ * `triggeredBy.conversationKey` through the governed outbound queue.
  */
 export interface WorkflowTriggeredFrom {
   /**
@@ -903,13 +903,15 @@ export interface WorkflowRunRow {
    * Origin metadata for runs whose `trigger.kind === "trigger.manual"` was
    * fired by an external surface (IM Claude tool, desktop button, HTTP API)
    * rather than the workflow's own trigger node. Drives IM-side progress
-   * fan-out — see `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`.
+   * fan-out — see `lib/execution/workflow-bridge.ts` and
+   * `lib/connectors/run-presentation/runner.ts`.
    */
   triggeredBy?: WorkflowTriggeredFrom
   /**
    * Denormalised copy of `triggeredBy.source` (Dexie v91), promoted to a
    * top-level INDEXED column because Dexie cannot index nested object props.
-   * Lets `workflow-progress-runner` watch only IM-triggered runs via
+   * Lets IM-scoped readers (`lib/workflow/runtime/risk-gate.ts`,
+   * `execution-authority.ts`) watch only IM-triggered runs via
    * `.where("triggeredBySource").equals("im")` instead of scanning the whole
    * `workflowRuns` table on every run. Stamped at run creation and backfilled
    * for legacy rows (`triggeredBy?.source ?? "ui"`).

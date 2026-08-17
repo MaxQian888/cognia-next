@@ -1175,8 +1175,6 @@ pub fn run() {
             connectors::commands::connectors_matrix_crypto_share_room_key,
             connectors::commands::connectors_matrix_crypto_update_tracked_users,
             connectors::commands::connectors_matrix_crypto_get_missing_sessions,
-            connectors::commands::connectors_matrix_crypto_encrypt_attachment,
-            connectors::commands::connectors_matrix_crypto_decrypt_attachment,
             connectors::commands::connectors_lark_upload_file,
             connectors::commands::connectors_lark_upload_image,
             connectors::commands::connectors_onebot_probe,

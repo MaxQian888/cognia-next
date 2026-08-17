@@ -392,38 +392,6 @@ export function serializeSendForwardMsgV11(
   }
 }
 
-// ---------------------------------------------------------------------------
-// edit — NOT SUPPORTED
-// ---------------------------------------------------------------------------
-
-/**
- * OneBot v11/v12 does not support message editing.
- * Throws OneBotUnsupportedError; callers should map this to an OutboundError.
- */
-export function serializeEditV11(_messageId: string, _req: OutboundRequest): never {
-  throw new OneBotUnsupportedError("edit_msg (v11)")
-}
-
-export function serializeEditV12(_messageId: string, _req: OutboundRequest): never {
-  throw new OneBotUnsupportedError("edit_message (v12)")
-}
-
-// ---------------------------------------------------------------------------
-// typing — NOT SUPPORTED (no-op)
-// ---------------------------------------------------------------------------
-
-/**
- * OneBot v11/v12 has no native typing indicator.
- * Returns an empty array (no-op); callers can ignore the result.
- */
-export function serializeTypingV11(_conversationKey: string, _on: boolean): SerializedOneBotCall[] {
-  return []
-}
-
-export function serializeTypingV12(_conversationKey: string, _on: boolean): SerializedOneBotCall[] {
-  return []
-}
-
 /**
  * Walk a segment list and expand each `a2ui` segment into the OneBot
  * native projection (text + image + plainTextMirror tail for any

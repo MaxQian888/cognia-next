@@ -29,19 +29,6 @@ export function normalizeHomeserver(url: string): string {
   return withScheme.replace(/\/+$/, "")
 }
 
-/**
- * Resolve the bot's own `user_id` (e.g. `@bot:matrix.org`) for an access
- * token. Returns null on any non-2xx / parse failure. The adapter consumes
- * {@link matrixWhoamiDetailed} directly because E2EE startup also requires
- * the homeserver-assigned `device_id` and fails closed when it is missing.
- */
-export async function matrixWhoami(
-  homeserver: string,
-  accessToken: string
-): Promise<string | null> {
-  return (await matrixWhoamiDetailed(homeserver, accessToken))?.userId ?? null
-}
-
 export interface MatrixWhoamiResult {
   userId: string
   deviceId?: string
@@ -50,6 +37,12 @@ export interface MatrixWhoamiResult {
 export type MatrixAccessTokenProbeResult =
   { ok: true; userId: string; deviceId?: string } | { ok: false; error: string }
 
+/**
+ * Resolve the bot's own `user_id` (e.g. `@bot:matrix.org`) plus the
+ * homeserver-assigned `device_id` for an access token. Returns null on any
+ * non-2xx / parse failure. E2EE startup requires `device_id` and fails
+ * closed when it is missing.
+ */
 export async function matrixWhoamiDetailed(
   homeserver: string,
   accessToken: string

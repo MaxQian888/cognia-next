@@ -207,35 +207,6 @@ function lineCount(s: string): number {
   return s.length === 0 ? 0 : s.split("\n").length
 }
 
-/** Render hunks as a plain unified-diff text block (`--- a/path` / `@@ ... @@` / `+`/`-` lines). */
-export function diffHunksToUnifiedText(
-  hunks: DiffHunk[],
-  filePath: string,
-  maxLines: number = 30
-): { text: string; truncated: number } {
-  const path = filePath ?? "file"
-  const out: string[] = [`--- a/${path}`, `+++ b/${path}`]
-  let emitted = 0
-  let truncated = 0
-  for (const h of hunks) {
-    if (emitted >= maxLines) {
-      truncated += h.lines.length
-      continue
-    }
-    out.push(`@@ -${h.oldStart},${h.oldLength} +${h.newStart},${h.newLength} @@`)
-    for (const line of h.lines) {
-      if (emitted >= maxLines) {
-        truncated++
-        continue
-      }
-      const prefix = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "
-      out.push(`${prefix}${line.text}`)
-      emitted++
-    }
-  }
-  return { text: out.join("\n"), truncated }
-}
-
 /** The kind of file edit a tool performed, or `null` for non-edit tools. */
 export type EditToolKind = "edit" | "write" | "multiedit" | null
 

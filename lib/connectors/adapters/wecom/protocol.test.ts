@@ -4,7 +4,6 @@ import {
   buildPingFrame,
   buildStreamRespondFrame,
   buildStreamWithTemplateCardFrame,
-  buildMarkdownRespondFrame,
   buildTemplateCardRespondFrame,
   buildWelcomeFrame,
   buildUpdateCardFrame,
@@ -85,11 +84,7 @@ describe("outbound frame builders", () => {
     expect(open.cmd).toBe("aibot_respond_msg")
   })
 
-  it("builds markdown + template_card respond frames", () => {
-    expect(buildMarkdownRespondFrame("r", "# hi").body).toEqual({
-      msgtype: "markdown",
-      markdown: { content: "# hi" },
-    })
+  it("builds template_card respond frames", () => {
     const card: WeComTemplateCard = {
       card_type: "button_interaction",
       button_list: [{ key: "k", text: "Go" }],

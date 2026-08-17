@@ -3422,36 +3422,12 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
-      "name": "connectors_matrix_crypto_decrypt_attachment",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
       "name": "connectors_matrix_crypto_decrypt_event",
       "target": "service",
       "operation": "write",
       "capability": "service.internal",
       "risk": "critical",
       "approval": "signed-policy",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
-      "name": "connectors_matrix_crypto_encrypt_attachment",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
       "idempotency": "required",
       "transports": ["internal"],
       "inputSchema": "#/components/schemas/RpcArgs",

@@ -3,7 +3,6 @@
 import {
   configureLarkJsSdk,
   getLarkTriggerDetail,
-  isInsideLarkWebview,
   loadLarkJsSdkScript,
   LARK_JSSDK_SCRIPT_URL,
 } from "./jssdk"
@@ -21,12 +20,6 @@ afterEach(() => {
   delete (globalThis as SdkGlobals).h5sdk
   delete (globalThis as SdkGlobals).tt
   window.sessionStorage.clear()
-})
-
-describe("isInsideLarkWebview", () => {
-  it("reflects the user agent", () => {
-    expect(typeof isInsideLarkWebview()).toBe("boolean")
-  })
 })
 
 describe("configureLarkJsSdk", () => {

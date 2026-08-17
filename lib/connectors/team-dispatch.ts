@@ -5,10 +5,11 @@
  * the connector runtime routes the inbound message here instead of the
  * single-character `runAndCapture` path. This reuses the *exact* primitive the
  * `action.team.run` workflow node uses (`runTeamLifecycle`) — passing
- * `triggeredFrom { source: "im" }` so the already-wired
- * `workflow-progress-runner` fans the team's progress + final result back to
- * the originating conversation. No second executor, no `resolveSendOptions`
- * change.
+ * `triggeredFrom { source: "im" }` so the execution bridge
+ * (`lib/execution/workflow-bridge.ts`) + the durable run-presentation runner
+ * (`lib/connectors/run-presentation/runner.ts`) fan the team's progress +
+ * final result back to the originating conversation. No second executor, no
+ * `resolveSendOptions` change.
  *
  * The team runtime + store are dynamically imported (matching
  * `action.team.run`) so the heavy Agent-Team graph never enters the connector
@@ -105,8 +106,8 @@ async function defaultLoadCharacter(characterId: string) {
  * Kick off a team run for an inbound IM message. Fire-and-forget: the lifecycle
  * is launched but NOT awaited (a team run can take minutes; the connector
  * runtime must ack the inbound event fast). Progress + final result flow back
- * to the conversation through the `workflow-progress-runner` via the
- * `triggeredFrom` origin. Returns once the run is launched (or a fast failure
+ * to the conversation through the execution bridge + run-presentation
+ * runner via the `triggeredFrom` origin. Returns once the run is launched (or a fast failure
  * is detected: missing team / no team id).
  */
 export async function startTeamRunFromIM(
@@ -188,7 +189,7 @@ export async function startTeamRunFromIM(
     },
   }
 
-  // Fire-and-forget. The progress-runner owns IM fan-out; we swallow the
+  // Fire-and-forget. The run-presentation runner owns IM fan-out; we swallow the
   // "already running" / lifecycle errors here (they surface via the run row /
   // notification path), never letting them reject the inbound dispatch.
   void Promise.resolve(runTeamLifecycle(teamId, lifecycleDeps)).catch(() => undefined)

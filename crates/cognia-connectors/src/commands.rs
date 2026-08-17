@@ -415,20 +415,6 @@ pub async fn connectors_matrix_crypto_get_missing_sessions(
     super::matrix_crypto::matrix_crypto_get_missing_sessions(req).await
 }
 
-#[tauri::command]
-pub async fn connectors_matrix_crypto_encrypt_attachment(
-    req: super::matrix_crypto::MatrixCryptoAttachmentEncryptRequest,
-) -> Result<super::matrix_crypto::MatrixCryptoAttachmentEncryptResponse, String> {
-    super::matrix_crypto::matrix_crypto_encrypt_attachment(req).await
-}
-
-#[tauri::command]
-pub async fn connectors_matrix_crypto_decrypt_attachment(
-    req: super::matrix_crypto::MatrixCryptoAttachmentDecryptRequest,
-) -> Result<super::matrix_crypto::MatrixCryptoAttachmentDecryptResponse, String> {
-    super::matrix_crypto::matrix_crypto_decrypt_attachment(req).await
-}
-
 // ---------------------------------------------------------------------------
 // Lark media upload — voice / video / file / image
 //

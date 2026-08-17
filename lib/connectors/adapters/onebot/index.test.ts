@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event"
 import { createOneBotAdapter } from "./index"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
-import { clearAllVariantCaches } from "./parse"
+import { __resetOneBotVariantCacheForTesting } from "./parse"
 
 // Mock the generic WS client commands so the forward-ws path doesn't invoke
 // Tauri. The reverse-ws path (default in most tests) never touches these.
@@ -85,7 +85,7 @@ beforeEach(() => {
   mockListen.mockReset()
   mockOnebotSend.mockReset()
   mockUpdateAdapter.mockClear()
-  clearAllVariantCaches()
+  __resetOneBotVariantCacheForTesting()
 })
 
 // ---------------------------------------------------------------------------

@@ -248,15 +248,6 @@ export function serializeAssistantSuggestedPrompts(
 }
 
 /**
- * @deprecated Phase 1 alias — returns null. Use
- * {@link serializeAssistantStatus} guarded by
- * `settings.assistantAppEnabled` for assistant-app threads.
- */
-export function serializeTyping(_channel: string, _threadTs?: string): SerializedSlackCall | null {
-  return null
-}
-
-/**
  * Project an OutboundRequest into a chat.postMessage SerializedSlackCall.
  */
 export function serializeOutbound(req: OutboundRequest): SerializedSlackCall {

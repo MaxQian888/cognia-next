@@ -167,7 +167,7 @@ Each builder does two things: a **self-id probe** and **lazy credential resolver
 | `buildOneBotAdapter` | `:293` | none — `reverse-ws`/`forward-ws`, optional bearer |
 | `buildWeComAdapter` | `:321` | none — `aibotid` arrives on first inbound frame |
 | `buildWechatPersonalAdapter` | `:338` | none — iLink reply-only long-poll |
-| `buildMatrixAdapter` | `:358` | `matrixWhoami` → `selfId` |
+| `buildMatrixAdapter` | `:358` | `matrixWhoamiDetailed` → `selfId` + `deviceId` (E2EE fails closed without it) |
 | `buildQQOfficialAdapter` | `:389` | none — id arrives on gateway READY |
 | `buildWechatOaAdapter` | `:409` | none — id arrives on first inbound message |
 | `buildDingTalkAdapter` | `:429` | none — Stream mode; token minted on demand |
@@ -256,8 +256,8 @@ self-detection plus the canonical return type — is identical and owned by `Men
 self id; `add(id)` (`:36`) records a candidate (no-op on empty/duplicate, but still flips `selfMentioned`
 on a duplicate self-id); `markSelfMentioned()` (`:55`) forces a self-mention without an `@`-entity (e.g.
 a reply to a bot-authored message); and `finalize()` (`:65`) returns the `MentionDescriptor` the bus
-consumes. `mentionsFromIds(selfId, ids)` (`:74`) is the convenience wrapper for parsers that already have
-a complete id list. Discord, Lark, Slack, and Telegram parsers use it; OneBot does the reduction inline.
+consumes. Discord, Lark, Slack, and Telegram parsers drive `MentionAccumulator` directly; OneBot does the
+reduction inline.
 
 ## Related
 

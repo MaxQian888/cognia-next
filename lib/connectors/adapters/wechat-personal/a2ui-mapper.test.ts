@@ -4,7 +4,7 @@ import type { A2UIMessageSegment } from "@/types/connectors/segment"
 import {
   __countNumericActionsForTesting,
   __resetNumericActionRegistryForTesting,
-  peekNumericAction,
+  __peekNumericActionForTesting,
 } from "./numeric-action-registry"
 import { buildIlinkA2UISurface, collectNumberedInteractives } from "./a2ui-mapper"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
@@ -141,8 +141,8 @@ describe("buildIlinkA2UISurface", () => {
     const yesBinding = bindings.find((b) => b.componentId === "yes")
     expect(yesBinding?.actionId).toBe("a2ui:sfc1:yes:confirm")
 
-    expect(peekNumericAction(conversationKey, 1)).toBe("a2ui:sfc1:yes:confirm")
-    expect(peekNumericAction(conversationKey, 2)).toBe("a2ui:sfc1:no:cancel")
+    expect(__peekNumericActionForTesting(conversationKey, 1)).toBe("a2ui:sfc1:yes:confirm")
+    expect(__peekNumericActionForTesting(conversationKey, 2)).toBe("a2ui:sfc1:no:cancel")
     expect(__countNumericActionsForTesting(conversationKey)).toBe(2)
   })
 
@@ -177,7 +177,7 @@ describe("buildIlinkA2UISurface", () => {
     expect(bindings).toHaveLength(1)
     // The existing wf_approve binding is untouched — no duplicate row.
     expect(bindings[0].kind).toBe("wf_approve")
-    expect(peekNumericAction(conversationKey, 1)).toBe("wfapp:bind1")
+    expect(__peekNumericActionForTesting(conversationKey, 1)).toBe("wfapp:bind1")
   })
 
   it("uses seg.plainTextMirror as the base when provided, generating one otherwise", async () => {

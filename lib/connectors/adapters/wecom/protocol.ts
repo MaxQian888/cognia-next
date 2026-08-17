@@ -202,15 +202,6 @@ export function buildStreamWithTemplateCardFrame(
   }
 }
 
-/** Non-streamed markdown reply (reuses the callback's req_id). */
-export function buildMarkdownRespondFrame(reqId: string, content: string): WeComFrameEnvelope {
-  return {
-    cmd: "aibot_respond_msg",
-    headers: { req_id: reqId },
-    body: { msgtype: "markdown", markdown: { content } },
-  }
-}
-
 /** Interactive template-card reply (reuses the callback's req_id). */
 export function buildTemplateCardRespondFrame(
   reqId: string,

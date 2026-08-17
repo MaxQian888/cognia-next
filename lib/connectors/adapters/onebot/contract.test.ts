@@ -11,7 +11,7 @@
 import { listen } from "@tauri-apps/api/event"
 import { createOneBotAdapter } from "./index"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
-import { clearAllVariantCaches } from "./parse"
+import { __resetOneBotVariantCacheForTesting } from "./parse"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 
@@ -126,7 +126,7 @@ beforeEach(() => {
   // on every event, so the mock must always return a Promise. Reaction tests
   // override this with a row carrying `implMetadata.features`.
   mockGetAdapterInstance.mockResolvedValue(undefined)
-  clearAllVariantCaches()
+  __resetOneBotVariantCacheForTesting()
 })
 
 // ---------------------------------------------------------------------------

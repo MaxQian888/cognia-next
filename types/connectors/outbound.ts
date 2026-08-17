@@ -14,7 +14,7 @@ export interface OutboundRequest {
    * rather than `adapter.send()`. Adapters that do not implement
    * `edit()` fall through to a new send (the runner detects via the
    * adapter capability check and audits the fallback). Used by the
-   * workflow-progress-runner for in-place status card refresh.
+   * run-presentation runner for in-place status card refresh.
    */
   editTargetMessageId?: string
   metadata: {

@@ -44,7 +44,7 @@ jest.mock("@/lib/goal/runtime", () => {
 import {
   handleGoalCommand,
   startConnectorGoalDriver,
-  isConnectorGoalDriverRunning,
+  __isConnectorGoalDriverRunningForTesting,
   __resetConnectorGoalDriversForTesting,
   __testing__,
 } from "./goal"
@@ -177,7 +177,7 @@ describe("handleGoalCommand", () => {
     expect(reply).toHaveBeenCalledWith("🎯 active", "applied")
     expect(openGoal).toHaveBeenCalledWith("s1")
     // Default startDriver = real startConnectorGoalDriver → registered.
-    expect(isConnectorGoalDriverRunning("g1")).toBe(true)
+    expect(__isConnectorGoalDriverRunningForTesting("g1")).toBe(true)
   })
 
   it("builds an inert slash context (composer callbacks are no-ops)", () => {
@@ -217,7 +217,7 @@ describe("startConnectorGoalDriver", () => {
     startConnectorGoalDriver(driverArgs(), { run: run as never, enqueue: jest.fn() })
     startConnectorGoalDriver(driverArgs(), { run: run as never, enqueue: jest.fn() })
     expect(run).toHaveBeenCalledTimes(1)
-    expect(isConnectorGoalDriverRunning("g1")).toBe(true)
+    expect(__isConnectorGoalDriverRunningForTesting("g1")).toBe(true)
   })
 
   it("posts each non-blank turn, then a terminal status line, then cleans up", async () => {
@@ -237,7 +237,7 @@ describe("startConnectorGoalDriver", () => {
     expect(texts).toContain("turn one")
     expect(texts.some((t: string) => t.includes("completed"))).toBe(true)
     expect(texts).not.toContain("   ")
-    expect(isConnectorGoalDriverRunning("g1")).toBe(false)
+    expect(__isConnectorGoalDriverRunningForTesting("g1")).toBe(false)
   })
 
   it("injects the connector PII-gated sender into every headless turn", async () => {
@@ -305,6 +305,6 @@ describe("startConnectorGoalDriver", () => {
     startConnectorGoalDriver(driverArgs(), { run: run as never, enqueue: jest.fn() })
     await tick()
     await tick()
-    expect(isConnectorGoalDriverRunning("g1")).toBe(false)
+    expect(__isConnectorGoalDriverRunningForTesting("g1")).toBe(false)
   })
 })

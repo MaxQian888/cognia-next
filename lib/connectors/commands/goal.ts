@@ -203,8 +203,8 @@ export function startConnectorGoalDriver(
   })()
 }
 
-/** True when a driver is currently running for `goalId` (test/observability). */
-export function isConnectorGoalDriverRunning(goalId: string): boolean {
+/** True when a driver is currently running for `goalId` — tests only. */
+export function __isConnectorGoalDriverRunningForTesting(goalId: string): boolean {
   return runningDrivers.has(goalId)
 }
 

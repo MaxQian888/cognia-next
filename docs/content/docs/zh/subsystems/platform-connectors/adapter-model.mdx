@@ -159,7 +159,7 @@ export async function buildAdapterFromRow(row: AdapterInstanceRow): Promise<Plat
 | `buildOneBotAdapter` | `:293` | 无 —— `reverse-ws`/`forward-ws`，可选 bearer |
 | `buildWeComAdapter` | `:321` | 无 —— `aibotid` 在首条入站帧到达 |
 | `buildWechatPersonalAdapter` | `:338` | 无 —— iLink 仅回复型长轮询 |
-| `buildMatrixAdapter` | `:358` | `matrixWhoami` → `selfId` |
+| `buildMatrixAdapter` | `:358` | `matrixWhoamiDetailed` → `selfId` + `deviceId`（缺失时 E2EE 关闭失败） |
 | `buildQQOfficialAdapter` | `:389` | 无 —— id 在网关 READY 到达 |
 | `buildWechatOaAdapter` | `:409` | 无 —— id 在首条入站消息到达 |
 | `buildDingTalkAdapter` | `:429` | 无 —— Stream 模式；令牌按需铸造 |
@@ -239,9 +239,8 @@ emit: async (event: NormalizedInboundEvent) => {
 由 `MentionAccumulator`（`lib/connectors/adapters/_shared/mention-extractor.ts:24`）持有。其
 `constructor(selfId)`（`:29`）植入 self id；`add(id)`（`:36`）记录一个候选（对空值/重复为空操作，但在重复的
 self-id 上仍翻转 `selfMentioned`）；`markSelfMentioned()`（`:55`）在没有 `@`-实体时强制标记自我提及（例如
-回复一条由机器人撰写的消息）；`finalize()`（`:65`）返回总线消费的 `MentionDescriptor`。`mentionsFromIds(selfId, ids)`
-（`:74`）是面向已有完整 id 列表的解析器的便捷封装。Discord、Lark、Slack 与 Telegram 解析器均使用它；
-OneBot 内联完成该归约。
+回复一条由机器人撰写的消息）；`finalize()`（`:65`）返回总线消费的 `MentionDescriptor`。Discord、Lark、Slack 与 Telegram 解析器直接驱动
+`MentionAccumulator`；OneBot 内联完成该归约。
 
 ## 相关
 

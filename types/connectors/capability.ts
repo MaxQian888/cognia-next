@@ -145,8 +145,7 @@ export type A2UIComponentKind = (typeof A2UI_COMPONENT_KINDS)[number]
  *                     assistant SHOULD NOT generate this kind on this
  *                     platform; the build-options capability prompt warns it.
  *
- * Worst-case ordering for `CapabilityEvaluation.worstCase`:
- *   `unsupported > fallback > simulated > native`.
+ * Worst-case ordering across kinds: `unsupported > fallback > simulated > native`.
  */
 export type A2UIComponentSupport = "native" | "simulated" | "fallback" | "unsupported"
 

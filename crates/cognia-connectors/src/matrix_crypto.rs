@@ -3,7 +3,6 @@ use std::io::{Cursor, Read};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use base64::Engine as _;
 use matrix_sdk_crypto::types::events::room::encrypted::EncryptedEvent;
 use matrix_sdk_crypto::types::requests::AnyOutgoingRequest;
 use matrix_sdk_crypto::{
@@ -115,32 +114,6 @@ pub struct MatrixCryptoTrackUsersRequest {
 pub struct MatrixCryptoMissingSessionsRequest {
     pub adapter_id: String,
     pub user_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MatrixCryptoAttachmentEncryptRequest {
-    pub bytes_base64: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MatrixCryptoAttachmentEncryptResponse {
-    pub bytes_base64: String,
-    pub info: Value,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MatrixCryptoAttachmentDecryptRequest {
-    pub bytes_base64: String,
-    pub info: Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MatrixCryptoAttachmentDecryptResponse {
-    pub bytes_base64: String,
 }
 
 #[derive(Clone)]
@@ -498,19 +471,6 @@ pub async fn matrix_crypto_mark_request_sent(
     }
 }
 
-pub async fn matrix_crypto_encrypt_attachment(
-    req: MatrixCryptoAttachmentEncryptRequest,
-) -> Result<MatrixCryptoAttachmentEncryptResponse, String> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(req.bytes_base64)
-        .map_err(|err| format!("invalid attachment base64: {err}"))?;
-    let (encrypted, info) = encrypt_attachment_bytes(bytes)?;
-    Ok(MatrixCryptoAttachmentEncryptResponse {
-        bytes_base64: base64::engine::general_purpose::STANDARD.encode(encrypted),
-        info,
-    })
-}
-
 pub(crate) fn encrypt_attachment_bytes(bytes: Vec<u8>) -> Result<(Vec<u8>, Value), String> {
     let mut cursor = Cursor::new(bytes);
     let mut encryptor = AttachmentEncryptor::new(&mut cursor);
@@ -521,18 +481,6 @@ pub(crate) fn encrypt_attachment_bytes(bytes: Vec<u8>) -> Result<(Vec<u8>, Value
     let info = serde_json::to_value(encryptor.finish())
         .map_err(|err| format!("serialize Matrix attachment info failed: {err}"))?;
     Ok((encrypted, info))
-}
-
-pub async fn matrix_crypto_decrypt_attachment(
-    req: MatrixCryptoAttachmentDecryptRequest,
-) -> Result<MatrixCryptoAttachmentDecryptResponse, String> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(req.bytes_base64)
-        .map_err(|err| format!("invalid encrypted attachment base64: {err}"))?;
-    let decrypted = decrypt_attachment_bytes(bytes, req.info)?;
-    Ok(MatrixCryptoAttachmentDecryptResponse {
-        bytes_base64: base64::engine::general_purpose::STANDARD.encode(decrypted),
-    })
 }
 
 pub(crate) fn decrypt_attachment_bytes(bytes: Vec<u8>, mut info: Value) -> Result<Vec<u8>, String> {
@@ -794,27 +742,18 @@ mod tests {
         close.await.unwrap().unwrap();
     }
 
-    #[tokio::test]
-    async fn attachment_encrypt_decrypt_round_trips() {
-        let encrypted = matrix_crypto_encrypt_attachment(MatrixCryptoAttachmentEncryptRequest {
-            bytes_base64: "aGVsbG8tbWF0cml4".to_string(),
-        })
-        .await
-        .unwrap();
+    #[test]
+    fn attachment_encrypt_decrypt_round_trips() {
+        let plain = b"hello-matrix".to_vec();
+        let (encrypted, info) = encrypt_attachment_bytes(plain.clone()).unwrap();
 
-        assert_ne!(encrypted.bytes_base64, "aGVsbG8tbWF0cml4");
-        assert!(encrypted.info.get("key").is_some());
-        assert!(encrypted.info.get("iv").is_some());
-        assert!(encrypted.info.get("hashes").is_some());
+        assert_ne!(encrypted, plain);
+        assert!(info.get("key").is_some());
+        assert!(info.get("iv").is_some());
+        assert!(info.get("hashes").is_some());
 
-        let decrypted = matrix_crypto_decrypt_attachment(MatrixCryptoAttachmentDecryptRequest {
-            bytes_base64: encrypted.bytes_base64,
-            info: encrypted.info,
-        })
-        .await
-        .unwrap();
-
-        assert_eq!(decrypted.bytes_base64, "aGVsbG8tbWF0cml4");
+        let decrypted = decrypt_attachment_bytes(encrypted, info).unwrap();
+        assert_eq!(decrypted, plain);
     }
 
     #[test]

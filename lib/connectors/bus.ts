@@ -2142,8 +2142,8 @@ export class ConnectorBus {
     // bus DOES NOT call `runConnectorDigestTurn` — IM users expect a
     // tight "✅ Started" reply, not a synthesised model turn that says
     // the same thing in three paragraphs. Subsequent progress + final
-    // surfaces are emitted by `workflow-progress-runner` via the same
-    // outbound queue.
+    // surfaces are emitted by the execution bridge + run-presentation
+    // runner via the same outbound queue.
     if (resolvedBinding?.kind === "wf_approve" || resolvedBinding?.kind === "wf_cancel") {
       const cancelled =
         resolvedBinding.kind === "wf_cancel" ||

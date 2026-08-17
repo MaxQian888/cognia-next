@@ -61,14 +61,24 @@ description: ConnectorBusProvider 启动脊柱、响应式三栏收件箱外壳�
 10. **启动回调绑定清理计划** ——
     `startCallbackBindingCleanupSchedule()` 每日修剪过期绑定
     （`connector-bus-provider.tsx:234-235`）。
-11. **启动工作流进度 runner** ——
-    `startWorkflowProgressRunner()` 将 IM 触发的工作流运行经由出站队列扇出回去
-    （`connector-bus-provider.tsx:241-242`）。
+11. **启动执行桥 + 运行呈现 runner** ——
+    `startWorkflowExecutionBridge()`（`lib/execution/workflow-bridge.ts:143`）
+    把 `workflowRuns` 镜像为持久的 `executionRuns` + 逐会话的
+    `executionRunBindings`；`startExecutionRunPresentationRunner()`
+    （`lib/connectors/run-presentation/runner.ts:715`）把这些绑定投射为原生运行
+    卡片（飞书 / Slack 驱动）或经出站队列的感知能力后备
+    （`lib/connectors/bootstrap/install-connector-runtime.ts:738-739`）。
 12. **订阅凭据轮换 → 生命周期** ——
     `subscribeCredentialsRotatedToLifecycle()`，经由同一个 `AbortController` 解绑
     （`connector-bus-provider.tsx:250-255`）。
 
-第 5、6 与 8–11 步 —— 运行时/回调接入与四个 runner 的启动：
+共享的启动主体现已迁入
+`lib/connectors/bootstrap/install-connector-runtime.ts`（provider 调用
+`installConnectorRuntime()`），并在第 9 与第 11 步之间多了几个启动 ——
+`startLarkSurfaceSweep` / `startBindRequestExpirySweep`（`:722-723`）与
+`startResumeReconnect`（`:732`）—— 本列表把它们并入 runner 阶段。
+
+第 5、6 与 8–11 步 —— 运行时/回调接入与各 runner 的启动：
 
 ```ts
 // components/connectors/connector-bus-provider.tsx:177-183
@@ -82,7 +92,13 @@ const adapters = new Map(bus.listAdapters().map((a) => [a.id, a]))
 void startOutboundRunner({ adapters, signal: ac.signal })
 if (!cancelled) heartbeatSweep = startHeartbeatSweep()
 if (!cancelled) cleanupHandle = startCallbackBindingCleanupSchedule()
-if (!cancelled) stopWorkflowProgressRunner = startWorkflowProgressRunner()
+```
+
+```ts
+// lib/connectors/bootstrap/install-connector-runtime.ts:737-739
+if (!cancelled) {
+  stopWorkflowExecutionBridge = startWorkflowExecutionBridge()
+  stopExecutionRunPresentationRunner = startExecutionRunPresentationRunner()
 ```
 
 ### bootAdapter —— 单适配器生命周期
@@ -98,7 +114,7 @@ if (!cancelled) stopWorkflowProgressRunner = startWorkflowProgressRunner()
 ### 清理
 
 effect 的返回闭包（`connector-bus-provider.tsx:258-296`）将 `cancelled = true`、
-调用 `ac.abort()`、释放 cleanup/heartbeat/workflow 句柄，然后遍历
+调用 `ac.abort()`、释放 cleanup/heartbeat/执行桥/呈现 runner 句柄，然后遍历
 `listRunningAdapters()` 对每个执行 `unregisterRunningAdapter`（审计
 `adapter.stopped`）。一个防御性的第二遍会停止 `startedAdapters` 中任何从未进入注册表
 的裸句柄，从而不泄漏任何传输层。
@@ -125,7 +141,7 @@ sequenceDiagram
   P->>R: 8. startOutboundRunner
   P->>R: 9. startHeartbeatSweep
   P->>R: 10. startCallbackBindingCleanupSchedule
-  P->>R: 11. startWorkflowProgressRunner
+  P->>R: 11. startWorkflowExecutionBridge + startExecutionRunPresentationRunner
   P->>B: 12. subscribeCredentialsRotatedToLifecycle
 ```
 

@@ -10,7 +10,6 @@ import "fake-indexeddb/auto"
 import {
   buildActionId,
   generatePlainTextMirror,
-  pruneOldCallbackBindings,
   recordCallbackBinding,
   resolveCallbackBinding,
   truncateActionId,
@@ -176,42 +175,6 @@ describe("callback binding persistence", () => {
       createdAt: Date.now() - 365 * 24 * 60 * 60 * 1000,
     })
     expect((await resolveCallbackBinding("adp_1", "act_legacy"))?.surfaceId).toBe("s_legacy")
-  })
-
-  it("pruneOldCallbackBindings deletes rows older than TTL for the given adapter", async () => {
-    const now = Date.now()
-    // Insert one fresh row + one stale row.
-    await getDb().connectorCallbackBindings.bulkAdd([
-      {
-        id: "adp_1:fresh",
-        adapterId: "adp_1",
-        actionId: "fresh",
-        kind: "callback_query",
-        surfaceId: "s",
-        createdAt: now,
-      },
-      {
-        id: "adp_1:stale",
-        adapterId: "adp_1",
-        actionId: "stale",
-        kind: "callback_query",
-        surfaceId: "s",
-        createdAt: now - 20 * 24 * 60 * 60 * 1000,
-      },
-      {
-        // Other adapter — should not be touched.
-        id: "adp_2:also_stale",
-        adapterId: "adp_2",
-        actionId: "also_stale",
-        kind: "callback_query",
-        surfaceId: "s",
-        createdAt: now - 20 * 24 * 60 * 60 * 1000,
-      },
-    ])
-    const removed = await pruneOldCallbackBindings("adp_1")
-    expect(removed).toBe(1)
-    const remaining = await getDb().connectorCallbackBindings.toArray()
-    expect(remaining.map((r) => r.actionId).sort()).toEqual(["also_stale", "fresh"])
   })
 })
 

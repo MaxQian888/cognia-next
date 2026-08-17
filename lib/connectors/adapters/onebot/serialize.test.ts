@@ -3,10 +3,6 @@ import {
   serializeOutboundV12,
   serializeDeleteV11,
   serializeDeleteV12,
-  serializeEditV11,
-  serializeEditV12,
-  serializeTypingV11,
-  serializeTypingV12,
   serializeSetMsgEmojiLike,
   serializeGetLoginInfoV11,
   serializeGetLoginInfoV12,
@@ -269,37 +265,9 @@ describe("serializeGetMsgV11", () => {
 // edit (unsupported)
 // ---------------------------------------------------------------------------
 
-describe("serializeEditV11", () => {
-  it("throws OneBotUnsupportedError", () => {
-    const req = makeGroupReq("edited")
-    expect(() => serializeEditV11("1", req)).toThrow(OneBotUnsupportedError)
-  })
-})
-
-describe("serializeEditV12", () => {
-  it("throws OneBotUnsupportedError", () => {
-    const req = makeGroupReq("edited")
-    expect(() => serializeEditV12("1", req)).toThrow(OneBotUnsupportedError)
-  })
-})
-
 // ---------------------------------------------------------------------------
 // typing (no-op)
 // ---------------------------------------------------------------------------
-
-describe("serializeTypingV11", () => {
-  it("returns empty array (no-op)", () => {
-    expect(serializeTypingV11("onebot:ob-1:g:300001", true)).toHaveLength(0)
-    expect(serializeTypingV11("onebot:ob-1:g:300001", false)).toHaveLength(0)
-  })
-})
-
-describe("serializeTypingV12", () => {
-  it("returns empty array (no-op)", () => {
-    expect(serializeTypingV12("onebot:ob-1:g:300001", true)).toHaveLength(0)
-    expect(serializeTypingV12("onebot:ob-1:g:300001", false)).toHaveLength(0)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // identity probe (get_login_info / get_self_info)

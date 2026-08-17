@@ -44,12 +44,6 @@ function tt(): LarkTt | undefined {
   return (globalThis as { tt?: LarkTt }).tt
 }
 
-/** Best-effort webview detection — used only to shape error messaging. */
-export function isInsideLarkWebview(): boolean {
-  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent
-  return /Lark|Feishu/i.test(ua)
-}
-
 /**
  * Inject the official SDK script once and wait for `window.h5sdk`/`tt`.
  * Resolves immediately when the SDK is already present (Lark clients often

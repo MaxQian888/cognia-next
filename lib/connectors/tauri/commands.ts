@@ -181,24 +181,6 @@ export interface MatrixCryptoMissingSessionsRequest {
   userIds: string[]
 }
 
-export interface MatrixCryptoAttachmentEncryptRequest {
-  bytesBase64: string
-}
-
-export interface MatrixCryptoAttachmentEncryptResponse {
-  bytesBase64: string
-  info: unknown
-}
-
-export interface MatrixCryptoAttachmentDecryptRequest {
-  bytesBase64: string
-  info: unknown
-}
-
-export interface MatrixCryptoAttachmentDecryptResponse {
-  bytesBase64: string
-}
-
 export type MatrixEncryptedMediaUploadRequest = ConnectorMediaUploadRequest
 
 export interface MatrixEncryptedMediaUploadResponse {
@@ -518,24 +500,6 @@ export async function connectorsMatrixCryptoGetMissingSessions(
   return invoker<MatrixCryptoOutgoingRequest[]>("connectors_matrix_crypto_get_missing_sessions", {
     req,
   })
-}
-
-export async function connectorsMatrixCryptoEncryptAttachment(
-  req: MatrixCryptoAttachmentEncryptRequest
-): Promise<MatrixCryptoAttachmentEncryptResponse> {
-  return invoker<MatrixCryptoAttachmentEncryptResponse>(
-    "connectors_matrix_crypto_encrypt_attachment",
-    { req }
-  )
-}
-
-export async function connectorsMatrixCryptoDecryptAttachment(
-  req: MatrixCryptoAttachmentDecryptRequest
-): Promise<MatrixCryptoAttachmentDecryptResponse> {
-  return invoker<MatrixCryptoAttachmentDecryptResponse>(
-    "connectors_matrix_crypto_decrypt_attachment",
-    { req }
-  )
 }
 
 export async function connectorsMatrixEncryptedMediaUpload(

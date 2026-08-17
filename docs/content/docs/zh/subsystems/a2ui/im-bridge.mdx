@@ -1,6 +1,6 @@
 ---
 title: IM 连接器桥接
-description: A2UI 表面必须降级为平台原生富内容 —— Lark、Telegram、Discord 无法渲染任意 React。本桥接层双向映射表面 ⇄ 平台分片，按适配器能力降级，并把实时工作流运行投射为可编辑的 IM 卡片。
+description: A2UI 表面必须降级为平台原生富内容 —— Lark、Telegram、Discord 无法渲染任意 React。本桥接层双向映射表面 ⇄ 平台分片，告知模型每个适配器能渲染什么，并把工作流审批交给运行呈现 runner 去生成实时卡片。
 ---
 
 # IM 连接器桥接
@@ -8,29 +8,29 @@ description: A2UI 表面必须降级为平台原生富内容 —— Lark、Teleg
 <Status variant="experimental" />
 
 <TLDR>
-  A2UI 输出的是声明式 React 组件树，但一个 IM 平台（Lark / Telegram / Discord）只能渲染自己的富内容原语 —— 一张卡片、一行按钮、一张图片、一个链接。本桥接层就是两个世界之间「有损但忠实」的适配层。**出站**方向：用面向插件的工厂构建表面（`surface-builder.ts`），把助手回复转成带 `plainTextMirror` 兜底的出站 `MessageSegment[]`（`a2ui-to-segments.ts`），并按目标适配器的能力矩阵给每个表面评分（`capability-evaluator.ts`）。**入站**方向：把平台富内容投射成给 Inbox 渲染器用的 `InboundA2UIBlock`（`projectInboundToA2UI` → 各平台 `inbound-to-a2ui.ts`），并把按钮点击路由到 AI 摘要轮次或某个工作流控制处理器。**工作流投射**：把实时运行渲染为审批卡片、逐步进度行、就地编辑的累积状态卡片，以及终态摘要 —— 由一个事件驱动的后台 runner（`workflow-progress-runner.ts`）扇出到每个订阅频道，**无轮询计时器**。
+  A2UI 输出的是声明式 React 组件树，但一个 IM 平台（Lark / Telegram / Discord）只能渲染自己的富内容原语 —— 一张卡片、一行按钮、一张图片、一个链接。本桥接层就是两个世界之间「有损但忠实」的适配层。**出站**方向：用面向插件的工厂构建表面（`surface-builder.ts`），把助手回复转成带 `plainTextMirror` 兜底的出站 `MessageSegment[]`（`a2ui-to-segments.ts`），并在系统提示里告知模型目标适配器的能力矩阵能承载哪些 A2UI 种类（`capability-evaluator.ts`）。**入站**方向：把平台富内容投射成给 Inbox 渲染器用的 `InboundA2UIBlock`（`projectInboundToA2UI` → 各平台 `inbound-to-a2ui.ts`），并把按钮点击路由到 AI 摘要轮次或某个工作流控制处理器。本桥接层的**工作流投射**只有审批卡片（`workflow-to-a2ui.ts`）；实时进度与终态卡片来自持久化的执行运行流水线 —— `lib/execution/workflow-bridge.ts` + `lib/connectors/run-presentation/runner.ts` —— 而非桥接层本地的循环。
 </TLDR>
 
 <StatGrid>
-  <Stat label="桥接模块" value="6 + 3" hint="lib/connectors/a2ui-bridge/ (6) + lib/a2ui/ handlers (3)" />
+  <Stat label="桥接模块" value="4 + 3" hint="lib/connectors/a2ui-bridge/ (4) + lib/a2ui/ handlers (3)" />
   <Stat label="能力等级" value="4" hint="native · simulated · fallback · unsupported" />
   <Stat label="表面工厂" value="14" hint="a2uiComponent in surface-builder.ts:218" />
-  <Stat label="Runner 节奏" value="event-driven" hint="liveQuery 扇出，无计时器" />
+  <Stat label="实时运行卡片" value="run-presentation" hint="lib/connectors/run-presentation/runner.ts，2 s 合并" />
 </StatGrid>
 
 ## 为什么需要 IM 桥接
 
 A2UI 的核心前提是模型能输出**真正的 UI**。这在 webview 里行得通，因为目录会把组件树直接渲染进 React DOM。但 IM 平台没有这样的渲染器 —— Lark 想要交互式卡片 schema，Telegram 想要内联键盘，Discord 想要 embed。它们都无法执行任意的 `component: "Select"` 节点。
 
-因此本桥接层是一个**有损、能力感知的投射层**。它从不假设表面会原样渲染。每条路径都携带 `plainTextMirror`，使最坏情况仍是一条可读的文本消息；每个出站表面在发送前都会先对适配器声明的能力评分，这样模型就能在自己的系统提示里被告知 —— 哪些内容能在这趟旅程中幸存、哪些不能。
+因此本桥接层是一个**有损、能力感知的投射层**。它从不假设表面会原样渲染。每条路径都携带 `plainTextMirror`，使最坏情况仍是一条可读的文本消息；适配器声明的能力矩阵会被渲染进模型自己的系统提示，这样它就能事先被告知 —— 哪些内容能在这趟旅程中幸存、哪些不能。
 
 <Files>
   - lib/connectors/a2ui-bridge/surface-builder.ts — 面向插件的纯表面构建器（支撑 `ctx.connectors.a2ui`）
-  - lib/connectors/a2ui-bridge/capability-evaluator.ts — 表面 vs 适配器能力矩阵
+  - lib/connectors/a2ui-bridge/capability-evaluator.ts — 适配器能力矩阵 → 系统提示段落
   - lib/connectors/a2ui-bridge/a2ui-to-segments.ts — 助手回复 → 出站 `MessageSegment[]`
   - lib/connectors/adapters/_shared/inbound-a2ui-dispatch.ts — `projectInboundToA2UI`：入站平台负载 → `InboundA2UIBlock`
-  - lib/connectors/a2ui-bridge/workflow-to-a2ui.ts — 纯函数 工作流 → A2UI 构建器
-  - lib/connectors/a2ui-bridge/workflow-progress-runner.ts — 后台扇出循环
+  - lib/connectors/a2ui-bridge/workflow-to-a2ui.ts — 纯函数审批表面构建器（`buildApprovalSurface`）
+  - lib/connectors/run-presentation/runner.ts — 实时运行卡片（不属于桥接层；在平台连接器文档中说明）
   - lib/a2ui/connector-callback-handler.ts — 通用回调 → AI 摘要轮次
   - lib/a2ui/workflow-approval-handler.ts — `wf_approve` / `wf_cancel` 派发器
   - lib/a2ui/workflow-fanout-handler.ts — `wf_fanout_approve` / `wf_fanout_cancel` 派发器
@@ -60,7 +60,7 @@ A2UI 的核心前提是模型能输出**真正的 UI**。这在 webview 里行�
 - 非空尾部 `text` → `{type:"markdown", md:text}`（`:67`）。
 - 文本为空**且**无表面 → `{type:"text", text:""}`（`:72`），使回复永不静默。
 
-`buildA2UISegment`（`a2ui-to-segments.ts:84`）是承重原语：它从 `widget.fallbackText`（若为字符串则 trim —— `:88-89`）派生 `plainTextMirror`，否则用 `generatePlainTextMirror(content)`（`:91`，mapper 在 `a2ui-mapper.ts:257`），随后返回 `{type:"a2ui", surfaceId, content, plainTextMirror}`（`:92-97`）。这个镜像就是能力贫弱的适配器最终展示的内容。
+`buildA2UISegment`（`a2ui-to-segments.ts:84`）是承重原语：它从 `widget.fallbackText`（若为字符串则 trim —— `:88-89`）派生 `plainTextMirror`，否则用 `generatePlainTextMirror(content)`（`:91`，mapper 在 `a2ui-mapper.ts:255`），随后返回 `{type:"a2ui", surfaceId, content, plainTextMirror}`（`:92-97`）。这个镜像就是能力贫弱的适配器最终展示的内容。
 
 ```mermaid
 flowchart LR
@@ -68,7 +68,7 @@ flowchart LR
   CB --> BC["surface-builder.ts:158<br/>buildA2UISurfaceContent"]
   BC --> VAL["surface-builder.ts:116<br/>validateA2UISurfaceComponents"]
   BC --> SEG["a2ui-to-segments.ts:84<br/>buildA2UISegment"]
-  SEG --> MIR["a2ui-mapper.ts:257<br/>generatePlainTextMirror"]
+  SEG --> MIR["a2ui-mapper.ts:255<br/>generatePlainTextMirror"]
   REPLY["assistant reply"] --> ARS["a2ui-to-segments.ts:52<br/>assistantReplyToSegments"]
   ARS --> SEG
   SEG --> OUT["MessageSegment[]<br/>type:a2ui + plainTextMirror"]
@@ -85,16 +85,15 @@ flowchart LR
 
 ## 能力降级阶梯
 
-`capability-evaluator.ts` 把一个表面对照某个适配器评分，让模型知道哪些东西可以依赖。四个等级构成一条最坏情况阶梯：**`native` → `simulated` → `fallback` → `unsupported`**（每一级都严格劣于前一级；`A2UIComponentSupport` 在 `capability.ts:124`）。
+`capability-evaluator.ts` 让模型知道对某个适配器哪些东西可以依赖。四个等级构成一条最坏情况阶梯：**`native` → `simulated` → `fallback` → `unsupported`**（每一级都严格劣于前一级；`A2UIComponentSupport` 在 `capability.ts:150`）。
 
-`evaluateSurfaceAgainstCapability`（`capability-evaluator.ts:55`）：
+本模块里刻意**不再**保留逐表面的评估器 —— 适配器在渲染时于自己的出站映射器内按自身 `A2UICapabilityMatrix` 分支，`plainTextMirror` 为映射器画不出来的一切兜底。（早前的 `evaluateSurfaceAgainstCapability` / `CapabilityEvaluation` 遍历器没有运行时消费者，已于 2026-08-18 移除。）留下的是提示词侧那一半：`buildCapabilityPromptSection(platform, matrix, skillCapabilities?)`（`capability-evaluator.ts:30`）：
 
-1. 通过 `walkA2UISurface(surface, node => presentKinds.add(node.component))` 收集出现的 kind（`:60-62`，walker 在 `a2ui-mapper.ts:50`）。
-2. 未知 kind → `continue` / 跳过（`:71-74`）。
-3. 已知 kind → `matrix[kind] ?? "fallback"`（`:76`）。
-4. 归桶进 `CapabilityEvaluation`（`:28`）并棘轮推进 `worstCase`：`native` (77)，`simulated` 从 native 上抬 (79-81)，`fallback` 从 native/simulated 上抬 (82-84)，`unsupported` 设硬底 (85-87)。
+1. 通过 `componentKindsByLevel(matrix, level)`（`:35-38`，辅助函数在 `capability.ts:177`）派生各等级的 kind 列表 —— 对 `A2UI_COMPONENT_KINDS` 遍历一遍，因此未知 kind 永远不会出现。
+2. 每个非空等级输出一条 bullet（`:43-58`）：原生渲染 / 仅经多步 UX 可用（不要假设同回合回复）/ 降级为纯文本 / 不支持 —— 不要发出。
+3. 从 `skillCapabilities` 追加一条可选的内置技能 bullet（`:59-67`）。
 
-`buildCapabilityPromptSection`（`capability-evaluator.ts:106`）随后渲染一段系统提示文字：它通过 `componentKindsByLevel`（`:111-114`）派生各等级的 kind 列表，每个等级输出一条 bullet（`:119-134`），外加一条 skill bullet（`:135-142`）。这段文字由 `lib/claude/build-options.ts:resolveSendOptions`（头部 `:6-16`）消费 —— 就是模型在撰写前看到的、按频道定制的 A2UI 能力提示。
+这段文字由 `lib/claude/build-options.ts:resolveSendOptions`（`:1929-1935`）消费 —— 就是模型在撰写前看到的、按频道定制的 A2UI 能力提示。
 
 | 等级 | 含义 | 对模型的指引 |
 | --- | --- | --- |
@@ -103,7 +102,7 @@ flowchart LR
 | `fallback` | 只有 `plainTextMirror` 幸存 | 优先文本友好的内容 |
 | `unsupported` | 硬底 —— 丢弃或重新设计 | 该频道避免使用 |
 
-`A2UICapabilityMatrix`（`capability.ts:126`）由 `buildA2UICapabilityMatrix`（`capability.ts:133`）生成；`isKnownKind`（`capability-evaluator.ts:147`）与 `A2UI_COMPONENT_KINDS` 防范无法识别的组件字符串。
+`A2UICapabilityMatrix`（`capability.ts:152`）由 `buildA2UICapabilityMatrix`（`capability.ts:159`）从每个适配器的 `../<platform>/capability.ts` 生成；`A2UI_COMPONENT_KINDS` 是两侧共同遍历的封闭组件字符串集合。
 
 ## 入站：平台负载 → InboundA2UIBlock + 回调
 
@@ -143,67 +142,53 @@ mapper 无法在 `body` 里表达的内容会塞进 `raw`，并藏在 `<details>
 
 ## 工作流投射
 
-实时工作流运行必须在 IM 会话内呈现。`workflow-to-a2ui.ts` 持有**纯**构建器；`workflow-progress-runner.ts` 是**后台循环**，决定何时、向哪里发出它们。
+实时工作流运行必须在 IM 会话内呈现。本桥接层只拥有**审批握手**：`workflow-to-a2ui.ts` 持有纯函数 `buildApprovalSurface` 构建器。实时进度与终态卡片**不再**在这里构建 —— 它们来自下文描述的持久化执行运行流水线。
 
 ### 纯构建器（`workflow-to-a2ui.ts`）
 
 | 构建器（`workflow-to-a2ui.ts`） | 产出 |
 | --- | --- |
-| `buildApprovalSurface` (63) | `Card` + `Row` + 2 个 `Button`；镜像追加 `回复 1 同意 / 2 取消`。Action id = `WF_APPROVE_PREFIX`（`"wfapp:"`, 40）+ `bindingId` / `WF_CANCEL_PREFIX`（`"wfcan:"`, 41）+ `bindingId`（64-65）；按钮 value 携带 action id（81 / 87） |
-| `buildProgressSegment` (126) | 每个步骤事件一行 markdown（非步骤事件返回 `null`）：started ▶…开始 (136)；completed ✓…完成（dur）(137-145)；failed ✗…失败：msg (147-153)；skipped ⊘…跳过 (155) |
-| `buildCumulativeStatusSurface` (259) | 一张就地编辑的 `Card`：表头按 `state.status` (261-276)，逐步 `Text` `step_<i>` (288-293)，可选 `Divider` + 正文 (298-302)，尾部 `openLink` `Link` (303) |
-| `buildFinalSurface` (336) | 终态摘要 `Card`：状态图标/文本 (339-347)，正文 = error（failed）/ output（succeeded）(350-355)，深链 (357) |
+| `buildApprovalSurface` (48) | `Card` + `Row` + 2 个 `Button`；镜像追加 `回复 1 同意 / 2 取消`。Action id = `WF_APPROVE_PREFIX`（`"wfapp:"`, 25）+ `bindingId` / `WF_CANCEL_PREFIX`（`"wfcan:"`, 26）+ `bindingId`（49-50）；按钮 value 携带 action id；`surfaceType: "inline"` |
 
-支撑类型：`CumulativeStepStatus`（182，`running|succeeded|failed|skipped`）、`CumulativeStepEntry`（184）、`CumulativeStatusState`（196）；辅助函数 `statusIcon`（220，`▶✓✗⊘`）、`statusLine`（233）、`truncate`（392）、`pickErrorMessage`（397）、`stringifyOutput`（404）、`formatDuration`（414）。深链 `buildWorkflowRunDeepLink`（173）→ `cognia://workflow-run/<wf>/<run>`。上限：`OUTPUT_SUMMARY_MAX = 500`（37）、`ERROR_MESSAGE_MAX = 280`（38）、`CUMULATIVE_TERMINAL_BODY_MAX = 500`（218）；每个表面都是 `surfaceType: "inline"`。
+输入为 `ApprovalSurfaceInput { bindingId, workflowName, summary? }`（28）；该表面由 `wf_run_workflow_by_name` 插件工具作为工具结果的一部分发出，Dexie I/O + `recordCallbackBinding` 由调用方负责。早前的 `buildProgressSegment` / `buildCumulativeStatusSurface` / `buildFinalSurface` 构建器与 `buildWorkflowRunDeepLink` 深链已于 2026-08-18 随 `workflow-progress-runner` 模块一并退役。
 
 <Callout type="info">
-  这些构建器里**没有任何时间间隔常量**。节奏完全由事件驱动 —— 每个频道每来一批新工作流事件就发出一次。runner 从不靠计时器唤醒。
+  这个构建器里仍然**没有任何时间间隔常量** —— 它是纯函数。实时卡片的节奏由运行呈现 runner 掌管（`COALESCE_MS = 2 s`，`run.started` / `step.started` / 终态 / interrupt 事件立即执行，5 s 耗时心跳）。
 </Callout>
 
-### 扇出 runner（`workflow-progress-runner.ts`）
+### 实时卡片：执行桥 + 运行呈现 runner
 
-`startWorkflowProgressRunner`（`workflow-progress-runner.ts:145`）订阅一个 Dexie `liveQuery(workflowRuns.toArray())`（`:154`）并协调每个运行的 watcher。它只跟踪 `triggeredBy.source === "im"` 且携带 `adapterId` + `conversationKey` 的运行（`reconcileWatchers:192-195`）；watcher 通过 `creatingWatchers` promise 去重只创建一次（`:203-219`），在终态状态下经 `emitFinal` 后 `delete`（`:225-233`），运行消失时被 GC（`:236-242`）。`ACTIVE_STATUSES`（63）与 `TERMINAL_STATUSES`（64）把控生命周期。
+连接器引导（`install-connector-runtime.ts:738-739`）启动的两个 runner 取代了旧的桥接层本地扇出循环：
 
-每个 watcher（`createWatcher:245`）建立自己的频道集，并通过 `subscribeRunEvents`（`:315`）订阅每个运行的事件 —— 一个对 `workflowRunEvents.where("[runId+ts]")` 的 `liveQuery`（`:316-321`），喂给 `emitForAllChannels`（`:414`）。该路由器按 `ts` 排序（`:419`），跳过 `ts <= lastEmittedTs`（`:425`），把每个事件折叠进状态（`foldEventIntoState:337`，`:427`），推进 `lastEmittedTs`（`:431`），然后按频道派发：累积模式 → `flushCumulativeOnChannel`（`:437`），追加模式 → `emitAppendOnChannel`（`:440`）。
-
-**两种发出模式：**
-
-- **追加**（`emitAppendOnChannel:447`）—— 每个事件一个分片：`buildProgressSegment`（`workflow-to-a2ui:126`）→ `dispatch`（`:580`）。幂等键 `progress:…:<ev.id>`（`:467`）。
-- **累积**（`flushCumulativeOnChannel:477`）—— 单张卡片**先发后就地编辑**，通过 `channel.flushing` / `flushQueued` 重入串行化（`:482-485, 521-527`）。首个事件 = 入口发送，缓存 `entryJobId`（`:493-503`）；后续事件从 `outboundQueue.get(entryJobId)` 解析 `platformMessageId`（`:506-509`），带 `editTargetMessageId` 派发（`:511-519`）。构建链：`buildStateSnapshot`（395）→ `buildCumulativeStatusSurface`（`workflow-to-a2ui:259`）→ `buildA2UISegment`（`a2ui-to-segments:84`）→ `dispatch`。表面模板：`wf-status:<run>:<chan>`（`:490`）、入口幂等 `wf-status-entry:…`（`:498`）、更新 `wf-status:…:<lastEmittedTs>`（`:515`）。
-
-`emitFinal`（`:548`）：累积 → 抬高 `lastEmittedTs` 后再 flush（`:559-560`）；追加 → `buildFinalSurface` → `buildA2UISegment` → `dispatch`（`:562-573`），幂等 `wf-final:…`（`:563`）。`dispatch`（`:580`）构建一个 `OutboundRequest` 并调用 `enqueueOutbound`（`lib/db/outbound-jobs`），在设置时带 `editTargetMessageId`（`:603`）、`source: "workflow"` + `sourceWorkflow {workflowId, runId, nodeId}`（`:605-610`）。`defaultSupportsEdit`（136）探测 `getBus().getAdapter(adapterId).edit` 来选模式；频道扇出在 `createWatcher`（`:291`）中读取 `listFanoutForWorkflow`（`lib/db/workflow-fanout-subscriptions`）。
+- `startWorkflowExecutionBridge`（`lib/execution/workflow-bridge.ts:143`）用 `liveQuery` 监视 `workflowRuns`（+ `workflowRunEvents` + `listForWorkflow` 扇出订阅），并对每个运行由 `syncWorkflowExecutionRun`（`:43`）创建一条持久的 `executionRuns` 行（`execution:workflow:<runId>`），记录 `plan.created` / `run.started` / 映射后的步骤事件，并按目的地各写一条 `executionRunBindings` 行 —— 触发方的 `triggeredBy.{adapterId, conversationKey}` **加上每个已启用的扇出订阅**（`:84-129`）。
+- `startExecutionRunPresentationRunner`（`lib/connectors/run-presentation/runner.ts:715`）用 `liveQuery` 监视 `active` / `degraded` 绑定，在 `latestSnapshot.revision > lastProjectedRevision` 时调用 `projectExecutionRunBinding`（`:264`）：PII 门（`projectImSafeSnapshot`，`:179`）→ 原生 `adapter.runPresentation` 驱动（`lark-driver.ts:320` / `slack-driver.ts:51`）对同一张卡片 `open` / `update` / `finish` → 失败或无驱动时 `deliverFallback`（`:381`），由 `resolveCapabilityAwareFallbackDeliveryMode`（`:223`）选择 `card-edit` / `append` / `final-only`，用 `buildA2UISegment` 包裹 `buildRunActivitySurface`，经投递网关以 `source: "workflow"` 入队。
 
 ```mermaid
 flowchart TB
-  START["workflow-progress-runner.ts:145<br/>startWorkflowProgressRunner"]
-  LQ1["liveQuery(workflowRuns.toArray())<br/>:154"]
-  REC["workflow-progress-runner.ts:184<br/>reconcileWatchers (source==im)"]
-  CW["workflow-progress-runner.ts:245<br/>createWatcher (+listFanoutForWorkflow)"]
-  SUB["workflow-progress-runner.ts:315<br/>subscribeRunEvents [runId+ts]"]
-  EMIT["workflow-progress-runner.ts:414<br/>emitForAllChannels (sort+skip+fold)"]
-  APP["workflow-progress-runner.ts:447<br/>emitAppendOnChannel"]
-  CUM["workflow-progress-runner.ts:477<br/>flushCumulativeOnChannel (send→edit)"]
-  FIN["workflow-progress-runner.ts:548<br/>emitFinal"]
-  BP["workflow-to-a2ui.ts:126<br/>buildProgressSegment"]
-  BC["workflow-to-a2ui.ts:259<br/>buildCumulativeStatusSurface"]
-  BF["workflow-to-a2ui.ts:336<br/>buildFinalSurface"]
-  SEG["a2ui-to-segments.ts:84<br/>buildA2UISegment"]
-  DSP["workflow-progress-runner.ts:580<br/>dispatch → enqueueOutbound"]
+  WF["workflowRuns + workflowRunEvents<br/>+ workflow-fanout-subscriptions"]
+  BR["workflow-bridge.ts:143<br/>startWorkflowExecutionBridge"]
+  SYNC["workflow-bridge.ts:43<br/>syncWorkflowExecutionRun"]
+  ER["executionRuns + runEventJournal<br/>+ executionRunBindings (1 per destination)"]
+  PR["runner.ts:715<br/>startExecutionRunPresentationRunner"]
+  PROJ["runner.ts:264<br/>projectExecutionRunBinding (PII gate)"]
+  NAT["adapter.runPresentation<br/>lark-driver / slack-driver"]
+  FB["runner.ts:381<br/>deliverFallback (card-edit / append / final-only)"]
+  SEG["a2ui-to-segments.ts:84<br/>buildA2UISegment(buildRunActivitySurface)"]
+  DSP["enqueueGoverned → Outbound Queue"]
 
-  START --> LQ1 --> REC --> CW --> SUB --> EMIT
-  REC -->|terminal| FIN
-  EMIT -->|append| APP --> BP --> DSP
-  EMIT -->|cumulative| CUM --> BC --> SEG --> DSP
-  FIN --> BF --> SEG
-  CUM -->|editTargetMessageId| DSP
+  WF --> BR --> SYNC --> ER --> PR --> PROJ
+  PROJ -->|driver| NAT
+  PROJ -->|none / failed| FB --> SEG --> DSP
 
   classDef run fill:#0f172a,stroke:#38bdf8,color:#e0f2fe
   classDef build fill:#1e293b,stroke:#a78bfa,color:#ede9fe
   classDef out fill:#064e3b,stroke:#34d399,color:#d1fae5
-  class START,LQ1,REC,CW,SUB,EMIT,APP,CUM,FIN run
-  class BP,BC,BF,SEG build
+  class BR,SYNC,PR,PROJ,FB run
+  class ER,SEG,NAT build
   class DSP out
 ```
+
+完整机制 —— 合并、游标提交、降级审计、原生 kill switch —— 见[平台连接器 › AI 循环与 A2UI 桥](../platform-connectors/ai-and-a2ui)。
 
 ## 工作流控制处理器
 
@@ -227,12 +212,12 @@ flowchart TB
 - **取消**（`:115`）→ push `⊘ 已取消订阅`，幂等 `wf-fanout-cancel:`（`:121`）+ 删除。
 - **同意**（`:127`）→ `createFanoutSubscription({workflowId, adapterId: target.adapterId, conversationKey: target.conversationKey, createdBy})` + push `✅ 已订阅`，幂等 `wf-fanout-ok:`（`:133-139`）+ 删除。
 
-`createFanoutSubscription` 写入的是与 `workflow-progress-runner.createWatcher` 读取**同一张** `workflow-fanout-subscriptions` 表 —— 在此订阅正是让未来某次运行扇出到本频道的原因。权限在**上游**工具层强制：target 被钉死为当前 IM 会话，因此处理器从不接受跨频道 target。
+`createFanoutSubscription` 写入的是执行桥经 `listForWorkflow`（`lib/execution/workflow-bridge.ts:152`）读取的**同一张** `workflow-fanout-subscriptions` 表 —— 每个已启用订阅都会成为该运行额外的一条 `executionRunBindings` 行，这正是让未来某次运行的卡片扇出到本频道的原因。权限在**上游**工具层强制：target 被钉死为当前 IM 会话，因此处理器从不接受跨频道 target。
 
 ## 下一步
 
 <Cards>
   <Card title="A2UI System" href="./index" description="本桥接所投射的协议、解析器、目录、渲染器与 store" />
   <Card title="Platform connectors" href="../platform-connectors" description="桥接接入的适配器、总线与出站队列" />
-  <Card title="Visual workflows" href="../visual-workflows" description="进度 runner 所投射的工作流运行时与运行事件流" />
+  <Card title="Visual workflows" href="../visual-workflows" description="执行桥镜像为持久执行运行的工作流运行时与运行事件流" />
 </Cards>

@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core"
 import {
   matrixLoginWithPassword,
   probeMatrixAccessToken,
-  matrixWhoami,
   matrixWhoamiDetailed,
   normalizeHomeserver,
 } from "./auth"
@@ -29,13 +28,8 @@ describe("normalizeHomeserver", () => {
   })
 })
 
-describe("matrixWhoami", () => {
+describe("matrixWhoamiDetailed", () => {
   beforeEach(() => mockInvoke.mockReset())
-
-  it("returns the user_id on success", async () => {
-    mockInvoke.mockResolvedValue(httpResp(200, { user_id: "@bot:matrix.org", device_id: "D" }))
-    await expect(matrixWhoami("matrix.org", "tok")).resolves.toBe("@bot:matrix.org")
-  })
 
   it("returns user_id + device_id through the detailed helper", async () => {
     mockInvoke.mockResolvedValue(httpResp(200, { user_id: "@bot:matrix.org", device_id: "D" }))
@@ -47,18 +41,18 @@ describe("matrixWhoami", () => {
 
   it("returns null on non-2xx", async () => {
     mockInvoke.mockResolvedValue(httpResp(401, { errcode: "M_UNKNOWN_TOKEN" }))
-    await expect(matrixWhoami("matrix.org", "tok")).resolves.toBeNull()
+    await expect(matrixWhoamiDetailed("matrix.org", "tok")).resolves.toBeNull()
   })
 
   it("returns null without homeserver or token", async () => {
-    await expect(matrixWhoami("", "tok")).resolves.toBeNull()
-    await expect(matrixWhoami("matrix.org", "")).resolves.toBeNull()
+    await expect(matrixWhoamiDetailed("", "tok")).resolves.toBeNull()
+    await expect(matrixWhoamiDetailed("matrix.org", "")).resolves.toBeNull()
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 
   it("returns null when the request throws", async () => {
     mockInvoke.mockRejectedValue(new Error("network"))
-    await expect(matrixWhoami("matrix.org", "tok")).resolves.toBeNull()
+    await expect(matrixWhoamiDetailed("matrix.org", "tok")).resolves.toBeNull()
   })
 })
 

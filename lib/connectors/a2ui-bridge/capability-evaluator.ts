@@ -1,95 +1,19 @@
 /**
- * Compare an A2UI surface against an adapter's capability matrix and
- * report which components are renderable natively, which will fall back
- * to `plainTextMirror`, and which are flat-out unsupported.
+ * Build the capability-aware system-prompt section for an IM channel.
  *
- * Consumers:
+ * Consumer: `lib/claude/build-options.ts:resolveSendOptions` calls
+ * {@link buildCapabilityPromptSection} when building the per-channel system
+ * prompt so the assistant knows which A2UI kinds render natively, which
+ * degrade, and which are unsupported on the current platform.
  *
- *   - `lib/claude/build-options.ts:resolveSendOptions` calls this when
- *     building the capability-aware system prompt so the assistant knows
- *     which kinds will degrade on the current channel.
- *   - Adapter mappers can call it to short-circuit native rendering when
- *     the surface contains an `"unsupported"` component (they go straight
- *     to `plainTextMirror`).
- *   - The Inbox panel uses it to show a "this card will not render in
- *     {platform}" hint next to outbound drafts.
+ * (The former per-surface evaluator `evaluateSurfaceAgainstCapability` had
+ * no runtime consumer — adapters branch on their own matrix inside their
+ * mappers — and was removed on 2026-08-18.)
  */
 
-import type {
-  A2UICapabilityMatrix,
-  A2UIComponentKind,
-  A2UIComponentSupport,
-} from "@/types/connectors/capability"
-import { A2UI_COMPONENT_KINDS, componentKindsByLevel } from "@/types/connectors/capability"
-import type { A2UISegmentContent } from "@/types/connectors/segment"
+import type { A2UICapabilityMatrix } from "@/types/connectors/capability"
+import { componentKindsByLevel } from "@/types/connectors/capability"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
-import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
-
-export interface CapabilityEvaluation {
-  /** Component kinds present in the surface that the platform renders natively. */
-  native: A2UIComponentKind[]
-  /**
-   * Present kinds that the platform delivers via a multi-step UX
-   * (Telegram ForceReply, Discord modal double-hop, NapCat QQ card).
-   * The component IS functional — the assistant just shouldn't assume
-   * an instantaneous reply on the same turn.
-   */
-  simulated: A2UIComponentKind[]
-  /** Present kinds that will degrade to plainTextMirror but are still safe to send. */
-  fallback: A2UIComponentKind[]
-  /** Present kinds the adapter refuses; the assistant should avoid these. */
-  unsupported: A2UIComponentKind[]
-  /**
-   * Overall verdict. Ordering, worst → best:
-   *   `unsupported > fallback > simulated > native`.
-   */
-  worstCase: A2UIComponentSupport
-}
-
-/**
- * Evaluate which component kinds are present in `surface` and look each
- * one up in `matrix`. Unknown component kinds (custom plugins / future
- * additions) are treated as `"fallback"` because the renderer guarantees
- * a best-effort `plainTextMirror`.
- */
-export function evaluateSurfaceAgainstCapability(
-  surface: A2UISegmentContent,
-  matrix: A2UICapabilityMatrix
-): CapabilityEvaluation {
-  const presentKinds = new Set<A2UIComponentKind | string>()
-  walkA2UISurface(surface, (node) => {
-    presentKinds.add(node.component)
-  })
-
-  const native: A2UIComponentKind[] = []
-  const simulated: A2UIComponentKind[] = []
-  const fallback: A2UIComponentKind[] = []
-  const unsupported: A2UIComponentKind[] = []
-  let worstCase: A2UIComponentSupport = "native"
-
-  for (const kind of presentKinds) {
-    if (!isKnownKind(kind)) {
-      // Unknown — bucket as fallback so we don't accidentally claim it
-      // unsupported when the renderer can still emit a text mirror.
-      continue
-    }
-    const support = matrix[kind] ?? "fallback"
-    if (support === "native") {
-      native.push(kind)
-    } else if (support === "simulated") {
-      simulated.push(kind)
-      if (worstCase === "native") worstCase = "simulated"
-    } else if (support === "fallback") {
-      fallback.push(kind)
-      if (worstCase === "native" || worstCase === "simulated") worstCase = "fallback"
-    } else {
-      unsupported.push(kind)
-      worstCase = "unsupported"
-    }
-  }
-
-  return { native, simulated, fallback, unsupported, worstCase }
-}
 
 /**
  * Build the capability summary the build-options resolver appends to the
@@ -142,8 +66,4 @@ export function buildCapabilityPromptSection(
     )
   }
   return lines.join("\n")
-}
-
-function isKnownKind(kind: string): kind is A2UIComponentKind {
-  return (A2UI_COMPONENT_KINDS as readonly string[]).includes(kind)
 }

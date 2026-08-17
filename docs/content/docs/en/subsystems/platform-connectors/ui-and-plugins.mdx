@@ -67,14 +67,25 @@ The bootstrap is an **ordered twelve-step sequence**:
 10. **Start the callback-binding cleanup schedule** —
     `startCallbackBindingCleanupSchedule()` prunes expired bindings daily
     (`connector-bus-provider.tsx:234-235`).
-11. **Start the workflow progress runner** —
-    `startWorkflowProgressRunner()` fans IM-triggered workflow runs back out
-    through the outbound queue (`connector-bus-provider.tsx:241-242`).
+11. **Start the execution bridge + run-presentation runner** —
+    `startWorkflowExecutionBridge()` (`lib/execution/workflow-bridge.ts:143`)
+    mirrors `workflowRuns` into durable `executionRuns` + per-conversation
+    `executionRunBindings`, and `startExecutionRunPresentationRunner()`
+    (`lib/connectors/run-presentation/runner.ts:715`) projects those bindings
+    into native run cards (Lark / Slack drivers) or the capability-aware
+    fallback through the outbound queue
+    (`lib/connectors/bootstrap/install-connector-runtime.ts:738-739`).
 12. **Subscribe credentials-rotated → lifecycle** —
     `subscribeCredentialsRotatedToLifecycle()`, unhooked via the same
     `AbortController` (`connector-bus-provider.tsx:250-255`).
 
-Steps 5, 6 and 8–11 — the runtime/callback wiring and the four runner starts:
+The shared bootstrap body now lives in
+`lib/connectors/bootstrap/install-connector-runtime.ts` (the provider calls
+`installConnectorRuntime()`), and it has grown a few extra starts between steps
+9 and 11 — `startLarkSurfaceSweep` / `startBindRequestExpirySweep` (`:722-723`)
+and `startResumeReconnect` (`:732`) — that this list folds into the runner phase.
+
+Steps 5, 6 and 8–11 — the runtime/callback wiring and the runner starts:
 
 ```ts
 // components/connectors/connector-bus-provider.tsx:177-183
@@ -88,7 +99,13 @@ const adapters = new Map(bus.listAdapters().map((a) => [a.id, a]))
 void startOutboundRunner({ adapters, signal: ac.signal })
 if (!cancelled) heartbeatSweep = startHeartbeatSweep()
 if (!cancelled) cleanupHandle = startCallbackBindingCleanupSchedule()
-if (!cancelled) stopWorkflowProgressRunner = startWorkflowProgressRunner()
+```
+
+```ts
+// lib/connectors/bootstrap/install-connector-runtime.ts:737-739
+if (!cancelled) {
+  stopWorkflowExecutionBridge = startWorkflowExecutionBridge()
+  stopExecutionRunPresentationRunner = startExecutionRunPresentationRunner()
 ```
 
 ### bootAdapter — per-adapter lifecycle
@@ -105,8 +122,8 @@ the per-adapter signal, and returns `false` without poisoning the loop.
 ### Cleanup
 
 The effect's return closure (`connector-bus-provider.tsx:258-296`) sets
-`cancelled = true`, calls `ac.abort()`, disposes the cleanup/heartbeat/workflow
-handles, then walks `listRunningAdapters()` to `unregisterRunningAdapter` each
+`cancelled = true`, calls `ac.abort()`, disposes the cleanup/heartbeat/
+execution-bridge/presentation-runner handles, then walks `listRunningAdapters()` to `unregisterRunningAdapter` each
 (auditing `adapter.stopped`). A defensive second pass stops any bare handle in
 `startedAdapters` that never made it into the registry, so no transport leaks.
 
@@ -132,7 +149,7 @@ sequenceDiagram
   P->>R: 8. startOutboundRunner
   P->>R: 9. startHeartbeatSweep
   P->>R: 10. startCallbackBindingCleanupSchedule
-  P->>R: 11. startWorkflowProgressRunner
+  P->>R: 11. startWorkflowExecutionBridge + startExecutionRunPresentationRunner
   P->>B: 12. subscribeCredentialsRotatedToLifecycle
 ```
 

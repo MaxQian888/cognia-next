@@ -1,6 +1,6 @@
 ---
 title: 自动模式 AI 循环与 A2UI 桥
-description: 真正落地（非桩）的自动模式回合 —— safeSendPrompt 用聊天输入框无需亲自执行的同一条 PII 红线来门控原始 IM 文本 —— 以及双向 A2UI 桥：将助手回复投影为平台原生富内容、把入站富内容反向提升为 surface、铸造可往返的回调 id，并把工作流进度扇出为原地编辑的状态卡片。
+description: 真正落地（非桩）的自动模式回合 —— safeSendPrompt 用聊天输入框无需亲自执行的同一条 PII 红线来门控原始 IM 文本 —— 以及双向 A2UI 桥：将助手回复投影为平台原生富内容、把入站富内容反向提升为 surface、铸造可往返的回调 id，以及把工作流 / 团队运行投射为逐会话运行卡片的执行桥 + 运行呈现 runner。
 ---
 
 # 自动模式 AI 循环与 A2UI 桥
@@ -8,7 +8,7 @@ description: 真正落地（非桩）的自动模式回合 —— safeSendPrompt
 <Status variant="stable" />
 
 <TLDR>
-当一条入站 IM 消息在没有人在环的情况下驱动一次 Claude 回合时，连接器子系统无法复用经人工审阅的聊天输入框路径 —— 于是 `safeSendPrompt`（`lib/connectors/ai-loop/safe-send-prompt.ts:69`）用 `lib/twin/ingest/` 强制执行的同一条 PII 红线包裹 `runAndCaptureAssistantReply`：遍历 prompt 与 build-options 的 `appendSystemPrompt`，对每段调用 `hasNoLeakingPii`，并在调用模型**之前中止**（写入一条 `pii_blocked` 审计行）而非脱敏 —— 因为没有人来决定要删掉什么。捕获到的回复由 `assistantReplyToSegments`（`a2ui-to-segments.ts:52`）投影为可传输的 segment；入站平台富内容由 `projectInboundToA2UI`（`inbound-a2ui-dispatch.ts:26`）投射为给 Inbox 渲染器用的 `InboundA2UIBlock`；插件通过 `createA2UIBuilder`（`surface-builder.ts:315`）声明式地编写 surface；build-options 解析器追加一段感知能力的降级说明（`capability-evaluator.ts:106`）；交互组件通过 `buildActionId` / `recordCallbackBinding` / `resolveCallbackBinding`（`_shared/a2ui-mapper.ts`）往返；由 IM 触发的工作流运行经 `startWorkflowProgressRunner`（`workflow-progress-runner.ts:145`）把进度扇出为原地编辑的状态卡片。
+当一条入站 IM 消息在没有人在环的情况下驱动一次 Claude 回合时，连接器子系统无法复用经人工审阅的聊天输入框路径 —— 于是 `safeSendPrompt`（`lib/connectors/ai-loop/safe-send-prompt.ts:69`）用 `lib/twin/ingest/` 强制执行的同一条 PII 红线包裹 `runAndCaptureAssistantReply`：遍历 prompt 与 build-options 的 `appendSystemPrompt`，对每段调用 `hasNoLeakingPii`，并在调用模型**之前中止**（写入一条 `pii_blocked` 审计行）而非脱敏 —— 因为没有人来决定要删掉什么。捕获到的回复由 `assistantReplyToSegments`（`a2ui-to-segments.ts:52`）投影为可传输的 segment；入站平台富内容由 `projectInboundToA2UI`（`inbound-a2ui-dispatch.ts:26`）投射为给 Inbox 渲染器用的 `InboundA2UIBlock`；插件通过 `createA2UIBuilder`（`surface-builder.ts:315`）声明式地编写 surface；build-options 解析器追加一段感知能力的降级说明（`buildCapabilityPromptSection`，`capability-evaluator.ts:30`）；交互组件通过 `buildActionId` / `recordCallbackBinding` / `resolveCallbackBinding`（`_shared/a2ui-mapper.ts`）往返；工作流 / 团队运行经 `startWorkflowExecutionBridge`（`lib/execution/workflow-bridge.ts:143`）+ `startExecutionRunPresentationRunner`（`lib/connectors/run-presentation/runner.ts:715`）以持久化运行卡片抵达 IM。
 </TLDR>
 
 <StatGrid>
@@ -61,7 +61,7 @@ flowchart TD
 
 聊天页把 A2UI 部件作为渲染端 React 状态消费；IM 出站路径需要它们作为可传输的 `MessageSegment`。`assistantReplyToSegments`（`a2ui-to-segments.ts:52`）桥接二者。A2UI surface **优先**，按创建顺序排列（`reply.a2uiSurfaceOrder ?? Object.keys(surfaces)`），每个由 `buildA2UISegment` 包裹。剩余的去空白 markdown 追加为单个 `{ type: "markdown" }` segment（`a2ui-to-segments.ts:67`）；若回复既无文本也无 surface，则发出一个空的 `{ type: "text" }` segment（`a2ui-to-segments.ts:72`），使 runner 始终有内容可派发 —— 空的 `OutboundRequest` 会被当作畸形而拒绝。
 
-`buildA2UISegment`（`a2ui-to-segments.ts:84`）烤制 `plainTextMirror`：模型提供的 `widget.fallbackText` 优先于自动生成的 `generatePlainTextMirror`。同一构造器被 `scheduled-outbound.ts` 以及工作流进度 runner 直接复用，用于正常助手回复路径之外发出的 surface。运行时在 `runtime.ts:437` 调用 `assistantReplyToSegments`。
+`buildA2UISegment`（`a2ui-to-segments.ts:84`）烤制 `plainTextMirror`：模型提供的 `widget.fallbackText` 优先于自动生成的 `generatePlainTextMirror`。同一构造器被 `scheduled-outbound.ts` 以及运行呈现 runner 的后备路径（`run-presentation/runner.ts:411`）直接复用，用于正常助手回复路径之外发出的 surface。运行时在 `runtime.ts:437` 调用 `assistantReplyToSegments`。
 
 ## 入站投影：projectInboundToA2UI
 
@@ -87,25 +87,24 @@ if (!ids.has(resolvedRoot)) {
 
 ## 感知能力的降级
 
-并非每个平台都渲染每种 A2UI 种类。`evaluateSurfaceAgainstCapability`（`capability-evaluator.ts:55`）经 `walkA2UISurface` 遍历 surface，按各平台在适配器 `A2UICapabilityMatrix` 中的条目把每个存在的种类归入 `native` / `simulated` / `fallback` / `unsupported`，并经一条严格的降级阶梯计算**最坏情况**裁决 —— `unsupported > fallback > simulated > native`：
+并非每个平台都渲染每种 A2UI 种类。每个适配器声明一份 `A2UICapabilityMatrix`（`../<platform>/capability.ts`），把 `A2UI_COMPONENT_KINDS` 里的每个种类评为 `native` / `simulated` / `fallback` / `unsupported`；`componentKindsByLevel(matrix, level)`（`types/connectors/capability.ts:177`）是对它的唯一查询。桥接层里刻意**没有**逐 surface 的评估器 —— 每个适配器在渲染时于自己的出站映射器（`../<platform>/a2ui-mapper.ts`、飞书 `card.ts`、Slack `block-kit.ts`）内按自身矩阵分支，共享的 `generatePlainTextMirror` 为映射器无法原生绘制的一切保证尽力的镜像。桥接层拥有的是*提示词侧*那一半：`buildCapabilityPromptSection`（`capability-evaluator.ts:30`）把矩阵渲染成精简的系统提示段落，由 `build-options.ts:resolveSendOptions`（`build-options.ts:1935`）追加到 `appendSystemPrompt`：
 
 ```ts
-// lib/connectors/a2ui-bridge/capability-evaluator.ts:77 — worst-case ladder
-if (support === "native") {
-  native.push(kind)
-} else if (support === "simulated") {
-  simulated.push(kind)
-  if (worstCase === "native") worstCase = "simulated"
-} else if (support === "fallback") {
-  fallback.push(kind)
-  if (worstCase === "native" || worstCase === "simulated") worstCase = "fallback"
-} else {
-  unsupported.push(kind)
-  worstCase = "unsupported"
+// lib/connectors/a2ui-bridge/capability-evaluator.ts:35 — one bullet per support level
+const native = componentKindsByLevel(matrix, "native")
+const simulated = componentKindsByLevel(matrix, "simulated")
+const fallback = componentKindsByLevel(matrix, "fallback")
+const unsupported = componentKindsByLevel(matrix, "unsupported")
+
+const lines: string[] = [
+  `This conversation is delivered via ${platform}. The platform supports a limited A2UI subset:`,
+]
+if (native.length > 0) {
+  lines.push(`- Renders natively: ${native.join(", ")}.`)
 }
 ```
 
-未知种类（自定义插件 / 未来新增）被当作 `fallback`，因为渲染器保证尽力的镜像。`buildCapabilityPromptSection`（`capability-evaluator.ts:106`）把矩阵渲染成精简的系统提示段落，由 `build-options.ts:resolveSendOptions` 追加到 `appendSystemPrompt` —— 告知助手哪些种类原生渲染、哪些仅经多步 UX 可用（不要假设同回合同步回复）、哪些降级为纯文本、哪些根本不能发出。一个可选的 `skillCapabilities` 条目声明本渠道可服务的内置技能族，使助手跳过逐工具探测。
+该段落告知助手哪些种类原生渲染、哪些仅经多步 UX 可用（不要假设同回合同步回复）、哪些降级为纯文本、哪些根本不能发出。一个可选的 `skillCapabilities` 条目声明本渠道可服务的内置技能族，使助手跳过逐工具探测。（本模块早前还有一条逐 surface 的 `evaluateSurfaceAgainstCapability` / `CapabilityEvaluation` 最坏情况阶梯；它没有运行时消费者，已于 2026-08-18 移除。）
 
 ## 回调往返
 
@@ -133,7 +132,7 @@ export async function resolveCallbackBinding(
 }
 ```
 
-`pruneOldCallbackBindings`（`_shared/a2ui-mapper.ts:231`）回收过期行；`generatePlainTextMirror`（`_shared/a2ui-mapper.ts:257`）是各映射器共享的、内容驱动（非布局驱动）的后备。
+过期行由每日清扫 `cleanupExpiredCallbackBindings`（`lib/connectors/callback-binding-cleanup.ts:60`）回收，由持久化的家务时钟（`housekeeping-scheduler.ts:57`，任务类型 `connection:housekeeping:callback-bindings`）每 24 h 触发一次 —— 删除超过 `expiresAt` 的行，以及早于 `LEGACY_GRACE_MS`（60 d）的 TTL 前遗留行；`generatePlainTextMirror`（`_shared/a2ui-mapper.ts:255`）是各映射器共享的、内容驱动（非布局驱动）的后备。
 
 ```mermaid
 sequenceDiagram
@@ -152,17 +151,36 @@ sequenceDiagram
   H-->>B: assistant next turn scoped to conversationKey
 ```
 
-## 工作流进度扇出
+## 执行桥与运行呈现 Runner
 
-当工作流运行由 IM 触发（`triggeredBy.source === "im"`），`startWorkflowProgressRunner`（`workflow-progress-runner.ts:145`）用 `liveQuery` 监视 `workflowRuns` 并为每个运行调和一个 watcher（`reconcileWatchers`，`workflow-progress-runner.ts:184`）。每个渠道择一模式：
+IM 内的工作流 / 团队运行实时呈现不再有专属的扇出循环。连接器引导（`lib/connectors/bootstrap/install-connector-runtime.ts:738-739`）背靠背启动的两个 runner 分担这项工作 —— 一个写入单一持久执行日志的**源桥**，以及一个拥有原生投射、合并、游标提交与后备的**呈现 runner**：
 
-- **cumulative-card（累积卡片）** —— `adapter.edit` 为函数的适配器（`defaultSupportsEdit`，`workflow-progress-runner.ts:136`）。每个事件经 `buildCumulativeStatusSurface`（`workflow-to-a2ui.ts:259`）**原地编辑**同一张状态 surface。`flushCumulativeOnChannel`（`workflow-progress-runner.ts:477`）从 `outboundQueue.get` 解析入口 job 的 `platformMessageId`，再带 `editTargetMessageId` 重新派发。
-- **append（追加）** —— 不支持 edit 的适配器（WeCom、wechat-personal）。每步一行紧凑 markdown，经 `buildProgressSegment`（`workflow-to-a2ui.ts:126`），由 `emitAppendOnChannel`（`workflow-progress-runner.ts:447`）发出，末尾加一张 `buildFinalSurface` 摘要。
+- **源桥** —— `startWorkflowExecutionBridge`（`lib/execution/workflow-bridge.ts:143`）用 `liveQuery` 监视 `workflowRuns` 连同每个运行的 `workflowRunEvents` 及其 `listForWorkflow` 扇出订阅，并对每行调用 `syncWorkflowExecutionRun`（`workflow-bridge.ts:43`）：创建一条持久的 `executionRuns` 行（`execution:workflow:<runId>`，按 `triggerKind` 取 kind `workflow` / `team` / `scheduled`），向 `runEventJournal` 追加 `plan.created` + `run.started` 及随后每个经 `mapWorkflowRunEvent` 映射的源事件，并按目的地各写一条 `executionRunBindings` 行 —— 触发方的 `triggeredBy.{adapterId, conversationKey}` 加上每个已启用的扇出订阅 —— 初始 `deliveryMode: "native"`、`lastProjectedRevision: 0`。它还启动 `startAgentStateExecutionBridge`，让 agent 运行落入同一份日志。
+- **呈现 runner** —— `startExecutionRunPresentationRunner`（`lib/connectors/run-presentation/runner.ts:715`）用 `liveQuery` 监视状态为 `active` / `degraded` 的 `executionRunBindings`，一旦 `latestSnapshot.revision > binding.lastProjectedRevision` 便调度 `projectExecutionRunBinding`（`runner.ts:264`）—— 首个修订、终态状态与 `IMMEDIATE_EVENT_TYPES`（`run.started`、`step.started`、`interrupt.*`……）立即执行，其余按 `COALESCE_MS = 2 s` 合并（`schedule`，`runner.ts:602`）。一个 5 s 心跳（`heartbeatExecutionRunBinding`，`runner.ts:623`）刷新每个非终态绑定的耗时。
 
-审批握手采用不同的 action-id 命名空间 —— `WF_APPROVE_PREFIX = "wfapp:"` 与 `WF_CANCEL_PREFIX = "wfcan:"`（`workflow-to-a2ui.ts:40`）—— 使总线按前缀路由 `wf_approve` 与 `wf_cancel` 而无需嗅探 payload：
+投射先跑 `projectImSafeSnapshot`（`runner.ts:179`，`hasNoLeakingPiiDeep`）—— 不安全的快照坍缩为不透明快照并审计 `pii_gate_blocked`。随后，若原生模式启用（kill switch `cognia-run-presentation-native-disabled` / `NEXT_PUBLIC_COGNIA_NATIVE_RUN_PRESENTATION=0`）且适配器暴露 `runPresentation` —— 飞书经 `createLarkRunPresentationDriver`（`lark-driver.ts:320`，卡片流式更新 + 带检查点的待定变更），Slack 经 `createSlackRunPresentationDriver`（`slack-driver.ts:51`，`plan_update` / `task_update` 分块）—— 驱动的 `open` / `update` / `finish` **原地更改同一张原生卡片**，并把 `platformMessageId` + 不透明状态检查点回写到绑定。任何驱动失败都会 `recordDegraded`（审计 `run_projection_degraded`）并落入 `deliverFallback`（`runner.ts:381`），其模式感知能力：
 
 ```ts
-// lib/connectors/a2ui-bridge/workflow-to-a2ui.ts:64 — approve/cancel Card
+// lib/connectors/run-presentation/runner.ts:223 — capability-aware fallback mode
+export function resolveCapabilityAwareFallbackDeliveryMode(input: {
+  hasEditMethod: boolean
+  messageEditing?: boolean | undefined
+  appendActivity: boolean
+  appendFallback?: boolean | undefined
+}): FallbackDeliveryMode {
+  return resolveFallbackDeliveryMode({
+    canEdit: input.hasEditMethod && input.messageEditing !== false,
+    appendActivity: input.appendActivity && input.appendFallback !== false,
+  })
+}
+```
+
+`card-edit`（适配器有 `edit` 且 `runtimeCapabilities.messageEditing !== false`）带 `editTargetMessageId` 重发 `buildRunActivitySurface` 卡片；`append` 在状态变化时新发一张卡片，否则至多每 `APPEND_UPDATE_INTERVAL_MS = 30 s` 一张（`shouldDeliverFallbackUpdate`，`runner.ts:235`）；`final-only` 只等终态快照。每次后备都汇入 `enqueueGoverned`（`delivery-gateway`），带 `source: "workflow"`、`sourceWorkflow: { …, nodeId: "run-projection" }` 与幂等键 `execution-run:<bindingId>:<revision>`，再 `waitForOutboundTerminal`，之后才经 `saveBinding` 提交游标（`lastProjectedRevision`）。
+
+审批握手仍留在桥接层：`buildApprovalSurface`（`workflow-to-a2ui.ts:48`，由 `wf_run_workflow_by_name` 工具发出）采用不同的 action-id 命名空间 —— `WF_APPROVE_PREFIX = "wfapp:"` 与 `WF_CANCEL_PREFIX = "wfcan:"`（`workflow-to-a2ui.ts:25`）—— 使总线按前缀路由 `wf_approve` 与 `wf_cancel` 而无需嗅探 payload：
+
+```ts
+// lib/connectors/a2ui-bridge/workflow-to-a2ui.ts:49 — approve/cancel Card
 const approveActionId = WF_APPROVE_PREFIX + input.bindingId
 const cancelActionId = WF_CANCEL_PREFIX + input.bindingId
 const safeSummary = (input.summary ?? "").trim()
@@ -174,35 +192,22 @@ const components: Record<string, unknown> = {
   },
 ```
 
-每次派发都汇入 `dispatch`（`workflow-progress-runner.ts:580`），它以 `source: "workflow"` 及 `sourceWorkflow: { workflowId, runId, nodeId }` 溯源标签调用 `enqueueOutbound` —— 且在累积模式下带上解析得到的 `editTargetMessageId`，使平台编辑既有消息而非新发一条：
-
-```ts
-// lib/connectors/a2ui-bridge/workflow-progress-runner.ts:511 — edit-in-place dispatch
-await dispatch(
-  watcher,
-  channel,
-  [segment],
-  `wf-status:${watcher.runId}:${channel.channelKey}:${watcher.lastEmittedTs}`,
-  "",
-  enqueue,
-  channel.entryPlatformMessageId
-)
-```
-
-终态的 `buildFinalSurface` / `buildCumulativeStatusSurface` 都内嵌一个 `buildWorkflowRunDeepLink`（`workflow-to-a2ui.ts:173`）—— `cognia://workflow-run/<workflowId>/<runId>` —— 使点击即在桌面 / 移动壳打开运行详情页。
+早前与之相邻的逐步进度行 / 累积状态 / 终态摘要构建器（以及 `cognia://workflow-run/…` 深链）已于 2026-08-18 随 `workflow-progress-runner` 模块一并退役；运行卡片的时间线现在由 `formatRunActivityTimeline` / `buildRunActivitySurface`（`lib/connectors/activity/activity-to-a2ui.ts:131,172`）从持久日志渲染，驱动与后备路径共用。
 
 ```mermaid
 flowchart TD
-  RUN["workflowRuns row<br/>triggeredBy.source=im"] --> LQ["startWorkflowProgressRunner L145<br/>liveQuery watch"]
-  LQ --> REC["reconcileWatchers L184<br/>one watcher per run"]
-  REC --> MODE{"adapter.edit<br/>is function?"}
-  MODE -- "yes" --> CUM["cumulative-card mode<br/>flushCumulativeOnChannel L477"]
-  MODE -- "no" --> APP["append mode<br/>emitAppendOnChannel L447"]
-  CUM --> EDIT["buildCumulativeStatusSurface L259<br/>dispatch with editTargetMessageId"]
-  APP --> LINE["buildProgressSegment L126<br/>one markdown line per step"]
-  EDIT --> DISP["dispatch L580<br/>enqueueOutbound source=workflow"]
-  LINE --> DISP
-  DISP --> ENQ["Outbound Queue"]
+  RUN["workflowRuns + workflowRunEvents<br/>+ fan-out subscriptions"] --> BR["startWorkflowExecutionBridge L143<br/>liveQuery watch"]
+  BR --> SYNC["syncWorkflowExecutionRun L43<br/>executionRuns + runEventJournal + executionRunBindings"]
+  SYNC --> PR["startExecutionRunPresentationRunner L715<br/>liveQuery on active / degraded bindings"]
+  PR --> SCH["schedule L602<br/>immediate vs COALESCE_MS 2s"]
+  SCH --> PROJ["projectExecutionRunBinding L264<br/>projectImSafeSnapshot PII gate"]
+  PROJ --> NAT{"native driver?<br/>adapter.runPresentation"}
+  NAT -- "lark / slack" --> DRV["driver.open / update / finish<br/>checkpoint platformMessageId"]
+  NAT -- "none / failed" --> FB["deliverFallback L381<br/>resolveCapabilityAwareFallbackDeliveryMode L223"]
+  FB --> MODE{"card-edit / append / final-only"}
+  MODE --> ENQ["enqueueGoverned source=workflow<br/>waitForOutboundTerminal"]
+  DRV --> SAVE["saveBinding<br/>lastProjectedRevision = revision"]
+  ENQ --> SAVE
 ```
 
 ## 附件缓存
@@ -227,7 +232,7 @@ if (existing && !isExpired(existing, now)) {
   <Card title="ConnectorBus" href="./connector-bus" description="决定是否回复并经 dispatchConnectorCallback 路由入站回调的调度器。" />
   <Card title="出站队列与投递" href="./outbound-queue" description="每个被投影的 segment 的终点 —— 持久队列、重试、限流、原地编辑投递。" />
   <Card title="A2UI" href="../a2ui" description="本桥往返投影所依据的 A2UI 组件词汇、schema 与渲染器。" />
-  <Card title="可视化工作流" href="../visual-workflows" description="其由 IM 触发的运行经本桥扇出进度的工作流运行时。" />
+  <Card title="可视化工作流" href="../visual-workflows" description="其运行由执行桥镜像为持久执行运行、再交给运行呈现 runner 的工作流运行时。" />
   <Card title="内置适配器" href="./built-in-adapters" description="消费 buildActionId / 能力矩阵并发出原生富内容的各平台映射器。" />
   <Card title="适配器模型" href="./adapter-model" description="这些投影所面向的适配器接口 —— edit()、能力矩阵、parse.ts。" />
 </Cards>

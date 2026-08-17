@@ -66,13 +66,3 @@ export class MentionAccumulator {
     return { selfMentioned: this.selfMentioned, users: [...this.users] }
   }
 }
-
-/**
- * Convenience for parsers that already have a complete list of candidate
- * ids and just need the dedup+self-detect reduction.
- */
-export function mentionsFromIds(selfId: string, ids: Iterable<string>): MentionDescriptor {
-  const acc = new MentionAccumulator(selfId)
-  for (const id of ids) acc.add(id)
-  return acc.finalize()
-}

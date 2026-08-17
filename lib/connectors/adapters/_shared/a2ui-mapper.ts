@@ -242,26 +242,6 @@ export async function resolveCallbackBinding(
 }
 
 /**
- * Bulk-prune bindings older than `ttlMs` (default 14 days). Adapters can
- * call this periodically, or it runs on adapter stop. Bindings are also
- * deleted when a surface is destroyed (separate API — see Group 5).
- */
-export async function pruneOldCallbackBindings(
-  adapterId: string,
-  ttlMs = 14 * 24 * 60 * 60 * 1000
-): Promise<number> {
-  const cutoff = Date.now() - ttlMs
-  const stale = await getDb()
-    .connectorCallbackBindings.where("adapterId")
-    .equals(adapterId)
-    .filter((row) => row.createdAt < cutoff && (!row.expiresAt || row.expiresAt < Date.now()))
-    .primaryKeys()
-  if (stale.length === 0) return 0
-  await getDb().connectorCallbackBindings.bulkDelete(stale as string[])
-  return stale.length
-}
-
-/**
  * Produce a plain-text projection of a surface — used as the
  * `plainTextMirror` on the outbound A2UI segment when the assistant
  * forgets to bake one in. Adapters can also call this at send-time as

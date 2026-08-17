@@ -37,8 +37,6 @@ import {
   connectorsMatrixCryptoShareRoomKey,
   connectorsMatrixCryptoUpdateTrackedUsers,
   connectorsMatrixCryptoGetMissingSessions,
-  connectorsMatrixCryptoEncryptAttachment,
-  connectorsMatrixCryptoDecryptAttachment,
   connectorsMatrixEncryptedMediaUpload,
   connectorsMatrixEncryptedMediaFetch,
   type AdapterRegistration,
@@ -500,26 +498,6 @@ describe("Matrix crypto command wrappers", () => {
     await expect(connectorsMatrixCryptoGetMissingSessions(req)).resolves.toEqual(expected)
     expect(mockInvoke).toHaveBeenCalledWith("connectors_matrix_crypto_get_missing_sessions", {
       req,
-    })
-  })
-
-  it("encrypts and decrypts attachment bytes", async () => {
-    const encrypted = { bytesBase64: "cipher", info: { key: {} } }
-    mockInvoke.mockResolvedValueOnce(encrypted)
-    await expect(
-      connectorsMatrixCryptoEncryptAttachment({ bytesBase64: "plain" })
-    ).resolves.toEqual(encrypted)
-    expect(mockInvoke).toHaveBeenLastCalledWith("connectors_matrix_crypto_encrypt_attachment", {
-      req: { bytesBase64: "plain" },
-    })
-
-    const decrypted = { bytesBase64: "plain" }
-    mockInvoke.mockResolvedValueOnce(decrypted)
-    await expect(
-      connectorsMatrixCryptoDecryptAttachment({ bytesBase64: "cipher", info: encrypted.info })
-    ).resolves.toEqual(decrypted)
-    expect(mockInvoke).toHaveBeenLastCalledWith("connectors_matrix_crypto_decrypt_attachment", {
-      req: { bytesBase64: "cipher", info: encrypted.info },
     })
   })
 })

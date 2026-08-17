@@ -1,7 +1,7 @@
-import { parseOneBotEvent, clearAllVariantCaches } from "./parse"
+import { parseOneBotEvent, __resetOneBotVariantCacheForTesting } from "./parse"
 
 beforeEach(() => {
-  clearAllVariantCaches()
+  __resetOneBotVariantCacheForTesting()
 })
 
 const V11_PRIVATE_MSG = {

@@ -5,7 +5,6 @@ import {
   serializeReaction,
   serializeReactionRemoval,
   serializeFetchHistory,
-  escapeDiscordMd,
   chunkDiscordContent,
   DISCORD_MAX_CONTENT_LENGTH,
 } from "./serialize"
@@ -27,26 +26,6 @@ function makeReq(
     ...extra,
   }
 }
-
-// ---------------------------------------------------------------------------
-// escapeDiscordMd
-// ---------------------------------------------------------------------------
-
-describe("escapeDiscordMd", () => {
-  it("escapes asterisk, underscore, tilde, pipe, gt, backslash", () => {
-    expect(escapeDiscordMd("*bold* _em_ ~strike~ |text| >quote")).toBe(
-      "\\*bold\\* \\_em\\_ \\~strike\\~ \\|text\\| \\>quote"
-    )
-  })
-
-  it("leaves normal text untouched", () => {
-    expect(escapeDiscordMd("Hello world")).toBe("Hello world")
-  })
-
-  it("escapes backslash", () => {
-    expect(escapeDiscordMd("back\\slash")).toBe("back\\\\slash")
-  })
-})
 
 // ---------------------------------------------------------------------------
 // serializeOutbound

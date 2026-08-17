@@ -99,8 +99,8 @@ export interface RunTeamLifecycleDeps {
    * Origin of this team run when it was triggered from an IM channel
    * (e.g. an `action.team.run` node inside a workflow that
    * `startWorkflowFromIM` kicked off). Threaded onto the synthesized team
-   * `runWorkflow` as `triggeredBy` so the existing
-   * `workflow-progress-runner` fans the team's progress + final result back
+   * `runWorkflow` as `triggeredBy` so the execution bridge +
+   * run-presentation runner fan the team's progress + final result back
    * to the originating conversation. Omitted for UI / API runs, which keeps
    * their behavior unchanged (no IM fan-out).
    */

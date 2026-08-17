@@ -146,13 +146,6 @@ export async function setFeishuTenantEnabled(
   return { ...tenant, status: next, updatedAt: now }
 }
 
-export async function getRegisteredTenant(
-  tenantKey: string,
-  appId: string
-): Promise<FeishuTenantRow | undefined> {
-  return getFeishuTenant(tenantKey, appId)
-}
-
 // ─── Bind requests ──────────────────────────────────────────────────────────
 
 export interface ListBindRequestsInput {

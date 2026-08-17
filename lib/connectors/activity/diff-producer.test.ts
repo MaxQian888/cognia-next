@@ -1,6 +1,5 @@
 import {
   countDiffStats,
-  diffHunksToUnifiedText,
   extractEditInput,
   fallbackStats,
   isFileEditTool,
@@ -104,26 +103,6 @@ describe("fallbackStats", () => {
 
   it("handles empty strings", () => {
     expect(fallbackStats("", "")).toEqual({ added: 0, removed: 0 })
-  })
-})
-
-describe("diffHunksToUnifiedText", () => {
-  it("renders unified-diff text with headers and +/- prefixes", () => {
-    const hunks = produceUnifiedHunks("a\nb", "a\nB")
-    const { text } = diffHunksToUnifiedText(hunks, "lib/foo.ts")
-    expect(text).toContain("--- a/lib/foo.ts")
-    expect(text).toContain("+++ b/lib/foo.ts")
-    expect(text).toContain("@@")
-    expect(text).toContain("-b")
-    expect(text).toContain("+B")
-  })
-
-  it("truncates beyond maxLines and reports the dropped count", () => {
-    const old = Array.from({ length: 50 }, (_, i) => `o${i}`).join("\n")
-    const next = Array.from({ length: 50 }, (_, i) => `n${i}`).join("\n")
-    const hunks = produceUnifiedHunks(old, next, 0)
-    const { truncated } = diffHunksToUnifiedText(hunks, "f", 5)
-    expect(truncated).toBeGreaterThan(0)
   })
 })
 

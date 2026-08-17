@@ -1,6 +1,6 @@
 ---
 title: IM Connector Bridge
-description: A2UI surfaces must degrade into platform-native rich content — Lark, Telegram, and Discord can't render arbitrary React. This bridge maps surfaces ⇄ platform segments both ways, downgrades by adapter capability, and projects live workflow runs into editable IM cards.
+description: A2UI surfaces must degrade into platform-native rich content — Lark, Telegram, and Discord can't render arbitrary React. This bridge maps surfaces ⇄ platform segments both ways, tells the model what each adapter can render, and hands workflow approvals off to the run-presentation runner for live cards.
 ---
 
 # IM Connector Bridge
@@ -12,21 +12,22 @@ description: A2UI surfaces must degrade into platform-native rich content — La
   only render its own rich-content primitives — a card, a button row, an image, a link. This bridge
   is the lossy-but-faithful adapter layer between the two worlds. **Outbound**, it builds surfaces
   from plugin-facing factories (`surface-builder.ts`), turns assistant replies into outbound
-  `MessageSegment[]` with a `plainTextMirror` fallback (`a2ui-to-segments.ts`), and scores each
-  surface against the target adapter's capability matrix (`capability-evaluator.ts`). **Inbound**, it
-  projects platform-rich content into an `InboundA2UIBlock` for the Inbox renderer
-  (`projectInboundToA2UI` → per-platform `inbound-to-a2ui.ts`) and routes
-  button taps into an AI digest turn or a workflow-control handler. **Workflow projection** turns a
-  live run into an approval card, per-step progress lines, an in-place cumulative status card, and a
-  terminal summary — fanned out to every subscribed channel by an event-driven background runner
-  (`workflow-progress-runner.ts`), with no polling timer.
+  `MessageSegment[]` with a `plainTextMirror` fallback (`a2ui-to-segments.ts`), and tells the model —
+  in its system prompt — which A2UI kinds the target adapter's capability matrix will carry
+  (`capability-evaluator.ts`). **Inbound**, it projects platform-rich content into an
+  `InboundA2UIBlock` for the Inbox renderer (`projectInboundToA2UI` → per-platform
+  `inbound-to-a2ui.ts`) and routes button taps into an AI digest turn or a workflow-control handler.
+  **Workflow projection** in this bridge is the approval card only (`workflow-to-a2ui.ts`); live
+  progress and terminal cards come from the durable execution-run pipeline —
+  `lib/execution/workflow-bridge.ts` + `lib/connectors/run-presentation/runner.ts` — not from a
+  bridge-local loop.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Bridge modules" value="6 + 3" hint="lib/connectors/a2ui-bridge/ (6) + lib/a2ui/ handlers (3)" />
+  <Stat label="Bridge modules" value="4 + 3" hint="lib/connectors/a2ui-bridge/ (4) + lib/a2ui/ handlers (3)" />
   <Stat label="Capability levels" value="4" hint="native · simulated · fallback · unsupported" />
   <Stat label="Surface factories" value="14" hint="a2uiComponent in surface-builder.ts:218" />
-  <Stat label="Runner cadence" value="event-driven" hint="liveQuery fan-out, NO timer" />
+  <Stat label="Live run cards" value="run-presentation" hint="lib/connectors/run-presentation/runner.ts, coalesced 2 s" />
 </StatGrid>
 
 ## Why An IM Bridge Exists
@@ -38,16 +39,16 @@ them can execute an arbitrary `component: "Select"` node.
 
 The bridge is therefore a **lossy, capability-aware projection layer**. It never assumes the surface
 will render verbatim. Every path carries a `plainTextMirror` so the worst case is still a readable
-text message, and every outbound surface is first scored against the adapter's declared capabilities
-so the model can be told — in its own system prompt — what will and won't survive the trip.
+text message, and the adapter's declared capability matrix is rendered into the model's own system
+prompt so it is told up front what will and won't survive the trip.
 
 <Files>
   - lib/connectors/a2ui-bridge/surface-builder.ts — plugin-facing pure surface builder (backs `ctx.connectors.a2ui`)
-  - lib/connectors/a2ui-bridge/capability-evaluator.ts — surface vs adapter capability matrix
+  - lib/connectors/a2ui-bridge/capability-evaluator.ts — adapter capability matrix → system-prompt section
   - lib/connectors/a2ui-bridge/a2ui-to-segments.ts — assistant reply → outbound `MessageSegment[]`
   - lib/connectors/adapters/_shared/inbound-a2ui-dispatch.ts — `projectInboundToA2UI`: inbound platform payload → `InboundA2UIBlock`
-  - lib/connectors/a2ui-bridge/workflow-to-a2ui.ts — PURE workflow → A2UI builders
-  - lib/connectors/a2ui-bridge/workflow-progress-runner.ts — background fan-out loop
+  - lib/connectors/a2ui-bridge/workflow-to-a2ui.ts — PURE approval-surface builder (`buildApprovalSurface`)
+  - lib/connectors/run-presentation/runner.ts — live run cards (not part of the bridge; documented in Platform Connectors)
   - lib/a2ui/connector-callback-handler.ts — generic callback → AI digest turn
   - lib/a2ui/workflow-approval-handler.ts — `wf_approve` / `wf_cancel` dispatcher
   - lib/a2ui/workflow-fanout-handler.ts — `wf_fanout_approve` / `wf_fanout_cancel` dispatcher
@@ -88,7 +89,7 @@ Once an assistant reply carries A2UI surfaces, `assistantReplyToSegments`
 
 `buildA2UISegment` (`a2ui-to-segments.ts:84`) is the load-bearing primitive: it derives the
 `plainTextMirror` from `widget.fallbackText` (trimmed, if a string — `:88-89`) and otherwise from
-`generatePlainTextMirror(content)` (`:91`, mapper at `a2ui-mapper.ts:257`), then returns
+`generatePlainTextMirror(content)` (`:91`, mapper at `a2ui-mapper.ts:255`), then returns
 `{type:"a2ui", surfaceId, content, plainTextMirror}` (`:92-97`). That mirror is what a
 capability-poor adapter ultimately shows.
 
@@ -98,7 +99,7 @@ flowchart LR
   CB --> BC["surface-builder.ts:158<br/>buildA2UISurfaceContent"]
   BC --> VAL["surface-builder.ts:116<br/>validateA2UISurfaceComponents"]
   BC --> SEG["a2ui-to-segments.ts:84<br/>buildA2UISegment"]
-  SEG --> MIR["a2ui-mapper.ts:257<br/>generatePlainTextMirror"]
+  SEG --> MIR["a2ui-mapper.ts:255<br/>generatePlainTextMirror"]
   REPLY["assistant reply"] --> ARS["a2ui-to-segments.ts:52<br/>assistantReplyToSegments"]
   ARS --> SEG
   SEG --> OUT["MessageSegment[]<br/>type:a2ui + plainTextMirror"]
@@ -115,25 +116,25 @@ flowchart LR
 
 ## Capability Downgrade Ladder
 
-`capability-evaluator.ts` scores a surface against an adapter so the model knows what it can rely on.
-Four levels form a worst-case ladder: **`native` → `simulated` → `fallback` → `unsupported`** (each
-strictly worse than the last; `A2UIComponentSupport` at `capability.ts:124`).
+`capability-evaluator.ts` tells the model what it can rely on for a given adapter. Four levels form a
+worst-case ladder: **`native` → `simulated` → `fallback` → `unsupported`** (each strictly worse than
+the last; `A2UIComponentSupport` at `capability.ts:150`).
 
-`evaluateSurfaceAgainstCapability` (`capability-evaluator.ts:55`):
+There is deliberately **no** per-surface evaluator left in this module — adapters branch on their own
+`A2UICapabilityMatrix` inside their outbound mappers at render time, and the `plainTextMirror`
+guarantees a floor for whatever a mapper cannot draw. (The former `evaluateSurfaceAgainstCapability`
+/ `CapabilityEvaluation` walker had no runtime consumer and was removed on 2026-08-18.) What remains
+is the prompt-side half, `buildCapabilityPromptSection(platform, matrix, skillCapabilities?)`
+(`capability-evaluator.ts:30`):
 
-1. Collect present kinds via `walkA2UISurface(surface, node => presentKinds.add(node.component))`
-   (`:60-62`, walker at `a2ui-mapper.ts:50`).
-2. Unknown kind → `continue` / skipped (`:71-74`).
-3. Known kind → `matrix[kind] ?? "fallback"` (`:76`).
-4. Bucket into the `CapabilityEvaluation` (`:28`) and ratchet `worstCase`: `native` (77),
-   `simulated` bumps from native (79-81), `fallback` bumps from native/simulated (82-84),
-   `unsupported` sets the hard floor (85-87).
+1. Derive per-level kind lists via `componentKindsByLevel(matrix, level)` (`:35-38`, helper at
+   `capability.ts:177`) — one pass over `A2UI_COMPONENT_KINDS`, so unknown kinds never appear.
+2. Emit one bullet per non-empty level (`:43-58`): renders natively / available via multi-step UX (do
+   not assume a same-turn reply) / degrades to plain text / NOT supported — do not emit.
+3. Append an optional built-in-skills bullet from `skillCapabilities` (`:59-67`).
 
-`buildCapabilityPromptSection` (`capability-evaluator.ts:106`) then renders a system-prompt paragraph:
-it derives per-level kind lists via `componentKindsByLevel` (`:111-114`), emits one bullet per level
-(`:119-134`), plus a skill bullet (`:135-142`). This paragraph is consumed by
-`lib/claude/build-options.ts:resolveSendOptions` (header `:6-16`) — the per-channel A2UI capability
-prompt the model sees before composing.
+This paragraph is consumed by `lib/claude/build-options.ts:resolveSendOptions` (`:1929-1935`) — the
+per-channel A2UI capability prompt the model sees before composing.
 
 | Level | Meaning | Model guidance |
 | --- | --- | --- |
@@ -142,9 +143,9 @@ prompt the model sees before composing.
 | `fallback` | Only the `plainTextMirror` survives | Prefer text-friendly content |
 | `unsupported` | Hard floor — drop or rethink | Avoid for this channel |
 
-`A2UICapabilityMatrix` (`capability.ts:126`) is produced by `buildA2UICapabilityMatrix`
-(`capability.ts:133`); `isKnownKind` (`capability-evaluator.ts:147`) and `A2UI_COMPONENT_KINDS`
-guard against unrecognized component strings.
+`A2UICapabilityMatrix` (`capability.ts:152`) is produced by `buildA2UICapabilityMatrix`
+(`capability.ts:159`) from each adapter's `../<platform>/capability.ts`; `A2UI_COMPONENT_KINDS` is the
+closed set of component strings both sides iterate.
 
 ## Inbound: Platform Payload → InboundA2UIBlock + Callbacks
 
@@ -212,102 +213,76 @@ a user taps a button in a rendered surface, and the bridge converts it into a fr
 
 ## Workflow Projection
 
-A live workflow run has to surface inside an IM thread. `workflow-to-a2ui.ts` holds the **pure**
-builders; `workflow-progress-runner.ts` is the **background loop** that decides when and where to
-emit them.
+A live workflow run has to surface inside an IM thread. This bridge owns only the **approval
+handshake**: `workflow-to-a2ui.ts` holds the pure `buildApprovalSurface` builder. Live progress and
+terminal cards are **not** built here any more — they come from the durable execution-run pipeline
+described below.
 
-### Pure builders (`workflow-to-a2ui.ts`)
+### Pure builder (`workflow-to-a2ui.ts`)
 
 | Builder (`workflow-to-a2ui.ts`) | Produces |
 | --- | --- |
-| `buildApprovalSurface` (63) | `Card` + `Row` + 2 `Button`s; mirror adds `回复 1 同意 / 2 取消`. Action ids = `WF_APPROVE_PREFIX` (`"wfapp:"`, 40) + `bindingId` / `WF_CANCEL_PREFIX` (`"wfcan:"`, 41) + `bindingId` (64-65); button value carries the action id (81 / 87) |
-| `buildProgressSegment` (126) | one markdown line per step event (`null` for non-step): started ▶…开始 (136); completed ✓…完成 (dur) (137-145); failed ✗…失败：msg (147-153); skipped ⊘…跳过 (155) |
-| `buildCumulativeStatusSurface` (259) | one `Card` edited in place: header by `state.status` (261-276), per-step `Text` `step_<i>` (288-293), optional `Divider` + body (298-302), trailing `openLink` `Link` (303) |
-| `buildFinalSurface` (336) | terminal summary `Card`: status icon/text (339-347), body = error (failed) / output (succeeded) (350-355), deep link (357) |
+| `buildApprovalSurface` (48) | `Card` + `Row` + 2 `Button`s; mirror adds `回复 1 同意 / 2 取消`. Action ids = `WF_APPROVE_PREFIX` (`"wfapp:"`, 25) + `bindingId` / `WF_CANCEL_PREFIX` (`"wfcan:"`, 26) + `bindingId` (49-50); button value carries the action id; `surfaceType: "inline"` |
 
-Supporting types: `CumulativeStepStatus` (182, `running|succeeded|failed|skipped`),
-`CumulativeStepEntry` (184), `CumulativeStatusState` (196); helpers `statusIcon` (220, `▶✓✗⊘`),
-`statusLine` (233), `truncate` (392), `pickErrorMessage` (397), `stringifyOutput` (404),
-`formatDuration` (414). Deep link `buildWorkflowRunDeepLink` (173) →
-`cognia://workflow-run/<wf>/<run>`. Caps: `OUTPUT_SUMMARY_MAX = 500` (37), `ERROR_MESSAGE_MAX = 280`
-(38), `CUMULATIVE_TERMINAL_BODY_MAX = 500` (218); every surface is `surfaceType: "inline"`.
+The input is `ApprovalSurfaceInput { bindingId, workflowName, summary? }` (28); the surface is emitted
+by the `wf_run_workflow_by_name` plugin tool as part of its tool result, and the caller owns Dexie I/O +
+`recordCallbackBinding`. The former `buildProgressSegment` / `buildCumulativeStatusSurface` /
+`buildFinalSurface` builders and the `buildWorkflowRunDeepLink` deep link were retired with the
+`workflow-progress-runner` module on 2026-08-18.
 
 <Callout type="info">
-  There is **no time-interval constant** anywhere in these builders. The cadence is entirely
-  event-driven — one emission per new workflow event batch per channel. The runner never wakes on a
-  timer.
+  There is still **no time-interval constant** in this builder — it is a pure function. Cadence for
+  the live cards is owned by the run-presentation runner (`COALESCE_MS = 2 s`, immediate on
+  `run.started` / `step.started` / terminal / interrupt events, 5 s elapsed-time heartbeat).
 </Callout>
 
-### The fan-out runner (`workflow-progress-runner.ts`)
+### Live cards: the execution bridge + run-presentation runner
 
-`startWorkflowProgressRunner` (`workflow-progress-runner.ts:145`) subscribes a Dexie
-`liveQuery(workflowRuns.toArray())` (`:154`) and reconciles per-run watchers. It only follows runs
-whose `triggeredBy.source === "im"` carrying an `adapterId` + `conversationKey`
-(`reconcileWatchers:192-195`); watchers are created once via a `creatingWatchers` promise dedup
-(`:203-219`), torn down on terminal status via `emitFinal` then `delete` (`:225-233`), and
-GC'd when a run vanishes (`:236-242`). `ACTIVE_STATUSES` (63) and `TERMINAL_STATUSES` (64) gate the
-lifecycle.
+Two runners started by the connector bootstrap (`install-connector-runtime.ts:738-739`) replace the
+old bridge-local fan-out loop:
 
-Each watcher (`createWatcher:245`) sets up its channel set and subscribes per-run events via
-`subscribeRunEvents` (`:315`) — a `liveQuery` over `workflowRunEvents.where("[runId+ts]")`
-(`:316-321`) that feeds `emitForAllChannels` (`:414`). That router sorts by `ts` (`:419`), skips
-`ts <= lastEmittedTs` (`:425`), folds each event into state (`foldEventIntoState:337`, `:427`),
-advances `lastEmittedTs` (`:431`), then dispatches per channel: cumulative mode →
-`flushCumulativeOnChannel` (`:437`), append mode → `emitAppendOnChannel` (`:440`).
-
-**Two emission modes:**
-
-- **Append** (`emitAppendOnChannel:447`) — one segment per event:
-  `buildProgressSegment` (`workflow-to-a2ui:126`) → `dispatch` (`:580`). Idempotency
-  `progress:…:<ev.id>` (`:467`).
-- **Cumulative** (`flushCumulativeOnChannel:477`) — a single card **sent then edited in place**,
-  reentrancy-serialized via `channel.flushing` / `flushQueued` (`:482-485, 521-527`). First event =
-  entry send, caches `entryJobId` (`:493-503`); subsequent events resolve the `platformMessageId`
-  from `outboundQueue.get(entryJobId)` (`:506-509`) and dispatch with `editTargetMessageId`
-  (`:511-519`). Builders: `buildStateSnapshot` (395) → `buildCumulativeStatusSurface`
-  (`workflow-to-a2ui:259`) → `buildA2UISegment` (`a2ui-to-segments:84`) → `dispatch`. Surface
-  templates: `wf-status:<run>:<chan>` (`:490`), entry idempotency `wf-status-entry:…` (`:498`),
-  update `wf-status:…:<lastEmittedTs>` (`:515`).
-
-`emitFinal` (`:548`): cumulative → bump `lastEmittedTs` then re-flush (`:559-560`); append →
-`buildFinalSurface` → `buildA2UISegment` → `dispatch` (`:562-573`), idempotency `wf-final:…`
-(`:563`). `dispatch` (`:580`) builds an `OutboundRequest` and calls `enqueueOutbound`
-(`lib/db/outbound-jobs`) with `editTargetMessageId` when set (`:603`), `source: "workflow"` +
-`sourceWorkflow {workflowId, runId, nodeId}` (`:605-610`). `defaultSupportsEdit` (136) probes
-`getBus().getAdapter(adapterId).edit` to pick the mode; the channel fan-out reads
-`listFanoutForWorkflow` (`lib/db/workflow-fanout-subscriptions`) in `createWatcher` (`:291`).
+- `startWorkflowExecutionBridge` (`lib/execution/workflow-bridge.ts:143`) `liveQuery`-watches
+  `workflowRuns` (+ `workflowRunEvents` + `listForWorkflow` fan-out subscriptions) and, per run,
+  `syncWorkflowExecutionRun` (`:43`) creates one durable `executionRuns` row
+  (`execution:workflow:<runId>`), journals `plan.created` / `run.started` / mapped step events, and
+  writes one `executionRunBindings` row per destination — the triggering `triggeredBy.{adapterId,
+  conversationKey}` **plus every enabled fan-out subscription** (`:84-129`).
+- `startExecutionRunPresentationRunner` (`lib/connectors/run-presentation/runner.ts:715`)
+  `liveQuery`-watches `active` / `degraded` bindings and calls `projectExecutionRunBinding` (`:264`)
+  when `latestSnapshot.revision > lastProjectedRevision`: PII gate (`projectImSafeSnapshot`, `:179`)
+  → native `adapter.runPresentation` driver (`lark-driver.ts:320` / `slack-driver.ts:51`)
+  `open` / `update` / `finish` on one card → on failure or no driver, `deliverFallback` (`:381`) with
+  `resolveCapabilityAwareFallbackDeliveryMode` (`:223`) choosing `card-edit` / `append` /
+  `final-only`, `buildA2UISegment`-wrapping `buildRunActivitySurface` and enqueueing through the
+  delivery gateway with `source: "workflow"`.
 
 ```mermaid
 flowchart TB
-  START["workflow-progress-runner.ts:145<br/>startWorkflowProgressRunner"]
-  LQ1["liveQuery(workflowRuns.toArray())<br/>:154"]
-  REC["workflow-progress-runner.ts:184<br/>reconcileWatchers (source==im)"]
-  CW["workflow-progress-runner.ts:245<br/>createWatcher (+listFanoutForWorkflow)"]
-  SUB["workflow-progress-runner.ts:315<br/>subscribeRunEvents [runId+ts]"]
-  EMIT["workflow-progress-runner.ts:414<br/>emitForAllChannels (sort+skip+fold)"]
-  APP["workflow-progress-runner.ts:447<br/>emitAppendOnChannel"]
-  CUM["workflow-progress-runner.ts:477<br/>flushCumulativeOnChannel (send→edit)"]
-  FIN["workflow-progress-runner.ts:548<br/>emitFinal"]
-  BP["workflow-to-a2ui.ts:126<br/>buildProgressSegment"]
-  BC["workflow-to-a2ui.ts:259<br/>buildCumulativeStatusSurface"]
-  BF["workflow-to-a2ui.ts:336<br/>buildFinalSurface"]
-  SEG["a2ui-to-segments.ts:84<br/>buildA2UISegment"]
-  DSP["workflow-progress-runner.ts:580<br/>dispatch → enqueueOutbound"]
+  WF["workflowRuns + workflowRunEvents<br/>+ workflow-fanout-subscriptions"]
+  BR["workflow-bridge.ts:143<br/>startWorkflowExecutionBridge"]
+  SYNC["workflow-bridge.ts:43<br/>syncWorkflowExecutionRun"]
+  ER["executionRuns + runEventJournal<br/>+ executionRunBindings (1 per destination)"]
+  PR["runner.ts:715<br/>startExecutionRunPresentationRunner"]
+  PROJ["runner.ts:264<br/>projectExecutionRunBinding (PII gate)"]
+  NAT["adapter.runPresentation<br/>lark-driver / slack-driver"]
+  FB["runner.ts:381<br/>deliverFallback (card-edit / append / final-only)"]
+  SEG["a2ui-to-segments.ts:84<br/>buildA2UISegment(buildRunActivitySurface)"]
+  DSP["enqueueGoverned → Outbound Queue"]
 
-  START --> LQ1 --> REC --> CW --> SUB --> EMIT
-  REC -->|terminal| FIN
-  EMIT -->|append| APP --> BP --> DSP
-  EMIT -->|cumulative| CUM --> BC --> SEG --> DSP
-  FIN --> BF --> SEG
-  CUM -->|editTargetMessageId| DSP
+  WF --> BR --> SYNC --> ER --> PR --> PROJ
+  PROJ -->|driver| NAT
+  PROJ -->|none / failed| FB --> SEG --> DSP
 
   classDef run fill:#0f172a,stroke:#38bdf8,color:#e0f2fe
   classDef build fill:#1e293b,stroke:#a78bfa,color:#ede9fe
   classDef out fill:#064e3b,stroke:#34d399,color:#d1fae5
-  class START,LQ1,REC,CW,SUB,EMIT,APP,CUM,FIN run
-  class BP,BC,BF,SEG build
+  class BR,SYNC,PR,PROJ,FB run
+  class ER,SEG,NAT build
   class DSP out
 ```
+
+The full mechanism — coalescing, cursor commits, degraded audits, the native kill switch — is
+documented in [Platform Connectors › AI loop & A2UI bridge](../platform-connectors/ai-and-a2ui).
 
 ## Workflow-Control Handlers
 
@@ -340,9 +315,10 @@ bindings (so the buttons can't be tapped twice).
   conversationKey: target.conversationKey, createdBy})` + push `✅ 已订阅`, idempotency
   `wf-fanout-ok:` (`:133-139`) + delete.
 
-`createFanoutSubscription` writes the **same** `workflow-fanout-subscriptions` table that
-`workflow-progress-runner.createWatcher` reads — subscribing here is what makes a future run fan out
-to this channel. Permission is enforced **upstream** at the tool layer: the target is pinned to the
+`createFanoutSubscription` writes the **same** `workflow-fanout-subscriptions` table that the
+execution bridge reads via `listForWorkflow` (`lib/execution/workflow-bridge.ts:152`) — every enabled
+subscription becomes an extra `executionRunBindings` row for the run, which is what makes a future
+run's card fan out to this channel. Permission is enforced **upstream** at the tool layer: the target is pinned to the
 current IM session, so the handler never accepts a cross-channel target.
 
 ## Next
@@ -350,5 +326,5 @@ current IM session, so the handler never accepts a cross-channel target.
 <Cards>
   <Card title="A2UI System" href="./index" description="The protocol, parser, catalog, renderer, and store this bridge projects from" />
   <Card title="Platform connectors" href="../platform-connectors" description="The adapters, bus, and outbound queue the bridge plugs into" />
-  <Card title="Visual workflows" href="../visual-workflows" description="The workflow runtime and run-events stream the progress runner projects" />
+  <Card title="Visual workflows" href="../visual-workflows" description="The workflow runtime and run-events stream the execution bridge mirrors into durable execution runs" />
 </Cards>

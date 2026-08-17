@@ -59,11 +59,11 @@ export function setNumericAction(
 }
 
 /**
- * Look up a numeric reply without consuming it. The parser consumes via
- * `consumeNumericAction` once it routes the callback so a double-tap
- * doesn't fire twice.
+ * Look up a numeric reply without consuming it — tests only. Production
+ * routing consumes via `consumeNumericAction` so a double-tap doesn't fire
+ * twice.
  */
-export function peekNumericAction(
+export function __peekNumericActionForTesting(
   conversationKey: string,
   numeric: number,
   nowMs: number = Date.now()

@@ -71,6 +71,6 @@ export function clearVariantCache(adapterId: string): void {
  * Clear all cached variants.
  * Primarily for use in tests.
  */
-export function clearAllVariantCaches(): void {
+export function __resetOneBotVariantCacheForTesting(): void {
   variantCache.clear()
 }

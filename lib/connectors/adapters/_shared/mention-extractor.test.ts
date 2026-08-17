@@ -1,4 +1,4 @@
-import { MentionAccumulator, mentionsFromIds } from "./mention-extractor"
+import { MentionAccumulator } from "./mention-extractor"
 
 describe("MentionAccumulator", () => {
   it("starts empty and reports no self-mention", () => {
@@ -45,18 +45,5 @@ describe("MentionAccumulator", () => {
     acc.markSelfMentioned()
     acc.add("alice")
     expect(acc.finalize()).toEqual({ selfMentioned: true, users: ["alice"] })
-  })
-})
-
-describe("mentionsFromIds", () => {
-  it("convenience wrapper builds a MentionDescriptor in one call", () => {
-    expect(mentionsFromIds("bot_1", ["a", "bot_1", "b", "a"])).toEqual({
-      selfMentioned: true,
-      users: ["a", "bot_1", "b"],
-    })
-  })
-
-  it("returns empty descriptor for empty input", () => {
-    expect(mentionsFromIds("bot_1", [])).toEqual({ selfMentioned: false, users: [] })
   })
 })

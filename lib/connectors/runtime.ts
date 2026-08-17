@@ -212,8 +212,8 @@ export async function resolveRecoveryExecutionSpec(
  * is React-only; this runtime is not a component tree), and the repo has no
  * locale-keyed catalog for notification texts today. The existing precedent
  * for `notifyConversationOverIM` call sites is inline bilingual "zh / en"
- * strings (see the terminal notify in
- * `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`); the live-activity
+ * strings (see the scheduler notify in
+ * `lib/scheduler/notification-integration.ts`); the live-activity
  * card's locale-resolved bag (`lib/connectors/activity/i18n.ts`) instead needs
  * `AppSettings` at the call site, which the dispatch-failure paths below do
  * not have. Follow the bilingual precedent, but keep every canned notice in
@@ -980,7 +980,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // When the conversation is bound to an Agent Team, route the turn to
         // the team runtime instead of the single-character `runAndCapture`
         // path. The team's progress + final result fan back to this
-        // conversation via the workflow-progress-runner (triggeredFrom). Skip
+        // conversation via the execution bridge + run-presentation runner
+        // (triggeredFrom). Skip
         // the rest of the ai-run branch on success.
         if (effectiveTeamId) {
           if (routing.teamSource === "rule") {
@@ -1030,7 +1031,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // the workflow orchestrator via `startWorkflowFromIM`. The message
         // text is surfaced to trigger-aware nodes as
         // `$trigger.payload.message`; progress + final fan back through the
-        // same `workflow-progress-runner` the team path uses. Skip the rest
+        // same execution bridge + run-presentation runner the team path
+        // uses. Skip the rest
         // of the ai-run branch on dispatch.
         if (effectiveWorkflowId) {
           if (routing.workflowSource === "rule") {
