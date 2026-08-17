@@ -1,0 +1,280 @@
+{
+  "actions": {
+    "configure": "配置",
+    "disable": "置为惰性",
+    "docs": "文档",
+    "enable": "启用",
+    "install": "安装",
+    "installCustom": "按 spec 安装",
+    "installCustomPlaceholder": "npm:name@version、git:host/path 或 ./local-path",
+    "installing": "正在安装…",
+    "reload": "重新加载",
+    "remove": "移除",
+    "removing": "正在移除…",
+    "search": "搜索扩展包",
+    "update": "更新"
+  },
+  "budget": {
+    "advisory": "建议上限：{limit} 个工具",
+    "chartLabel": "各包的常驻 tokens",
+    "delta": "安装它将增加 {tokens, number} 个常驻 tokens 与 {tools, number} 个常驻工具。",
+    "deltaNone": "这个包不增加任何常驻面。",
+    "deltaSpawns": "它还可能开启额外的付费模型上下文。",
+    "description": "在你真正用到它们之前，已安装的包在每一次请求上就已经产生的开销。",
+    "empty": "没有安装任何包，也就没有任何固定开销。",
+    "level": {
+      "ok": "在预算内",
+      "over": "已超过建议上限",
+      "warn": "接近上限"
+    },
+    "spawning": "会开启额外的模型上下文",
+    "spawningHint": "一个 subagent 任务就是一个全新的付费上下文，其成本远超 schema 体积。因此这一项单独统计，而不是折进一个会严重低估它的 token 总数。",
+    "staticTokens": "常驻 tokens",
+    "title": "上下文预算",
+    "toolCount": "常驻工具",
+    "unknown": "{count, plural, other {# 个包未测量}}",
+    "unknownHint": "这些包不在已审阅目录中。它们的开销未知 —— 未知不等于零。"
+  },
+  "catalog": {
+    "aliou-pi-guardrails": {
+      "removeWhen": "换用 Permission Modes 或 Gotgenes 策略栈时移除 —— 绝不要同时启用两个策略层。",
+      "risk": "这是一个完整权限的扩展：提示只是建议，不是隔离，背后没有操作系统级沙箱。",
+      "summary": "对受保护文件、工作区外访问与危险命令给出确定性提示。四个扩展入口，无模型工具、无 prompt 注入。"
+    },
+    "gotgenes-pi-permission-system": {
+      "removeWhen": "回到 Guardrails 或 Permission Modes 时移除 —— 这三者互斥。",
+      "risk": "仍然不是操作系统沙箱。要从原生 subagent 转发审批，必须搭配对应的 @gotgenes/pi-subagents，而非其他子进程包。",
+      "summary": "跨工具、Bash、路径、MCP、skills、外部目录与 per-agent 覆盖的 fail-closed allow / ask / deny 策略。当策略精度比上手简单更重要时选它。"
+    },
+    "gotgenes-pi-subagents": {
+      "removeWhen": "除非你正在运行配套的 Gotgenes 权限系统，否则移除本包。",
+      "risk": "只有作为 Gotgenes 策略栈的一部分才成立；单独使用时，它只是一个功能面比其他选择更窄的 subagent 包。",
+      "summary": "进程内 subagent，支持原生注册，并把 ask 状态转发给 @gotgenes/pi-permission-system。"
+    },
+    "juicesharp-rpiv-ask-user-question": {
+      "removeWhen": "如果 Plan Mode 自带的仅限规划期提问工具已够用，则移除本包。",
+      "risk": "增加一个 schema，且可能过于频繁地打断。应调整它的引导语，而不是再装一个提问界面。",
+      "summary": "一个结构化澄清工具，支持 2–4 个选项、预览、备注与自由作答。不额外调用模型，也无原生依赖。"
+    },
+    "juicesharp-rpiv-todo": {
+      "removeWhen": "仅在替换时移除 —— 不要在它旁边再运行第二个 todo / 任务状态扩展。",
+      "risk": "较低。它跟踪的是实现进度而非对话式规划，混用两者会导致状态重复。",
+      "summary": "可见的任务浮层，通过重放会话工具调用，使状态在重载与压缩后依然存活。无磁盘状态、无 API key。"
+    },
+    "narumitw-pi-chrome-devtools": {
+      "removeWhen": "Cognia 已内置 agent-browser —— 除非确实需要在 Pi 内使用 CDP，否则移除本包。",
+      "risk": "挂到个人 Chrome 配置会暴露已登录页面与 cookie。请优先使用它的隔离临时配置。",
+      "summary": "惰性暴露原生 CDP 能力，用于导航、求值、截图与目标选择。加载后有五个能力工具。"
+    },
+    "narumitw-pi-github-pr": {
+      "removeWhen": "如果你更愿意用显式 gh 命令查看 PR 状态，则移除本包。",
+      "risk": "会反复发起进程与网络调用；账号可见范围取决于你的 gh 认证。它只是状态展示，不是评审流程。",
+      "summary": "通过已认证的 gh 被动获取当前分支的 PR 状态，定期以及每轮结束后刷新。无模型工具、不注入评论正文。"
+    },
+    "narumitw-pi-goal": {
+      "removeWhen": "若同时安装 Workflow 则移除 —— 两者重复实现同一套生命周期。",
+      "risk": "自动续跑会放大成本，也可能重复执行一个错误动作；因为它会持续接管回合，运行时开销可能极高。请设置明确的 token 预算与很低的续跑上限。",
+      "summary": "会话级目标与受保护的自动续跑。它的 after-first-goal 设置会在目标创建前隐藏工具面。"
+    },
+    "narumitw-pi-lsp": {
+      "removeWhen": "如果现有门禁已能更快给出同样的诊断，则移除本包。",
+      "risk": "比真正的 IDE LSP 窄 —— 没有通用的引用查找或重命名流程。typecheck、Rust 检查与项目测试仍然是权威。",
+      "summary": "由短生命周期 language server 支撑的定向诊断与源码修复工具，新增两个 schema。"
+    },
+    "narumitw-pi-plan-mode": {
+      "removeWhen": "若让 Permission Modes 用它自带的 Plan 模式接管规划，或改用 Workflow，则移除本包。",
+      "risk": "Pi 无法在沙箱层面强制只读，所以「只读」是模型遵循的约定，而不是边界。",
+      "summary": "对话式只读规划，带显式的完成交接，以及经过校验的窄口径 Git / gh 查看能力。工具与计划文本只在该流程期间存在。"
+    },
+    "narumitw-pi-statusline": {
+      "removeWhen": "若改用 Atelier（它同时替代底栏与完成通知），则移除本包。",
+      "risk": "对模型上下文无风险，唯一的隐患是又装了第二个底栏。",
+      "summary": "在底栏显示模型、思考档位、Git、工具、上下文、缓存、耗时与费用。无 LLM 工具、无注入文本，模型上下文开销可忽略。"
+    },
+    "narumitw-pi-subagents": {
+      "removeWhen": "改用 pi-subagents 或 Gotgenes 分支时移除 —— 只能有一套委派实现。",
+      "risk": "每个任务都会开启另一个付费模型上下文，token 与延迟成本可能压倒其他一切。工作目录信任不等于沙箱，且默认并发与深度都过宽。",
+      "summary": "隔离的子进程 agent，支持咨询与自动路由。Blocking-only 暴露 4 个工具，All 模式暴露 8 个。"
+    },
+    "narumitw-pi-workflow": {
+      "removeWhen": "目前整体推迟 —— 优先使用分别维护、使用量高得多的 plan-mode 加 goal。",
+      "risk": "版本远早于它所重叠的那些包，且与 plan-mode 或 goal 并存会导致状态机重复。",
+      "summary": "在一个包里合并 plan 与 goal 生命周期。它自己的源码标注为实验性。"
+    },
+    "narumitw-pi-worktree": {
+      "removeWhen": "如果你从不用 worktree 开分支，则移除本包。",
+      "risk": "由用户驱动的 Git 变更。注意：worktree 恰恰是 Permission Modes 沙箱失效的场景。",
+      "summary": "交互式 /worktree 会话切换。无模型工具、无后台任务，prompt 开销基本为零。"
+    },
+    "pi-atelier": {
+      "removeWhen": "用它来替代 statusline 加通知包，而不是与它们并存。",
+      "risk": "年轻且覆盖面宽：它一次性替代了多个独立 UI 包，因此一处回归会同时影响全部。",
+      "summary": "一个包里同时提供自适应底栏与侧栏、上下文阈值、会话与压缩控制，以及完成通知。无模型工具。"
+    },
+    "pi-finish-notification": {
+      "removeWhen": "若安装了 Atelier（已自带通知）则移除本包；否则请先审阅源码。",
+      "risk": "月下载 102、周下载 22，包元数据中的源码与维护证据都有限。",
+      "summary": "只做完成通知，别无其他。体积极小，不占模型上下文。"
+    },
+    "pi-mcp-adapter": {
+      "removeWhen": "只保留一个适配器。除非是要替换它，否则不要移除 —— 更绝不要与 pi-codemcp、pi-mcp-tools 并存。",
+      "risk": "MCP server 会执行本地或远程工具，并可能接触仓库数据。每个被提升的工具约 150–300 tokens；该适配器自身在超过 75 个时就会告警。",
+      "summary": "Pi 通往 MCP 的唯一路径：一个惰性代理工具、磁盘元数据缓存、重连与保活，并可把选中的工具提升为直接 schema。"
+    },
+    "pi-memory": {
+      "removeWhen": "如果 Cognia 自带的长期记忆已覆盖此需求，则移除本包；两者并存意味着两条互相竞争的召回路径。",
+      "risk": "七个 schema 加上召回内容构成明显的每轮开销，深度搜索约需十秒，且过时的私有事实会长期留存。项目 ADR 与 AGENTS.md 必须仍是唯一事实源。",
+      "summary": "基于 Markdown 存储的七个记忆工具，带稳定快照与可选的 qmd 语义索引。"
+    },
+    "pi-permission-modes": {
+      "removeWhen": "在 worktree 中移除 —— 那里它的沙箱已不构成隔离，应保留 Guardrails 或改用整进程隔离。",
+      "risk": "只有模型执行的 Bash 受操作系统沙箱约束；文件工具靠策略门控，且已批准的逃逸会在沙箱外运行。worktree 下会退化为提示（沙箱无法处理 .git 文件）。绝不要切到 YOLO。",
+      "summary": "allow / ask / deny，外加 Bash AST 门控、macOS sandbox-exec、网络白名单与工具 / skill 门控。每轮注入一段沙箱说明。"
+    },
+    "pi-permission-system-legacy": {
+      "removeWhen": "在 Pi 0.84.1 上避免使用。请改用 @gotgenes/pi-permission-system，等有兼容版本后再评估。",
+      "risk": "它的 npm peer 范围只枚举到 Pi 0.80，不含 0.84.1，因此并未声明与 Cognia 所验证的 Pi 版本兼容。",
+      "summary": "未加 scope 的旧版 permission-system 包。"
+    },
+    "pi-rtk-optimizer": {
+      "removeWhen": "做审计和硬调试时关闭压缩 —— 或直接移除 —— 因为那时完整输出本身才是重点。",
+      "risk": "压缩会隐藏证据，并可能让精确的编辑锚点失效。请先从建议模式开始，并关闭有损的来源过滤。",
+      "summary": "把受支持的 shell 命令改写为经由已安装的 rtk 二进制执行，并压缩嘈杂的 Bash、read 与 grep 输出。"
+    },
+    "pi-subagents": {
+      "removeWhen": "如果一个受限的 blocking-only 委派包已够用，则移除本包。",
+      "risk": "比 Narumitw 那个包宽得多，也更容易配过头。它的子进程不会原生转发 Gotgenes 的 ask 提示，因此请让子 agent 保持只读，或给它们显式的非交互 deny 策略。",
+      "summary": "功能丰富的子进程委派，含工作流、fleet UI、MCP 选择、定时与后台运行。"
+    },
+    "pi-web-access": {
+      "removeWhen": "如果 Cognia 自带的 web 工具已覆盖你的检索需求，则移除本包。",
+      "risk": "出站网络面很宽，provider / 凭据面也很大。真正的上下文成本来自抓回的内容而非 schema。请关闭远程托管抓取器，且绝不要把 key 粘贴进 JSON。",
+      "summary": "四个工具：搜索、抓取、有上限的缓存检索与论断核查，支持 GitHub、PDF 与视频。"
+    },
+    "vtstech-pi-long-term-memory": {
+      "removeWhen": "完全不推荐：请改用 pi-memory 的显式检索。",
+      "risk": "它自己的包页面写明每轮注入约 4K tokens —— 本目录中固定开销最大的一项 —— 而观测快照中月下载量仅 191。",
+      "summary": "自动注入式长期记忆，含三个工具。"
+    }
+  },
+  "catalogDescription": "整理自 {date} 的一次评审。没有任何包注册中心会给出重叠组或上下文开销，因此这些信息记录在此而非在线获取。",
+  "catalogFields": {
+    "removeWhen": "何时移除",
+    "risk": "风险"
+  },
+  "catalogTitle": "已审阅目录",
+  "cli": {
+    "detected": "PATH 中的 Pi {version}",
+    "missingBody": "改动将直接写入 settings.json。这只是记录你的意图，并不会下载任何东西 —— Pi 会在下次启动时解析该包。",
+    "missingTitle": "PATH 中没有 Pi 的 CLI"
+  },
+  "config": {
+    "description": "每个包各自的配置文件都是该扩展自己的约定，而不是 Pi 的契约，因此没有可用于校验的 schema。",
+    "editorLabel": "配置 JSON",
+    "empty": "这个包还没有配置文件。",
+    "insertTemplate": "插入已审阅的推荐值",
+    "invalidJson": "这不是合法的 JSON，因此未保存。",
+    "noTemplate": "这个包没有已审阅的推荐值。",
+    "pathLabel": "文件",
+    "save": "保存",
+    "saved": "已保存",
+    "title": "包配置"
+  },
+  "description": "已装入 Pi 编码 agent 的扩展包，以及它们每一轮对话的固定开销。",
+  "desktopOnly": "Pi 扩展包管理需要桌面端：它要读取 Pi 的配置文件并调用 Pi 的 CLI。",
+  "discouraged": {
+    "action": "查看",
+    "title": "{count, plural, other {有 # 个已安装的包不被推荐}}"
+  },
+  "install": {
+    "avoidWarning": "评审结论是不建议使用这个包。",
+    "cancel": "取消",
+    "commandLabel": "Cognia 将执行",
+    "confirm": "安装",
+    "failureToast": "无法安装 {name}：{message}",
+    "fallbackLabel": "Cognia 将编辑",
+    "outputLabel": "输出",
+    "overlapWarning": "它与你已有的某个包重叠。",
+    "removeBody": "这会从 {scope} 配置中删除该条目。你的 Pi 设置的其他部分不受影响。",
+    "removeFailureToast": "无法移除 {name}：{message}",
+    "removeSuccessToast": "已移除 {name}",
+    "removeTitle": "移除 {name}？",
+    "scopeLabel": "作用域",
+    "specLabel": "Spec",
+    "successToast": "已安装 {name}",
+    "title": "安装 {name}"
+  },
+  "installed": {
+    "disabled": "惰性",
+    "disabledHint": "autoload 为 false：不会隐式加载任何东西，只加载过滤数组中列出的资源。",
+    "empty": "两个作用域都没有声明 Pi 扩展包。",
+    "filtered": "已过滤",
+    "filteredHint": "该条目限制了 Pi 从这个包中加载哪些资源。",
+    "title": "已安装",
+    "unknown": "不在 Cognia 已审阅的目录中",
+    "unknownHint": "开销未测量 —— 这与「没有开销」不是一回事。"
+  },
+  "loading": "正在读取 Pi 的配置…",
+  "overlaps": {
+    "conflict": "有 {count} 个包同时占据了 {group}",
+    "description": "Pi 既没有包沙箱也没有依赖解析器，因此没有任何机制阻止同一职责的两套实现同时安装。Pi 不会给出任何告警。",
+    "graphLabel": "按能力组聚类的重叠关系图",
+    "group": {
+      "browser": "浏览器自动化",
+      "footer": "底栏",
+      "goal": "目标续跑",
+      "mcp-adapter": "MCP 适配器",
+      "memory": "记忆",
+      "notification": "通知",
+      "permission": "权限策略",
+      "plan": "规划模式",
+      "subagents": "子 agent"
+    },
+    "groupLabel": "能力组",
+    "none": "在 Cognia 已审阅的包中没有发现重叠。",
+    "title": "重叠的包"
+  },
+  "piMissing": {
+    "body": "未找到 Pi 的配置文件。请先安装 Pi 并运行一次，然后重新加载本区域。",
+    "hint": "Cognia 会读取 $PI_CODING_AGENT_DIR，缺省回落到 ~/.pi/agent。",
+    "title": "本机尚未配置 Pi"
+  },
+  "presets": {
+    "alreadyApplied": "这套组合中的包都已安装。",
+    "appliedToast": "{count, plural, other {已安装 # 个包}}",
+    "apply": "应用",
+    "applying": "正在应用…",
+    "balanced": "均衡",
+    "balancedHint": "加入规划、经由单一适配器的 MCP、受限的子 agent，以及 Git 辅助。",
+    "description": "三套自洽的组合。应用其中一套只会补齐缺失的包，绝不会移除你已有的任何东西。",
+    "partialToast": "已安装 {ok} / {total} 个，{failed} 个失败。",
+    "power": "进阶",
+    "powerHint": "加入沙箱、目标续跑、诊断与 web 访问。请在均衡组合稳定运行一周之后再用。",
+    "starter": "入门",
+    "starterHint": "一个策略层加一个底栏。不引入任何工具 schema。",
+    "title": "推荐组合",
+    "willInstall": "{count, plural, other {将安装 # 个包}}"
+  },
+  "scope": {
+    "confirmProjectAction": "写入项目",
+    "confirmProjectBody": "这会修改 {path} —— 它属于本仓库。任何检出该仓库的人都会拿到这次改动。",
+    "confirmProjectTitle": "写入受版本控制的文件？",
+    "delta": "叠加",
+    "deltaHint": "项目在不重新声明的前提下收窄了这个包，因此用户级条目依然生效。",
+    "noWorkspace": "打开一个工作区目录后才能管理它的项目作用域。",
+    "project": "项目",
+    "projectFile": "项目配置",
+    "replaced": "本项目覆盖了用户级的同名条目。",
+    "user": "用户",
+    "userFile": "用户配置"
+  },
+  "tier": {
+    "avoid": "不建议",
+    "core": "核心",
+    "optional": "可选"
+  },
+  "title": "Agent 扩展包",
+  "warnings": {
+    "title": "读取 Pi 配置时"
+  }
+}

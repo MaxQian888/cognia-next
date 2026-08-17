@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import { renderToString } from "react-dom/server"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -13,11 +14,15 @@ jest.mock("@/hooks/plugins", () => ({
   useDevtoolsGate: () => devtoolsEnabled,
 }))
 
+let inDesktopShell = false
+jest.mock("@/lib/tauri", () => ({ isTauri: () => inDesktopShell }))
+
 import { PluginNavSidebar } from "./plugin-nav-sidebar"
 import { usePluginsStore } from "@/stores/plugins"
 
 beforeEach(() => {
   devtoolsEnabled = false
+  inDesktopShell = false
   usePluginsStore.setState({
     activeSection: "library",
     librarySubFilter: "all",
@@ -43,6 +48,39 @@ describe("PluginNavSidebar", () => {
     devtoolsEnabled = true
     render(<PluginNavSidebar />)
     expect(screen.getByTestId("plugin-nav-devtools")).toBeInTheDocument()
+  })
+
+  /**
+   * Pi's package manager needs a config file and a CLI, so on the web and on
+   * mobile the entry is not rendered at all rather than rendered and broken.
+   */
+  it("hides agent packages outside the desktop shell", () => {
+    inDesktopShell = false
+    render(<PluginNavSidebar />)
+    expect(screen.queryByTestId("plugin-nav-agent-packages")).not.toBeInTheDocument()
+  })
+
+  it("renders agent packages in the desktop shell", () => {
+    inDesktopShell = true
+    render(<PluginNavSidebar />)
+    expect(screen.getByTestId("plugin-nav-agent-packages")).toBeInTheDocument()
+  })
+
+  /**
+   * The gate must resolve in an effect, not during render. This app is a static
+   * export: the server render happens at build time, where `isTauri()` is
+   * always false. A render-time read would emit the entry into the desktop
+   * shell's server HTML and then disagree with it on hydration.
+   *
+   * Asserting on the server render is the only way to pin that — after mount
+   * the effect has already run, so a client-side query cannot tell the two
+   * implementations apart.
+   */
+  it("omits the desktop entry from the server render even inside Tauri", () => {
+    inDesktopShell = true
+    const html = renderToString(<PluginNavSidebar />)
+    expect(html).not.toContain("plugin-nav-agent-packages")
+    expect(html).toContain("plugin-nav-library")
   })
 
   it("marks the active section via aria-current=page", () => {

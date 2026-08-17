@@ -1,3 +1,5 @@
+import enCatalog from "../../i18n/messages/en/plugins/agentPackages.json"
+import zhCatalog from "../../i18n/messages/zh-CN/plugins/agentPackages.json"
 import {
   piCatalogEntry,
   piCatalogMessageKey,
@@ -5,6 +7,13 @@ import {
   PI_STACK_PRESETS,
 } from "./catalog"
 import { piPackageIdentity } from "./identity"
+
+/** Both locales' catalog prose, so the parity check can run over each. */
+const LOCALES = ["en", "zh-CN"] as const
+const CATALOG_MESSAGES: Record<
+  (typeof LOCALES)[number],
+  { catalog: Record<string, Record<string, string>> }
+> = { en: enCatalog, "zh-CN": zhCatalog }
 
 describe("PI_PACKAGE_CATALOG", () => {
   it("has unique ids", () => {
@@ -113,6 +122,32 @@ describe("piCatalogMessageKey", () => {
   it("derives i18n keys mechanically from the id", () => {
     expect(piCatalogMessageKey("pi-mcp-adapter", "summary")).toBe("catalog.pi-mcp-adapter.summary")
     expect(piCatalogMessageKey("pi-mcp-adapter", "risk")).toBe("catalog.pi-mcp-adapter.risk")
+  })
+
+  /**
+   * `pnpm lint:i18n` cannot check these: the keys are built at runtime from
+   * `id`, so it counts them as dynamic references and skips them. This is the
+   * only gate that catches a catalog row shipped without prose, which would
+   * render as the raw key in the UI.
+   */
+  it.each(LOCALES)("has prose for every catalog entry in %s", (locale) => {
+    const messages = CATALOG_MESSAGES[locale]
+    const missing: string[] = []
+    for (const entry of PI_PACKAGE_CATALOG) {
+      for (const field of ["summary", "risk", "removeWhen"] as const) {
+        if (!messages.catalog?.[entry.id]?.[field]?.trim()) {
+          missing.push(piCatalogMessageKey(entry.id, field))
+        }
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  /** The inverse: prose for a row that no longer exists is dead weight. */
+  it.each(LOCALES)("has no orphaned catalog prose in %s", (locale) => {
+    const messages = CATALOG_MESSAGES[locale]
+    const ids = new Set(PI_PACKAGE_CATALOG.map((entry) => entry.id))
+    expect(Object.keys(messages.catalog).filter((id) => !ids.has(id))).toEqual([])
   })
 })
 

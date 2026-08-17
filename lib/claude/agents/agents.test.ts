@@ -50,6 +50,7 @@ describe("registry", () => {
         "gemini",
         "kiro",
         "opencode",
+        "pi-mcp-adapter",
         "roo-code",
         "vscode",
         "windsurf",

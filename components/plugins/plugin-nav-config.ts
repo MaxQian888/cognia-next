@@ -11,7 +11,14 @@
 // branching the nav-sidebar component — `plugin-nav-sidebar.tsx` filters
 // the array by the flag's value before rendering.
 
-import { BoxesIcon, CompassIcon, ShieldCheckIcon, WrenchIcon, type LucideIcon } from "lucide-react"
+import {
+  BoxesIcon,
+  CompassIcon,
+  PackageIcon,
+  ShieldCheckIcon,
+  WrenchIcon,
+  type LucideIcon,
+} from "lucide-react"
 import type {
   PluginGovernanceView,
   PluginLibrarySubFilter,
@@ -23,8 +30,15 @@ export interface PluginNavItem {
   /** i18n key under `plugins.sections.<key>`. */
   labelKey: PluginNavSection
   icon: LucideIcon
-  /** Runtime gate; the nav sidebar hides the entry when false. */
-  featureFlag?: "devtools"
+  /**
+   * Runtime gate; the nav sidebar hides the entry when false.
+   *
+   * `devtools` is the opt-in localStorage flag. `desktop` means the section
+   * only works in the Tauri shell — Pi's package manager reads a config file
+   * and shells out to a CLI, neither of which exists in the browser or on
+   * mobile, so the entry is not rendered there rather than rendered broken.
+   */
+  featureFlag?: "devtools" | "desktop"
 }
 
 export interface PluginLibrarySubItem {
@@ -42,6 +56,12 @@ export interface PluginGovernanceSubItem {
 export const PLUGIN_NAV_SECTIONS: ReadonlyArray<PluginNavItem> = [
   { section: "library", labelKey: "library", icon: BoxesIcon },
   { section: "discover", labelKey: "discover", icon: CompassIcon },
+  {
+    section: "agent-packages",
+    labelKey: "agent-packages",
+    icon: PackageIcon,
+    featureFlag: "desktop",
+  },
   { section: "governance", labelKey: "governance", icon: ShieldCheckIcon },
   { section: "devtools", labelKey: "devtools", icon: WrenchIcon, featureFlag: "devtools" },
 ]

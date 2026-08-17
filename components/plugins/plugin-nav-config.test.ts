@@ -5,10 +5,11 @@ import {
 } from "./plugin-nav-config"
 
 describe("plugin-nav-config", () => {
-  it("exposes the 4 top-level nav sections in order", () => {
+  it("exposes the 5 top-level nav sections in order", () => {
     expect(PLUGIN_NAV_SECTIONS.map((item) => item.section)).toEqual([
       "library",
       "discover",
+      "agent-packages",
       "governance",
       "devtools",
     ])
@@ -19,8 +20,20 @@ describe("plugin-nav-config", () => {
     expect(devtools?.featureFlag).toBe("devtools")
   })
 
+  /**
+   * Pi's package manager reads a config file and shells out to a CLI. Neither
+   * exists in the browser or on mobile, so the section is hidden there rather
+   * than rendered broken.
+   */
+  it("gates agent-packages to the desktop shell", () => {
+    const section = PLUGIN_NAV_SECTIONS.find((item) => item.section === "agent-packages")
+    expect(section?.featureFlag).toBe("desktop")
+  })
+
   it("does not gate library / discover / governance", () => {
-    const ungated = PLUGIN_NAV_SECTIONS.filter((item) => item.section !== "devtools")
+    const ungated = PLUGIN_NAV_SECTIONS.filter(
+      (item) => item.section !== "devtools" && item.section !== "agent-packages"
+    )
     for (const item of ungated) {
       expect(item.featureFlag).toBeUndefined()
     }

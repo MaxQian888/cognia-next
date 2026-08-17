@@ -60,6 +60,7 @@ import { PluginDiscoverPane } from "./discover/plugin-discover-pane"
 import { PluginGovernancePane } from "./governance/plugin-governance-pane"
 import { PluginGovernanceHeader } from "./governance/plugin-governance-header"
 import { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"
+import { AgentPackagesPane } from "./agent-packages/agent-packages-pane"
 import { PluginDetailPane } from "./detail/plugin-detail-pane"
 
 // One-time translation of legacy `?tab=` deep links into the canonical
@@ -86,6 +87,7 @@ const TAB_REDIRECT: Record<
 const VALID_SECTIONS: ReadonlySet<PluginNavSection> = new Set([
   "library",
   "discover",
+  "agent-packages",
   "governance",
   "devtools",
 ])
@@ -290,6 +292,8 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
       <PluginLibraryPane />
     ) : activeSection === "discover" ? (
       <PluginDiscoverPane />
+    ) : activeSection === "agent-packages" ? (
+      <AgentPackagesPane />
     ) : activeSection === "governance" ? (
       <PluginGovernancePane />
     ) : (
@@ -332,9 +336,12 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
       // the split the user dragged. Governance's aggregate views are
       // per-plugin rows, so the same detail pane is the right target for
       // them. Devtools is still 2-pane — its diagnostics grid needs the full
-      // width and gets its own right-pane content in a later step.
+      // width and gets its own right-pane content in a later step. Agent
+      // Packages is 2-pane for a different reason: its rows are Pi packages,
+      // which have no row in the plugins table, so the detail pane would have
+      // nothing to show for whatever is selected there.
       rightPane={
-        activeSection === "devtools"
+        activeSection === "devtools" || activeSection === "agent-packages"
           ? undefined
           : {
               label: t("detailSheetLabel"),

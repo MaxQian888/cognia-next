@@ -18,12 +18,31 @@
 // the opt-in localStorage flag hide it entirely (the option is never
 // rendered, not just disabled).
 
+import { useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { useDevtoolsGate } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
+import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { PLUGIN_NAV_SECTIONS } from "./plugin-nav-config"
+
+/**
+ * Which shell we are in, read SSR-safely.
+ *
+ * This app is a static export, so the server render happens at build time where
+ * `isTauri()` is always false. `useSyncExternalStore`'s third argument is the
+ * server snapshot, which is exactly this distinction — and unlike an effect it
+ * does not cause a cascading render on mount. The shell never changes while the
+ * page is open, so `subscribe` has nothing to listen for.
+ */
+const NEVER_CHANGES = () => () => {}
+const useDesktopShell = () =>
+  useSyncExternalStore(
+    NEVER_CHANGES,
+    () => isTauri(),
+    () => false
+  )
 
 export function PluginNavSidebar() {
   const t = useTranslations("plugins.sections")
@@ -31,8 +50,11 @@ export function PluginNavSidebar() {
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
   const devtoolsEnabled = useDevtoolsGate()
 
+  const isDesktop = useDesktopShell()
+
   const visibleSections = PLUGIN_NAV_SECTIONS.filter((item) => {
     if (item.featureFlag === "devtools") return devtoolsEnabled
+    if (item.featureFlag === "desktop") return isDesktop
     return true
   })
 

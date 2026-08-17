@@ -336,6 +336,20 @@ jest.mock("next-intl", () => {
       (acc, [k, v]) => acc.replace(new RegExp(`\\{\\s*${k}\\s*\\}`, "g"), String(v)),
       out
     )
+    // Bare typed number arguments — `{count, number}`. Real next-intl formats
+    // these through `Intl.NumberFormat`, so without this a message using one
+    // renders as raw ICU and any test asserting on its visible text looks
+    // inexplicably broken. Grouping is the usual difference (1400 vs 1,400).
+    //
+    // Skeleton forms (`{rate, number, ::percent}`, `{k, number, ::.00}`) are
+    // deliberately left raw: formatting them properly needs a real skeleton
+    // parser, and approximating one would turn `85%` into `0.85` — a plausible
+    // wrong answer, which is harder to spot than obviously-unformatted ICU.
+    out = out.replace(/\{\s*(\w+)\s*,\s*number\s*\}/g, (match, name: string) => {
+      const value = values[name]
+      if (typeof value !== "number") return match
+      return new Intl.NumberFormat("en-US").format(value)
+    })
     return out
   }
 

@@ -412,11 +412,26 @@ pub fn spec_for(agent: &str) -> Option<AgentSpec> {
         }
         "pi" => {
             // $PI_CODING_AGENT_DIR/settings.json, else ~/.pi/agent/settings.json.
-            // This file holds Pi's `packages[]` next to its provider
-            // credentials, so every reader must go through the key allowlist in
-            // `lib/pi-packages/settings-io.ts` and every writer must keep the
-            // "existing but unparseable => refuse" guard (lib/claude/sync.ts).
+            // This is Pi's whole preference file, of which Cognia owns exactly
+            // one key (`packages`). Credentials live in a separate mode-600
+            // `auth.json` that we never open, but readers still go through the
+            // key allowlist in `lib/pi-packages/settings-io.ts` so no future
+            // caller can hand the rest of the tree to a log or support report,
+            // and writers keep the "exists but unparseable => refuse" guard
+            // (lib/claude/sync.ts) so a hand-edit is never serialized away.
             path = pi_agent_dir().map(|d| d.join("settings.json"));
+            format = AgentFormat::Json;
+            writable = true;
+        }
+        "pi-mcp-adapter" => {
+            // Pi's core ships no MCP support at all; MCP arrives only with the
+            // third-party `pi-mcp-adapter` package, which reads six layers and
+            // lets the LAST one win: ~/.config/mcp/mcp.json, ~/.agents/mcp.json,
+            // ~/.agents/mcp/mcp.json, this file, ./.mcp.json, then
+            // ./.pi/mcp.json (highest). We write only this user-scope layer —
+            // the two project layers outrank it and belong to the repo, so the
+            // UI warns about them via `mcp-drift-banner.tsx` instead.
+            path = pi_agent_dir().map(|d| d.join("mcp.json"));
             format = AgentFormat::Json;
             writable = true;
         }
@@ -639,6 +654,21 @@ mod tests {
             path.to_string_lossy().contains(".pi")
                 || std::env::var("PI_CODING_AGENT_DIR").is_ok()
         );
+    }
+
+    /// The MCP file sits beside `settings.json` in the same Pi agent dir, so
+    /// relocating the dir must move both. A hard-coded `~/.pi/agent/mcp.json`
+    /// here would write into a directory Pi is not reading.
+    #[test]
+    fn spec_for_pi_mcp_adapter_is_the_user_scope_mcp_file() {
+        let spec = spec_for("pi-mcp-adapter").expect("pi-mcp-adapter spec");
+        assert!(spec.writable);
+        assert_eq!(spec.format, AgentFormat::Json);
+        let mcp = spec.path.expect("pi-mcp-adapter path");
+        assert!(mcp.ends_with("mcp.json"));
+
+        let settings = spec_for("pi").expect("pi spec").path.expect("pi path");
+        assert_eq!(mcp.parent(), settings.parent());
     }
 
     #[test]

@@ -7,6 +7,7 @@ import {
   CURSOR_AGENT,
   GEMINI_AGENT,
   MCP_AGENT_ADAPTERS,
+  PI_MCP_ADAPTER_AGENT,
   ROO_CODE_AGENT,
   VSCODE_AGENT,
   WINDSURF_AGENT,
@@ -15,8 +16,8 @@ import {
 } from "./index"
 
 describe("MCP_AGENT_ADAPTERS registry", () => {
-  it("contains exactly the 13 known adapters", () => {
-    expect(MCP_AGENT_ADAPTERS).toHaveLength(13)
+  it("contains exactly the 14 known adapters", () => {
+    expect(MCP_AGENT_ADAPTERS).toHaveLength(14)
     expect(MCP_AGENT_ADAPTERS.map((a) => a.id).sort()).toEqual(
       [
         "claude-code",
@@ -28,12 +29,23 @@ describe("MCP_AGENT_ADAPTERS registry", () => {
         "gemini",
         "kiro",
         "opencode",
+        "pi-mcp-adapter",
         "roo-code",
         "vscode",
         "windsurf",
         "zed",
       ].sort()
     )
+  })
+
+  /**
+   * `"pi"` addresses Pi's `settings.json` for the config importers; it is not
+   * an MCP target, because Pi's core has no MCP. Listing it here would make
+   * Cognia offer to sync MCP servers into a file Pi never reads.
+   */
+  it("does not treat Pi itself as an MCP target", () => {
+    expect(MCP_AGENT_ADAPTERS.map((a) => a.id)).not.toContain("pi")
+    expect(getAgentAdapter("pi")).toBeUndefined()
   })
 
   it("orders writable adapters before read-only ones", () => {
@@ -57,6 +69,7 @@ describe("MCP_AGENT_ADAPTERS registry", () => {
     expect(CLINE_AGENT.id).toBe("cline")
     expect(ROO_CODE_AGENT.id).toBe("roo-code")
     expect(COGNIA_AGENT.id).toBe("cognia")
+    expect(PI_MCP_ADAPTER_AGENT.id).toBe("pi-mcp-adapter")
   })
 
   it("each adapter exposes the documented interface fields", () => {

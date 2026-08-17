@@ -1498,6 +1498,42 @@ export function isMcpLogEvent(evt: ClaudeEvent): evt is McpLogEvent {
   return evt.type === "mcp_log"
 }
 
+/**
+ * One finished span measured INSIDE the sidecar, handed back to the renderer.
+ *
+ * Sidecar spans previously existed only as OTLP, so a default install — which
+ * configures no collector — recorded nothing for the out-of-process half of a
+ * turn. Mirror of the payload built by `traceAsyncIterable` in
+ * `sidecar/telemetry.mjs`; consumed by `lib/agent-trace/sidecar-span-bridge.ts`.
+ *
+ * `traceparent` is the value the RENDERER sent on the way in, echoed back
+ * verbatim: the renderer owns the W3C parser, so the sidecar never needs one.
+ * A span whose traceparent is missing or unparseable has no trace to attach to
+ * and is dropped rather than orphaned onto an invented trace.
+ */
+export interface AgentTraceSpanEvent {
+  type: "agent_trace_span"
+  sessionId?: string
+  /** W3C `traceparent` as sent to the sidecar. */
+  traceparent?: string
+  /** 16 hex chars, minted in the sidecar. */
+  spanId: string
+  /** OTel span name, e.g. `gen_ai.invoke_agent`. */
+  name?: string
+  operationName?: string
+  providerName?: string
+  startTime: number
+  endTime?: number
+  durationMs?: number
+  attributes?: Record<string, unknown>
+  errorType?: string
+  errorMessage?: string
+}
+
+export function isAgentTraceSpanEvent(evt: ClaudeEvent): evt is AgentTraceSpanEvent {
+  return evt.type === "agent_trace_span"
+}
+
 export type ClaudeEvent =
   | ReadyEvent
   | SidecarExitedEvent
@@ -1516,6 +1552,7 @@ export type ClaudeEvent =
   | SessionApiResponseEvent
   | FeatureCallEvent
   | McpLogEvent
+  | AgentTraceSpanEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
 // Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits
@@ -2761,6 +2798,25 @@ export interface AppSettings {
    * "keep forever". Merged forward by `lib/db/settings.ts:getSettings()`.
    */
   storageRetention?: { traceRetentionDays: number }
+  /**
+   * USD spending ceilings (ADR-0130). Four independent scopes — day/month ×
+   * global/per-provider — evaluated by `lib/usage/cost-budget.ts`.
+   *
+   * Distinct from `ProviderConstraint.dailyCostBudget`, which is an ADVISORY
+   * routing hint: it deprioritises an over-budget provider and warns, but the
+   * send proceeds. These are HARD: at 100% the send is blocked until a human
+   * approves one more request. Absent ⇒ no ceiling, which is the default.
+   */
+  costBudget?: {
+    dailyUsd?: number
+    monthlyUsd?: number
+    perProviderDailyUsd?: Record<string, number>
+    perProviderMonthlyUsd?: Record<string, number>
+    /** Warning ratio (0–1). Defaults to 0.80. */
+    warnAt?: number
+    /** Critical ratio (0–1). Defaults to 0.95. */
+    criticalAt?: number
+  }
   /**
    * Scheduler notification preferences.
    *
@@ -4909,6 +4965,12 @@ export type AgentId =
    * importer and the vendor probe read.
    */
   | "pi"
+  /**
+   * The third-party `pi-mcp-adapter` package's `<pi agent dir>/mcp.json` —
+   * a separate id from `"pi"` because it is a separate file owned by a
+   * separate project. Only meaningful once that package is installed.
+   */
+  | "pi-mcp-adapter"
 
 export interface McpSecretRef {
   /** Stable keyring locator. Secret material is never serialized here. */

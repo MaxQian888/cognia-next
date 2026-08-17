@@ -33,7 +33,11 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 
-export type PluginNavSection = "library" | "discover" | "governance" | "devtools"
+// `agent-packages` is the Pi package manager (ADR-0119). It is a section of
+// /plugins rather than a page of its own because it answers the same question
+// as the rest of the panel — "what extends my agent, and what does it cost?" —
+// only for a different runtime's package system.
+export type PluginNavSection = "library" | "discover" | "agent-packages" | "governance" | "devtools"
 
 export type PluginLibrarySubFilter = "all" | "enabled" | "updates" | "configurable" | "errored"
 

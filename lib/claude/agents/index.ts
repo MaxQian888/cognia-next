@@ -30,6 +30,7 @@ import { CURSOR_AGENT } from "./cursor"
 import { GEMINI_AGENT } from "./gemini"
 import { KIRO_AGENT } from "./kiro"
 import { OPENCODE_AGENT } from "./opencode"
+import { PI_MCP_ADAPTER_AGENT } from "./pi-mcp-adapter"
 import { ROO_CODE_AGENT } from "./roo-code"
 import { VSCODE_AGENT } from "./vscode"
 import { WINDSURF_AGENT } from "./windsurf"
@@ -45,6 +46,7 @@ export {
   GEMINI_AGENT,
   KIRO_AGENT,
   OPENCODE_AGENT,
+  PI_MCP_ADAPTER_AGENT,
   ROO_CODE_AGENT,
   VSCODE_AGENT,
   WINDSURF_AGENT,
@@ -111,6 +113,10 @@ export const MCP_AGENT_ADAPTERS: McpAgentAdapter[] = [
   ZED_AGENT,
   KIRO_AGENT,
   OPENCODE_AGENT,
+  // Last of the writable adapters: unlike the rest, its file is only read when
+  // a third-party Pi package is installed, so surfaces that offer a sync target
+  // gate it on detection rather than listing it unconditionally.
+  PI_MCP_ADAPTER_AGENT,
   CLINE_AGENT,
   ROO_CODE_AGENT,
 ]

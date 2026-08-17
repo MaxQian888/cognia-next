@@ -17628,6 +17628,286 @@
       "clearAll": "Clear all",
       "removeAria": "Remove {name}"
     },
+    "agentPackages": {
+      "actions": {
+        "configure": "Configure",
+        "disable": "Make inert",
+        "docs": "Documentation",
+        "enable": "Enable",
+        "install": "Install",
+        "installCustom": "Install by spec",
+        "installCustomPlaceholder": "npm:name@version, git:host/path, or ./local-path",
+        "installing": "Installing…",
+        "reload": "Reload",
+        "remove": "Remove",
+        "removing": "Removing…",
+        "search": "Search packages",
+        "update": "Update"
+      },
+      "budget": {
+        "advisory": "Advisory ceiling: {limit} tools",
+        "chartLabel": "Always-on tokens per package",
+        "delta": "Installing this adds {tokens, number} always-on tokens and {tools, number} always-visible tools.",
+        "deltaNone": "This package adds no always-visible surface.",
+        "deltaSpawns": "It can also start extra paid model contexts.",
+        "description": "What your installed packages cost on every single request, before you use any of them.",
+        "empty": "Nothing installed, so nothing is being paid for.",
+        "level": {
+          "ok": "Within budget",
+          "over": "Over the advisory ceiling",
+          "warn": "Approaching the ceiling"
+        },
+        "spawning": "Can start extra model contexts",
+        "spawningHint": "One subagent task is a fresh paid context, so this dominates cost far more than schema size. It is counted separately rather than folded into a token total that would understate it.",
+        "staticTokens": "Always-on tokens",
+        "title": "Context budget",
+        "toolCount": "Always-visible tools",
+        "unknown": "{count, plural, =1 {1 package unmeasured} other {# packages unmeasured}}",
+        "unknownHint": "These are not in the reviewed catalog. Their cost is unknown, which is not the same as zero."
+      },
+      "catalog": {
+        "aliou-pi-guardrails": {
+          "removeWhen": "Remove when you switch to Permission Modes or the Gotgenes policy stack — never run two policy layers at once.",
+          "risk": "A full-authority extension: prompts are advice, not containment. There is no OS sandbox behind them.",
+          "summary": "Deterministic prompts for protected files, out-of-workspace access and dangerous commands. Four extension entry points, no model tool, no prompt injection."
+        },
+        "gotgenes-pi-permission-system": {
+          "removeWhen": "Remove if you go back to Guardrails or Permission Modes — these three are mutually exclusive.",
+          "risk": "Still not an OS sandbox. Forwarding approvals from native subagents requires the matching @gotgenes/pi-subagents, not an unrelated subprocess package.",
+          "summary": "Fail-closed allow / ask / deny policy across tools, Bash, paths, MCP, skills, external directories and per-agent overrides. The precise option when policy detail matters more than easy onboarding."
+        },
+        "gotgenes-pi-subagents": {
+          "removeWhen": "Remove unless you are running the matching Gotgenes permission system.",
+          "risk": "Only coherent as part of the Gotgenes policy stack; on its own it is a subagent package with a narrower feature set than the alternatives.",
+          "summary": "In-process subagents with native registration and ask-state forwarding into @gotgenes/pi-permission-system."
+        },
+        "juicesharp-rpiv-ask-user-question": {
+          "removeWhen": "Remove if Plan Mode's own plan-only question tool is enough for how you work.",
+          "risk": "Adds one schema and can interrupt too eagerly. Tune its guidance rather than installing a second question UI.",
+          "summary": "One structured clarification tool with 2–4 options, previews, notes and free-form answers. No extra model call and no native dependency."
+        },
+        "juicesharp-rpiv-todo": {
+          "removeWhen": "Remove only when replacing it — do not run a second todo or task-state extension beside it.",
+          "risk": "Low. It tracks implementation progress, not conversational planning, and confusing the two leads to duplicated state.",
+          "summary": "A visible task overlay whose state survives reload and compaction by replaying session tool calls. No disk state and no API key."
+        },
+        "narumitw-pi-chrome-devtools": {
+          "removeWhen": "Cognia already ships agent-browser — remove this unless you specifically need CDP inside Pi.",
+          "risk": "Attaching to a personal Chrome profile exposes logged-in pages and cookies. Prefer its isolated temporary profile.",
+          "summary": "Lazily exposes native CDP capabilities for navigation, evaluation, screenshots and target selection. Five capability tools once loaded."
+        },
+        "narumitw-pi-github-pr": {
+          "removeWhen": "Remove if you read PR state through explicit gh commands instead.",
+          "risk": "Repeated process and network calls; account visibility follows your gh auth. It is status only, not a review workflow.",
+          "summary": "Passive current-branch PR status through authenticated gh, refreshed periodically and after each turn. No model tool and no comment-body injection."
+        },
+        "narumitw-pi-goal": {
+          "removeWhen": "Remove if you also install Workflow — the two duplicate the same lifecycle.",
+          "risk": "Autonomous continuation can compound cost or repeat a bad action, and runtime cost can be very high because it keeps taking turns. Use explicit token budgets and low continuation limits.",
+          "summary": "Session-scoped goals with guarded automatic continuation. Its after-first-goal setting delays the tool surface until a goal exists."
+        },
+        "narumitw-pi-lsp": {
+          "removeWhen": "Remove if your gates already give you the same diagnostics faster.",
+          "risk": "Narrower than a real IDE LSP — no general references or rename workflow. Typecheck, Rust checks and project tests stay authoritative.",
+          "summary": "Targeted diagnostics and source-fix tools backed by short-lived language servers. Two additional schemas."
+        },
+        "narumitw-pi-plan-mode": {
+          "removeWhen": "Remove if you let Permission Modes own planning via its own Plan mode, or if you adopt Workflow.",
+          "risk": "Pi cannot enforce read-only at the sandbox level, so the mode is a convention the model follows rather than a boundary.",
+          "summary": "Conversational read-only planning with an explicit completion handoff and narrow validated Git / gh inspection. Tools and plan text are present only during the workflow."
+        },
+        "narumitw-pi-statusline": {
+          "removeWhen": "Remove if you adopt Atelier, which replaces the footer and the completion notification together.",
+          "risk": "None to the model context. The only hazard is installing a second footer.",
+          "summary": "Model, thinking level, Git, tools, context, cache, time and cost in the footer. No LLM tool and no injected text, so the model-context cost is negligible."
+        },
+        "narumitw-pi-subagents": {
+          "removeWhen": "Remove if you move to pi-subagents or the Gotgenes fork — one delegation implementation only.",
+          "risk": "Every task starts another paid model context, so token and latency cost can dominate everything else. Working-directory trust is not sandboxing, and the default concurrency and depth are too broad.",
+          "summary": "Isolated subprocess agents with consultation and auto-routing. Blocking-only exposes four tools; All mode exposes eight."
+        },
+        "narumitw-pi-workflow": {
+          "removeWhen": "Defer entirely for now — prefer plan-mode plus goal, which are separately maintained and far more used.",
+          "risk": "At a much earlier version than the packages it overlaps, and installing it beside plan-mode or goal duplicates state machines.",
+          "summary": "Combines plan and goal lifecycle in one package. Its own source labels it experimental."
+        },
+        "narumitw-pi-worktree": {
+          "removeWhen": "Remove if you never branch through worktrees.",
+          "risk": "User-driven Git mutation. Note that a worktree is exactly where the Permission Modes sandbox stops containing.",
+          "summary": "Interactive /worktree session switching. No model tool and no background work, so effectively zero prompt cost."
+        },
+        "pi-atelier": {
+          "removeWhen": "Use it instead of statusline plus a notification package, never alongside them.",
+          "risk": "Young and broad: it replaces several separate UI packages at once, so a regression affects all of them together.",
+          "summary": "A responsive footer and sidebar with context thresholds, session and compaction controls, and completion notification in one package. No model tools."
+        },
+        "pi-finish-notification": {
+          "removeWhen": "Remove if you install Atelier, which already supplies notifications. Otherwise review the source first.",
+          "risk": "Only 102 monthly and 22 weekly downloads, with limited source and maintenance evidence on its package metadata.",
+          "summary": "A completion notification and nothing else. Tiny footprint and no model context."
+        },
+        "pi-mcp-adapter": {
+          "removeWhen": "Keep exactly one adapter. Remove this only if you replace it — never run it alongside pi-codemcp or pi-mcp-tools.",
+          "risk": "MCP servers execute local or remote tools and can receive repository data. Promoted tools cost roughly 150–300 tokens each; the adapter itself warns past 75.",
+          "summary": "Pi's only route to MCP: one lazy proxy tool, a disk metadata cache, reconnect and keepalive, and optional promotion of selected tools to direct schemas."
+        },
+        "pi-memory": {
+          "removeWhen": "Remove if Cognia's own long-term memory already covers this; running both means two competing recall paths.",
+          "risk": "Seven schemas plus recalled content are a meaningful per-turn tax, deep search can take around ten seconds, and stale private facts persist. Project ADRs and AGENTS.md must stay the source of truth.",
+          "summary": "Seven memory tools over Markdown storage, with stable snapshots and optional qmd semantic indexing."
+        },
+        "pi-permission-modes": {
+          "removeWhen": "Remove in a worktree, where its sandbox is no longer containment — keep Guardrails or use whole-process isolation instead.",
+          "risk": "Only model Bash is OS-sandboxed; file tools are policy-gated and approved escapes run unsandboxed. Worktrees degrade to prompts because the sandbox cannot handle a .git file. Never cycle to YOLO.",
+          "summary": "Allow / ask / deny with Bash AST gating, macOS sandbox-exec, a network allowlist and tool / skill gating. Injects one sandbox section every turn."
+        },
+        "pi-permission-system-legacy": {
+          "removeWhen": "Avoid on Pi 0.84.1. Use @gotgenes/pi-permission-system, and reconsider after a compatible release.",
+          "risk": "Its npm peer range enumerates Pi versions only through 0.80, not 0.84.1, so it is not declared compatible with the Pi that Cognia verifies against.",
+          "summary": "The unscoped, older permission-system package."
+        },
+        "pi-rtk-optimizer": {
+          "removeWhen": "Turn compaction off — or remove it — for audits and hard debugging, where the full output is the point.",
+          "risk": "Compaction can hide evidence and invalidate exact edit anchors. Start in suggestion mode with lossy source filtering off.",
+          "summary": "Rewrites supported shell commands through the installed rtk binary and compacts noisy Bash, read and grep output."
+        },
+        "pi-subagents": {
+          "removeWhen": "Remove if a bounded blocking-only delegation package covers your workload.",
+          "risk": "Much broader than the Narumitw package and much easier to over-configure. Its child processes do not natively forward Gotgenes ask prompts, so keep children read-only or give them explicit non-interactive deny policies.",
+          "summary": "Rich subprocess delegation with workflows, a fleet UI, MCP selection, schedules and background runs."
+        },
+        "pi-web-access": {
+          "removeWhen": "Remove if Cognia's own web tools already cover your retrieval needs.",
+          "risk": "Broad outbound network and a wide provider / credential surface. Fetched content, not the schemas, is the real context cost. Keep remote hosted fetchers disabled and never paste keys into JSON.",
+          "summary": "Four tools: search, fetch, bounded cached retrieval and claim checking, with GitHub, PDF and video support."
+        },
+        "vtstech-pi-long-term-memory": {
+          "removeWhen": "Not recommended at all: prefer pi-memory's explicit retrieval.",
+          "risk": "Its own package page documents roughly 4K tokens injected on every turn — by far the largest fixed cost in this catalog — against only 191 monthly downloads in the observed snapshot.",
+          "summary": "Automatic long-term memory injection with three tools."
+        }
+      },
+      "catalogDescription": "Curated from a review dated {date}. No package registry exposes overlap groups or context cost, so these are recorded here rather than fetched.",
+      "catalogFields": {
+        "removeWhen": "Remove when",
+        "risk": "Risk"
+      },
+      "catalogTitle": "Reviewed catalog",
+      "cli": {
+        "detected": "Pi {version} on PATH",
+        "missingBody": "Changes will be written straight into settings.json instead. That records your intent, but it does not download anything — Pi resolves the package the next time it starts.",
+        "missingTitle": "Pi's CLI is not on PATH"
+      },
+      "config": {
+        "description": "Per-package config files are each extension's own convention, not a Pi contract, so there is no schema to validate against.",
+        "editorLabel": "Configuration JSON",
+        "empty": "This package has no configuration file yet.",
+        "insertTemplate": "Insert reviewed defaults",
+        "invalidJson": "This is not valid JSON, so it has not been saved.",
+        "noTemplate": "No reviewed defaults for this package.",
+        "pathLabel": "File",
+        "save": "Save",
+        "saved": "Saved",
+        "title": "Package configuration"
+      },
+      "description": "Packages installed into the Pi coding agent, and what they cost you every turn.",
+      "desktopOnly": "Pi package management needs the desktop app: it reads Pi's settings file and runs Pi's CLI.",
+      "discouraged": {
+        "action": "Review",
+        "title": "{count, plural, =1 {1 installed package is not recommended} other {# installed packages are not recommended}}"
+      },
+      "install": {
+        "avoidWarning": "The review recommends against this package.",
+        "cancel": "Cancel",
+        "commandLabel": "Cognia will run",
+        "confirm": "Install",
+        "failureToast": "Could not install {name}: {message}",
+        "fallbackLabel": "Cognia will edit",
+        "outputLabel": "Output",
+        "overlapWarning": "This overlaps something you already have.",
+        "removeBody": "This removes the entry from {scope} settings. Nothing else about your Pi setup changes.",
+        "removeFailureToast": "Could not remove {name}: {message}",
+        "removeSuccessToast": "Removed {name}",
+        "removeTitle": "Remove {name}?",
+        "scopeLabel": "Scope",
+        "specLabel": "Spec",
+        "successToast": "Installed {name}",
+        "title": "Install {name}"
+      },
+      "installed": {
+        "disabled": "Inert",
+        "disabledHint": "autoload is false: nothing is picked up implicitly, only what the filters list.",
+        "empty": "No Pi packages are declared in either scope.",
+        "filtered": "Filtered",
+        "filteredHint": "This entry restricts which resources Pi loads from the package.",
+        "title": "Installed",
+        "unknown": "Not in Cognia's reviewed catalog",
+        "unknownHint": "Cost unmeasured — this is not the same as free."
+      },
+      "loading": "Reading Pi's settings…",
+      "overlaps": {
+        "conflict": "{count} packages both occupy {group}",
+        "description": "Pi has no package sandbox and no dependency resolver, so nothing stops two implementations of the same job from being installed at once. Pi will not warn you.",
+        "graphLabel": "Overlap graph, clustered by capability group",
+        "group": {
+          "browser": "Browser automation",
+          "footer": "Footer",
+          "goal": "Goal continuation",
+          "mcp-adapter": "MCP adapter",
+          "memory": "Memory",
+          "notification": "Notifications",
+          "permission": "Permission policy",
+          "plan": "Plan mode",
+          "subagents": "Subagents"
+        },
+        "groupLabel": "Capability group",
+        "none": "No overlaps among the packages Cognia has reviewed.",
+        "title": "Overlapping packages"
+      },
+      "piMissing": {
+        "body": "No Pi settings file was found. Install Pi, run it once, then reload this section.",
+        "hint": "Cognia looks in $PI_CODING_AGENT_DIR, falling back to ~/.pi/agent.",
+        "title": "Pi is not set up on this machine"
+      },
+      "presets": {
+        "alreadyApplied": "Everything in this stack is installed.",
+        "appliedToast": "{count, plural, =1 {Installed 1 package} other {Installed # packages}}",
+        "apply": "Apply",
+        "applying": "Applying…",
+        "balanced": "Balanced",
+        "balancedHint": "Adds planning, MCP through a single adapter, bounded subagents, and Git helpers.",
+        "description": "Three coherent stacks. Applying one installs what is missing; it never removes anything you already have.",
+        "partialToast": "Installed {ok} of {total}; {failed} failed.",
+        "power": "Power",
+        "powerHint": "Adds sandboxing, goal continuation, diagnostics and web access. Use only after the balanced stack has run cleanly for a week.",
+        "starter": "Starter",
+        "starterHint": "One policy layer and one footer. Nothing that adds a tool schema.",
+        "title": "Recommended stacks",
+        "willInstall": "{count, plural, =1 {Installs 1 package} other {Installs # packages}}"
+      },
+      "scope": {
+        "confirmProjectAction": "Write to project",
+        "confirmProjectBody": "This edits {path}, which is part of the repository. Everyone who checks it out gets the change.",
+        "confirmProjectTitle": "Write to a version-controlled file?",
+        "delta": "Layered",
+        "deltaHint": "The project narrows this package without redeclaring it, so the user entry still applies.",
+        "noWorkspace": "Open a workspace folder to manage its project scope.",
+        "project": "Project",
+        "projectFile": "Project settings",
+        "replaced": "This project replaces the user's entry for this package.",
+        "user": "User",
+        "userFile": "User settings"
+      },
+      "tier": {
+        "avoid": "Avoid",
+        "core": "Core",
+        "optional": "Optional"
+      },
+      "title": "Agent packages",
+      "warnings": {
+        "title": "While reading Pi's settings"
+      }
+    },
     "analytics": {
       "colDistinctKeys": "Keys",
       "colLastEvent": "Last event",
@@ -18618,6 +18898,7 @@
       }
     },
     "sections": {
+      "agent-packages": "Agent packages",
       "detailSheetLabel": "Plugin detail",
       "devtools": "Devtools",
       "discover": "Discover",

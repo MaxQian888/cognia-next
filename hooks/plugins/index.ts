@@ -37,6 +37,7 @@ export {
   type BuiltinMarketplaceEntry,
 } from "./use-builtin-plugin-entries"
 export { useDevtoolsGate, DEVTOOLS_GATE_STORAGE_KEY } from "./use-devtools-gate"
+export { usePiPackages, type UsePiPackagesResult } from "./use-pi-packages"
 export { usePluginRow, type PluginRowState } from "./use-plugin-row"
 export { usePluginDiagnostics } from "./use-plugin-diagnostics"
 export {
