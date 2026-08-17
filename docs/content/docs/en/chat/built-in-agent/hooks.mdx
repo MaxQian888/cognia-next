@@ -49,6 +49,10 @@ The pinned SDK catalog contains:
 
 The SDK callback is the sole owner of built-in execution. Cognia does not pre-run `UserPromptSubmit` or `PreToolUse` in Rust and then register them again in the SDK.
 
+### Worktree lifecycle events
+
+`WorktreeCreate` and `WorktreeRemove` are produced by Cognia itself, not by the SDK (ADR-0111 decision 9): the managed-worktree Registry fires them when a worktree becomes Active and when it is discarded or pruned, and the shared git command layer fires them for the agent-team allocator and the source-control panel. The payload carries `worktree_path`, `workspace_root`, `branch`, `owner_type`, `owner_ref`, `source` and, on removal, `reason`. They are observational — a hook cannot block a worktree from being created or removed.
+
 ### Codex
 
 Before installation, Cognia runs:

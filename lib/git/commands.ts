@@ -449,10 +449,25 @@ export async function gitWorktreeAdd(
   repoPath: string,
   path: string,
   branch: string,
-  baseRef?: string
+  baseRef?: string,
+  hookContext?: WorktreeHookContext
 ): Promise<void> {
   if (!hasGitBridge()) return
   await transport.call("git_worktree_add", { repoPath, path, branch, baseRef: baseRef ?? null })
+  await fireWorktreeHook(
+    "WorktreeCreate",
+    repoPath,
+    {
+      worktree_path: path,
+      workspace_root: repoPath,
+      branch,
+      base_ref: baseRef ?? null,
+      source: hookContext?.source ?? "git-command",
+      ...(hookContext?.ownerType ? { owner_type: hookContext.ownerType } : {}),
+      ...(hookContext?.ownerRef ? { owner_ref: hookContext.ownerRef } : {}),
+    },
+    hookContext
+  )
 }
 
 /** `git worktree remove [--force] <path>`, optionally deleting the branch. */
@@ -460,7 +475,8 @@ export async function gitWorktreeRemove(
   repoPath: string,
   path: string,
   force: boolean,
-  deleteBranch?: string
+  deleteBranch?: string,
+  hookContext?: WorktreeHookContext
 ): Promise<void> {
   if (!hasGitBridge()) return
   await transport.call("git_worktree_remove", {
@@ -469,6 +485,68 @@ export async function gitWorktreeRemove(
     force,
     deleteBranch: deleteBranch ?? null,
   })
+  await fireWorktreeHook(
+    "WorktreeRemove",
+    repoPath,
+    {
+      worktree_path: path,
+      workspace_root: repoPath,
+      branch: deleteBranch ?? null,
+      force,
+      reason: hookContext?.reason ?? "remove",
+      source: hookContext?.source ?? "git-command",
+      ...(hookContext?.ownerType ? { owner_type: hookContext.ownerType } : {}),
+      ...(hookContext?.ownerRef ? { owner_ref: hookContext.ownerRef } : {}),
+    },
+    hookContext
+  )
+}
+
+/**
+ * Who is creating/removing the worktree, for the `WorktreeCreate` /
+ * `WorktreeRemove` hook payload. Optional: the source-control panel passes
+ * nothing (user-driven, no session); the agent-team allocator passes the team
+ * run it is allocating for.
+ */
+export interface WorktreeHookContext {
+  sessionId?: string
+  /** `agent-team-allocator` | `worktree-panel` | … ; defaults to `git-command`. */
+  source?: string
+  ownerType?: string
+  ownerRef?: string
+  /** Removal reason (`cleanup`, `prune`, `user`) — `WorktreeRemove` only. */
+  reason?: string
+}
+
+/**
+ * The TS producer for the two worktree hook events (ADR-0111 decision 9).
+ * The managed Registry fires them from Rust; the two legacy worktree owners —
+ * the agent-team allocator and the source-control panel — both funnel through
+ * `gitWorktreeAdd` / `gitWorktreeRemove` above, so this one seam covers them.
+ * Payload field names match the Rust producer (`worktree_hook_fields`).
+ * Observational: never throws, never blocks the git operation that succeeded.
+ */
+async function fireWorktreeHook(
+  event: "WorktreeCreate" | "WorktreeRemove",
+  cwd: string,
+  payload: Record<string, unknown>,
+  hookContext?: WorktreeHookContext
+): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const { fireAgentHook } = await import("@/lib/ai/agent/external/agent-hooks")
+    await fireAgentHook(
+      event,
+      {
+        agentId: hookContext?.source ?? "git-command",
+        sessionId: hookContext?.sessionId ?? "",
+        cwd,
+      },
+      { payload }
+    )
+  } catch {
+    // Observational hook; a failure to reach the runner is not a git failure.
+  }
 }
 
 /** `git worktree list --porcelain`, parsed. Empty on web (no git backend). */

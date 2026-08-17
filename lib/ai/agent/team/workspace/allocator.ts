@@ -15,6 +15,7 @@
 
 import {
   gitWorktreeAdd,
+  type WorktreeHookContext,
   gitWorktreeCommit,
   gitWorktreeList,
   gitWorktreePrune,
@@ -47,12 +48,27 @@ export interface AllocateArgs {
 
 /** Injectable git seam so the allocator is testable without Tauri. */
 export interface WorktreeGitOps {
-  add(repoPath: string, path: string, branch: string, baseRef?: string): Promise<void>
-  remove(repoPath: string, path: string, force: boolean, deleteBranch?: string): Promise<void>
+  add(
+    repoPath: string,
+    path: string,
+    branch: string,
+    baseRef?: string,
+    hookContext?: WorktreeHookContext
+  ): Promise<void>
+  remove(
+    repoPath: string,
+    path: string,
+    force: boolean,
+    deleteBranch?: string,
+    hookContext?: WorktreeHookContext
+  ): Promise<void>
   list(repoPath: string): Promise<GitWorktree[]>
   commit(worktreePath: string, message: string): Promise<string | null>
   prune(repoPath: string): Promise<void>
 }
+
+/** `WorktreeCreate` / `WorktreeRemove` payload provenance for allocator worktrees. */
+export const ALLOCATOR_HOOK_SOURCE = "agent-team-allocator"
 
 const REAL_GIT: WorktreeGitOps = {
   add: gitWorktreeAdd,
@@ -166,7 +182,11 @@ export class AgentWorkspaceAllocator {
     let lastErr: unknown
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       try {
-        await this.git.add(this.mainRepo, path, branch, this.baseRef)
+        await this.git.add(this.mainRepo, path, branch, this.baseRef, {
+          source: ALLOCATOR_HOOK_SOURCE,
+          ownerType: "team",
+          ownerRef: args.runId,
+        })
         const handle: WorktreeHandle = {
           key,
           runId: args.runId,
@@ -200,7 +220,13 @@ export class AgentWorkspaceAllocator {
       this.mainRepo,
       handle.path,
       true,
-      opts?.deleteBranch ? handle.branch : undefined
+      opts?.deleteBranch ? handle.branch : undefined,
+      {
+        source: ALLOCATOR_HOOK_SOURCE,
+        ownerType: "team",
+        ownerRef: handle.runId,
+        reason: "cleanup",
+      }
     )
     this.handles.delete(handle.key)
   }

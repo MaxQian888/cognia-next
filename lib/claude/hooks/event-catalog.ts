@@ -64,6 +64,13 @@ const EVENT_META: Record<HookEvent, { category: HookEventCategory; dormant?: boo
   PreCompact: { category: "lifecycle" },
   PostCompact: { category: "lifecycle" },
   Setup: { category: "lifecycle" },
+  // Producers (ADR-0111 decision 9): the managed-worktree Registry in Rust
+  // (`crates/cognia-task-workspace/src/lifecycle.rs` → `src-tauri/src/
+  // task_workspace.rs:HookWorktreeLifecycleSink`) and the TS git choke point
+  // `lib/git/commands.ts` (`gitWorktreeAdd` / `gitWorktreeRemove`, which the
+  // agent-team allocator and the source-control panel both go through).
+  // Payload: `worktree_path`, `workspace_root`, `branch`, `base_ref` |
+  // `base`, `owner_type`, `owner_ref`, `source`, and `reason` on remove.
   WorktreeCreate: { category: "lifecycle" },
   WorktreeRemove: { category: "lifecycle" },
   FileChanged: { category: "lifecycle" },

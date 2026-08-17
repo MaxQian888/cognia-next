@@ -138,7 +138,11 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
     if (!nextBranch || !nextPath) return
     const created = await runMutation(
       "git_worktree_add",
-      () => gitWorktreeAdd(rootDir, nextPath, nextBranch, baseRef.trim() || undefined),
+      () =>
+        gitWorktreeAdd(rootDir, nextPath, nextBranch, baseRef.trim() || undefined, {
+          source: "worktree-panel",
+          ownerType: "user",
+        }),
       "worktrees.created"
     )
     if (created) {
@@ -163,7 +167,8 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
           rootDir,
           removeTarget.path,
           forceRemove,
-          deleteBranch ? (removeTarget.branch ?? undefined) : undefined
+          deleteBranch ? (removeTarget.branch ?? undefined) : undefined,
+          { source: "worktree-panel", ownerType: "user", reason: "user" }
         ),
       "worktrees.removed"
     )
