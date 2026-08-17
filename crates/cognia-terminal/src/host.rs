@@ -173,6 +173,28 @@ impl From<ReplayBounds> for HostReplayBounds {
     }
 }
 
+/// One attached client of a session, as seen by every other attachment — the
+/// roster behind terminal session sharing (ADR-0131). `role` mirrors the
+/// controller lease: exactly one attachment may be `controller`; the rest are
+/// read-only `viewer`s (the host enforces this via `NotController`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionParticipant {
+    pub client_id: String,
+    /// Paired device id for remote clients (`companion:<deviceId>`); `None` for
+    /// the local desktop.
+    pub device_id: Option<String>,
+    pub local: bool,
+    pub role: ParticipantRole,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParticipantRole {
+    Controller,
+    Viewer,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HostSessionInfo {
@@ -188,6 +210,10 @@ pub struct HostSessionInfo {
     pub last_activity_at: u64,
     pub current_controller: Option<String>,
     pub attached_clients: usize,
+    /// Every attached client with its lease role. Additive: older clients
+    /// ignore it, newer ones render the participant list from it.
+    #[serde(default)]
+    pub participants: Vec<SessionParticipant>,
     pub alive: bool,
     pub sandboxed: bool,
     pub integration_capabilities: IntegrationCapabilities,
@@ -218,6 +244,7 @@ pub enum HostEvent {
         session_id: String,
         controller: Option<String>,
     },
+
     ReplayGap {
         session_id: String,
         requested_after: u64,
@@ -1045,6 +1072,8 @@ impl TerminalHost {
         let _ = sender.try_send(HostEvent::SessionSnapshot {
             session: info.clone(),
         });
+        // Every attachment (the new one included) learns the roster changed.
+        broadcast_participants(&self.inner, session_id);
         Ok(info)
     }
 
@@ -1089,6 +1118,7 @@ impl TerminalHost {
         if released {
             broadcast_controller(&self.inner, session_id, None);
         }
+        broadcast_participants(&self.inner, session_id);
         if let Some(process) = flow_release {
             let _ = apply_flow_state(&self.inner, session_id, &process, false);
         }
@@ -1127,6 +1157,7 @@ impl TerminalHost {
         );
         drop(state);
         broadcast_controller(&self.inner, session_id, Some(identity.client_id));
+        broadcast_participants(&self.inner, session_id);
         Ok(())
     }
 
@@ -1151,6 +1182,7 @@ impl TerminalHost {
         );
         drop(state);
         broadcast_controller(&self.inner, session_id, None);
+        broadcast_participants(&self.inner, session_id);
         Ok(())
     }
 
@@ -1550,6 +1582,7 @@ fn session_info(
             .as_ref()
             .map(|controller| controller.client_id.clone()),
         attached_clients: session.attachments.len(),
+        participants: session_participants(state, session),
         alive: session.process.is_alive(),
         sandboxed: session.sandboxed,
         integration_capabilities: session.capabilities.clone(),
@@ -1698,6 +1731,65 @@ fn broadcast_transport_state(
     }
 }
 
+/// The roster of one session: every attached connection resolved to its
+/// client identity, with the lease role. Deterministic order (by client id)
+/// so two attachments render identical lists.
+fn session_participants(state: &HostState, session: &HostedSession) -> Vec<SessionParticipant> {
+    let controller = session
+        .controller
+        .as_ref()
+        .filter(|controller| controller.disconnected_at.is_none())
+        .map(|controller| controller.client_id.clone());
+    let mut participants = session
+        .attachments
+        .iter()
+        .filter_map(|id| state.clients.get(id))
+        .map(|client| SessionParticipant {
+            client_id: client.identity.client_id.clone(),
+            device_id: client.identity.device_id.clone(),
+            local: client.identity.local,
+            role: if controller.as_deref() == Some(client.identity.client_id.as_str()) {
+                ParticipantRole::Controller
+            } else {
+                ParticipantRole::Viewer
+            },
+        })
+        .collect::<Vec<_>>();
+    participants.sort_by(|a, b| a.client_id.cmp(&b.client_id));
+    participants.dedup_by(|a, b| a.client_id == b.client_id);
+    participants
+}
+
+/// Tell every attachment of `session_id` who is attached now, by re-sending
+/// the session snapshot (whose `participants` carries the roster).
+///
+/// Deliberately NOT a new frame kind: an unsolicited kind an older client
+/// cannot decode would break it (the protocol's compatibility invariant),
+/// whereas an extra `SessionSnapshot` is a kind every client already accepts
+/// and older ones simply overwrite `info` with it.
+fn broadcast_participants(inner: &TerminalHostInner, session_id: &str) {
+    let (recipients, info) = {
+        let state = inner.state.lock();
+        let Ok(info) = session_info(inner, &state, session_id) else {
+            return;
+        };
+        let Some(session) = state.sessions.get(session_id) else {
+            return;
+        };
+        let recipients = session
+            .attachments
+            .iter()
+            .filter_map(|id| state.clients.get(id).map(|client| client.sender.clone()))
+            .collect::<Vec<_>>();
+        (recipients, info)
+    };
+    for sender in recipients {
+        let _ = sender.try_send(HostEvent::SessionSnapshot {
+            session: info.clone(),
+        });
+    }
+}
+
 fn broadcast_controller(inner: &TerminalHostInner, session_id: &str, controller: Option<String>) {
     let recipients = {
         let state = inner.state.lock();
@@ -1727,8 +1819,11 @@ fn disconnect_inner(inner: &Arc<TerminalHostInner>, connection_id: Uuid, now: In
     // Fires from `Drop for HostClient`, so this one path covers a closed
     // socket, a crashed renderer, and a revoked device.
     let mut resumed = Vec::new();
+    let mut touched = Vec::new();
     for (session_id, session) in &mut state.sessions {
-        session.attachments.remove(&connection_id);
+        if session.attachments.remove(&connection_id) {
+            touched.push(session_id.clone());
+        }
         if let Some(process) = release_flow_for(session, connection_id) {
             resumed.push((session_id.clone(), process));
         }
@@ -1741,6 +1836,9 @@ fn disconnect_inner(inner: &Arc<TerminalHostInner>, connection_id: Uuid, now: In
     drop(state);
     for (session_id, process) in resumed {
         let _ = apply_flow_state(inner, &session_id, &process, false);
+    }
+    for session_id in touched {
+        broadcast_participants(inner, &session_id);
     }
 }
 
@@ -2136,6 +2234,78 @@ mod tests {
             host.list(&second.connection_id).unwrap()[0].current_controller,
             Some("tablet".into())
         );
+    }
+
+    /// Drain a client's event queue and return every roster the host pushed
+    /// (attach / detach / lease moves each re-send the session snapshot).
+    fn rosters(client: &mut HostClient) -> Vec<Vec<SessionParticipant>> {
+        let mut out = Vec::new();
+        while let Ok(event) = client.events.try_recv() {
+            if let HostEvent::SessionSnapshot { session } = event {
+                out.push(session.participants);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn roster_is_broadcast_to_every_attachment_on_attach_detach_and_lease_moves() {
+        let (host, mut first, _process, session_id) = local_host();
+        let _ = rosters(&mut first); // drop the spawn-time snapshot
+        let mut phone = host
+            .connect(ClientIdentity::remote("companion:dev-1", "dev-1", true))
+            .unwrap();
+        host.attach(&phone.connection_id, &session_id, 0).unwrap();
+
+        // Both attachments got the two-member roster; the desktop is controller.
+        let desktop_view = rosters(&mut first);
+        let phone_view = rosters(&mut phone);
+        let expected = vec![
+            SessionParticipant {
+                client_id: "companion:dev-1".into(),
+                device_id: Some("dev-1".into()),
+                local: false,
+                role: ParticipantRole::Viewer,
+            },
+            SessionParticipant {
+                client_id: "desktop".into(),
+                device_id: None,
+                local: true,
+                role: ParticipantRole::Controller,
+            },
+        ];
+        assert_eq!(desktop_view.last().unwrap(), &expected);
+        assert_eq!(phone_view.last().unwrap(), &expected);
+        // The list() surface carries the same roster.
+        assert_eq!(
+            host.list(&phone.connection_id).unwrap()[0].participants,
+            expected
+        );
+
+        // Lease moves flip the roles.
+        host.take_control(&phone.connection_id, &session_id)
+            .unwrap();
+        let after_take = rosters(&mut first);
+        let latest = after_take.last().unwrap();
+        assert_eq!(latest[0].role, ParticipantRole::Controller);
+        assert_eq!(latest[1].role, ParticipantRole::Viewer);
+
+        // Detach shrinks the roster for the remaining attachment.
+        host.detach(&phone.connection_id, &session_id).unwrap();
+        let after_detach = rosters(&mut first);
+        assert_eq!(after_detach.last().unwrap().len(), 1);
+        assert_eq!(after_detach.last().unwrap()[0].client_id, "desktop");
+    }
+
+    #[test]
+    fn dropping_a_client_updates_the_roster_for_the_others() {
+        let (host, mut first, _process, session_id) = local_host();
+        let phone = host.connect(ClientIdentity::local("phone")).unwrap();
+        host.attach(&phone.connection_id, &session_id, 0).unwrap();
+        let _ = rosters(&mut first);
+        drop(phone);
+        let after_drop = rosters(&mut first);
+        assert_eq!(after_drop.last().unwrap().len(), 1);
     }
 
     #[test]

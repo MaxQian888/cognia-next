@@ -60,6 +60,10 @@ class TestableTerminalSession extends BaseTerminalSession {
   pushReplayGap(): void {
     this.dispatchReplayGap({ requestedAfter: 1, firstAvailable: 4, lastAvailable: 9 })
   }
+
+  pushSnapshot(next: SessionInfo): void {
+    this.applySessionSnapshot(next)
+  }
 }
 
 const info: SessionInfo = {
@@ -298,5 +302,60 @@ describe("BaseTerminalSession flow control", () => {
     expect(session.supportsFlowControl).toBe(false)
     await expect(session.setFlowControl(true)).resolves.toBe(false)
     await expect(session.setFlowControl(false)).resolves.toBe(false)
+  })
+})
+
+describe("BaseTerminalSession session snapshots (ADR-0131)", () => {
+  it("refreshes info in place, drops keys the host stopped sending, and notifies onInfo", () => {
+    const session = new TestableTerminalSession({ ...info, sshHostKeyStatus: "learned" })
+    const before = session.info
+    const seen: SessionInfo[] = []
+    const off = session.onInfo((next) => seen.push({ ...next }))
+
+    session.pushSnapshot({
+      ...info,
+      currentController: "companion:dev-1",
+      attachedClients: 2,
+      participants: [
+        { clientId: "desktop", deviceId: null, local: true, role: "viewer" },
+        { clientId: "companion:dev-1", deviceId: "dev-1", local: false, role: "controller" },
+      ],
+    })
+
+    // Same object — consumers holding `session.info` see the update.
+    expect(session.info).toBe(before)
+    expect(session.info.currentController).toBe("companion:dev-1")
+    expect(session.participants).toHaveLength(2)
+    expect(session.info.sshHostKeyStatus).toBeUndefined()
+    expect(seen).toHaveLength(1)
+    expect(seen[0].participants).toHaveLength(2)
+
+    off()
+    session.pushSnapshot({ ...info, participants: [] })
+    expect(seen).toHaveLength(1)
+    expect(session.participants).toEqual([])
+  })
+
+  it("ignores snapshots for another session and survives a throwing listener", () => {
+    const session = makeSession()
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const good = jest.fn()
+    session.onInfo(() => {
+      throw new Error("boom")
+    })
+    session.onInfo(good)
+
+    session.pushSnapshot({ ...info, id: "someone-else", attachedClients: 9 })
+    expect(session.info.attachedClients).toBeUndefined()
+    expect(good).not.toHaveBeenCalled()
+
+    session.pushSnapshot({ ...info, attachedClients: 3 })
+    expect(good).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("reports an empty roster for hosts that predate participants", () => {
+    expect(makeSession().participants).toEqual([])
   })
 })

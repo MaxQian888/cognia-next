@@ -34442,6 +34442,7 @@
       "resize": "Drag to resize the terminal dock (arrow keys also work)",
       "resizeVertical": "Drag to resize the terminal dock (arrow keys also work)",
       "restore": "Restore terminal panel size",
+      "share": "Share with paired devices",
       "spawnDenied": "Terminal blocked by a plugin",
       "spawnError": "Couldn't open terminal: {message}",
       "splitRight": "Split terminal right (Ctrl+\\)",
@@ -34613,14 +34614,43 @@
       "integrationDegraded": "Shell integration unavailable",
       "outputThrottled": "Output throttled — the process was paused to catch up",
       "outputThrottledBuffered": "Output throttled — buffering in this window",
+      "participantController": "controlling",
+      "participantViewer": "viewing",
+      "participantsLabel": "Attached devices",
       "readOnly": "Read-only",
       "releaseConfirm": "Release control of this session? Another client can then take over.",
       "releaseControl": "Release control",
       "replayGap": "Output before sequence {firstAvailable} is no longer available.",
       "replayGapMarker": "Earlier terminal output is unavailable because the replay buffer was truncated.",
       "sandboxed": "Sandboxed",
+      "shared": "Shared with {count, plural, one {# device} other {# devices}}",
       "takeControl": "Take control",
       "takeoverConfirm": "Take control of this session? The current controller will become read-only."
+    },
+    "share": {
+      "description": "Paired devices with the remote-terminal grant attach to this host session over the companion link and share the same control lease: one controller at a time, everyone else read-only. Nothing is copied and no link is created.",
+      "devices": {
+        "attached": "Attached",
+        "blocked": "Revoked or paused",
+        "empty": "No paired devices yet. Pair a phone or another Cognia to share with it.",
+        "granted": "Can attach to terminals on this host",
+        "notGranted": "Cannot attach — turn on to share",
+        "pair": "Pair a device",
+        "scope": "The grant applies to every terminal on this host, not just this session.",
+        "title": "Paired devices",
+        "toggleAria": "Allow {label} to attach to terminals"
+      },
+      "openTerminalSettings": "Open terminal settings",
+      "participants": {
+        "controller": "Controller",
+        "notLive": "This session is not attached in this window.",
+        "thisDevice": "This device",
+        "title": "In this session",
+        "unknown": "{count, plural, =0 {No attached clients reported} one {# attached client — this host does not report who} other {# attached clients — this host does not report who}}",
+        "viewer": "Viewer"
+      },
+      "remoteAccessOff": "Remote terminal access is turned off on this host, so no device can attach until it is enabled in Settings → Terminal.",
+      "title": "Share terminal"
     },
     "shellPicker": {
       "auto": "Default shell",

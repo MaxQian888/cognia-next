@@ -24,8 +24,13 @@ import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { projectRoster } from "@/lib/terminal/collaboration/roster"
 import { getLiveSession, subscribeLiveSessions } from "@/lib/terminal/session-registry"
-import type { TerminalControlState, TerminalReplayGap } from "@/lib/terminal/types"
+import type {
+  TerminalControlState,
+  TerminalParticipant,
+  TerminalReplayGap,
+} from "@/lib/terminal/types"
 import { cn } from "@/lib/utils"
 
 /** How long the chip stays expanded before collapsing to its dot. */
@@ -62,6 +67,11 @@ interface SessionFacts {
   sandboxed: boolean
   currentController: string | null
   degradedReason: string | null
+  /**
+   * Remote (non-desktop) participants attached right now (ADR-0131). Empty
+   * when nobody else is attached, or when the host predates the roster.
+   */
+  remoteParticipants: readonly TerminalParticipant[]
 }
 
 const FACTS_CACHE = new Map<string, { key: string; facts: SessionFacts }>()
@@ -73,12 +83,19 @@ function sessionFactsSnapshot(sessionId: string): SessionFacts | null {
     FACTS_CACHE.delete(sessionId)
     return null
   }
+  const roster = projectRoster(info)
   const facts: SessionFacts = {
     sandboxed: info.sandboxed === true,
-    currentController: info.currentController ?? null,
+    currentController: roster.controllerId,
     degradedReason: info.integrationCapabilities?.degradedReason ?? null,
+    remoteParticipants: roster.remote,
   }
-  const key = `${facts.sandboxed}|${facts.currentController}|${facts.degradedReason}`
+  const key = [
+    facts.sandboxed,
+    facts.currentController,
+    facts.degradedReason,
+    ...roster.remote.map((p) => `${p.clientId}:${p.role}`),
+  ].join("|")
   const cached = FACTS_CACHE.get(sessionId)
   if (cached && cached.key === key) return cached.facts
   const frozen = Object.freeze(facts)
@@ -129,6 +146,16 @@ export function TerminalSessionChip({
   }
   if (info?.degradedReason) {
     states.push({ key: "degraded", label: t("integrationDegraded"), severity: "warn" })
+  }
+  // Someone else is watching (ADR-0131). Surfaced as a state so the chip
+  // re-expands when a device attaches, and so a controller knows a viewer
+  // will see whatever they type next.
+  if (info && info.remoteParticipants.length > 0) {
+    states.push({
+      key: "shared",
+      label: t("shared", { count: info.remoteParticipants.length }),
+      severity: "info",
+    })
   }
   if (throttled) {
     states.push({
@@ -222,6 +249,28 @@ export function TerminalSessionChip({
               </li>
             ))}
           </ul>
+          {info && info.remoteParticipants.length > 0 ? (
+            <ul
+              className="space-y-0.5 border-t pt-2"
+              aria-label={t("participantsLabel")}
+              data-testid="terminal-chip-participants"
+            >
+              {info.remoteParticipants.map((participant) => (
+                <li
+                  key={participant.clientId}
+                  className="flex items-center justify-between gap-2 text-muted-foreground"
+                  data-client-id={participant.clientId}
+                >
+                  <span className="truncate">{participant.deviceId ?? participant.clientId}</span>
+                  <span className="shrink-0">
+                    {participant.role === "controller"
+                      ? t("participantController")
+                      : t("participantViewer")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {controlState.role === "viewer" ? (
             <Button
               type="button"

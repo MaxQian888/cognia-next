@@ -64,6 +64,12 @@ pub enum HostChannelEvent {
         state: HostTransportState,
         message: Option<String>,
     },
+    /// An unsolicited session snapshot (sequence 0) — the host re-sends it
+    /// whenever the attachment roster or the controller lease changes, so the
+    /// renderer's `info.participants` stays current (ADR-0131).
+    SessionSnapshot {
+        session: HostSessionInfo,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -291,46 +297,11 @@ impl BridgeClient {
             }
         }
         let session_id = frame.session_id.to_string();
-        let event = match frame.kind {
-            FrameKind::Stdout => Some(HostChannelEvent::Data {
-                bytes: frame.payload,
-            }),
-            FrameKind::Integration => serde_json::from_slice(&frame.payload)
-                .ok()
-                .map(|event| HostChannelEvent::Integration { event }),
-            FrameKind::Exit => serde_json::from_slice::<ExitPayload>(&frame.payload)
-                .ok()
-                .map(|payload| HostChannelEvent::Exit { code: payload.code }),
-            FrameKind::ControllerChanged => {
-                serde_json::from_slice::<ControllerPayload>(&frame.payload)
-                    .ok()
-                    .map(|payload| HostChannelEvent::ControllerChanged {
-                        controller: payload.controller,
-                    })
-            }
-            FrameKind::ReplayGap => serde_json::from_slice::<ReplayGapPayload>(&frame.payload)
-                .ok()
-                .map(|payload| HostChannelEvent::ReplayGap {
-                    requested_after: payload.requested_after,
-                    first_available: payload.first_available,
-                    last_available: payload.last_available,
-                }),
-            FrameKind::TransportState => {
-                serde_json::from_slice::<TransportStatePayload>(&frame.payload)
-                    .ok()
-                    .map(|payload| HostChannelEvent::TransportState {
-                        state: payload.state,
-                        message: payload.message,
-                    })
-            }
-            _ => None,
-        };
+        let seq = frame.sequence;
+        let event = channel_event_for(frame);
         if let Some(event) = event {
             if let Some(channel) = self.channels.lock().get(&session_id).cloned() {
-                let _ = channel.send(HostSeqEvent {
-                    seq: frame.sequence,
-                    event,
-                });
+                let _ = channel.send(HostSeqEvent { seq, event });
             }
         }
     }
@@ -343,6 +314,50 @@ impl BridgeClient {
         for (_, sender) in pending {
             let _ = sender.send(Err(error.clone()));
         }
+    }
+}
+
+/// Project an unsolicited host frame onto the per-session Tauri channel event.
+/// Response kinds addressed to a pending caller never reach here (see
+/// `dispatch`); a `SessionSnapshot` here is therefore the host's unsolicited
+/// roster/lease refresh. `None` for kinds the channel does not carry.
+fn channel_event_for(frame: TerminalFrame) -> Option<HostChannelEvent> {
+    match frame.kind {
+        FrameKind::Stdout => Some(HostChannelEvent::Data {
+            bytes: frame.payload,
+        }),
+        FrameKind::Integration => serde_json::from_slice(&frame.payload)
+            .ok()
+            .map(|event| HostChannelEvent::Integration { event }),
+        FrameKind::Exit => serde_json::from_slice::<ExitPayload>(&frame.payload)
+            .ok()
+            .map(|payload| HostChannelEvent::Exit { code: payload.code }),
+        FrameKind::ControllerChanged => serde_json::from_slice::<ControllerPayload>(&frame.payload)
+            .ok()
+            .map(|payload| HostChannelEvent::ControllerChanged {
+                controller: payload.controller,
+            }),
+        // Only the unsolicited (sequence 0) snapshot reaches here — replies
+        // to Attach/List were routed to their pending caller above.
+        FrameKind::SessionSnapshot => serde_json::from_slice::<HostSessionInfo>(&frame.payload)
+            .ok()
+            .map(|session| HostChannelEvent::SessionSnapshot { session }),
+        FrameKind::ReplayGap => serde_json::from_slice::<ReplayGapPayload>(&frame.payload)
+            .ok()
+            .map(|payload| HostChannelEvent::ReplayGap {
+                requested_after: payload.requested_after,
+                first_available: payload.first_available,
+                last_available: payload.last_available,
+            }),
+        FrameKind::TransportState => {
+            serde_json::from_slice::<TransportStatePayload>(&frame.payload)
+                .ok()
+                .map(|payload| HostChannelEvent::TransportState {
+                    state: payload.state,
+                    message: payload.message,
+                })
+        }
+        _ => None,
     }
 }
 
@@ -1337,6 +1352,61 @@ mod tests {
         assert!(is_response_kind(FrameKind::SessionSnapshot));
         assert!(!is_response_kind(FrameKind::Stdout));
         assert!(!is_response_kind(FrameKind::Integration));
+    }
+
+    #[test]
+    fn unsolicited_session_snapshots_reach_the_channel_as_roster_refreshes() {
+        // The host re-sends `SessionSnapshot` (sequence 0) whenever the
+        // participant roster or the controller lease changes (ADR-0131). The
+        // bridge must surface it as a `session_snapshot` channel event
+        // carrying the full `HostSessionInfo`, not drop it as an unknown kind.
+        let session_id = Uuid::new_v4();
+        let info = serde_json::json!({
+            "id": session_id.to_string(),
+            "hostId": "host-1",
+            "kind": "localPty",
+            "profileId": "default",
+            "projectId": null,
+            "extensionId": null,
+            "origin": "local",
+            "shell": "/bin/zsh",
+            "createdAt": 1,
+            "lastActivityAt": 2,
+            "currentController": "desktop",
+            "attachedClients": 2,
+            "participants": [
+                { "clientId": "companion:dev-1", "deviceId": "dev-1", "local": false, "role": "viewer" },
+                { "clientId": "desktop", "deviceId": null, "local": true, "role": "controller" }
+            ],
+            "alive": true,
+            "sandboxed": false,
+            "integrationCapabilities": {
+                "osc633": true, "commandStatus": true, "cwdTracking": true, "degradedReason": null
+            },
+            "replay": { "firstSequence": 0, "lastSequence": 0, "retainedBytes": 0, "truncated": false }
+        });
+        let frame = TerminalFrame::command(
+            FrameKind::SessionSnapshot,
+            session_id,
+            0,
+            serde_json::to_vec(&info).unwrap(),
+        );
+        match channel_event_for(frame) {
+            Some(HostChannelEvent::SessionSnapshot { session }) => {
+                assert_eq!(session.id, session_id.to_string());
+                assert_eq!(session.participants.len(), 2);
+                assert_eq!(session.participants[0].client_id, "companion:dev-1");
+                assert_eq!(session.current_controller.as_deref(), Some("desktop"));
+            }
+            other => panic!("expected a session_snapshot event, got {other:?}"),
+        }
+
+        // A malformed snapshot is dropped rather than poisoning the channel.
+        let bad = TerminalFrame::command(FrameKind::SessionSnapshot, session_id, 0, b"{".to_vec());
+        assert!(channel_event_for(bad).is_none());
+        // Kinds the channel does not carry map to nothing.
+        let ack = TerminalFrame::command(FrameKind::Ack, session_id, 0, Vec::new());
+        assert!(channel_event_for(ack).is_none());
     }
 
     #[test]

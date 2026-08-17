@@ -54,6 +54,24 @@ export interface SpawnRequest {
   sandboxNetwork?: boolean
 }
 
+/** Lease role of one attached client, as the host reports it (ADR-0131). */
+export type TerminalParticipantRole = "controller" | "viewer"
+
+/**
+ * One attached client of a hosted session. The host broadcasts the full
+ * roster (as a refreshed `SessionInfo`) whenever a client attaches, detaches,
+ * or the controller lease moves, so this is always the host's view — the
+ * renderer never guesses at who else is watching.
+ */
+export interface TerminalParticipant {
+  /** Host client id: `desktop` for the local app, `companion:<deviceId>` for paired devices. */
+  clientId: string
+  /** Paired device id for remote clients; `null` for the local desktop. */
+  deviceId: string | null
+  local: boolean
+  role: TerminalParticipantRole
+}
+
 export interface SessionInfo {
   id: string
   projectId: string | null
@@ -84,6 +102,11 @@ export interface SessionInfo {
   lastActivityAt?: number
   currentController?: string | null
   attachedClients?: number
+  /**
+   * Every attached client with its lease role (ADR-0131). Additive: hosts
+   * that predate the roster omit it, and `undefined` renders as "just me".
+   */
+  participants?: TerminalParticipant[]
   sandboxed?: boolean
   integrationCapabilities?: {
     osc633: boolean
@@ -134,3 +157,9 @@ export type TerminalEvent =
       last_available: number
     }
   | { kind: "controller_changed"; controller: string | null }
+  /**
+   * The host re-sent the session's info block unsolicited — the participant
+   * roster or the controller lease changed (ADR-0131). Carries the full,
+   * current `SessionInfo`; the session replaces its own copy in place.
+   */
+  | { kind: "session_snapshot"; session: SessionInfo }

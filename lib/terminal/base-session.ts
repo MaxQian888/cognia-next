@@ -24,6 +24,7 @@ import type {
   IntegrationEvent,
   SessionInfo,
   TerminalControlState,
+  TerminalParticipant,
   TerminalReplayGap,
 } from "./types"
 
@@ -32,6 +33,8 @@ export type IntegrationListener = (event: IntegrationEvent) => void
 export type ExitListener = (code: number | null) => void
 export type ControlStateListener = (state: TerminalControlState) => void
 export type ReplayGapListener = (gap: TerminalReplayGap) => void
+/** Fired after `info` was refreshed from a host snapshot (roster / lease moved). */
+export type InfoListener = (info: SessionInfo) => void
 
 export class TerminalSessionError extends Error {
   constructor(
@@ -58,6 +61,7 @@ export abstract class BaseTerminalSession {
   protected readonly exitListeners = new Set<ExitListener>()
   protected readonly controlStateListeners = new Set<ControlStateListener>()
   protected readonly replayGapListeners = new Set<ReplayGapListener>()
+  protected readonly infoListeners = new Set<InfoListener>()
   protected exited = false
   protected exitCode: number | null = null
   protected controlState: TerminalControlState = {
@@ -168,6 +172,24 @@ export abstract class BaseTerminalSession {
     }
   }
 
+  /**
+   * Subscribe to `info` refreshes. The host re-sends the session snapshot
+   * whenever the participant roster or the controller lease changes
+   * (ADR-0131); `info` is updated in place BEFORE listeners run, so a
+   * listener may read `session.info.participants` directly.
+   */
+  onInfo(listener: InfoListener): () => void {
+    this.infoListeners.add(listener)
+    return () => {
+      this.infoListeners.delete(listener)
+    }
+  }
+
+  /** The host's roster for this session; `[]` when the host predates it. */
+  get participants(): readonly TerminalParticipant[] {
+    return this.info.participants ?? []
+  }
+
   // ── Transport surface ────────────────────────────────────────────
   abstract write(data: Uint8Array | string): Promise<void>
   abstract resize(rows: number, cols: number): Promise<void>
@@ -259,6 +281,33 @@ export abstract class BaseTerminalSession {
         listener(state)
       } catch (err) {
         console.warn(`terminal-session(${this.info.id}): control listener threw:`, err)
+      }
+    }
+  }
+
+  /**
+   * Replace `info` with a fresh host snapshot and notify `onInfo` listeners.
+   *
+   * Mutates the existing object rather than swapping the reference: consumers
+   * (dock, chip, store) hold `session.info` and read fields per render, and
+   * `sessionFactsSnapshot` in the chip keys on field values, so in-place is
+   * both cheaper and identity-safe. Keys absent from the snapshot are removed
+   * so an SSH fingerprint (or any optional field) never lingers past the host
+   * dropping it. Snapshots for another session id are ignored — a transport
+   * that multiplexes sessions must route before calling this.
+   */
+  protected applySessionSnapshot(next: SessionInfo): void {
+    if (!next || next.id !== this.info.id) return
+    const target = this.info as unknown as Record<string, unknown>
+    for (const key of Object.keys(target)) {
+      if (!(key in next)) delete target[key]
+    }
+    Object.assign(target, next)
+    for (const listener of this.infoListeners) {
+      try {
+        listener(this.info)
+      } catch (err) {
+        console.warn(`terminal-session(${this.info.id}): info listener threw:`, err)
       }
     }
   }
