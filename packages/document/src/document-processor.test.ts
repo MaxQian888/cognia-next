@@ -23,6 +23,14 @@ import {
   parseOpenDocumentSpreadsheet,
   parseOpenDocumentPresentation,
 } from "./parsers/open-document-parser"
+import { AnyDocParseError, parseLegacyOfficeWithAnyDoc } from "./parsers/anydoc-parser"
+
+jest.mock("./parsers/anydoc-parser", () => ({
+  ...jest.requireActual<typeof import("./parsers/anydoc-parser")>("./parsers/anydoc-parser"),
+  parseLegacyOfficeWithAnyDoc: jest.fn(),
+}))
+
+const mockParseLegacyOfficeWithAnyDoc = jest.mocked(parseLegacyOfficeWithAnyDoc)
 
 jest.mock("@cognia/provider-embedding/chunking", () => ({
   chunkDocument: jest.fn((content: string) => {
@@ -409,12 +417,106 @@ describe("processDocument", () => {
 
 describe("processDocumentAsync", () => {
   beforeEach(() => {
+    mockParseLegacyOfficeWithAnyDoc.mockReset()
     jest.mocked(parseWord).mockClear()
     jest.mocked(parseExcel).mockClear()
     jest.mocked(parsePresentation).mockClear()
     jest.mocked(parseOpenDocumentText).mockClear()
     jest.mocked(parseOpenDocumentSpreadsheet).mockClear()
     jest.mocked(parseOpenDocumentPresentation).mockClear()
+  })
+
+  it("processes legacy Word documents as Markdown through AnyDoc", async () => {
+    const input = Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0]).buffer
+    mockParseLegacyOfficeWithAnyDoc.mockResolvedValueOnce({
+      markdown: "# Legacy Word\n\nReadable body",
+      format: "doc",
+      engineVersion: "0.1.9",
+    })
+
+    const result = await processDocumentAsync("legacy-word", "legacy.doc", input, {
+      anyDoc: { enabled: true },
+    })
+
+    expect(mockParseLegacyOfficeWithAnyDoc).toHaveBeenCalledWith(input, "doc", {
+      signal: undefined,
+      timeoutMs: undefined,
+    })
+    expect(result).toMatchObject({
+      type: "word",
+      content: "# Legacy Word\n\nReadable body",
+      embeddableContent: "# Legacy Word\n\nReadable body",
+      metadata: {
+        parseEngine: "anydoc",
+        parseEngineVersion: "0.1.9",
+        parseMode: "markdown-only",
+      },
+      parseSummary: {
+        parser: "word",
+        structure: { segmentCount: 1 },
+        quality: { status: "partial" },
+      },
+      parseDiagnostics: [expect.objectContaining({ code: "parser_info", severity: "info" })],
+    })
+    expect(result.parseResult).toBeUndefined()
+  })
+
+  it("keeps the existing rich Word parser for a DOCX file mislabeled as .doc", async () => {
+    mockParseLegacyOfficeWithAnyDoc.mockRejectedValueOnce(
+      new AnyDocParseError("The file is actually docx", "formatMismatch", "docx")
+    )
+
+    const result = await processDocumentAsync("mislabeled-word", "modern.doc", new ArrayBuffer(8), {
+      anyDoc: { enabled: true },
+    })
+
+    expect(parseWord).toHaveBeenCalled()
+    expect(result.content).toContain("Parsed Word content")
+    expect(result.parseResult).toBeDefined()
+    expect(result.metadata.parseEngine).toBeUndefined()
+  })
+
+  it("does not guess a parser when legacy Word content has an unrelated signature", async () => {
+    const mismatch = new AnyDocParseError(
+      "The file is actually a presentation",
+      "formatMismatch",
+      "ppt"
+    )
+    mockParseLegacyOfficeWithAnyDoc.mockRejectedValueOnce(mismatch)
+
+    await expect(
+      processDocumentAsync("wrong-word", "wrong.doc", new ArrayBuffer(8), {
+        anyDoc: { enabled: true },
+      })
+    ).rejects.toBe(mismatch)
+    expect(parseWord).not.toHaveBeenCalled()
+  })
+
+  it("forwards AbortSignal and preserves user cancellation", async () => {
+    const controller = new AbortController()
+    const cancellation = new DOMException("cancelled", "AbortError")
+    mockParseLegacyOfficeWithAnyDoc.mockRejectedValueOnce(cancellation)
+
+    await expect(
+      processDocumentAsync("cancelled-word", "cancelled.doc", new ArrayBuffer(8), {
+        anyDoc: { enabled: true, signal: controller.signal, timeoutMs: 15_000 },
+      })
+    ).rejects.toBe(cancellation)
+    expect(mockParseLegacyOfficeWithAnyDoc).toHaveBeenCalledWith(expect.any(ArrayBuffer), "doc", {
+      signal: controller.signal,
+      timeoutMs: 15_000,
+    })
+  })
+
+  it("keeps the AnyDoc rollout gate disabled by default", async () => {
+    const word = await processDocumentAsync("gated-word", "legacy.doc", new ArrayBuffer(8))
+
+    expect(word.parseResult).toBeDefined()
+    expect(mockParseLegacyOfficeWithAnyDoc).not.toHaveBeenCalled()
+    await expect(
+      processDocumentAsync("gated-presentation", "legacy.ppt", new ArrayBuffer(8))
+    ).rejects.toThrow("convert to .pptx")
+    expect(mockParseLegacyOfficeWithAnyDoc).not.toHaveBeenCalled()
   })
 
   it("processes macro-enabled word files via office parser", async () => {
@@ -655,10 +757,72 @@ describe("processDocumentAsync", () => {
     expect(result.content).toContain("Parsed ODP slide")
   })
 
-  it("throws actionable error for legacy ppt files", async () => {
+  it("processes legacy PowerPoint documents as Markdown through AnyDoc", async () => {
+    const input = Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0]).buffer
+    mockParseLegacyOfficeWithAnyDoc.mockResolvedValueOnce({
+      markdown: "# Legacy deck\n\nSlide body",
+      format: "ppt",
+      engineVersion: "0.1.9",
+    })
+
+    const result = await processDocumentAsync("legacy-presentation", "legacy.ppt", input, {
+      anyDoc: { enabled: true },
+    })
+
+    expect(mockParseLegacyOfficeWithAnyDoc).toHaveBeenCalledWith(input, "ppt", {
+      signal: undefined,
+      timeoutMs: undefined,
+    })
+    expect(result).toMatchObject({
+      type: "presentation",
+      content: "# Legacy deck\n\nSlide body",
+      metadata: {
+        parseEngine: "anydoc",
+        parseEngineVersion: "0.1.9",
+        parseMode: "markdown-only",
+      },
+      parseSummary: {
+        parser: "presentation",
+        structure: { segmentCount: 1 },
+        quality: { status: "partial" },
+      },
+      parseDiagnostics: [expect.objectContaining({ code: "parser_info", severity: "info" })],
+    })
+    expect(result.parseResult).toBeUndefined()
+  })
+
+  it("keeps the existing rich presentation parser for PPTX mislabeled as .ppt", async () => {
+    mockParseLegacyOfficeWithAnyDoc.mockRejectedValueOnce(
+      new AnyDocParseError("The file is actually pptx", "formatMismatch", "pptx")
+    )
+
+    const result = await processDocumentAsync(
+      "mislabeled-presentation",
+      "modern.ppt",
+      new ArrayBuffer(8),
+      { anyDoc: { enabled: true } }
+    )
+
+    expect(parsePresentation).toHaveBeenCalled()
+    expect(result.content).toContain("Slide 1 content")
+    expect(result.parseResult).toBeDefined()
+    expect(result.metadata.parseEngine).toBeUndefined()
+  })
+
+  it("does not guess a parser when legacy PowerPoint content has an unrelated signature", async () => {
+    const mismatch = new AnyDocParseError(
+      "The file is actually a Word document",
+      "formatMismatch",
+      "doc"
+    )
+    mockParseLegacyOfficeWithAnyDoc.mockRejectedValueOnce(mismatch)
+
     await expect(
-      processDocumentAsync("doc-async-4", "legacy.ppt", new ArrayBuffer(8))
-    ).rejects.toThrow("convert to .pptx")
+      processDocumentAsync("wrong-presentation", "wrong.ppt", new ArrayBuffer(8), {
+        anyDoc: { enabled: true },
+      })
+    ).rejects.toBe(mismatch)
+    expect(parsePresentation).not.toHaveBeenCalled()
   })
 
   it("throws actionable error for unreadable macro-enabled word files", async () => {

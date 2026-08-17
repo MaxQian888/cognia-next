@@ -38,6 +38,9 @@ const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME || new Date().toISOString()
 const disableSerwist =
   process.env.NEXT_PUBLIC_PLATFORM === "mobile" || process.env.NODE_ENV !== "production"
 const MAX_PRECACHE_ASSET_BYTES = 2 * 1024 * 1024
+const MAX_ANYDOC_WASM_BYTES = 8 * 1024 * 1024
+const ANYDOC_WASM_ASSET = /(?:^|\/)anydoc_wasm_bg(?:\.[a-f0-9]+)?\.wasm$/i
+const anyDocRolloutEnabled = process.env.NEXT_PUBLIC_ENABLE_ANYDOC_LEGACY_OFFICE === "true"
 
 const withSerwist = withSerwistInit({
   swSrc: "app/sw.ts",
@@ -45,11 +48,17 @@ const withSerwist = withSerwistInit({
   cacheOnNavigation: true,
   reloadOnOnline: true,
   disable: disableSerwist,
-  // Large optional runtimes (Transformers.js WASM and its lazy worker chunk)
-  // must remain network-on-demand. Filtering them explicitly preserves the
-  // default 2 MiB precache budget without emitting a warning for every build.
-  maximumFileSizeToCacheInBytes: MAX_PRECACHE_ASSET_BYTES,
-  exclude: [({ asset }) => asset.source.size() > MAX_PRECACHE_ASSET_BYTES],
+  // Keep the general 2 MiB budget for optional model runtimes while admitting
+  // only AnyDoc's pinned ~6.8 MiB module to the PWA precache. Offline lifecycle
+  // and quota behavior remain rollout gates outside this build-time filter.
+  maximumFileSizeToCacheInBytes: anyDocRolloutEnabled
+    ? MAX_ANYDOC_WASM_BYTES
+    : MAX_PRECACHE_ASSET_BYTES,
+  exclude: [
+    ({ asset }) =>
+      asset.source.size() > MAX_PRECACHE_ASSET_BYTES &&
+      !(anyDocRolloutEnabled && ANYDOC_WASM_ASSET.test(asset.name)),
+  ],
 })
 
 const internalHost = process.env.TAURI_DEV_HOST

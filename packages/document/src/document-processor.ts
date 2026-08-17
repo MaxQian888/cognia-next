@@ -45,6 +45,12 @@ export interface ProcessingOptions {
   generateChunks?: boolean
   chunkingOptions?: Partial<ChunkingOptions>
   maxFileSize?: number
+  /** Opt-in rollout gate for the experimental AnyDoc legacy Office adapter. */
+  anyDoc?: {
+    enabled?: boolean
+    signal?: AbortSignal
+    timeoutMs?: number
+  }
 }
 
 export interface ValidationOptions {
@@ -68,6 +74,9 @@ export interface DocumentDiff {
 const DEFAULT_PROCESSING_OPTIONS: ProcessingOptions = {
   extractEmbeddable: true,
   generateChunks: false,
+  anyDoc: {
+    enabled: process.env.NEXT_PUBLIC_ENABLE_ANYDOC_LEGACY_OFFICE === "true",
+  },
 }
 
 /**
@@ -82,6 +91,45 @@ export function detectDocumentType(filename: string): DocumentType {
  */
 function countWords(text: string): number {
   return text.split(/\s+/).filter((w) => w.length > 0).length
+}
+
+function normalizeAnyDocMarkdown(
+  markdown: string,
+  engineVersion: string,
+  baseMetadata: DocumentMetadata,
+  parser: "word" | "presentation",
+  label: string
+): {
+  metadata: DocumentMetadata
+  parseSummary: ParseSummary
+  parseDiagnostics: ParseDiagnostic[]
+} {
+  return {
+    metadata: {
+      ...baseMetadata,
+      lineCount: markdown.split("\n").length,
+      wordCount: countWords(markdown),
+      language: parser,
+      parseEngine: "anydoc",
+      parseEngineVersion: engineVersion,
+      parseMode: "markdown-only",
+    },
+    parseSummary: {
+      parser,
+      structure: { segmentCount: 1 },
+      quality: {
+        status: "partial",
+        reason: `AnyDoc produced Markdown without a structured ${label} parse result`,
+      },
+    },
+    parseDiagnostics: [
+      {
+        code: "parser_info",
+        severity: "info",
+        message: `Legacy ${label} document parsed as Markdown by AnyDoc`,
+      },
+    ],
+  }
 }
 
 function normalizeDocumentParseError(label: string, error: unknown): Error {
@@ -226,7 +274,11 @@ export async function processDocumentAsync(
   data: string | ArrayBuffer,
   options: ProcessingOptions = {}
 ): Promise<ProcessedDocument> {
-  const opts = { ...DEFAULT_PROCESSING_OPTIONS, ...options }
+  const opts = {
+    ...DEFAULT_PROCESSING_OPTIONS,
+    ...options,
+    anyDoc: { ...DEFAULT_PROCESSING_OPTIONS.anyDoc, ...options.anyDoc },
+  }
   const type = detectDocumentType(filename)
 
   // For plain text-based formats, use sync processing.
@@ -274,10 +326,42 @@ export async function processDocumentAsync(
     }
 
     case "word": {
-      try {
-        const extension = getFileExtension(filename)
-        const buffer = typeof data === "string" ? stringToArrayBuffer(data) : data
+      const extension = getFileExtension(filename)
+      const buffer = typeof data === "string" ? stringToArrayBuffer(data) : data
 
+      if (extension === "doc" && opts.anyDoc?.enabled) {
+        const { AnyDocParseError, parseLegacyOfficeWithAnyDoc } =
+          await import("./parsers/anydoc-parser")
+        try {
+          const parsed = await parseLegacyOfficeWithAnyDoc(buffer, "doc", {
+            signal: opts.anyDoc.signal,
+            timeoutMs: opts.anyDoc.timeoutMs,
+          })
+          content = parsed.markdown
+          embeddableContent = content
+          const normalized = normalizeAnyDocMarkdown(
+            content,
+            parsed.engineVersion,
+            metadata,
+            "word",
+            "Word"
+          )
+          metadata = normalized.metadata
+          parseSummary = normalized.parseSummary
+          parseDiagnostics = normalized.parseDiagnostics
+          break
+        } catch (error) {
+          if (
+            !(error instanceof AnyDocParseError) ||
+            error.engineCode !== "formatMismatch" ||
+            error.detectedFormat !== "docx"
+          ) {
+            throw error
+          }
+        }
+      }
+
+      try {
         if (extension === "odt") {
           const { parseOpenDocumentText } = await import("./parsers/open-document-parser")
           const parsed = await parseOpenDocumentText(buffer)
@@ -368,9 +452,41 @@ export async function processDocumentAsync(
     case "presentation": {
       const ext = getFileExtension(filename)
       if (ext === "ppt") {
-        throw new Error(
-          "Legacy PowerPoint (.ppt) is not supported. Please convert to .pptx and retry."
-        )
+        if (!opts.anyDoc?.enabled) {
+          throw new Error(
+            "Legacy PowerPoint (.ppt) is not supported. Please convert to .pptx and retry."
+          )
+        }
+        const buffer = typeof data === "string" ? stringToArrayBuffer(data) : data
+        const { AnyDocParseError, parseLegacyOfficeWithAnyDoc } =
+          await import("./parsers/anydoc-parser")
+        try {
+          const parsed = await parseLegacyOfficeWithAnyDoc(buffer, "ppt", {
+            signal: opts.anyDoc.signal,
+            timeoutMs: opts.anyDoc.timeoutMs,
+          })
+          content = parsed.markdown
+          embeddableContent = content
+          const normalized = normalizeAnyDocMarkdown(
+            content,
+            parsed.engineVersion,
+            metadata,
+            "presentation",
+            "PowerPoint"
+          )
+          metadata = normalized.metadata
+          parseSummary = normalized.parseSummary
+          parseDiagnostics = normalized.parseDiagnostics
+          break
+        } catch (error) {
+          if (
+            !(error instanceof AnyDocParseError) ||
+            error.engineCode !== "formatMismatch" ||
+            error.detectedFormat !== "pptx"
+          ) {
+            throw error
+          }
+        }
       }
 
       try {

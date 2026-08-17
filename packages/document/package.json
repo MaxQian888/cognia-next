@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cognia/provider-embedding": "workspace:*"
+    "@cognia/provider-embedding": "workspace:*",
+    "@firecrawl/anydoc-wasm": "0.1.9"
   },
   "peerDependencies": {
     "cheerio": "*",
