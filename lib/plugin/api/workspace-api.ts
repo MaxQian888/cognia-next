@@ -7,10 +7,10 @@
  * `manifest.workspaceBackends[]` and let `workspace-backend-bridge.ts`
  * resolve the lazy factory on plugin enable.
  *
- * Backend ids are namespaced as `<pluginId>:<backendId>`. The legacy
- * `setE2BBackend()` shim still registers under the unprefixed id `"e2b"`
- * for back-compat — see `lib/github/workspace.ts:setE2BBackend` and
- * ADR-0026 §2 §D.
+ * Backend ids are namespaced as `<pluginId>:<backendId>`. The host dispatches
+ * on the unprefixed *kind* via `resolveWorkspaceBackendByKind` (e.g.
+ * `cloneToWorkspace({ backend: "e2b" })` finds `cognia-e2b-sandbox:e2b`), so
+ * plugins never need to know how the host names backends. ADR-0026 §2 §D.
  *
  * Auto-cleanup on plugin disable is wired through
  * `clearWorkspaceBackendsForPlugin(pluginId)`.

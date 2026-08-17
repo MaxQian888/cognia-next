@@ -1,15 +1,20 @@
 /**
- * Workspace backend registry — generalizes the legacy `_e2bBackend`
- * singleton in `workspace.ts` into a Map keyed by backend id.
+ * Workspace backend registry — a Map of plugin-contributed workspace
+ * backends keyed by backend id.
  *
  * Two backends in production today:
- *   - `"e2b"`   — registered by `plugins/e2b-sandbox` (Firecracker microVM).
+ *   - `"cognia-e2b-sandbox:e2b"` — registered by `plugins/e2b-sandbox`
+ *     through `ctx.workspace.registerBackend({ id: "e2b" })` (Firecracker
+ *     microVM). The plugin API prefixes the id with the plugin id.
  *   - implicit `"local"` — handled by Tauri Rust commands directly in
  *     `workspace.ts:cloneToWorkspace`; not registered here because it has
  *     no JS-side implementation to inject.
  *
- * The registry is the destination both the legacy `setE2BBackend()` shim
- * and the new `ctx.workspace.registerBackend(...)` API funnel through.
+ * `ctx.workspace.registerBackend(...)` (`lib/plugin/api/workspace-api.ts`) is
+ * the only production writer. The host dispatches by *kind* (the unprefixed
+ * id, e.g. `"e2b"`) via `resolveWorkspaceBackendByKind`, so whichever plugin
+ * contributed a backend of that kind is reachable without the host knowing
+ * the plugin id.
  *
  * ADR-0026 §2 §D.
  */
@@ -17,9 +22,9 @@
 import type { E2BBackend } from "./workspace"
 
 export interface WorkspaceBackendRegistration {
-  /** Already-prefixed backend id (`<pluginId>:<id>` or unprefixed for legacy). */
+  /** Already-prefixed backend id (`<pluginId>:<id>`; unprefixed only in tests/host code). */
   backendId: string
-  /** Owning plugin id; "host" for the legacy `setE2BBackend` shim. */
+  /** Owning plugin id; "host" for host-owned registrations. */
   pluginId: string
   /** Human label shown in the picker UI. */
   label: string
@@ -81,6 +86,28 @@ export function getWorkspaceBackend(backendId: string): E2BBackend | undefined {
 
 export function hasWorkspaceBackend(backendId: string): boolean {
   return registry.has(backendId)
+}
+
+/**
+ * Resolve a backend by its unprefixed *kind* (e.g. `"e2b"`), which is what
+ * the host's `WorkspaceBackend` string union selects on.
+ *
+ * Plugin registrations are namespaced as `<pluginId>:<id>` by
+ * `lib/plugin/api/workspace-api.ts`, so a host lookup for the bare kind
+ * used to miss every plugin-contributed backend (the historic bug: the
+ * plugin registered `cognia-e2b-sandbox:e2b` while `cloneToWorkspace`
+ * looked up `"e2b"`). Precedence: an exact (unprefixed) match wins, then
+ * the first registration whose id ends in `:<kind>` in registration order.
+ * Returns `undefined` when nothing matches.
+ */
+export function resolveWorkspaceBackendByKind(kind: string): E2BBackend | undefined {
+  const exact = registry.get(kind)
+  if (exact) return exact.backend
+  const suffix = `:${kind}`
+  for (const [id, reg] of registry) {
+    if (id.endsWith(suffix)) return reg.backend
+  }
+  return undefined
 }
 
 export function listWorkspaceBackends(): WorkspaceBackendRegistration[] {

@@ -68,7 +68,7 @@ description: "新增6个平面清单字段，8个新运行时点，1个新hook�
 
 ### 第二阶段 ·提供商登记册
 
-`ctx.ocr`（`lib/plugin/api/ocr-api.ts`）和`ctx.workspace`（`lib/plugin/api/workspace-api.ts`）加入插件上下文。工作区注册表（`lib/github/workspace-backend-registry.ts`）将遗留单例推广`_e2bBackend`——`setE2BBackend`成为一个`@deprecated` shim，在id `"e2b"`下注册。四个新的清单驱动桥接：
+`ctx.ocr`（`lib/plugin/api/ocr-api.ts`）和`ctx.workspace`（`lib/plugin/api/workspace-api.ts`）加入插件上下文。工作区注册表（`lib/github/workspace-backend-registry.ts`）将遗留单例`_e2bBackend`推广为注册表。`setE2BBackend`在迁移期间保留为`@deprecated` shim，并已于 **2026-08-18 移除**（`plugins/e2b-sandbox` 只通过 `ctx.workspace.registerBackend` 注册）；宿主改为按 kind 解析后端（`resolveWorkspaceBackendByKind("e2b")` 可找到 `cognia-e2b-sandbox:e2b`），同时修复了宿主查找裸 `"e2b"` id 与插件前缀 id 不匹配的问题。四个新的清单驱动桥接：
 
 - `lib/plugin/bridge/ocr-providers-bridge.ts`
 - `lib/plugin/bridge/workspace-backend-bridge.ts`

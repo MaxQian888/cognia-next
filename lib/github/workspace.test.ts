@@ -9,17 +9,32 @@ const call = transport.call
 import {
   cloneToWorkspace,
   commitAndPush,
-  getE2BBackend,
   removeWorkspace,
-  setE2BBackend,
   statWorkspace,
   type E2BBackend,
   type WorkspaceHandle,
 } from "./workspace"
+import {
+  __resetWorkspaceBackendRegistryForTesting,
+  registerWorkspaceBackend,
+} from "./workspace-backend-registry"
+
+/**
+ * Register a backend the way the real plugin does — under the plugin-prefixed
+ * id — so these tests exercise the kind-based resolution the host relies on.
+ */
+function registerPluginE2B(backend: E2BBackend, pluginId = "cognia-e2b-sandbox"): void {
+  registerWorkspaceBackend({
+    backendId: `${pluginId}:e2b`,
+    pluginId,
+    label: "E2B Firecracker",
+    backend,
+  })
+}
 
 beforeEach(() => {
   call.mockReset()
-  setE2BBackend(null)
+  __resetWorkspaceBackendRegistryForTesting()
 })
 
 describe("cloneToWorkspace — local backend", () => {
@@ -119,7 +134,7 @@ describe("cloneToWorkspace — local backend", () => {
       commitAndPush: jest.fn(),
       remove: jest.fn(async () => true),
     }
-    setE2BBackend(backend)
+    registerPluginE2B(backend)
     const handle = await cloneToWorkspace({
       repoFullName: "o/r",
       branch: "main",
@@ -200,7 +215,7 @@ describe("commitAndPush", () => {
       commitAndPush: jest.fn(async () => "deadbeef"),
       remove: jest.fn(async () => true),
     }
-    setE2BBackend(backend)
+    registerPluginE2B(backend)
     const sha = await commitAndPush({
       workspace: { ...handle, backend: "e2b", path: "sb-id" },
       message: "msg",
@@ -259,7 +274,7 @@ describe("removeWorkspace + statWorkspace", () => {
       commitAndPush: jest.fn(),
       remove: jest.fn(async () => true),
     }
-    setE2BBackend(backend)
+    registerPluginE2B(backend)
     const ok = await removeWorkspace({
       backend: "e2b",
       path: "sb",
@@ -273,7 +288,7 @@ describe("removeWorkspace + statWorkspace", () => {
 
   it("logs and returns false when the E2B backend rejects", async () => {
     const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    setE2BBackend({
+    registerPluginE2B({
       clone: jest.fn(),
       commitAndPush: jest.fn(),
       remove: jest.fn(async () => Promise.reject(new Error("e2b boom"))),
@@ -304,17 +319,93 @@ describe("removeWorkspace + statWorkspace", () => {
   })
 })
 
-describe("setE2BBackend / getE2BBackend", () => {
-  it("round-trips the singleton", () => {
-    expect(getE2BBackend()).toBeNull()
-    const b: E2BBackend = {
-      clone: jest.fn(),
+describe("e2b backend resolution by kind", () => {
+  it("throws a helpful error when no e2b backend is registered", async () => {
+    await expect(
+      cloneToWorkspace({ repoFullName: "o/r", branch: "main", token: "tok", backend: "e2b" })
+    ).rejects.toThrow(/e2b workspace backend not registered/)
+    await expect(
+      commitAndPush({
+        workspace: {
+          backend: "e2b",
+          path: "sb",
+          repoFullName: "o/r",
+          branch: "main",
+          createdAt: 0,
+        },
+        message: "m",
+      })
+    ).rejects.toThrow(/e2b workspace backend not registered/)
+    await expect(
+      removeWorkspace({
+        backend: "e2b",
+        path: "sb",
+        repoFullName: "o/r",
+        branch: "main",
+        createdAt: 0,
+      })
+    ).resolves.toBe(false)
+  })
+
+  it("resolves a plugin-prefixed registration (`<pluginId>:e2b`) for the bare `e2b` kind", async () => {
+    const backend: E2BBackend = {
+      clone: jest.fn(async () => ({
+        backend: "e2b" as const,
+        path: "sb-prefixed",
+        repoFullName: "o/r",
+        branch: "main",
+        createdAt: 0,
+      })),
       commitAndPush: jest.fn(),
-      remove: jest.fn(),
+      remove: jest.fn(async () => true),
     }
-    setE2BBackend(b)
-    expect(getE2BBackend()).toBe(b)
-    setE2BBackend(null)
-    expect(getE2BBackend()).toBeNull()
+    registerPluginE2B(backend, "some-other-plugin")
+    const handle = await cloneToWorkspace({
+      repoFullName: "o/r",
+      branch: "main",
+      token: "tok",
+      backend: "e2b",
+    })
+    expect(handle.path).toBe("sb-prefixed")
+  })
+
+  it("prefers an exact unprefixed `e2b` registration over a plugin-prefixed one", async () => {
+    const exact: E2BBackend = {
+      clone: jest.fn(async () => ({
+        backend: "e2b" as const,
+        path: "exact",
+        repoFullName: "o/r",
+        branch: "main",
+        createdAt: 0,
+      })),
+      commitAndPush: jest.fn(),
+      remove: jest.fn(async () => true),
+    }
+    const prefixed: E2BBackend = {
+      clone: jest.fn(async () => ({
+        backend: "e2b" as const,
+        path: "prefixed",
+        repoFullName: "o/r",
+        branch: "main",
+        createdAt: 0,
+      })),
+      commitAndPush: jest.fn(),
+      remove: jest.fn(async () => true),
+    }
+    registerPluginE2B(prefixed)
+    registerWorkspaceBackend({
+      backendId: "e2b",
+      pluginId: "host",
+      label: "host e2b",
+      backend: exact,
+    })
+    const handle = await cloneToWorkspace({
+      repoFullName: "o/r",
+      branch: "main",
+      token: "tok",
+      backend: "e2b",
+    })
+    expect(handle.path).toBe("exact")
+    expect(prefixed.clone).not.toHaveBeenCalled()
   })
 })

@@ -73,8 +73,9 @@ export async function activate(ctx: PluginContext) {
 ## ctx.workspace — register an issue-loop backend
 
 `E2BBackend`-shaped runtime (the same `clone / commitAndPush / remove`
-contract `lib/github/workspace.ts` has always required). Replaces the
-legacy `setE2BBackend()` singleton:
+contract `lib/github/workspace.ts` has always required). This is the only
+registration path — the legacy `setE2BBackend()` singleton has been removed;
+the host resolves your backend by its unprefixed kind:
 
 ```ts
 ctx.workspace.registerBackend({
@@ -534,7 +535,7 @@ If your plugin still uses the old paths, the host accepts them under
 | Old                                       | New                                                              |
 | ----------------------------------------- | ---------------------------------------------------------------- |
 | `installOcrRuntime()` global              | `ctx.ocr.registerProvider(...)`                                  |
-| `setE2BBackend(impl)`                     | `ctx.workspace.registerBackend({ id: "e2b", ... })`              |
+| `setE2BBackend(impl)` (**removed**)       | `ctx.workspace.registerBackend({ id: "e2b", ... })`              |
 | `registerNodeExecutor` side-effect import | `ctx.workflow.registerNode(...)` or `manifest.workflows.nodes[]` |
 | `registerPluginI18n({ ... })`             | `manifest.i18n` (auto-wired)                                     |
 | Direct `isTauri()` import                 | `ctx.capabilities.tauri`                                         |

@@ -1,6 +1,5 @@
 import type { PluginContext } from "@/types/plugin"
 
-jest.mock("@/lib/github/workspace", () => ({ setE2BBackend: jest.fn() }))
 jest.mock("@/lib/sandbox/microvm-bridge", () => ({ setMicrovmExec: jest.fn() }))
 
 const fakeBackend = { kind: "e2b-backend" }
@@ -11,13 +10,11 @@ jest.mock("./workspace-backend", () => ({
 const fakeExec = { kind: "microvm-exec" }
 jest.mock("./microvm-exec", () => ({ buildMicrovmExec: jest.fn(() => fakeExec) }))
 
-import { setE2BBackend } from "@/lib/github/workspace"
 import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 import { buildMicrovmExec } from "./microvm-exec"
 import e2bSandbox from "./index"
 
-const setE2BBackendMock = setE2BBackend as jest.Mock
 const setMicrovmExecMock = setMicrovmExec as jest.Mock
 const E2BWorkspaceBackendMock = E2BWorkspaceBackend as jest.Mock
 const buildMicrovmExecMock = buildMicrovmExec as jest.Mock
@@ -58,7 +55,6 @@ function makeCtx(opts: { workspace?: boolean; config?: Record<string, unknown> }
 }
 
 beforeEach(() => {
-  setE2BBackendMock.mockReset()
   setMicrovmExecMock.mockReset()
   E2BWorkspaceBackendMock.mockClear()
   buildMicrovmExecMock.mockClear()
@@ -106,24 +102,20 @@ describe("e2b-sandbox (built-in)", () => {
     await e2bSandbox.deactivate?.(ctx)
   })
 
-  it("prefers ctx.workspace.registerBackend and tears down via its disposer", async () => {
+  it("registers through ctx.workspace.registerBackend and tears down via its disposer", async () => {
     const { ctx, registerBackend, unregister } = makeCtx({ workspace: true })
     await e2bSandbox.activate?.(ctx)
     expect(registerBackend).toHaveBeenCalledWith(
       expect.objectContaining({ id: "e2b", backend: fakeBackend })
     )
-    expect(setE2BBackendMock).not.toHaveBeenCalled()
     await e2bSandbox.deactivate?.(ctx)
     expect(unregister).toHaveBeenCalledTimes(1)
-    expect(setE2BBackendMock).not.toHaveBeenCalled()
   })
 
-  it("falls back to the legacy setE2BBackend shim when ctx.workspace is absent", async () => {
+  it("fails loudly when the host context has no workspace API (no legacy shim fallback)", async () => {
     const { ctx } = makeCtx({ workspace: false })
-    await e2bSandbox.activate?.(ctx)
-    expect(setE2BBackendMock).toHaveBeenCalledWith(fakeBackend)
-    await e2bSandbox.deactivate?.(ctx)
-    expect(setE2BBackendMock).toHaveBeenLastCalledWith(null)
+    await expect(e2bSandbox.activate?.(ctx)).rejects.toThrow(/no `workspace` API/)
+    expect(E2BWorkspaceBackendMock).not.toHaveBeenCalled()
   })
 
   it("wires the microvm exec adapter on activate and clears it on deactivate", async () => {

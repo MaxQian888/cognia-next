@@ -238,7 +238,7 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 - `plugins/github-delivery/src/adapter/conversation-key.ts` 为 `gh:owner/repo/<kind>-<n>`
   共享编解码器,inbox-bridge 与出站适配器在路由键上保持一致。
 - `plugins/e2b-sandbox/src/workspace-backend.ts` 实现 `E2BBackend`,在该插件 activate 时通过
-  `setE2BBackend()` 注册。默认沙盒工厂动态 `import('@e2b/sdk')`;若 SDK 未安装,在克隆点显示
+  `ctx.workspace.registerBackend({ id: "e2b" })` 注册（旧 `setE2BBackend()` shim 已于 2026-08-18 移除）。默认沙盒工厂动态 `import('@e2b/sdk')`;若 SDK 未安装,在克隆点显示
   安装提示而不是在插件激活点崩溃。
 - `@tauri-apps/plugin-shell` 加入 `package.json`,Rust crate 加入 `Cargo.toml`,plugin init
   加到 `src-tauri/src/lib.rs`,`tauri.conf.json` 的 shell scope 里给 `cloudflared` 留了一条

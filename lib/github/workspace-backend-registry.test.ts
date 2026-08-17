@@ -5,6 +5,7 @@ import {
   hasWorkspaceBackend,
   listWorkspaceBackends,
   registerWorkspaceBackend,
+  resolveWorkspaceBackendByKind,
   subscribeWorkspaceBackendRegistry,
   unregisterWorkspaceBackend,
   type WorkspaceBackendRegistryEvent,
@@ -131,5 +132,58 @@ describe("workspace-backend-registry", () => {
     })
     const all = listWorkspaceBackends()
     expect(all.map((r) => r.backendId).sort()).toEqual(["a", "b"])
+  })
+
+  describe("resolveWorkspaceBackendByKind", () => {
+    it("returns undefined when nothing matches the kind", () => {
+      registerWorkspaceBackend({
+        backendId: "p:other",
+        pluginId: "p",
+        label: "x",
+        backend: makeBackend(),
+      })
+      expect(resolveWorkspaceBackendByKind("e2b")).toBeUndefined()
+    })
+
+    it("resolves a plugin-prefixed `<pluginId>:<kind>` registration", () => {
+      const backend = makeBackend()
+      registerWorkspaceBackend({
+        backendId: "cognia-e2b-sandbox:e2b",
+        pluginId: "cognia-e2b-sandbox",
+        label: "E2B",
+        backend,
+      })
+      expect(resolveWorkspaceBackendByKind("e2b")).toBe(backend)
+    })
+
+    it("does not match a kind that only appears as a substring", () => {
+      registerWorkspaceBackend({
+        backendId: "p:e2b-lite",
+        pluginId: "p",
+        label: "x",
+        backend: makeBackend(),
+      })
+      registerWorkspaceBackend({
+        backendId: "p:note2b",
+        pluginId: "p",
+        label: "x",
+        backend: makeBackend(),
+      })
+      expect(resolveWorkspaceBackendByKind("e2b")).toBeUndefined()
+    })
+
+    it("prefers an exact unprefixed id, then the first prefixed match in registration order", () => {
+      const first = makeBackend()
+      const second = makeBackend()
+      const exact = makeBackend()
+      registerWorkspaceBackend({ backendId: "a:e2b", pluginId: "a", label: "a", backend: first })
+      registerWorkspaceBackend({ backendId: "b:e2b", pluginId: "b", label: "b", backend: second })
+      expect(resolveWorkspaceBackendByKind("e2b")).toBe(first)
+      registerWorkspaceBackend({ backendId: "e2b", pluginId: "host", label: "h", backend: exact })
+      expect(resolveWorkspaceBackendByKind("e2b")).toBe(exact)
+      unregisterWorkspaceBackend("e2b")
+      unregisterWorkspaceBackend("a:e2b")
+      expect(resolveWorkspaceBackendByKind("e2b")).toBe(second)
+    })
   })
 })

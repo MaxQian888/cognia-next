@@ -4,11 +4,15 @@
  * Project store — keeps the in-memory project list, the active project
  * pointer, and the per-project knowledge files / linked sessions / tags.
  *
- * Persistence is intentionally NOT wired up here. cognia-next tracks the
- * authoritative project model in Dexie (`projects` table is on the
- * roadmap); this store mirrors what the plugin Project API needs without
- * blocking on the Dexie migration. Once the Dexie table lands, hydrate
- * from it in `load()` and persist mutations via thin async writers.
+ * Persistence: the authoritative model is the Dexie `projects` table
+ * (`lib/db/projects.ts`; the active pointer lives on the `AppSettings`
+ * singleton). `load()` hydrates from `getAllProjects` / `loadActiveProjectId`
+ * (after `ensureDefaultProject`), and every mutation persists through the
+ * thin async writers `putProject` / `deleteProjectRow` /
+ * `persistActiveProjectId`; deleting a project cascades workspace-scoped rows
+ * via `deleteProjectCascade` (`lib/db/project-scope.ts`, Dexie v86 isolation
+ * column). The store is therefore an in-memory mirror, never a second source
+ * of truth — a user-facing "Workspace" *is* a row of this table.
  *
  * The shape is dictated by `lib/plugin/api/project-api.ts` — every method
  * the plugin API calls is implemented here, and the field set on

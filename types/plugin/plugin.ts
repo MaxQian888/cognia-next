@@ -1016,10 +1016,9 @@ export interface PluginManifest {
 
   /**
    * Workspace execution backends contributed by this plugin (issue-loop /
-   * sandbox runners). Registered with the workspace-backend-registry; the
-   * legacy `setE2BBackend` singleton becomes a `@deprecated` shim that
-   * delegates to the same registry. Permission gate: `process:spawn` +
-   * `filesystem:write`.
+   * sandbox runners). Registered with the workspace-backend-registry under
+   * `<pluginId>:<id>`; the host resolves them by kind. Permission gate:
+   * `process:spawn` + `filesystem:write`.
    */
   workspaceBackends?: PluginWorkspaceBackendDef[]
 

@@ -70,7 +70,7 @@ Validation enforces the shared shape rules (`{ id, label, entry, export }`) plus
 
 ### Phase 2 · Provider registries
 
-`ctx.ocr` (`lib/plugin/api/ocr-api.ts`) and `ctx.workspace` (`lib/plugin/api/workspace-api.ts`) join the plugin context. The workspace registry (`lib/github/workspace-backend-registry.ts`) generalizes the legacy `_e2bBackend` singleton — `setE2BBackend` becomes a `@deprecated` shim that registers under id `"e2b"`. Four new manifest-driven bridges land:
+`ctx.ocr` (`lib/plugin/api/ocr-api.ts`) and `ctx.workspace` (`lib/plugin/api/workspace-api.ts`) join the plugin context. The workspace registry (`lib/github/workspace-backend-registry.ts`) generalizes the legacy `_e2bBackend` singleton. `setE2BBackend` was kept as a `@deprecated` shim during migration and **removed on 2026-08-18** once `plugins/e2b-sandbox` registered exclusively through `ctx.workspace.registerBackend`; the host now resolves backends by kind (`resolveWorkspaceBackendByKind("e2b")` finds `cognia-e2b-sandbox:e2b`), which also fixed the prefix mismatch where the host looked up the bare `"e2b"` id. Four new manifest-driven bridges land:
 
 - `lib/plugin/bridge/ocr-providers-bridge.ts`
 - `lib/plugin/bridge/workspace-backend-bridge.ts`
