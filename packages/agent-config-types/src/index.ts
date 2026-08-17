@@ -4901,6 +4901,14 @@ export type AgentId =
   | "kiro"
   | "opencode"
   | "cognia"
+  /**
+   * Pi is a **config-read target only**, not an MCP sync target: Pi's core
+   * ships no MCP support (`mcpServers` appears nowhere in its distribution),
+   * so it deliberately has no entry in `MCP_AGENT_ADAPTERS`. `spec_for("pi")`
+   * resolves to `<pi agent dir>/settings.json`, which is what the settings
+   * importer and the vendor probe read.
+   */
+  | "pi"
 
 export interface McpSecretRef {
   /** Stable keyring locator. Secret material is never serialized here. */

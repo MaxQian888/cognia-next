@@ -1,6 +1,6 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 
-export type SettingsSourceId = "claude-code" | "codex" | "opencode"
+export type SettingsSourceId = "claude-code" | "codex" | "opencode" | "pi"
 export type SettingsGroup = "model" | "permissions" | "sandbox" | "env" | "hooks" | "ui"
 export type SettingsImportTarget =
   | "defaultModel"
@@ -30,7 +30,7 @@ export interface SettingsImportDraft {
 export type SettingsImportMergeStrategy = "skip" | "overwrite" | "duplicate"
 export type SettingsSnapshot = Partial<AppSettings>
 
-const SOURCES = new Set<SettingsSourceId>(["claude-code", "codex", "opencode"])
+const SOURCES = new Set<SettingsSourceId>(["claude-code", "codex", "opencode", "pi"])
 const GROUPS = new Set<SettingsGroup>(["model", "permissions", "sandbox", "env", "hooks", "ui"])
 
 export function isSettingsImportDraft(value: unknown): value is SettingsImportDraft {

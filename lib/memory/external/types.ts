@@ -9,7 +9,7 @@
  */
 
 /** Which external agent owns a discovered file. */
-export type ExternalAgentId = "claude-code" | "codex" | "opencode"
+export type ExternalAgentId = "claude-code" | "codex" | "opencode" | "pi"
 
 /**
  * Where a discovered file sits in its agent's hierarchy. Drives grouping,

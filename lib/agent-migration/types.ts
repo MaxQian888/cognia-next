@@ -1,6 +1,6 @@
 import type { SettingsImportMergeStrategy } from "@/lib/settings-import"
 
-export const MIGRATION_VENDORS = ["claude-code", "codex", "opencode"] as const
+export const MIGRATION_VENDORS = ["claude-code", "codex", "opencode", "pi"] as const
 export type MigrationVendor = (typeof MIGRATION_VENDORS)[number]
 
 export const MIGRATION_ARTIFACTS = [

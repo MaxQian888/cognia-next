@@ -1,6 +1,6 @@
 import { parseFrontmatter, stringOrUndef } from "@/lib/claude/subagent-importers/_parse-helpers"
 
-export type CommandsSourceId = "claude-code" | "codex" | "opencode"
+export type CommandsSourceId = "claude-code" | "codex" | "opencode" | "pi"
 export type CommandImportMergeStrategy = "skip" | "overwrite" | "duplicate"
 
 export interface CommandSourceFile {

@@ -3,11 +3,12 @@ import type { EffectiveSettings } from "@/lib/claude/settings"
 import { settingsFromClaudeCode } from "./adapters/claude-code"
 import { settingsFromCodex } from "./adapters/codex"
 import { settingsFromOpencode } from "./adapters/opencode"
+import { settingsFromPi } from "./adapters/pi"
 import type { SettingsImportDraft, SettingsSnapshot, SettingsSourceId } from "./types"
 
 export interface SettingsImportPreviewDeps {
   currentSettings: () => SettingsSnapshot
-  readAgentConfig: (agent: "codex" | "opencode") => Promise<Pick<AgentReadResult, "parsed">>
+  readAgentConfig: (agent: "codex" | "opencode" | "pi") => Promise<Pick<AgentReadResult, "parsed">>
   readClaudeEffectiveSettings: () => Promise<Pick<EffectiveSettings, "merged">>
 }
 
@@ -36,6 +37,7 @@ export async function previewSettingsImport(
   }
   const config = await resolved.readAgentConfig(source)
   if (source === "codex") return settingsFromCodex(current, config.parsed)
+  if (source === "pi") return settingsFromPi(current, config.parsed)
   return settingsFromOpencode(current, config.parsed)
 }
 

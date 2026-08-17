@@ -70,7 +70,9 @@ async function scanSubagents(
       ? roots.claudeConfigDir
       : vendor === "codex"
         ? roots.codexHome
-        : roots.opencodeConfigDir
+        : vendor === "pi"
+          ? roots.piAgentDir
+          : roots.opencodeConfigDir
   if (!base) return { drafts: [], warnings: ["Source root is unavailable."] }
   const dir = joinPath(base, "agents")
   const fs = realSessionFs()
@@ -142,9 +144,31 @@ async function defaultPreviewDeps(): Promise<ArtifactPreviewDeps> {
     previewSubagents: scanSubagents,
     previewSkills: async (vendor) => {
       const ipc = await import("@/lib/claude/ipc")
-      if (vendor === "claude-code") return ipc.skillsScanNative()
-      if (vendor === "codex") return ipc.skillsScanCodex()
-      return ipc.skillsScanOpencode()
+      switch (vendor) {
+        case "claude-code":
+          return ipc.skillsScanNative()
+        case "codex":
+          return ipc.skillsScanCodex()
+        case "opencode":
+          return ipc.skillsScanOpencode()
+        case "pi": {
+          // Pi discovers skills from the agent-neutral `.agents/skills`
+          // convention rather than a Pi-specific directory, so it uses the
+          // generic scanner instead of a vendor command.
+          const [{ resolveHome }, { joinPath }] = await Promise.all([
+            import("@/lib/memory/external/home"),
+            import("@/lib/claude/instructions/paths"),
+          ])
+          const home = (await resolveHome()) ?? ""
+          return home ? ipc.skillsScanDir(joinPath(home, ".agents/skills")) : []
+        }
+      }
+      // Exhaustive on purpose. This used to fall through to
+      // `skillsScanOpencode()`, so any new vendor would have reported
+      // OpenCode's skills as its own — a silent wrong answer rather than a
+      // visible gap.
+      const unhandled: never = vendor
+      throw new Error(`no skills scanner registered for vendor: ${String(unhandled)}`)
     },
     previewMemory: discoverMemory,
   }

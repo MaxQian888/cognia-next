@@ -3,6 +3,7 @@ import type { VendorRoots } from "@/lib/agent-roots"
 import type { SessionFs } from "@/lib/session-import/types"
 import { commandsFromCodexFiles } from "./codex"
 import { commandsFromOpencodeFiles } from "./opencode"
+import { commandsFromPiFiles } from "./pi"
 import type { CommandsImportPreview, CommandsSourceId, CommandSourceFile } from "./types"
 
 export interface CommandsImportPreviewDeps {
@@ -32,11 +33,19 @@ export async function previewCommandsImport(
   }
   const resolved = deps ?? (await defaultDeps())
   const roots = await resolved.roots()
-  const baseRoot = source === "codex" ? roots.codexHome : roots.opencodeConfigDir
+  const baseRoot =
+    source === "codex"
+      ? roots.codexHome
+      : source === "pi"
+        ? roots.piAgentDir
+        : roots.opencodeConfigDir
   if (!baseRoot) {
     return { source, shared: false, drafts: [], warnings: ["Source root is unavailable."] }
   }
-  const root = source === "codex" ? joinPath(baseRoot, "prompts") : joinPath(baseRoot, "commands")
+  // Codex and Pi both call the directory `prompts`; only OpenCode still
+  // uses `commands` (Pi migrated away from that name).
+  const root =
+    source === "opencode" ? joinPath(baseRoot, "commands") : joinPath(baseRoot, "prompts")
   const paths = await resolved.walkFiles(resolved.fs, root, (name) =>
     /\.(md|markdown)$/i.test(name)
   )
@@ -52,7 +61,9 @@ export async function previewCommandsImport(
   const drafts =
     source === "codex"
       ? commandsFromCodexFiles(root, files)
-      : commandsFromOpencodeFiles(root, files)
+      : source === "pi"
+        ? commandsFromPiFiles(root, files)
+        : commandsFromOpencodeFiles(root, files)
   return { source, shared: false, drafts, warnings }
 }
 

@@ -9,7 +9,15 @@ function file(path: string, content = "body"): ImportFile {
 describe("SUBAGENT_SOURCE_ADAPTERS", () => {
   it("contains every adapter in priority order, generic last", () => {
     const ids: SubagentSourceId[] = SUBAGENT_SOURCE_ADAPTERS.map((a) => a.id)
-    expect(ids).toEqual(["claude-code", "codex-cli", "opencode", "cursor", "cline", "generic-md"])
+    expect(ids).toEqual([
+      "claude-code",
+      "codex-cli",
+      "opencode",
+      "cursor",
+      "cline",
+      "pi",
+      "generic-md",
+    ])
   })
 
   it("each adapter has stable metadata fields", () => {

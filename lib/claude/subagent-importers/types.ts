@@ -10,7 +10,7 @@
 //   4. `subagent-import-dialog.tsx` is the UI that drives all three.
 
 export type SubagentSourceId =
-  "claude-code" | "codex-cli" | "opencode" | "cursor" | "cline" | "generic-md"
+  "claude-code" | "codex-cli" | "opencode" | "cursor" | "cline" | "pi" | "generic-md"
 
 /** A single file's worth of input text, with enough metadata to detect the source. */
 export interface ImportFile {

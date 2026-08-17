@@ -23,6 +23,7 @@ export async function probeVendors(deps?: ProbeVendorsDeps): Promise<MigrationVe
     "claude-code": roots.claudeConfigDir,
     codex: roots.codexHome,
     opencode: roots.opencodeDataDir || roots.opencodeConfigDir,
+    pi: roots.piAgentDir,
   }
   return Promise.all(
     MIGRATION_VENDORS.map(async (vendor) => {

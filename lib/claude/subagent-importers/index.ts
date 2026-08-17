@@ -5,6 +5,7 @@ import { codexCliAdapter } from "./codex-cli"
 import { opencodeAdapter } from "./opencode"
 import { cursorAdapter } from "./cursor"
 import { clineAdapter } from "./cline"
+import { piAdapter } from "./pi"
 import { genericMdAdapter } from "./generic-md"
 import type { ImportInput, SubagentSourceAdapter, SubagentSourceId } from "./types"
 
@@ -15,6 +16,7 @@ export const SUBAGENT_SOURCE_ADAPTERS: SubagentSourceAdapter[] = [
   opencodeAdapter,
   cursorAdapter,
   clineAdapter,
+  piAdapter,
   genericMdAdapter,
 ]
 
