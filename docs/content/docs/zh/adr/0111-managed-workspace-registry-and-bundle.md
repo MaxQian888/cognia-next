@@ -37,7 +37,7 @@ Cognia 已经拥有 Task Workspace 的快照与 patch、Git worktree 通道、Wo
 
 8. **敏感资源基于显式授权。** Include pattern 仅接受相对路径，拒绝 `..`、绝对路径与逃逸 symlink。敏感路径默认拒绝。交互任务可对某路径持久授权（记录审计）。后台任务只能使用**已有授权**的路径；缺少授权即 fail closed，不做静默降级。跨边界复制必须先过 `packages/redact/src/index.ts::hasNoLeakingPii`。
 
-9. **激活 `WorktreeCreate` / `WorktreeRemove` hook。** Registry 状态机是唯一 producer，在进入和离开 `active` 时触发。`event-catalog.ts` 去除两者的 `dormant: true`，`isDormantEvent` 测试断言同步更新；两个事件在任何 handler 执行前都必须过现有 Workspace Trust gate。
+9. **激活 `WorktreeCreate` / `WorktreeRemove` hook。** _（措辞由 ADR-0132 切片 ④ 修订，生产者随之落地。）_ 生产者有两个而非一个：Registry 状态机通过注入的 `WorktreeLifecycleSink`（`crates/cognia-task-workspace/src/lifecycle.rs`，由 `src-tauri/src/task_workspace.rs` 安装）在 `GitWorktree` 执行进入 `active` 以及被 discard / prune 时发出；渲染端 `lib/git/commands.ts` 在 `git_worktree_add` / `git_worktree_remove` 成功后发出同样的事件，覆盖 Registry 前面没有站着的另外两个所有者——Agent Team allocator 与源代码管理 worktree 面板。非 Git 根的 materialized shadow 不发事件。两个事件都是观察性的（绝不阻塞 git 操作），走普通的会话作用域 hook runner；它们**不**额外做 Workspace Trust 检查——信任门禁施加在打开 worktree 的位置，而不是 hook 触发的位置。
 
 10. **保留策略。** 默认活跃受管目录上限 15；快照保留 30 天；blob 预算 1 GiB。三者均可在设置里调整。目录回收与快照过期分开执行，共同遵守决策 (2) 的"不可 prune"清单，各自写一条审计。
 

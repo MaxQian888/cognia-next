@@ -1,5 +1,5 @@
 /**
- * Issue tracker domain types (Dexie v170).
+ * Issue tracker domain types (Dexie v170 / v171 / v174 — ADR-0132).
  *
  * ─── NAMING INVARIANT — read before touching anything here ───────────────
  * This repo overloads "project" and "workspace" badly (17 distinct meanings
@@ -38,7 +38,7 @@
  *     column, so the tracker can bind to any engine without a schema bump.
  */
 
-/** Board columns, in display order. Fixed by design — see ADR (slice ①). */
+/** Board columns, in display order. Fixed by design — see ADR-0132 §1. */
 export const ISSUE_STATUSES = [
   "backlog",
   "todo",
