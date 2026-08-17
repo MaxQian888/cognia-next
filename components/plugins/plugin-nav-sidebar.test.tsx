@@ -58,25 +58,28 @@ describe("PluginNavSidebar", () => {
     expect(usePluginsStore.getState().activeSection).toBe("discover")
   })
 
-  it("reveals the library sub-filter chips only when the Library section is active", () => {
+  // The rail carries one axis: which section you are in. Library's status
+  // filter moved to PluginLibraryHeader and Governance's aggregate-view
+  // picker to PluginGovernanceHeader — both as segments in the shared
+  // second header tier. Rendering either here too would put two axes back
+  // in one column, so these two tests pin the rail's emptiness rather than
+  // its old sub-lists.
+  it("never renders the library sub-filters, even on the Library section", () => {
+    usePluginsStore.setState({ activeSection: "library" })
     render(<PluginNavSidebar />)
-    expect(screen.getByTestId("plugin-nav-library-sub-enabled")).toBeInTheDocument()
-    usePluginsStore.setState({ activeSection: "discover" })
-    render(<PluginNavSidebar />)
-    expect(screen.queryAllByTestId("plugin-nav-library-sub-enabled")).toHaveLength(0)
+    expect(screen.getByTestId("plugin-nav-library")).toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-nav-library-sub-enabled")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-nav-library-sub-configurable")).not.toBeInTheDocument()
   })
 
-  it("clicking a library sub-filter chip updates the store", () => {
+  it("leaves librarySubFilter untouched when the Library section is selected", () => {
+    usePluginsStore.setState({ activeSection: "discover", librarySubFilter: "errored" })
     render(<PluginNavSidebar />)
-    fireEvent.click(screen.getByTestId("plugin-nav-library-sub-configurable"))
-    expect(usePluginsStore.getState().librarySubFilter).toBe("configurable")
-    expect(usePluginsStore.getState().filters.configurable).toBe(true)
+    fireEvent.click(screen.getByTestId("plugin-nav-library"))
+    expect(usePluginsStore.getState().activeSection).toBe("library")
+    expect(usePluginsStore.getState().librarySubFilter).toBe("errored")
   })
 
-  // The rail carries one axis: which section you are in. Governance's
-  // aggregate-view picker moved to PluginGovernanceHeader (the shared
-  // second header tier); rendering it here too would put two axes back in
-  // one column.
   it("never renders the governance sub-views, even on the Governance section", () => {
     usePluginsStore.setState({ activeSection: "governance" })
     render(<PluginNavSidebar />)

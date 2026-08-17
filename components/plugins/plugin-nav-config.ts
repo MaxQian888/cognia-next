@@ -1,8 +1,11 @@
 // Static navigation map for the /plugins 3-pane shell. Mirrors the shape of
 // `components/settings/settings-nav-config.ts` (sections grouped by area,
 // each item carries an i18n label key + lucide icon). The plugin nav is
-// flatter than settings: 4 top-level sections, with Library and Governance
-// exposing nested sub-items.
+// flatter than settings: the rail itself is 4 flat top-level sections.
+// Library's status filters and Governance's aggregate views also live here
+// — not because the rail nests them (it no longer does), but because both
+// lists are static navigation maps and the header's `PluginSectionToolbar`
+// reads them from one place.
 //
 // `featureFlag` lets us hide a section behind a runtime gate without
 // branching the nav-sidebar component — `plugin-nav-sidebar.tsx` filters

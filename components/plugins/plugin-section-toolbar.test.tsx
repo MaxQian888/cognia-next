@@ -128,6 +128,25 @@ describe("PluginSectionToolbar", () => {
     expect(screen.queryByTestId("seg")).not.toBeInTheDocument()
   })
 
+  // `testId` is optional on the segments config, so a section may opt out of
+  // per-item hooks. The items still have to render — leaving the attribute
+  // off must not cost the caller the control.
+  it("renders the segments without per-item test ids when the section omits testId", () => {
+    render(
+      <PluginSectionToolbar
+        segments={{
+          ariaLabel: "Status",
+          items: [{ value: "all", label: "All", count: 40 }],
+          value: "all",
+          onSelect: jest.fn(),
+        }}
+      />
+    )
+    const item = screen.getByRole("radio", { name: /All/ })
+    expect(item).toBeInTheDocument()
+    expect(item).not.toHaveAttribute("data-testid")
+  })
+
   it("renders section tools and the status line when supplied", () => {
     render(
       <PluginSectionToolbar tools={<button type="button">Sort</button>} status={<p>3 of 40</p>} />

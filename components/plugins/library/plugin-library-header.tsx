@@ -25,7 +25,7 @@ import {
 import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
 import { PluginSectionToolbar } from "../plugin-section-toolbar"
 import { PluginActiveFilters } from "./plugin-active-filters"
-import { PluginLibrarySubFilter } from "./plugin-library-sub-filter"
+import { useLibrarySubFilterSegments } from "./plugin-library-sub-filter"
 import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
 
 const SORT_MODES: readonly PluginSortMode[] = ["name", "updated", "usage", "rating"]
@@ -42,6 +42,10 @@ export function PluginLibraryHeader() {
   const setFilters = usePluginsStore((s) => s.setFilters)
   const setFilterSheetOpen = usePluginsStore((s) => s.setFilterSheetOpen)
   const { filtered, totals, loading } = usePlugins()
+  // Library's status axis rides the toolbar's segments slot — the same
+  // control Governance's view picker uses, and no longer a second copy of
+  // the left rail's old sub-items.
+  const segments = useLibrarySubFilterSegments()
   // Only surface the count when the visible set is narrower than the total
   // (or when a search query is active). Hides on the unfiltered "All" view
   // so the header stays tidy when there's nothing to communicate.
@@ -56,6 +60,7 @@ export function PluginLibraryHeader() {
         placeholder: t("searchPlaceholder"),
         testId: "plugin-library-search",
       }}
+      segments={segments}
       tools={
         <>
           <Button
@@ -96,7 +101,6 @@ export function PluginLibraryHeader() {
       }
       status={
         <>
-          <PluginLibrarySubFilter />
           <PluginActiveFilters />
           {showCount && (
             <p

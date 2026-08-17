@@ -15,9 +15,10 @@ jest.mock("../dialogs/plugin-category-sheet", () => ({
     <div data-testid="plugin-category-sheet" className={className} />
   ),
 }))
-jest.mock("./plugin-library-sub-filter", () => ({
-  PluginLibrarySubFilter: () => <div data-testid="plugin-library-sub-filter" />,
-}))
+// `useLibrarySubFilterSegments` is deliberately NOT mocked — it reads the
+// same `usePlugins()` mock below, so letting it run proves the status axis
+// actually reaches the toolbar's segments slot (and that the zero-count
+// rule applies to it) instead of just proving a stub rendered.
 jest.mock("./plugin-library-view-toggle", () => ({
   PluginLibraryViewToggle: () => <div data-testid="plugin-library-view-toggle" />,
 }))
@@ -38,6 +39,7 @@ beforeEach(() => {
   mockUsePlugins.mockReset()
   // Default: not loading, no filtering active (filtered === total).
   mockUsePlugins.mockReturnValue({
+    all: [],
     filtered: [],
     totals: { total: 0, enabled: 0, errored: 0, loading: 0, updateAvailable: 0 },
     loading: false,
@@ -58,10 +60,45 @@ describe("PluginLibraryHeader", () => {
     expect(usePluginsStore.getState().filterSheetOpen).toBe(true)
   })
 
-  it("renders the view toggle and sub-filter controls", () => {
+  it("renders the view toggle", () => {
     render(<PluginLibraryHeader />)
     expect(screen.getByTestId("plugin-library-view-toggle")).toBeInTheDocument()
-    expect(screen.getByTestId("plugin-library-sub-filter")).toBeInTheDocument()
+  })
+
+  // The status axis is a segmented control in the toolbar now, not a chip
+  // row in the status line and not sub-items in the left rail.
+  it("puts the status filters in the toolbar's segments slot", () => {
+    mockUsePlugins.mockReturnValue({
+      all: [
+        { id: "a", status: "enabled", manifest: {} },
+        { id: "b", status: "error", manifest: {} },
+      ],
+      filtered: [],
+      totals: { total: 2, enabled: 1, errored: 1, loading: 0, updateAvailable: 0 },
+      loading: false,
+    })
+    render(<PluginLibraryHeader />)
+    expect(screen.getByTestId("plugin-library-sub-all")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-library-sub-enabled")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-library-sub-errored")).toBeInTheDocument()
+  })
+
+  it("drops the zero-count status segments and keeps the active one", () => {
+    usePluginsStore.setState({
+      filters: {
+        ...usePluginsStore.getState().filters,
+        status: "all",
+        hasUpdate: false,
+        configurable: false,
+      },
+    })
+    // Empty library → every count is 0, so only the derived-active "all"
+    // segment survives `visibleSegments`.
+    render(<PluginLibraryHeader />)
+    expect(screen.getByTestId("plugin-library-sub-all")).toBeInTheDocument()
+    for (const dead of ["enabled", "updates", "configurable", "errored"]) {
+      expect(screen.queryByTestId(`plugin-library-sub-${dead}`)).not.toBeInTheDocument()
+    }
   })
 
   it("renders the first-class Sort control reflecting filters.sort", () => {
@@ -96,6 +133,7 @@ describe("PluginLibraryHeader", () => {
 
   it("hides the result count when filters are inactive (filtered === total)", () => {
     mockUsePlugins.mockReturnValue({
+      all: [],
       filtered: [{ id: "a" }, { id: "b" }],
       totals: { total: 2, enabled: 2, errored: 0, loading: 0, updateAvailable: 0 },
       loading: false,
@@ -106,6 +144,7 @@ describe("PluginLibraryHeader", () => {
 
   it("renders 'X of Y plugins' when filtering reduces visible rows", () => {
     mockUsePlugins.mockReturnValue({
+      all: [],
       filtered: [{ id: "a" }],
       totals: { total: 3, enabled: 1, errored: 0, loading: 0, updateAvailable: 0 },
       loading: false,
@@ -120,6 +159,7 @@ describe("PluginLibraryHeader", () => {
 
   it("renders the no-match message when filters yield zero results", () => {
     mockUsePlugins.mockReturnValue({
+      all: [],
       filtered: [],
       totals: { total: 5, enabled: 0, errored: 0, loading: 0, updateAvailable: 0 },
       loading: false,
@@ -132,6 +172,7 @@ describe("PluginLibraryHeader", () => {
 
   it("hides the result count during loading even if filtered.length differs", () => {
     mockUsePlugins.mockReturnValue({
+      all: [],
       filtered: [],
       totals: { total: 0, enabled: 0, errored: 0, loading: 0, updateAvailable: 0 },
       loading: true,

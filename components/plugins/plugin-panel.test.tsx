@@ -9,6 +9,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
+    if (vars && typeof vars.message === "string") return `${key}:${vars.message}`
     return key
   },
 }))

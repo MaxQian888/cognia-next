@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { renderHook, act } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -40,7 +40,7 @@ jest.mock("@/hooks/plugins", () => ({
 }))
 
 import { usePluginsStore } from "@/stores/plugins"
-import { PluginLibrarySubFilter, deriveActiveSubFilter } from "./plugin-library-sub-filter"
+import { useLibrarySubFilterSegments, deriveActiveSubFilter } from "./plugin-library-sub-filter"
 
 function makePlugin(overrides: Partial<PluginRow> = {}): PluginRow {
   return {
@@ -61,33 +61,74 @@ function makePlugin(overrides: Partial<PluginRow> = {}): PluginRow {
 }
 
 beforeEach(() => {
-  usePluginsStore.setState({ librarySubFilter: "all" })
+  usePluginsStore.setState({
+    librarySubFilter: "all",
+    filters: {
+      ...usePluginsStore.getState().filters,
+      status: "all",
+      hasUpdate: false,
+      configurable: false,
+    },
+  })
 })
 
-describe("PluginLibrarySubFilter", () => {
-  it("renders all 5 chip values from the config", () => {
-    render(<PluginLibrarySubFilter />)
-    for (const label of ["all", "enabled", "updates", "configurable", "errored"]) {
-      expect(screen.getByText(label)).toBeInTheDocument()
+describe("useLibrarySubFilterSegments", () => {
+  it("emits all 5 segments in config order", () => {
+    const { result } = renderHook(() => useLibrarySubFilterSegments())
+    expect(result.current.items.map((s) => s.value)).toEqual([
+      "all",
+      "enabled",
+      "updates",
+      "configurable",
+      "errored",
+    ])
+  })
+
+  it("attaches the live count to every segment", () => {
+    const { result } = renderHook(() => useLibrarySubFilterSegments())
+    const counts = Object.fromEntries(result.current.items.map((s) => [s.value, s.count]))
+    // Fixture: 2 enabled, 1 with updateAvailable, 1 with configSchema, 1 errored.
+    expect(counts).toEqual({ all: 4, enabled: 2, updates: 1, configurable: 1, errored: 1 })
+  })
+
+  // Counts are what let `visibleSegments` drop the dead filters, so a
+  // segment arriving without one would silently make it unhideable.
+  it("never emits an undefined count (the zero-count rule reads them)", () => {
+    const { result } = renderHook(() => useLibrarySubFilterSegments())
+    for (const segment of result.current.items) {
+      expect(typeof segment.count).toBe("number")
     }
   })
 
-  it("renders the live counts for each sub-filter", () => {
-    render(<PluginLibrarySubFilter />)
-    expect(screen.getByText("4")).toBeInTheDocument() // total
-    // Two enabled rows
-    const enabledCount = screen.getAllByText("2")
-    expect(enabledCount.length).toBeGreaterThan(0)
-    // One row with updateAvailable, one with configSchema, one with error
-    const onePeerCount = screen.getAllByText("1")
-    expect(onePeerCount.length).toBeGreaterThanOrEqual(3)
-  })
-
-  it("clicking a chip updates the store + filters", () => {
-    render(<PluginLibrarySubFilter />)
-    fireEvent.click(screen.getByText("configurable"))
+  it("onSelect writes both the sub-filter and the derived filters", () => {
+    const { result } = renderHook(() => useLibrarySubFilterSegments())
+    act(() => result.current.onSelect("configurable"))
     expect(usePluginsStore.getState().librarySubFilter).toBe("configurable")
     expect(usePluginsStore.getState().filters.configurable).toBe(true)
+  })
+
+  // The active value comes from `filters`, never from `librarySubFilter` —
+  // so the filter sheet moving an axis directly still lights the segment.
+  it("derives the active value from filters, not from the stored sub-filter", () => {
+    usePluginsStore.setState({
+      librarySubFilter: "all",
+      filters: { ...usePluginsStore.getState().filters, hasUpdate: true },
+    })
+    const { result } = renderHook(() => useLibrarySubFilterSegments())
+    expect(result.current.value).toBe("updates")
+  })
+
+  it("emits an empty active value for a custom sheet status so nothing is falsely lit", () => {
+    usePluginsStore.setState({
+      filters: { ...usePluginsStore.getState().filters, status: "disabled" },
+    })
+    const { result } = renderHook(() => useLibrarySubFilterSegments())
+    expect(result.current.value).toBe("")
+  })
+
+  it("labels the group with the Library section name", () => {
+    const { result } = renderHook(() => useLibrarySubFilterSegments())
+    expect(result.current.ariaLabel).toBe("library")
   })
 })
 
