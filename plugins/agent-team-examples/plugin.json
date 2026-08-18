@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Reference subagents and team templates demonstrating Agent Team plugin extensibility (ADR-0032).",
   "type": "frontend",
-  "capabilities": ["subagent", "agent-team-template", "shared-memory-adapter"],
+  "capabilities": ["subagent", "agent-team-template", "shared-memory-adapter", "balance-adapter"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",

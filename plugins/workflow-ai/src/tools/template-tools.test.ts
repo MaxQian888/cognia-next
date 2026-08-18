@@ -15,6 +15,34 @@ import type { PluginTool, PluginToolContext } from "@/types/plugin"
 import { buildTemplateTools, templateToProposalOps } from "./template-tools"
 import { getCopilotTemplate, listCopilotTemplates } from "@/lib/workflow/copilot-templates"
 
+/**
+ * The template these mechanics tests drive. Any registered template works —
+ * they assert `templateToProposalOps` behaviour, not template content — but it
+ * must exist, so resolve it loudly. (`github-pr` was removed in
+ * f478448874 "align runtime nodes and triggers"; this suite was the consumer
+ * that commit missed.)
+ */
+const TEMPLATE_ID = "cron-report"
+/** A required slot on TEMPLATE_ID that carries no defaultValue. */
+const REQUIRED_SLOT = "sourceUrl"
+const SLOTS = {
+  cronExpression: "0 9 * * 1-5",
+  sourceUrl: "https://example.com/api/feed",
+  adapterId: "telegram_main",
+  conversationKey: "ops",
+}
+
+function template(id: string = TEMPLATE_ID) {
+  const found = getCopilotTemplate(id)
+  if (!found) {
+    throw new Error(
+      `Copilot template "${id}" is not registered — update TEMPLATE_ID/REQUIRED_SLOT ` +
+        `in this suite to a template from lib/workflow/copilot-templates/index.ts.`
+    )
+  }
+  return found
+}
+
 function workflow(id: string): VisualWorkflow {
   return {
     id,
@@ -54,13 +82,7 @@ beforeEach(() => {
 
 describe("templateToProposalOps", () => {
   it("rebrands ids and emits add_node + connect_edge in stable order", () => {
-    const template = getCopilotTemplate("github-pr")!
-    const wf = template.build({
-      repoFullName: "acme/widgets",
-      labelName: "auto-fix",
-      baseBranch: "main",
-      webhookPath: "github",
-    })
+    const wf = template().build(SLOTS)
     let counter = 0
     const { ops, idMap } = templateToProposalOps(
       wf,
@@ -85,12 +107,12 @@ describe("templateToProposalOps", () => {
   })
 
   it("avoids id collisions with the existing graph", () => {
-    const template = getCopilotTemplate("github-pr")!
-    const wf = template.build({ repoFullName: "acme/widgets" })
+    const wf = template().build(SLOTS)
     let counter = 0
-    // Pre-reserve a couple of names that the sanitizer would normally produce.
+    // Pre-reserve a couple of names that the sanitizer would normally produce
+    // for this template's first two nodes (`n_cron` / `n_fetch`).
     const existing = {
-      nodeIds: new Set<string>(["n_n_trigger_t0", "n_n_extract_t0"]),
+      nodeIds: new Set<string>(["n_n_cron_t0", "n_n_fetch_t0"]),
       edgeIds: new Set<string>(),
     }
     const { ops } = templateToProposalOps(wf, existing, () => `t${counter++}`)
@@ -100,8 +122,7 @@ describe("templateToProposalOps", () => {
   })
 
   it("preserves every template node typeVersion in its proposal op", () => {
-    const template = getCopilotTemplate("github-pr")!
-    const wf = template.build({ repoFullName: "acme/widgets" })
+    const wf = template().build(SLOTS)
     wf.nodes[0] = { ...wf.nodes[0], typeVersion: 7 }
 
     let counter = 0
@@ -126,10 +147,10 @@ describe("wf_list_templates tool", () => {
     expect(result.ok).toBe(true)
     const ids = result.templates.map((t) => t.id)
     expect(ids).toEqual(listCopilotTemplates().map((t) => t.id))
-    // GitHub PR template's required slot must surface.
-    const gh = result.templates.find((t) => t.id === "github-pr")
-    expect(gh).toBeDefined()
-    expect(gh!.slots.some((s) => s.key === "repoFullName" && s.required)).toBe(true)
+    // The driven template's required slot must surface.
+    const listed = result.templates.find((t) => t.id === TEMPLATE_ID)
+    expect(listed).toBeDefined()
+    expect(listed!.slots.some((s) => s.key === REQUIRED_SLOT && s.required)).toBe(true)
   })
 })
 
@@ -140,8 +161,8 @@ describe("wf_apply_template tool", () => {
     const result = (await tool.execute(
       {
         workflowId: "wf_a",
-        templateId: "github-pr",
-        slots: { repoFullName: "acme/widgets" },
+        templateId: TEMPLATE_ID,
+        slots: SLOTS,
       },
       EMPTY_CTX
     )) as {
@@ -165,14 +186,14 @@ describe("wf_apply_template tool", () => {
     const result = (await tool.execute(
       {
         workflowId: "wf_a",
-        templateId: "github-pr",
+        templateId: TEMPLATE_ID,
         slots: {},
       },
       EMPTY_CTX
     )) as { ok: false; error: { code: string; detail?: { missing: string[] } } }
     expect(result.ok).toBe(false)
     expect(result.error.code).toBe("missing-required-slot")
-    expect(result.error.detail?.missing).toContain("repoFullName")
+    expect(result.error.detail?.missing).toContain(REQUIRED_SLOT)
   })
 
   it("surfaces unknown-template for an unregistered id", async () => {
@@ -191,8 +212,8 @@ describe("wf_apply_template tool", () => {
     const result = (await tool.execute(
       {
         workflowId: "wf_missing",
-        templateId: "github-pr",
-        slots: { repoFullName: "acme/widgets" },
+        templateId: TEMPLATE_ID,
+        slots: SLOTS,
       },
       EMPTY_CTX
     )) as { ok: false; error: { code: string } }

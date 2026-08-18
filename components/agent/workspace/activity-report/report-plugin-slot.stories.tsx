@@ -1,12 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { ReportPluginSlot, PluginReportSlotPlaceholder } from "./report-plugin-slot"
-import { buildReport, buildTeam } from "@/lib/storybook/fixtures/agent-team"
+import { buildReport } from "@/lib/storybook/fixtures/agent-team"
 
 const meta = {
   title: "Agent/Workspace/ActivityReport/ReportPluginSlot",
   component: ReportPluginSlot,
-  args: { report: buildReport(), team: buildTeam() },
+  args: { report: buildReport() },
 } satisfies Meta<typeof ReportPluginSlot>
 
 export default meta

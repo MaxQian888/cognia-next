@@ -14,11 +14,10 @@ import { useTranslations } from "next-intl"
 
 import { Card } from "@/components/ui/card"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
-import type { AgentTeam, TeamExecutionReport } from "@/types/agent/agent-team"
+import type { TeamExecutionReport } from "@/types/agent/agent-team"
 
 export interface ReportPluginSlotProps {
   report: TeamExecutionReport
-  team: AgentTeam
 }
 
 export function PluginReportSlotPlaceholder() {

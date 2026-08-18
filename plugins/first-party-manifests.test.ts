@@ -82,6 +82,7 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
     "field_missing:subagent",
     "field_missing:agent-team-template",
     "field_missing:shared-memory-adapter",
+    "field_missing:balance-adapter",
   ],
   // `commands` is DECLARED now (manifest.commands[] + hooks.onCommand);
   // `field_missing:commands` is therefore gone.

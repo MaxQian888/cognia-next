@@ -1,6 +1,5 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { getDb } from "@/lib/db/schema"
 import { createWorkflow } from "@/lib/db/workflows"
 import { buildRunByNameTools } from "./run-by-name-tools"
 
@@ -35,12 +34,17 @@ const ctx = (sessionId?: string) => ({
   config: {},
 })
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+// Shared fixture rather than a per-test delete()+reopen — it snapshots and
+// restores instead of tearing the Dexie database down, and it binds
+// `jest.setTimeout(30_000)`. Without that, this suite inherited Jest 30's 5s
+// hook default and its `beforeEach` DB open intermittently timed out under
+// full-batch contention. Matches run-typed-tools.test.ts and
+// lib/workflow/runtime/execution-authority.test.ts.
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("wf_list_workflows", () => {
   it("returns id + name + description for every workflow up to limit", async () => {

@@ -44,6 +44,11 @@ const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze(
   "cognia-character-seeds": "Copy-paste character-pack template for plugin authors (ADR-0030).",
   "cognia-impeccable":
     "Installable desktop skill bundle — discovered from the on-disk plugin directory and deliberately blocked in browser/mobile shells.",
+  // Present in `browserBuiltins` but filtered out of the effective registry by
+  // `isBrowserBuiltinAvailable` unless NEXT_PUBLIC_E2E=1 — so it is out of the
+  // DEFAULT registry, which is what this list curates. Do not "wire it up".
+  "ui-surface-reference":
+    "E2E-only fixture exercising every plugin UI surface — gated behind NEXT_PUBLIC_E2E by `isBrowserBuiltinAvailable` so it never reaches a user shell; drives tests/e2e/plugin-ui-surfaces.spec.ts. ADR-0126 cites it as the E2E-only-fixture precedent; the gating itself is pinned by lib/plugin/core/browser-builtin-registry.test.ts.",
 })
 
 /** Walk `plugins/` and return every direct child that owns a plugin.json. */

@@ -112,7 +112,7 @@ export function AgentTeamActivity({
           <ReportKpiCards report={report} />
           <ReportTaskline report={report} teammates={teammates} />
           <ReportTokenBurn report={report} />
-          {team ? <ReportPluginSlot report={report} team={team} /> : null}
+          <ReportPluginSlot report={report} />
           <Collapsible className="group/collapsible rounded-md border px-3 py-2">
             <CollapsibleTrigger asChild>
               <Button variant="ghost" className="h-auto w-full justify-between px-0 py-1 text-xs">

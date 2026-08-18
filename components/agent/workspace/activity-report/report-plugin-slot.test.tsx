@@ -23,7 +23,7 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
 }))
 
 import { ReportPluginSlot } from "./report-plugin-slot"
-import type { AgentTeam, TeamExecutionReport } from "@/types/agent/agent-team"
+import type { TeamExecutionReport } from "@/types/agent/agent-team"
 
 const baseReport = {
   id: "r1",
@@ -51,7 +51,7 @@ describe("ReportPluginSlot", () => {
         nextActions: [],
       },
     } as TeamExecutionReport
-    render(<ReportPluginSlot report={report} team={{ id: "t1" } as AgentTeam} />)
+    render(<ReportPluginSlot report={report} />)
     const slot = screen.getByTestId("slot-agent.team.report")
     const ctx = JSON.parse(slot.getAttribute("data-context") ?? "{}")
     expect(ctx).toMatchObject({
@@ -65,7 +65,7 @@ describe("ReportPluginSlot", () => {
   })
 
   it("renders the placeholder fallback when no analytics renderer is registered", () => {
-    render(<ReportPluginSlot report={baseReport} team={{ id: "t1" } as AgentTeam} />)
+    render(<ReportPluginSlot report={baseReport} />)
     expect(screen.getByTestId("report-plugin-slot-placeholder")).toBeInTheDocument()
   })
 })

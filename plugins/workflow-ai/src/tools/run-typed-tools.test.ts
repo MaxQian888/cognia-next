@@ -1,18 +1,27 @@
-/** @jest-environment jsdom */
-import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow } from "@/lib/db/workflows"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 import { buildRunTypedTools } from "./run-typed-tools"
 
 const tool = buildRunTypedTools().find((t) => t.name === "wf_run_workflow_typed")!
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+// Use the shared fixture rather than a per-test delete()+reopen. This suite is
+// the only one in this directory that drives a REAL run through
+// `executeDeployedWorkflow`, and tearing the Dexie database down underneath it
+// aborted the admission transaction (TransactionInactiveError). The fixture
+// snapshots and restores instead, holding one connection open for the whole
+// file — the same setup `lib/workflow/runtime/execution-authority.test.ts`
+// uses to drive the same executor.
+//
+// The fixture also owns the Dexie runtime (`__enableDbRuntimeForTesting`), so
+// this file runs in the default node env: the `@jest-environment jsdom`
+// docblock the old hand-rolled setup needed is gone. Both halves are load
+// bearing — keeping the docblock with the fixture fails the whole suite.
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 const inputSchema = {
   type: "object",
