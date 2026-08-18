@@ -5,7 +5,11 @@ use std::collections::HashSet;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Map, Value};
 
-use crate::engine::contract::AUTHORING_CATALOG_JSON;
+use crate::engine::contract::{
+    AUTHORING_CATALOG_JSON, CONTRACT_VERSION, GATEWAY_CLIENT_VERSION,
+    MINIMUM_GATEWAY_CLIENT_VERSION, MINIMUM_SDK_VERSION, PROTOCOL_VERSION, SDK_VERSION,
+    VALID_ERROR_CODES,
+};
 use crate::shared::JsonFailureExit;
 use crate::ui::RuntimeUi;
 
@@ -64,6 +68,12 @@ fn build_report(catalog: &Value, filters: ContractFilters) -> std::result::Resul
     let all_permissions = string_array(catalog, "permissions")?;
     let all_path_fields = object_array(catalog, "pathFields")?;
     let all_plugin_points = object_array(catalog, "pluginPoints")?;
+    let legacy_adapter = catalog
+        .get("protocol")
+        .and_then(Value::as_object)
+        .and_then(|protocol| protocol.get("legacyAdapter"))
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "catalog.protocol.legacyAdapter must be a boolean".to_string())?;
     let all_runtime_entries = catalog
         .get("runtimeEntries")
         .and_then(Value::as_object)
@@ -197,6 +207,7 @@ fn build_report(catalog: &Value, filters: ContractFilters) -> std::result::Resul
         "runtimeEntries": all_runtime_entries.len(),
         "pathFields": all_path_fields.len(),
         "pluginPoints": all_plugin_points.len(),
+        "errorCodes": VALID_ERROR_CODES.len(),
     });
     let selection_counts = json!({
         "pluginTypes": selected_plugin_types.len(),
@@ -206,6 +217,7 @@ fn build_report(catalog: &Value, filters: ContractFilters) -> std::result::Resul
         "runtimeEntries": selected_runtime_entries.len(),
         "pathFields": all_path_fields.len(),
         "pluginPoints": selected_plugin_points.len(),
+        "errorCodes": VALID_ERROR_CODES.len(),
     });
 
     Ok(json!({
@@ -215,6 +227,15 @@ fn build_report(catalog: &Value, filters: ContractFilters) -> std::result::Resul
         "catalogSchemaVersion": catalog.get("schemaVersion").cloned().unwrap_or(Value::Null),
         "pluginPointSchemaVersion": catalog.get("pluginPointSchemaVersion").cloned().unwrap_or(Value::Null),
         "minimumHostVersion": catalog.get("minimumHostVersion").cloned().unwrap_or(Value::Null),
+        "contractVersion": CONTRACT_VERSION,
+        "protocol": {
+            "version": PROTOCOL_VERSION,
+            "sdkVersion": SDK_VERSION,
+            "minimumSdkVersion": MINIMUM_SDK_VERSION,
+            "gatewayClientVersion": GATEWAY_CLIENT_VERSION,
+            "minimumGatewayClientVersion": MINIMUM_GATEWAY_CLIENT_VERSION,
+            "legacyAdapter": legacy_adapter,
+        },
         "filters": {
             "capabilities": capability_filters,
             "manifestContributions": contribution_filters,
@@ -232,6 +253,7 @@ fn build_report(catalog: &Value, filters: ContractFilters) -> std::result::Resul
         "runtimeEntries": selected_runtime_entries,
         "pathFields": all_path_fields,
         "pluginPoints": selected_plugin_points,
+        "errorCodes": VALID_ERROR_CODES,
     }))
 }
 
@@ -297,9 +319,19 @@ fn validate_filters<'a>(
 
 fn print_human(report: &Value) {
     println!(
-        "Cognia plugin contract (catalog schema {}, minimum host {})",
-        report["catalogSchemaVersion"], report["minimumHostVersion"]
+        "Cognia plugin contract {} (catalog schema {}, minimum host {})",
+        report["contractVersion"], report["catalogSchemaVersion"], report["minimumHostVersion"]
     );
+    println!(
+        "Protocol: {} (SDK {}+, gateway client {}+; current SDK {}, current gateway client {}; legacy adapter {})",
+        report["protocol"]["version"],
+        report["protocol"]["minimumSdkVersion"],
+        report["protocol"]["minimumGatewayClientVersion"],
+        report["protocol"]["sdkVersion"],
+        report["protocol"]["gatewayClientVersion"],
+        report["protocol"]["legacyAdapter"],
+    );
+    print_array("Adapter error codes", &report["errorCodes"]);
     print_array("Plugin types", &report["pluginTypes"]);
     print_array("Capabilities", &report["capabilities"]);
     print_array("Manifest contributions", &report["manifestContributions"]);
@@ -347,6 +379,33 @@ mod tests {
         assert_eq!(report["runtimeEntries"], catalog["runtimeEntries"]);
         assert_eq!(report["pathFields"], catalog["pathFields"]);
         assert_eq!(report["pluginPoints"], catalog["pluginPoints"]);
+    }
+
+    #[test]
+    fn report_exposes_generated_version_and_error_contracts() {
+        let report = build_report(&catalog(), ContractFilters::default()).unwrap();
+
+        assert_eq!(report["contractVersion"], CONTRACT_VERSION);
+        assert_eq!(report["protocol"]["version"], PROTOCOL_VERSION);
+        assert_eq!(report["protocol"]["sdkVersion"], SDK_VERSION);
+        assert_eq!(report["protocol"]["minimumSdkVersion"], MINIMUM_SDK_VERSION);
+        assert_eq!(
+            report["protocol"]["gatewayClientVersion"],
+            GATEWAY_CLIENT_VERSION
+        );
+        assert_eq!(
+            report["protocol"]["minimumGatewayClientVersion"],
+            MINIMUM_GATEWAY_CLIENT_VERSION
+        );
+        assert_eq!(report["errorCodes"], json!(VALID_ERROR_CODES));
+        assert_eq!(
+            report["catalogCounts"]["errorCodes"],
+            VALID_ERROR_CODES.len()
+        );
+        assert_eq!(
+            report["selectionCounts"]["errorCodes"],
+            VALID_ERROR_CODES.len()
+        );
     }
 
     #[test]

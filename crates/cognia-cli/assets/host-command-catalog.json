@@ -5997,6 +5997,15 @@
         "properties": {
           "draftId": {
             "type": "string"
+          },
+          "segments": {
+            "type": "array",
+            "description": "Edited segments replacing the draft's own (ADR-0131 — the phone's draft editor sends what the operator actually approved).",
+            "items": {
+              "type": "object",
+              "additionalProperties": {},
+              "example": {}
+            }
           }
         },
         "additionalProperties": false
@@ -6012,6 +6021,99 @@
           "null"
         ],
         "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connector_enqueue_outbound",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "connector_enqueue_outbound (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Relay a human-authored reply into a platform conversation (ADR-0131). The host replays idempotently on `request.metadata.idempotencyKey`.",
+        "required": [
+          "adapterId",
+          "conversationKey",
+          "sessionId",
+          "clientMessageId",
+          "request"
+        ],
+        "properties": {
+          "adapterId": {
+            "type": "string"
+          },
+          "conversationKey": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "clientMessageId": {
+            "type": "string",
+            "description": "Client-minted id for the local `messages` row; the host reuses it so the optimistic mirror and the authoritative row converge."
+          },
+          "request": {
+            "type": "object",
+            "required": [
+              "conversationRef",
+              "segments",
+              "metadata"
+            ],
+            "properties": {
+              "conversationRef": {
+                "type": "object",
+                "additionalProperties": {},
+                "example": {}
+              },
+              "segments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "example": {}
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "required": [
+                  "idempotencyKey"
+                ],
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "replyTo": {
+                "type": "object",
+                "additionalProperties": {},
+                "example": {}
+              },
+              "threadId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "connectors"
       },
       "outputTyped": true
@@ -6291,6 +6393,86 @@
         "additionalProperties": true,
         "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_discord_upload",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_discord_upload (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "botToken",
+          "channelId",
+          "files"
+        ],
+        "properties": {
+          "botToken": {
+            "type": "string"
+          },
+          "channelId": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "sourceUrl",
+                "filename"
+              ],
+              "properties": {
+                "sourceUrl": {
+                  "type": "string"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "durationSecs": {
+                  "type": "number"
+                },
+                "waveform": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "replyToMessageId": {
+            "type": "string"
+          },
+          "flags": {
+            "type": "integer"
+          },
+          "nonce": {
+            "type": "string",
+            "description": "Deterministic dedupe nonce (≤25 chars); Discord returns the already-created message on a retry."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -7521,6 +7703,47 @@
       "outputTyped": true
     },
     {
+      "name": "connectors_onebot_probe",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
+      "summary": "connectors_onebot_probe (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "description": "Reverse-WS OneBot clients currently dialed in to the in-app server.",
+        "items": {
+          "type": "object",
+          "required": [
+            "adapterId",
+            "connectedAtMs"
+          ],
+          "properties": {
+            "adapterId": {
+              "type": "string"
+            },
+            "connectedAtMs": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "outputTyped": true
+    },
+    {
       "name": "connectors_onebot_send",
       "category": "connectors",
       "resource": "connectors",
@@ -8079,17 +8302,56 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "input"
-        ],
-        "properties": {
-          "input": {
+        "description": "Legacy `{ input }` upsert, or an ADR-0131 `{ mutation }` envelope the host applies with full audit + assignment-trail semantics.",
+        "oneOf": [
+          {
             "type": "object",
-            "additionalProperties": {},
-            "example": {}
+            "required": [
+              "input"
+            ],
+            "properties": {
+              "input": {
+                "type": "object",
+                "additionalProperties": {},
+                "example": {}
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "mutation"
+            ],
+            "properties": {
+              "mutation": {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "upsert",
+                      "patch",
+                      "configSection",
+                      "setStatus",
+                      "setAssignee",
+                      "addLabel",
+                      "removeLabel",
+                      "setPinned",
+                      "setArchived",
+                      "delete"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
@@ -28884,5 +29146,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "07bc09ba3a6849d7a0e2f99f88c75ad930b80185b496ab3b577a0684f76efec1"
+  "catalogHash": "b861d199d72663ec5e65b2423d1aacfbea1d653624070200f454daad2a908b5f"
 }

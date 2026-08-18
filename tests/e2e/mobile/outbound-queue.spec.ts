@@ -19,9 +19,17 @@
  * The command list MUST stay in lockstep with
  * `lib/db/mobile-outbound-types.ts:MOBILE_OUTBOUND_COMMANDS` — drift here
  * silently passes the spec while production commands rot. The
- * `outbound-queue-spec-parity` unit test pins both sides, and the mock 404s
- * commands outside that list (mirroring the Rust dispatcher), so a rotten
- * kind fails assertion 1.
+ * `lib/db/mobile-outbound-types.test.ts` parity suite pins both sides, and
+ * the mock 404s commands outside that list (mirroring the Rust dispatcher),
+ * so a rotten kind fails assertion 1.
+ *
+ * Deliberate gaps are enumerated (with a reason) in that suite's
+ * `E2E_GENERIC_DRAIN_EXCLUSIONS` — currently only `host_state_submit`, whose
+ * `protocol: "host-state-v1"` rows need a negotiated HostState host operation
+ * plus an actionId-echoing `HostStateSubmitResponseV1` receipt and therefore
+ * cannot run through the generic `{ e2e: true }` → `{}` → "sent" loop below.
+ * Adding a kind here that the parity suite excludes fails that suite until
+ * the exclusion is removed.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
@@ -39,6 +47,9 @@ const COMMAND_KINDS = [
   "connector_send",
   "connector_approve_draft",
   "connector_reject_draft",
+  // ADR-0131 inbox relay
+  "connector_enqueue_outbound",
+  "conversation_overrides_update",
   // Workflow subsystem
   "workflow_trigger_manual",
   "workflow_delete",
@@ -62,6 +73,9 @@ const COMMAND_KINDS = [
   "memory_forget",
   // External agents (ADR-0056, Wave 4)
   "external_agent_update",
+  // NOTE: `host_state_submit` (HostStateProtocolV1) is intentionally absent —
+  // see the header comment and `E2E_GENERIC_DRAIN_EXCLUSIONS` in
+  // lib/db/mobile-outbound-types.test.ts.
 ] as const
 
 function mockV2BaseUrl(): string {
