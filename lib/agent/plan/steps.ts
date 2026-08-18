@@ -8,6 +8,27 @@
 import type { AgentPlan, CreatePlanStepInput, PlanStep, PlanStepStatus } from "@/types/agent/plan"
 import { computePlanCounts } from "@/types/agent/plan"
 
+/** Max characters kept from a step title (Dexie row hygiene + card layout). */
+export const MAX_PLAN_STEP_TITLE_LEN = 200
+
+/**
+ * Turn an ordered list of titles into a linear `agent_turn` chain: step *i*
+ * depends on step *i-1*, titles clamped to {@link MAX_PLAN_STEP_TITLE_LEN}.
+ *
+ * Every plan producer that has only prose to work with — the ExitPlanMode
+ * capture, the planner LLM, the goal projection, the `/plan new` command, the
+ * composer dialog, an inline approval-card edit, and a refinement — needs
+ * exactly this shape. It lived inline in all seven, so a change to the chain
+ * (or the clamp) had to be made seven times to stay consistent.
+ */
+export function linearAgentTurnSteps(titles: readonly string[]): CreatePlanStepInput[] {
+  return titles.map((title, i) => ({
+    title: title.slice(0, MAX_PLAN_STEP_TITLE_LEN),
+    kind: "agent_turn" as const,
+    ...(i > 0 ? { dependsOn: [i - 1] } : {}),
+  }))
+}
+
 /**
  * Materialise creation inputs into full steps: assign stable ids, resolve
  * `dependsOn` index references into dependency ids (dropping self-refs and

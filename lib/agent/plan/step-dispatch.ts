@@ -18,6 +18,7 @@ import type { StepExecutionResult, TriggerEvent } from "@/types/workflow/visual"
 import type { PlanStep } from "@/types/agent/plan"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 import type { PlanRunContext } from "./plan-run-context"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 
 /** The approval-bus scope plan `approval_gate` steps wait on. */
 export const PLAN_APPROVAL_SCOPE = "agent-plan"
@@ -76,7 +77,32 @@ async function runStepWork(
 
     case "approval_gate": {
       const { waitForDecision } = await import("@/lib/runtime/approval-bus")
-      const decision = await waitForDecision(planApprovalKey(runCtx.planId, step.id), signal)
+      const key = planApprovalKey(runCtx.planId, step.id)
+      // Register the gate BEFORE blocking: `GateModalsHost` (app-root mounted)
+      // renders one dialog per store entry, and that dialog is the only thing
+      // that can resolve this waiter. Without the registration the step would
+      // block until the run's 24h timeout — a built-but-unanswerable gate.
+      const gates = usePendingGatesStore.getState()
+      gates.open({
+        key,
+        gateType: "plan_step",
+        title: step.title,
+        ...(step.params?.kind === "approval_gate" && step.params.prompt
+          ? { body: step.params.prompt }
+          : step.description
+            ? { body: step.description }
+            : {}),
+        planId: runCtx.planId,
+        ...(runCtx.plan.sessionId ? { sessionId: runCtx.plan.sessionId } : {}),
+      })
+      let decision
+      try {
+        decision = await waitForDecision(key, signal)
+      } finally {
+        // Abort (pause / cancel), reject, or approve — the entry must go, or a
+        // stale dialog outlives the run.
+        usePendingGatesStore.getState().close(key)
+      }
       if (decision.outcome === "reject") {
         throw nonRetryable(
           `plan approval gate rejected${decision.feedback ? `: ${decision.feedback}` : ""}`

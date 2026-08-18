@@ -4,6 +4,7 @@
 
 import { render, screen } from "@testing-library/react"
 import { PlanTrackerPanel } from "./plan-tracker-panel"
+import { useSettingsStore } from "@/stores/settings"
 import type { AgentPlan, PlanStep } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 
@@ -92,5 +93,38 @@ describe("PlanTrackerPanel", () => {
     for (const s of statuses) {
       expect(screen.getByText(`step ${s}`)).toBeInTheDocument()
     }
+  })
+})
+
+// ADR-0045: the visual preset is a property of how this user reads plans, so
+// the live tracker follows the same setting the approval editor does — before
+// this it was hard-coded and the preset only reached the approval iframe.
+describe("presentation presets", () => {
+  it("falls back to the default preset", () => {
+    render(<PlanTrackerPanel plan={plan()} />)
+    expect(screen.getByTestId("plan-tracker-steps")).toHaveAttribute("data-style", "default")
+  })
+
+  it("honours an explicit preset override", () => {
+    render(<PlanTrackerPanel plan={plan()} styleVariant="timeline" />)
+    expect(screen.getByTestId("plan-tracker-steps")).toHaveAttribute("data-style", "timeline")
+  })
+
+  it("reads the persisted preset from settings", () => {
+    useSettingsStore.setState({
+      settings: { id: "singleton", planSettings: { interactiveHtmlStyle: "cards" } },
+    } as never)
+    render(<PlanTrackerPanel plan={plan()} />)
+    expect(screen.getByTestId("plan-tracker-steps")).toHaveAttribute("data-style", "cards")
+    useSettingsStore.setState({ settings: null } as never)
+  })
+
+  it("coerces a junk persisted value instead of rendering an unknown style", () => {
+    useSettingsStore.setState({
+      settings: { id: "singleton", planSettings: { interactiveHtmlStyle: "hologram" } },
+    } as never)
+    render(<PlanTrackerPanel plan={plan()} />)
+    expect(screen.getByTestId("plan-tracker-steps")).toHaveAttribute("data-style", "default")
+    useSettingsStore.setState({ settings: null } as never)
   })
 })

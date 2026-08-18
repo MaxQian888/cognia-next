@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { InspectRow } from "@/components/scheduler/details/_shared/inspect-row"
+import { PlanTrackerPanel } from "@/components/agent/plan/plan-tracker-panel"
+import { usePlanById } from "@/hooks/agent/use-session-plan"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { useAgentRuns } from "@/hooks/agent-runs/use-agent-runs"
 import { useAgentRunActions } from "@/hooks/agent-runs/use-agent-run-actions"
@@ -142,6 +144,18 @@ export function AgentRunsPanel({
   )
 }
 
+/**
+ * Live step tracker for a plan run. Renders nothing for other run kinds, or
+ * while the plan row has not loaded — the surrounding detail pane stays useful
+ * either way.
+ */
+function PlanRunSteps({ run }: { run: AgentRun }) {
+  const planId = run.kind === "plan" ? (run.origin.planId ?? run.origin.nativeId) : undefined
+  const plan = usePlanById(planId)
+  if (!plan) return null
+  return <PlanTrackerPanel plan={plan} />
+}
+
 function AgentRunDetail({
   run,
   actions,
@@ -180,6 +194,12 @@ function AgentRunDetail({
         )}
         {run.error && <InspectRow label={t("detail.error")} value={run.error.message} />}
       </div>
+
+      {/* A plan run's steps are the run. Without this the detail pane showed a
+          percentage for a plan started headlessly (scheduler / workflow node /
+          external bridge) and the step list was reachable only from the chat
+          session that happened to own it. */}
+      <PlanRunSteps run={run} />
 
       <div className="flex flex-wrap gap-2">
         {actions.canPause(run) && (

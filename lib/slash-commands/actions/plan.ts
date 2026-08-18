@@ -31,6 +31,7 @@ import {
   teamTaskInputsFromPlan,
 } from "@/lib/agent/plan/projections"
 import { decomposeIntoPlan } from "@/lib/agent/plan/planner"
+import { linearAgentTurnSteps } from "@/lib/agent/plan/steps"
 import { buildAgentRoleLlmClient } from "@/lib/ai/generation/agent-role-client"
 import { redactText } from "@cognia/redact"
 import { ensureSoloTeam, soloTeamId } from "@/lib/agent/plan-mode-bridge"
@@ -38,8 +39,7 @@ import { getGoalRuntime } from "@/lib/goal/runtime"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentPlan, CreatePlanInput, CreatePlanStepInput } from "@/types/agent/plan"
 
-/** Max characters kept from a hand-authored step / plan title. */
-const MAX_TITLE_LEN = 200
+/** Max characters kept from a hand-authored plan title (steps clamp in `linearAgentTurnSteps`). */
 const MAX_PLAN_TITLE_LEN = 120
 
 /** Result handed back to the composer; `system` is pushed as a system message. */
@@ -82,6 +82,11 @@ export async function dispatchPlanSubcommand(ctx: SlashContext): Promise<PlanCom
       return await commandFromTeam(ctx)
     case "to-team":
       return await commandToTeam(ctx)
+    case "to-workflow":
+      return await commandToWorkflow(ctx)
+    case "from-workflow":
+    case "workflow":
+      return await commandFromWorkflow(ctx, rest)
     case "cancel":
     case "stop":
     case "clear":
@@ -105,7 +110,7 @@ async function commandStatus(ctx: SlashContext): Promise<PlanCommandResult> {
         "",
         "- `/plan <objective>` — let the planner model decompose it",
         "- `/plan new <title> | <step> | <step>` — write the steps yourself",
-        "- `/plan from-goal` / `/plan from-team` — reuse an existing decomposition",
+        "- `/plan from-goal` / `/plan from-team` / `/plan from-workflow <name>` — reuse an existing decomposition",
       ].join("\n"),
     }
   }
@@ -164,11 +169,7 @@ async function commandNew(ctx: SlashContext, raw: string): Promise<PlanCommandRe
   const sessionId = ctx.activeSessionId!
   const session = await loadSession(sessionId)
   const [title, ...stepTitles] = segments
-  const steps: CreatePlanStepInput[] = stepTitles.map((t, i) => ({
-    title: t.slice(0, MAX_TITLE_LEN),
-    kind: "agent_turn",
-    ...(i > 0 ? { dependsOn: [i - 1] } : {}),
-  }))
+  const steps: CreatePlanStepInput[] = linearAgentTurnSteps(stepTitles)
   const plan = await createWithDefaults({
     sessionId,
     ...(session?.characterId ? { characterId: session.characterId } : {}),
@@ -261,6 +262,85 @@ async function commandToTeam(ctx: SlashContext): Promise<PlanCommandResult> {
   }
 }
 
+/**
+ * `/plan to-workflow` — persist the open plan as a real, editable workflow.
+ *
+ * The run path already compiles a plan into a workflow, but that one is
+ * ephemeral by contract (`__plan__:` id, never in the library). This is the
+ * durable direction: the same compiler, plus a manual trigger and a real
+ * layout, saved as a row the user can open, edit and re-run without the plan.
+ */
+async function commandToWorkflow(ctx: SlashContext): Promise<PlanCommandResult> {
+  const plan = await getPlanRuntime().getOpenPlanForSession(ctx.activeSessionId!)
+  if (!plan) return { system: "No open plan to export — create one with `/plan <objective>`." }
+  if (plan.steps.length === 0) return { system: `Plan "${plan.title}" has no steps to export.` }
+
+  const { planWorkflowDraft } = await import("@/lib/agent/plan/workflow-conversion")
+  const { createWorkflow } = await import("@/lib/db/workflows")
+  let draft: ReturnType<typeof planWorkflowDraft>
+  try {
+    draft = planWorkflowDraft(plan)
+  } catch (err) {
+    // Cycle / unknown dependency — the same validation the run path applies.
+    return { system: `Could not export the plan: ${(err as Error).message}` }
+  }
+  const workflow = await createWorkflow(draft)
+  return {
+    system: [
+      `🧩 Saved "${plan.title}" as a workflow (${plan.steps.length} step(s) + a manual trigger).`,
+      "",
+      `Open it from **Workflows** — id \`${workflow.id}\`. The plan is untouched; the workflow is now yours to edit and re-run.`,
+    ].join("\n"),
+  }
+}
+
+/**
+ * `/plan from-workflow <id|name>` — wrap a saved workflow in a plan.
+ *
+ * One `sub_workflow` step behind an approval gate, not one step per node: the
+ * orchestrator is what runs nodes, and plan step kinds are a different
+ * vocabulary. This gives a workflow the plan surface — approval, tracking,
+ * pause / resume, the unified runs list — without duplicating the engine.
+ */
+async function commandFromWorkflow(ctx: SlashContext, rest: string): Promise<PlanCommandResult> {
+  const query = rest.trim()
+  if (!query) {
+    return {
+      system:
+        "Usage: `/plan from-workflow <workflow id or name>` — wraps a saved workflow in a plan with an approval gate.",
+    }
+  }
+  const sessionId = ctx.activeSessionId!
+  const session = await loadSession(sessionId)
+  const { getWorkflow, listWorkflows } = await import("@/lib/db/workflows")
+  let workflow = await getWorkflow(query)
+  if (!workflow) {
+    const all = await listWorkflows()
+    const lower = query.toLowerCase()
+    const matches = all.filter((w) => w.name.toLowerCase().includes(lower))
+    if (matches.length === 0) {
+      return { system: `No workflow matches "${query}". Check **Workflows** for the exact name.` }
+    }
+    if (matches.length > 1) {
+      const names = matches.slice(0, 5).map((w) => `- ${w.name}`)
+      return {
+        system: [`"${query}" matches ${matches.length} workflows:`, "", ...names].join("\n"),
+      }
+    }
+    workflow = matches[0]
+  }
+
+  const { planInputFromWorkflow } = await import("@/lib/agent/plan/workflow-conversion")
+  const plan = await createWithDefaults(
+    planInputFromWorkflow(workflow, {
+      sessionId,
+      ...(session?.characterId ? { characterId: session.characterId } : {}),
+      withApprovalGate: true,
+    })
+  )
+  return { system: renderCreatedCard(plan, "workflow") }
+}
+
 /** `/plan cancel` — cancel the session's open plan. */
 async function commandCancel(ctx: SlashContext): Promise<PlanCommandResult> {
   const runtime = getPlanRuntime()
@@ -303,13 +383,14 @@ async function loadSession(sessionId: string) {
 // Card renderers (hard-coded English, consistent with the /goal cards)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type CreatedVia = "planner" | "manual" | "goal" | "team"
+type CreatedVia = "planner" | "manual" | "goal" | "team" | "workflow"
 
 const VIA_LABEL: Record<CreatedVia, string> = {
   planner: "decomposed by the planner model",
   manual: "hand-authored",
   goal: "projected from the active goal",
   team: "projected from the team task list",
+  workflow: "wrapping a saved workflow",
 }
 
 function renderCreatedCard(plan: AgentPlan, via: CreatedVia): string {

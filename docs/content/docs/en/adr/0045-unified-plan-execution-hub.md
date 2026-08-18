@@ -190,3 +190,53 @@ See `docs/plans/2026-06-03-unified-plan-execution-hub.md`. Each phase ships gree
 ## Current-state amendment (2026-08-13)
 
 Plan persistence, approval, projections, execution, and the plan/goal/team integration are implemented. Several paths named by the proposal have since moved; the canonical owners are the current plan repository, projections, goal orchestration, and AgentTeam execution modules. No separate plan engine should be created from the historical path list.
+
+## Completion amendment (2026-08-19)
+
+The gaps a wiring audit found between the proposal and the shipped subsystem
+are closed. What changed, and why each was a defect rather than a preference:
+
+- **`approval_gate` steps are answerable.** The step waited on approval-bus
+  scope `agent-plan`, but nothing ever produced a decision for that scope, so
+  the step blocked until the run's 24h timeout. `step-dispatch.ts` now registers
+  the gate in `pending-gates-store` before blocking (and clears it in a
+  `finally`), `GateModalsHost` moved from the team workspace page to the app
+  root so a gate is answerable from whatever surface the user is on, and
+  `PlanRuntime` sweeps a plan's gates on reject / cancel / finish / delete.
+- **`PlanSource: "agent_tool"` has a producer.** §3.2's `CreatePlan` /
+  `UpdatePlan` were never built. They now ship as `create_plan` / `update_plan`
+  in `sidecar/builtin-tools/plan-tools.mjs` (both dispatch paths, opt-out via
+  `planSettings.agentAuthoring` → `SendOptions.planTools`), acknowledged in the
+  sidecar and written by the renderer capture
+  (`lib/agent/plan/agent-tool-capture.ts`) — the same seam `ExitPlanMode` uses,
+  so no new IPC transport was introduced.
+- **Every step kind is authorable.** The planner and the composer emitted only
+  `agent_turn`, leaving delegation / tool / MCP / sub-workflow / approval steps
+  reachable only from a workflow node. The composer now has a per-step kind
+  picker with per-kind params, validated by the shared
+  `lib/agent/plan/step-params.ts` that the agent-tool capture also uses.
+- **Plans cross shells.** `agentPlans` had no companion sync handler while
+  `chatGoals` did, so the companion mounted the approval dock against an empty
+  mirror. Added the `plans` protocol table (TS handler, desktop reader, Rust
+  allowlist) and `approve` / `deny` to the plan run-control handler, so a
+  decision made off-host travels back as a command instead of a doomed local
+  write.
+- **Notifications exist.** §5 promised a `notify()` fan-out that was never
+  built. `notify.ts` now posts a directed approval row with working Approve /
+  Discard actions (handler installed at boot by
+  `PlanNotificationInitializer`) and an ambient terminal row.
+- **Plan ⇄ workflow is bidirectional and durable.** The run path's compile is
+  ephemeral by contract; `workflow-conversion.ts` adds `planWorkflowDraft`
+  (plan → a real, laid-out, manually-triggered workflow row) and
+  `planInputFromWorkflow` (workflow → an approval-gated `sub_workflow` plan),
+  surfaced as `/plan to-workflow` and `/plan from-workflow`.
+- **Plugin + external surfaces.** `ctx.plans` (`plan:read` / `plan:write`) joins
+  `ctx.goals` and `ctx.team`; the External Bridge gains `plan_list` / `plan_run`
+  under the existing `agent:dispatch` scope.
+- **Presentation is one choice, not one screen's.** `planSettings.interactiveHtmlStyle`
+  now also drives the live tracker, and the unified runs detail renders the step
+  list for a plan started headlessly.
+
+Not done, deliberately: the CLI's markdown plans (`~/.cognia/plans/*.md`) remain
+a separate, file-backed concept — bridging them into `AgentPlan` needs a CLI↔app
+handoff design (ADR-0078) rather than a conversion function.

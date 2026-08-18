@@ -58,7 +58,6 @@ import { AgentTeamSettings } from "@/components/agent/workspace/settings"
 import { WorkspaceTabNav } from "@/components/agent/workspace/workspace-tab-nav"
 import { WorkspaceHeader } from "@/components/agent/workspace/workspace-header"
 import { countUnread } from "@/components/agent/workspace/unread"
-import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
 import type { ComposerHandle } from "@/components/chat/composer"
 
 import { parseLeadingMention } from "@/lib/agent-team/mention-parser"
@@ -536,10 +535,6 @@ function AgentTeamWorkspaceInner() {
           </div>
         </div>
       </SidebarInset>
-
-      {/* HITL approval gates (budget / deadlock / teammate-fix) — the consumer
-          for usePendingGatesStore; without it a paused run has no release UI. */}
-      <GateModalsHost />
     </SidebarProvider>
   )
 }

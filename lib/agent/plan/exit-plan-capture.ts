@@ -17,6 +17,7 @@
  */
 
 import type { SDKAssistantMessage, SDKMessage, BetaToolUseBlock } from "@cognia/agent-config-types"
+import { linearAgentTurnSteps } from "./steps"
 import type {
   AgentPlan,
   CreatePlanInput,
@@ -97,11 +98,7 @@ export function planInputFromExitPlanMode(
 
   if (titles.length === 0) return null
 
-  const steps: CreatePlanStepInput[] = titles.map((title, i) => ({
-    title: title.slice(0, 200),
-    kind: "agent_turn",
-    ...(i > 0 ? { dependsOn: [i - 1] } : {}),
-  }))
+  const steps: CreatePlanStepInput[] = linearAgentTurnSteps(titles)
 
   return {
     sessionId: ctx.sessionId,

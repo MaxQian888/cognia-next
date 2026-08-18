@@ -471,3 +471,104 @@ describe("runOrchestrationExec (renderer dispatch entry for the sidecar path)", 
     expect(out.error).toMatch(/unknown orchestration command/)
   })
 })
+
+// ADR-0045 — the bridge could drive teams and scheduled tasks but not plans,
+// the IR both of those project into.
+describe("plan_list / plan_run", () => {
+  const listAllPlans = jest.fn()
+  const getPlan = jest.fn()
+  const approvePlan = jest.fn()
+  const runPlan = jest.fn()
+
+  beforeEach(() => {
+    jest.resetModules()
+    jest.clearAllMocks()
+    jest.doMock("@/lib/db/plans", () => ({ listAllPlans }))
+    jest.doMock("@/lib/agent/plan/runtime", () => ({
+      getPlanRuntime: () => ({ getPlan, approvePlan, runPlan }),
+    }))
+  })
+
+  const plan = (over: Record<string, unknown> = {}) => ({
+    id: "p1",
+    title: "Ship v2",
+    status: "approved",
+    source: "manual",
+    executionMode: "orchestrated",
+    totalSteps: 2,
+    completedSteps: 0,
+    steps: [
+      { id: "s1", kind: "teammate_dispatch", order: 0, dependencies: [] },
+      { id: "s2", kind: "agent_turn", order: 1, dependencies: ["s1"] },
+    ],
+    ...over,
+  })
+
+  it("lists plans with redacted titles and honours the filter", async () => {
+    listAllPlans.mockResolvedValue([plan(), plan({ id: "p2", status: "awaiting_approval" })])
+    const { planListCore } = await import("./orchestration")
+    const all = await planListCore()
+    expect(all.ok).toBe(true)
+    expect(all.plans).toHaveLength(2)
+    const pending = await planListCore({ awaitingApprovalOnly: true })
+    expect(pending.plans?.map((p) => p.id)).toEqual(["p2"])
+  })
+
+  it("clamps the limit into a sane range", async () => {
+    listAllPlans.mockResolvedValue([])
+    const { planListCore } = await import("./orchestration")
+    await planListCore({ limit: 5000 })
+    expect(listAllPlans).toHaveBeenCalledWith(200)
+    await planListCore({ limit: 0 })
+    expect(listAllPlans).toHaveBeenLastCalledWith(1)
+  })
+
+  it("runs an approved orchestrated plan", async () => {
+    getPlan.mockResolvedValue(plan())
+    runPlan.mockResolvedValue({ status: "completed" })
+    const { planRunCore } = await import("./orchestration")
+    expect(await planRunCore({ planId: "p1" })).toEqual({
+      ok: true,
+      planId: "p1",
+      status: "completed",
+    })
+    expect(approvePlan).not.toHaveBeenCalled()
+  })
+
+  // An external agent must not silently answer a gate a human was asked to
+  // answer; it has to opt in explicitly.
+  it("refuses a pending plan unless approve is set, then approves and runs", async () => {
+    getPlan.mockResolvedValue(plan({ status: "awaiting_approval" }))
+    const { planRunCore } = await import("./orchestration")
+    const refused = await planRunCore({ planId: "p1" })
+    expect(refused.ok).toBe(false)
+    expect(refused.error).toContain("approve: true")
+    expect(runPlan).not.toHaveBeenCalled()
+
+    runPlan.mockResolvedValue({ status: "completed" })
+    const ran = await planRunCore({ planId: "p1", approve: true })
+    expect(approvePlan).toHaveBeenCalledWith("p1")
+    expect(ran.ok).toBe(true)
+  })
+
+  it("refuses an in-session plan instead of half-executing it", async () => {
+    getPlan.mockResolvedValue(
+      plan({
+        executionMode: "in_session",
+        steps: [{ id: "s1", kind: "agent_turn", order: 0, dependencies: [] }],
+      })
+    )
+    const { planRunCore } = await import("./orchestration")
+    const res = await planRunCore({ planId: "p1" })
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain("visible turns")
+    expect(runPlan).not.toHaveBeenCalled()
+  })
+
+  it("reports a missing plan and a missing id as structured errors", async () => {
+    getPlan.mockResolvedValue(undefined)
+    const { planRunCore } = await import("./orchestration")
+    expect((await planRunCore({ planId: "gone" })).error).toContain("not found")
+    expect((await planRunCore({ planId: "" })).error).toContain("requires a planId")
+  })
+})

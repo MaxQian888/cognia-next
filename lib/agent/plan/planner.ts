@@ -19,6 +19,7 @@ import type {
   PlanRefinementRequest,
 } from "@/types/agent/plan"
 import { PLAN_REFINEMENT_PROMPTS } from "@/types/agent/plan"
+import { linearAgentTurnSteps } from "./steps"
 
 /** Hard cap on generated steps — keeps a plan scannable + bounded. */
 export const MAX_PLAN_STEPS = 16
@@ -73,15 +74,6 @@ function cleanSteps(raw: unknown): string[] {
     if (out.length >= MAX_PLAN_STEPS) break
   }
   return out
-}
-
-/** Turn step titles into linear `agent_turn` creation inputs. */
-function linearAgentTurnSteps(titles: string[]): CreatePlanStepInput[] {
-  return titles.map((title, i) => ({
-    title,
-    kind: "agent_turn",
-    ...(i > 0 ? { dependsOn: [i - 1] } : {}),
-  }))
 }
 
 export interface DecomposeIntoPlanInput {

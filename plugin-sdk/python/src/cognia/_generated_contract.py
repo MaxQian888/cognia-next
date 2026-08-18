@@ -94,6 +94,8 @@ VALID_PERMISSIONS = (
     "git:write",
     "goal:read",
     "goal:write",
+    "plan:read",
+    "plan:write",
     "memory:read",
     "memory:write",
     "team:read",

@@ -2963,6 +2963,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.appendSystemPrompt = existing ? `${existing}\n\n${planSnippet}` : planSnippet
   }
 
+  // ADR-0045 §3.2 — plan authoring tools (`create_plan` / `update_plan`).
+  // Carried as an explicit opt-OUT only: the sidecar defaults them on, so the
+  // send spec stays quiet unless the user disabled the feature.
+  if (appSettings?.planSettings?.agentAuthoring === false) {
+    opts.planTools = false
+  }
+
   // Output style — Claude Code parity. Composes with brief mode (both append).
   const outputStyle = session?.outputStyle ?? character?.outputStyle ?? appSettings?.outputStyle
   const customOutputStyle =

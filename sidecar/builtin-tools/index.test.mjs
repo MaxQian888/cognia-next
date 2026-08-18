@@ -95,3 +95,32 @@ test("coreFiles suite requires a readTracker", () => {
     ["Monitor", "monitor_cancel", "monitor_list", "exit_plan_mode"]
   )
 })
+
+// ADR-0045 §3.2 — the plan-authoring pair. Registered on BOTH dispatch paths
+// (no provider ships them natively), but only when the caller opts in, so a
+// bare "no categories" call still yields nothing.
+test("plan tools are opt-in and available on both dispatch paths", () => {
+  assert.deepEqual(collectCogniaToolDefs({ enabled: {} }), [])
+  assert.deepEqual(
+    collectCogniaToolDefs({ enabled: {}, planTools: true }).map((d) => d.name),
+    ["create_plan", "update_plan"]
+  )
+  for (const dispatchPath of ["anthropic", "ai-sdk"]) {
+    const names = collectCogniaToolDefs({ enabled: {}, planTools: true, dispatchPath }).map(
+      (d) => d.name
+    )
+    assert.ok(names.includes("create_plan"), dispatchPath)
+    assert.ok(names.includes("update_plan"), dispatchPath)
+  }
+})
+
+test("plan tools acknowledge without side effects (the renderer owns the write)", async () => {
+  const [create, update] = collectCogniaToolDefs({ enabled: {}, planTools: true })
+  const body = (r) => JSON.parse(r.content[0].text)
+  const created = body(
+    await create.handler({ title: "Ship", steps: [{ title: "a" }, { title: "b" }] })
+  )
+  assert.deepEqual(created, { created: true, title: "Ship", steps: 2 })
+  const updated = body(await update.handler({ stepUpdates: [{ step: 0, status: "completed" }] }))
+  assert.deepEqual(updated, { updated: true, stepUpdates: 1 })
+})

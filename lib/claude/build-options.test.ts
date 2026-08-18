@@ -3153,6 +3153,28 @@ describe("resolveSendOptions — plan mode prompt", () => {
     })
     expect(notPlan.appendSystemPrompt ?? "").not.toContain("## Steps")
   })
+
+  // The sidecar registers create_plan / update_plan by default, so the send
+  // spec only ever carries the user's opt-OUT. A stray `planTools: true` would
+  // be harmless but noisy; a missing `false` would silently ignore the setting.
+  it("carries the plan-authoring opt-out and nothing else", async () => {
+    const off = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: {
+        id: "singleton",
+        planSettings: { agentAuthoring: false },
+      } as AppSettings,
+    })
+    expect(off.planTools).toBe(false)
+
+    for (const planSettings of [undefined, { agentAuthoring: true }]) {
+      const on = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        appSettings: { id: "singleton", ...(planSettings ? { planSettings } : {}) } as AppSettings,
+      })
+      expect(on.planTools).toBeUndefined()
+    }
+  })
 })
 
 describe("resolveSendOptions — brief mode", () => {

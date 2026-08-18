@@ -40,6 +40,7 @@ import { syncCharacters } from "./handlers/characters"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
 import { syncExecutionRuns } from "./handlers/execution-runs"
 import { syncGoals } from "./handlers/goals"
+import { syncPlans } from "./handlers/plans"
 import { syncMcpServers } from "./handlers/mcp-servers"
 import { syncMemories } from "./handlers/memory"
 import { syncMessages } from "./handlers/messages"
@@ -90,6 +91,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // mirrors these so the phone can show goal progress / recalled memories
   // from Dexie offline; both are authored on the desktop.
   { table: "goals", run: syncGoals },
+  // ADR-0045 — AgentPlan rows. The companion mounts the approval dock and the
+  // step tracker; without this pull they read an empty local table and a
+  // plan-mode turn taken through the companion has nothing to approve.
+  { table: "plans", run: syncPlans },
   { table: "memories", run: syncMemories },
   // Canonical, remote-safe run summaries. Detailed/private event rows remain
   // on the executing host and are never part of companion sync.
@@ -167,6 +172,7 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   settings: syncDomain("tombstone", "internal"),
   conversationOverrides: syncDomain("tombstone"),
   goals: syncDomain("tombstone"),
+  plans: syncDomain("tombstone"),
   memories: syncDomain("tombstone"),
   executionRuns: syncDomain("append-only", "confidential", "opaque"),
   workflowRuns: syncDomain("append-only", "confidential", "opaque"),

@@ -177,6 +177,8 @@ export async function readDexieDelta(
       return readConversationOverridesDelta(since)
     case "goals":
       return readGoalsDelta(since)
+    case "plans":
+      return readPlansDelta(since)
     case "memories":
       return readMemoriesDelta(since, contentDeps)
     case "agentTeamBoard":
@@ -443,7 +445,9 @@ export function projectOutboundJobRow(row: OutboundJobRow): OutboundQueueProject
   }
 }
 
-async function readOutboundQueueDelta(since: number): Promise<SyncDelta<OutboundQueueProjectionRow>> {
+async function readOutboundQueueDelta(
+  since: number
+): Promise<SyncDelta<OutboundQueueProjectionRow>> {
   const rows = await getDb().outboundQueue.where("updatedAt").above(since).toArray()
   // Never re-export a projection this host itself mirrored from a further
   // upstream host (desktop-as-thin-client): its own paired phones would see a
@@ -457,6 +461,13 @@ async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {
   // so pull only the rows past the cursor instead of scanning the whole table.
   const rows = await getDb().chatGoals.where("updatedAt").above(since).toArray()
   return finalizeDelta("goals", rows as UpdatedAtRow[], since)
+}
+
+async function readPlansDelta(since: number): Promise<SyncDelta<unknown>> {
+  // `agentPlans` carries an `updatedAt` index (schema v71), so this is a range
+  // read rather than a table scan — same shape as `readGoalsDelta`.
+  const rows = await getDb().agentPlans.where("updatedAt").above(since).toArray()
+  return finalizeDelta("plans", rows as UpdatedAtRow[], since)
 }
 
 async function readMemoriesDelta(

@@ -2257,6 +2257,8 @@ export interface PluginHostContextAPI {
   capabilities: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
   git: import("@/lib/plugin/api/git-api").PluginGitAPI
   goals: import("@/lib/plugin/api/goal-api").PluginGoalAPI
+  /** ADR-0045 plan hub — read/author/approve/run `AgentPlan`s. */
+  plans: import("@/lib/plugin/api/plan-api").PluginPlanAPI
   memory: import("@/lib/plugin/api/memory-api").PluginMemoryAPI
   team: import("@/lib/plugin/api/team-api").PluginTeamAPI
   subscription: import("@/lib/plugin/api/subscription-api").PluginSubscriptionAPI

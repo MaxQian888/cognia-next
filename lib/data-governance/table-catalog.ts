@@ -159,6 +159,7 @@ export const CORE_TABLE_NAMES = [
   "issueCounters",
   "issueEvents",
   "issueProjects",
+  "issueRuns",
   "issues",
   "knowledgeBaseChunks",
   "knowledgeBaseIngestJobs",
@@ -387,6 +388,7 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "settings",
   "conversationOverrides",
   "chatGoals",
+  "agentPlans",
   "memories",
   "executionRuns",
   "workflowRuns",
@@ -404,7 +406,10 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "outboundQueue",
 ])
 
-/** Public protocol names. `goals` is the stable wire alias for `chatGoals`. */
+/**
+ * Public protocol names. `goals` is the stable wire alias for `chatGoals`, and
+ * `plans` the alias for `agentPlans` (ADR-0045).
+ */
 export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "characters",
   "skills",
@@ -417,6 +422,7 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "settings",
   "conversationOverrides",
   "goals",
+  "plans",
   "memories",
   "executionRuns",
   "workflowRuns",
@@ -569,6 +575,7 @@ const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 const CONFIDENTIAL_TABLES = new Set<CoreTableName>([
   "githubIssueMirror",
   "issueEvents",
+  "issueRuns",
   "issues",
   "matrixPendingEncryptedEvents",
   "workInputBatches",

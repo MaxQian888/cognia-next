@@ -29,7 +29,7 @@ import { getPlanRuntime } from "@/lib/agent/plan/runtime"
 import { parsePlanText } from "@/lib/agent/plan/exit-plan-capture"
 import { resolvePlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { resolvePlanStrategy } from "@/lib/agent/plan/strategy"
-import { materializeSteps } from "@/lib/agent/plan/steps"
+import { linearAgentTurnSteps, materializeSteps } from "@/lib/agent/plan/steps"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -70,12 +70,7 @@ export function buildPlanApprovedPrompt(plan: AgentPlan): string {
 
 /** Build the linear `agent_turn` step chain `exit-plan-capture` / edits share. */
 function linearSteps(titles: string[]) {
-  const inputs: CreatePlanStepInput[] = titles.map((title, i) => ({
-    title: title.slice(0, 200),
-    kind: "agent_turn",
-    ...(i > 0 ? { dependsOn: [i - 1] } : {}),
-  }))
-  return materializeSteps(inputs)
+  return materializeSteps(linearAgentTurnSteps(titles))
 }
 
 export interface PlanApprovalDockProps {

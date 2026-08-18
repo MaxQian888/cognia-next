@@ -93,6 +93,7 @@ export function DefaultsTab() {
   const [planMaxAutoRefinements, setPlanMaxAutoRefinements] = useState<number>(2)
   const [planInteractiveHtml, setPlanInteractiveHtml] = useState(false)
   const [planInteractiveStyle, setPlanInteractiveStyle] = useState<PlanHtmlStyle>("default")
+  const [planAgentAuthoring, setPlanAgentAuthoring] = useState(true)
 
   useEffect(() => {
     if (!settings) return
@@ -114,6 +115,7 @@ export function DefaultsTab() {
     setPlanMaxAutoRefinements(settings.planSettings?.maxAutoRefinements ?? 2)
     setPlanInteractiveHtml(settings.planSettings?.interactiveHtmlView === true)
     setPlanInteractiveStyle(resolvePlanHtmlStyle(settings.planSettings?.interactiveHtmlStyle))
+    setPlanAgentAuthoring(settings.planSettings?.agentAuthoring !== false)
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
 
@@ -203,6 +205,15 @@ export function DefaultsTab() {
     setPlanInteractiveStyle(value)
     void save({
       planSettings: { ...settings?.planSettings, interactiveHtmlStyle: value },
+    })
+  }
+
+  const persistPlanAgentAuthoring = (value: boolean) => {
+    setPlanAgentAuthoring(value)
+    // Default ON: persist the explicit boolean so the send spec can carry the
+    // opt-out (`SendOptions.planTools === false`) to the sidecar.
+    void update({
+      planSettings: { ...settings?.planSettings, agentAuthoring: value },
     })
   }
 
@@ -422,6 +433,19 @@ export function DefaultsTab() {
             onCheckedChange={persistPlanRequireApproval}
             aria-label={t("planRequireApproval")}
             data-testid="plan-require-approval-switch"
+          />
+        </SettingsField>
+        <SettingsField
+          htmlFor="agent-runtime-plan-agent-authoring"
+          label={t("planAgentAuthoring")}
+          description={t("planAgentAuthoringHint")}
+        >
+          <Switch
+            id="agent-runtime-plan-agent-authoring"
+            checked={planAgentAuthoring}
+            onCheckedChange={persistPlanAgentAuthoring}
+            aria-label={t("planAgentAuthoring")}
+            data-testid="plan-agent-authoring-switch"
           />
         </SettingsField>
         <SettingsField

@@ -262,6 +262,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     // sees. Read from the send spec rather than re-derived here, so renderer
     // and sidecar cannot disagree about what this turn is.
     toolPresentation: sendOptions.execution?.composition?.toolPresentation,
+    // ADR-0045 plan authoring (`create_plan` / `update_plan`). On unless the
+    // user turned it off (`planSettings.agentAuthoring: false`).
+    planTools: sendOptions.planTools !== false,
     // Per-tool deadline for read-only built-ins on this channel too (parity with
     // the ai-sdk bridge). `undefined` ⇒ buildCogniaToolsServer's 120s default;
     // `0` disables.

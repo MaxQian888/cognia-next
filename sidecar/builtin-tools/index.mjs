@@ -27,6 +27,7 @@ import { createCodeGraphTools } from "./code/tools.mjs"
 import { createCoreTools } from "./core/core-tools.mjs"
 import { createMonitorTools } from "./core/monitor.mjs"
 import { createExitPlanTool } from "./exit-plan.mjs"
+import { createPlanTools } from "./plan-tools.mjs"
 import { codeModeToolDefs } from "./run-code/index.mjs"
 import { isProgrammaticReadOnly } from "./run-code/eligibility.mjs"
 import { bareToolName } from "./confinement.mjs"
@@ -163,6 +164,11 @@ export function collectCogniaToolDefs({
    * Absent ⇒ `native`, the pre-composition behaviour.
    */
   toolPresentation,
+  /**
+   * Register the ADR-0045 plan-authoring tools (`create_plan` / `update_plan`).
+   * Off unless the caller asks — the dispatch layer opts in per send.
+   */
+  planTools = false,
 } = {}) {
   if (!enabled || typeof enabled !== "object") return []
   const tools = []
@@ -226,6 +232,15 @@ export function collectCogniaToolDefs({
   // model calls it).
   if (dispatchPath === "ai-sdk") {
     tools.push(createExitPlanTool())
+  }
+  // create_plan / update_plan (ADR-0045 §3.2). Not native on ANY provider, so
+  // both dispatch paths register them — but only when the caller asks, so the
+  // "no categories → no tools" invariant of a bare `collectCogniaToolDefs`
+  // call still holds. The dispatch layer opts in by default; a user can turn
+  // it off with `planSettings.agentAuthoring: false`, which rides the send
+  // spec as `sendOptions.planTools`.
+  if (planTools) {
+    tools.push(...createPlanTools())
   }
 
   // Code tool presentation (ADR-0117 Phase 4). Applied LAST, over the fully
@@ -308,6 +323,7 @@ export function buildCogniaToolsServer({
   toolExecutionTimeoutMs,
   maxToolResultTokens,
   toolPresentation,
+  planTools = false,
 }) {
   if (!enabled || typeof enabled !== "object") return null
   const tools = collectCogniaToolDefs({
@@ -324,6 +340,7 @@ export function buildCogniaToolsServer({
     model,
     provider,
     toolPresentation,
+    planTools,
   })
   if (tools.length === 0) return null
   // Per-tool execution deadline for READ-ONLY built-ins (see

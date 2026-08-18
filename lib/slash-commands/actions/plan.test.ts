@@ -14,6 +14,11 @@ jest.mock("@/lib/goal/runtime", () => ({ getGoalRuntime: jest.fn() }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn() }))
 jest.mock("@/stores/settings", () => ({ useSettingsStore: { getState: jest.fn() } }))
 jest.mock("@/stores/agent/agent-team-store", () => ({ useAgentTeamStore: { getState: jest.fn() } }))
+jest.mock("@/lib/db/workflows", () => ({
+  getWorkflow: jest.fn(),
+  listWorkflows: jest.fn(),
+  createWorkflow: jest.fn(),
+}))
 
 import { getPlanRuntime } from "@/lib/agent/plan/runtime"
 import { loadPlanConfigDefaults } from "@/lib/agent/plan/plan-settings"
@@ -23,6 +28,7 @@ import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { createWorkflow, getWorkflow, listWorkflows } from "@/lib/db/workflows"
 import { soloTeamId } from "@/lib/agent/plan-mode-bridge"
 import { dispatchPlanSubcommand } from "./plan"
 import type { SlashContext } from "../builtin"
@@ -36,6 +42,9 @@ const getGoalRuntimeMock = getGoalRuntime as jest.Mock
 const getSessionMock = getSession as jest.Mock
 const settingsStateMock = useSettingsStore.getState as jest.Mock
 const teamStateMock = useAgentTeamStore.getState as jest.Mock
+const getWorkflowMock = getWorkflow as jest.Mock
+const listWorkflowsMock = listWorkflows as jest.Mock
+const createWorkflowMock = createWorkflow as jest.Mock
 
 const createPlan = jest.fn()
 const getOpenPlanForSession = jest.fn()
@@ -500,5 +509,87 @@ describe("plan settings defaults", () => {
     const input = createPlan.mock.calls[0][0] as CreatePlanInput
     expect(input.characterId).toBeUndefined()
     expect(input.title).toBe("T")
+  })
+})
+
+// `/plan to-workflow` / `/plan from-workflow` — the durable half of the
+// plan⇄workflow conversion. The ephemeral compile that `runPlan` performs is
+// never persisted; these two are.
+describe("plan ⇄ workflow conversion", () => {
+  it("saves the open plan as an editable workflow with a manual trigger", async () => {
+    getOpenPlanForSession.mockResolvedValue({
+      id: "p1",
+      sessionId: "ses_1",
+      title: "Ship v2",
+      status: "awaiting_approval",
+      config: {},
+      steps: [
+        {
+          id: "a",
+          title: "one",
+          kind: "agent_turn",
+          status: "pending",
+          order: 0,
+          dependencies: [],
+        },
+        {
+          id: "b",
+          title: "two",
+          kind: "agent_turn",
+          status: "pending",
+          order: 1,
+          dependencies: ["a"],
+        },
+      ],
+    })
+    createWorkflowMock.mockResolvedValue({ id: "wf_new", name: "Ship v2" })
+
+    const res = await dispatchPlanSubcommand(ctx({ args: "to-workflow" }))
+
+    expect(createWorkflowMock).toHaveBeenCalledTimes(1)
+    const draft = createWorkflowMock.mock.calls[0][0]
+    expect(draft.name).toBe("Ship v2")
+    expect(draft.nodes[0].type).toBe("trigger.manual")
+    expect(draft.nodes).toHaveLength(3)
+    expect(res.system).toContain("wf_new")
+  })
+
+  it("refuses to export when there is no open plan", async () => {
+    getOpenPlanForSession.mockResolvedValue(undefined)
+    const res = await dispatchPlanSubcommand(ctx({ args: "to-workflow" }))
+    expect(createWorkflowMock).not.toHaveBeenCalled()
+    expect(res.system).toContain("No open plan to export")
+  })
+
+  it("wraps a workflow found by id in an approval-gated plan", async () => {
+    getWorkflowMock.mockResolvedValue({ id: "wf_1", name: "Nightly report" })
+    await dispatchPlanSubcommand(ctx({ args: "from-workflow wf_1" }))
+    const input = createPlan.mock.calls[0][0] as CreatePlanInput
+    expect(input.steps.map((s) => s.kind)).toEqual(["approval_gate", "sub_workflow"])
+    expect(input.metadata).toEqual({ workflowId: "wf_1" })
+  })
+
+  it("falls back to a name search and reports an ambiguous match", async () => {
+    getWorkflowMock.mockResolvedValue(undefined)
+    listWorkflowsMock.mockResolvedValue([
+      { id: "wf_1", name: "Nightly report" },
+      { id: "wf_2", name: "Nightly digest" },
+    ])
+    const res = await dispatchPlanSubcommand(ctx({ args: "from-workflow nightly" }))
+    expect(createPlan).not.toHaveBeenCalled()
+    expect(res.system).toContain("matches 2 workflows")
+  })
+
+  it("reports a miss instead of creating an empty plan", async () => {
+    getWorkflowMock.mockResolvedValue(undefined)
+    listWorkflowsMock.mockResolvedValue([])
+    const res = await dispatchPlanSubcommand(ctx({ args: "from-workflow nope" }))
+    expect(createPlan).not.toHaveBeenCalled()
+    expect(res.system).toContain("No workflow matches")
+  })
+
+  it("explains the usage when no workflow is named", async () => {
+    const res = await dispatchPlanSubcommand(ctx({ args: "from-workflow" }))
+    expect(res.system).toContain("Usage:")
   })
 })

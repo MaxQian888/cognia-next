@@ -42,6 +42,8 @@
     "permissionDesc": "Default for new sessions — characters and individual sessions can still override.",
     "permissionMode": "Mode",
     "permissionTitle": "Permission mode",
+    "planAgentAuthoring": "Let the agent write plans",
+    "planAgentAuthoringHint": "Gives the agent create_plan / update_plan so it can open a tracked checklist for multi-step work and keep it current. Turn off to remove both tools from the prompt.",
     "planDesc": "Defaults applied when a plan-mode turn proposes a plan (ExitPlanMode).",
     "planInteractiveHtml": "Interactive plan view",
     "planInteractiveHtmlHint": "Enhanced plan mode: review proposed plans in an interactive HTML editor — drag to reorder, edit inline, add or remove steps before approving.",

@@ -3,6 +3,7 @@ import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 import { PluginToolInvocationError } from "@/lib/plugin/core/invoke-plugin-tool"
 import type { PlanRunContext } from "./plan-run-context"
 import { PLAN_APPROVAL_SCOPE, dispatchPlanStepNode, planApprovalKey } from "./step-dispatch"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 
 const executeAgentMock = jest.fn()
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
@@ -205,6 +206,57 @@ describe("dispatchPlanStepNode — approval_gate", () => {
       retryable: false,
     })
     expect(calls[1].status).toBe("failed")
+  })
+
+  // The gate is only answerable if it reaches `usePendingGatesStore` — that
+  // store is what `GateModalsHost` renders. Registering late (or not at all)
+  // means the step blocks to the run timeout with no UI.
+  it("registers the gate in the pending-gates store while blocked", async () => {
+    usePendingGatesStore.setState({ gates: [] })
+    let seen: ReturnType<typeof usePendingGatesStore.getState>["gates"] = []
+    waitForDecisionMock.mockImplementation(async () => {
+      seen = usePendingGatesStore.getState().gates
+      return { outcome: "approve" }
+    })
+    const { ctx } = makeCtx(
+      step({
+        kind: "approval_gate",
+        title: "Ship it?",
+        params: { kind: "approval_gate", prompt: "Confirm the deploy" },
+      })
+    )
+    await dispatchPlanStepNode(ctx, "s1", signal)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({
+      key: { scope: PLAN_APPROVAL_SCOPE, id: "p1:s1" },
+      gateType: "plan_step",
+      title: "Ship it?",
+      body: "Confirm the deploy",
+      planId: "p1",
+      sessionId: "ses",
+      status: "open",
+    })
+  })
+
+  it.each([
+    ["approve", { outcome: "approve" } as const, false],
+    ["reject", { outcome: "reject" } as const, true],
+  ])("clears the gate entry after %s", async (_label, decision, throws) => {
+    usePendingGatesStore.setState({ gates: [] })
+    waitForDecisionMock.mockResolvedValue(decision)
+    const { ctx } = makeCtx(step({ kind: "approval_gate" }))
+    const run = dispatchPlanStepNode(ctx, "s1", signal)
+    if (throws) await expect(run).rejects.toThrow()
+    else await run
+    expect(usePendingGatesStore.getState().gates).toHaveLength(0)
+  })
+
+  it("clears the gate entry when the wait aborts (pause / cancel)", async () => {
+    usePendingGatesStore.setState({ gates: [] })
+    waitForDecisionMock.mockRejectedValue(new Error("Aborted"))
+    const { ctx } = makeCtx(step({ kind: "approval_gate" }))
+    await expect(dispatchPlanStepNode(ctx, "s1", signal)).rejects.toThrow("Aborted")
+    expect(usePendingGatesStore.getState().gates).toHaveLength(0)
   })
 })
 

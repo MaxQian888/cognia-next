@@ -142,6 +142,17 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Goal console rows (read-only mirror; goals are authored on the desktop)".to_string(),
             has_tombstones: false,
         },
+        // ADR-0045 — AgentPlan rows. The companion mounts the plan approval
+        // dock and the step tracker; without this allowlist entry `sync_pull`
+        // rejects the table and those surfaces render against an empty local
+        // mirror. Plans are authored and executed on the host; the phone
+        // approves/controls them through the run-control RPCs, never by
+        // writing rows back.
+        SyncTableDescriptor {
+            name: "plans".to_string(),
+            description: "AgentPlan rows (read-only mirror for the companion plan dock / tracker)".to_string(),
+            has_tombstones: false,
+        },
         SyncTableDescriptor {
             name: "memories".to_string(),
             description: "Long-term memory rows (read-only mirror for the mobile memory viewer)".to_string(),

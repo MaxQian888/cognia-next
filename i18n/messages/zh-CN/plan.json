@@ -45,10 +45,32 @@
     "title": "审阅计划"
   },
   "composer": {
+    "advancedHint": "默认每个步骤都是一次对话轮次。可以改为委派给队友、调用工具、运行子工作流，或插入人工审批点。",
+    "advancedToggle": "步骤类型",
     "cancel": "取消",
     "create": "创建计划",
     "createFailed": "无法创建计划。",
     "description": "每行一个步骤。批准前仍可重新排序和编辑步骤。",
+    "field": {
+      "prompt": "提示词（可选）",
+      "teamId": "团队 ID",
+      "teammateId": "队友 ID（可选）",
+      "toolName": "工具名称",
+      "toolInput": "输入（JSON）",
+      "serverId": "MCP 服务器 ID",
+      "workflowId": "工作流 ID"
+    },
+    "invalidJson": "第 {index} 步：输入必须是合法 JSON。",
+    "invalidStep": "第 {index} 步：请补全该类型所需的字段。",
+    "kind": {
+      "agent_turn": "智能体轮次",
+      "teammate_dispatch": "委派给队友",
+      "tool_call": "插件工具调用",
+      "mcp_tool_call": "MCP 工具调用",
+      "sub_workflow": "子工作流",
+      "approval_gate": "人工审批点"
+    },
+    "kindLabel": "类型",
     "openLabel": "编写计划",
     "stepCount": "{count, plural, =0 {尚无步骤} other {# 个步骤}}",
     "stepsLabel": "步骤",

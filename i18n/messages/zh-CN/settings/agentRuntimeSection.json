@@ -42,6 +42,8 @@
     "permissionDesc": "新会话的默认权限模式，角色和会话仍可覆盖。",
     "permissionMode": "模式",
     "permissionTitle": "权限模式",
+    "planAgentAuthoring": "允许智能体自己写计划",
+    "planAgentAuthoringHint": "向智能体提供 create_plan / update_plan：多步骤任务可自动生成可追踪的清单并实时更新。关闭后这两个工具不会出现在提示词中。",
     "planDesc": "计划模式回合提出计划（ExitPlanMode）时应用的默认设置。",
     "planInteractiveHtml": "交互式计划视图",
     "planInteractiveHtmlHint": "增强计划模式：在可交互的 HTML 编辑器中审阅提议的计划——批准前可拖动排序、行内编辑、添加或删除步骤。",

@@ -54,6 +54,10 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   spawn_task: "agent:dispatch",
   team_run: "agent:team",
   team_list: "agent:team",
+  // ADR-0045 plans. Grouped under `agent:dispatch` (not a new scope): running
+  // a plan is dispatching Cognia's own agent runtime, exactly like spawn_task.
+  plan_list: "agent:dispatch",
+  plan_run: "agent:dispatch",
   plugin_tool_invoke: "plugin:tools",
   schedule_task: "agent:dispatch",
   list_scheduled_tasks: "agent:dispatch",

@@ -4,11 +4,45 @@ import {
   type CreatePlanStepInput,
   type PlanStep,
 } from "@/types/agent/plan"
-import { allStepsTerminal, applyStepStatus, materializeSteps, nextRunnableStep } from "./steps"
+import {
+  MAX_PLAN_STEP_TITLE_LEN,
+  allStepsTerminal,
+  applyStepStatus,
+  linearAgentTurnSteps,
+  materializeSteps,
+  nextRunnableStep,
+} from "./steps"
 
 function input(over: Partial<CreatePlanStepInput> = {}): CreatePlanStepInput {
   return { title: over.title ?? "step", kind: over.kind ?? "agent_turn", ...over }
 }
+
+describe("linearAgentTurnSteps", () => {
+  it("chains each step onto its predecessor", () => {
+    const steps = linearAgentTurnSteps(["a", "b", "c"])
+    expect(steps.map((s) => s.kind)).toEqual(["agent_turn", "agent_turn", "agent_turn"])
+    expect(steps[0].dependsOn).toBeUndefined()
+    expect(steps[1].dependsOn).toEqual([0])
+    expect(steps[2].dependsOn).toEqual([1])
+  })
+
+  it("clamps titles so one long line cannot bloat the row", () => {
+    const [step] = linearAgentTurnSteps(["x".repeat(MAX_PLAN_STEP_TITLE_LEN + 50)])
+    expect(step.title).toHaveLength(MAX_PLAN_STEP_TITLE_LEN)
+  })
+
+  it("returns an empty chain for no titles", () => {
+    expect(linearAgentTurnSteps([])).toEqual([])
+  })
+
+  // The chain feeds `materializeSteps` in every producer; the index → id remap
+  // has to survive that hand-off or dependencies silently vanish.
+  it("round-trips through materializeSteps into id-based dependencies", () => {
+    const steps = materializeSteps(linearAgentTurnSteps(["a", "b"]))
+    expect(steps[0].dependencies).toEqual([])
+    expect(steps[1].dependencies).toEqual([steps[0].id])
+  })
+})
 
 describe("materializeSteps", () => {
   it("assigns ids, 0-based order, pending status, and zero attempts", () => {

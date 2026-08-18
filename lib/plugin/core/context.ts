@@ -152,6 +152,7 @@ import { createChatAPI } from "../api/chat-api"
 import { createCapabilitiesAPI } from "../api/capabilities-api"
 import { createGitAPI } from "../api/git-api"
 import { createGoalAPI } from "../api/goal-api"
+import { createPlanAPI } from "../api/plan-api"
 import { createMemoryAPI } from "../api/memory-api"
 import { createTeamAPI } from "../api/team-api"
 import { createSubscriptionAPI } from "../api/subscription-api"
@@ -402,6 +403,7 @@ export function createFullPluginContext(
     capabilities: createCapabilitiesAPI(),
     git: createGitAPI(pluginId),
     goals: createGoalAPI(pluginId),
+    plans: createPlanAPI(pluginId),
     memory: createMemoryAPI(pluginId),
     team: createTeamAPI(pluginId),
     subscription: createSubscriptionAPI(pluginId),

@@ -16,6 +16,11 @@ jest.mock("@/hooks/agent-runs/use-agent-runs", () => ({
   useAgentRuns: () => ({ runs: mockRuns, isLoading: mockLoading }),
 }))
 
+const mockPlan: { current: unknown } = { current: undefined }
+jest.mock("@/hooks/agent/use-session-plan", () => ({
+  usePlanById: (id?: string) => (id ? mockPlan.current : undefined),
+}))
+
 const abort = jest.fn()
 const pause = jest.fn()
 const resume = jest.fn()
@@ -83,5 +88,58 @@ describe("AgentRunsPanel", () => {
     render(<AgentRunsPanel onSelect={jest.fn()} onFilterKind={onFilterKind} />)
     fireEvent.click(screen.getByText("filters.team"))
     expect(onFilterKind).toHaveBeenCalledWith("team")
+  })
+})
+
+// A plan run's steps ARE the run. Before this the detail pane showed a bare
+// percentage for a plan started headlessly (scheduler / workflow / bridge) and
+// the step list was reachable only from the chat session that owned it.
+describe("plan run detail", () => {
+  const planRun = () =>
+    run({
+      unifiedId: "plan:p1",
+      kind: "plan",
+      title: "Ship v2",
+      origin: { tableName: "agentPlans", nativeId: "p1", planId: "p1" },
+    })
+
+  it("renders the live step tracker for a plan run", () => {
+    mockPlan.current = {
+      id: "p1",
+      title: "Ship v2",
+      status: "executing",
+      steps: [
+        {
+          id: "s1",
+          title: "Build",
+          kind: "agent_turn",
+          status: "completed",
+          order: 0,
+          dependencies: [],
+        },
+      ],
+      totalSteps: 1,
+      completedSteps: 1,
+      config: {},
+    }
+    mockRuns = [planRun()]
+    render(<AgentRunsPanel selectedId="plan:p1" onSelect={jest.fn()} />)
+    expect(screen.getByTestId("plan-tracker-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-tracker-steps")).toBeInTheDocument()
+  })
+
+  it("renders no tracker for a non-plan run", () => {
+    mockPlan.current = undefined
+    mockRuns = [run()]
+    render(<AgentRunsPanel selectedId="goal:g1" onSelect={jest.fn()} />)
+    expect(screen.queryByTestId("plan-tracker-panel")).not.toBeInTheDocument()
+  })
+
+  it("keeps the detail pane usable while the plan row has not loaded", () => {
+    mockPlan.current = undefined
+    mockRuns = [planRun()]
+    render(<AgentRunsPanel selectedId="plan:p1" onSelect={jest.fn()} />)
+    expect(screen.queryByTestId("plan-tracker-panel")).not.toBeInTheDocument()
+    expect(screen.getByText("detail.status")).toBeInTheDocument()
   })
 })

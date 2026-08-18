@@ -822,6 +822,13 @@ export async function handleEvent(
           // import keeps the plan runtime out of the hot path until used.
           const { captureExitPlanMode } = await import("@/lib/agent/plan/exit-plan-capture")
           await captureExitPlanMode(env.event, sessionId, session?.characterId)
+          // create_plan / update_plan capture (ADR-0045 §3.2): the same
+          // renderer-side pattern for the agent's OWN plan authoring. The
+          // sidecar tools only acknowledge; this is where the plan is written,
+          // so an agent-authored plan lands in the identical pipeline (approval
+          // dock, tracker, unified runs) as a captured or hand-written one.
+          const { applyPlanToolCalls } = await import("@/lib/agent/plan/agent-tool-capture")
+          await applyPlanToolCalls(env.event, sessionId, session?.characterId)
         } catch (err) {
           console.warn("planModeBridge failed", err)
         }

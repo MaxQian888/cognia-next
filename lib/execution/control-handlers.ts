@@ -105,6 +105,25 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     if (!run) throw new Error("Execution run not found")
     const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
     const runtime = getPlanRuntime()
+    // `approve` / `deny` close the remote-approval loop: a companion mirrors
+    // plan rows read-only (sync handler `plans`), so answering the approval
+    // gate from the phone has to travel back as a control command — a local
+    // write would be overwritten by the next pull.
+    if (command.action === "approve") {
+      const approved = await runtime.approvePlan(run.sourceId)
+      if (!approved) throw new Error("Execution run not found")
+      // Orchestrated plans are headless, so the host can start them right
+      // here. An in-session plan is driven by the chat surface that owns the
+      // visible turns; leaving it `approved` is what hands it over.
+      const started = await runtime.startPlan(run.sourceId)
+      if (started?.strategy === "orchestrated") void runtime.runPlan(run.sourceId)
+      return
+    }
+    if (command.action === "deny") {
+      const rejected = await runtime.rejectPlan(run.sourceId)
+      if (!rejected) throw new Error("Execution run not found")
+      return
+    }
     const result =
       command.action === "pause"
         ? await runtime.pausePlan(run.sourceId)

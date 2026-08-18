@@ -3,11 +3,15 @@
 /**
  * ApprovalGateDialog — shared modal for the four ADR-0022 HITL gate variants.
  *
- * One component, four `gateType` values: budget / deadlock / plan / teammate_fix.
- * The component does NOT call approval-bus directly; callers thread approve /
- * reject handlers (see `useApprovalGate`) so the dialog stays presentation-only.
+ * One component per `gateType`: budget / deadlock / plan / teammate_fix /
+ * replan / capability_audit, plus the ADR-0045 `plan_step` variant (a plan's
+ * own `approval_gate` step). The component does NOT call approval-bus
+ * directly; callers thread approve / reject handlers (see `useApprovalGate`)
+ * so the dialog stays presentation-only.
  *
- * v1 gates: budget, deadlock, plan, teammate_fix. PR 6 wires teammate_fix.
+ * `plan_step` is the only variant that collects reject feedback inline: the
+ * text becomes the step's failure reason in the plan event log, so "why" has
+ * to be capturable at the moment of rejection.
  */
 
 import { useState } from "react"
@@ -21,11 +25,12 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 
 export type ApprovalGateType =
-  "budget" | "deadlock" | "plan" | "teammate_fix" | "replan" | "capability_audit"
+  "budget" | "deadlock" | "plan" | "teammate_fix" | "replan" | "capability_audit" | "plan_step"
 
 /**
  * Maps a `gateType` to its i18n namespace under `agentTeam.approvalGate`.
@@ -39,6 +44,7 @@ const GATE_I18N_KEY: Record<ApprovalGateType, string> = {
   teammate_fix: "teammateFix",
   replan: "replan",
   capability_audit: "capabilityAudit",
+  plan_step: "planStep",
 }
 
 export interface ApprovalGateDialogProps {
@@ -59,6 +65,7 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
   const [extraTokens, setExtraTokens] = useState<string>("")
   const [resetAll, setResetAll] = useState<boolean>(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [feedback, setFeedback] = useState<string>("")
 
   if (!props.open) return null
 
@@ -78,9 +85,10 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
       case "plan":
       case "replan":
       case "capability_audit":
+      case "plan_step":
         // Approve applies the lead's proposed re-plan / runs with the stale
-        // capabilities as-is; reject continues the original plan / cancels
-        // the run. No edit payload.
+        // capabilities as-is / releases the blocked plan step; reject
+        // continues the original plan / cancels the run. No edit payload.
         props.onApprove()
         return
     }
@@ -104,6 +112,19 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
                 placeholder={t("budget.extraTokensPlaceholder")}
                 value={extraTokens}
                 onChange={(e) => setExtraTokens(e.target.value)}
+              />
+            </div>
+          )}
+          {props.gateType === "plan_step" && (
+            <div className="space-y-2">
+              <Label htmlFor="plan-step-feedback">{t("planStep.feedbackLabel")}</Label>
+              <Textarea
+                id="plan-step-feedback"
+                rows={2}
+                placeholder={t("planStep.feedbackPlaceholder")}
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                data-testid="plan-step-gate-feedback"
               />
             </div>
           )}
@@ -141,7 +162,7 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
           )}
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => props.onReject()}>
+          <Button variant="ghost" onClick={() => props.onReject(feedback.trim() || undefined)}>
             {props.gateType === "capability_audit" ? t("capabilityAudit.rejectLabel") : t("reject")}
           </Button>
           <Button onClick={handleApprove}>

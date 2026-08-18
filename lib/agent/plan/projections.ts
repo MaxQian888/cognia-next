@@ -18,6 +18,7 @@
 import type { AgentTeam, AgentTeamTask } from "@/types/agent/agent-team"
 import type { Goal } from "@/types/goal"
 import type { AgentPlan, CreatePlanInput, CreatePlanStepInput } from "@/types/agent/plan"
+import { linearAgentTurnSteps } from "./steps"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Team → Plan
@@ -73,11 +74,7 @@ export function planInputFromTeam(
 export function planInputFromGoal(goal: Goal, opts: { sessionId?: string } = {}): CreatePlanInput {
   const subgoals = (goal.subgoals ?? []).slice().sort((a, b) => a.order - b.order)
   const titles = subgoals.length > 0 ? subgoals.map((s) => s.text) : [goal.safeObjective]
-  const steps: CreatePlanStepInput[] = titles.map((title, i) => ({
-    title: title.slice(0, 200),
-    kind: "agent_turn",
-    ...(i > 0 ? { dependsOn: [i - 1] } : {}),
-  }))
+  const steps: CreatePlanStepInput[] = linearAgentTurnSteps(titles)
   return {
     sessionId: opts.sessionId ?? goal.sessionId,
     ...(goal.characterId ? { characterId: goal.characterId } : {}),

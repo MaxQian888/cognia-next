@@ -115,4 +115,39 @@ describe("PendingGatesStore", () => {
     expect(gateTypeFromScope("agent-team")).toBe("plan")
     expect(gateTypeFromScope("unknown")).toBe("plan")
   })
+
+  // ADR-0045: a plan `approval_gate` step must not fall through to the team
+  // "plan" variant — the two ask different questions and read different keys.
+  it("gateTypeFromScope maps the plan-step scope", () => {
+    expect(gateTypeFromScope("agent-plan")).toBe("plan_step")
+  })
+
+  it("clearForPlan drops only that plan's gates", () => {
+    const store = usePendingGatesStore.getState()
+    store.open({
+      key: { scope: "agent-plan", id: "p1:s1" },
+      gateType: "plan_step",
+      title: "Step one",
+      planId: "p1",
+      sessionId: "ses",
+    })
+    store.open({
+      key: { scope: "agent-plan", id: "p2:s1" },
+      gateType: "plan_step",
+      title: "Other plan",
+      planId: "p2",
+      sessionId: "ses",
+    })
+    usePendingGatesStore.getState().clearForPlan("p1")
+    const left = usePendingGatesStore.getState().gates
+    expect(left).toHaveLength(1)
+    expect(left[0].planId).toBe("p2")
+  })
+
+  it("keeps team gates when a plan is cleared", () => {
+    const store = usePendingGatesStore.getState()
+    store.open(budgetGate())
+    usePendingGatesStore.getState().clearForPlan("p1")
+    expect(usePendingGatesStore.getState().gates).toHaveLength(1)
+  })
 })

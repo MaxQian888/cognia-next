@@ -297,6 +297,129 @@ export async function teamListCore(input: TeamListInput = {}): Promise<TeamListO
 }
 
 // ---------------------------------------------------------------------------
+// plan_list / plan_run  (ADR-0045)
+//
+// The bridge could drive teams and scheduled tasks but not plans — the app's
+// canonical IR for multi-step work, and the thing a goal or a team projects
+// into. These two mirror `team_list` / `team_run` exactly: list what is
+// runnable (PII-redacted), then run one headlessly.
+// ---------------------------------------------------------------------------
+
+export interface PlanListInput {
+  /** Only plans still waiting for a decision (`awaiting_approval`). */
+  awaitingApprovalOnly?: boolean
+  /** Cap on returned rows (default 50). */
+  limit?: number
+}
+
+export interface PlanListOutput {
+  ok: boolean
+  plans?: Array<{
+    id: string
+    /** PII-redacted plan title. */
+    title: string
+    status: string
+    source: string
+    executionMode: string
+    totalSteps: number
+    completedSteps: number
+  }>
+  error?: string
+}
+
+export async function planList(input: PlanListInput = {}): Promise<PlanListOutput> {
+  if (isTauri()) return planListCore(input)
+  return proxyToRenderer<PlanListOutput>("plan_list", { ...input })
+}
+
+/** Renderer-side `plan_list`. Titles are redacted before crossing the boundary. */
+export async function planListCore(input: PlanListInput = {}): Promise<PlanListOutput> {
+  try {
+    const [{ listAllPlans }, { redactText }] = await Promise.all([
+      import("@/lib/db/plans"),
+      import("@cognia/redact"),
+    ])
+    const limit = Math.max(1, Math.min(input.limit ?? 50, 200))
+    const rows = (await listAllPlans(limit))
+      .filter((plan) => !input.awaitingApprovalOnly || plan.status === "awaiting_approval")
+      .map((plan) => ({
+        id: plan.id,
+        title: redactText(plan.title ?? "").redacted,
+        status: plan.status,
+        source: plan.source,
+        executionMode: plan.executionMode,
+        totalSteps: plan.totalSteps,
+        completedSteps: plan.completedSteps,
+      }))
+    return { ok: true, plans: rows }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export interface PlanRunInput {
+  planId: string
+  /**
+   * Approve the plan first when it is still awaiting a decision. Default
+   * false: an external agent must not silently answer a gate a human was
+   * asked to answer — it has to say so.
+   */
+  approve?: boolean
+}
+
+export interface PlanRunOutput {
+  ok: boolean
+  planId?: string
+  status?: string
+  error?: string
+}
+
+export async function planRun(input: PlanRunInput): Promise<PlanRunOutput> {
+  if (isTauri()) return planRunCore(input)
+  return proxyToRenderer<PlanRunOutput>("plan_run", { ...input })
+}
+
+/**
+ * Renderer-side `plan_run`. Runs the ORCHESTRATED path (`runPlan`) — the
+ * headless one. An in-session plan is driven by visible chat turns, which an
+ * external caller has no seat at, so it is refused with an explanation rather
+ * than half-executed.
+ */
+export async function planRunCore(input: PlanRunInput): Promise<PlanRunOutput> {
+  if (!input.planId) return { ok: false, error: "plan_run requires a planId" }
+  try {
+    const [{ getPlanRuntime }, { resolvePlanStrategy }] = await Promise.all([
+      import("@/lib/agent/plan/runtime"),
+      import("@/lib/agent/plan/strategy"),
+    ])
+    const runtime = getPlanRuntime()
+    const plan = await runtime.getPlan(input.planId)
+    if (!plan) return { ok: false, error: `plan '${input.planId}' not found` }
+    if (resolvePlanStrategy(plan) !== "orchestrated") {
+      return {
+        ok: false,
+        error: "this plan runs as visible turns in its chat session; it cannot be run headlessly",
+      }
+    }
+    if (plan.status === "awaiting_approval" || plan.status === "draft") {
+      if (!input.approve) {
+        return {
+          ok: false,
+          planId: plan.id,
+          status: plan.status,
+          error: "plan is awaiting approval — re-call with approve: true to approve and run it",
+        }
+      }
+      await runtime.approvePlan(plan.id)
+    }
+    const result = await runtime.runPlan(plan.id)
+    return { ok: true, planId: plan.id, status: result?.status ?? "unknown" }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // plugin_tool_invoke
 // ---------------------------------------------------------------------------
 
@@ -443,6 +566,10 @@ export async function runOrchestrationExec(
       return teamRunCore(args as unknown as TeamRunInput)
     case "team_list":
       return teamListCore(args as unknown as TeamListInput)
+    case "plan_list":
+      return planListCore(args as unknown as PlanListInput)
+    case "plan_run":
+      return planRunCore(args as unknown as PlanRunInput)
     case "plugin_tool_invoke":
       return pluginToolInvokeCore(args as unknown as PluginToolInvokeInput)
     case "schedule_task":

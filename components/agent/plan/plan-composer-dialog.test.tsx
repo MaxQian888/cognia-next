@@ -2,9 +2,14 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { PlanComposerDialog, parseStepLines } from "./plan-composer-dialog"
+import {
+  DEFAULT_STEP_DRAFT,
+  PlanComposerDialog,
+  buildStepParams,
+  parseStepLines,
+} from "./plan-composer-dialog"
 import type { CreatePlanInput } from "@/types/agent/plan"
 
 jest.mock("next-intl", () => ({
@@ -49,6 +54,68 @@ describe("parseStepLines", () => {
 
   it("returns an empty list for blank input", () => {
     expect(parseStepLines("   \n\n ")).toEqual([])
+  })
+})
+
+// The dispatcher implements six step kinds; before this the composer could
+// only ever emit `agent_turn`, so the other five were unreachable from the UI.
+describe("buildStepParams", () => {
+  it("leaves a bare agent turn without params", () => {
+    expect(buildStepParams(DEFAULT_STEP_DRAFT)).toEqual({ params: undefined })
+  })
+
+  it("carries an explicit agent-turn prompt", () => {
+    expect(buildStepParams({ kind: "agent_turn", prompt: " go " })).toEqual({
+      params: { kind: "agent_turn", prompt: "go" },
+    })
+  })
+
+  it("requires a team for delegation and keeps the teammate optional", () => {
+    expect(buildStepParams({ kind: "teammate_dispatch" })).toEqual({ error: "missing" })
+    expect(buildStepParams({ kind: "teammate_dispatch", teamId: "t1" })).toEqual({
+      params: { kind: "teammate_dispatch", teamId: "t1" },
+    })
+    expect(
+      buildStepParams({ kind: "teammate_dispatch", teamId: "t1", teammateId: "m1", prompt: "do" })
+    ).toEqual({
+      params: { kind: "teammate_dispatch", teamId: "t1", teammateId: "m1", spawnPrompt: "do" },
+    })
+  })
+
+  it("requires a workflow id for a sub-workflow step", () => {
+    expect(buildStepParams({ kind: "sub_workflow" })).toEqual({ error: "missing" })
+    expect(buildStepParams({ kind: "sub_workflow", workflowId: "wf1" })).toEqual({
+      params: { kind: "sub_workflow", workflowId: "wf1" },
+    })
+  })
+
+  it("defaults a tool call's input to an empty object and rejects bad JSON", () => {
+    expect(buildStepParams({ kind: "tool_call" })).toEqual({ error: "missing" })
+    expect(buildStepParams({ kind: "tool_call", toolName: "fs.read" })).toEqual({
+      params: { kind: "tool_call", toolName: "fs.read", input: {} },
+    })
+    expect(buildStepParams({ kind: "tool_call", toolName: "fs.read", toolInput: "{" })).toEqual({
+      error: "json",
+    })
+    // A JSON array parses but is not a tool-input object.
+    expect(buildStepParams({ kind: "tool_call", toolName: "fs.read", toolInput: "[1]" })).toEqual({
+      error: "json",
+    })
+  })
+
+  it("requires both a server and a tool for an MCP call", () => {
+    expect(buildStepParams({ kind: "mcp_tool_call", toolName: "t" })).toEqual({ error: "missing" })
+    expect(buildStepParams({ kind: "mcp_tool_call", serverId: "s" })).toEqual({ error: "missing" })
+    expect(
+      buildStepParams({ kind: "mcp_tool_call", serverId: "s", toolName: "t", toolInput: '{"a":1}' })
+    ).toEqual({ params: { kind: "mcp_tool_call", serverId: "s", toolName: "t", input: { a: 1 } } })
+  })
+
+  it("treats an approval gate prompt as optional", () => {
+    expect(buildStepParams({ kind: "approval_gate" })).toEqual({ params: undefined })
+    expect(buildStepParams({ kind: "approval_gate", prompt: "ok?" })).toEqual({
+      params: { kind: "approval_gate", prompt: "ok?" },
+    })
   })
 })
 
@@ -100,6 +167,35 @@ describe("PlanComposerDialog", () => {
     expect(input.steps[2].dependsOn).toEqual([1])
     expect(onCreated).toHaveBeenCalledWith("p_new")
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("emits a typed step when a kind is picked, and blocks submit until it is valid", async () => {
+    const user = userEvent.setup()
+    setup()
+    await user.type(screen.getByLabelText("titleLabel"), "Ship v2")
+    await user.type(screen.getByLabelText("stepsLabel"), "hand off{Enter}wrap up")
+
+    // Radix Select needs a keyboard-driven open in jsdom (no pointer geometry).
+    fireEvent.keyDown(screen.getByTestId("plan-step-0-kind"), { key: "Enter" })
+    fireEvent.click(await screen.findByRole("option", { name: "kind.teammate_dispatch" }))
+
+    // A delegation step without a team is incomplete — the guard must hold.
+    expect(screen.getByTestId("plan-composer-invalid")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-composer-create")).toBeDisabled()
+
+    await user.type(screen.getByTestId("plan-step-0-teamId"), "team_7")
+    expect(screen.queryByTestId("plan-composer-invalid")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("plan-composer-create"))
+
+    await waitFor(() => expect(createPlan).toHaveBeenCalled())
+    const input = createPlan.mock.calls[0][0] as CreatePlanInput
+    expect(input.steps[0]).toMatchObject({
+      title: "hand off",
+      kind: "teammate_dispatch",
+      params: { kind: "teammate_dispatch", teamId: "team_7" },
+    })
+    // Untouched rows stay plain agent turns, deps intact.
+    expect(input.steps[1]).toMatchObject({ title: "wrap up", kind: "agent_turn", dependsOn: [0] })
   })
 
   it("merges the user's plan defaults into the created plan", async () => {

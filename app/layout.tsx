@@ -37,6 +37,7 @@ import { StorageRetentionInitializer } from "@/components/providers/initializers
 import { StoragePersistenceInitializer } from "@/components/providers/initializers/storage-persistence-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
 import { IssueTrackerInitializer } from "@/components/providers/initializers/issue-tracker-initializer"
+import { PlanNotificationInitializer } from "@/components/providers/initializers/plan-notification-initializer"
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { SessionFocusInitializer } from "@/components/providers/initializers/session-focus-initializer"
@@ -74,6 +75,7 @@ import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
 import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-dialog"
 import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
 import { ReportProblemHost } from "@/components/support/report-problem-host"
+import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
 import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
@@ -249,6 +251,9 @@ export default async function RootLayout({
                             <StoragePersistenceInitializer />
                             <ProjectStoreInitializer />
                             <IssueTrackerInitializer />
+                            {/* Handler for the Approve / Discard buttons on a
+                             * plan-awaiting-approval notification (ADR-0045). */}
+                            <PlanNotificationInitializer />
                             {/* Capability-scoped dynamic boundaries keep optional
                              * subsystem graphs out of the main profile's initial
                              * compile. Production/eager requests every group;
@@ -376,6 +381,15 @@ export default async function RootLayout({
                              * "Report issue" and `/report` open the unified
                              * "Report a problem" dialog through here. */}
                             <ReportProblemHost />
+                            {/* Single consumer for every HITL approval gate in
+                             * `usePendingGatesStore` — ADR-0022 team gates
+                             * (budget / deadlock / teammate-fix / replan /
+                             * capability-audit) AND ADR-0045 plan `approval_gate`
+                             * steps. Mounted at the root, not on the team
+                             * workspace page: a gate opened while the user is in
+                             * chat (or anywhere else) must still be answerable,
+                             * or the blocked waiter hangs to its timeout. */}
+                            <GateModalsHost />
                             {/* Global live progress for workflow runs started outside
                              * the editor (library Run button, /workflow chat command,
                              * IM/API). Editor/run-list runs keep their own inline

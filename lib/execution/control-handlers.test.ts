@@ -26,11 +26,19 @@ jest.mock("@/lib/goal/runtime", () => ({
 const mockPausePlan = jest.fn(async (id: string) => ({ id, status: "paused" }))
 const mockResumePlan = jest.fn(async (id: string) => ({ id, status: "executing" }))
 const mockCancelPlan = jest.fn(async (id: string) => ({ id, status: "cancelled" }))
+const mockApprovePlan = jest.fn(async (id: string) => ({ id, status: "approved" }))
+const mockRejectPlan = jest.fn(async (id: string) => ({ id, status: "cancelled" }))
+const mockStartPlan = jest.fn(async () => ({ strategy: "in_session", status: "executing" }))
+const mockRunPlan = jest.fn(async () => ({ status: "completed" }))
 jest.mock("@/lib/agent/plan/runtime", () => ({
   getPlanRuntime: () => ({
     pausePlan: mockPausePlan,
     resumePlan: mockResumePlan,
     cancelPlan: mockCancelPlan,
+    approvePlan: mockApprovePlan,
+    rejectPlan: mockRejectPlan,
+    startPlan: mockStartPlan,
+    runPlan: mockRunPlan,
   }),
 }))
 
@@ -159,4 +167,64 @@ describe("execution source control handlers", () => {
       installed.dispose()
     }
   )
+})
+
+// A companion mirrors plan rows read-only, so approving from the phone has to
+// travel back as a control command; a local write would be overwritten by the
+// next sync pull.
+describe("plan approval over run control", () => {
+  // Own the reset: this block sits outside the suite-level beforeEach, so each
+  // case seeds its own run id rather than colliding on a shared one.
+  let seq = 0
+  async function seedPlanRun(): Promise<string> {
+    const id = `plan-approval-run-${(seq += 1)}`
+    await createExecutionRun({
+      id,
+      kind: "plan",
+      sourceId: "plan-source",
+      title: "Plan",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    return id
+  }
+
+  const command = (runId: string, action: "approve" | "deny") => ({
+    runId,
+    action,
+    idempotencyKey: `${runId}-${action}`,
+    expectedRevision: 0,
+    actor: {},
+  })
+
+  it("approves and hands an in-session plan to the chat surface", async () => {
+    const installed = installExecutionRunControlHandlers()
+    const runId = await seedPlanRun()
+    await installed.plan(command(runId, "approve"))
+    expect(mockApprovePlan).toHaveBeenCalledWith("plan-source")
+    expect(mockStartPlan).toHaveBeenCalledWith("plan-source")
+    // In-session plans are driven by the visible chat turns, not headlessly.
+    expect(mockRunPlan).not.toHaveBeenCalled()
+    installed.dispose()
+  })
+
+  it("starts an orchestrated plan headlessly on approval", async () => {
+    mockStartPlan.mockResolvedValueOnce({ strategy: "orchestrated", status: "approved" })
+    const installed = installExecutionRunControlHandlers()
+    const runId = await seedPlanRun()
+    await installed.plan(command(runId, "approve"))
+    expect(mockRunPlan).toHaveBeenCalledWith("plan-source")
+    installed.dispose()
+  })
+
+  it("denies through rejectPlan", async () => {
+    const installed = installExecutionRunControlHandlers()
+    const runId = await seedPlanRun()
+    await installed.plan(command(runId, "deny"))
+    expect(mockRejectPlan).toHaveBeenCalledWith("plan-source")
+    expect(mockApprovePlan).not.toHaveBeenCalled()
+    installed.dispose()
+  })
 })

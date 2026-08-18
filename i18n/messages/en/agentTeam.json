@@ -26,6 +26,12 @@
       "body": "Review the lead's proposed plan.",
       "title": "Plan awaiting approval"
     },
+    "planStep": {
+      "title": "Plan step needs approval",
+      "body": "The plan paused at a human checkpoint. Approve to run the remaining steps, or reject to stop the plan here.",
+      "feedbackLabel": "Reason (optional)",
+      "feedbackPlaceholder": "Why this step should not run…"
+    },
     "reject": "Reject",
     "replan": {
       "body": "The lead proposes adjusting the remaining plan based on results so far. Approve to apply, or reject to continue as planned.",

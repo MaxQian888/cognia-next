@@ -1,21 +1,29 @@
 /**
- * Runtime-proof guard: the team workspace page must mount the HITL gate host
- * and the durable run-history list. Both are ADR-0022 deliverables that were
- * built + unit-tested but historically left unmounted ("built-but-dormant").
- * This source-level assertion keeps them wired so a refactor can't silently
+ * Runtime-proof guard: the durable run-history list and the HITL gate host
+ * must stay mounted. Both are ADR-0022 deliverables that were built +
+ * unit-tested but historically left unmounted ("built-but-dormant"). This
+ * source-level assertion keeps them wired so a refactor can't silently
  * re-orphan them.
+ *
+ * `GateModalsHost` moved to the app root (`app/layout.tsx`) when ADR-0045 plan
+ * `approval_gate` steps became a second producer for the same store: a gate
+ * opened while the user sits in chat has to be answerable there too. It is
+ * asserted at its new home below, and must NOT be re-added here — two mounts
+ * would render two dialogs per gate.
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const src = readFileSync(join(__dirname, "page.tsx"), "utf8")
+const layoutSrc = readFileSync(join(__dirname, "../../layout.tsx"), "utf8")
 
 describe("agent-teams workspace page wiring", () => {
-  it("imports and renders GateModalsHost (HITL gate consumer)", () => {
-    expect(src).toMatch(
+  it("renders GateModalsHost exactly once, at the app root", () => {
+    expect(layoutSrc).toMatch(
       /import\s*{\s*GateModalsHost\s*}\s*from\s*"@\/components\/agent\/team\/gate-modals-host"/
     )
-    expect(src).toMatch(/<GateModalsHost\s*\/>/)
+    expect(layoutSrc).toMatch(/<GateModalsHost\s*\/>/)
+    expect(src).not.toMatch(/<GateModalsHost/)
   })
 
   it("mounts AgentTeamActivity, which wires the durable run history", () => {

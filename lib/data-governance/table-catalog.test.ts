@@ -19,7 +19,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(277)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(278)
     db.close()
   })
 
@@ -52,8 +52,8 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 24 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(24)
+  it("maps all 25 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(25)
     // ADR-0131 inbox relay: drafts + outbound status projection are mirrored.
     expect(COMPANION_SYNC_TABLES.has("connectorDrafts")).toBe(true)
     expect(COMPANION_SYNC_TABLES.has("outboundQueue")).toBe(true)
@@ -167,7 +167,7 @@ describe("DataTableCatalog", () => {
     expect(COMPANION_SYNC_TABLES.has("matrixPendingEncryptedEvents")).toBe(false)
   })
 
-  it("governs issue authority, history, and rebuildable GitHub mirrors", () => {
+  it("governs issue authority, history, runs, and rebuildable GitHub mirrors", () => {
     expect(policyForTable("issues")).toMatchObject({
       role: "authoritative",
       sensitivity: "confidential",
@@ -184,5 +184,18 @@ describe("DataTableCatalog", () => {
       backupPolicy: { mode: "derived" },
       cleanupPolicy: "quick",
     })
+    // v174 execution bridge: the issue side owns the engine binding, so a run
+    // is authoritative user history — device-local, never companion-synced
+    // (the engine rows it points at are not synced either), and swept only by
+    // the `deleteIssue` cascade.
+    expect(policyForTable("issueRuns")).toMatchObject({
+      role: "authoritative",
+      sensitivity: "confidential",
+      backupPolicy: { mode: "device-local" },
+      syncPolicy: { mode: "none" },
+      retentionPolicy: { mode: "permanent", enforcement: "explicit-delete" },
+      cleanupPolicy: "protected",
+    })
+    expect(COMPANION_SYNC_TABLES.has("issueRuns")).toBe(false)
   })
 })

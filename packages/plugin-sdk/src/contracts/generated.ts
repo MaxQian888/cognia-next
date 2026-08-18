@@ -83,6 +83,8 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "git:write",
   "goal:read",
   "goal:write",
+  "plan:read",
+  "plan:write",
   "memory:read",
   "memory:write",
   "team:read",

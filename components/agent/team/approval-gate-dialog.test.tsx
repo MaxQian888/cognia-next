@@ -53,6 +53,31 @@ describe("ApprovalGateDialog", () => {
     expect(screen.queryByPlaceholderText(/50000/)).not.toBeInTheDocument()
   })
 
+  it("plan_step gate renders its own title and approves with no payload", () => {
+    const onApprove = jest.fn()
+    renderDialog({ gateType: "plan_step", onApprove })
+    expect(screen.getByText(/Plan step needs approval/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Approve/i }))
+    expect(onApprove).toHaveBeenCalledWith()
+  })
+
+  // The reject reason becomes the plan step's failure text, so it has to reach
+  // the caller rather than being collected and dropped.
+  it("plan_step gate forwards the reject reason", () => {
+    const onReject = jest.fn()
+    renderDialog({ gateType: "plan_step", onReject })
+    fireEvent.change(screen.getByTestId("plan-step-gate-feedback"), {
+      target: { value: "  wrong branch  " },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Reject/i }))
+    expect(onReject).toHaveBeenCalledWith("wrong branch")
+  })
+
+  it("only the plan_step gate collects reject feedback", () => {
+    renderDialog({ gateType: "plan" })
+    expect(screen.queryByTestId("plan-step-gate-feedback")).not.toBeInTheDocument()
+  })
+
   it("teammate_fix gate approve sends action=rejoin", () => {
     const onApprove = jest.fn()
     renderDialog({ gateType: "teammate_fix", onApprove })

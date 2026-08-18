@@ -389,6 +389,15 @@ export interface SendOptions {
    * the renderer-side turn/token budget. Undefined → no ceiling.
    */
   maxBudgetUsd?: number
+  /**
+   * Register the ADR-0045 plan-authoring tools (`create_plan` / `update_plan`)
+   * for this send. Both dispatch paths default to ON — no provider ships them
+   * natively — so this only carries the user's opt-OUT
+   * (`AppSettings.planSettings.agentAuthoring === false`). The tools
+   * acknowledge in the sidecar and are written by the renderer capture
+   * (`lib/agent/plan/agent-tool-capture.ts`).
+   */
+  planTools?: boolean
   /** Forward partial-message stream events (only meaningful in streaming mode). */
   includePartialMessages?: boolean
   /** Which on-disk settings the SDK loads — subset of "user" | "project" | "local". */
@@ -4346,12 +4355,16 @@ export interface AppSettings {
    *   reorder / inline edit / add / remove steps) instead of the static list.
    * - `interactiveHtmlStyle` — built-in visual preset for the interactive
    *   editor (mirrors `lib/agent/plan/plan-html.ts:PLAN_HTML_STYLES`).
+   * - `agentAuthoring` — expose `create_plan` / `update_plan` to the agent so
+   *   it can open and maintain a tracked plan itself (default true). Rides the
+   *   send spec as `SendOptions.planTools`.
    */
   planSettings?: {
     requireApproval?: boolean
     maxAutoRefinements?: number
     interactiveHtmlView?: boolean
     interactiveHtmlStyle?: "default" | "compact" | "timeline" | "cards"
+    agentAuthoring?: boolean
   }
   /**
    * Per-provider configuration. Stores the full `UserProviderSettings`

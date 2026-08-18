@@ -81,6 +81,7 @@ export { createMessagePartAPI, purgeMessagePartRenderersForPlugin } from "./mess
 export { createToolResultAPI, purgeToolResultRenderersForPlugin } from "./tool-result-api"
 export { createGitAPI, NoActiveRepoError } from "./git-api"
 export { createGoalAPI, NoJudgeModelError } from "./goal-api"
+export { createPlanAPI, NoPlannerModelError } from "./plan-api"
 export { createMemoryAPI } from "./memory-api"
 export { createTeamAPI } from "./team-api"
 export { createSubscriptionAPI } from "./subscription-api"

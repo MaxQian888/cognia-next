@@ -36,7 +36,14 @@ import {
 } from "../permission-gate"
 import { wrapUntrusted } from "../untrusted"
 import { computerUse } from "../handlers/computer-use"
-import { agentDispatch, teamRun, teamList, pluginToolInvoke } from "../handlers/orchestration"
+import {
+  agentDispatch,
+  teamRun,
+  teamList,
+  planList,
+  planRun,
+  pluginToolInvoke,
+} from "../handlers/orchestration"
 import { scheduleTask, listScheduledTasks, cancelScheduledTask } from "../handlers/scheduling"
 import { ragSearch } from "../handlers/rag"
 import { parseResourceUri } from "./resource-uri"
@@ -933,6 +940,71 @@ function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsG
         scope: "agent:team",
         check: checkToolCall(await scopedSettings(settingsGetter, extra), "team_list"),
         body: () => teamList(args as Parameters<typeof teamList>[0]),
+      })
+  )
+
+  server.registerTool(
+    "plan_list",
+    {
+      title: "List Cognia agent plans",
+      description:
+        "List AgentPlans (id, redacted title, status, step counts) — the app's " +
+        "structured representation of multi-step work. Use `awaitingApprovalOnly` " +
+        "to find plans blocked on a decision. Read-only. Denied by default until " +
+        "the `agent:dispatch` scope is enabled in Settings → External Bridge.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        awaitingApprovalOnly: z
+          .boolean()
+          .optional()
+          .describe("Only plans waiting for an approval decision."),
+        limit: z.number().optional().describe("Max rows to return (default 50, max 200)."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "plan_list",
+        scope: "agent:dispatch",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "plan_list"),
+        body: () => planList(args as Parameters<typeof planList>[0]),
+      })
+  )
+
+  server.registerTool(
+    "plan_run",
+    {
+      title: "Run a Cognia agent plan",
+      description:
+        "Execute an approved plan through the orchestrator and return its terminal " +
+        "status. Plans that run as visible turns in a chat session are refused — " +
+        "they need a seat at that conversation. Pass `approve: true` to answer a " +
+        "pending approval gate yourself. Denied by default until the " +
+        "`agent:dispatch` scope is enabled in Settings → External Bridge.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        planId: z.string().describe("Id of an existing plan."),
+        approve: z
+          .boolean()
+          .optional()
+          .describe("Approve the plan first when it is still awaiting a decision."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "plan_run",
+        scope: "agent:dispatch",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "plan_run"),
+        body: () => planRun(args as Parameters<typeof planRun>[0]),
       })
   )
 

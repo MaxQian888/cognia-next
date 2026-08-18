@@ -51,9 +51,15 @@ import {
   updatePlan,
 } from "@/lib/db/plans"
 import { loggers } from "@cognia/logging"
-import { applyStepStatus, materializeSteps } from "./steps"
+import { applyStepStatus, linearAgentTurnSteps, materializeSteps } from "./steps"
 import { findPlanPiiLeak } from "./pii-gate"
-import { emitPlanCompletedSchedulerEvent, emitPlanStatus } from "./notify"
+import {
+  emitPlanCompletedSchedulerEvent,
+  emitPlanStatus,
+  notifyPlanAwaitingApproval,
+  notifyPlanTerminal,
+} from "./notify"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { resolvePlanStrategy, type PlanRunStrategy } from "./strategy"
 import type { SynthesizePlanResult } from "./synthesize-workflow"
 
@@ -155,6 +161,10 @@ class PlanRuntime {
         executionMode: row.executionMode,
       },
     })
+    // A plan that needs a human is the one lifecycle moment worth interrupting
+    // for; the notification carries Approve / Discard so the answer does not
+    // require finding the session first. No-op for a plan that landed approved.
+    void notifyPlanAwaitingApproval(row)
     return row
   }
 
@@ -231,11 +241,27 @@ class PlanRuntime {
     if (!current) return null
     if (isTerminalPlanStatus(current.status)) return current
     this.fireAbort(planId)
+    this.clearGates(planId)
     await updatePlan(planId, { status: "cancelled", generationId: crypto.randomUUID() })
     await appendPlanEvent({ planId, kind: "rejected", payload: { kind: "rejected", feedback } })
     const updated = (await getPlan(planId)) ?? null
     void emitPlanStatus(updated)
     return updated
+  }
+
+  /**
+   * Drop any `approval_gate` dialogs still standing for this plan.
+   *
+   * The executor's own `finally` already closes a gate it is blocked on, but a
+   * gate restored from persistence after a reload has no live waiter behind it
+   * — cancelling / finishing the plan is what makes that ghost card obsolete.
+   */
+  private clearGates(planId: string): void {
+    try {
+      usePendingGatesStore.getState().clearForPlan(planId)
+    } catch {
+      // Store unavailable (headless / SSR) — the gate UI does not exist there.
+    }
   }
 
   /** Pause an executing plan → `paused`; fires the run's AbortController. */
@@ -269,6 +295,7 @@ class PlanRuntime {
     if (!current) return null
     if (isTerminalPlanStatus(current.status)) return current
     this.fireAbort(planId)
+    this.clearGates(planId)
     await updatePlan(planId, { status: "cancelled", generationId: crypto.randomUUID() })
     await appendPlanEvent({ planId, kind: "cancelled", payload: { kind: "cancelled" } })
     await appendPlanEvent({
@@ -494,13 +521,7 @@ class PlanRuntime {
     const result = await refinePlanSteps(current, request, client, opts.signal)
     if (!result) return current // fail-OPEN — keep the existing plan
 
-    const steps = materializeSteps(
-      result.titles.map((title, i) => ({
-        title,
-        kind: "agent_turn" as const,
-        ...(i > 0 ? { dependsOn: [i - 1] } : {}),
-      }))
-    )
+    const steps = materializeSteps(linearAgentTurnSteps(result.titles))
     const counts = computePlanCounts(steps)
     await updatePlan(request.planId, {
       steps,
@@ -556,8 +577,10 @@ class PlanRuntime {
       payload: { kind: "exit", status, reason: reason ?? `plan run ${status}` },
     })
     const updated = await getPlan(planId)
+    this.clearGates(planId)
     void emitPlanStatus(updated ?? null)
     void emitPlanCompletedSchedulerEvent(planId, status)
+    if (updated) void notifyPlanTerminal(updated, status)
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -583,6 +606,7 @@ class PlanRuntime {
   /** Delete a plan (and its events). For history "remove" actions. */
   async deletePlan(planId: string): Promise<void> {
     this.fireAbort(planId)
+    this.clearGates(planId)
     await deletePlan(planId)
   }
 }
