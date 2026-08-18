@@ -54,10 +54,10 @@ describe("session-folders CRUD", () => {
 
   it("ignores unknown ids and keeps unnamed folders after the ones given", async () => {
     const a = await createFolder("A")
-    const b = await createFolder("B")
+    await createFolder("B")
     const c = await createFolder("C")
-    // `gone` was deleted by another surface between the drag and the drop; `b`
-    // simply was not part of the request.
+    // `gone` was deleted by another surface between the drag and the drop; the
+    // "B" folder simply was not part of the request.
     await reorderFolders([c.id, "gone", a.id])
     expect((await listFolders("proj-A")).map((f) => f.name)).toEqual(["C", "A", "B"])
   })

@@ -85,7 +85,7 @@ export function SidebarRowsScope({
     if (claimed) return
     const first = rows[0]?.getAttribute(SIDEBAR_ROW_ATTR)
     if (first) setRovingKey((current) => (current === first ? current : first))
-  })
+  }, [children, scopeRef])
 
   const value = useMemo<RovingContextValue>(
     () => ({ rovingKey, setRovingKey, scopeRef }),

@@ -15,7 +15,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { cn } from "@/lib/utils"
 import { ProviderSidebarItem } from "./provider-sidebar-item"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
 import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
