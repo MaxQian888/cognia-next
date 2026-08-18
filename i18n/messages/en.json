@@ -1961,6 +1961,12 @@
         "body": "Review the lead's proposed plan.",
         "title": "Plan awaiting approval"
       },
+      "planStep": {
+        "body": "The plan paused at a human checkpoint. Approve to run the remaining steps, or reject to stop the plan here.",
+        "feedbackLabel": "Reason (optional)",
+        "feedbackPlaceholder": "Why this step should not run…",
+        "title": "Plan step needs approval"
+      },
       "reject": "Reject",
       "replan": {
         "body": "The lead proposes adjusting the remaining plan based on results so far. Approve to apply, or reject to continue as planned.",
@@ -4895,7 +4901,19 @@
         "faster": "Faster",
         "hint": "Choose how much reasoning the model should use for this conversation.",
         "hintAria": "About thinking levels",
-        "smarter": "Smarter"
+        "hintExternal": "Choose how much reasoning the external agent should use. The agent folds this onto whatever depth levels its own model publishes.",
+        "level": {
+          "high": "High",
+          "low": "Low",
+          "max": "Max",
+          "medium": "Medium",
+          "off": "Auto",
+          "ultracode": "Ultracode",
+          "xhigh": "Extra"
+        },
+        "smarter": "Smarter",
+        "title": "Effort",
+        "triggerAria": "Thinking level: {level}"
       },
       "enhance": {
         "modes": {
@@ -8628,6 +8646,61 @@
       "dirty": "{name} has unsaved changes",
       "preview": "{name} — preview tab, double-click to keep it open",
       "unread": "{count, plural, one {# update} other {# updates}}"
+    }
+  },
+  "docsProviders": {
+    "errors": {
+      "empty": "That document is empty.",
+      "hostUnsupported": "Remote documents are available on the desktop app only.",
+      "invalidRef": "That is not a document link this source can read.",
+      "network": "Could not reach the document service.",
+      "noPermission": "You do not have access to this document.",
+      "notAuthorized": "Authorization expired — reconnect the account in Settings.",
+      "notConfigured": "No account is connected for this document source.",
+      "notFound": "That document no longer exists.",
+      "rateLimited": "The document service is rate limiting — try again shortly.",
+      "unsupportedType": "This document type cannot be read."
+    },
+    "kind": {
+      "bitable": "Base",
+      "doc": "Document",
+      "sheet": "Spreadsheet",
+      "wiki": "Wiki"
+    },
+    "label": "Feishu Docs",
+    "labelGoogle": "Google Workspace",
+    "picker": {
+      "accountLabel": "Account",
+      "attached": "Attached “{title}”",
+      "fetching": "Fetching “{title}”…",
+      "hostUnsupported": "Remote documents are available on the desktop app only.",
+      "linkOnlyHint": "This provider has no search — paste a document link.",
+      "noAccount": "Connect an account in Settings to use this.",
+      "noMatches": "No document matches \"{query}\"",
+      "pasteHint": "Type keywords, or paste a document link.",
+      "searching": "Searching…",
+      "title": "Remote documents",
+      "truncated": "“{title}” was too large and has been truncated."
+    },
+    "settings": {
+      "connect": "Connect",
+      "connectFailed": "Could not start authorization: {reason}",
+      "connectSucceeded": "Google Workspace connected.",
+      "connectedAs": "Connected as {email}",
+      "connecting": "Waiting for authorization…",
+      "description": "Reference Feishu and Google documents with @ in chat.",
+      "desktopOnly": "Desktop app only.",
+      "disconnect": "Disconnect",
+      "googleClientHint": "Create a Desktop app credential in Google Cloud Console.",
+      "googleClientId": "OAuth client ID",
+      "googleClientSecret": "OAuth client secret",
+      "googleScopes": "Read-only access to Drive, Docs and Sheets.",
+      "larkAccountCount": "{count} connected",
+      "larkDescription": "Uses your connected Feishu accounts — no extra setup.",
+      "larkManage": "Manage Feishu accounts",
+      "larkNoAccount": "No Feishu account is connected yet.",
+      "notConnected": "Not connected",
+      "title": "Remote documents"
     }
   },
   "docsSite": {
@@ -17698,10 +17771,32 @@
       "title": "Review plan"
     },
     "composer": {
+      "advancedHint": "By default every step is a conversation turn. Give a step another type to delegate it, call a tool, run a sub-workflow, or pause for approval.",
+      "advancedToggle": "Step types",
       "cancel": "Cancel",
       "create": "Create plan",
       "createFailed": "Could not create the plan.",
       "description": "One step per line. You can reorder and edit the steps before approving.",
+      "field": {
+        "prompt": "Prompt (optional)",
+        "serverId": "MCP server id",
+        "teamId": "Team id",
+        "teammateId": "Teammate id (optional)",
+        "toolInput": "Input (JSON)",
+        "toolName": "Tool name",
+        "workflowId": "Workflow id"
+      },
+      "invalidJson": "Step {index}: input must be valid JSON.",
+      "invalidStep": "Step {index}: fill in the required fields for this type.",
+      "kind": {
+        "agent_turn": "Agent turn",
+        "approval_gate": "Approval checkpoint",
+        "mcp_tool_call": "MCP tool call",
+        "sub_workflow": "Sub-workflow",
+        "teammate_dispatch": "Delegate to teammate",
+        "tool_call": "Plugin tool call"
+      },
+      "kindLabel": "Type",
       "openLabel": "Write a plan",
       "stepCount": "{count, plural, =0 {No steps yet} one {# step} other {# steps}}",
       "stepsLabel": "Steps",
@@ -19570,6 +19665,11 @@
     "previewTab": "{name} — preview tab, double-click to keep it open",
     "proIde": {
       "cancelDownload": "Cancel",
+      "chatPrompts": {
+        "explain": "Please explain this code.",
+        "fix": "Please fix the issues in this code.",
+        "review": "Please review this code for potential bugs and improvements."
+      },
       "checkingTooltip": "Checking whether Pro IDE is available…",
       "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
       "downloading": "Downloading VS Code… {percent}%",
@@ -19579,6 +19679,12 @@
       "localVsCodeFailed": "Couldn't open your local VS Code: {error}",
       "openFileFailed": "Couldn't open the file in VS Code: {error}",
       "openLocalVsCode": "Open in VS Code",
+      "profileLabel": "Extension profile",
+      "profileManaged": "Managed",
+      "profileManagedTooltip": "Pinned built-ins, the Cognia broker, and signed generated proxies. Agent drive, chat context, and plugin IDE capabilities all need this profile.",
+      "profileNative": "Extensions",
+      "profileNativeTooltip": "Your Open VSX extensions, in a separate process with its own settings and extension directory. It never receives Cognia broker credentials, so agent drive and plugin IDE capabilities are unavailable here.",
+      "profileSwitchRestarts": "Switching profile starts a separate VS Code. Open editors and terminals stay in the other profile.",
       "retry": "Retry",
       "revokedToMonaco": "Switched back to Monaco — the VS Code pane was taken by another editor or stopped.",
       "starting": "Starting VS Code…",
@@ -23652,6 +23758,8 @@
         "permissionDesc": "Default for new sessions — characters and individual sessions can still override.",
         "permissionMode": "Mode",
         "permissionTitle": "Permission mode",
+        "planAgentAuthoring": "Let the agent write plans",
+        "planAgentAuthoringHint": "Gives the agent create_plan / update_plan so it can open a tracked checklist for multi-step work and keep it current. Turn off to remove both tools from the prompt.",
         "planDesc": "Defaults applied when a plan-mode turn proposes a plan (ExitPlanMode).",
         "planInteractiveHtml": "Interactive plan view",
         "planInteractiveHtmlHint": "Enhanced plan mode: review proposed plans in an interactive HTML editor — drag to reorder, edit inline, add or remove steps before approving.",
@@ -27460,6 +27568,18 @@
         "title": "Composer behavior"
       },
       "description": "Auto-generate titles and configure the timeline minimap.",
+      "effortPreferences": {
+        "defaultLevel": {
+          "hint": "The depth every new conversation starts on. \"Auto\" leaves each model at its own default.",
+          "label": "Default for new chats"
+        },
+        "description": "Defaults for the composer's reasoning-depth control.",
+        "title": "Thinking level",
+        "visibleTiers": {
+          "hint": "Hide the depths you never use to shorten the track. Conversations already using a hidden tier keep running at that depth.",
+          "label": "Tiers to offer"
+        }
+      },
       "inputSend": {
         "description": "Keyboard, sending, and AI assistance for the message composer.",
         "title": "Input & sending"
@@ -30307,11 +30427,13 @@
     },
     "proIde": {
       "cancel": "Cancel",
+      "cancelDownload": "Cancel download",
       "clean": "Clean up old versions",
       "cleanDone": "Freed {size}.",
       "description": "The optional embedded VS Code used by the project editors. This card manages the install; running instances appear under Performance → Managed Processes.",
       "diskUsage": "Disk usage",
       "download": "Download now",
+      "downloadCancelled": "Download cancelled. The partial archive was removed.",
       "downloadDone": "code-server {version} installed.",
       "failed": "Failed: {error}",
       "installed": "Installed",

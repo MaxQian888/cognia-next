@@ -1961,6 +1961,12 @@
         "body": "请审阅 lead 提出的方案。",
         "title": "等待方案审批"
       },
+      "planStep": {
+        "body": "计划在人工检查点暂停。批准后继续执行剩余步骤，拒绝则在此终止计划。",
+        "feedbackLabel": "原因（可选）",
+        "feedbackPlaceholder": "说明该步骤不应执行的原因…",
+        "title": "计划步骤待审批"
+      },
       "reject": "拒绝",
       "replan": {
         "body": "组长根据已有结果建议调整剩余计划。批准以应用，或拒绝以按原计划继续。",
@@ -4895,7 +4901,19 @@
         "faster": "更快",
         "hint": "选择模型在本会话中使用的推理强度。",
         "hintAria": "关于思考等级",
-        "smarter": "更智能"
+        "hintExternal": "选择外部 Agent 使用的推理深度。Agent 会将其折算到自身模型公布的档位上。",
+        "level": {
+          "high": "深度",
+          "low": "轻度",
+          "max": "最大",
+          "medium": "均衡",
+          "off": "自动",
+          "ultracode": "Ultracode",
+          "xhigh": "极深"
+        },
+        "smarter": "更智能",
+        "title": "思考强度",
+        "triggerAria": "思考强度：{level}"
       },
       "enhance": {
         "modes": {
@@ -8628,6 +8646,61 @@
       "dirty": "{name} 有未保存的更改",
       "preview": "{name} —— 预览标签页，双击可固定",
       "unread": "{count, plural, other {# 条更新}}"
+    }
+  },
+  "docsProviders": {
+    "errors": {
+      "empty": "该文档没有内容。",
+      "hostUnsupported": "云端文档仅在桌面端可用。",
+      "invalidRef": "该链接不是此来源可读取的文档。",
+      "network": "无法连接文档服务。",
+      "noPermission": "你没有该文档的访问权限。",
+      "notAuthorized": "授权已失效，请到设置中重新连接账号。",
+      "notConfigured": "该文档来源尚未连接账号。",
+      "notFound": "该文档不存在。",
+      "rateLimited": "文档服务限流中，请稍后重试。",
+      "unsupportedType": "暂不支持读取该类型的文档。"
+    },
+    "kind": {
+      "bitable": "多维表格",
+      "doc": "文档",
+      "sheet": "电子表格",
+      "wiki": "知识库"
+    },
+    "label": "飞书云文档",
+    "labelGoogle": "Google 文档",
+    "picker": {
+      "accountLabel": "账号",
+      "attached": "已附加「{title}」",
+      "fetching": "正在获取「{title}」…",
+      "hostUnsupported": "云端文档仅在桌面端可用。",
+      "linkOnlyHint": "该来源不支持搜索，请粘贴文档链接。",
+      "noAccount": "请先在设置中连接账号。",
+      "noMatches": "没有匹配「{query}」的文档",
+      "pasteHint": "输入关键词，或粘贴文档链接。",
+      "searching": "搜索中…",
+      "title": "云端文档",
+      "truncated": "「{title}」内容过大，已截断。"
+    },
+    "settings": {
+      "connect": "连接",
+      "connectFailed": "无法开始授权：{reason}",
+      "connectSucceeded": "已连接 Google Workspace。",
+      "connectedAs": "已连接：{email}",
+      "connecting": "等待授权…",
+      "description": "在聊天中用 @ 引用飞书与 Google 文档。",
+      "desktopOnly": "仅桌面端可用。",
+      "disconnect": "断开连接",
+      "googleClientHint": "请在 Google Cloud Console 创建「桌面应用」类型的凭据。",
+      "googleClientId": "OAuth 客户端 ID",
+      "googleClientSecret": "OAuth 客户端密钥",
+      "googleScopes": "仅申请 Drive、Docs、Sheets 的只读权限。",
+      "larkAccountCount": "已连接 {count} 个",
+      "larkDescription": "复用已连接的飞书账号，无需额外配置。",
+      "larkManage": "管理飞书账号",
+      "larkNoAccount": "尚未连接飞书账号。",
+      "notConnected": "未连接",
+      "title": "云端文档"
     }
   },
   "docsSite": {
@@ -17698,10 +17771,32 @@
       "title": "审阅计划"
     },
     "composer": {
+      "advancedHint": "默认每个步骤都是一次对话轮次。可以改为委派给队友、调用工具、运行子工作流，或插入人工审批点。",
+      "advancedToggle": "步骤类型",
       "cancel": "取消",
       "create": "创建计划",
       "createFailed": "无法创建计划。",
       "description": "每行一个步骤。批准前仍可重新排序和编辑步骤。",
+      "field": {
+        "prompt": "提示词（可选）",
+        "serverId": "MCP 服务器 ID",
+        "teamId": "团队 ID",
+        "teammateId": "队友 ID（可选）",
+        "toolInput": "输入（JSON）",
+        "toolName": "工具名称",
+        "workflowId": "工作流 ID"
+      },
+      "invalidJson": "第 {index} 步：输入必须是合法 JSON。",
+      "invalidStep": "第 {index} 步：请补全该类型所需的字段。",
+      "kind": {
+        "agent_turn": "智能体轮次",
+        "approval_gate": "人工审批点",
+        "mcp_tool_call": "MCP 工具调用",
+        "sub_workflow": "子工作流",
+        "teammate_dispatch": "委派给队友",
+        "tool_call": "插件工具调用"
+      },
+      "kindLabel": "类型",
       "openLabel": "编写计划",
       "stepCount": "{count, plural, =0 {尚无步骤} other {# 个步骤}}",
       "stepsLabel": "步骤",
@@ -19570,6 +19665,11 @@
     "previewTab": "{name} —— 预览标签页，双击可固定",
     "proIde": {
       "cancelDownload": "取消",
+      "chatPrompts": {
+        "explain": "请解释这段代码。",
+        "fix": "请修复这段代码中的问题。",
+        "review": "请审查这段代码，找出潜在的缺陷和可以改进的地方。"
+      },
       "checkingTooltip": "正在检查 Pro IDE 是否可用…",
       "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
       "downloading": "正在下载 VS Code… {percent}%",
@@ -19579,6 +19679,12 @@
       "localVsCodeFailed": "无法打开本机 VS Code：{error}",
       "openFileFailed": "无法在 VS Code 中打开文件：{error}",
       "openLocalVsCode": "用本机 VS Code 打开",
+      "profileLabel": "扩展配置",
+      "profileManaged": "托管",
+      "profileManagedTooltip": "仅加载锁定的内置扩展、Cognia broker 和已签名的生成代理。智能体驱动、聊天上下文和插件 IDE 能力都依赖此配置。",
+      "profileNative": "扩展",
+      "profileNativeTooltip": "加载你自己的 Open VSX 扩展，运行在独立进程中，拥有独立的设置和扩展目录。它不会拿到 Cognia broker 凭据，因此这里没有智能体驱动和插件 IDE 能力。",
+      "profileSwitchRestarts": "切换配置会启动另一个 VS Code。已打开的编辑器和终端会留在原配置里。",
       "retry": "重试",
       "revokedToMonaco": "已切回 Monaco —— VS Code 面板被另一个编辑器占用或已停止。",
       "starting": "正在启动 VS Code…",
@@ -23652,6 +23758,8 @@
         "permissionDesc": "新会话的默认权限模式，角色和会话仍可覆盖。",
         "permissionMode": "模式",
         "permissionTitle": "权限模式",
+        "planAgentAuthoring": "允许智能体自己写计划",
+        "planAgentAuthoringHint": "向智能体提供 create_plan / update_plan：多步骤任务可自动生成可追踪的清单并实时更新。关闭后这两个工具不会出现在提示词中。",
         "planDesc": "计划模式回合提出计划（ExitPlanMode）时应用的默认设置。",
         "planInteractiveHtml": "交互式计划视图",
         "planInteractiveHtmlHint": "增强计划模式：在可交互的 HTML 编辑器中审阅提议的计划——批准前可拖动排序、行内编辑、添加或删除步骤。",
@@ -27460,6 +27568,18 @@
         "title": "输入框行为"
       },
       "description": "自动生成标题并配置时间线缩略图。",
+      "effortPreferences": {
+        "defaultLevel": {
+          "hint": "每个新会话的起始思考强度。选择「自动」则由模型自行决定。",
+          "label": "新会话默认档"
+        },
+        "description": "输入框推理深度控件的默认设置。",
+        "title": "思考强度",
+        "visibleTiers": {
+          "hint": "隐藏用不到的档位可以缩短滑轨。已经在使用隐藏档位的会话仍按原深度运行。",
+          "label": "可选档位"
+        }
+      },
       "inputSend": {
         "description": "消息输入框的键盘、发送与 AI 辅助设置。",
         "title": "输入与发送"
@@ -30307,11 +30427,13 @@
     },
     "proIde": {
       "cancel": "取消",
+      "cancelDownload": "取消下载",
       "clean": "清理旧版本",
       "cleanDone": "已释放 {size}。",
       "description": "项目编辑器可选的内嵌 VS Code。此处管理安装；正在运行的实例见「性能 → 托管进程」。",
       "diskUsage": "磁盘占用",
       "download": "立即下载",
+      "downloadCancelled": "已取消下载，未完成的安装包已删除。",
       "downloadDone": "已安装 code-server {version}。",
       "failed": "操作失败：{error}",
       "installed": "已安装",
