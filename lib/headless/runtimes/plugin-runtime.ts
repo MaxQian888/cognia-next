@@ -38,6 +38,14 @@ registerHeadlessRuntime({
     if (!runtime) throw new Error("plugin-runtime requires a Node plugin host adapter")
     await runtime.start()
 
+    // Keep character-pack warnings in step with the theme-pack registry. Pure
+    // in-process registry subscription — no Tauri, no DOM — but it booted only
+    // from `PluginRuntimeInitializer`, so on a cloud host pack warnings went
+    // stale the moment a pack was added or removed (ADR-0059).
+    const { installPackWarningRefreshWiring } =
+      await import("@/lib/plugin/character-pack/warning-refresh-wiring")
+    const disposePackWarnings = installPackWarningRefreshWiring()
+
     let pending = Promise.resolve()
     const unsubscribe = transport.subscribe<unknown>("plugin://runtime-changed", (payload) => {
       const change = parsePluginChange(payload)
@@ -60,6 +68,7 @@ registerHeadlessRuntime({
 
     return async () => {
       unsubscribe()
+      disposePackWarnings()
       await pending
       await runtime.stop?.()
     }

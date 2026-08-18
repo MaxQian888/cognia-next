@@ -4,6 +4,8 @@ import { describe, it } from "node:test"
 import {
   CLASSIFICATIONS,
   ENFORCE_RATCHET,
+  isFileAnnotation,
+  stripComments,
   censusRuntimeGuards,
   checkAnnotations,
   diffAgainstBaseline,
@@ -252,10 +254,12 @@ describe("ratchet", () => {
     assert.deepEqual(fixed, ["B:gone"])
   })
 
-  it("is report-only until the paydown batch lands", () => {
-    // Guards the documented switch: flipping this constant is the whole
-    // migration from buffer period to hard failure, and it must be deliberate.
-    assert.equal(ENFORCE_RATCHET, false)
+  it("enforces now that the paydown batch has landed", () => {
+    // Guards the documented switch in both directions: flipping this constant
+    // is the whole migration from buffer period to hard failure, and turning it
+    // back off would silently reopen a buffer ADR-0059 D7 called "not
+    // open-ended". Either change must be deliberate.
+    assert.equal(ENFORCE_RATCHET, true)
   })
 })
 
@@ -292,5 +296,70 @@ describe("annotations", () => {
   it("names seam-infrastructure as a first-class classification", () => {
     // lib/tauri alone carries 121 guards; they are the seam, not a gap.
     assert.ok(CLASSIFICATIONS.includes("seam-infrastructure"))
+  })
+})
+
+describe("annotation granularity", () => {
+  // Annotations come at two granularities. Comparing a FILE key against the
+  // subsystem census reported every per-file judgment as stale on every run —
+  // `lib/native/codex-app-dispatch.ts` carries a dated, fully reasoned
+  // classification and was listed as stale forever.
+  it("tells a file annotation from a subsystem annotation", () => {
+    assert.equal(isFileAnnotation("lib/native/codex-app-dispatch.ts"), true)
+    assert.equal(isFileAnnotation("components/foo/bar.tsx"), true)
+    assert.equal(isFileAnnotation("lib/connectors"), false)
+    assert.equal(isFileAnnotation("app/issues"), false)
+  })
+
+  it("keeps a file annotation while its file exists", () => {
+    const census = new Map([["lib/git", { files: 1, sites: 1 }]])
+    const annotations = {
+      "lib/git": { classification: "unmigrated" },
+      "lib/native/codex-app-dispatch.ts": { classification: "physically-impossible" },
+    }
+    const { stale } = checkAnnotations(census, annotations, () => true)
+    assert.deepEqual(stale, [])
+  })
+
+  it("reports a file annotation whose file is gone", () => {
+    const census = new Map([["lib/git", { files: 1, sites: 1 }]])
+    const annotations = {
+      "lib/git": { classification: "unmigrated" },
+      "lib/native/deleted.ts": { classification: "physically-impossible" },
+    }
+    const { stale } = checkAnnotations(census, annotations, () => false)
+    assert.deepEqual(stale, ["lib/native/deleted.ts"])
+  })
+
+  it("validates the classification on file annotations too", () => {
+    const { invalid } = checkAnnotations(
+      new Map(),
+      { "lib/native/x.ts": { classification: "made-up" } },
+      () => true
+    )
+    assert.deepEqual(invalid, ["lib/native/x.ts"])
+  })
+})
+
+describe("stripComments", () => {
+  // `lib/agent-trace` entered the inventory on the strength of one doc comment
+  // reading "callers guard with `isTauri()` upstream" — a subsystem with zero
+  // guards demanding a parity classification.
+  it("drops guards that appear only in prose", () => {
+    const source = [
+      "/** callers guard with `isTauri()` upstream. */",
+      "// also isHeadlessHost() here",
+      "export function f() { return 1 }",
+    ].join("\n")
+    assert.equal(/\b(isTauri|isHeadlessHost|usePlatform)\s*\(/.test(stripComments(source)), false)
+  })
+
+  it("keeps real guards", () => {
+    const source = "// a note\nif (isTauri()) return null"
+    assert.equal(stripComments(source).includes("isTauri()"), true)
+  })
+
+  it("does not eat the scheme in a url inside code", () => {
+    assert.equal(stripComments('const u = "https://x.dev"').includes("https://x.dev"), true)
   })
 })

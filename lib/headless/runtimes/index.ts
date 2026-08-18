@@ -33,6 +33,13 @@
  * - `workflow-trigger-bridge` — subscribes to `workflow:trigger` on the brain's
  *   events plane so the Rust cron daemon / webhook router in cognia-server
  *   actually start workflow runs (host-neutral `installTriggerBridge`).
+ * - `issue-tracker` — the ADR-0132 board's runtime half: four issue sources,
+ *   the run bridge that dispatches an issue to an agent engine, the lifecycle →
+ *   Notification Center watcher, label seeding and the GitHub refresh schedule
+ *   (host-neutral `bootIssueTracker` in lib/issues/boot.ts).
+ * - `plan-notification` — the ADR-0045 `plan.respond` notification command;
+ *   approve/reject/start mutate the brain-side plan runtime, and an orchestrated
+ *   plan starts running from here.
  * - The bridge-owned `BridgeWorkerRpcPool` is the one sanctioned bootstrap
  *   exception: `serveCommand` creates it only after the authenticated bridge
  *   connects, injects that transport into the existing AgentTeam runtime, and
@@ -85,5 +92,7 @@ import "./twin-job-worker"
 import "./integration-runtime"
 import "./performance-runtime"
 import "./workflow-trigger-bridge"
+import "./issue-tracker"
+import "./plan-notification"
 
 export {}

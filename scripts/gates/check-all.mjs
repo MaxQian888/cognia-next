@@ -171,6 +171,13 @@ const REGISTRY = [
   // that disagree with the manifest. Report-only until the first paydown
   // batch lands (ADR-0059).
   { script: "audit:host-parity", group: "audit" },
+  // Host parity's blind spot: it inventories the RPC surface and the UI, but a
+  // brain that reaches every arm still runs nothing if the effect is wired
+  // only into a React provider. ADR-0059's closing rule ("new runtime
+  // side-effects must register through the headless bootstrap registry") was
+  // enforced by an advisory subagent until this gate; two subsystems shipped
+  // desktop-only in the interim.
+  { script: "audit:headless-registry", group: "audit" },
   { script: "audit:e2e-governance", group: "audit" },
   { script: "audit:docs-links", group: "audit" },
   { script: "audit:adr-catalog", group: "audit" },

@@ -3290,6 +3290,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "connectors_ensure_server",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "connectors_health",
       "target": "service",
       "operation": "write",

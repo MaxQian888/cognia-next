@@ -1,18 +1,18 @@
 "use client"
 
 /**
- * Boots the issue tracker: registers the issue sources (local, the GitHub
- * mirror, and the two agent engines), installs the run bridge (adapters +
- * engine watchers), and seeds the starter label catalogue.
+ * Desktop entry point for the issue tracker: runs the host-neutral
+ * `bootIssueTracker` (`lib/issues/boot.ts`) on account unlock, and installs the
+ * one effect that genuinely needs React — the `issue.open` notification
+ * command, whose body is an App Router `router.push`.
  *
  * Without this the board renders empty forever — `registerLocalIssueSource`
  * exists and is tested, but a registry nobody registers into is the repo's
  * single most recurrent defect class (built, correct, and unreachable at
- * runtime). The `wiring-auditor` skill exists because of it.
- *
- * Registration is idempotent (`IssueSourceRegistry.register` keys on
- * `source.kind`) and seeding is idempotent (`createLabel` returns the existing
- * row for a taken name), so a re-run on account switch is harmless.
+ * runtime). The `wiring-auditor` skill exists because of it, and the same
+ * defect recurred one level up: the boot body itself lived here, so it ran only
+ * in the WebView and a cloud install drove no issue runs at all. The brain now
+ * boots it through `lib/headless/runtimes/issue-tracker.ts` (ADR-0059).
  */
 
 import { useEffect, useRef } from "react"
@@ -20,57 +20,17 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { loggers } from "@cognia/logging"
 
-import { seedBuiltinIssueLabels } from "@/lib/db/labels"
-import { syncGithubIssueSchedule } from "@/lib/issues/github-sync-schedule"
-import {
-  installIssueNotificationCommands,
-  installIssueNotifications,
-  type IssueNotifyTranslate,
-} from "@/lib/issues/notify"
-import { installIssueRunBridge } from "@/lib/issues/run/install"
-import { registerAgentTaskIssueSource } from "@/lib/issues/sources/agent-task-source"
-import { registerAgentTeamIssueSource } from "@/lib/issues/sources/agent-team-source"
-import { registerGithubIssueSource } from "@/lib/issues/sources/github-source"
-import { registerLocalIssueSource } from "@/lib/issues/sources/local-source"
+import { installIssueNotificationCommands, type IssueNotifyTranslate } from "@/lib/issues/notify"
 import { useAccountStore } from "@/stores/account/account-store"
 
+// The boot body lives in `lib/issues/boot.ts` so the headless brain can run the
+// same code without pulling React and `next/*` into its bundle
+// (lib/headless/runtimes/issue-tracker.ts). Re-exported here because this was
+// the original home and callers/tests still import it from this path.
+export { bootIssueTracker, type BootIssueTrackerOptions } from "@/lib/issues/boot"
+import { bootIssueTracker } from "@/lib/issues/boot"
+
 const log = loggers.shell
-
-/**
- * Exported separately from the component so the headless CLI host and tests can
- * boot the tracker without mounting React.
- */
-export interface BootIssueTrackerOptions {
-  /** `useTranslations("issues")` from React; headless hosts use the English fallback. */
-  translate?: IssueNotifyTranslate
-}
-
-export async function bootIssueTracker(options: BootIssueTrackerOptions = {}): Promise<void> {
-  registerLocalIssueSource()
-  // The GitHub source reads only the Dexie mirror, so registering it here is
-  // free even with no repo bound — it simply contributes nothing until a
-  // project gains a `github-repo` resource and a sync runs.
-  registerGithubIssueSource()
-  // Slice ③: the two agent engines project their tasks onto the same board
-  // (read-only), and the run bridge lets an issue be dispatched to them.
-  registerAgentTaskIssueSource()
-  registerAgentTeamIssueSource()
-  installIssueRunBridge({
-    onError: (error) => log.warn("issue-tracker: run bridge error", { error: String(error) }),
-  })
-  // Lifecycle → Notification Center (+ opt-in IM push). Watches the activity
-  // trail from now on, so every mutation site is covered without calling
-  // notify itself.
-  installIssueNotifications({
-    translate: options.translate,
-    onError: (error) => log.warn("issue-tracker: notify error", { error: String(error) }),
-  })
-  await seedBuiltinIssueLabels()
-  // Reconcile the background refresh against the bindings that already exist.
-  // Adding a resource schedules it there and then; this covers the restart
-  // case, where the binding survives but the scheduler row may not.
-  await syncGithubIssueSchedule()
-}
 
 export function IssueTrackerInitializer() {
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)

@@ -52,20 +52,23 @@
  * exists to record, and an unannotated subsystem means a gap nobody has looked
  * at.
  *
- * ## Ratchet, not a cliff — and not yet a cliff at all
+ * ## Ratchet — enforcing since 2026-08-19
  *
  * Same contract as `check-colocated-tests.mjs` and
  * `check-unreachable-components.mjs`: findings live in
  * `host-parity-baseline.json` and THE LIST MAY ONLY SHRINK.
  *
- * REPORT-ONLY FOR NOW. New findings print loudly and exit 0. Flip
- * `ENFORCE_RATCHET` to `true` once the first paydown batch lands (see
- * ADR-0059, "headless ↔ desktop capability parity"); everything else is
- * already wired for it. Leaving the buffer open indefinitely defeats the
- * point, so the switch is a one-line change with its own test.
+ * `ENFORCE_RATCHET` was `false` through the buffer period ADR-0059 D7 opened,
+ * whose stated end condition was "the connectors seam migration plus the 15
+ * remotely-reachable arms". Both landed: all nine IM adapters now subscribe
+ * through `lib/connectors/events.ts` (the only production file under
+ * lib/connectors importing `@tauri-apps/api/event`, and a declared SEAM_OWNER),
+ * and the remotely-reachable headless-only arms are down to the four
+ * `codeserver_*` ones D7 itself records as correct. The ADR called that buffer
+ * "not open-ended"; this is it closing. New findings now fail the build.
  *
  * Usage:
- *   pnpm audit:host-parity                     # check (report-only today)
+ *   pnpm audit:host-parity                     # check
  *   pnpm audit:host-parity:report              # full inventory, grouped
  *   pnpm audit:host-parity:baseline            # after paying debt down
  */
@@ -86,7 +89,7 @@ export const ANNOTATIONS_FILE = join(REPO_ROOT, "scripts/gates/host-parity-annot
  * The switch is deliberately a named constant, not a CLI flag: a buffer period
  * that anyone can extend per-invocation never ends.
  */
-export const ENFORCE_RATCHET = false
+export const ENFORCE_RATCHET = true
 
 /** The four hosts `lib/platform/detect.ts` models. */
 export const HOSTS = Object.freeze(["tauri", "headless", "mobile", "web"])
@@ -176,6 +179,26 @@ const HEADLESS_GATE_RE = new RegExp(
   "g"
 )
 const GUARD_RE = /\b(isTauri|isHeadlessHost|usePlatform)\s*\(/g
+
+/**
+ * Strip `//` line comments and block comments so the census counts guards, not
+ * prose about guards.
+ *
+ * Without this, `lib/agent-trace` appeared in the inventory as a guarded
+ * subsystem on the strength of one doc comment reading "callers guard with
+ * `isTauri()` upstream" — a subsystem with zero actual guards demanding a
+ * parity classification. A phantom entry is worse than a missing one: it asks a
+ * reader to adjudicate a gap that does not exist.
+ *
+ * String literals containing the token are not stripped. That is deliberate —
+ * this is a census, not a parser, and a literal `"isTauri()"` in shipped source
+ * is worth a human look either way.
+ *
+ * @param {string} source @returns {string}
+ */
+export function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
+}
 
 /** @returns {string[]} tracked repo-relative paths */
 function trackedFiles() {
@@ -352,7 +375,7 @@ export function censusRuntimeGuards(files, io) {
   const census = new Map()
   for (const path of files) {
     if (!isRendererSource(path)) continue
-    const sites = [...io.read(path).matchAll(GUARD_RE)].length
+    const sites = [...stripComments(io.read(path)).matchAll(GUARD_RE)].length
     if (sites === 0) continue
     const key = subsystemOf(path)
     const row = census.get(key) ?? { files: 0, sites: 0 }
@@ -438,7 +461,18 @@ export function writeBaseline(findings) {
  * @param {Record<string, { classification?: string }>} annotations
  * @returns {{ missing: string[], invalid: string[], stale: string[] }}
  */
-export function checkAnnotations(census, annotations) {
+/** A key naming one file (`lib/native/codex-app-dispatch.ts`) rather than a subsystem. */
+export function isFileAnnotation(key) {
+  return /\.[tj]sx?$/.test(key)
+}
+
+/**
+ * @param {Map<string, unknown>} census keyed by subsystem
+ * @param {Record<string, { classification: string }>} annotations
+ * @param {(path: string) => boolean} [fileExists]
+ */
+export function checkAnnotations(census, annotations, fileExists = undefined) {
+  const exists = fileExists ?? ((p) => existsSync(join(REPO_ROOT, p)))
   const missing = []
   const invalid = []
   for (const key of census.keys()) {
@@ -449,8 +483,21 @@ export function checkAnnotations(census, annotations) {
     }
     if (!CLASSIFICATIONS.includes(row.classification)) invalid.push(key)
   }
-  const stale = Object.keys(annotations).filter((k) => !census.has(k))
-  return { missing: missing.sort(), invalid: invalid.sort(), stale: stale.sort() }
+  for (const [key, row] of Object.entries(annotations)) {
+    if (!isFileAnnotation(key)) continue
+    if (!CLASSIFICATIONS.includes(row.classification)) invalid.push(key)
+  }
+  // Annotations come at two granularities and the staleness rule differs.
+  // A subsystem key is stale once the census stops finding guards there. A FILE
+  // key (used for per-file Class A judgments) is never in the subsystem census
+  // at all, so comparing it against `census` reported every one of them as
+  // stale forever — `lib/native/codex-app-dispatch.ts` carries a dated, fully
+  // reasoned classification and was listed as stale on every run. A file
+  // annotation is stale only when its file is gone.
+  const stale = Object.keys(annotations).filter((key) =>
+    isFileAnnotation(key) ? !exists(key) : !census.has(key)
+  )
+  return { missing: missing.sort(), invalid: [...new Set(invalid)].sort(), stale: stale.sort() }
 }
 
 // ---------------------------------------------------------------------------
@@ -585,11 +632,28 @@ export function main(argv = []) {
     for (const c of remotelyReachable) console.log(`    ${c}`)
   }
   if (annotationStatus.missing.length) {
-    console.log(
+    // The Class D docstring has always said this gates ("an unannotated
+    // subsystem means a gap nobody has looked at"), but the code only printed
+    // it. Now that every subsystem the census finds carries a classification,
+    // the claim and the behaviour agree.
+    console.error(
       `[host-parity] ${annotationStatus.missing.length} subsystem(s) have host guards but no ` +
         "recorded classification in host-parity-annotations.json:"
     )
-    for (const s of annotationStatus.missing) console.log(`    ${s}`)
+    for (const s of annotationStatus.missing) console.error(`    ${s}`)
+    console.error(
+      `\n  Classify each one (${CLASSIFICATIONS.join(" | ")}) with a note saying what its\n` +
+        "  guards actually are. An unclassified subsystem is a gap nobody has adjudicated."
+    )
+    return 1
+  }
+  if (annotationStatus.stale.length) {
+    console.error(
+      `[host-parity] ${annotationStatus.stale.length} annotation(s) no longer match anything — ` +
+        "the subsystem lost its guards, or the annotated file is gone:"
+    )
+    for (const s of annotationStatus.stale) console.error(`    ${s}`)
+    return 1
   }
   if (annotationStatus.invalid.length) {
     console.error(

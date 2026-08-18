@@ -9,6 +9,12 @@ jest.mock("@/lib/tauri", () => ({
   transport: { call: jest.fn(), subscribe: jest.fn() },
 }))
 
+const mockDisposePackWarnings = jest.fn()
+const mockInstallPackWarningRefreshWiring = jest.fn(() => mockDisposePackWarnings)
+jest.mock("@/lib/plugin/character-pack/warning-refresh-wiring", () => ({
+  installPackWarningRefreshWiring: () => mockInstallPackWarningRefreshWiring(),
+}))
+
 const mockSubscribe = transport.subscribe as jest.Mock
 
 beforeAll(async () => {
@@ -74,4 +80,25 @@ it("reports the runtime as failed when the Node adapter is absent", async () => 
   const result = await bootstrapHeadlessRuntimes(ctx)
   expect(result.started).toEqual([])
   expect(result.failed[0]?.name).toBe("plugin-runtime")
+})
+
+describe("character-pack warning refresh", () => {
+  // Booted only from `PluginRuntimeInitializer` before ADR-0059 wiring, so on a
+  // cloud host pack warnings went stale the moment a pack was added or removed.
+  it("installs the refresh wiring on start and disposes it on teardown", async () => {
+    mockSubscribe.mockReturnValue(() => undefined)
+    const runtime = {
+      start: jest.fn(async () => undefined),
+      reconcile: jest.fn(async () => undefined),
+    }
+    const { ctx } = context(runtime)
+
+    const result = await bootstrapHeadlessRuntimes(ctx)
+    expect(result.started).toContain("plugin-runtime")
+    expect(mockInstallPackWarningRefreshWiring).toHaveBeenCalledTimes(1)
+    expect(mockDisposePackWarnings).not.toHaveBeenCalled()
+
+    await result.stop()
+    expect(mockDisposePackWarnings).toHaveBeenCalledTimes(1)
+  })
 })

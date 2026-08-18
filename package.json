@@ -30,6 +30,8 @@
     "audit:docs-links": "node scripts/gates/check-docs-links.mjs",
     "audit:e2e-governance": "node scripts/gates/check-e2e-governance.mjs",
     "audit:e2e-governance:test": "node --test scripts/gates/check-e2e-governance.test.mjs",
+    "audit:headless-registry": "node scripts/gates/check-headless-registry.mjs",
+    "audit:headless-registry:test": "node --test scripts/gates/check-headless-registry.test.mjs",
     "audit:host-parity": "node scripts/gates/check-host-parity.mjs",
     "audit:host-parity:baseline": "node scripts/gates/check-host-parity.mjs --write-baseline",
     "audit:host-parity:report": "node scripts/gates/check-host-parity.mjs --report",

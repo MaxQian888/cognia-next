@@ -929,16 +929,118 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundJobRecord",
+        "required": [
+          "id",
+          "command",
+          "cwd",
+          "owner",
+          "status",
+          "startedAtMs",
+          "totalOutputBytes",
+          "droppedOutputBytes"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "background-jobs"
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "owner": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "sessionId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "session"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "taskId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "scheduledTask"
+                    ]
+                  },
+                  "taskId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "app"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "exited",
+              "killed",
+              "interrupted",
+              "failed"
+            ]
+          },
+          "exitCode": {
+            "type": "integer"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "startedAtMs": {
+            "type": "integer"
+          },
+          "endedAtMs": {
+            "type": "integer"
+          },
+          "totalOutputBytes": {
+            "type": "integer"
+          },
+          "droppedOutputBytes": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -1118,16 +1220,118 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundJobRecord",
+        "required": [
+          "id",
+          "command",
+          "cwd",
+          "owner",
+          "status",
+          "startedAtMs",
+          "totalOutputBytes",
+          "droppedOutputBytes"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "background-jobs"
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "owner": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "sessionId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "session"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "taskId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "scheduledTask"
+                    ]
+                  },
+                  "taskId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "app"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "exited",
+              "killed",
+              "interrupted",
+              "failed"
+            ]
+          },
+          "exitCode": {
+            "type": "integer"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "startedAtMs": {
+            "type": "integer"
+          },
+          "endedAtMs": {
+            "type": "integer"
+          },
+          "totalOutputBytes": {
+            "type": "integer"
+          },
+          "droppedOutputBytes": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -1159,16 +1363,116 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundMonitorRecord",
+        "required": [
+          "id",
+          "condition",
+          "owner",
+          "status",
+          "createdAtMs"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "background-monitors"
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "object",
+            "description": "Discriminated by `kind`; the per-kind fields are declared open (BackgroundMonitorCondition).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          },
+          "owner": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "sessionId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "session"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "taskId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "scheduledTask"
+                    ]
+                  },
+                  "taskId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "app"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "fired",
+              "unsatisfiable",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "createdAtMs": {
+            "type": "integer"
+          },
+          "settledAtMs": {
+            "type": "integer"
+          },
+          "expiresAtMs": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -1432,16 +1736,116 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundMonitorRecord",
+        "required": [
+          "id",
+          "condition",
+          "owner",
+          "status",
+          "createdAtMs"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "background-monitors"
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "object",
+            "description": "Discriminated by `kind`; the per-kind fields are declared open (BackgroundMonitorCondition).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          },
+          "owner": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "sessionId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "session"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "taskId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "scheduledTask"
+                    ]
+                  },
+                  "taskId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "app"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "fired",
+              "unsatisfiable",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "createdAtMs": {
+            "type": "integer"
+          },
+          "settledAtMs": {
+            "type": "integer"
+          },
+          "expiresAtMs": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -4685,16 +5089,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "codeserver"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -4737,16 +5132,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "codeserver"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -4793,16 +5179,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "codeserver"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -4840,16 +5217,10 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "codeserver"
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
       },
       "outputTyped": true
     },
@@ -4930,9 +5301,45 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "codeserver"
+        "x-cognia-wire-source": "lib/codeserver/client.ts CodeServerStatus",
+        "description": "`profile` is absent only when talking to a pre-platform host during a rolling upgrade; `relayPath` never carries a credential or the host loopback port.",
+        "required": [
+          "running",
+          "port",
+          "version"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "managed",
+              "native",
+              null
+            ]
+          },
+          "relayPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -4995,9 +5402,45 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "codeserver"
+        "x-cognia-wire-source": "lib/codeserver/client.ts CodeServerStatus",
+        "description": "`profile` is absent only when talking to a pre-platform host during a rolling upgrade; `relayPath` never carries a credential or the host loopback port.",
+        "required": [
+          "running",
+          "port",
+          "version"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "managed",
+              "native",
+              null
+            ]
+          },
+          "relayPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -5028,16 +5471,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "codeserver"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -6112,9 +6546,24 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+        "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job — i.e. this was a retry replay, not a second send.",
+        "required": [
+          "jobId",
+          "messageId",
+          "reused"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "reused": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -6300,9 +6749,20 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+        "x-cognia-wire-source": "lib/connectors/tauri/commands.ts AttachmentRef",
+        "required": [
+          "localUrl",
+          "remoteRef"
+        ],
+        "properties": {
+          "localUrl": {
+            "type": "string"
+          },
+          "remoteRef": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -6389,10 +6849,10 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "outputTyped": true
     },
@@ -6675,10 +7135,10 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "outputTyped": true
     },
@@ -6736,18 +7196,8 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+          "type": "string"
+        }
       },
       "outputTyped": true
     },
@@ -6914,16 +7364,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "connectors"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -6997,16 +7438,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "connectors"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -7100,10 +7532,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -7308,18 +7737,32 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "lib/connectors/tauri/commands.ts MatrixCryptoOutgoingRequest",
+          "required": [
+            "requestId",
+            "kind",
+            "method",
+            "path",
+            "body"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+          "properties": {
+            "requestId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "body": {}
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -7438,18 +7881,32 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "lib/connectors/tauri/commands.ts MatrixCryptoOutgoingRequest",
+          "required": [
+            "requestId",
+            "kind",
+            "method",
+            "path",
+            "body"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+          "properties": {
+            "requestId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "body": {}
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -7517,18 +7974,32 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "lib/connectors/tauri/commands.ts MatrixCryptoOutgoingRequest",
+          "required": [
+            "requestId",
+            "kind",
+            "method",
+            "path",
+            "body"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+          "properties": {
+            "requestId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "body": {}
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -7595,9 +8066,20 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+        "x-cognia-wire-source": "lib/connectors/tauri/commands.ts AttachmentRef",
+        "required": [
+          "localUrl",
+          "remoteRef"
+        ],
+        "properties": {
+          "localUrl": {
+            "type": "string"
+          },
+          "remoteRef": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7689,16 +8171,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "connectors"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -7870,16 +8343,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "connectors"
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -8227,10 +8691,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "connectors"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -8659,9 +9120,57 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "external-bridge"
+        "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeClientCredential",
+        "required": [
+          "client",
+          "credential"
+        ],
+        "properties": {
+          "client": {
+            "type": "object",
+            "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeClient",
+            "required": [
+              "id",
+              "name",
+              "scopes",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "revokedAt": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "credential": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -8687,18 +9196,45 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeClient",
+          "required": [
+            "id",
+            "name",
+            "scopes",
+            "createdAt"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "external-bridge"
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "createdAt": {
+              "type": "integer"
+            },
+            "expiresAt": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "revokedAt": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -8809,16 +9345,58 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeClientCredential",
+        "required": [
+          "client",
+          "credential"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "external-bridge"
+        "properties": {
+          "client": {
+            "type": "object",
+            "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeClient",
+            "required": [
+              "id",
+              "name",
+              "scopes",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "revokedAt": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "credential": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -8843,9 +9421,40 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "external-bridge"
+        "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeHostConfig",
+        "required": [
+          "revision",
+          "enabledScopes",
+          "port",
+          "bindMode",
+          "autoStart"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "enabledScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "port": {
+            "type": "integer"
+          },
+          "bindMode": {
+            "type": "string",
+            "enum": [
+              "loopback",
+              "relay",
+              "direct-tls"
+            ]
+          },
+          "autoStart": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -8879,9 +9488,40 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "external-bridge"
+        "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeHostConfig",
+        "required": [
+          "revision",
+          "enabledScopes",
+          "port",
+          "bindMode",
+          "autoStart"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "enabledScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "port": {
+            "type": "integer"
+          },
+          "bindMode": {
+            "type": "string",
+            "enum": [
+              "loopback",
+              "relay",
+              "direct-tls"
+            ]
+          },
+          "autoStart": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -8971,16 +9611,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "external-bridge"
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -9004,10 +9635,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "external-bridge"
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -9032,9 +9660,61 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "external-bridge"
+        "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeHostStatus",
+        "required": [
+          "state",
+          "configRevision",
+          "bindMode",
+          "health",
+          "sidecarBuild"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "stopped",
+              "starting",
+              "running",
+              "degraded"
+            ]
+          },
+          "configRevision": {
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bindMode": {
+            "type": "string"
+          },
+          "health": {
+            "type": "string",
+            "enum": [
+              "inactive",
+              "healthy",
+              "unhealthy"
+            ]
+          },
+          "sidecarBuild": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -9830,16 +10510,39 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "workspace-files"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "lib/files/types.ts RawWorkspaceEntry",
+          "description": "snake_case on the wire — the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
+          "required": [
+            "rel_path",
+            "absolute_path",
+            "is_dir",
+            "size"
+          ],
+          "properties": {
+            "rel_path": {
+              "type": "string"
+            },
+            "absolute_path": {
+              "type": "string"
+            },
+            "is_dir": {
+              "type": "boolean"
+            },
+            "size": {
+              "type": "integer"
+            },
+            "mtime_ms": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -10005,16 +10708,39 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "workspace-files"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "lib/files/types.ts RawWorkspaceEntry",
+          "description": "snake_case on the wire — the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
+          "required": [
+            "rel_path",
+            "absolute_path",
+            "is_dir",
+            "size"
+          ],
+          "properties": {
+            "rel_path": {
+              "type": "string"
+            },
+            "absolute_path": {
+              "type": "string"
+            },
+            "is_dir": {
+              "type": "boolean"
+            },
+            "size": {
+              "type": "integer"
+            },
+            "mtime_ms": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -10180,18 +10906,42 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitBlameLine",
+          "required": [
+            "lineNumber",
+            "commitHash",
+            "shortHash",
+            "authorName",
+            "authoredAtMs",
+            "summary",
+            "content"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "lineNumber": {
+              "type": "integer"
+            },
+            "commitHash": {
+              "type": "string"
+            },
+            "shortHash": {
+              "type": "string"
+            },
+            "authorName": {
+              "type": "string"
+            },
+            "authoredAtMs": {
+              "type": "integer"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -10225,18 +10975,41 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitBranch",
+          "required": [
+            "name",
+            "isCurrent",
+            "isRemote",
+            "upstream",
+            "ahead",
+            "behind"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "isCurrent": {
+              "type": "boolean"
+            },
+            "isRemote": {
+              "type": "boolean"
+            },
+            "upstream": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ahead": {
+              "type": "integer"
+            },
+            "behind": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -10407,10 +11180,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -10449,18 +11219,51 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitFileChange",
+          "required": [
+            "path",
+            "origPath",
+            "status",
+            "staged",
+            "group"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "origPath": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "modified",
+                "added",
+                "deleted",
+                "renamed",
+                "untracked",
+                "conflicted",
+                "typeChanged"
+              ]
+            },
+            "staged": {
+              "type": "boolean"
+            },
+            "group": {
+              "type": "string",
+              "enum": [
+                "staged",
+                "changes",
+                "merge"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -10494,18 +11297,33 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitConflict",
+          "required": [
+            "path",
+            "ours",
+            "theirs",
+            "base"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "ours": {
+              "type": "string"
+            },
+            "theirs": {
+              "type": "string"
+            },
+            "base": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -10715,9 +11533,87 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "x-cognia-wire-source": "cognia-git::types::GitDiff",
+        "required": [
+          "path",
+          "oldContent",
+          "newContent",
+          "hunks",
+          "isBinary"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "oldContent": {
+            "type": "string"
+          },
+          "newContent": {
+            "type": "string"
+          },
+          "hunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "cognia-git::types::GitHunk",
+              "required": [
+                "header",
+                "oldStart",
+                "oldLines",
+                "newStart",
+                "newLines",
+                "patch",
+                "lines"
+              ],
+              "properties": {
+                "header": {
+                  "type": "string"
+                },
+                "oldStart": {
+                  "type": "integer"
+                },
+                "oldLines": {
+                  "type": "integer"
+                },
+                "newStart": {
+                  "type": "integer"
+                },
+                "newLines": {
+                  "type": "integer"
+                },
+                "patch": {
+                  "type": "string"
+                },
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "x-cognia-wire-source": "cognia-git::types::GitDiffLine",
+                    "required": [
+                      "kind",
+                      "content"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "content": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "isBinary": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Rust never sends `language`; the renderer derives it from the path extension after receipt."
       },
       "outputTyped": true
     },
@@ -10760,9 +11656,87 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "x-cognia-wire-source": "cognia-git::types::GitDiff",
+        "required": [
+          "path",
+          "oldContent",
+          "newContent",
+          "hunks",
+          "isBinary"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "oldContent": {
+            "type": "string"
+          },
+          "newContent": {
+            "type": "string"
+          },
+          "hunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "cognia-git::types::GitHunk",
+              "required": [
+                "header",
+                "oldStart",
+                "oldLines",
+                "newStart",
+                "newLines",
+                "patch",
+                "lines"
+              ],
+              "properties": {
+                "header": {
+                  "type": "string"
+                },
+                "oldStart": {
+                  "type": "integer"
+                },
+                "oldLines": {
+                  "type": "integer"
+                },
+                "newStart": {
+                  "type": "integer"
+                },
+                "newLines": {
+                  "type": "integer"
+                },
+                "patch": {
+                  "type": "string"
+                },
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "x-cognia-wire-source": "cognia-git::types::GitDiffLine",
+                    "required": [
+                      "kind",
+                      "content"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "content": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "isBinary": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Rust never sends `language`; the renderer derives it from the path extension after receipt."
       },
       "outputTyped": true
     },
@@ -10810,9 +11784,87 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "x-cognia-wire-source": "cognia-git::types::GitDiff",
+        "required": [
+          "path",
+          "oldContent",
+          "newContent",
+          "hunks",
+          "isBinary"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "oldContent": {
+            "type": "string"
+          },
+          "newContent": {
+            "type": "string"
+          },
+          "hunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "cognia-git::types::GitHunk",
+              "required": [
+                "header",
+                "oldStart",
+                "oldLines",
+                "newStart",
+                "newLines",
+                "patch",
+                "lines"
+              ],
+              "properties": {
+                "header": {
+                  "type": "string"
+                },
+                "oldStart": {
+                  "type": "integer"
+                },
+                "oldLines": {
+                  "type": "integer"
+                },
+                "newStart": {
+                  "type": "integer"
+                },
+                "newLines": {
+                  "type": "integer"
+                },
+                "patch": {
+                  "type": "string"
+                },
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "x-cognia-wire-source": "cognia-git::types::GitDiffLine",
+                    "required": [
+                      "kind",
+                      "content"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "content": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "isBinary": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Rust never sends `language`; the renderer derives it from the path extension after receipt."
       },
       "outputTyped": true
     },
@@ -10854,10 +11906,53 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitFileChange",
+          "required": [
+            "path",
+            "origPath",
+            "status",
+            "staged",
+            "group"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "origPath": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "modified",
+                "added",
+                "deleted",
+                "renamed",
+                "untracked",
+                "conflicted",
+                "typeChanged"
+              ]
+            },
+            "staged": {
+              "type": "boolean"
+            },
+            "group": {
+              "type": "string",
+              "enum": [
+                "staged",
+                "changes",
+                "merge"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -10921,10 +12016,28 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitFileDiffStat",
+          "required": [
+            "path",
+            "insertions",
+            "deletions"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "insertions": {
+              "type": "integer"
+            },
+            "deletions": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -11088,18 +12201,49 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitCommit",
+          "required": [
+            "hash",
+            "shortHash",
+            "summary",
+            "body",
+            "authorName",
+            "authorEmail",
+            "authoredAtMs",
+            "parents"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "shortHash": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "authorName": {
+              "type": "string"
+            },
+            "authorEmail": {
+              "type": "string"
+            },
+            "authoredAtMs": {
+              "type": "integer"
+            },
+            "parents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -11132,9 +12276,26 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "x-cognia-wire-source": "cognia-git::types::GitIdentity",
+        "required": [
+          "name",
+          "email"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -11330,18 +12491,49 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitCommit",
+          "required": [
+            "hash",
+            "shortHash",
+            "summary",
+            "body",
+            "authorName",
+            "authorEmail",
+            "authoredAtMs",
+            "parents"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "shortHash": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "authorName": {
+              "type": "string"
+            },
+            "authorEmail": {
+              "type": "string"
+            },
+            "authoredAtMs": {
+              "type": "integer"
+            },
+            "parents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -11613,18 +12805,49 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitCommit",
+          "required": [
+            "hash",
+            "shortHash",
+            "summary",
+            "body",
+            "authorName",
+            "authorEmail",
+            "authoredAtMs",
+            "parents"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "shortHash": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "authorName": {
+              "type": "string"
+            },
+            "authorEmail": {
+              "type": "string"
+            },
+            "authoredAtMs": {
+              "type": "integer"
+            },
+            "parents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -11658,18 +12881,32 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitRef",
+          "required": [
+            "name",
+            "kind",
+            "targetHash"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "branch",
+                "remoteBranch",
+                "tag",
+                "head"
+              ]
+            },
+            "targetHash": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -11782,18 +13019,26 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitRemote",
+          "required": [
+            "name",
+            "fetchUrl",
+            "pushUrl"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "fetchUrl": {
+              "type": "string"
+            },
+            "pushUrl": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -11866,9 +13111,41 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "x-cognia-wire-source": "cognia-git::types::GitRepoState",
+        "required": [
+          "isRepo",
+          "rootDir",
+          "detachedHead",
+          "operationInProgress"
+        ],
+        "properties": {
+          "isRepo": {
+            "type": "boolean"
+          },
+          "rootDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detachedHead": {
+            "type": "boolean"
+          },
+          "operationInProgress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "merge",
+              "rebase",
+              "cherryPick",
+              "revert",
+              null
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -12304,18 +13581,29 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitStashEntry",
+          "required": [
+            "index",
+            "message",
+            "branch"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "index": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            },
+            "branch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -12428,9 +13716,192 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "x-cognia-wire-source": "cognia-git::types::GitStatus",
+        "required": [
+          "branch",
+          "upstream",
+          "ahead",
+          "behind",
+          "staged",
+          "changes",
+          "merge",
+          "isRebasing",
+          "isMerging"
+        ],
+        "properties": {
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upstream": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ahead": {
+            "type": "integer"
+          },
+          "behind": {
+            "type": "integer"
+          },
+          "staged": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "cognia-git::types::GitFileChange",
+              "required": [
+                "path",
+                "origPath",
+                "status",
+                "staged",
+                "group"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "origPath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "modified",
+                    "added",
+                    "deleted",
+                    "renamed",
+                    "untracked",
+                    "conflicted",
+                    "typeChanged"
+                  ]
+                },
+                "staged": {
+                  "type": "boolean"
+                },
+                "group": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changes",
+                    "merge"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "cognia-git::types::GitFileChange",
+              "required": [
+                "path",
+                "origPath",
+                "status",
+                "staged",
+                "group"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "origPath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "modified",
+                    "added",
+                    "deleted",
+                    "renamed",
+                    "untracked",
+                    "conflicted",
+                    "typeChanged"
+                  ]
+                },
+                "staged": {
+                  "type": "boolean"
+                },
+                "group": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changes",
+                    "merge"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "merge": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "cognia-git::types::GitFileChange",
+              "required": [
+                "path",
+                "origPath",
+                "status",
+                "staged",
+                "group"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "origPath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "modified",
+                    "added",
+                    "deleted",
+                    "renamed",
+                    "untracked",
+                    "conflicted",
+                    "typeChanged"
+                  ]
+                },
+                "staged": {
+                  "type": "boolean"
+                },
+                "group": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changes",
+                    "merge"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "isRebasing": {
+            "type": "boolean"
+          },
+          "isMerging": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -12462,16 +13933,21 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "cognia-git::types::AheadBehind",
+        "required": [
+          "ahead",
+          "behind"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "git"
+        "properties": {
+          "ahead": {
+            "type": "integer"
+          },
+          "behind": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -12505,18 +13981,33 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitTag",
+          "required": [
+            "name",
+            "targetHash",
+            "message",
+            "isAnnotated"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "targetHash": {
+              "type": "string"
+            },
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "isAnnotated": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -12678,10 +14169,10 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "outputTyped": true
     },
@@ -12715,18 +14206,36 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::types::GitWorktree",
+          "required": [
+            "path",
+            "branch",
+            "head",
+            "isMain"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "git"
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "branch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "head": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "isMain": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -12872,16 +14381,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "github-workspaces"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -12913,16 +14413,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "github-workspaces"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -13816,15 +15307,9 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": [
-          "object",
-          "array",
           "string",
-          "number",
-          "boolean",
           "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "integration-ingress"
+        ]
       },
       "outputTyped": true
     },
@@ -13899,16 +15384,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "integration-ingress"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -13974,10 +15450,10 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "integration-ingress"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "outputTyped": true
     },
@@ -14052,16 +15528,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "integration-ingress"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -15246,16 +16713,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "mcp"
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -15322,10 +16780,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "mcp"
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -15934,16 +17389,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "ocr"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -16104,18 +17550,8 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "ocr"
+          "type": "string"
+        }
       },
       "outputTyped": true
     },
@@ -16139,18 +17575,8 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "ocr"
+          "type": "string"
+        }
       },
       "outputTyped": true
     },
@@ -19623,18 +21049,8 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "plugin-python"
+          "type": "string"
+        }
       },
       "outputTyped": true
     },
@@ -20958,16 +22374,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "plugin-wasm"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -22033,16 +23440,155 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "types/scheduler TaskExecution, serialized (`ExecutionWire` in lib/scheduler/scheduler-data-source.ts)",
+          "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateExecution.",
+          "required": [
+            "id",
+            "taskId",
+            "taskName",
+            "taskType",
+            "status",
+            "retryAttempt",
+            "startedAt",
+            "logs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "taskName": {
+              "type": "string"
+            },
+            "taskType": {
+              "type": "string",
+              "enum": [
+                "workflow",
+                "agent",
+                "sync",
+                "backup",
+                "custom",
+                "plugin",
+                "script",
+                "background-command",
+                "monitor",
+                "test",
+                "ai-generation",
+                "chat",
+                "im-push",
+                "skill",
+                "external-agent",
+                "agent-team",
+                "goal",
+                "plan",
+                "twin"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "skipped"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+              "additionalProperties": true
+            },
+            "output": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "error": {
+              "type": "string"
+            },
+            "retryAttempt": {
+              "type": "integer"
+            },
+            "duration": {
+              "type": "integer"
+            },
+            "scheduledFor": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "triggerSource": {
+              "type": "string",
+              "enum": [
+                "schedule",
+                "run-now",
+                "retry",
+                "event",
+                "dependency",
+                "catch-up",
+                "remote",
+                "backfill"
+              ]
+            },
+            "terminalReason": {
+              "type": "string"
+            },
+            "retryScheduledAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "startedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "completedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "logs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler TaskExecutionLog",
+                "required": [
+                  "id",
+                  "timestamp",
+                  "level",
+                  "message"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "level": {
+                    "type": "string",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "data": {}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -22072,16 +23618,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -22465,9 +24002,336 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "x-cognia-wire-source": "types/scheduler ScheduledTask, serialized (`TaskWire` in lib/scheduler/scheduler-data-source.ts)",
+        "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateTask. Optional fields are omitted rather than sent as null.",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "trigger",
+          "config",
+          "notification",
+          "status",
+          "runCount",
+          "successCount",
+          "failureCount",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "workflow",
+              "agent",
+              "sync",
+              "backup",
+              "custom",
+              "plugin",
+              "script",
+              "background-command",
+              "monitor",
+              "test",
+              "ai-generation",
+              "chat",
+              "im-push",
+              "skill",
+              "external-agent",
+              "agent-team",
+              "goal",
+              "plan",
+              "twin"
+            ]
+          },
+          "trigger": {
+            "type": "object",
+            "x-cognia-wire-source": "types/scheduler TaskTrigger",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cron",
+                  "interval",
+                  "once",
+                  "event"
+                ]
+              },
+              "cronExpression": {
+                "type": "string"
+              },
+              "intervalMs": {
+                "type": "integer"
+              },
+              "runAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "eventType": {
+                "type": "string"
+              },
+              "eventSource": {
+                "type": "string"
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "dependsOn": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "jitterMs": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "payload": {
+            "type": "object",
+            "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+            "additionalProperties": true
+          },
+          "config": {
+            "type": "object",
+            "x-cognia-wire-source": "types/scheduler TaskExecutionConfig",
+            "required": [
+              "timeout",
+              "maxRetries",
+              "retryDelay",
+              "runMissedOnStartup"
+            ],
+            "properties": {
+              "timeout": {
+                "type": "integer"
+              },
+              "maxRetries": {
+                "type": "integer"
+              },
+              "retryDelay": {
+                "type": "integer"
+              },
+              "maxRetryDelay": {
+                "type": "integer"
+              },
+              "runMissedOnStartup": {
+                "type": "boolean"
+              },
+              "maxMissedRuns": {
+                "type": "integer"
+              },
+              "allowConcurrent": {
+                "type": "boolean"
+              },
+              "overlapPolicy": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "skip",
+                  "queue-one",
+                  "queue-all",
+                  "cancel-previous"
+                ]
+              },
+              "maxQueueSize": {
+                "type": "integer"
+              },
+              "maxRuns": {
+                "type": "integer"
+              },
+              "pauseAfterConsecutiveFailures": {
+                "type": "integer"
+              },
+              "catchupWindowMs": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "notification": {
+            "type": "object",
+            "x-cognia-wire-source": "types/scheduler TaskNotificationConfig",
+            "required": [
+              "onStart",
+              "onComplete",
+              "onError"
+            ],
+            "properties": {
+              "onStart": {
+                "type": "boolean"
+              },
+              "onComplete": {
+                "type": "boolean"
+              },
+              "onError": {
+                "type": "boolean"
+              },
+              "onProgress": {
+                "type": "boolean"
+              },
+              "channels": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "desktop",
+                    "toast",
+                    "webhook",
+                    "im",
+                    "none"
+                  ]
+                }
+              },
+              "webhookUrl": {
+                "type": "string"
+              },
+              "imTarget": {
+                "type": "object",
+                "required": [
+                  "conversationKey"
+                ],
+                "properties": {
+                  "conversationKey": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused",
+              "disabled",
+              "expired"
+            ]
+          },
+          "createdBy": {
+            "type": "object",
+            "x-cognia-wire-source": "types/scheduler ScheduledTaskCreator",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "agent",
+                  "plugin"
+                ]
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "pluginId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "endAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "promotion": {
+            "type": "object",
+            "x-cognia-wire-source": "types/scheduler ScheduledTaskPromotion",
+            "required": [
+              "systemTaskId",
+              "token",
+              "promotedAt"
+            ],
+            "properties": {
+              "systemTaskId": {
+                "type": "string"
+              },
+              "token": {
+                "type": "string"
+              },
+              "promotedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "backend": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "onSuccessTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "onFailureTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "lastRunAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "nextRunAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "runCount": {
+            "type": "integer"
+          },
+          "successCount": {
+            "type": "integer"
+          },
+          "failureCount": {
+            "type": "integer"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "lastTerminalReason": {
+            "type": "string"
+          },
+          "lastTerminalAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -22499,16 +24363,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -22551,16 +24406,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -22592,9 +24438,358 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "x-cognia-wire-source": "TaskScheduler.exportTasks",
+        "required": [
+          "version",
+          "exportedAt",
+          "tasks"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "exportedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler ScheduledTask, serialized (`TaskWire` in lib/scheduler/scheduler-data-source.ts)",
+              "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateTask. Optional fields are omitted rather than sent as null.",
+              "required": [
+                "id",
+                "name",
+                "type",
+                "trigger",
+                "config",
+                "notification",
+                "status",
+                "runCount",
+                "successCount",
+                "failureCount",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "workflow",
+                    "agent",
+                    "sync",
+                    "backup",
+                    "custom",
+                    "plugin",
+                    "script",
+                    "background-command",
+                    "monitor",
+                    "test",
+                    "ai-generation",
+                    "chat",
+                    "im-push",
+                    "skill",
+                    "external-agent",
+                    "agent-team",
+                    "goal",
+                    "plan",
+                    "twin"
+                  ]
+                },
+                "trigger": {
+                  "type": "object",
+                  "x-cognia-wire-source": "types/scheduler TaskTrigger",
+                  "required": [
+                    "type"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "cron",
+                        "interval",
+                        "once",
+                        "event"
+                      ]
+                    },
+                    "cronExpression": {
+                      "type": "string"
+                    },
+                    "intervalMs": {
+                      "type": "integer"
+                    },
+                    "runAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "eventType": {
+                      "type": "string"
+                    },
+                    "eventSource": {
+                      "type": "string"
+                    },
+                    "timezone": {
+                      "type": "string"
+                    },
+                    "dependsOn": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "jitterMs": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "payload": {
+                  "type": "object",
+                  "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+                  "additionalProperties": true
+                },
+                "config": {
+                  "type": "object",
+                  "x-cognia-wire-source": "types/scheduler TaskExecutionConfig",
+                  "required": [
+                    "timeout",
+                    "maxRetries",
+                    "retryDelay",
+                    "runMissedOnStartup"
+                  ],
+                  "properties": {
+                    "timeout": {
+                      "type": "integer"
+                    },
+                    "maxRetries": {
+                      "type": "integer"
+                    },
+                    "retryDelay": {
+                      "type": "integer"
+                    },
+                    "maxRetryDelay": {
+                      "type": "integer"
+                    },
+                    "runMissedOnStartup": {
+                      "type": "boolean"
+                    },
+                    "maxMissedRuns": {
+                      "type": "integer"
+                    },
+                    "allowConcurrent": {
+                      "type": "boolean"
+                    },
+                    "overlapPolicy": {
+                      "type": "string",
+                      "enum": [
+                        "allow",
+                        "skip",
+                        "queue-one",
+                        "queue-all",
+                        "cancel-previous"
+                      ]
+                    },
+                    "maxQueueSize": {
+                      "type": "integer"
+                    },
+                    "maxRuns": {
+                      "type": "integer"
+                    },
+                    "pauseAfterConsecutiveFailures": {
+                      "type": "integer"
+                    },
+                    "catchupWindowMs": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "notification": {
+                  "type": "object",
+                  "x-cognia-wire-source": "types/scheduler TaskNotificationConfig",
+                  "required": [
+                    "onStart",
+                    "onComplete",
+                    "onError"
+                  ],
+                  "properties": {
+                    "onStart": {
+                      "type": "boolean"
+                    },
+                    "onComplete": {
+                      "type": "boolean"
+                    },
+                    "onError": {
+                      "type": "boolean"
+                    },
+                    "onProgress": {
+                      "type": "boolean"
+                    },
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "desktop",
+                          "toast",
+                          "webhook",
+                          "im",
+                          "none"
+                        ]
+                      }
+                    },
+                    "webhookUrl": {
+                      "type": "string"
+                    },
+                    "imTarget": {
+                      "type": "object",
+                      "required": [
+                        "conversationKey"
+                      ],
+                      "properties": {
+                        "conversationKey": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "paused",
+                    "disabled",
+                    "expired"
+                  ]
+                },
+                "createdBy": {
+                  "type": "object",
+                  "x-cognia-wire-source": "types/scheduler ScheduledTaskCreator",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "user",
+                        "agent",
+                        "plugin"
+                      ]
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "pluginId": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "endAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "promotion": {
+                  "type": "object",
+                  "x-cognia-wire-source": "types/scheduler ScheduledTaskPromotion",
+                  "required": [
+                    "systemTaskId",
+                    "token",
+                    "promotedAt"
+                  ],
+                  "properties": {
+                    "systemTaskId": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "type": "string"
+                    },
+                    "promotedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "backend": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "onSuccessTaskIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "onFailureTaskIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "consecutiveFailures": {
+                  "type": "integer"
+                },
+                "lastRunAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "nextRunAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "runCount": {
+                  "type": "integer"
+                },
+                "successCount": {
+                  "type": "integer"
+                },
+                "failureCount": {
+                  "type": "integer"
+                },
+                "lastError": {
+                  "type": "string"
+                },
+                "lastTerminalReason": {
+                  "type": "string"
+                },
+                "lastTerminalAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -22626,10 +24821,344 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "oneOf": [
+          {
+            "type": "object",
+            "x-cognia-wire-source": "types/scheduler ScheduledTask, serialized (`TaskWire` in lib/scheduler/scheduler-data-source.ts)",
+            "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateTask. Optional fields are omitted rather than sent as null.",
+            "required": [
+              "id",
+              "name",
+              "type",
+              "trigger",
+              "config",
+              "notification",
+              "status",
+              "runCount",
+              "successCount",
+              "failureCount",
+              "createdAt",
+              "updatedAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "workflow",
+                  "agent",
+                  "sync",
+                  "backup",
+                  "custom",
+                  "plugin",
+                  "script",
+                  "background-command",
+                  "monitor",
+                  "test",
+                  "ai-generation",
+                  "chat",
+                  "im-push",
+                  "skill",
+                  "external-agent",
+                  "agent-team",
+                  "goal",
+                  "plan",
+                  "twin"
+                ]
+              },
+              "trigger": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler TaskTrigger",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "cron",
+                      "interval",
+                      "once",
+                      "event"
+                    ]
+                  },
+                  "cronExpression": {
+                    "type": "string"
+                  },
+                  "intervalMs": {
+                    "type": "integer"
+                  },
+                  "runAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "eventSource": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "jitterMs": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "payload": {
+                "type": "object",
+                "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+                "additionalProperties": true
+              },
+              "config": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler TaskExecutionConfig",
+                "required": [
+                  "timeout",
+                  "maxRetries",
+                  "retryDelay",
+                  "runMissedOnStartup"
+                ],
+                "properties": {
+                  "timeout": {
+                    "type": "integer"
+                  },
+                  "maxRetries": {
+                    "type": "integer"
+                  },
+                  "retryDelay": {
+                    "type": "integer"
+                  },
+                  "maxRetryDelay": {
+                    "type": "integer"
+                  },
+                  "runMissedOnStartup": {
+                    "type": "boolean"
+                  },
+                  "maxMissedRuns": {
+                    "type": "integer"
+                  },
+                  "allowConcurrent": {
+                    "type": "boolean"
+                  },
+                  "overlapPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "skip",
+                      "queue-one",
+                      "queue-all",
+                      "cancel-previous"
+                    ]
+                  },
+                  "maxQueueSize": {
+                    "type": "integer"
+                  },
+                  "maxRuns": {
+                    "type": "integer"
+                  },
+                  "pauseAfterConsecutiveFailures": {
+                    "type": "integer"
+                  },
+                  "catchupWindowMs": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "notification": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler TaskNotificationConfig",
+                "required": [
+                  "onStart",
+                  "onComplete",
+                  "onError"
+                ],
+                "properties": {
+                  "onStart": {
+                    "type": "boolean"
+                  },
+                  "onComplete": {
+                    "type": "boolean"
+                  },
+                  "onError": {
+                    "type": "boolean"
+                  },
+                  "onProgress": {
+                    "type": "boolean"
+                  },
+                  "channels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "desktop",
+                        "toast",
+                        "webhook",
+                        "im",
+                        "none"
+                      ]
+                    }
+                  },
+                  "webhookUrl": {
+                    "type": "string"
+                  },
+                  "imTarget": {
+                    "type": "object",
+                    "required": [
+                      "conversationKey"
+                    ],
+                    "properties": {
+                      "conversationKey": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "paused",
+                  "disabled",
+                  "expired"
+                ]
+              },
+              "createdBy": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler ScheduledTaskCreator",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "agent",
+                      "plugin"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "pluginId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "endAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "promotion": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler ScheduledTaskPromotion",
+                "required": [
+                  "systemTaskId",
+                  "token",
+                  "promotedAt"
+                ],
+                "properties": {
+                  "systemTaskId": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "promotedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "backend": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "onSuccessTaskIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "onFailureTaskIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "consecutiveFailures": {
+                "type": "integer"
+              },
+              "lastRunAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "nextRunAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "runCount": {
+                "type": "integer"
+              },
+              "successCount": {
+                "type": "integer"
+              },
+              "failureCount": {
+                "type": "integer"
+              },
+              "lastError": {
+                "type": "string"
+              },
+              "lastTerminalReason": {
+                "type": "string"
+              },
+              "lastTerminalAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "outputTyped": true
     },
@@ -23113,16 +25642,28 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "TaskScheduler.importTasks",
+        "required": [
+          "imported",
+          "skipped",
+          "errors"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "properties": {
+          "imported": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -23223,18 +25764,338 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "types/scheduler ScheduledTask, serialized (`TaskWire` in lib/scheduler/scheduler-data-source.ts)",
+          "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateTask. Optional fields are omitted rather than sent as null.",
+          "required": [
+            "id",
+            "name",
+            "type",
+            "trigger",
+            "config",
+            "notification",
+            "status",
+            "runCount",
+            "successCount",
+            "failureCount",
+            "createdAt",
+            "updatedAt"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "workflow",
+                "agent",
+                "sync",
+                "backup",
+                "custom",
+                "plugin",
+                "script",
+                "background-command",
+                "monitor",
+                "test",
+                "ai-generation",
+                "chat",
+                "im-push",
+                "skill",
+                "external-agent",
+                "agent-team",
+                "goal",
+                "plan",
+                "twin"
+              ]
+            },
+            "trigger": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler TaskTrigger",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "cron",
+                    "interval",
+                    "once",
+                    "event"
+                  ]
+                },
+                "cronExpression": {
+                  "type": "string"
+                },
+                "intervalMs": {
+                  "type": "integer"
+                },
+                "runAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "eventType": {
+                  "type": "string"
+                },
+                "eventSource": {
+                  "type": "string"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "dependsOn": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "jitterMs": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "payload": {
+              "type": "object",
+              "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+              "additionalProperties": true
+            },
+            "config": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler TaskExecutionConfig",
+              "required": [
+                "timeout",
+                "maxRetries",
+                "retryDelay",
+                "runMissedOnStartup"
+              ],
+              "properties": {
+                "timeout": {
+                  "type": "integer"
+                },
+                "maxRetries": {
+                  "type": "integer"
+                },
+                "retryDelay": {
+                  "type": "integer"
+                },
+                "maxRetryDelay": {
+                  "type": "integer"
+                },
+                "runMissedOnStartup": {
+                  "type": "boolean"
+                },
+                "maxMissedRuns": {
+                  "type": "integer"
+                },
+                "allowConcurrent": {
+                  "type": "boolean"
+                },
+                "overlapPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "allow",
+                    "skip",
+                    "queue-one",
+                    "queue-all",
+                    "cancel-previous"
+                  ]
+                },
+                "maxQueueSize": {
+                  "type": "integer"
+                },
+                "maxRuns": {
+                  "type": "integer"
+                },
+                "pauseAfterConsecutiveFailures": {
+                  "type": "integer"
+                },
+                "catchupWindowMs": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "notification": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler TaskNotificationConfig",
+              "required": [
+                "onStart",
+                "onComplete",
+                "onError"
+              ],
+              "properties": {
+                "onStart": {
+                  "type": "boolean"
+                },
+                "onComplete": {
+                  "type": "boolean"
+                },
+                "onError": {
+                  "type": "boolean"
+                },
+                "onProgress": {
+                  "type": "boolean"
+                },
+                "channels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "desktop",
+                      "toast",
+                      "webhook",
+                      "im",
+                      "none"
+                    ]
+                  }
+                },
+                "webhookUrl": {
+                  "type": "string"
+                },
+                "imTarget": {
+                  "type": "object",
+                  "required": [
+                    "conversationKey"
+                  ],
+                  "properties": {
+                    "conversationKey": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "active",
+                "paused",
+                "disabled",
+                "expired"
+              ]
+            },
+            "createdBy": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler ScheduledTaskCreator",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "agent",
+                    "plugin"
+                  ]
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "pluginId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "endAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "promotion": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler ScheduledTaskPromotion",
+              "required": [
+                "systemTaskId",
+                "token",
+                "promotedAt"
+              ],
+              "properties": {
+                "systemTaskId": {
+                  "type": "string"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "promotedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "backend": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "onSuccessTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "onFailureTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "consecutiveFailures": {
+              "type": "integer"
+            },
+            "lastRunAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "nextRunAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "runCount": {
+              "type": "integer"
+            },
+            "successCount": {
+              "type": "integer"
+            },
+            "failureCount": {
+              "type": "integer"
+            },
+            "lastError": {
+              "type": "string"
+            },
+            "lastTerminalReason": {
+              "type": "string"
+            },
+            "lastTerminalAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "updatedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -23266,16 +26127,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -23307,16 +26159,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "type": "boolean"
       },
       "outputTyped": true
     },
@@ -23361,16 +26204,159 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "oneOf": [
+          {
+            "type": "object",
+            "x-cognia-wire-source": "types/scheduler TaskExecution, serialized (`ExecutionWire` in lib/scheduler/scheduler-data-source.ts)",
+            "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateExecution.",
+            "required": [
+              "id",
+              "taskId",
+              "taskName",
+              "taskType",
+              "status",
+              "retryAttempt",
+              "startedAt",
+              "logs"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "taskId": {
+                "type": "string"
+              },
+              "taskName": {
+                "type": "string"
+              },
+              "taskType": {
+                "type": "string",
+                "enum": [
+                  "workflow",
+                  "agent",
+                  "sync",
+                  "backup",
+                  "custom",
+                  "plugin",
+                  "script",
+                  "background-command",
+                  "monitor",
+                  "test",
+                  "ai-generation",
+                  "chat",
+                  "im-push",
+                  "skill",
+                  "external-agent",
+                  "agent-team",
+                  "goal",
+                  "plan",
+                  "twin"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "running",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "skipped"
+                ]
+              },
+              "input": {
+                "type": "object",
+                "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+                "additionalProperties": true
+              },
+              "output": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "error": {
+                "type": "string"
+              },
+              "retryAttempt": {
+                "type": "integer"
+              },
+              "duration": {
+                "type": "integer"
+              },
+              "scheduledFor": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "triggerSource": {
+                "type": "string",
+                "enum": [
+                  "schedule",
+                  "run-now",
+                  "retry",
+                  "event",
+                  "dependency",
+                  "catch-up",
+                  "remote",
+                  "backfill"
+                ]
+              },
+              "terminalReason": {
+                "type": "string"
+              },
+              "retryScheduledAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "startedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "completedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "logs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "x-cognia-wire-source": "types/scheduler TaskExecutionLog",
+                  "required": [
+                    "id",
+                    "timestamp",
+                    "level",
+                    "message"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "level": {
+                      "type": "string",
+                      "enum": [
+                        "debug",
+                        "info",
+                        "warn",
+                        "error"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "outputTyped": true
     },
@@ -23408,18 +26394,153 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "types/scheduler TaskExecution, serialized (`ExecutionWire` in lib/scheduler/scheduler-data-source.ts)",
+          "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateExecution.",
+          "required": [
+            "id",
+            "taskId",
+            "taskName",
+            "taskType",
+            "status",
+            "retryAttempt",
+            "startedAt",
+            "logs"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "taskName": {
+              "type": "string"
+            },
+            "taskType": {
+              "type": "string",
+              "enum": [
+                "workflow",
+                "agent",
+                "sync",
+                "backup",
+                "custom",
+                "plugin",
+                "script",
+                "background-command",
+                "monitor",
+                "test",
+                "ai-generation",
+                "chat",
+                "im-push",
+                "skill",
+                "external-agent",
+                "agent-team",
+                "goal",
+                "plan",
+                "twin"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "skipped"
+              ]
+            },
+            "input": {
+              "type": "object",
+              "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+              "additionalProperties": true
+            },
+            "output": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "error": {
+              "type": "string"
+            },
+            "retryAttempt": {
+              "type": "integer"
+            },
+            "duration": {
+              "type": "integer"
+            },
+            "scheduledFor": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "triggerSource": {
+              "type": "string",
+              "enum": [
+                "schedule",
+                "run-now",
+                "retry",
+                "event",
+                "dependency",
+                "catch-up",
+                "remote",
+                "backfill"
+              ]
+            },
+            "terminalReason": {
+              "type": "string"
+            },
+            "retryScheduledAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "startedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "completedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "logs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler TaskExecutionLog",
+                "required": [
+                  "id",
+                  "timestamp",
+                  "level",
+                  "message"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "level": {
+                    "type": "string",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "data": {}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -23444,9 +26565,44 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "x-cognia-wire-source": "types/scheduler TaskStatistics",
+        "required": [
+          "totalTasks",
+          "activeTasks",
+          "pausedTasks",
+          "totalExecutions",
+          "successfulExecutions",
+          "failedExecutions",
+          "averageDuration",
+          "upcomingExecutions"
+        ],
+        "properties": {
+          "totalTasks": {
+            "type": "integer"
+          },
+          "activeTasks": {
+            "type": "integer"
+          },
+          "pausedTasks": {
+            "type": "integer"
+          },
+          "totalExecutions": {
+            "type": "integer"
+          },
+          "successfulExecutions": {
+            "type": "integer"
+          },
+          "failedExecutions": {
+            "type": "integer"
+          },
+          "averageDuration": {
+            "type": "number"
+          },
+          "upcomingExecutions": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -23478,18 +26634,338 @@
       "outputSchema": {
         "type": "array",
         "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
+          "type": "object",
+          "x-cognia-wire-source": "types/scheduler ScheduledTask, serialized (`TaskWire` in lib/scheduler/scheduler-data-source.ts)",
+          "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateTask. Optional fields are omitted rather than sent as null.",
+          "required": [
+            "id",
+            "name",
+            "type",
+            "trigger",
+            "config",
+            "notification",
+            "status",
+            "runCount",
+            "successCount",
+            "failureCount",
+            "createdAt",
+            "updatedAt"
           ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "workflow",
+                "agent",
+                "sync",
+                "backup",
+                "custom",
+                "plugin",
+                "script",
+                "background-command",
+                "monitor",
+                "test",
+                "ai-generation",
+                "chat",
+                "im-push",
+                "skill",
+                "external-agent",
+                "agent-team",
+                "goal",
+                "plan",
+                "twin"
+              ]
+            },
+            "trigger": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler TaskTrigger",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "cron",
+                    "interval",
+                    "once",
+                    "event"
+                  ]
+                },
+                "cronExpression": {
+                  "type": "string"
+                },
+                "intervalMs": {
+                  "type": "integer"
+                },
+                "runAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "eventType": {
+                  "type": "string"
+                },
+                "eventSource": {
+                  "type": "string"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "dependsOn": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "jitterMs": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "payload": {
+              "type": "object",
+              "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+              "additionalProperties": true
+            },
+            "config": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler TaskExecutionConfig",
+              "required": [
+                "timeout",
+                "maxRetries",
+                "retryDelay",
+                "runMissedOnStartup"
+              ],
+              "properties": {
+                "timeout": {
+                  "type": "integer"
+                },
+                "maxRetries": {
+                  "type": "integer"
+                },
+                "retryDelay": {
+                  "type": "integer"
+                },
+                "maxRetryDelay": {
+                  "type": "integer"
+                },
+                "runMissedOnStartup": {
+                  "type": "boolean"
+                },
+                "maxMissedRuns": {
+                  "type": "integer"
+                },
+                "allowConcurrent": {
+                  "type": "boolean"
+                },
+                "overlapPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "allow",
+                    "skip",
+                    "queue-one",
+                    "queue-all",
+                    "cancel-previous"
+                  ]
+                },
+                "maxQueueSize": {
+                  "type": "integer"
+                },
+                "maxRuns": {
+                  "type": "integer"
+                },
+                "pauseAfterConsecutiveFailures": {
+                  "type": "integer"
+                },
+                "catchupWindowMs": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "notification": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler TaskNotificationConfig",
+              "required": [
+                "onStart",
+                "onComplete",
+                "onError"
+              ],
+              "properties": {
+                "onStart": {
+                  "type": "boolean"
+                },
+                "onComplete": {
+                  "type": "boolean"
+                },
+                "onError": {
+                  "type": "boolean"
+                },
+                "onProgress": {
+                  "type": "boolean"
+                },
+                "channels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "desktop",
+                      "toast",
+                      "webhook",
+                      "im",
+                      "none"
+                    ]
+                  }
+                },
+                "webhookUrl": {
+                  "type": "string"
+                },
+                "imTarget": {
+                  "type": "object",
+                  "required": [
+                    "conversationKey"
+                  ],
+                  "properties": {
+                    "conversationKey": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "active",
+                "paused",
+                "disabled",
+                "expired"
+              ]
+            },
+            "createdBy": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler ScheduledTaskCreator",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "agent",
+                    "plugin"
+                  ]
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "pluginId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "endAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "promotion": {
+              "type": "object",
+              "x-cognia-wire-source": "types/scheduler ScheduledTaskPromotion",
+              "required": [
+                "systemTaskId",
+                "token",
+                "promotedAt"
+              ],
+              "properties": {
+                "systemTaskId": {
+                  "type": "string"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "promotedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "backend": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "onSuccessTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "onFailureTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "consecutiveFailures": {
+              "type": "integer"
+            },
+            "lastRunAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "nextRunAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "runCount": {
+              "type": "integer"
+            },
+            "successCount": {
+              "type": "integer"
+            },
+            "failureCount": {
+              "type": "integer"
+            },
+            "lastError": {
+              "type": "string"
+            },
+            "lastTerminalReason": {
+              "type": "string"
+            },
+            "lastTerminalAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "updatedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -23829,10 +27305,344 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "scheduled-tasks"
+        "oneOf": [
+          {
+            "type": "object",
+            "x-cognia-wire-source": "types/scheduler ScheduledTask, serialized (`TaskWire` in lib/scheduler/scheduler-data-source.ts)",
+            "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateTask. Optional fields are omitted rather than sent as null.",
+            "required": [
+              "id",
+              "name",
+              "type",
+              "trigger",
+              "config",
+              "notification",
+              "status",
+              "runCount",
+              "successCount",
+              "failureCount",
+              "createdAt",
+              "updatedAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "workflow",
+                  "agent",
+                  "sync",
+                  "backup",
+                  "custom",
+                  "plugin",
+                  "script",
+                  "background-command",
+                  "monitor",
+                  "test",
+                  "ai-generation",
+                  "chat",
+                  "im-push",
+                  "skill",
+                  "external-agent",
+                  "agent-team",
+                  "goal",
+                  "plan",
+                  "twin"
+                ]
+              },
+              "trigger": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler TaskTrigger",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "cron",
+                      "interval",
+                      "once",
+                      "event"
+                    ]
+                  },
+                  "cronExpression": {
+                    "type": "string"
+                  },
+                  "intervalMs": {
+                    "type": "integer"
+                  },
+                  "runAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "eventSource": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "jitterMs": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "payload": {
+                "type": "object",
+                "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+                "additionalProperties": true
+              },
+              "config": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler TaskExecutionConfig",
+                "required": [
+                  "timeout",
+                  "maxRetries",
+                  "retryDelay",
+                  "runMissedOnStartup"
+                ],
+                "properties": {
+                  "timeout": {
+                    "type": "integer"
+                  },
+                  "maxRetries": {
+                    "type": "integer"
+                  },
+                  "retryDelay": {
+                    "type": "integer"
+                  },
+                  "maxRetryDelay": {
+                    "type": "integer"
+                  },
+                  "runMissedOnStartup": {
+                    "type": "boolean"
+                  },
+                  "maxMissedRuns": {
+                    "type": "integer"
+                  },
+                  "allowConcurrent": {
+                    "type": "boolean"
+                  },
+                  "overlapPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "skip",
+                      "queue-one",
+                      "queue-all",
+                      "cancel-previous"
+                    ]
+                  },
+                  "maxQueueSize": {
+                    "type": "integer"
+                  },
+                  "maxRuns": {
+                    "type": "integer"
+                  },
+                  "pauseAfterConsecutiveFailures": {
+                    "type": "integer"
+                  },
+                  "catchupWindowMs": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "notification": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler TaskNotificationConfig",
+                "required": [
+                  "onStart",
+                  "onComplete",
+                  "onError"
+                ],
+                "properties": {
+                  "onStart": {
+                    "type": "boolean"
+                  },
+                  "onComplete": {
+                    "type": "boolean"
+                  },
+                  "onError": {
+                    "type": "boolean"
+                  },
+                  "onProgress": {
+                    "type": "boolean"
+                  },
+                  "channels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "desktop",
+                        "toast",
+                        "webhook",
+                        "im",
+                        "none"
+                      ]
+                    }
+                  },
+                  "webhookUrl": {
+                    "type": "string"
+                  },
+                  "imTarget": {
+                    "type": "object",
+                    "required": [
+                      "conversationKey"
+                    ],
+                    "properties": {
+                      "conversationKey": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "paused",
+                  "disabled",
+                  "expired"
+                ]
+              },
+              "createdBy": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler ScheduledTaskCreator",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "agent",
+                      "plugin"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "pluginId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "endAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "promotion": {
+                "type": "object",
+                "x-cognia-wire-source": "types/scheduler ScheduledTaskPromotion",
+                "required": [
+                  "systemTaskId",
+                  "token",
+                  "promotedAt"
+                ],
+                "properties": {
+                  "systemTaskId": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "promotedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "backend": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "onSuccessTaskIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "onFailureTaskIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "consecutiveFailures": {
+                "type": "integer"
+              },
+              "lastRunAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "nextRunAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "runCount": {
+                "type": "integer"
+              },
+              "successCount": {
+                "type": "integer"
+              },
+              "failureCount": {
+                "type": "integer"
+              },
+              "lastError": {
+                "type": "string"
+              },
+              "lastTerminalReason": {
+                "type": "string"
+              },
+              "lastTerminalAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "outputTyped": true
     },
@@ -24607,16 +28417,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "skills"
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -24942,16 +28743,21 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/claude/ipc.ts skills_uninstall / skills_uninstall_native",
+        "required": [
+          "removed",
+          "directory"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "skills"
+        "properties": {
+          "removed": {
+            "type": "boolean"
+          },
+          "directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -24983,16 +28789,21 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/claude/ipc.ts skills_uninstall / skills_uninstall_native",
+        "required": [
+          "removed",
+          "directory"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "skills"
+        "properties": {
+          "removed": {
+            "type": "boolean"
+          },
+          "directory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -25447,10 +29258,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "task-resources"
+        "type": "string"
       },
       "outputTyped": true
     },
@@ -25542,16 +29350,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "task-resources"
+        "type": "integer"
       },
       "outputTyped": true
     },
@@ -25596,9 +29395,46 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "task-workspaces"
+        "x-cognia-wire-source": "lib/task-workspace/types.ts ApplyOutcome",
+        "required": [
+          "state",
+          "revision",
+          "conflicts"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "applied",
+              "reverted",
+              "conflict"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "reason"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -26200,16 +30036,47 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/task-workspace/types.ts ApplyOutcome",
+        "required": [
+          "state",
+          "revision",
+          "conflicts"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "task-workspaces"
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "applied",
+              "reverted",
+              "conflict"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "reason"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -26309,16 +30176,47 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "lib/task-workspace/types.ts ApplyOutcome",
+        "required": [
+          "state",
+          "revision",
+          "conflicts"
         ],
-        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
-        "x-cognia-schema-owner": "task-workspaces"
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "applied",
+              "reverted",
+              "conflict"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "reason"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -29146,5 +33044,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "b861d199d72663ec5e65b2423d1aacfbea1d653624070200f454daad2a908b5f"
+  "catalogHash": "59b5068b834793dfe1ffbd863bf07bd424a10fb2770d3d41ac63bd35c3f51299"
 }

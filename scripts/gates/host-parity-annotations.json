@@ -17,6 +17,10 @@
     "app/inbox": {
       "classification": "ui-assumption"
     },
+    "app/issues": {
+      "classification": "ui-assumption",
+      "note": "One `usePlatform()` in page.tsx choosing the board's layout density. The tracker's runtime half is host-neutral and now boots in the brain too (lib/headless/runtimes/issue-tracker.ts)."
+    },
     "app/me": {
       "classification": "ui-assumption"
     },
@@ -24,12 +28,6 @@
       "classification": "ui-assumption"
     },
     "app/page.tsx": {
-      "classification": "ui-assumption"
-    },
-    "app/workflows": {
-      "classification": "ui-assumption"
-    },
-    "components/account": {
       "classification": "ui-assumption"
     },
     "components/agent": {
@@ -44,6 +42,10 @@
     "components/automation": {
       "classification": "ui-assumption",
       "note": "The consent overlay hides itself off-Tauri; once consent is remotable it should key off the capability instead."
+    },
+    "components/boot": {
+      "classification": "ui-assumption",
+      "note": "`usePlatform()` in boot-screen.tsx to pick the shell-appropriate boot presentation. A brain has no boot screen."
     },
     "components/browser": {
       "classification": "ui-assumption",
@@ -72,6 +74,10 @@
     "components/fleet": {
       "classification": "ui-assumption"
     },
+    "components/global-search": {
+      "classification": "ui-assumption",
+      "note": "`usePlatform()` in the dialog for platform-appropriate chrome and shortcut hints (ADR-0129)."
+    },
     "components/inbox": {
       "classification": "ui-assumption",
       "note": "Adapter health/consent affordances gated on isTauri(); the connector runtime itself works headless."
@@ -85,9 +91,6 @@
     "components/pet": {
       "classification": "physically-impossible",
       "note": "The in-page pet renders anywhere; only the overlay window is desktop-bound."
-    },
-    "components/platform": {
-      "classification": "seam-infrastructure"
     },
     "components/plugins": {
       "classification": "ui-assumption"
@@ -133,6 +136,10 @@
     "components/twin": {
       "classification": "ui-assumption"
     },
+    "components/ui": {
+      "classification": "ui-assumption",
+      "note": "`usePlatform()` in loading-states.tsx to fold host-specific boot phases (pairing, host, sync) into one timeline. Presentation only; components/ui is otherwise the untested shadcn tree."
+    },
     "components/workflow": {
       "classification": "ui-assumption"
     },
@@ -160,6 +167,10 @@
     "hooks/codeserver": {
       "classification": "ui-assumption"
     },
+    "hooks/companion": {
+      "classification": "unmigrated",
+      "note": "`setRemoteTerminalRustSide` returns early on `!isTauri()` and only then calls `transport.call(\"companion_set_remote_terminal\")` — the guard, not the transport, is what blocks a cloud host from granting a paired device terminal access. Dropping the guard is the migration; the arm itself is host-neutral."
+    },
     "hooks/connectors": {
       "classification": "ui-assumption"
     },
@@ -174,6 +185,10 @@
     },
     "hooks/git": {
       "classification": "ui-assumption"
+    },
+    "hooks/global-search": {
+      "classification": "ui-assumption",
+      "note": "`isTauri()` around the open-folder and check-updates palette actions, each falling back to a localized \"desktop only\" toast rather than failing silently, plus one `usePlatform()` for context assembly. Honest degradation, not a hidden gap."
     },
     "hooks/mcp": {
       "classification": "ui-assumption"
@@ -191,9 +206,6 @@
       "classification": "ui-assumption"
     },
     "hooks/scheduler": {
-      "classification": "ui-assumption"
-    },
-    "hooks/settings": {
       "classification": "ui-assumption"
     },
     "hooks/skills": {
@@ -239,6 +251,10 @@
     "lib/biometric": {
       "classification": "physically-impossible"
     },
+    "lib/browser": {
+      "classification": "unmigrated",
+      "note": "`installSnapshotInvalidation` gates on `isTauri()` because the snapshot-dirty event arrives on the Tauri event plane. The code already degrades honestly (the cache stays conservative and `fresh` bypasses it), so this is a missed optimisation on a cloud host rather than a broken feature — it clears when the browser events move onto the swappable seam."
+    },
     "lib/canvas": {
       "classification": "unmigrated"
     },
@@ -273,7 +289,7 @@
     },
     "lib/connectors": {
       "classification": "unmigrated",
-      "note": "installConnectorRuntime gates on isTauri() and the brain bypasses it with skipHostGate. 10 transports still import `listen` straight from @tauri-apps/api/event (class A), which is why 4 IM platforms cannot receive on a cloud host."
+      "note": "installConnectorRuntime gates on isTauri() and the brain bypasses it with skipHostGate. The transports themselves are migrated: all nine IM adapters subscribe through `connectorListen` (lib/connectors/events.ts), which is the only production file here importing @tauri-apps/api/event and is a declared SEAM_OWNER — so the four IM platforms that once could not receive on a cloud host now can. What remains is the bootstrap gate itself."
     },
     "lib/credentials": {
       "classification": "unmigrated"
@@ -321,9 +337,6 @@
       "classification": "unmigrated"
     },
     "lib/lsp": {
-      "classification": "unmigrated"
-    },
-    "lib/mcp": {
       "classification": "unmigrated"
     },
     "lib/memory": {
@@ -401,6 +414,10 @@
     },
     "lib/subscription": {
       "classification": "unmigrated"
+    },
+    "lib/support-report": {
+      "classification": "unmigrated",
+      "note": "Two guards: `clipboardAvailable()` probes the host so the copy button is never a silent no-op (legitimate), and the `crashReports` section declares `isAvailable: () => isTauri()`. A headless server produces native crash reports too, so that section is gated to the desktop by omission rather than by a physical boundary."
     },
     "lib/task-workspace": {
       "classification": "unmigrated"

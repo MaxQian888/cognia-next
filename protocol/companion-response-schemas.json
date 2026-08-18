@@ -1,277 +1,318 @@
 {
   "schemaVersion": 1,
   "$defs": {
-    "LegacyResult": {
-      "type": ["object", "array", "string", "number", "boolean", "null"],
-      "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-    },
-    "LegacyRecord": {
+    "AgentReadResult": {
       "type": "object",
-      "additionalProperties": true,
-      "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
-    },
-    "LegacyList": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/LegacyResult"
-      },
-      "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain."
-    },
-    "WorkflowApprovalList": {
-      "type": "object",
-      "required": ["approvals"],
+      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all — the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
+      "required": ["path", "exists", "writable", "format", "raw", "parsed"],
       "properties": {
-        "approvals": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "approvalId",
-              "runId",
-              "workflowId",
-              "stepId",
-              "title",
-              "requestedAt",
-              "kind"
-            ],
-            "properties": {
-              "approvalId": { "type": "string" },
-              "runId": { "type": "string" },
-              "workflowId": { "type": "string" },
-              "stepId": { "type": "string" },
-              "title": { "type": "string" },
-              "message": { "type": ["string", "null"] },
-              "requestedAt": { "type": "integer" },
-              "timeoutAt": { "type": ["integer", "null"] },
-              "kind": { "type": "string", "enum": ["approval", "risk_gate"] }
-            },
-            "additionalProperties": false
-          }
+        "path": {
+          "type": ["string", "null"]
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "writable": {
+          "type": "boolean"
+        },
+        "format": {
+          "enum": ["json", "jsonc", "toml"]
+        },
+        "raw": {
+          "type": "string"
+        },
+        "parsed": {
+          "x-cognia-opaque-reason": "serde_json::Value — the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
+        },
+        "parseError": {
+          "type": "string"
         }
       },
       "additionalProperties": false
     },
-    "PerfLease": {
+    "AgentWriteResult": {
       "type": "object",
-      "required": [
-        "wireVersion",
-        "leaseId",
-        "clientId",
-        "deviceId",
-        "targetId",
-        "routingGeneration",
-        "sourceId",
-        "purpose",
-        "requestedCadenceMs",
-        "samplingSessionId",
-        "openedAtMs",
-        "heartbeatAtMs",
-        "expiresAtMs"
-      ],
+      "x-cognia-wire-source": "crate::agents::commands::AgentWriteResult. backup_path is renamed to backupPath and skipped when None.",
+      "required": ["path"],
       "properties": {
-        "wireVersion": { "type": "integer", "const": 1 },
-        "leaseId": { "type": "string" },
-        "clientId": { "type": "string" },
-        "deviceId": { "type": "string" },
-        "targetId": { "type": "string" },
-        "routingGeneration": { "type": "integer", "minimum": 0 },
-        "sourceId": { "type": ["string", "null"] },
-        "purpose": { "type": "string", "enum": ["live", "capture"] },
-        "requestedCadenceMs": { "type": "integer", "minimum": 1 },
-        "samplingSessionId": { "type": "string" },
-        "openedAtMs": { "type": "integer" },
-        "heartbeatAtMs": { "type": "integer" },
-        "expiresAtMs": { "type": "integer" }
-      },
-      "additionalProperties": false
-    },
-    "PerfSource": {
-      "type": "object",
-      "required": [
-        "wireVersion",
-        "sourceId",
-        "kind",
-        "hostInstanceId",
-        "runtimeKind",
-        "build",
-        "metricSchemaVersion",
-        "capabilities",
-        "clock",
-        "connection"
-      ],
-      "properties": {
-        "wireVersion": { "type": "integer", "const": 1 },
-        "sourceId": { "type": "string" },
-        "kind": { "type": "string", "enum": ["renderer", "host"] },
-        "hostInstanceId": { "type": "string" },
-        "runtimeKind": { "type": "string", "enum": ["browser", "tauri-rust", "node-headless"] },
-        "build": { "type": "object", "additionalProperties": true },
-        "metricSchemaVersion": { "type": "integer", "minimum": 1 },
-        "capabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-        "clock": { "type": "object", "additionalProperties": true },
-        "connection": { "type": "object", "additionalProperties": true }
-      },
-      "additionalProperties": false
-    },
-    "PerfFrame": {
-      "type": "object",
-      "required": [
-        "wireVersion",
-        "sourceId",
-        "targetId",
-        "routingGeneration",
-        "hostInstanceId",
-        "samplingSessionId",
-        "sequence",
-        "requestedIntervalMs",
-        "actualIntervalMs",
-        "monotonicElapsedMs",
-        "wallStartMs",
-        "wallEndMs",
-        "collectionDurationMs",
-        "missedTicks",
-        "flags",
-        "tsMs",
-        "intervalMs",
-        "processes",
-        "runtime",
-        "topSpans",
-        "systemMemory",
-        "managed"
-      ],
-      "properties": {
-        "wireVersion": { "type": "integer", "const": 1 },
-        "sourceId": { "type": "string" },
-        "targetId": { "type": "string" },
-        "routingGeneration": { "type": "integer", "minimum": 0 },
-        "hostInstanceId": { "type": "string" },
-        "samplingSessionId": { "type": "string" },
-        "leaseId": { "type": "string" },
-        "sequence": { "type": "integer", "minimum": 1 },
-        "requestedIntervalMs": { "type": "integer", "minimum": 1 },
-        "actualIntervalMs": { "type": "integer", "minimum": 0 },
-        "monotonicElapsedMs": { "type": "integer", "minimum": 0 },
-        "wallStartMs": { "type": "integer" },
-        "wallEndMs": { "type": "integer" },
-        "collectionDurationMs": { "type": "integer", "minimum": 0 },
-        "missedTicks": { "type": "integer", "minimum": 0 },
-        "flags": { "type": "object", "additionalProperties": { "type": "boolean" } },
-        "tsMs": { "type": "integer" },
-        "intervalMs": { "type": "integer", "minimum": 0 },
-        "processes": {
-          "type": "array",
-          "items": { "type": "object", "additionalProperties": true }
+        "path": {
+          "type": "string"
         },
-        "runtime": { "type": "object", "additionalProperties": true },
-        "topSpans": {
-          "type": "array",
-          "items": { "type": "object", "additionalProperties": true }
-        },
-        "systemMemory": { "type": ["object", "null"], "additionalProperties": true },
-        "managed": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
-        "observations": {
-          "type": "object",
-          "additionalProperties": { "type": ["number", "null"] }
+        "backupPath": {
+          "type": "string"
         }
       },
       "additionalProperties": false
     },
-    "PerfOpenLeaseResult": {
+    "AheadBehind": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::AheadBehind",
+      "required": ["ahead", "behind"],
+      "properties": {
+        "ahead": {
+          "type": "integer"
+        },
+        "behind": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BackgroundJobOwner": {
       "oneOf": [
         {
           "type": "object",
-          "required": ["accepted", "lease", "source"],
+          "required": ["kind", "sessionId"],
           "properties": {
-            "accepted": { "const": true },
-            "lease": { "$ref": "#/$defs/PerfLease" },
-            "source": { "$ref": "#/$defs/PerfSource" }
+            "kind": {
+              "type": "string",
+              "enum": ["session"]
+            },
+            "sessionId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["accepted", "code", "detail"],
+          "required": ["kind", "taskId"],
           "properties": {
-            "accepted": { "const": false },
-            "code": {
+            "kind": {
               "type": "string",
-              "enum": [
-                "cadence-too-fast",
-                "device-purpose-limit",
-                "host-lease-limit",
-                "rate-limited",
-                "target-mismatch",
-                "routing-generation-mismatch",
-                "unsupported",
-                "permission-denied"
-              ]
+              "enum": ["scheduledTask"]
             },
-            "detail": { "type": "string" }
+            "taskId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["app"]
+            }
           },
           "additionalProperties": false
         }
       ]
     },
-    "PerfSnapshot": {
+    "BackgroundJobRecord": {
       "type": "object",
+      "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundJobRecord",
       "required": [
-        "wireVersion",
-        "frames",
-        "oldestSequence",
-        "latestSequence",
-        "sources",
-        "leases",
-        "gaps",
-        "samples",
-        "running",
-        "intervalMs"
+        "id",
+        "command",
+        "cwd",
+        "owner",
+        "status",
+        "startedAtMs",
+        "totalOutputBytes",
+        "droppedOutputBytes"
       ],
       "properties": {
-        "wireVersion": { "type": "integer", "const": 1 },
-        "frames": { "type": "array", "items": { "$ref": "#/$defs/PerfFrame" } },
-        "oldestSequence": { "type": ["integer", "null"], "minimum": 0 },
-        "latestSequence": { "type": ["integer", "null"], "minimum": 0 },
-        "sources": { "type": "array", "items": { "$ref": "#/$defs/PerfSource" } },
-        "leases": { "type": "array", "items": { "$ref": "#/$defs/PerfLease" } },
-        "gaps": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
-        "samples": { "type": "array", "items": { "$ref": "#/$defs/PerfFrame" } },
-        "running": { "type": "boolean" },
-        "intervalMs": { "type": "integer", "minimum": 1 }
+        "id": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/$defs/BackgroundJobOwner"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "exited", "killed", "interrupted", "failed"]
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "startedAtMs": {
+          "type": "integer"
+        },
+        "endedAtMs": {
+          "type": "integer"
+        },
+        "totalOutputBytes": {
+          "type": "integer"
+        },
+        "droppedOutputBytes": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
-    "NullResult": {
-      "type": "null"
+    "BackgroundMonitorRecord": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundMonitorRecord",
+      "required": ["id", "condition", "owner", "status", "createdAtMs"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "object",
+          "description": "Discriminated by `kind`; the per-kind fields are declared open (BackgroundMonitorCondition).",
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "owner": {
+          "$ref": "#/$defs/BackgroundJobOwner"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["waiting", "fired", "unsatisfiable", "cancelled", "expired"]
+        },
+        "createdAtMs": {
+          "type": "integer"
+        },
+        "settledAtMs": {
+          "type": "integer"
+        },
+        "expiresAtMs": {
+          "type": "integer"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "BooleanResult": {
       "type": "boolean"
     },
-    "RuntimeLeaseAcquireResult": {
-      "oneOf": [
-        { "type": "boolean" },
-        {
-          "type": "string",
-          "enum": ["acquired", "busy", "handoff-pending"]
+    "CodeServerStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/codeserver/client.ts CodeServerStatus",
+      "description": "`profile` is absent only when talking to a pre-platform host during a rolling upgrade; `relayPath` never carries a credential or the host loopback port.",
+      "required": ["running", "port", "version"],
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": ["integer", "null"]
+        },
+        "version": {
+          "type": "string"
+        },
+        "profile": {
+          "type": ["string", "null"],
+          "enum": ["managed", "native", null]
+        },
+        "relayPath": {
+          "type": ["string", "null"]
         }
-      ]
+      },
+      "additionalProperties": false
     },
-    "StringResult": {
-      "type": "string"
-    },
-    "IntegerResult": {
-      "type": "integer"
+    "CodexAppInventory": {
+      "type": "object",
+      "required": ["plugins", "skills", "mcpServers"],
+      "properties": {
+        "plugins": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "skills": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "mcpServers": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
     },
     "CodexAppRuntimeStatus": {
       "type": "object",
       "required": ["ready", "mode"],
       "properties": {
-        "ready": { "type": "boolean" },
-        "mode": { "const": "normal-app-cdp-rollout-mirror" },
-        "restartSupported": { "type": "boolean" },
-        "error": { "type": "string" },
+        "ready": {
+          "type": "boolean"
+        },
+        "mode": {
+          "const": "normal-app-cdp-rollout-mirror"
+        },
+        "restartSupported": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
         "runtime": {
           "type": "object",
           "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppTaskInterrupt": {
+      "type": "object",
+      "required": ["threadId", "interrupted"],
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "interrupted": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppTaskOpen": {
+      "type": "object",
+      "required": ["threadId", "deepLink"],
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "deepLink": {
+          "type": "string",
+          "pattern": "^codex://threads/"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CodexAppTaskPage": {
+      "type": "object",
+      "required": ["data"],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CodexAppThread"
+          }
+        },
+        "nextCursor": {
+          "type": ["string", "null"]
         }
       },
       "additionalProperties": false
@@ -280,18 +321,41 @@
       "type": "object",
       "required": ["id", "cwd"],
       "properties": {
-        "id": { "type": "string", "format": "uuid" },
-        "sessionId": { "type": "string" },
-        "parentThreadId": { "type": ["string", "null"] },
-        "preview": { "type": ["string", "null"] },
-        "name": { "type": ["string", "null"] },
-        "cwd": { "type": "string" },
-        "createdAt": { "type": "integer" },
-        "updatedAt": { "type": "integer" },
-        "status": { "type": "object", "additionalProperties": true },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "parentThreadId": {
+          "type": ["string", "null"]
+        },
+        "preview": {
+          "type": ["string", "null"]
+        },
+        "name": {
+          "type": ["string", "null"]
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "turns": {
           "type": "array",
-          "items": { "type": "object", "additionalProperties": true }
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": true
@@ -300,7 +364,9 @@
       "type": "object",
       "required": ["thread"],
       "properties": {
-        "thread": { "$ref": "#/$defs/CodexAppThread" }
+        "thread": {
+          "$ref": "#/$defs/CodexAppThread"
+        }
       },
       "additionalProperties": false
     },
@@ -308,21 +374,11 @@
       "type": "object",
       "required": ["thread"],
       "properties": {
-        "thread": { "$ref": "#/$defs/CodexAppThread" }
+        "thread": {
+          "$ref": "#/$defs/CodexAppThread"
+        }
       },
       "additionalProperties": true
-    },
-    "CodexAppTaskPage": {
-      "type": "object",
-      "required": ["data"],
-      "properties": {
-        "data": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/CodexAppThread" }
-        },
-        "nextCursor": { "type": ["string", "null"] }
-      },
-      "additionalProperties": false
     },
     "CodexAppTurnEnvelope": {
       "type": "object",
@@ -332,63 +388,895 @@
           "type": "object",
           "required": ["id"],
           "properties": {
-            "id": { "type": "string", "format": "uuid" }
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
           },
           "additionalProperties": true
         }
       },
       "additionalProperties": false
     },
-    "CodexAppTaskOpen": {
+    "ConnectorAdapters": {
       "type": "object",
-      "required": ["threadId", "deepLink"],
+      "required": ["adapters"],
       "properties": {
-        "threadId": { "type": "string", "format": "uuid" },
-        "deepLink": { "type": "string", "pattern": "^codex://threads/" }
+        "adapters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["adapter_id", "adapter_type"],
+            "properties": {
+              "adapter_id": {
+                "type": "string"
+              },
+              "adapter_type": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
       },
       "additionalProperties": false
     },
-    "CodexAppTaskInterrupt": {
+    "ConnectorAttachmentRef": {
       "type": "object",
-      "required": ["threadId", "interrupted"],
+      "x-cognia-wire-source": "lib/connectors/tauri/commands.ts AttachmentRef",
+      "required": ["localUrl", "remoteRef"],
       "properties": {
-        "threadId": { "type": "string", "format": "uuid" },
-        "interrupted": { "type": "boolean" },
-        "reason": { "type": ["string", "null"] }
+        "localUrl": {
+          "type": "string"
+        },
+        "remoteRef": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
-    "CodexAppInventory": {
+    "ExternalBridgeClient": {
       "type": "object",
-      "required": ["plugins", "skills", "mcpServers"],
+      "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeClient",
+      "required": ["id", "name", "scopes", "createdAt"],
       "properties": {
-        "plugins": { "type": "object", "additionalProperties": true },
-        "skills": { "type": "object", "additionalProperties": true },
-        "mcpServers": { "type": "object", "additionalProperties": true }
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "expiresAt": {
+          "type": ["integer", "null"]
+        },
+        "revokedAt": {
+          "type": ["integer", "null"]
+        }
       },
       "additionalProperties": false
+    },
+    "ExternalBridgeClientCredential": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeClientCredential",
+      "required": ["client", "credential"],
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/ExternalBridgeClient"
+        },
+        "credential": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExternalBridgeClientList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ExternalBridgeClient"
+      }
+    },
+    "ExternalBridgeHostConfig": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeHostConfig",
+      "required": ["revision", "enabledScopes", "port", "bindMode", "autoStart"],
+      "properties": {
+        "revision": {
+          "type": "integer"
+        },
+        "enabledScopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "port": {
+          "type": "integer"
+        },
+        "bindMode": {
+          "type": "string",
+          "enum": ["loopback", "relay", "direct-tls"]
+        },
+        "autoStart": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExternalBridgeHostStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/external-bridge/tauri-control.ts ExternalBridgeHostStatus",
+      "required": ["state", "configRevision", "bindMode", "health", "sidecarBuild"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["stopped", "starting", "running", "degraded"]
+        },
+        "configRevision": {
+          "type": "integer"
+        },
+        "endpoint": {
+          "type": ["string", "null"]
+        },
+        "bindMode": {
+          "type": "string"
+        },
+        "health": {
+          "type": "string",
+          "enum": ["inactive", "healthy", "unhealthy"]
+        },
+        "sidecarBuild": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": ["string", "null"]
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FleetSnapshot": {
+      "type": "object",
+      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent — not empty arrays — on a quiet host.",
+      "x-cognia-fixes": "Previously LegacyList, which requires an ARRAY. FleetSnapshot is a struct and always serializes as an object, so the enforced output contract rejected every fleet_get_snapshot response with contract_output_violation. The helper directly above the dispatch arm (fleet_event_payload) already asserted 'fleet snapshot must serialize as an object'.",
+      "required": ["sessions", "liveness", "generatedAt"],
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "x-cognia-opaque-reason": "FleetSession is owned by the Agent Fleet domain (ADR-0009) and is projected from several agent runtimes. The envelope is pinned here; item-level typing belongs with that domain and is tracked as remaining response-schema debt."
+          }
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "liveness": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "runtimeCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "generatedAt": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "FleetWorkerEnrollment": {
+      "type": "object",
+      "x-cognia-wire-source": "Literal json! in the fleet_worker_enrollment_create arm; `enrollment` is the String returned by SecurityStore::create_worker_enrollment.",
+      "required": ["enrollment", "expiresAtMs", "baseUrl", "fingerprint", "tenantId"],
+      "properties": {
+        "enrollment": {
+          "type": "string"
+        },
+        "expiresAtMs": {
+          "type": "integer"
+        },
+        "baseUrl": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FleetWorkerList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<WorkerDeviceSummary>. NOTE serde(flatten): DeviceSummary's fields are inlined ALONGSIDE hostRef rather than nested under a `device` key.",
+      "items": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "displayName",
+          "role",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "capabilities",
+          "hostRef"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hostRef": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "GitBlameLine": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitBlameLine",
+      "required": [
+        "lineNumber",
+        "commitHash",
+        "shortHash",
+        "authorName",
+        "authoredAtMs",
+        "summary",
+        "content"
+      ],
+      "properties": {
+        "lineNumber": {
+          "type": "integer"
+        },
+        "commitHash": {
+          "type": "string"
+        },
+        "shortHash": {
+          "type": "string"
+        },
+        "authorName": {
+          "type": "string"
+        },
+        "authoredAtMs": {
+          "type": "integer"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitBlameLineList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitBlameLine"
+      }
+    },
+    "GitBranch": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitBranch",
+      "required": ["name", "isCurrent", "isRemote", "upstream", "ahead", "behind"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "isCurrent": {
+          "type": "boolean"
+        },
+        "isRemote": {
+          "type": "boolean"
+        },
+        "upstream": {
+          "type": ["string", "null"]
+        },
+        "ahead": {
+          "type": "integer"
+        },
+        "behind": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitBranchList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitBranch"
+      }
+    },
+    "GitCommit": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitCommit",
+      "required": [
+        "hash",
+        "shortHash",
+        "summary",
+        "body",
+        "authorName",
+        "authorEmail",
+        "authoredAtMs",
+        "parents"
+      ],
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "shortHash": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "authorName": {
+          "type": "string"
+        },
+        "authorEmail": {
+          "type": "string"
+        },
+        "authoredAtMs": {
+          "type": "integer"
+        },
+        "parents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitCommitList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitCommit"
+      }
+    },
+    "GitConflict": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitConflict",
+      "required": ["path", "ours", "theirs", "base"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "ours": {
+          "type": "string"
+        },
+        "theirs": {
+          "type": "string"
+        },
+        "base": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitConflictList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitConflict"
+      }
+    },
+    "GitDiff": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitDiff",
+      "required": ["path", "oldContent", "newContent", "hunks", "isBinary"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "oldContent": {
+          "type": "string"
+        },
+        "newContent": {
+          "type": "string"
+        },
+        "hunks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GitHunk"
+          }
+        },
+        "isBinary": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Rust never sends `language`; the renderer derives it from the path extension after receipt."
+    },
+    "GitDiffLine": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitDiffLine",
+      "required": ["kind", "content"],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitFileChange": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitFileChange",
+      "required": ["path", "origPath", "status", "staged", "group"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "origPath": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "$ref": "#/$defs/GitFileStatus"
+        },
+        "staged": {
+          "type": "boolean"
+        },
+        "group": {
+          "$ref": "#/$defs/GitStatusGroup"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitFileChangeList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitFileChange"
+      }
+    },
+    "GitFileDiffStat": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitFileDiffStat",
+      "required": ["path", "insertions", "deletions"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "insertions": {
+          "type": "integer"
+        },
+        "deletions": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitFileDiffStatList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitFileDiffStat"
+      }
+    },
+    "GitFileStatus": {
+      "type": "string",
+      "enum": ["modified", "added", "deleted", "renamed", "untracked", "conflicted", "typeChanged"]
+    },
+    "GitHunk": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitHunk",
+      "required": ["header", "oldStart", "oldLines", "newStart", "newLines", "patch", "lines"],
+      "properties": {
+        "header": {
+          "type": "string"
+        },
+        "oldStart": {
+          "type": "integer"
+        },
+        "oldLines": {
+          "type": "integer"
+        },
+        "newStart": {
+          "type": "integer"
+        },
+        "newLines": {
+          "type": "integer"
+        },
+        "patch": {
+          "type": "string"
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GitDiffLine"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitIdentity": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitIdentity",
+      "required": ["name", "email"],
+      "properties": {
+        "name": {
+          "type": ["string", "null"]
+        },
+        "email": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitOperation": {
+      "type": "string",
+      "enum": ["merge", "rebase", "cherryPick", "revert"]
+    },
+    "GitRef": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitRef",
+      "required": ["name", "kind", "targetHash"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/GitRefKind"
+        },
+        "targetHash": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitRefKind": {
+      "type": "string",
+      "enum": ["branch", "remoteBranch", "tag", "head"]
+    },
+    "GitRefList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitRef"
+      }
+    },
+    "GitRemote": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitRemote",
+      "required": ["name", "fetchUrl", "pushUrl"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "fetchUrl": {
+          "type": "string"
+        },
+        "pushUrl": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitRemoteList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitRemote"
+      }
+    },
+    "GitRepoState": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitRepoState",
+      "required": ["isRepo", "rootDir", "detachedHead", "operationInProgress"],
+      "properties": {
+        "isRepo": {
+          "type": "boolean"
+        },
+        "rootDir": {
+          "type": ["string", "null"]
+        },
+        "detachedHead": {
+          "type": "boolean"
+        },
+        "operationInProgress": {
+          "type": ["string", "null"],
+          "enum": ["merge", "rebase", "cherryPick", "revert", null]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitStashEntry": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitStashEntry",
+      "required": ["index", "message", "branch"],
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "branch": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitStashEntryList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitStashEntry"
+      }
+    },
+    "GitStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitStatus",
+      "required": [
+        "branch",
+        "upstream",
+        "ahead",
+        "behind",
+        "staged",
+        "changes",
+        "merge",
+        "isRebasing",
+        "isMerging"
+      ],
+      "properties": {
+        "branch": {
+          "type": ["string", "null"]
+        },
+        "upstream": {
+          "type": ["string", "null"]
+        },
+        "ahead": {
+          "type": "integer"
+        },
+        "behind": {
+          "type": "integer"
+        },
+        "staged": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GitFileChange"
+          }
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GitFileChange"
+          }
+        },
+        "merge": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GitFileChange"
+          }
+        },
+        "isRebasing": {
+          "type": "boolean"
+        },
+        "isMerging": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitStatusGroup": {
+      "type": "string",
+      "enum": ["staged", "changes", "merge"]
+    },
+    "GitTag": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitTag",
+      "required": ["name", "targetHash", "message", "isAnnotated"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "targetHash": {
+          "type": "string"
+        },
+        "message": {
+          "type": ["string", "null"]
+        },
+        "isAnnotated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitTagList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitTag"
+      }
+    },
+    "GitWorktree": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::types::GitWorktree",
+      "required": ["path", "branch", "head", "isMain"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": ["string", "null"]
+        },
+        "head": {
+          "type": ["string", "null"]
+        },
+        "isMain": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitWorktreeList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitWorktree"
+      }
+    },
+    "IntegerResult": {
+      "type": "integer"
+    },
+    "LarkEntryToken": {
+      "type": "object",
+      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone — so only `token` is guaranteed.",
+      "required": ["token"],
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "jti": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "LarkMetricAck": {
+      "type": "object",
+      "x-cognia-wire-source": "lark_entry::rpc_metrics_record — json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
+      "required": ["ok"],
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "LarkResultAck": {
+      "type": "object",
+      "x-cognia-wire-source": "lark_entry::rpc_result_complete — json!({ \"accepted\": bool }).",
+      "required": ["accepted"],
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "LegacyList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LegacyResult"
+      },
+      "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain."
+    },
+    "LegacyRecord": {
+      "type": "object",
+      "additionalProperties": true,
+      "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
+    },
+    "LegacyResult": {
+      "type": ["object", "array", "string", "number", "boolean", "null"],
+      "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+    },
+    "MatrixCryptoOutgoingRequest": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/connectors/tauri/commands.ts MatrixCryptoOutgoingRequest",
+      "required": ["requestId", "kind", "method", "path", "body"],
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "body": {}
+      },
+      "additionalProperties": false
+    },
+    "MatrixCryptoOutgoingRequestList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MatrixCryptoOutgoingRequest"
+      }
     },
     "McpOAuthAuthResult": {
       "type": "object",
       "required": ["ok", "status", "message"],
       "properties": {
-        "ok": { "type": "boolean" },
+        "ok": {
+          "type": "boolean"
+        },
         "status": {
           "type": "string",
           "enum": ["authorized", "pending", "denied", "error", "unsupported"]
         },
-        "message": { "type": "string" },
-        "attempt_id": { "type": "string", "format": "uuid" },
-        "authorization_url": { "type": "string", "format": "uri" },
-        "expires_at_ms": { "type": "integer" }
+        "message": {
+          "type": "string"
+        },
+        "attempt_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "authorization_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "expires_at_ms": {
+          "type": "integer"
+        }
       },
       "additionalProperties": false
     },
     "McpOAuthProjection": {
       "type": ["object", "null"],
       "properties": {
-        "access_token": { "type": ["string", "null"] },
-        "expires_at_ms": { "type": ["integer", "null"] }
+        "access_token": {
+          "type": ["string", "null"]
+        },
+        "expires_at_ms": {
+          "type": ["integer", "null"]
+        }
       },
       "required": ["access_token", "expires_at_ms"],
       "additionalProperties": false
@@ -397,44 +1285,34 @@
       "type": "object",
       "required": ["has_tokens", "expires_at_ms"],
       "properties": {
-        "has_tokens": { "type": "boolean" },
-        "expires_at_ms": { "type": ["integer", "null"] },
-        "status": { "type": "string" },
-        "attempt_id": { "type": "string", "format": "uuid" },
-        "authorization_url": { "type": "string", "format": "uri" }
-      },
-      "additionalProperties": false
-    },
-    "SessionRow": {
-      "type": "object",
-      "required": ["id", "title", "kind", "createdAt", "updatedAt"],
-      "properties": {
-        "id": {
+        "has_tokens": {
+          "type": "boolean"
+        },
+        "expires_at_ms": {
+          "type": ["integer", "null"]
+        },
+        "status": {
           "type": "string"
         },
-        "title": {
-          "type": "string"
+        "attempt_id": {
+          "type": "string",
+          "format": "uuid"
         },
-        "kind": {
-          "type": "string"
-        },
-        "createdAt": {
-          "type": "integer"
-        },
-        "updatedAt": {
-          "type": "integer"
+        "authorization_url": {
+          "type": "string",
+          "format": "uri"
         }
       },
       "additionalProperties": false
     },
-    "SessionPage": {
+    "MessagePage": {
       "type": "object",
       "required": ["rows", "total"],
       "properties": {
         "rows": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/SessionRow"
+            "$ref": "#/$defs/MessageRow"
           }
         },
         "total": {
@@ -470,23 +1348,448 @@
       },
       "additionalProperties": false
     },
-    "MessagePage": {
-      "type": "object",
-      "required": ["rows", "total"],
-      "properties": {
-        "rows": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/MessageRow"
+    "NativeLogFileList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<cognia_observability::log_query::NativeLogFileInfo>. modifiedMs is skipped when None.",
+      "items": {
+        "type": "object",
+        "required": ["name", "size"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "modifiedMs": {
+            "type": "integer"
           }
         },
-        "total": {
+        "additionalProperties": false
+      }
+    },
+    "NativeLogQueryResult": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia_observability::log_query::NativeLogQueryResult (rename_all = camelCase), via rpc/diagnostics.rs `to_json(result)`.",
+      "required": ["entries", "fileSize", "scannedBytes", "truncated", "path"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "x-cognia-wire-source": "cognia_observability::log_query::NativeLogEntry. epochMs and fields carry skip_serializing_if = Option::is_none, so both are absent rather than null.",
+            "required": ["timestamp", "level", "target", "message"],
+            "properties": {
+              "timestamp": {
+                "type": "string"
+              },
+              "epochMs": {
+                "type": "integer"
+              },
+              "level": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "fields": {
+                "x-cognia-opaque-reason": "serde_json::Value — arbitrary structured fields captured at the log call site."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "fileSize": {
           "type": "integer",
           "minimum": 0
         },
-        "nextOffset": {
+        "scannedBytes": {
           "type": "integer",
           "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "NullResult": {
+      "type": "null"
+    },
+    "NullableString": {
+      "type": ["string", "null"]
+    },
+    "PerfFrame": {
+      "type": "object",
+      "required": [
+        "wireVersion",
+        "sourceId",
+        "targetId",
+        "routingGeneration",
+        "hostInstanceId",
+        "samplingSessionId",
+        "sequence",
+        "requestedIntervalMs",
+        "actualIntervalMs",
+        "monotonicElapsedMs",
+        "wallStartMs",
+        "wallEndMs",
+        "collectionDurationMs",
+        "missedTicks",
+        "flags",
+        "tsMs",
+        "intervalMs",
+        "processes",
+        "runtime",
+        "topSpans",
+        "systemMemory",
+        "managed"
+      ],
+      "properties": {
+        "wireVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "routingGeneration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hostInstanceId": {
+          "type": "string"
+        },
+        "samplingSessionId": {
+          "type": "string"
+        },
+        "leaseId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requestedIntervalMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "actualIntervalMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "monotonicElapsedMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wallStartMs": {
+          "type": "integer"
+        },
+        "wallEndMs": {
+          "type": "integer"
+        },
+        "collectionDurationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missedTicks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "tsMs": {
+          "type": "integer"
+        },
+        "intervalMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "processes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "topSpans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "systemMemory": {
+          "type": ["object", "null"],
+          "additionalProperties": true
+        },
+        "managed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "observations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["number", "null"]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PerfLease": {
+      "type": "object",
+      "required": [
+        "wireVersion",
+        "leaseId",
+        "clientId",
+        "deviceId",
+        "targetId",
+        "routingGeneration",
+        "sourceId",
+        "purpose",
+        "requestedCadenceMs",
+        "samplingSessionId",
+        "openedAtMs",
+        "heartbeatAtMs",
+        "expiresAtMs"
+      ],
+      "properties": {
+        "wireVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "leaseId": {
+          "type": "string"
+        },
+        "clientId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "routingGeneration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceId": {
+          "type": ["string", "null"]
+        },
+        "purpose": {
+          "type": "string",
+          "enum": ["live", "capture"]
+        },
+        "requestedCadenceMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "samplingSessionId": {
+          "type": "string"
+        },
+        "openedAtMs": {
+          "type": "integer"
+        },
+        "heartbeatAtMs": {
+          "type": "integer"
+        },
+        "expiresAtMs": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PerfOpenLeaseResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["accepted", "lease", "source"],
+          "properties": {
+            "accepted": {
+              "const": true
+            },
+            "lease": {
+              "$ref": "#/$defs/PerfLease"
+            },
+            "source": {
+              "$ref": "#/$defs/PerfSource"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["accepted", "code", "detail"],
+          "properties": {
+            "accepted": {
+              "const": false
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "cadence-too-fast",
+                "device-purpose-limit",
+                "host-lease-limit",
+                "rate-limited",
+                "target-mismatch",
+                "routing-generation-mismatch",
+                "unsupported",
+                "permission-denied"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PerfSnapshot": {
+      "type": "object",
+      "required": [
+        "wireVersion",
+        "frames",
+        "oldestSequence",
+        "latestSequence",
+        "sources",
+        "leases",
+        "gaps",
+        "samples",
+        "running",
+        "intervalMs"
+      ],
+      "properties": {
+        "wireVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PerfFrame"
+          }
+        },
+        "oldestSequence": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "latestSequence": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PerfSource"
+          }
+        },
+        "leases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PerfLease"
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PerfFrame"
+          }
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "intervalMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "PerfSource": {
+      "type": "object",
+      "required": [
+        "wireVersion",
+        "sourceId",
+        "kind",
+        "hostInstanceId",
+        "runtimeKind",
+        "build",
+        "metricSchemaVersion",
+        "capabilities",
+        "clock",
+        "connection"
+      ],
+      "properties": {
+        "wireVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["renderer", "host"]
+        },
+        "hostInstanceId": {
+          "type": "string"
+        },
+        "runtimeKind": {
+          "type": "string",
+          "enum": ["browser", "tauri-rust", "node-headless"]
+        },
+        "build": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "metricSchemaVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "clock": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "connection": {
+          "type": "object",
+          "additionalProperties": true
         }
       },
       "additionalProperties": false
@@ -501,6 +1804,387 @@
         }
       },
       "additionalProperties": false
+    },
+    "ProviderSearch": {
+      "type": "object",
+      "required": ["results"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LegacyRecord"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawWorkspaceEntry": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/files/types.ts RawWorkspaceEntry",
+      "description": "snake_case on the wire — the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
+      "required": ["rel_path", "absolute_path", "is_dir", "size"],
+      "properties": {
+        "rel_path": {
+          "type": "string"
+        },
+        "absolute_path": {
+          "type": "string"
+        },
+        "is_dir": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "mtime_ms": {
+          "type": ["integer", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawWorkspaceEntryList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RawWorkspaceEntry"
+      }
+    },
+    "RuntimeLeaseAcquireResult": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string",
+          "enum": ["acquired", "busy", "handoff-pending"]
+        }
+      ]
+    },
+    "ScheduledTask": {
+      "type": "object",
+      "x-cognia-wire-source": "types/scheduler ScheduledTask, serialized (`TaskWire` in lib/scheduler/scheduler-data-source.ts)",
+      "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateTask. Optional fields are omitted rather than sent as null.",
+      "required": [
+        "id",
+        "name",
+        "type",
+        "trigger",
+        "config",
+        "notification",
+        "status",
+        "runCount",
+        "successCount",
+        "failureCount",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/ScheduledTaskType"
+        },
+        "trigger": {
+          "$ref": "#/$defs/TaskTrigger"
+        },
+        "payload": {
+          "$ref": "#/$defs/ScheduledTaskPayload"
+        },
+        "config": {
+          "$ref": "#/$defs/TaskExecutionConfig"
+        },
+        "notification": {
+          "$ref": "#/$defs/TaskNotificationConfig"
+        },
+        "status": {
+          "$ref": "#/$defs/ScheduledTaskStatus"
+        },
+        "createdBy": {
+          "$ref": "#/$defs/ScheduledTaskCreator"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "endAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "promotion": {
+          "$ref": "#/$defs/ScheduledTaskPromotion"
+        },
+        "onSuccessTaskIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "onFailureTaskIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "consecutiveFailures": {
+          "type": "integer"
+        },
+        "lastRunAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "nextRunAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "runCount": {
+          "type": "integer"
+        },
+        "successCount": {
+          "type": "integer"
+        },
+        "failureCount": {
+          "type": "integer"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "lastTerminalReason": {
+          "type": "string"
+        },
+        "lastTerminalAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScheduledTaskCreator": {
+      "type": "object",
+      "x-cognia-wire-source": "types/scheduler ScheduledTaskCreator",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["user", "agent", "plugin"]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "pluginId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScheduledTaskExport": {
+      "type": "object",
+      "x-cognia-wire-source": "TaskScheduler.exportTasks",
+      "required": ["version", "exportedAt", "tasks"],
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "exportedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "tasks": {
+          "$ref": "#/$defs/ScheduledTaskList"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScheduledTaskImportResult": {
+      "type": "object",
+      "x-cognia-wire-source": "TaskScheduler.importTasks",
+      "required": ["imported", "skipped", "errors"],
+      "properties": {
+        "imported": {
+          "type": "integer"
+        },
+        "skipped": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScheduledTaskList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ScheduledTask"
+      }
+    },
+    "ScheduledTaskOrNull": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ScheduledTask"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ScheduledTaskPayload": {
+      "type": "object",
+      "description": "Union whose first member is Record<string, unknown> (types/scheduler): the per-task-type payload shapes are refinements, so any object is valid on the wire.",
+      "additionalProperties": true
+    },
+    "ScheduledTaskPromotion": {
+      "type": "object",
+      "x-cognia-wire-source": "types/scheduler ScheduledTaskPromotion",
+      "required": ["systemTaskId", "token", "promotedAt"],
+      "properties": {
+        "systemTaskId": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "promotedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "backend": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScheduledTaskStatus": {
+      "type": "string",
+      "enum": ["active", "paused", "disabled", "expired"]
+    },
+    "ScheduledTaskType": {
+      "type": "string",
+      "enum": [
+        "workflow",
+        "agent",
+        "sync",
+        "backup",
+        "custom",
+        "plugin",
+        "script",
+        "background-command",
+        "monitor",
+        "test",
+        "ai-generation",
+        "chat",
+        "im-push",
+        "skill",
+        "external-agent",
+        "agent-team",
+        "goal",
+        "plan",
+        "twin"
+      ]
+    },
+    "SchedulerNotificationChannel": {
+      "type": "string",
+      "enum": ["desktop", "toast", "webhook", "im", "none"]
+    },
+    "SecretValue": {
+      "type": ["string", "null"],
+      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
+      "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
+    },
+    "SessionPage": {
+      "type": "object",
+      "required": ["rows", "total"],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionRow"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "SessionRow": {
+      "type": "object",
+      "required": ["id", "title", "kind", "createdAt", "updatedAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SidecarStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus — derives Serialize with NO rename_all, and has exactly one field.",
+      "required": ["ready"],
+      "properties": {
+        "ready": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SkillUninstallResult": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/claude/ipc.ts skills_uninstall / skills_uninstall_native",
+      "required": ["removed", "directory"],
+      "properties": {
+        "removed": {
+          "type": "boolean"
+        },
+        "directory": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "StringList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "StringResult": {
+      "type": "string"
     },
     "SyncTables": {
       "type": "object",
@@ -528,20 +2212,332 @@
       },
       "additionalProperties": false
     },
-    "ConnectorAdapters": {
+    "TaskExecution": {
       "type": "object",
-      "required": ["adapters"],
+      "x-cognia-wire-source": "types/scheduler TaskExecution, serialized (`ExecutionWire` in lib/scheduler/scheduler-data-source.ts)",
+      "description": "Date fields cross the wire as ISO-8601 strings; the client rehydrates them via hydrateExecution.",
+      "required": [
+        "id",
+        "taskId",
+        "taskName",
+        "taskType",
+        "status",
+        "retryAttempt",
+        "startedAt",
+        "logs"
+      ],
       "properties": {
-        "adapters": {
+        "id": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "taskName": {
+          "type": "string"
+        },
+        "taskType": {
+          "$ref": "#/$defs/ScheduledTaskType"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskExecutionStatus"
+        },
+        "input": {
+          "$ref": "#/$defs/ScheduledTaskPayload"
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "error": {
+          "type": "string"
+        },
+        "retryAttempt": {
+          "type": "integer"
+        },
+        "duration": {
+          "type": "integer"
+        },
+        "scheduledFor": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "triggerSource": {
+          "$ref": "#/$defs/TaskExecutionTriggerSource"
+        },
+        "terminalReason": {
+          "type": "string"
+        },
+        "retryScheduledAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "logs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskExecutionLog"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "TaskExecutionConfig": {
+      "type": "object",
+      "x-cognia-wire-source": "types/scheduler TaskExecutionConfig",
+      "required": ["timeout", "maxRetries", "retryDelay", "runMissedOnStartup"],
+      "properties": {
+        "timeout": {
+          "type": "integer"
+        },
+        "maxRetries": {
+          "type": "integer"
+        },
+        "retryDelay": {
+          "type": "integer"
+        },
+        "maxRetryDelay": {
+          "type": "integer"
+        },
+        "runMissedOnStartup": {
+          "type": "boolean"
+        },
+        "maxMissedRuns": {
+          "type": "integer"
+        },
+        "allowConcurrent": {
+          "type": "boolean"
+        },
+        "overlapPolicy": {
+          "$ref": "#/$defs/TaskOverlapPolicy"
+        },
+        "maxQueueSize": {
+          "type": "integer"
+        },
+        "maxRuns": {
+          "type": "integer"
+        },
+        "pauseAfterConsecutiveFailures": {
+          "type": "integer"
+        },
+        "catchupWindowMs": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TaskExecutionList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TaskExecution"
+      }
+    },
+    "TaskExecutionLog": {
+      "type": "object",
+      "x-cognia-wire-source": "types/scheduler TaskExecutionLog",
+      "required": ["id", "timestamp", "level", "message"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "level": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {}
+      },
+      "additionalProperties": false
+    },
+    "TaskExecutionOrNull": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TaskExecution"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "TaskExecutionStatus": {
+      "type": "string",
+      "enum": ["pending", "running", "completed", "failed", "cancelled", "skipped"]
+    },
+    "TaskExecutionTriggerSource": {
+      "type": "string",
+      "enum": [
+        "schedule",
+        "run-now",
+        "retry",
+        "event",
+        "dependency",
+        "catch-up",
+        "remote",
+        "backfill"
+      ]
+    },
+    "TaskNotificationConfig": {
+      "type": "object",
+      "x-cognia-wire-source": "types/scheduler TaskNotificationConfig",
+      "required": ["onStart", "onComplete", "onError"],
+      "properties": {
+        "onStart": {
+          "type": "boolean"
+        },
+        "onComplete": {
+          "type": "boolean"
+        },
+        "onError": {
+          "type": "boolean"
+        },
+        "onProgress": {
+          "type": "boolean"
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SchedulerNotificationChannel"
+          }
+        },
+        "webhookUrl": {
+          "type": "string"
+        },
+        "imTarget": {
+          "type": "object",
+          "required": ["conversationKey"],
+          "properties": {
+            "conversationKey": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "TaskOverlapPolicy": {
+      "type": "string",
+      "enum": ["allow", "skip", "queue-one", "queue-all", "cancel-previous"]
+    },
+    "TaskStatistics": {
+      "type": "object",
+      "x-cognia-wire-source": "types/scheduler TaskStatistics",
+      "required": [
+        "totalTasks",
+        "activeTasks",
+        "pausedTasks",
+        "totalExecutions",
+        "successfulExecutions",
+        "failedExecutions",
+        "averageDuration",
+        "upcomingExecutions"
+      ],
+      "properties": {
+        "totalTasks": {
+          "type": "integer"
+        },
+        "activeTasks": {
+          "type": "integer"
+        },
+        "pausedTasks": {
+          "type": "integer"
+        },
+        "totalExecutions": {
+          "type": "integer"
+        },
+        "successfulExecutions": {
+          "type": "integer"
+        },
+        "failedExecutions": {
+          "type": "integer"
+        },
+        "averageDuration": {
+          "type": "number"
+        },
+        "upcomingExecutions": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TaskTrigger": {
+      "type": "object",
+      "x-cognia-wire-source": "types/scheduler TaskTrigger",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/TaskTriggerType"
+        },
+        "cronExpression": {
+          "type": "string"
+        },
+        "intervalMs": {
+          "type": "integer"
+        },
+        "runAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "eventType": {
+          "type": "string"
+        },
+        "eventSource": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "jitterMs": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TaskTriggerType": {
+      "type": "string",
+      "enum": ["cron", "interval", "once", "event"]
+    },
+    "TaskWorkspaceApplyOutcome": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/task-workspace/types.ts ApplyOutcome",
+      "required": ["state", "revision", "conflicts"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["ready", "applied", "reverted", "conflict"]
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "conflicts": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["adapter_id", "adapter_type"],
+            "required": ["path", "reason"],
             "properties": {
-              "adapter_id": {
+              "path": {
                 "type": "string"
               },
-              "adapter_type": {
+              "reason": {
                 "type": "string"
               }
             },
@@ -551,18 +2547,50 @@
       },
       "additionalProperties": false
     },
-    "ProviderSearch": {
+    "TerminalExecResult": {
       "type": "object",
-      "required": ["results"],
+      "x-cognia-wire-source": "cognia_terminal::exec::TerminalExecResult (serde rename_all = camelCase). A non-zero exit is a SUCCESSFUL response with exitCode set; exitCode is null when the child was signalled or killed on timeout.",
+      "required": ["stdout", "stderr", "exitCode", "timedOut"],
       "properties": {
-        "results": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/LegacyRecord"
-          }
+        "stdout": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": ["integer", "null"]
+        },
+        "timedOut": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
+    },
+    "TerminalKilledPidList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port — the PIDs actually signalled, possibly empty when nothing was listening.",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "TerminalPathCandidateList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<cognia_terminal::complete::PathCandidate> (serde rename_all = camelCase).",
+      "items": {
+        "type": "object",
+        "required": ["name", "isDir"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "isDir": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
     },
     "TerminalSession": {
       "type": "object",
@@ -586,28 +2614,67 @@
         "replay"
       ],
       "properties": {
-        "id": { "type": "string" },
-        "hostId": { "type": "string" },
-        "kind": { "enum": ["localPty", "ssh"] },
-        "profileId": { "type": "string" },
-        "projectId": { "type": ["string", "null"] },
-        "extensionId": { "type": ["string", "null"] },
-        "origin": { "enum": ["local", "remote"] },
-        "shell": { "type": "string" },
-        "createdAt": { "type": "integer", "minimum": 0 },
-        "lastActivityAt": { "type": "integer", "minimum": 0 },
-        "currentController": { "type": ["string", "null"] },
-        "attachedClients": { "type": "integer", "minimum": 0 },
-        "alive": { "type": "boolean" },
-        "sandboxed": { "type": "boolean" },
+        "id": {
+          "type": "string"
+        },
+        "hostId": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": ["localPty", "ssh"]
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": ["string", "null"]
+        },
+        "extensionId": {
+          "type": ["string", "null"]
+        },
+        "origin": {
+          "enum": ["local", "remote"]
+        },
+        "shell": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastActivityAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currentController": {
+          "type": ["string", "null"]
+        },
+        "attachedClients": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "alive": {
+          "type": "boolean"
+        },
+        "sandboxed": {
+          "type": "boolean"
+        },
         "integrationCapabilities": {
           "type": "object",
           "required": ["osc633", "commandStatus", "cwdTracking", "degradedReason"],
           "properties": {
-            "osc633": { "type": "boolean" },
-            "commandStatus": { "type": "boolean" },
-            "cwdTracking": { "type": "boolean" },
-            "degradedReason": { "type": ["string", "null"] }
+            "osc633": {
+              "type": "boolean"
+            },
+            "commandStatus": {
+              "type": "boolean"
+            },
+            "cwdTracking": {
+              "type": "boolean"
+            },
+            "degradedReason": {
+              "type": ["string", "null"]
+            }
           },
           "additionalProperties": false
         },
@@ -615,222 +2682,90 @@
           "type": "object",
           "required": ["firstSequence", "lastSequence", "retainedBytes", "truncated"],
           "properties": {
-            "firstSequence": { "type": "integer", "minimum": 0 },
-            "lastSequence": { "type": "integer", "minimum": 0 },
-            "retainedBytes": { "type": "integer", "minimum": 0 },
-            "truncated": { "type": "boolean" }
+            "firstSequence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "lastSequence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retainedBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "type": "boolean"
+            }
           },
           "additionalProperties": false
         },
-        "sshHostKeyStatus": { "type": "string" },
-        "sshHostKeyFingerprint": { "type": "string" }
+        "sshHostKeyStatus": {
+          "type": "string"
+        },
+        "sshHostKeyFingerprint": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "TerminalSessionList": {
       "type": "array",
-      "items": { "$ref": "#/$defs/TerminalSession" }
-    },
-    "TerminalExecResult": {
-      "type": "object",
-      "x-cognia-wire-source": "cognia_terminal::exec::TerminalExecResult (serde rename_all = camelCase). A non-zero exit is a SUCCESSFUL response with exitCode set; exitCode is null when the child was signalled or killed on timeout.",
-      "required": ["stdout", "stderr", "exitCode", "timedOut"],
-      "properties": {
-        "stdout": { "type": "string" },
-        "stderr": { "type": "string" },
-        "exitCode": { "type": ["integer", "null"] },
-        "timedOut": { "type": "boolean" }
-      },
-      "additionalProperties": false
-    },
-    "TerminalPathCandidateList": {
-      "type": "array",
-      "x-cognia-wire-source": "Vec<cognia_terminal::complete::PathCandidate> (serde rename_all = camelCase).",
       "items": {
-        "type": "object",
-        "required": ["name", "isDir"],
-        "properties": {
-          "name": { "type": "string" },
-          "isDir": { "type": "boolean" }
-        },
-        "additionalProperties": false
+        "$ref": "#/$defs/TerminalSession"
       }
     },
-    "TerminalKilledPidList": {
-      "type": "array",
-      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port — the PIDs actually signalled, possibly empty when nothing was listening.",
-      "items": { "type": "integer", "minimum": 0 }
-    },
-    "SecretValue": {
-      "type": ["string", "null"],
-      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
-      "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
-    },
-    "SidecarStatus": {
+    "WorkflowApprovalList": {
       "type": "object",
-      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus — derives Serialize with NO rename_all, and has exactly one field.",
-      "required": ["ready"],
+      "required": ["approvals"],
       "properties": {
-        "ready": { "type": "boolean" }
-      },
-      "additionalProperties": false
-    },
-    "AgentReadResult": {
-      "type": "object",
-      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all — the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
-      "required": ["path", "exists", "writable", "format", "raw", "parsed"],
-      "properties": {
-        "path": { "type": ["string", "null"] },
-        "exists": { "type": "boolean" },
-        "writable": { "type": "boolean" },
-        "format": { "enum": ["json", "jsonc", "toml"] },
-        "raw": { "type": "string" },
-        "parsed": {
-          "x-cognia-opaque-reason": "serde_json::Value — the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
-        },
-        "parseError": { "type": "string" }
-      },
-      "additionalProperties": false
-    },
-    "AgentWriteResult": {
-      "type": "object",
-      "x-cognia-wire-source": "crate::agents::commands::AgentWriteResult. backup_path is renamed to backupPath and skipped when None.",
-      "required": ["path"],
-      "properties": {
-        "path": { "type": "string" },
-        "backupPath": { "type": "string" }
-      },
-      "additionalProperties": false
-    },
-    "NativeLogQueryResult": {
-      "type": "object",
-      "x-cognia-wire-source": "cognia_observability::log_query::NativeLogQueryResult (rename_all = camelCase), via rpc/diagnostics.rs `to_json(result)`.",
-      "required": ["entries", "fileSize", "scannedBytes", "truncated", "path"],
-      "properties": {
-        "entries": {
+        "approvals": {
           "type": "array",
           "items": {
             "type": "object",
-            "x-cognia-wire-source": "cognia_observability::log_query::NativeLogEntry. epochMs and fields carry skip_serializing_if = Option::is_none, so both are absent rather than null.",
-            "required": ["timestamp", "level", "target", "message"],
+            "required": [
+              "approvalId",
+              "runId",
+              "workflowId",
+              "stepId",
+              "title",
+              "requestedAt",
+              "kind"
+            ],
             "properties": {
-              "timestamp": { "type": "string" },
-              "epochMs": { "type": "integer" },
-              "level": { "type": "string" },
-              "target": { "type": "string" },
-              "message": { "type": "string" },
-              "fields": {
-                "x-cognia-opaque-reason": "serde_json::Value — arbitrary structured fields captured at the log call site."
+              "approvalId": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "workflowId": {
+                "type": "string"
+              },
+              "stepId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "message": {
+                "type": ["string", "null"]
+              },
+              "requestedAt": {
+                "type": "integer"
+              },
+              "timeoutAt": {
+                "type": ["integer", "null"]
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["approval", "risk_gate"]
               }
             },
             "additionalProperties": false
           }
-        },
-        "fileSize": { "type": "integer", "minimum": 0 },
-        "scannedBytes": { "type": "integer", "minimum": 0 },
-        "truncated": { "type": "boolean" },
-        "path": { "type": "string" }
+        }
       },
-      "additionalProperties": false
-    },
-    "NativeLogFileList": {
-      "type": "array",
-      "x-cognia-wire-source": "Vec<cognia_observability::log_query::NativeLogFileInfo>. modifiedMs is skipped when None.",
-      "items": {
-        "type": "object",
-        "required": ["name", "size"],
-        "properties": {
-          "name": { "type": "string" },
-          "size": { "type": "integer", "minimum": 0 },
-          "modifiedMs": { "type": "integer" }
-        },
-        "additionalProperties": false
-      }
-    },
-    "FleetSnapshot": {
-      "type": "object",
-      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent — not empty arrays — on a quiet host.",
-      "x-cognia-fixes": "Previously LegacyList, which requires an ARRAY. FleetSnapshot is a struct and always serializes as an object, so the enforced output contract rejected every fleet_get_snapshot response with contract_output_violation. The helper directly above the dispatch arm (fleet_event_payload) already asserted 'fleet snapshot must serialize as an object'.",
-      "required": ["sessions", "liveness", "generatedAt"],
-      "properties": {
-        "sessions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "x-cognia-opaque-reason": "FleetSession is owned by the Agent Fleet domain (ADR-0009) and is projected from several agent runtimes. The envelope is pinned here; item-level typing belongs with that domain and is tracked as remaining response-schema debt."
-          }
-        },
-        "hosts": { "type": "array", "items": { "type": "object" } },
-        "liveness": { "type": "array", "items": { "type": "object" } },
-        "runtimeCapabilities": { "type": "array", "items": { "type": "object" } },
-        "generatedAt": { "type": "integer", "minimum": 0 }
-      },
-      "additionalProperties": false
-    },
-    "FleetWorkerEnrollment": {
-      "type": "object",
-      "x-cognia-wire-source": "Literal json! in the fleet_worker_enrollment_create arm; `enrollment` is the String returned by SecurityStore::create_worker_enrollment.",
-      "required": ["enrollment", "expiresAtMs", "baseUrl", "fingerprint", "tenantId"],
-      "properties": {
-        "enrollment": { "type": "string" },
-        "expiresAtMs": { "type": "integer" },
-        "baseUrl": { "type": "string" },
-        "fingerprint": { "type": "string" },
-        "tenantId": { "type": "string" }
-      },
-      "additionalProperties": false
-    },
-    "FleetWorkerList": {
-      "type": "array",
-      "x-cognia-wire-source": "Vec<WorkerDeviceSummary>. NOTE serde(flatten): DeviceSummary's fields are inlined ALONGSIDE hostRef rather than nested under a `device` key.",
-      "items": {
-        "type": "object",
-        "required": [
-          "deviceId",
-          "displayName",
-          "role",
-          "status",
-          "createdAt",
-          "updatedAt",
-          "capabilities",
-          "hostRef"
-        ],
-        "properties": {
-          "deviceId": { "type": "string" },
-          "displayName": { "type": "string" },
-          "role": { "type": "string" },
-          "status": { "type": "string" },
-          "createdAt": { "type": "integer" },
-          "updatedAt": { "type": "integer" },
-          "capabilities": { "type": "array", "items": { "type": "string" } },
-          "hostRef": { "type": "string" }
-        },
-        "additionalProperties": false
-      }
-    },
-    "LarkEntryToken": {
-      "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone — so only `token` is guaranteed.",
-      "required": ["token"],
-      "properties": {
-        "token": { "type": "string" },
-        "jti": { "type": "string" },
-        "expiresAt": { "type": "integer" }
-      },
-      "additionalProperties": false
-    },
-    "LarkResultAck": {
-      "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_result_complete — json!({ \"accepted\": bool }).",
-      "required": ["accepted"],
-      "properties": { "accepted": { "type": "boolean" } },
-      "additionalProperties": false
-    },
-    "LarkMetricAck": {
-      "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_metrics_record — json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
-      "required": ["ok"],
-      "properties": { "ok": { "const": true } },
       "additionalProperties": false
     }
   },
@@ -866,7 +2801,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "background_job_kill": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BackgroundJobRecord"
     },
     "background_job_list": {
       "$ref": "#/$defs/LegacyList"
@@ -875,16 +2810,16 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "background_job_spawn_scheduled": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BackgroundJobRecord"
     },
     "background_monitor_cancel": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BackgroundMonitorRecord"
     },
     "background_monitor_list": {
       "$ref": "#/$defs/LegacyList"
     },
     "background_monitor_register_scheduled": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BackgroundMonitorRecord"
     },
     "backup_export": {
       "$ref": "#/$defs/LegacyRecord"
@@ -893,9 +2828,6 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "browser_act": {
-      "$ref": "#/$defs/LegacyResult"
-    },
-    "browser_drag": {
       "$ref": "#/$defs/LegacyResult"
     },
     "browser_back": {
@@ -909,6 +2841,9 @@
     },
     "browser_downloads": {
       "$ref": "#/$defs/LegacyList"
+    },
+    "browser_drag": {
+      "$ref": "#/$defs/LegacyResult"
     },
     "browser_evaluate": {
       "$ref": "#/$defs/LegacyResult"
@@ -1048,6 +2983,39 @@
     "claude_tool_result_decision": {
       "$ref": "#/$defs/NullResult"
     },
+    "codeserver_activate_proxy": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "codeserver_broker_notify": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "codeserver_broker_respond": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "codeserver_broker_validate_paths": {
+      "$ref": "#/$defs/StringList"
+    },
+    "codeserver_build_proxy": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_ensure": {
+      "$ref": "#/$defs/CodeServerStatus"
+    },
+    "codeserver_list_proxies": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "codeserver_status": {
+      "$ref": "#/$defs/CodeServerStatus"
+    },
+    "codeserver_stop": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "codeserver_stop_all": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "codeserver_supported": {
+      "$ref": "#/$defs/BooleanResult"
+    },
     "codex_app_inventory": {
       "$ref": "#/$defs/CodexAppInventory"
     },
@@ -1072,39 +3040,6 @@
     "codex_app_task_send": {
       "$ref": "#/$defs/CodexAppTurnEnvelope"
     },
-    "codeserver_activate_proxy": {
-      "$ref": "#/$defs/LegacyResult"
-    },
-    "codeserver_broker_notify": {
-      "$ref": "#/$defs/LegacyResult"
-    },
-    "codeserver_broker_respond": {
-      "$ref": "#/$defs/LegacyResult"
-    },
-    "codeserver_broker_validate_paths": {
-      "$ref": "#/$defs/LegacyResult"
-    },
-    "codeserver_build_proxy": {
-      "$ref": "#/$defs/LegacyResult"
-    },
-    "codeserver_ensure": {
-      "$ref": "#/$defs/LegacyRecord"
-    },
-    "codeserver_list_proxies": {
-      "$ref": "#/$defs/LegacyResult"
-    },
-    "codeserver_status": {
-      "$ref": "#/$defs/LegacyRecord"
-    },
-    "codeserver_stop": {
-      "$ref": "#/$defs/LegacyResult"
-    },
-    "codeserver_stop_all": {
-      "$ref": "#/$defs/NullResult"
-    },
-    "codeserver_supported": {
-      "$ref": "#/$defs/BooleanResult"
-    },
     "companion_can_control": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -1119,9 +3054,15 @@
       "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job — i.e. this was a retry replay, not a second send.",
       "required": ["jobId", "messageId", "reused"],
       "properties": {
-        "jobId": { "type": "string" },
-        "messageId": { "type": "string" },
-        "reused": { "type": "boolean" }
+        "jobId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "reused": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
@@ -1132,10 +3073,13 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "connectors_attachment_fetch": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ConnectorAttachmentRef"
     },
     "connectors_attachment_read": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableString"
+    },
+    "connectors_discord_upload": {
+      "$ref": "#/$defs/StringResult"
     },
     "connectors_health": {
       "$ref": "#/$defs/LegacyResult"
@@ -1147,31 +3091,28 @@
       "$ref": "#/$defs/NullResult"
     },
     "connectors_keyring_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableString"
     },
     "connectors_keyring_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/StringList"
     },
     "connectors_keyring_set": {
       "$ref": "#/$defs/NullResult"
     },
     "connectors_lark_upload_file": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/StringResult"
     },
     "connectors_lark_upload_image": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/StringResult"
     },
     "connectors_lark_ws_close": {
       "$ref": "#/$defs/NullResult"
     },
     "connectors_lark_ws_open": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/StringResult"
     },
     "connectors_list_adapters": {
       "$ref": "#/$defs/ConnectorAdapters"
-    },
-    "connectors_media_upload": {
-      "$ref": "#/$defs/LegacyResult"
     },
     "connectors_matrix_crypto_close": {
       "$ref": "#/$defs/NullResult"
@@ -1183,7 +3124,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "connectors_matrix_crypto_get_missing_sessions": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/MatrixCryptoOutgoingRequestList"
     },
     "connectors_matrix_crypto_init": {
       "$ref": "#/$defs/NullResult"
@@ -1192,27 +3133,24 @@
       "$ref": "#/$defs/NullResult"
     },
     "connectors_matrix_crypto_outgoing_requests": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/MatrixCryptoOutgoingRequestList"
     },
     "connectors_matrix_crypto_receive_sync_changes": {
       "$ref": "#/$defs/NullResult"
     },
     "connectors_matrix_crypto_share_room_key": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/MatrixCryptoOutgoingRequestList"
     },
     "connectors_matrix_crypto_update_tracked_users": {
       "$ref": "#/$defs/NullResult"
     },
     "connectors_matrix_encrypted_media_fetch": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ConnectorAttachmentRef"
     },
     "connectors_matrix_encrypted_media_upload": {
       "$ref": "#/$defs/LegacyRecord"
     },
-    "connectors_onebot_send": {
-      "$ref": "#/$defs/NullResult"
-    },
-    "connectors_discord_upload": {
+    "connectors_media_upload": {
       "$ref": "#/$defs/StringResult"
     },
     "connectors_onebot_probe": {
@@ -1222,17 +3160,24 @@
         "type": "object",
         "required": ["adapterId", "connectedAtMs"],
         "properties": {
-          "adapterId": { "type": "string" },
-          "connectedAtMs": { "type": "integer" }
+          "adapterId": {
+            "type": "string"
+          },
+          "connectedAtMs": {
+            "type": "integer"
+          }
         },
         "additionalProperties": false
       }
+    },
+    "connectors_onebot_send": {
+      "$ref": "#/$defs/NullResult"
     },
     "connectors_register": {
       "$ref": "#/$defs/NullResult"
     },
     "connectors_reset_all_ws": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/IntegerResult"
     },
     "connectors_runtime_lease_acquire": {
       "$ref": "#/$defs/RuntimeLeaseAcquireResult"
@@ -1250,7 +3195,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "connectors_ws_open": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/StringResult"
     },
     "connectors_ws_send": {
       "$ref": "#/$defs/NullResult"
@@ -1280,22 +3225,22 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "external_bridge_client_create": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ExternalBridgeClientCredential"
     },
     "external_bridge_client_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/ExternalBridgeClientList"
     },
     "external_bridge_client_revoke": {
       "$ref": "#/$defs/LegacyResult"
     },
     "external_bridge_client_rotate": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/ExternalBridgeClientCredential"
     },
     "external_bridge_config_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ExternalBridgeHostConfig"
     },
     "external_bridge_config_update": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ExternalBridgeHostConfig"
     },
     "external_bridge_relay_disable": {
       "$ref": "#/$defs/LegacyResult"
@@ -1304,13 +3249,13 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "external_bridge_restart": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/IntegerResult"
     },
     "external_bridge_start": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/IntegerResult"
     },
     "external_bridge_status": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ExternalBridgeHostStatus"
     },
     "external_bridge_stop": {
       "$ref": "#/$defs/NullResult"
@@ -1321,24 +3266,6 @@
     "fleet_get_snapshot": {
       "$ref": "#/$defs/FleetSnapshot"
     },
-    "fleet_worker_enrollment_create": {
-      "$ref": "#/$defs/FleetWorkerEnrollment"
-    },
-    "fleet_worker_list": {
-      "$ref": "#/$defs/FleetWorkerList"
-    },
-    "fleet_worker_set": {
-      "$ref": "#/$defs/NullResult"
-    },
-    "fleet_project_managed_session": {
-      "$ref": "#/$defs/NullResult"
-    },
-    "fleet_project_worker_load": {
-      "$ref": "#/$defs/NullResult"
-    },
-    "fleet_remove_managed_session": {
-      "$ref": "#/$defs/BooleanResult"
-    },
     "fleet_interrupt_session": {
       "$ref": "#/$defs/NullResult"
     },
@@ -1348,11 +3275,29 @@
     "fleet_permission_respond": {
       "$ref": "#/$defs/BooleanResult"
     },
-    "fleet_question_respond": {
-      "$ref": "#/$defs/BooleanResult"
+    "fleet_project_managed_session": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "fleet_project_worker_load": {
+      "$ref": "#/$defs/NullResult"
     },
     "fleet_question_reject": {
       "$ref": "#/$defs/BooleanResult"
+    },
+    "fleet_question_respond": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "fleet_remove_managed_session": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "fleet_worker_enrollment_create": {
+      "$ref": "#/$defs/FleetWorkerEnrollment"
+    },
+    "fleet_worker_list": {
+      "$ref": "#/$defs/FleetWorkerList"
+    },
+    "fleet_worker_set": {
+      "$ref": "#/$defs/NullResult"
     },
     "fs_copy_workspace_entry": {
       "$ref": "#/$defs/NullResult"
@@ -1364,7 +3309,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "fs_list_workspace_dir": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/RawWorkspaceEntryList"
     },
     "fs_read_workspace_file": {
       "$ref": "#/$defs/StringResult"
@@ -1376,7 +3321,7 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "fs_search_workspace": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/RawWorkspaceEntryList"
     },
     "fs_stat_workspace_file": {
       "$ref": "#/$defs/LegacyRecord"
@@ -1388,10 +3333,10 @@
       "$ref": "#/$defs/StringResult"
     },
     "git_blame": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitBlameLineList"
     },
     "git_branches": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitBranchList"
     },
     "git_checkout_branch": {
       "$ref": "#/$defs/NullResult"
@@ -1403,19 +3348,23 @@
       "type": "object",
       "required": ["workspaceId", "relativePath"],
       "properties": {
-        "workspaceId": { "type": "string" },
-        "relativePath": { "type": "string" }
+        "workspaceId": {
+          "type": "string"
+        },
+        "relativePath": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "git_commit": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/StringResult"
     },
     "git_commit_files": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitFileChangeList"
     },
     "git_conflicts": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitConflictList"
     },
     "git_create_branch": {
       "$ref": "#/$defs/NullResult"
@@ -1430,22 +3379,22 @@
       "$ref": "#/$defs/NullResult"
     },
     "git_diff_commit": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/GitDiff"
     },
     "git_diff_file": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/GitDiff"
     },
     "git_diff_refs_file": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/GitDiff"
     },
     "git_diff_refs_files": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/GitFileChangeList"
     },
     "git_diff_staged_all": {
       "$ref": "#/$defs/StringResult"
     },
     "git_diff_stat": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/GitFileDiffStatList"
     },
     "git_discard": {
       "$ref": "#/$defs/NullResult"
@@ -1457,10 +3406,10 @@
       "$ref": "#/$defs/NullResult"
     },
     "git_file_history": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitCommitList"
     },
     "git_identity": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/GitIdentity"
     },
     "git_ignore_add": {
       "$ref": "#/$defs/NullResult"
@@ -1475,7 +3424,7 @@
       "$ref": "#/$defs/BooleanResult"
     },
     "git_log": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitCommitList"
     },
     "git_merge": {
       "$ref": "#/$defs/NullResult"
@@ -1496,10 +3445,10 @@
       "$ref": "#/$defs/NullResult"
     },
     "git_rebase_commits": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitCommitList"
     },
     "git_refs": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitRefList"
     },
     "git_remote_add": {
       "$ref": "#/$defs/NullResult"
@@ -1508,13 +3457,13 @@
       "$ref": "#/$defs/NullResult"
     },
     "git_remotes": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitRemoteList"
     },
     "git_rename_branch": {
       "$ref": "#/$defs/NullResult"
     },
     "git_repo_state": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/GitRepoState"
     },
     "git_reset": {
       "$ref": "#/$defs/NullResult"
@@ -1547,7 +3496,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "git_stash_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitStashEntryList"
     },
     "git_stash_pop": {
       "$ref": "#/$defs/NullResult"
@@ -1556,25 +3505,28 @@
       "$ref": "#/$defs/NullResult"
     },
     "git_status": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/GitStatus"
     },
     "git_sync": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/AheadBehind"
     },
     "git_tags": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitTagList"
     },
     "git_unstage": {
       "$ref": "#/$defs/NullResult"
+    },
+    "git_workspace_list": {
+      "$ref": "#/$defs/LegacyList"
     },
     "git_worktree_add": {
       "$ref": "#/$defs/NullResult"
     },
     "git_worktree_commit": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableString"
     },
     "git_worktree_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/GitWorktreeList"
     },
     "git_worktree_prune": {
       "$ref": "#/$defs/NullResult"
@@ -1582,17 +3534,14 @@
     "git_worktree_remove": {
       "$ref": "#/$defs/NullResult"
     },
-    "git_workspace_list": {
-      "$ref": "#/$defs/LegacyList"
-    },
     "github_workspace_clone": {
       "$ref": "#/$defs/LegacyRecord"
     },
     "github_workspace_commit_and_push": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/StringResult"
     },
     "github_workspace_remove": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "github_workspace_stat": {
       "$ref": "#/$defs/LegacyResult"
@@ -1646,19 +3595,19 @@
       "$ref": "#/$defs/LegacyList"
     },
     "integration_ingress_get_url": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NullableString"
     },
     "integration_ingress_nack": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NullResult"
     },
     "integration_ingress_poll": {
       "$ref": "#/$defs/LegacyRecord"
     },
     "integration_ingress_register": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableString"
     },
     "integration_ingress_requeue": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "integration_ingress_unregister": {
       "$ref": "#/$defs/NullResult"
@@ -1712,10 +3661,10 @@
       "$ref": "#/$defs/McpOAuthStatus"
     },
     "mcp_server_restart": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/IntegerResult"
     },
     "mcp_server_start": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/IntegerResult"
     },
     "mcp_server_status": {
       "$ref": "#/$defs/LegacyRecord"
@@ -1751,7 +3700,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "ocr_cancel_model_download": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "ocr_download_model": {
       "$ref": "#/$defs/LegacyResult"
@@ -1760,10 +3709,10 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "ocr_list_available_backends": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/StringList"
     },
     "ocr_list_native_backends": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/StringList"
     },
     "ocr_model_status": {
       "$ref": "#/$defs/LegacyRecord"
@@ -1785,10 +3734,15 @@
     },
     "perf_read_observations": {
       "type": "array",
-      "items": { "$ref": "#/$defs/PerfFrame" }
+      "items": {
+        "$ref": "#/$defs/PerfFrame"
+      }
     },
     "perf_renew_lease": {
       "$ref": "#/$defs/NullResult"
+    },
+    "perf_system_details": {
+      "$ref": "#/$defs/LegacyRecord"
     },
     "perf_trace_close": {
       "$ref": "#/$defs/NullResult"
@@ -1797,12 +3751,29 @@
       "type": "object",
       "required": ["handleId", "traceId", "sizeBytes", "sha256", "chunkBytes", "expiresAtMs"],
       "properties": {
-        "handleId": { "type": "string" },
-        "traceId": { "type": "string" },
-        "sizeBytes": { "type": "integer", "minimum": 0, "maximum": 268435456 },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "chunkBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
-        "expiresAtMs": { "type": "integer" }
+        "handleId": {
+          "type": "string"
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 268435456
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "chunkBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "expiresAtMs": {
+          "type": "integer"
+        }
       },
       "additionalProperties": false
     },
@@ -1810,17 +3781,30 @@
       "type": "object",
       "required": ["offset", "nextOffset", "dataBase64", "chunkSha256", "eof", "finalSha256"],
       "properties": {
-        "offset": { "type": "integer", "minimum": 0 },
-        "nextOffset": { "type": "integer", "minimum": 0 },
-        "dataBase64": { "type": "string" },
-        "chunkSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "eof": { "type": "boolean" },
-        "finalSha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dataBase64": {
+          "type": "string"
+        },
+        "chunkSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "eof": {
+          "type": "boolean"
+        },
+        "finalSha256": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        }
       },
       "additionalProperties": false
-    },
-    "perf_system_details": {
-      "$ref": "#/$defs/LegacyRecord"
     },
     "plugin_activate_vscode": {
       "$ref": "#/$defs/LegacyResult"
@@ -1929,7 +3913,7 @@
       "$ref": "#/$defs/BooleanResult"
     },
     "plugin_python_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/StringList"
     },
     "plugin_python_load": {
       "$ref": "#/$defs/LegacyResult"
@@ -1986,7 +3970,7 @@
       "$ref": "#/$defs/StringResult"
     },
     "plugin_wasm_deactivate": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "plugin_wasm_list": {
       "$ref": "#/$defs/LegacyList"
@@ -2069,52 +4053,52 @@
       "$ref": "#/$defs/NullResult"
     },
     "scheduled_task_backfill": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TaskExecutionList"
     },
     "scheduled_task_cleanup": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/IntegerResult"
     },
     "scheduled_task_create": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ScheduledTask"
     },
     "scheduled_task_delete": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "scheduled_task_emit_event": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/NullResult"
     },
     "scheduled_task_export": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ScheduledTaskExport"
     },
     "scheduled_task_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ScheduledTaskOrNull"
     },
     "scheduled_task_import": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/ScheduledTaskImportResult"
     },
     "scheduled_task_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/ScheduledTaskList"
     },
     "scheduled_task_pause": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "scheduled_task_resume": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/BooleanResult"
     },
     "scheduled_task_run_now": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TaskExecutionOrNull"
     },
     "scheduled_task_runs": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/TaskExecutionList"
     },
     "scheduled_task_statistics": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/TaskStatistics"
     },
     "scheduled_task_upcoming": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/ScheduledTaskList"
     },
     "scheduled_task_update": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ScheduledTaskOrNull"
     },
     "secret_store_delete": {
       "$ref": "#/$defs/NullResult"
@@ -2156,7 +4140,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "skills_bundle_upload_write": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/IntegerResult"
     },
     "skills_catalog_get": {
       "$ref": "#/$defs/LegacyRecord"
@@ -2174,10 +4158,10 @@
       "$ref": "#/$defs/LegacyList"
     },
     "skills_uninstall": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/SkillUninstallResult"
     },
     "skills_uninstall_native": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/SkillUninstallResult"
     },
     "spawn_external_agent": {
       "$ref": "#/$defs/StringResult"
@@ -2207,16 +4191,16 @@
       "$ref": "#/$defs/NullResult"
     },
     "task_resource_upload_commit": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/StringResult"
     },
     "task_resource_upload_open": {
       "$ref": "#/$defs/LegacyRecord"
     },
     "task_resource_upload_write_chunk": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/IntegerResult"
     },
     "task_workspace_apply": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
     },
     "task_workspace_begin": {
       "$ref": "#/$defs/LegacyRecord"
@@ -2258,7 +4242,7 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "task_workspace_resolve_conflict": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
     },
     "task_workspace_settle": {
       "$ref": "#/$defs/LegacyRecord"
@@ -2267,7 +4251,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "task_workspace_undo": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
     },
     "team_run_pause": {
       "$ref": "#/$defs/LegacyResult"
@@ -2314,6 +4298,20 @@
     "twin_delete": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "twin_draft_review": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["accepted", "rejected"]
+        },
+        "acceptedAsId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "twin_ingest_source": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -2337,15 +4335,6 @@
     },
     "twin_profile_update": {
       "$ref": "#/$defs/LegacyRecord"
-    },
-    "twin_draft_review": {
-      "type": "object",
-      "required": ["status"],
-      "properties": {
-        "status": { "type": "string", "enum": ["accepted", "rejected"] },
-        "acceptedAsId": { "type": "string" }
-      },
-      "additionalProperties": false
     },
     "twin_source_create": {
       "$ref": "#/$defs/LegacyRecord"
