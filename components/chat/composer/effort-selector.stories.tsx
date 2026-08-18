@@ -5,9 +5,9 @@ import type { ChatSession } from "@cognia/agent-config-types"
 
 // EffortSelector self-gates to `null` unless there is a session AND the active
 // model supports reasoning effort (`modelSupportsEffort`). On the Anthropic path
-// the effort families are Opus 4.5–4.9, Sonnet 4.6, and Fable/Mythos 5 — NOT
-// Sonnet 4.5 / Haiku / Opus 4.0–4.1. We pin the session to an effort-capable
-// model (`claude-opus-4-8`); using Sonnet 4.5 would render nothing.
+// the effort families are Opus 4.5–4.9, Sonnet 4.6, and the Claude 5 family bar
+// Haiku — NOT Sonnet 4.5 / Haiku / Opus 4.0–4.1. We pin the session to an
+// effort-capable model (`claude-opus-5`); using Sonnet 4.5 would render nothing.
 //
 // `thinkingLevel` is the tier the control renders; `effort` is what the SDK
 // receives. Production writes the two together (`thinkingLevelPatch`), so these
@@ -22,7 +22,7 @@ function session(thinkingLevel?: ChatSession["thinkingLevel"]): ChatSession {
   return {
     id: "sess-effort-1",
     title: "Refactor the composer toolbar",
-    model: "claude-opus-4-8",
+    model: "claude-opus-5",
     providerOverride: "anthropic",
     thinkingLevel,
     effort,
@@ -82,4 +82,16 @@ export const CompactSlider: Story = {
 // Streaming in flight → every affordance is inert.
 export const Disabled: Story = {
   args: { session: session("max"), mode: "slider", disabled: true },
+}
+
+// The standalone card the composer's thinking-level chip opens. Same component
+// and same state as the in-popover copy above — only the chrome differs (no
+// divider, more breathing room), because here it owns the whole surface.
+export const Card: Story = {
+  args: { session: session("high"), mode: "slider", variant: "card" },
+}
+
+// The card at the composite top tier, where the track picks up its lattice.
+export const CardUltracode: Story = {
+  args: { session: session("ultracode"), mode: "slider", variant: "card" },
 }

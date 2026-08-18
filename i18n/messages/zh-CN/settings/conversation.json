@@ -197,5 +197,17 @@
     "description": "用于生成标题的后台模型，默认使用对话模型。",
     "heading": "标题模型"
   },
-  "useDefault": "使用对话默认"
+  "useDefault": "使用对话默认",
+  "effortPreferences": {
+    "title": "思考强度",
+    "description": "输入框推理深度控件的默认设置。",
+    "defaultLevel": {
+      "label": "新会话默认档",
+      "hint": "每个新会话的起始思考强度。选择「自动」则由模型自行决定。"
+    },
+    "visibleTiers": {
+      "label": "可选档位",
+      "hint": "隐藏用不到的档位可以缩短滑轨。已经在使用隐藏档位的会话仍按原深度运行。"
+    }
+  }
 }

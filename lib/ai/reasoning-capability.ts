@@ -13,7 +13,8 @@
  *
  * Effort support facts (from the Anthropic API guidance):
  *   - Native Anthropic path: `effort` (low/medium/high/xhigh/max) is supported
- *     on Opus 4.5–4.9, Sonnet 4.6, and Fable 5 / Mythos 5. NOT on Haiku,
+ *     on Opus 4.5–4.9, Sonnet 4.6, and the whole Claude 5 family bar Haiku
+ *     (Opus 5, Sonnet 5, Fable 5, Mythos 5). NOT on Haiku of any generation,
  *     Sonnet 4.5-and-earlier, or Opus 4.1/4.0.
  *   - Non-Anthropic (ai-sdk) path: reasoning models map effort to their own
  *     `reasoning_effort`. The authoritative signal is models.dev's per-model
@@ -38,7 +39,16 @@ import { snapshotModelReasoning } from "@/lib/ai/providers/models-dev-snapshot-l
 const ANTHROPIC_EFFORT_FAMILIES = [
   /opus-4-(?:5|6|7|8|9)/, // Opus 4.5 → 4.9 (effort GA from 4.5)
   /sonnet-4-6/, // Sonnet 4.6
-  /(?:fable|mythos)-5/, // Fable 5 / Mythos 5
+  // The Claude 5 family. Written as one alternation rather than four regexes
+  // because every 5-series model except Haiku takes `effort`, and spelling the
+  // shared `-5` suffix once is what makes that rule legible. Haiku is absent
+  // deliberately: it reasons, but it still rejects the parameter.
+  //
+  // Anchoring on the family segment (not the whole id) is what makes the
+  // vendor-prefixed ids resolve too — `us.anthropic.claude-opus-5` (Bedrock),
+  // `claude-sonnet-5@default` (Vertex) and `anthropic/claude-opus-5` (gateways)
+  // all carry the same fragment.
+  /(?:opus|sonnet|fable|mythos)-5/, // Opus 5 / Sonnet 5 / Fable 5 / Mythos 5
 ]
 
 /** Reasoning-model id fragments on the non-Anthropic (ai-sdk) path. */

@@ -155,8 +155,29 @@ export const CHROME_BUDGET = {
    * header became title-bar chrome (the preset pill and the no-credential
    * badge came with it, but both self-hide in the default state). Not a new
    * control — the same one, one band down; `chatHeader` did not grow.
+   *
+   * 8 → 9: the thinking-level chip. This is the increase the note above warns
+   * against, so it needs its case made rather than assumed.
+   *
+   * The control already existed — at the bottom of the model popover, where it
+   * cost two interactions and a scroll to reach and showed its current value
+   * nowhere. It was also, for a period, invisible outright: its capability gate
+   * had not been taught the Claude 5 family, so on the shipped default model it
+   * offered an empty ladder and removed itself. Users reported the feature as
+   * missing, which is the honest reading of a control you cannot see or find.
+   *
+   * The band's own doctrine is what justifies the slot: the permanent row keeps
+   * "the high-value permanent controls" — the ones answering "what will this run
+   * as" before every turn. Model and permission are already there on exactly
+   * that basis, and depth is the third axis of the same question; the chip is
+   * also the only place the active tier is READABLE without opening a menu,
+   * which is the state the de-crowding pass was careful not to hide.
+   *
+   * It is also a conditional control, not an unconditional one: it renders only
+   * where the active surface publishes a depth ladder (`./effort-surface`), so
+   * a session on Haiku or a non-reasoning model still measures 8.
    */
-  composerToolbar: 8,
+  composerToolbar: 9,
   /**
    * `components/inbox/conversation-header.tsx`, desktop branch. Five of these
    * are the strip proper — platform badge, mode switcher, `⋯` overflow,

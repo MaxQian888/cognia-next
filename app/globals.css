@@ -110,6 +110,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --color-effort-ultra: var(--effort-ultra);
+  --color-effort-ultra-muted: var(--effort-ultra-muted);
 }
 
 :root,
@@ -186,6 +188,16 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Ultracode accent — the ONE chromatic token in an otherwise achromatic
+     palette (`--primary` is a neutral here, so it cannot carry "this tier is
+     different in kind"). Ultracode is not merely the deepest step on the
+     thinking ladder: it also switches on the dynamic-workflow tool suite, and
+     the composer's track uses this hue to say so before the user reads the
+     label. Scoped to that one control on purpose — promoting it to a general
+     accent would undo the neutral palette. */
+  --effort-ultra: oklch(0.53 0.23 293);
+  --effort-ultra-muted: oklch(0.53 0.23 293 / 22%);
 }
 
 .dark,
@@ -242,6 +254,12 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /* Lifted well above the light-mode value: the same violet at L=0.53 sits too
+     close to the dark surface to read as an accent, and the dot lattice it
+     paints is 1px wide. */
+  --effort-ultra: oklch(0.72 0.19 296);
+  --effort-ultra-muted: oklch(0.72 0.19 296 / 26%);
 }
 
 /* ---------------------------------------------------------------------------

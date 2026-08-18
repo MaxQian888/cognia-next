@@ -3208,6 +3208,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // `modelSupportsEffort` gate below covers a bot default set on a
   // non-reasoning model.
   const effort = requestedEffort
+  // Carried ungated for the external-agent rail, which never runs `opts.model`
+  // and folds effort onto its own agent's ladder (see `SendOptions.requestedEffort`).
+  if (effort) opts.requestedEffort = effort
   if (effort && (!opts.model || modelSupportsEffort(opts.provider, opts.model))) {
     opts.effort = effort
   } else if (effort && opts.model) {

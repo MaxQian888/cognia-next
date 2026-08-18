@@ -168,6 +168,49 @@ describe("createSession — without default preset", () => {
   })
 })
 
+describe("createSession — default thinking level", () => {
+  it("leaves a new session without a tier when no default is configured", async () => {
+    const session = await createSession({ title: "t" })
+    expect(session.thinkingLevel).toBeUndefined()
+    expect(session.effort).toBeUndefined()
+  })
+
+  it("stamps the configured tier onto a new session", async () => {
+    // Stamped, not consulted at send time: the composer's control reads the
+    // session row, so a fallback the row never carries would display as "Auto"
+    // while turns quietly ran deeper.
+    await saveSettings({ defaultThinkingLevel: "high" })
+    const session = await createSession({ title: "t" })
+    expect(session.thinkingLevel).toBe("high")
+    expect(session.effort).toBe("high")
+    expect((await getSession(session.id))?.thinkingLevel).toBe("high")
+  })
+
+  it("stamps ultracode as its own tier over xhigh effort", async () => {
+    // The composite tier's second half (the dynamic-workflow tools) keys on
+    // `thinkingLevel`, so a default of `ultracode` has to survive as itself.
+    await saveSettings({ defaultThinkingLevel: "ultracode" })
+    const session = await createSession({ title: "t" })
+    expect(session.thinkingLevel).toBe("ultracode")
+    expect(session.effort).toBe("xhigh")
+  })
+
+  it("records an explicit 'off' default rather than dropping it", async () => {
+    await saveSettings({ defaultThinkingLevel: "off" })
+    const session = await createSession({ title: "t" })
+    expect(session.thinkingLevel).toBe("off")
+    expect(session.effort).toBeUndefined()
+  })
+
+  it("lets an explicit tier on the call win over the default", async () => {
+    // Branch / fork / import carry their source conversation's depth.
+    await saveSettings({ defaultThinkingLevel: "max" })
+    const session = await createSession({ title: "t", thinkingLevel: "low", effort: "low" })
+    expect(session.thinkingLevel).toBe("low")
+    expect(session.effort).toBe("low")
+  })
+})
+
 describe("forkSessionFromParent", () => {
   it("inherits the parent's message display override", async () => {
     const parent = await createSession({

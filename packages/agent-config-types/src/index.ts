@@ -441,6 +441,27 @@ export interface SendOptions {
   /** SDK effort level. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
   /**
+   * The thinking level the user actually asked for, BEFORE the
+   * `modelSupportsEffort` gate that produces {@link effort}.
+   *
+   * The two differ only when the resolved model rejects the parameter, and the
+   * distinction exists for ONE consumer: the external-agent rail. That rail
+   * never runs `model` — it dispatches to a CLI agent (Codex, Gemini CLI, …)
+   * that brings its own model and folds whatever effort it receives onto its
+   * own published ladder. Gating it on an Anthropic model's wire capability
+   * therefore silences the composer's control for a reason that does not apply
+   * to it: pick `high` while the session sits on Haiku and the external agent
+   * would receive nothing, even though it honours `high` perfectly well.
+   *
+   * Every other consumer must keep reading {@link effort} — the gate is real
+   * for them, and forwarding this to the Anthropic / ai-sdk wire is exactly the
+   * 400 the gate was added to prevent.
+   *
+   * Sidecar-protocol metadata only — the sidecar ignores it (mirrors
+   * {@link droppedCapabilityWarning}).
+   */
+  requestedEffort?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
    * Token budget for the SDK's extended-thinking pass. Positive values turn on
    * the SDK's `thinking` block; `undefined` (or `0`) leaves the SDK's default
    * in place. SDK note: streaming partial events are not emitted when this is
@@ -3030,6 +3051,29 @@ export interface AppSettings {
    * `undefined` leaves the model at its own default effort.
    */
   defaultEffort?: SendOptions["effort"]
+  /**
+   * The thinking TIER stamped onto every newly created session
+   * (`lib/db/sessions.ts:createSession`), so a user who always works at one
+   * depth stops re-picking it per conversation.
+   *
+   * Distinct from {@link defaultEffort} in both mechanism and vocabulary:
+   *
+   *   - Mechanism. `defaultEffort` is a SEND-TIME fallback consulted at the end
+   *     of the effort chain, so it never appears on the session row and the
+   *     composer's control cannot show it. This is a CREATE-TIME stamp — the
+   *     new session owns the tier from its first render, and editing it is an
+   *     ordinary per-session change that overwrites the stamp rather than
+   *     fighting a fallback.
+   *   - Vocabulary. `SendOptions["effort"]` has no way to say `"off"` (which
+   *     must stay distinguishable from "never chose") or `"ultracode"` (which
+   *     is `xhigh` PLUS the dynamic-workflow tool suite). Both are tiers a user
+   *     can pick in the composer, so the app default has to speak the same
+   *     ladder the control does.
+   *
+   * `undefined` keeps the historical behavior: new sessions carry no tier and
+   * fall through to `defaultEffort`, then to the model's own default.
+   */
+  defaultThinkingLevel?: ChatSession["thinkingLevel"]
   /** App-wide default for `--bare` (skip on-disk auto-discovery). Overridden by character + session. */
   bareMode?: boolean
   /** App-wide default for `--debug` (verbose logging). Overridden by character + session. */
@@ -3152,6 +3196,26 @@ export interface AppSettings {
     inputHistoryRecall?: boolean
     /** Persist unsent drafts per session in Dexie and restore on session switch. Default true. */
     persistDrafts?: boolean
+    /**
+     * Thinking tiers to HIDE from the composer's effort control. A user who
+     * only ever works at three depths gets a three-stop track instead of six,
+     * which is the difference between a control they aim at and one they drag
+     * past.
+     *
+     * Purely presentational, and deliberately so: hiding a tier removes it from
+     * the ladder the control OFFERS, never from what a session may hold. A
+     * session already sitting on a hidden tier keeps it and keeps sending it —
+     * `clampThinkingLevel` folds the display down to the nearest visible tier
+     * rather than rewriting the row, the same way it already handles a tier the
+     * active model doesn't publish.
+     *
+     * `"off"` is never hideable and so is absent from this union: it is the
+     * escape hatch back to the model's own default, and a user who hid every
+     * tier would otherwise have no way to express "stop overriding".
+     * `lib/ai/thinking-level.ts:visibleThinkingLevels` also refuses to hide the
+     * last remaining tier, so the ladder can never empty out.
+     */
+    hiddenEffortTiers?: Array<"low" | "medium" | "high" | "xhigh" | "max" | "ultracode">
     /**
      * How the composer renders the thinking-level ("reasoning effort") control
      * inside the model picker. `"slider"` (default) is the Faster→Smarter track

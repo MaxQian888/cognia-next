@@ -119,9 +119,14 @@ jest.mock("@/stores/chat", () => ({
   ),
 }))
 
+// The shipped default (`PROVIDERS.anthropic.defaultModel`), so the budget below
+// measures the roster a stock install actually renders. It matters here because
+// the thinking-level chip self-hides on a model with no depth ladder — pinning
+// this to an effort-incapable id would quietly under-count the band.
+let mockDefaultModel = "claude-sonnet-5"
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: { settings: { defaultModel: string } | null }) => T) =>
-    selector({ settings: { defaultModel: "claude-sonnet-4-5" } }),
+    selector({ settings: { defaultModel: mockDefaultModel } }),
 }))
 
 const session: ChatSession = {
@@ -133,6 +138,7 @@ const session: ChatSession = {
 }
 
 beforeEach(() => {
+  mockDefaultModel = "claude-sonnet-5"
   pushSpy.mockClear()
   chatStoreState = {
     messages: [],
@@ -254,11 +260,27 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(screen.queryByTestId("composition-chip")).toBeNull()
   })
 
-  // Effort is a qualifier of the model, meaningless without one, so it renders
-  // inside the model picker's popover instead of as a chip beside it.
-  it("no longer carries a standalone effort chip", () => {
+  // Effort qualifies the model, so its chip sits directly after the model chip
+  // — and on the permanent row rather than only inside the model popover, which
+  // is where it was unreachable and unreadable.
+  it("carries the thinking-level chip beside the model chip", () => {
     render(<BottomToolbar session={session} />)
-    expect(screen.queryByTestId("effort-selector")).toBeNull()
+    const chip = screen.getByTestId("effort-chip")
+    expect(chip).toBeInTheDocument()
+    // Placement is the point: the chip belongs between the model it qualifies
+    // and the permission chip, so the three read as one answer to "what will
+    // this run as". `compareDocumentPosition` asserts that order without
+    // depending on the wrapper markup.
+    const permission = screen.getByTestId("permission-mode-indicator")
+    expect(chip.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  // The self-gate is what lets the chip live on a saturated band: a surface
+  // with no depth ladder pays nothing for it, in pixels or in budget.
+  it("hides the thinking-level chip on a model with no depth ladder", () => {
+    mockDefaultModel = "claude-sonnet-4-5"
+    render(<BottomToolbar session={session} />)
+    expect(screen.queryByTestId("effort-chip")).toBeNull()
   })
 
   // Regression: the row must wrap instead of pinning both ends with

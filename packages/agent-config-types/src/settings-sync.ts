@@ -88,6 +88,10 @@ export const SETTINGS_SYNC = {
   pluginSecurityPosture: { category: "desktop-only" },
   defaultMaxThinkingTokens: { category: "shared" },
   defaultEffort: { category: "desktop-only" },
+  // Same classification as its sibling `defaultEffort`: the thinking ladder is
+  // not part of the mobile settings contract, so neither half of the pair
+  // crosses the wire.
+  defaultThinkingLevel: { category: "desktop-only" },
   bareMode: { category: "shared" },
   debugMode: { category: "shared" },
   briefMode: { category: "shared" },

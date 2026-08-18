@@ -1,0 +1,87 @@
+"use client"
+
+// Composer toolbar chip for the thinking level — the control's primary entry
+// point, and the reason this feature stopped being invisible.
+//
+// It used to live only at the bottom of the model popover, on the argument that
+// depth qualifies a model and so belongs with it. That argument is still true
+// (the model popover keeps its copy) but it made a per-turn decision cost two
+// interactions and a scroll, and it left the current tier unreadable without
+// opening something. A user who never went looking had no way to learn the
+// control existed at all.
+//
+// So the tier gets a chip on the permanent execution row, beside the model and
+// permission chips that answer the same "what will this run as" question. The
+// chip is the label; the popover is `./effort-selector` in its `card` variant —
+// one component, one piece of state, two mount points.
+//
+// Self-gates to nothing on a surface with no depth control (see
+// `./effort-surface`), so a composer where it would be a no-op pays nothing for
+// it — including the toolbar's chrome budget, which counts mounted controls.
+
+import { useState } from "react"
+import { useTranslations } from "next-intl"
+import { BrainIcon } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
+import {
+  clampThinkingLevel,
+  isUltracodeLevel,
+  resolveThinkingLevel,
+  type ThinkingLevel,
+} from "@/lib/ai/thinking-level"
+import type { ChatSession } from "@cognia/agent-config-types"
+import { EffortSelector } from "./effort-selector"
+import { useEffortSurface } from "./effort-surface"
+
+interface EffortChipProps {
+  session: ChatSession | null
+  /** Disable interaction while a turn is in flight. */
+  disabled?: boolean
+  className?: string
+}
+
+export function EffortChip({ session, disabled, className }: EffortChipProps) {
+  const t = useTranslations("chat.composer.effort")
+  const surface = useEffortSurface(session)
+  const [open, setOpen] = useState(false)
+
+  if (!session?.id) return null
+  if (surface.levels.length === 0) return null
+
+  // The same projection the card shows: a tier the active surface can't honour
+  // displays as the deepest one it can, so the chip never advertises depth the
+  // turn won't carry.
+  const current: ThinkingLevel = clampThinkingLevel(resolveThinkingLevel(session), surface.levels)
+  const ultra = isUltracodeLevel(current)
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          aria-label={t("triggerAria", { level: t(`level.${current}` as "level.off") })}
+          data-testid="effort-chip"
+          data-level={current}
+          className={cn("gap-1", ultra && "text-effort-ultra hover:text-effort-ultra", className)}
+        >
+          <BrainIcon
+            className={cn("size-3.5 shrink-0", ultra && "text-effort-ultra")}
+            aria-hidden
+          />
+          <span className="truncate">{t(`level.${current}` as "level.off")}</span>
+        </Button>
+      </PopoverTrigger>
+      {/* Width matches the model popover's, so opening one after the other
+          doesn't resize the surface under the pointer. */}
+      <PopoverContent align="start" side="top" className="w-[19rem] p-0">
+        <EffortSelector session={session} disabled={disabled} variant="card" />
+      </PopoverContent>
+    </Popover>
+  )
+}

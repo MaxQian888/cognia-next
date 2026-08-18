@@ -19,6 +19,15 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: mockSettings }),
 }))
 
+// The offered ladder now depends on WHICH RAIL runs the turn (`./effort-surface`),
+// so the runtime is an input to every assertion below. Pinned to the built-in
+// Claude rail here; the external rail has its own describe block.
+let mockRuntime: "claude-sdk" | "external" = "claude-sdk"
+jest.mock("@/stores/agent", () => ({
+  useAgentRuntimeStore: <T,>(selector: (s: { runtime: string }) => T) =>
+    selector({ runtime: mockRuntime }),
+}))
+
 // `useElementWidth` measures a real DOMRect, which jsdom always reports as 0.
 // Drive the responsive band explicitly instead.
 let mockWidth = 0
@@ -73,6 +82,7 @@ beforeEach(() => {
   mockedUpdateSession.mockImplementation(async () => undefined)
   mockSettings = null
   mockWidth = 0
+  mockRuntime = "claude-sdk"
 })
 
 describe("self-gating", () => {
@@ -105,18 +115,18 @@ describe("provider adaptation", () => {
     mockWidth = 360
     renderSelector(capableSession, { mode: "list" })
     const names = screen.getAllByRole("radio").map((el) => el.textContent ?? "")
-    expect(names.some((n) => n.startsWith("max"))).toBe(true)
-    expect(names.some((n) => n.startsWith("ultracode"))).toBe(true)
+    expect(names.some((n) => n.startsWith("Max"))).toBe(true)
+    expect(names.some((n) => n.startsWith("Ultracode"))).toBe(true)
   })
 
   it("hides max on OpenAI-native, which folds it to xhigh anyway", () => {
     mockWidth = 360
     renderSelector(onModel("gpt-5", "openai"), { mode: "list" })
     const names = screen.getAllByRole("radio").map((el) => el.textContent ?? "")
-    expect(names.some((n) => n.startsWith("xhigh"))).toBe(true)
-    expect(names.some((n) => n.startsWith("max"))).toBe(false)
+    expect(names.some((n) => n.startsWith("Extra"))).toBe(true)
+    expect(names.some((n) => n.startsWith("Max"))).toBe(false)
     // xhigh survives to the wire there, so the composite tier is still honest.
-    expect(names.some((n) => n.startsWith("ultracode"))).toBe(true)
+    expect(names.some((n) => n.startsWith("Ultracode"))).toBe(true)
   })
 
   it("collapses a generic gateway to the three tiers it distinguishes", () => {
@@ -126,14 +136,16 @@ describe("provider adaptation", () => {
     // Auto + low/medium/high, and nothing above: the channel folds xhigh AND
     // max onto `high`, so offering them would be three controls with one effect.
     expect(names).toHaveLength(4)
-    expect(names.some((n) => n.startsWith("xhigh"))).toBe(false)
-    expect(names.some((n) => n.startsWith("ultracode"))).toBe(false)
+    expect(names.some((n) => n.startsWith("Extra"))).toBe(false)
+    expect(names.some((n) => n.startsWith("Ultracode"))).toBe(false)
   })
 
   it("draws one tick per offered tier, not per ladder entry", () => {
     const { container } = renderSelector(onModel("deepseek-reasoner", "deepseek"))
-    // 3 offered tiers ⇒ 3 ticks (the marker carries its own testid).
-    expect(container.querySelectorAll("[data-testid='effort-track'] > span")).toHaveLength(5)
+    // 3 offered tiers ⇒ 3 ticks, plus the marker. (There is no progress fill:
+    // the redesigned track carries position through the marker and the tick
+    // scale alone, so a fourth kind of span would be a fourth thing to read.)
+    expect(container.querySelectorAll("[data-testid='effort-track'] > span")).toHaveLength(4)
     expect(screen.getByTestId("effort-track")).toHaveAttribute("aria-valuemax", "2")
   })
 
@@ -141,7 +153,7 @@ describe("provider adaptation", () => {
     // `max` on a gateway really goes out as `high`; showing `max` would
     // misreport the turn. The session row is left alone.
     renderSelector({ ...onModel("deepseek-reasoner", "deepseek"), thinkingLevel: "max" })
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("high")
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("High")
     expect(mockedUpdateSession).not.toHaveBeenCalled()
   })
 
@@ -153,6 +165,90 @@ describe("provider adaptation", () => {
       effort: "high",
       thinkingLevel: "high",
     })
+  })
+})
+
+describe("tier presentation", () => {
+  // The control used to print the raw wire value — "xhigh", "ultracode" — which
+  // is a parameter name, not a choice a user can weigh. The ladder now reads as
+  // a ladder.
+  it("labels tiers by display name rather than wire value", () => {
+    mockWidth = 360
+    renderSelector(capableSession, { mode: "list" })
+    const names = screen.getAllByRole("radio").map((el) => el.textContent ?? "")
+    expect(names.some((n) => n.startsWith("Extra"))).toBe(true)
+    expect(names.some((n) => n.startsWith("xhigh"))).toBe(false)
+  })
+
+  it("heads the card with the caption and the live tier", () => {
+    renderSelector(capableSession)
+    expect(screen.getByText("Effort")).toBeInTheDocument()
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("High")
+  })
+
+  // Ultracode is not just the deepest step — it also arms the dynamic-workflow
+  // tools — so the track says so before the label is read.
+  it("textures the track only on the ultracode tier", () => {
+    const { unmount } = renderSelector(capableSession)
+    expect(screen.queryByTestId("effort-track-ultra")).toBeNull()
+    expect(screen.getByTestId("effort-track")).not.toHaveAttribute("data-ultra")
+    unmount()
+
+    renderSelector({ ...capableSession, effort: "xhigh", thinkingLevel: "ultracode" })
+    expect(screen.getByTestId("effort-track-ultra")).toBeInTheDocument()
+    expect(screen.getByTestId("effort-track")).toHaveAttribute("data-ultra", "true")
+    expect(screen.getByTestId("effort-selector-value").className).toContain("text-effort-ultra")
+  })
+
+  it("renders the standalone card variant without the in-popover divider", () => {
+    const { container } = render(<EffortSelector session={capableSession} variant="card" />)
+    const root = screen.getByTestId("effort-selector-section")
+    expect(root).toHaveAttribute("data-variant", "card")
+    expect(root.className).not.toContain("border-t")
+    expect(container).not.toBeEmptyDOMElement()
+  })
+})
+
+describe("external agent rail", () => {
+  // The agent brings its own model, so the session's model describes a runtime
+  // that will not execute the turn.
+  it("offers the generic ladder even when the session model rejects effort", () => {
+    mockRuntime = "external"
+    mockWidth = 360
+    renderSelector({ ...capableSession, model: "claude-sonnet-4-5" }, { mode: "list" })
+    const names = screen.getAllByRole("radio").map((el) => el.textContent ?? "")
+    expect(names).toHaveLength(4) // Auto + low/medium/high
+    expect(names.some((n) => n.startsWith("Ultracode"))).toBe(false)
+  })
+
+  it("explains that the agent folds the level onto its own ladder", () => {
+    mockRuntime = "external"
+    renderSelector(capableSession)
+    // The hint text differs per rail; assert the control picked the external one.
+    expect(screen.getByLabelText("About thinking levels")).toBeInTheDocument()
+  })
+})
+
+describe("hidden-tier preference", () => {
+  it("drops the tiers the user chose not to see", () => {
+    mockWidth = 360
+    mockSettings = { composerBehavior: { hiddenEffortTiers: ["low", "max", "ultracode"] } }
+    renderSelector(capableSession, { mode: "list" })
+    const names = screen.getAllByRole("radio").map((el) => el.textContent ?? "")
+    expect(names.some((n) => n.startsWith("Ultracode"))).toBe(false)
+    expect(names.some((n) => n.startsWith("Max"))).toBe(false)
+    expect(names.some((n) => n.startsWith("Medium"))).toBe(true)
+    // "Auto" survives every preference: it is the way back to the model default.
+    expect(names.some((n) => n.startsWith("Auto"))).toBe(true)
+  })
+
+  it("keeps a session on a hidden tier running, showing the nearest visible one", () => {
+    // Hiding is presentation. The row is not rewritten, so the depth the user
+    // picked before hiding still goes out.
+    mockSettings = { composerBehavior: { hiddenEffortTiers: ["max"] } }
+    renderSelector({ ...capableSession, effort: "max", thinkingLevel: "max" })
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("Extra")
+    expect(mockedUpdateSession).not.toHaveBeenCalled()
   })
 })
 
@@ -179,17 +275,17 @@ describe("presentation mode", () => {
 
   it("shows the same current tier in both modes", () => {
     const { unmount } = renderSelector(capableSession, { mode: "slider" })
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("high")
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("High")
     unmount()
     renderSelector(capableSession, { mode: "list" })
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("high")
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("High")
   })
 })
 
 describe("persistence", () => {
   it("writes effort and thinkingLevel together for a plain tier", () => {
     renderSelector(capableSession, { mode: "list" })
-    fireEvent.click(screen.getByRole("radio", { name: /^max/ }))
+    fireEvent.click(screen.getByRole("radio", { name: /^Max/ }))
     expect(mockedUpdateSession).toHaveBeenCalledWith("ses_1", {
       effort: "max",
       thinkingLevel: "max",
@@ -201,7 +297,7 @@ describe("persistence", () => {
     // but the tier has to survive a round-trip so the workflow-tool coupling in
     // `resolveSendOptions` can key on it.
     renderSelector(capableSession, { mode: "list" })
-    fireEvent.click(screen.getByRole("radio", { name: /^ultracode/ }))
+    fireEvent.click(screen.getByRole("radio", { name: /^Ultracode/ }))
     expect(mockedUpdateSession).toHaveBeenCalledWith("ses_1", {
       effort: "xhigh",
       thinkingLevel: "ultracode",
@@ -219,38 +315,38 @@ describe("persistence", () => {
 
   it("updates the displayed tier optimistically, before the session prop changes", () => {
     renderSelector(capableSession, { mode: "list" })
-    fireEvent.click(screen.getByRole("radio", { name: /^max/ }))
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("max")
+    fireEvent.click(screen.getByRole("radio", { name: /^Max/ }))
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("Max")
   })
 
   it("reverts the optimistic tier when the write fails", async () => {
     mockedUpdateSession.mockRejectedValueOnce(new Error("write failed"))
     renderSelector(capableSession, { mode: "list" }) // persisted tier: "high"
-    fireEvent.click(screen.getByRole("radio", { name: /^max/ }))
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("max")
+    fireEvent.click(screen.getByRole("radio", { name: /^Max/ }))
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("Max")
     // …then back to the persisted tier, so the control never misrepresents
     // what the DB actually holds.
     await waitFor(() =>
-      expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("high")
+      expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("High")
     )
   })
 
   it("clears the optimistic overlay when the session changes", () => {
     const { rerender } = renderSelector(capableSession, { mode: "list" })
-    fireEvent.click(screen.getByRole("radio", { name: /^max/ }))
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("max")
+    fireEvent.click(screen.getByRole("radio", { name: /^Max/ }))
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("Max")
     rerender(
       <EffortSelector
         session={{ ...capableSession, id: "ses_2", effort: "low", thinkingLevel: "low" }}
         mode="list"
       />
     )
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("low")
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("Low")
   })
 
   it("derives the tier from effort alone on rows written before thinkingLevel existed", () => {
     renderSelector({ ...capableSession, thinkingLevel: undefined, effort: "medium" })
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("medium")
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("Medium")
   })
 })
 
@@ -274,7 +370,7 @@ describe("slider interaction", () => {
     fireEvent(track, pointerEvent("pointermove", 80))
     // The tier under the pointer is previewed the whole way…
     expect(mockedUpdateSession).not.toHaveBeenCalled()
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("max")
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("Max")
     fireEvent.pointerUp(track)
     // …and committed exactly once on release.
     expect(mockedUpdateSession).toHaveBeenCalledTimes(1)
@@ -308,7 +404,7 @@ describe("slider interaction", () => {
     renderSelector(capableSession)
     const track = stubTrackRect()
     fireEvent(track, pointerEvent("pointermove", 100))
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("high")
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("High")
   })
 
   it("abandons a drag on pointer cancel without a second write", () => {
@@ -375,7 +471,7 @@ describe("slider interaction", () => {
   it("selects a tier from its label under the track", () => {
     mockWidth = 360
     renderSelector(capableSession)
-    fireEvent.click(screen.getByRole("button", { name: "medium" }))
+    fireEvent.click(screen.getByRole("button", { name: "Medium" }))
     expect(mockedUpdateSession).toHaveBeenCalledWith("ses_1", {
       effort: "medium",
       thinkingLevel: "medium",
@@ -388,24 +484,24 @@ describe("responsive layout", () => {
     mockWidth = 360
     renderSelector(capableSession)
     expect(screen.getByTestId("effort-selector-section")).toHaveAttribute("data-layout", "wide")
-    expect(screen.getByRole("button", { name: "ultracode" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Ultracode" })).toBeInTheDocument()
   })
 
   it("drops the tier labels in a narrow container", () => {
     mockWidth = 240
     renderSelector(capableSession)
     expect(screen.getByTestId("effort-selector-section")).toHaveAttribute("data-layout", "compact")
-    expect(screen.queryByRole("button", { name: "ultracode" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Ultracode" })).not.toBeInTheDocument()
     // The track and the current tier survive — only the scale is dropped.
     expect(screen.getByTestId("effort-track")).toBeInTheDocument()
-    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("high")
+    expect(screen.getByTestId("effort-selector-value")).toHaveTextContent("High")
   })
 
   it("drops the per-row descriptions in a narrow list", () => {
     mockWidth = 240
     renderSelector(capableSession, { mode: "list" })
     expect(screen.queryByText(ULTRACODE_DESCRIPTION)).not.toBeInTheDocument()
-    expect(screen.getByRole("radio", { name: /^ultracode/ })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /^Ultracode/ })).toBeInTheDocument()
   })
 
   it("keeps the per-row descriptions when there is room", () => {
@@ -428,7 +524,7 @@ describe("streaming", () => {
     fireEvent.pointerUp(track)
     expect(mockedUpdateSession).not.toHaveBeenCalled()
 
-    expect(screen.getByRole("button", { name: "ultracode" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Ultracode" })).toBeDisabled()
     expect(screen.getByTestId("effort-auto-toggle")).toBeDisabled()
   })
 

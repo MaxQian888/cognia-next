@@ -301,7 +301,19 @@
       "faster": "Faster",
       "hint": "Choose how much reasoning the model should use for this conversation.",
       "hintAria": "About thinking levels",
-      "smarter": "Smarter"
+      "smarter": "Smarter",
+      "title": "Effort",
+      "triggerAria": "Thinking level: {level}",
+      "hintExternal": "Choose how much reasoning the external agent should use. The agent folds this onto whatever depth levels its own model publishes.",
+      "level": {
+        "off": "Auto",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra",
+        "max": "Max",
+        "ultracode": "Ultracode"
+      }
     },
     "enhance": {
       "modes": {

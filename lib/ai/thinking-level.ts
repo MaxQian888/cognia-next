@@ -29,7 +29,9 @@
 import type { ChatSession, SendOptions } from "@cognia/agent-config-types"
 import {
   reasoningTiersFor,
+  tiersForSurface,
   type ReasoningSurfaceInput,
+  type ReasoningTier,
 } from "@cognia/provider-core/providers/reasoning-tiers"
 
 /**
@@ -162,9 +164,73 @@ export function thinkingLevelAtIndex(
  *     into `high` its name would promise depth the request never carries.
  */
 export function availableThinkingLevels(input: ReasoningSurfaceInput): EffortTier[] {
-  const levels = reasoningTiersFor(input).filter((tier): tier is Effort => tier !== "minimal")
+  return appLadderFromTiers(reasoningTiersFor(input))
+}
+
+/**
+ * The two adjustments that turn a WIRE tier list into an APP ladder, factored
+ * out so every entry point applies them identically — see
+ * {@link availableThinkingLevels} for what they are and why.
+ */
+function appLadderFromTiers(tiers: readonly ReasoningTier[]): EffortTier[] {
+  const levels = tiers.filter((tier): tier is Effort => tier !== "minimal")
   if (levels.length === 0) return []
   return levels.includes("xhigh") ? [...levels, "ultracode"] : levels
+}
+
+/**
+ * The ladder to offer while an EXTERNAL agent runtime drives the turn.
+ *
+ * The other entry point keys off a provider + model, which is the wrong pair
+ * here: an external agent (Codex, Gemini CLI, …) brings its own model, and the
+ * renderer never learns which one — the composer's model chip describes the
+ * built-in runtime's model, not the agent's. Reading that chip produced two
+ * wrong answers depending on what it happened to hold: a six-tier ladder no ACP
+ * agent publishes, or no control at all on a session that merely defaulted to
+ * Haiku.
+ *
+ * So the honest answer is the generic OpenAI-dialect surface — the same
+ * `low | medium | high` that `GENERIC_REASONING_EFFORT` folds to, and exactly
+ * the ladder the Codex client falls back to (`DEFAULT_REASONING_EFFORTS`) before
+ * its model catalog loads. Derived rather than restated, so a change to the fold
+ * map moves this with it. `ultracode` is correctly absent: that surface folds
+ * `xhigh` into `high`, so the tier's name would promise depth the request cannot
+ * carry, and its workflow-tool half belongs to the built-in runtime anyway.
+ *
+ * Each adapter still clamps what it receives onto its own published ladder, so
+ * offering the intersection is safe rather than merely conservative.
+ */
+export function externalAgentThinkingLevels(): EffortTier[] {
+  return appLadderFromTiers(tiersForSurface("generic-effort"))
+}
+
+/**
+ * Narrow an offered ladder by the user's hidden-tier preference
+ * (`composerBehavior.hiddenEffortTiers`).
+ *
+ * Presentation only. Hiding a tier removes it from what the control OFFERS; it
+ * never touches what a session holds or sends, so a conversation already
+ * sitting on a hidden tier keeps running at that depth and merely displays as
+ * the nearest visible one (via {@link clampThinkingLevel}, the same folding the
+ * model-capability narrowing already uses).
+ *
+ * Two things this refuses to do, both because the alternative is a control the
+ * user cannot recover from:
+ *   - empty the ladder. Hiding every offered tier returns the full ladder
+ *     rather than nothing, because an empty ladder is the selector's own
+ *     "this surface has no depth control" signal — it would remove the control
+ *     from the composer, and with it the only way to unhide anything.
+ *   - hide `"off"`. It is not a depth and never appears in `available`; it is
+ *     the way back to the model's own default and stays reachable always.
+ */
+export function visibleThinkingLevels(
+  available: readonly EffortTier[],
+  hidden: readonly EffortTier[] | undefined
+): EffortTier[] {
+  if (!hidden || hidden.length === 0) return [...available]
+  const hiddenSet = new Set(hidden)
+  const visible = available.filter((level) => !hiddenSet.has(level))
+  return visible.length > 0 ? visible : [...available]
 }
 
 /**

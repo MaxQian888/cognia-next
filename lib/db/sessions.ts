@@ -7,6 +7,8 @@ import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
 import { invalidatePersistSnapshot } from "./messages"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { resolveScopeProjectId } from "./project-scope"
+import { getSettings } from "./settings"
+import { thinkingLevelPatch } from "@/lib/ai/thinking-level"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 
@@ -156,6 +158,29 @@ export async function createSession(
   // conversation's workspace); otherwise the active project — never null.
   const projectId = await resolveScopeProjectId(partial?.projectId)
 
+  // The app-wide default thinking tier (`AppSettings.defaultThinkingLevel`),
+  // stamped onto the row rather than consulted at send time.
+  //
+  // Stamping is what makes the composer's control able to SHOW the default: a
+  // send-time fallback never reaches the session row, so the chip would read
+  // "Auto" while turns quietly ran at another depth. Owning the value also
+  // makes editing it an ordinary per-session write instead of a fight with a
+  // fallback, and keeps `ultracode`'s workflow-tool coupling — which keys on
+  // `session.thinkingLevel` — working from the first turn.
+  //
+  // An explicit `partial` always wins (branch/fork/import carry their source's
+  // tier), and the read is best-effort: a settings failure must not stop a
+  // conversation from being created.
+  let defaultTier: ReturnType<typeof thinkingLevelPatch> | undefined
+  if (partial?.thinkingLevel === undefined && partial?.effort === undefined) {
+    try {
+      const level = (await getSettings())?.defaultThinkingLevel
+      if (level) defaultTier = thinkingLevelPatch(level)
+    } catch (err) {
+      console.warn("createSession: default thinking level lookup failed", err)
+    }
+  }
+
   const session: ChatSession = {
     id: newId(),
     projectId,
@@ -180,6 +205,10 @@ export async function createSession(
     forkedFromSdkSessionId: partial?.forkedFromSdkSessionId,
     scratchpad: partial?.scratchpad,
     integrationBinding: partial?.integrationBinding,
+    // Both halves always move together — see `thinkingLevelPatch`, the only
+    // supported writer of the pair.
+    effort: partial?.effort ?? defaultTier?.effort,
+    thinkingLevel: partial?.thinkingLevel ?? defaultTier?.thinkingLevel,
     createdAt: now,
     updatedAt: now,
   }

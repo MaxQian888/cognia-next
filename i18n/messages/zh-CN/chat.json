@@ -301,7 +301,19 @@
       "faster": "更快",
       "hint": "选择模型在本会话中使用的推理强度。",
       "hintAria": "关于思考等级",
-      "smarter": "更智能"
+      "smarter": "更智能",
+      "title": "思考强度",
+      "triggerAria": "思考强度：{level}",
+      "hintExternal": "选择外部 Agent 使用的推理深度。Agent 会将其折算到自身模型公布的档位上。",
+      "level": {
+        "off": "自动",
+        "low": "轻度",
+        "medium": "均衡",
+        "high": "深度",
+        "xhigh": "极深",
+        "max": "最大",
+        "ultracode": "Ultracode"
+      }
     },
     "enhance": {
       "modes": {

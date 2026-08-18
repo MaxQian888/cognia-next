@@ -8,6 +8,7 @@ import { SettingsCard, SettingsDivider } from "../common/settings-section"
 import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-override-fields"
 import { CompactionSettings } from "./compaction-settings"
 import { ComposerBehaviorCard } from "./composer-behavior-card"
+import { EffortPreferencesCard } from "./effort-preferences-card"
 import { ConversationSidebarCard } from "./conversation-sidebar-card"
 import { RunStatusBarCard } from "./run-status-bar-card"
 import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
@@ -144,6 +145,12 @@ export function ConversationSection() {
       >
         <div className="space-y-6">
           <ComposerBehaviorCard />
+          <SettingsDivider />
+          {/* Thinking-level defaults sit with the composer behaviour that
+              surfaces them, not with the model settings: what a new session
+              starts at and which tiers the track offers are both preferences
+              about the CONTROL, and the control lives here. */}
+          <EffortPreferencesCard />
           <SettingsDivider />
           <ComposerAssistanceCard />
         </div>

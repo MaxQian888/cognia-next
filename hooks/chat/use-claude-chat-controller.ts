@@ -1411,10 +1411,20 @@ export function useClaudeChat() {
             workingDirectory: sendOptions.cwd,
             // The composer's thinking level, which before this reached only the
             // built-in runtime — on an external agent the control was silently
-            // inert. `sendOptions.effort` already carries the resolved
-            // precedence chain (IM override > session > bot > app default), and
-            // the adapter folds it onto whatever ladder its model publishes.
-            ...(sendOptions.effort ? { reasoningEffort: sendOptions.effort } : {}),
+            // inert. Both fields carry the same resolved precedence chain (IM
+            // override > session > bot > app default), and the adapter folds
+            // the value onto whatever ladder its model publishes.
+            //
+            // `requestedEffort` rather than `effort`: the latter has already
+            // been through the `modelSupportsEffort` gate against the SESSION's
+            // model, which this rail does not run — the external agent brings
+            // its own. Reading the gated field made the control inert again
+            // whenever the session happened to sit on a model that rejects the
+            // Anthropic `effort` parameter (Haiku, Sonnet 4.5), even though the
+            // agent about to run it honours the level fine.
+            ...(sendOptions.requestedEffort || sendOptions.effort
+              ? { reasoningEffort: sendOptions.requestedEffort ?? sendOptions.effort }
+              : {}),
             context: {
               custom: {
                 additionalDirectories: sendOptions.additionalDirectories ?? [],

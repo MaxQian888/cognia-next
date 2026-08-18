@@ -496,7 +496,20 @@ describe("reasoning effort integration", () => {
         messages={{
           chat: {
             composer: {
-              effort: { aria: "Thinking level", auto: "Auto" },
+              effort: {
+                aria: "Thinking level",
+                auto: "Auto",
+                title: "Effort",
+                level: {
+                  off: "Auto",
+                  low: "Low",
+                  medium: "Medium",
+                  high: "High",
+                  xhigh: "Extra",
+                  max: "Max",
+                  ultracode: "Ultracode",
+                },
+              },
               modelPicker: { effortSuffix: "· {effort}" },
             },
           },
@@ -518,9 +531,11 @@ describe("reasoning effort integration", () => {
     expect(screen.getByTestId("model-picker-effort")).toHaveTextContent("high")
     fireEvent.click(screen.getByRole("button"))
     expect(screen.getByTestId("effort-selector-section")).toBeInTheDocument()
+    // The chip keeps the raw wire value (it labels the MODEL); the selector
+    // announces the tier's display name.
     expect(screen.getByRole("slider", { name: "Thinking level" })).toHaveAttribute(
       "aria-valuetext",
-      "high"
+      "High"
     )
   })
 
@@ -582,7 +597,7 @@ describe("explicit Auto routing selection", () => {
     useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never, save })
     renderPicker()
     fireEvent.click(screen.getByRole("button")) // open the popover
-    fireEvent.click(screen.getByText("Auto"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
     expect(save).toHaveBeenCalledWith({
       autoRouting: expect.objectContaining({ enabled: true }),
     })
@@ -597,7 +612,7 @@ describe("explicit Auto routing selection", () => {
     useSettingsStore.setState({ settings: {} as never, save })
     renderPicker()
     fireEvent.click(screen.getByRole("button"))
-    fireEvent.click(screen.getByText("Auto"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
 
     expect(save).toHaveBeenCalledWith({
       autoRouting: expect.objectContaining({
@@ -615,7 +630,7 @@ describe("explicit Auto routing selection", () => {
     useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never, save })
     renderPicker()
     fireEvent.click(screen.getByRole("button"))
-    fireEvent.click(screen.getByText("Auto"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
 
     expect(mockCloseSession).toHaveBeenCalledWith("ses_1")
     expect(mockedUpdateSession).toHaveBeenCalledWith(

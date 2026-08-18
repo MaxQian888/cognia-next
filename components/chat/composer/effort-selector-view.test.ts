@@ -67,16 +67,16 @@ describe("effortTrackOffset", () => {
   it("reserves half a marker at each end so neither extreme overhangs the track", () => {
     // Without the inset a marker at tier 0 / the last tier is drawn half outside
     // the rounded track — visible at both ends of the real control.
-    expect(effortTrackOffset(0, 5)).toBe("calc(0.5rem + 0 * (100% - 0.5rem * 2))")
-    expect(effortTrackOffset(5, 5)).toBe("calc(0.5rem + 1 * (100% - 0.5rem * 2))")
+    expect(effortTrackOffset(0, 5)).toBe("calc(0.875rem + 0 * (100% - 0.875rem * 2))")
+    expect(effortTrackOffset(5, 5)).toBe("calc(0.875rem + 1 * (100% - 0.875rem * 2))")
   })
 
   it("places interior tiers proportionally within the inset span", () => {
-    expect(effortTrackOffset(1, 5)).toBe("calc(0.5rem + 0.2 * (100% - 0.5rem * 2))")
+    expect(effortTrackOffset(1, 5)).toBe("calc(0.875rem + 0.2 * (100% - 0.875rem * 2))")
   })
 
   it("parks 'off' at the fast end — the marker is not drawn there anyway", () => {
-    expect(effortTrackOffset(-1, 5)).toBe("calc(0.5rem + 0 * (100% - 0.5rem * 2))")
+    expect(effortTrackOffset(-1, 5)).toBe("calc(0.875rem + 0 * (100% - 0.875rem * 2))")
   })
 })
 

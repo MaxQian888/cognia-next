@@ -72,7 +72,11 @@ export type ReasoningSurface =
  * into `@/lib`), and pinned to it by
  * `reasoning-tiers.capability-parity.test.ts`.
  */
-const ANTHROPIC_EFFORT_FAMILIES = [/opus-4-(?:5|6|7|8|9)/, /sonnet-4-6/, /(?:fable|mythos)-5/]
+const ANTHROPIC_EFFORT_FAMILIES = [
+  /opus-4-(?:5|6|7|8|9)/,
+  /sonnet-4-6/,
+  /(?:opus|sonnet|fable|mythos)-5/,
+]
 
 /** Tiers the OpenAI-native surface accepts, in canonical order. `none` is not a
  * tier here — the app expresses "no reasoning" as its own `off` level. */

@@ -1,8 +1,6 @@
 "use client"
 
-// Composer thinking-level ("reasoning effort") control — the labelled block at
-// the bottom of the model picker's popover. Effort only ever qualifies a model,
-// so it shares that one surface rather than owning a second toolbar chip.
+// Composer thinking-level ("reasoning effort") control.
 //
 // It surfaces the per-session tier, persisted by `thinkingLevelPatch` as BOTH
 // `ChatSession.effort` (what every existing consumer reads) and
@@ -10,6 +8,14 @@
 // `@/lib/ai/thinking-level`). `resolveSendOptions` consumes them at send time,
 // so a change applies from the NEXT turn: there is no live-apply IPC here,
 // unlike model switching.
+//
+// Rendered in two places, both passing the same session, so there is one state
+// and one component:
+//   - `./effort-chip` — the composer toolbar's own control, which is how the
+//     user reaches it; and
+//   - `./model-picker` — the bottom of the model popover, because depth
+//     qualifies a model and adjusting both at once is the common edit.
+// The `variant` prop only changes chrome (a divider vs a standalone card).
 //
 // Two presentations, chosen by `composerBehavior.effortSelectorMode`:
 //   - "slider" (default) — a Faster→Smarter track, mirroring the CLI's effort
@@ -20,19 +26,20 @@
 // it is drawn. Each adapts again to its own measured width (see
 // `./effort-selector-view`), so neither depends on a viewport breakpoint.
 //
-// Self-gates to nothing when there is no session or the active model can't use
-// effort, so it never clutters a picker where it would be a no-op.
+// Self-gates to nothing when there is no session or the active surface can't
+// use effort, so it never clutters a composer where it would be a no-op. Which
+// tiers that surface offers — including the external-agent rail, whose model
+// the renderer never sees — is `./effort-surface`'s decision, not this file's.
 
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { BrainIcon, CheckIcon, InfoIcon } from "lucide-react"
+import { CheckIcon, CircleHelpIcon } from "lucide-react"
 
-import { useSettingsStore } from "@/stores/settings"
 import { updateSession } from "@/lib/db/sessions"
-import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
+import { useSettingsStore } from "@/stores/settings"
 import {
-  availableThinkingLevels,
   clampThinkingLevel,
+  isUltracodeLevel,
   resolveThinkingLevel,
   thinkingLevelAtIndex,
   thinkingLevelPatch,
@@ -43,6 +50,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useEffortSurface } from "./effort-surface"
 import {
   DEFAULT_EFFORT_SELECTOR_MODE,
   effortIndexFromRatio,
@@ -53,11 +61,19 @@ import {
   type EffortSelectorMode,
 } from "./effort-selector-view"
 
+/**
+ * Where the control is drawn. `"section"` is the divider-topped block inside
+ * the model popover; `"card"` is the standalone popover the toolbar chip opens
+ * and owns the whole surface, so it carries no divider and breathes more.
+ */
+export type EffortSelectorVariant = "section" | "card"
+
 interface EffortSelectorProps {
   session: ChatSession | null
   /** Disable interaction while a turn is in flight. */
   disabled?: boolean
   className?: string
+  variant?: EffortSelectorVariant
   /**
    * Force a presentation instead of reading `composerBehavior.effortSelectorMode`.
    * Only for stories and tests — production always follows the preference.
@@ -69,13 +85,12 @@ export function EffortSelector({
   session,
   disabled,
   className,
+  variant = "section",
   mode: modeProp,
 }: EffortSelectorProps) {
   const t = useTranslations("chat.composer.effort")
-  const tEffort = useTranslations("settings.general")
-  const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
-  const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const preferredMode = useSettingsStore((s) => s.settings?.composerBehavior?.effortSelectorMode)
+  const surface = useEffortSurface(session)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const width = useElementWidth(rootRef)
@@ -97,33 +112,21 @@ export function EffortSelector({
   const pendingRef = useRef<ThinkingLevel | null>(null)
   const [dragging, setDragging] = useState(false)
 
-  // Mirrors the toolbar's model resolution: per-session override > app default.
-  const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
-  const providerId = session?.providerOverride ?? defaultProvider ?? "anthropic"
-
-  // The tiers THIS provider+model actually distinguishes. Doubles as the
-  // self-gate: a surface with no depth control offers none, so the block simply
-  // does not render (a session-less composer likewise has nothing to configure).
-  const levels = availableThinkingLevels({
-    providerId,
-    modelId,
-    reasoning: modelSupportsEffort(providerId, modelId),
-  })
+  const levels = surface.levels
   if (!session?.id) return null
   if (levels.length === 0) return null
 
   const sessionId = session.id
-  // Display the tier the turn will REALLY carry: a level the active model does
-  // not offer folds to the deepest one it does. The session keeps the user's
-  // actual choice, which reapplies once a capable model is active again.
+  // Display the tier the turn will REALLY carry: a level the active surface
+  // does not offer folds to the deepest one it does. The session keeps the
+  // user's actual choice, which reapplies once a capable model is active again.
   const current = clampThinkingLevel(optimistic ?? resolveThinkingLevel(session), levels)
   const currentIndex = current === "off" ? -1 : levels.indexOf(current)
   const lastIndex = levels.length - 1
   const layout = effortSelectorLayout(width)
   const mode = modeProp ?? preferredMode ?? DEFAULT_EFFORT_SELECTOR_MODE
 
-  const levelLabel = (level: ThinkingLevel) =>
-    level === "off" ? t("auto") : tEffort(`effort.${level}` as "effort.low")
+  const levelLabel = (level: ThinkingLevel) => t(`level.${level}` as "level.off")
   const levelDescription = (level: ThinkingLevel) => t(`desc.${level}` as "desc.off")
 
   /** Show a tier without writing it (drag in progress). */
@@ -141,47 +144,60 @@ export function EffortSelector({
     void updateSession(sessionId, thinkingLevelPatch(level)).catch(() => setOptimistic(null))
   }
 
+  // The reference framing: a quiet "Effort" caption with the live tier name as
+  // the loud half, so the header reads as one phrase ("Effort · Extra") rather
+  // than a label and a value in a row.
   const header = (
     <div className="flex min-w-0 items-center justify-between gap-2">
-      <span className="flex min-w-0 items-center gap-1.5 text-xs">
-        <BrainIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="truncate">{t("aria")}</span>
-      </span>
-      <span className="flex shrink-0 items-center gap-1">
-        <span className="text-[11px] font-medium" data-testid="effort-selector-value">
+      <span className="flex min-w-0 items-baseline gap-1.5">
+        <span className="shrink-0 text-[13px] leading-none text-muted-foreground">
+          {t("title")}
+        </span>
+        <span
+          data-testid="effort-selector-value"
+          className={cn(
+            "truncate text-[13px] font-semibold leading-none tracking-tight transition-colors",
+            isUltracodeLevel(current) ? "text-effort-ultra" : "text-foreground"
+          )}
+        >
           {levelLabel(current)}
         </span>
-        {/* Own provider rather than relying on the one in `app/layout.tsx`:
-            this block renders inside the model picker's portalled popover and
-            is also mounted directly by tests/stories, and Radix throws outright
-            when a Tooltip has no provider above it. Nesting is supported. */}
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={t("hintAria")}
-                className="text-muted-foreground/70 hover:text-foreground"
-              >
-                <InfoIcon className="size-3" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[16rem] text-xs">
-              {t("hint")}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
       </span>
+      {/* Own provider rather than relying on the one in `app/layout.tsx`:
+          this block renders inside portalled popovers and is also mounted
+          directly by tests/stories, and Radix throws outright when a Tooltip
+          has no provider above it. Nesting is supported. */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("hintAria")}
+              className="shrink-0 rounded-full text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <CircleHelpIcon className="size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[16rem] text-xs">
+            {surface.external ? t("hintExternal") : t("hint")}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   )
 
   return (
     <div
       ref={rootRef}
-      className={cn("flex flex-col gap-2 border-t px-3 py-2", className)}
+      className={cn(
+        "flex flex-col",
+        variant === "card" ? "gap-3 px-3.5 py-3" : "gap-2.5 border-t px-3 py-2.5",
+        className
+      )}
       data-testid="effort-selector-section"
       data-mode={mode}
       data-layout={layout}
+      data-variant={variant}
     >
       {header}
       {mode === "slider" ? (
@@ -200,7 +216,7 @@ export function EffortSelector({
           label={t("aria")}
           fasterLabel={t("faster")}
           smarterLabel={t("smarter")}
-          autoLabel={t("auto")}
+          autoLabel={t("level.off")}
           levelLabel={levelLabel}
           levelDescription={levelDescription}
         />
@@ -227,7 +243,7 @@ interface LevelLabellers {
 }
 
 /**
- * The "slider" presentation: a Faster→Smarter track over the six non-off tiers,
+ * The "slider" presentation: a Faster→Smarter track over the offered tiers,
  * with "use model default" as a separate toggle (it is not a depth, so it is not
  * a tick). Driven by pointer (click or drag anywhere on the track) and by the
  * CLI's keyboard map (←/→/↑/↓, Home/End, 1-6, 0 for off).
@@ -253,7 +269,7 @@ function EffortTrack({
 }: LevelLabellers & {
   current: ThinkingLevel
   currentIndex: number
-  /** The tiers this provider+model offers — NOT the full ladder. */
+  /** The tiers this surface offers — NOT the full ladder. */
   levels: readonly EffortTier[]
   lastIndex: number
   layout: "wide" | "compact"
@@ -269,6 +285,7 @@ function EffortTrack({
   autoLabel: string
 }) {
   const off = current === "off"
+  const ultra = isUltracodeLevel(current)
   const trackRef = useRef<HTMLDivElement>(null)
 
   /** Resolve the tier under a pointer position on the track. */
@@ -320,7 +337,7 @@ function EffortTrack({
 
   return (
     <>
-      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+      <div className="flex items-center justify-between text-[11px] leading-none text-muted-foreground">
         <span>{fasterLabel}</span>
         <span>{smarterLabel}</span>
       </div>
@@ -339,38 +356,51 @@ function EffortTrack({
         aria-valuetext={levelLabel(current)}
         aria-disabled={disabled || undefined}
         data-testid="effort-track"
+        data-ultra={ultra || undefined}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onKeyDown={handleKeyDown}
         className={cn(
-          "relative h-6 w-full min-w-0 touch-none rounded-full bg-muted/60 outline-none",
-          "focus-visible:ring-2 focus-visible:ring-ring/60",
+          "relative h-7 w-full min-w-0 touch-none rounded-full bg-muted outline-none",
+          "transition-opacity focus-visible:ring-2 focus-visible:ring-ring/60",
           disabled ? "pointer-events-none opacity-50" : "cursor-pointer",
           off && "opacity-60"
         )}
       >
-        {/* Filled portion, up to the marker's centre. Hidden while off — an
-            empty track reads as "nothing forwarded" more honestly than a
-            zero-width fill. */}
-        {!off && (
+        {/* Ultracode's track. A dot LATTICE that fades in left→right rather
+            than a flat fill: the tier is a step change in kind (it also arms
+            the dynamic-workflow tools), and a texture says that where another
+            solid bar would just read as "more of the same". The mask does the
+            fading, so the lattice itself stays a constant-density grid. */}
+        {ultra && (
           <span
             aria-hidden
-            className="absolute inset-y-0 left-0 rounded-full bg-primary/45"
-            style={{ width: effortTrackOffset(currentIndex, lastIndex) }}
+            data-testid="effort-track-ultra"
+            // `rounded-full` on the lattice itself rather than `overflow-hidden`
+            // on the track: clipping the track also clips the end markers,
+            // which hang half their width past the last tick's centre.
+            className="absolute inset-0 rounded-full"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at center, var(--effort-ultra) 0.9px, transparent 1px)",
+              backgroundSize: "5px 5px",
+              maskImage: "linear-gradient(to right, transparent 4%, black 92%)",
+              WebkitMaskImage: "linear-gradient(to right, transparent 4%, black 92%)",
+            }}
           />
         )}
-        {/* One tick per OFFERED tier. `ultracode` gets a larger, accented dot
-            even when inactive: it is the one tick that changes more than depth,
-            and the scale below reads as a plain ladder otherwise. */}
+        {/* One tick per OFFERED tier. `ultracode` keeps an accented dot even
+            when inactive: it is the one tick that changes more than depth, and
+            the scale reads as a plain ladder otherwise. */}
         {levels.map((level, index) => (
           <span
             key={level}
             aria-hidden
             className={cn(
-              "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full",
-              level === "ultracode" ? "size-1.5 bg-primary" : "size-1 bg-muted-foreground/50"
+              "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors",
+              level === "ultracode" ? "size-1.5 bg-effort-ultra" : "size-1 bg-muted-foreground/40"
             )}
             style={{ left: effortTrackOffset(index, lastIndex) }}
           />
@@ -379,7 +409,19 @@ function EffortTrack({
           <span
             aria-hidden
             data-testid="effort-track-marker"
-            className="absolute top-1/2 h-5 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground shadow-sm"
+            className={cn(
+              "absolute top-1/2 h-[22px] w-7 -translate-x-1/2 -translate-y-1/2 rounded-full",
+              // A knob reads as raised by being LIGHTER than its trough, which
+              // means it cannot be one token: `bg-background` is the lightest
+              // surface in light mode and the darkest in dark. Flipping to
+              // `foreground` there is the same move `components/ui/switch.tsx`
+              // makes for its thumb.
+              "bg-background shadow-[0_1px_3px_rgba(0,0,0,0.18)] ring-1 ring-black/5",
+              "dark:bg-foreground dark:ring-white/10",
+              // No transition while dragging: the marker must track the pointer
+              // exactly, and easing it turns a drag into a lag.
+              !dragging && "transition-[left] duration-150 ease-out"
+            )}
             style={{ left: effortTrackOffset(currentIndex, lastIndex) }}
           />
         )}
@@ -398,7 +440,9 @@ function EffortTrack({
               className={cn(
                 "min-w-0 truncate rounded px-1 py-0.5 text-[10px] transition-colors",
                 level === current
-                  ? "font-medium text-foreground"
+                  ? level === "ultracode"
+                    ? "font-medium text-effort-ultra"
+                    : "font-medium text-foreground"
                   : "text-muted-foreground hover:text-foreground",
                 disabled && "pointer-events-none opacity-50"
               )}
@@ -410,7 +454,7 @@ function EffortTrack({
       )}
 
       <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 text-[10px] leading-snug text-muted-foreground">
+        <p className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
           {levelDescription(current)}
         </p>
         <button
@@ -420,7 +464,7 @@ function EffortTrack({
           onClick={() => onSelect("off")}
           data-testid="effort-auto-toggle"
           className={cn(
-            "shrink-0 rounded px-1.5 py-0.5 text-[10px] transition-colors",
+            "shrink-0 rounded-full px-2 py-0.5 text-[10px] transition-colors",
             off
               ? "bg-accent font-medium text-foreground"
               : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -436,7 +480,7 @@ function EffortTrack({
 
 /**
  * The "list" presentation: one row per tier — "use model default" first, then
- * the six depths — each with a check on the active row. Descriptions are
+ * the offered depths — each with a check on the active row. Descriptions are
  * dropped in the compact band so a narrow popover stays scannable.
  */
 function EffortList({
@@ -450,7 +494,7 @@ function EffortList({
   levelDescription,
 }: LevelLabellers & {
   current: ThinkingLevel
-  /** The tiers this provider+model offers — NOT the full ladder. */
+  /** The tiers this surface offers — NOT the full ladder. */
   levels: readonly EffortTier[]
   layout: "wide" | "compact"
   disabled?: boolean
@@ -461,6 +505,7 @@ function EffortList({
     <div role="radiogroup" aria-label={label} className="-mx-1 flex flex-col">
       {(["off", ...levels] as ThinkingLevel[]).map((level) => {
         const active = level === current
+        const ultra = level === "ultracode"
         return (
           <button
             key={level}
@@ -470,7 +515,7 @@ function EffortList({
             disabled={disabled}
             onClick={() => onSelect(level)}
             className={cn(
-              "flex items-center gap-2 rounded px-1.5 py-1 text-left transition-colors",
+              "flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors",
               active ? "bg-accent/60" : "hover:bg-accent/40",
               disabled && "pointer-events-none opacity-50"
             )}
@@ -480,7 +525,13 @@ function EffortList({
               className={cn("size-3 shrink-0", active ? "opacity-100" : "opacity-0")}
             />
             <span className="flex min-w-0 flex-col">
-              <span className={cn("truncate text-[11px]", active && "font-medium text-foreground")}>
+              <span
+                className={cn(
+                  "truncate text-[11px]",
+                  active && "font-medium",
+                  ultra ? "text-effort-ultra" : active && "text-foreground"
+                )}
+              >
                 {levelLabel(level)}
               </span>
               {layout === "wide" && (

@@ -60,11 +60,16 @@ export function effortMarkerPercent(index: number, last: number = LAST_TIER_INDE
 }
 
 /**
- * Half the marker's width (`w-4` ⇒ `1rem`), as a CSS length. The track reserves
- * this much at each end so the marker at tier 0 / the last tier sits fully
- * inside the rounded track instead of overhanging its cap.
+ * Half the marker's width (`w-7` ⇒ `1.75rem`), as a CSS length. The track
+ * reserves this much at each end so the marker at tier 0 / the last tier sits
+ * fully inside the rounded track instead of overhanging its cap.
+ *
+ * Keep this in step with the marker's Tailwind width in `./effort-selector`.
+ * They drifted once — the marker grew to `w-7` while this stayed at half of
+ * `w-4` — and the visible symptom was the top tier's marker sliced off by the
+ * track's right cap.
  */
-export const EFFORT_MARKER_INSET = "0.5rem"
+export const EFFORT_MARKER_INSET = "0.875rem"
 
 /**
  * Left offset for a tick or the marker, as a CSS `calc()` that maps the tier

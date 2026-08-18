@@ -21,6 +21,46 @@ describe("modelSupportsEffort", () => {
       }
     })
 
+    // Regression: the family table predated the Claude 5 release and matched
+    // only `opus-4-5…4-9` / `sonnet-4-6` / `fable-5`. The built-in Anthropic
+    // provider ships `claude-sonnet-5` as its default model, so on a stock
+    // install this gate said "no effort", `availableThinkingLevels` returned an
+    // empty ladder, and the composer's thinking-level control removed itself
+    // entirely — the feature read as missing rather than broken.
+    it("accepts effort across the Claude 5 family", () => {
+      for (const id of ["claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5"]) {
+        expect(modelSupportsEffort("anthropic", id)).toBe(true)
+      }
+    })
+
+    // Bedrock/Vertex/gateway spellings carry a prefix or a suffix around the
+    // same family fragment. Matching on the fragment is what makes them work,
+    // so pin it: a future tightening to a whole-string match would break every
+    // non-direct Anthropic route at once.
+    it("accepts effort on vendor-prefixed Claude 5 ids", () => {
+      for (const id of [
+        "us.anthropic.claude-opus-5",
+        "global.anthropic.claude-sonnet-5",
+        "claude-sonnet-5@default",
+        "anthropic/claude-opus-5",
+      ]) {
+        expect(modelSupportsEffort("anthropic", id)).toBe(true)
+      }
+    })
+
+    // The `-5` suffix must not leak onto 4.x ids that merely contain a "5":
+    // `claude-sonnet-4-5` ends in `-5` but rejects the parameter, so an
+    // over-broad `/-5/` would 400 every turn on the previous generation.
+    it("does not let the Claude 5 rule swallow 4.5-generation ids", () => {
+      for (const id of [
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+      ]) {
+        expect(modelSupportsEffort("anthropic", id)).toBe(false)
+      }
+    })
+
     it("rejects effort on Haiku, Sonnet 4.5-and-earlier, and Opus 4.1/4.0", () => {
       for (const id of [
         "claude-haiku-4-5",

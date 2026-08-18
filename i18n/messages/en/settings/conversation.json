@@ -197,5 +197,17 @@
     "description": "Background model used to generate titles. Defaults to the chat model.",
     "heading": "Title model"
   },
-  "useDefault": "Use chat default"
+  "useDefault": "Use chat default",
+  "effortPreferences": {
+    "title": "Thinking level",
+    "description": "Defaults for the composer's reasoning-depth control.",
+    "defaultLevel": {
+      "label": "Default for new chats",
+      "hint": "The depth every new conversation starts on. \"Auto\" leaves each model at its own default."
+    },
+    "visibleTiers": {
+      "label": "Tiers to offer",
+      "hint": "Hide the depths you never use to shorten the track. Conversations already using a hidden tier keep running at that depth."
+    }
+  }
 }

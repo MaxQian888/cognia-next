@@ -34,6 +34,7 @@ import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { ModelPicker } from "./model-picker"
+import { EffortChip } from "./effort-chip"
 import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { CompositionChip } from "@/components/agent/composition/composition-chip"
@@ -202,6 +203,15 @@ function GenericBottomToolbar({
         session={session}
         disabled={isStreaming}
         className={cn(TOOLBAR_CHIP, "max-w-[11rem]")}
+      />
+      {/* Thinking level sits immediately after the model because it qualifies
+          it — the pair reads as one answer to "how deeply will this run". It
+          self-hides on a surface with no depth control, which is why it can
+          live on the permanent row rather than behind the overflow. */}
+      <EffortChip
+        session={session}
+        disabled={isStreaming}
+        className={cn(TOOLBAR_CHIP, "max-w-[7.5rem]")}
       />
       <PermissionModeIndicator
         onCycle={(next) => setPermissionMode(next)}

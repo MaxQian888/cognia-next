@@ -28,6 +28,19 @@ const ANTHROPIC_MODELS = [
   "claude-opus-4-8",
   "claude-opus-4-9",
   "claude-sonnet-4-6",
+  // The Claude 5 family. These are the ids the app actually ships on — the
+  // built-in Anthropic provider's `defaultModel` is `claude-sonnet-5` — and
+  // their absence here is exactly why the composer's thinking-level control
+  // silently disappeared on a default install: neither table matched them, so
+  // `availableThinkingLevels` came back empty and the selector rendered null.
+  "claude-opus-5",
+  "claude-sonnet-5",
+  // Vendor-prefixed spellings of the same models. The family fragment is what
+  // both tables match on, so these must agree with the bare ids above.
+  "us.anthropic.claude-opus-5",
+  "global.anthropic.claude-sonnet-5",
+  "claude-sonnet-5@default",
+  "anthropic/claude-opus-5",
   "claude-fable-5",
   "claude-mythos-5",
   // …and the ones that reject the parameter.
