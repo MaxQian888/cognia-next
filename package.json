@@ -453,7 +453,7 @@
     "yaml": "^2.9.0",
     "zod": "^4.4.3",
     "zundo": "^2.3.0",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.15"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
