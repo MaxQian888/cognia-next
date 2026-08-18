@@ -1,8 +1,10 @@
 {
   "conflictsTitle": "{count} 个冲突",
   "cyclesTitle": "{count} 个依赖循环",
+  "graphLabel": "依赖关系图，按安装顺序分层",
   "loading": "解析依赖中…",
   "missing": "缺失",
+  "noDependencies": "该插件没有声明任何依赖。",
   "root": "根",
   "title": "依赖图",
   "unresolved": "未解决",

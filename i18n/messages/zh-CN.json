@@ -9926,6 +9926,7 @@
       "piExtensionPolicyLabel": "扩展策略",
       "piExtensionPolicyTrustedProject": "同时信任项目本地文件",
       "piExtensionPolicyTrustedProjectWarning": "项目本地的 Pi 文件可以执行所打开仓库中的任意代码。请仅对你信任的仓库启用。",
+      "piManagePackages": "管理 Pi 扩展包",
       "piMigration": {
         "blocker": {
           "command_missing": "未安装 Pi，或其不在 PATH 中。",
@@ -10188,6 +10189,7 @@
       "memory": "记忆",
       "message": "消息",
       "navigation": "页面",
+      "pi-package": "Pi 扩展包",
       "plugin": "插件",
       "plugin-action": "插件操作",
       "scheduled-task": "计划任务",
@@ -10209,6 +10211,11 @@
     "people": {
       "members": "{count} 位成员",
       "newChatWith": "新建会话"
+    },
+    "piPackages": {
+      "avoid": "不推荐",
+      "cost": "{tools} 个工具 · {tokens} tokens",
+      "free": "无常驻开销"
     },
     "placeholder": "搜索或跳转…（> 命令，@ 人物）",
     "placeholders": {
@@ -10249,6 +10256,7 @@
       "before": "before:2026-08-16 — 早于某时间",
       "from": "from:me · from:assistant — 消息作者",
       "in": "in:messages · in:skills — 只搜某一类",
+      "inPi": "in:pi —— Pi agent 扩展包",
       "is": "is:archived — 包含已归档会话",
       "prefixes": "> 命令 · @ 人物",
       "title": "title:词 — 仅匹配会话标题",
@@ -18233,8 +18241,10 @@
     "dependencyGraph": {
       "conflictsTitle": "{count} 个冲突",
       "cyclesTitle": "{count} 个依赖循环",
+      "graphLabel": "依赖关系图，按安装顺序分层",
       "loading": "解析依赖中…",
       "missing": "缺失",
+      "noDependencies": "该插件没有声明任何依赖。",
       "root": "根",
       "title": "依赖图",
       "unresolved": "未解决",

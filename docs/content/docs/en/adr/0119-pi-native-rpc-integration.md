@@ -47,3 +47,80 @@ The extension intercepts every native Pi tool call through `pi.on("tool_call")` 
 - Isolation disables the user's own Pi extension stack inside Cognia-run sessions. That is the point: community permission engines such as `pi-permission-system` also hook `tool_call`, and two engines intercepting the same call produce double prompts and unpredictable blocking.
 - Cognia never reads Pi's credentials. Authentication diagnostics call only `pi auth check --provider <id> --json --no-refresh`; `--credentials`, `print-api-key`, and `print-bearer-token` are forbidden.
 - `pi-acp` is retained as a separate experimental compatibility preset. Migration is explicit and reversible, updates the config in place so team, scheduler, and runtime references to the agent id survive, and does not assume an ACP session id maps onto a Pi session.
+
+## Revision record
+
+### 2026-08-18 — Pi's configuration surface and package system
+
+The original ADR covered Pi's *runtime* only. Reviewing the integration end to
+end showed the shape of the gap: Pi was the deepest runtime integration in the
+repo and simultaneously the emptiest configuration one — no settings, slash
+command, subagent, skill, MCP or memory import, no `VendorRoots` entry (so
+`PI_CODING_AGENT_DIR` was ignored and the session path was hard-coded), no entry
+in the migration wizard, and **zero code anywhere touching Pi's npm packages**.
+
+This revision closes the closable half and records the rest as explicit
+non-goals rather than leaving them as apparent oversights.
+
+#### One clause is narrowed, not withdrawn
+
+The Consequences section says:
+
+> Cognia never reads Pi's credentials. Authentication diagnostics call only
+> `pi auth check --provider <id> --json --no-refresh`; `--credentials`,
+> `print-api-key`, and `print-bearer-token` are forbidden.
+
+That still holds exactly as written, and is deliberately kept above rather than
+rewritten. What has changed is that Cognia now *reads and writes*
+`<pi agent dir>/settings.json`, which it previously never opened. The boundary
+moved from "do not open the file" to:
+
+- **A key allowlist.** `lib/pi-packages/settings-io.ts` parses `packages` and
+  nothing else reaches a caller; the rest of the parsed object is dropped rather
+  than returned, logged, or attached to telemetry or a support report.
+- **Prefer letting Pi write its own file.** Mutations shell out to
+  `pi install` / `pi remove` / `pi update --extension`, and edit `settings.json`
+  directly only when Pi is not on PATH.
+- **Never clobber an unparseable file.** An existing-but-unparseable
+  `settings.json` refuses the write, mirroring the guard in `lib/claude/sync.ts`.
+- **`auth.json` and `models-store.json` are still never opened.** Pi keeps
+  credentials in a separate mode-600 file, which is out of scope entirely.
+
+`PI_` is still absent from `ENV_PREFIX_ALLOWLIST`. That was a deliberate choice
+in the original ADR and remains one — it is not an oversight to be corrected.
+
+#### Now in scope
+
+Settings, prompt-template, subagent, skill and memory import; `VendorRoots.piAgentDir`
+/ `piSessionDir` honouring `PI_CODING_AGENT_DIR`; Pi in the migration wizard with
+an honest per-artifact support matrix; MCP through a 14th adapter, `pi-mcp-adapter`
+(its own id, because Pi's core ships no MCP and that file belongs to a third-party
+package); and the package manager at `/plugins` → Agent packages.
+
+#### Explicit non-goals
+
+1. **Lifecycle hooks stay `sidecarOnly`.** Not a Pi limitation — this is uniform
+   across every external backend. Changing it for Pi alone would make Pi the
+   exception in a place where uniformity is the design.
+2. **Rate limits and MCP logs stay `sidecarOnly` / `agentOwned`.** Same reason.
+3. **No per-session `mcpServers`.** Pi's RPC protocol has no such parameter —
+   `mcpServers` appears nowhere in its distribution. The `COGNIA_TOOLHOST_*`
+   environment channel recorded above is the accepted trade-off; closing this
+   needs a protocol change upstream, not a change here.
+4. **No local Pi on Windows.** A consequence of the mandatory sandbox, already
+   recorded above. Windows can now *configure* Pi — read its settings, manage its
+   packages for another machine — but still cannot run it locally.
+5. **No package registry integration.** pi.dev/packages is an npm-keyword gallery
+   with no JSON API, and npm exposes only versions and download counts — never
+   the overlap group, context cost or maintenance signal that make a catalog
+   entry useful. The catalog is therefore curated in-repo and dated, with its
+   prose in i18n so both locales stay checkable.
+
+#### Known limitation
+
+Cognia cannot read a Pi package's own configuration file, so overlap detection
+works from the curated catalog alone. Concretely: `pi-permission-modes` ships a
+Plan mode, but the recommended configuration removes `plan` from its
+`cycleOrder` so the standalone plan package owns planning. The catalog therefore
+does not list `plan` for it — and a user who re-enables `plan` there gets no
+overlap warning.

@@ -9926,6 +9926,7 @@
       "piExtensionPolicyLabel": "Extension policy",
       "piExtensionPolicyTrustedProject": "Also trust project-local files",
       "piExtensionPolicyTrustedProjectWarning": "Project-local Pi files can execute arbitrary code from the repository you open. Only use this for repositories you trust.",
+      "piManagePackages": "Manage Pi packages",
       "piMigration": {
         "blocker": {
           "command_missing": "Pi is not installed, or not on PATH.",
@@ -10188,6 +10189,7 @@
       "memory": "Memories",
       "message": "Messages",
       "navigation": "Pages",
+      "pi-package": "Pi package",
       "plugin": "Plugins",
       "plugin-action": "Plugin actions",
       "scheduled-task": "Scheduled tasks",
@@ -10209,6 +10211,11 @@
     "people": {
       "members": "{count, plural, one {# member} other {# members}}",
       "newChatWith": "New chat"
+    },
+    "piPackages": {
+      "avoid": "Not recommended",
+      "cost": "{tools} tools · {tokens} tokens",
+      "free": "No always-on cost"
     },
     "placeholder": "Search or jump to… (> commands, @ people)",
     "placeholders": {
@@ -10249,6 +10256,7 @@
       "before": "before:2026-08-16 — older than",
       "from": "from:me · from:assistant — message author",
       "in": "in:messages · in:skills — one kind only",
+      "inPi": "in:pi — Pi agent packages",
       "is": "is:archived — include archived conversations",
       "prefixes": "> commands · @ people",
       "title": "title:word — conversation titles only",
@@ -18233,8 +18241,10 @@
     "dependencyGraph": {
       "conflictsTitle": "{count} conflicts",
       "cyclesTitle": "{count} dependency cycles",
+      "graphLabel": "Dependency graph, ranked by install order",
       "loading": "Resolving dependencies…",
       "missing": "missing",
+      "noDependencies": "This plugin declares no dependencies.",
       "root": "root",
       "title": "Dependency graph",
       "unresolved": "Unresolved",

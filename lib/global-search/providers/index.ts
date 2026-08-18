@@ -12,6 +12,7 @@ import { memoriesProvider, skillsProvider, templatesProvider, workflowsProvider 
 import { createMessagesProvider, type MessagesProviderDeps } from "./messages"
 import { navigationProvider } from "./navigation"
 import { charactersProvider, teamsProvider } from "./people"
+import { piPackagesProvider } from "./pi-packages"
 import { sessionsProvider } from "./sessions"
 import { settingsProvider } from "./settings"
 import {
@@ -50,6 +51,9 @@ export function builtinGlobalSearchProviders(
     pluginActionsProvider,
     mcpServersProvider,
     inboxProvider,
+    // Desktop-only in effect: the provider returns [] outside the Tauri shell,
+    // where Pi's config file and CLI do not exist.
+    piPackagesProvider,
   ]
 }
 

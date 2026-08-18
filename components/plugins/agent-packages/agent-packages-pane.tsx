@@ -18,6 +18,7 @@
 //     rather than presenting the two as equivalent.
 
 import { useCallback, useMemo, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, PackageIcon, RefreshCwIcon, TerminalIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -30,6 +31,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePiPackages } from "@/hooks/plugins"
 import type { PiCatalogEntry, PiStackPresetId } from "@/lib/pi-packages/catalog"
 import { piConfigPath } from "@/lib/pi-packages/config-templates"
+import { PI_INSTALL_PARAM, readPiInstallParam } from "@/lib/pi-packages/deep-link"
 import { planPiMutation, type PiMutationPlan } from "@/lib/pi-packages/mutate"
 import type { PiPackageScope } from "@/lib/pi-packages/types"
 import { PiCatalogList } from "./pi-catalog-list"
@@ -43,10 +45,48 @@ export function AgentPackagesPane() {
   const t = useTranslations("plugins.agentPackages")
   const pi = usePiPackages()
 
-  const [pending, setPending] = useState<PiInstallRequest | null>(null)
+  const [manualPending, setManualPending] = useState<PiInstallRequest | null>(null)
+  const [dismissedSpec, setDismissedSpec] = useState<string | null>(null)
   const [busySpec, setBusySpec] = useState<string | null>(null)
   const [applyingPreset, setApplyingPreset] = useState<PiStackPresetId | null>(null)
   const [configSpec, setConfigSpec] = useState<string | null>(null)
+
+  // ⌘K's `install` action and the external-agent settings entry both land here
+  // with `?piInstall=<spec>`. The deep link *chooses* a package; it never
+  // installs one — what it opens is the same pre-install gate as any other
+  // route in.
+  //
+  // The staged request is derived from the URL rather than copied into state by
+  // an effect: a synchronous `setState` inside an effect causes a cascading
+  // render, and this is the case that makes the derivation easy anyway.
+  // `dismissedSpec` covers the frame between closing the dialog and the URL
+  // actually losing the param, so it cannot flicker back open.
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const requestedInstall = readPiInstallParam(searchParams)
+
+  // Memoized because the URL branch builds a fresh object every render, which
+  // would otherwise invalidate every downstream memo and callback on each one.
+  const pending: PiInstallRequest | null = useMemo(
+    () =>
+      manualPending ??
+      (requestedInstall && requestedInstall !== dismissedSpec
+        ? { spec: requestedInstall, scope: "user" as const }
+        : null),
+    [manualPending, requestedInstall, dismissedSpec]
+  )
+
+  /** Close the gate and strip the param, so a reload does not reopen it. */
+  const closePending = useCallback(() => {
+    setManualPending(null)
+    if (!requestedInstall) return
+    setDismissedSpec(requestedInstall)
+    const next = new URLSearchParams(searchParams?.toString() ?? "")
+    next.delete(PI_INSTALL_PARAM)
+    const query = next.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }, [requestedInstall, searchParams, router, pathname])
 
   const installedSpecs = useMemo(() => pi.resolved.map((entry) => entry.pkg), [pi.resolved])
 
@@ -72,9 +112,9 @@ export function AgentPackagesPane() {
       else toast.error(t("install.failureToast", { name, message: outcome.error ?? "" }))
     } finally {
       setBusySpec(null)
-      setPending(null)
+      closePending()
     }
-  }, [pending, pi, t])
+  }, [pending, pi, t, closePending])
 
   const remove = useCallback(
     async (spec: string, scope: PiPackageScope) => {
@@ -250,7 +290,7 @@ export function AgentPackagesPane() {
               resolved={pi.resolved}
               busySpec={busySpec}
               applyingPreset={applyingPreset}
-              onInstall={(spec) => setPending({ spec, scope: "user" })}
+              onInstall={(spec) => setManualPending({ spec, scope: "user" })}
               onApplyPreset={(preset, missing) => void applyPreset(preset, missing)}
             />
           </>
@@ -269,7 +309,7 @@ export function AgentPackagesPane() {
           projectPath={pi.projectPath}
           busy={busySpec !== null}
           onConfirm={() => void confirmInstall()}
-          onCancel={() => setPending(null)}
+          onCancel={closePending}
         />
 
         <PiPackageConfigEditor

@@ -62,6 +62,7 @@
     "memory": "记忆",
     "message": "消息",
     "navigation": "页面",
+    "pi-package": "Pi 扩展包",
     "plugin": "插件",
     "plugin-action": "插件操作",
     "scheduled-task": "计划任务",
@@ -83,6 +84,11 @@
   "people": {
     "members": "{count} 位成员",
     "newChatWith": "新建会话"
+  },
+  "piPackages": {
+    "avoid": "不推荐",
+    "cost": "{tools} 个工具 · {tokens} tokens",
+    "free": "无常驻开销"
   },
   "placeholder": "搜索或跳转…（> 命令，@ 人物）",
   "placeholders": {
@@ -123,6 +129,7 @@
     "before": "before:2026-08-16 — 早于某时间",
     "from": "from:me · from:assistant — 消息作者",
     "in": "in:messages · in:skills — 只搜某一类",
+    "inPi": "in:pi —— Pi agent 扩展包",
     "is": "is:archived — 包含已归档会话",
     "prefixes": "> 命令 · @ 人物",
     "title": "title:词 — 仅匹配会话标题",

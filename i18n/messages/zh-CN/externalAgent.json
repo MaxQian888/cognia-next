@@ -342,6 +342,7 @@
     "piExtensionPolicyLabel": "扩展策略",
     "piExtensionPolicyTrustedProject": "同时信任项目本地文件",
     "piExtensionPolicyTrustedProjectWarning": "项目本地的 Pi 文件可以执行所打开仓库中的任意代码。请仅对你信任的仓库启用。",
+    "piManagePackages": "管理 Pi 扩展包",
     "piMigration": {
       "blocker": {
         "command_missing": "未安装 Pi，或其不在 PATH 中。",

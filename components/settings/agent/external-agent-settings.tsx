@@ -25,7 +25,10 @@ import {
   Settings2,
   Sparkles,
   Route,
+  PackageIcon,
 } from "lucide-react"
+import Link from "next/link"
+import { piPackagesHref } from "@/lib/pi-packages/deep-link"
 import { cn } from "@/lib/utils"
 import { pickDirectory } from "@/lib/files/file-bridge"
 import { toast } from "@/components/ui/sonner"
@@ -1130,6 +1133,15 @@ function AgentEditorDialog({
                 </p>
               </div>
               <p className="text-muted-foreground text-xs">{t("piSandboxNote")}</p>
+              {/* The policy above decides how much of the user's Pi extension
+                  stack loads; this is where they can see and change what that
+                  stack actually contains, and what it costs per turn. */}
+              <Button asChild variant="outline" size="sm" className="w-fit">
+                <Link href={piPackagesHref()} data-testid="pi-packages-link">
+                  <PackageIcon className="size-3.5" />
+                  {t("piManagePackages")}
+                </Link>
+              </Button>
             </FormSection>
           )}
 

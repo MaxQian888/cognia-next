@@ -41,6 +41,8 @@ export type GlobalSearchKind =
   | "mcp-server"
   | "inbox-conversation"
   | "workbench-panel"
+  /** A package for the Pi coding agent (ADR-0119), not a Cognia plugin. */
+  | "pi-package"
 
 /** The scope tabs across the top of the dialog. */
 export type GlobalSearchScope =
@@ -80,6 +82,7 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   "mcp-server": ["library"],
   "inbox-conversation": ["library"],
   "workbench-panel": ["commands"],
+  "pi-package": ["library"],
 }
 
 /**
@@ -106,6 +109,9 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   "plugin-action": 15,
   "mcp-server": 16,
   "inbox-conversation": 17,
+  // Last of the library kinds: these are another agent's packages, so they
+  // should never outrank the user's own workflows, skills or plugins.
+  "pi-package": 19,
 }
 
 /** What the dialog does when an item is chosen. */
@@ -119,6 +125,18 @@ export type GlobalSearchAction =
   | { type: "switch-workspace"; projectId: string }
   | { type: "switch-guild"; kind: "dm" | "canvas" | "team"; teamId?: string }
   | { type: "new-chat-with-character"; characterId: string; characterName: string }
+  /**
+   * Begin installing something into an external agent. Deliberately *not* a
+   * `navigate`: the href that opens the owning surface with the right item
+   * pre-selected is an implementation detail of one handler, and baking it into
+   * every provider item would spread the deep-link format across the codebase.
+   *
+   * It also never installs directly. The handler routes to the owning surface,
+   * which opens its own pre-install gate — a palette that installed on Enter
+   * would skip the overlap and budget warnings that are the only ones a user
+   * gets, since Pi itself never warns.
+   */
+  | { type: "install"; target: "pi-package"; spec: string }
   | { type: "callback"; run: () => void | Promise<void> }
 
 /** Icon slot: a lucide component or an avatar subject (characters, teams). */

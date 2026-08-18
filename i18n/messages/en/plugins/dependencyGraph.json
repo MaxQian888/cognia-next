@@ -1,8 +1,10 @@
 {
   "conflictsTitle": "{count} conflicts",
   "cyclesTitle": "{count} dependency cycles",
+  "graphLabel": "Dependency graph, ranked by install order",
   "loading": "Resolving dependencies…",
   "missing": "missing",
+  "noDependencies": "This plugin declares no dependencies.",
   "root": "root",
   "title": "Dependency graph",
   "unresolved": "Unresolved",

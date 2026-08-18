@@ -134,3 +134,39 @@ Pi 的 session 文件与 Cognia 的记录属于用户数据，原样保留。
 会话历史经 `pi` 源导入（见
 [session import](../../subsystems/cognia-agent-external-hosting/index)）：活动 leaf 成为主对话，
 其他每个 leaf 导入为 nested conversation，因此在 Pi 的 `/tree` 中仍可达的分支不会被丢弃。
+
+## 配置与扩展包
+
+Pi 的运行时集成是本仓库最深的；而在 2026-08-18 之前，它的配置面是最空的。现在两者都已覆盖，而设计的大部分形状由 Pi 自己的配置模型决定。
+
+**Pi 的文件在哪里。** `$PI_CODING_AGENT_DIR`（缺省回落 `~/.pi/agent`）在 `src-tauri/src/agents/paths.rs` 中解析一次，并在 `lib/agent-roots/index.ts` 中镜像。会话导入、设置导入与包管理器都读这个解析结果 —— 没有任何一处硬编码 `~/.pi`，因此迁移该目录时一切同步跟随。
+
+**导入。** settings、prompt templates（Pi 的 slash command）、subagents 与 memory 文件都走其他 vendor 相同的注册表。Pi 出现在迁移向导中，并配一份 per-artifact 矩阵而非笼统宣称：其中 `mcp` 为 `unsupported`，因为 Pi 核心完全没有 MCP；`memory` 为 `shared`，因为 `AGENTS.md` 是 agent 中立的约定，Cognia 已经在扫描。
+
+### 扩展包
+
+`/plugins` → **Agent 扩展包** 管理 Pi 的 `packages[]`。Pi 模型的四个性质决定了它的形状：
+
+- **没有 `enabled` 字段。** 「已安装但惰性」是 `autoload: false` 加四个资源过滤数组 —— 这正是 `pi config` 写入的形式 —— 因此 Cognia 也写它，两边共用同一个事实源，而不是由 Cognia 维护一份 `pi list` 看不见的私有清单。
+- **两个作用域分开读，绝不合并。** Pi 的通用设置合并对数组是 replace，因此只要某个仓库声明了自己的包，合并视图就会把你其余的包报告为「消失」。（Pi 自己的合并视图访问器 `getPackages()` 在其发行物中零调用者。）`resolvePiPackages` 移植的是 Pi 真正的解析逻辑，包括「`autoload: false` 的 project 条目是 user 条目之上的 *delta*，因此两者都保留」这条规则。
+- **identity 忽略版本。** `npm:x@1.0.0` 与 `npm:x@2.0.0` 是同一个包，所以版本升级是替换条目，而不是新增第二条。
+- **优先用 CLI，降级路径确实更弱。** `pi install` 同时会下载；直接编辑 `settings.json` 只是记录意图，由 Pi 下次启动时解析。`pi` 在 PATH 中时 Cognia 走 CLI，否则标注为降级，而不是宣称两者等价。
+
+**已审阅目录**在仓库内人工整理并带日期（`lib/pi-packages/catalog.ts`），因为没有任何注册中心提供这里真正需要的信息：pi.dev/packages 是 npm 关键字画廊、没有 JSON API，而 npm 只能给出版本与下载量。目录携带重叠组、常驻工具与 token 数、tier，以及该包是否会开启额外模型上下文；散文位于 `i18n/messages/{en,zh-CN}/plugins/agentPackages.json`，使两个 locale 都可被校验。
+
+**两块可视化之所以存在，是因为 Pi 不会给你任何告警。** Pi 既没有包沙箱也没有依赖解析器，因此没有任何机制阻止两个底栏、两个 MCP 适配器或两个权限层同时安装。重叠关系图是唯一会呈现这一点的地方。上下文预算面板刻意把三个维度分开：常驻 tokens 与工具 schema；会开启额外**付费模型上下文**的包（一个 subagent 任务的开销就超过目录中所有 schema 之和）；以及 Cognia 从未审阅过的包 —— 报告为「开销未测量」，这与「没有开销」是不同的论断。
+
+**各包的配置文件没有 schema。** `~/.pi/agent/<name>.json` 是各扩展自己发明的约定，Pi 核心并不定义这些文件。因此编辑器是纯 JSON，保存时做一次解析检查，另附一个按钮插入研究记录下的推荐值（对有记录的包而言）。
+
+### MCP
+
+Pi 核心不带任何 MCP，它只随第三方 `pi-mcp-adapter` 包到来 —— 这就是 Cognia 的适配器注册在 `pi-mcp-adapter` 这个 id 之下的原因；`pi` 仍然指向供导入器使用的 `settings.json`。该适配器读取六层，并让**最后**一层胜出：
+
+```text
+~/.config/mcp/mcp.json  →  ~/.agents/mcp.json  →  ~/.agents/mcp/mcp.json
+  →  <pi agent dir>/mcp.json  →  ./.mcp.json  →  ./.pi/mcp.json   （最高）
+```
+
+这与注册表中其他所有 agent 相反 —— 那些都以用户层为权威。Cognia 只写 `<pi agent dir>/mcp.json`，不碰两个 project 层（它们是受版本控制的仓库文件），并复用既有的 MCP drift banner 提示这一倒置。
+
+`ServerEntry` 没有 `type` 判别字段：传输方式由 `command` / `url` / `socket` 推断。因此 Cognia 不写任何 type 键，并用该适配器自己的 `httpTransport: "sse"` 固定 SSE，使 SSE server 在下一次往返读回时不会退化成 HTTP。

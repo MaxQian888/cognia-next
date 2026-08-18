@@ -16,6 +16,16 @@ import { AgentPackagesPane } from "./agent-packages-pane"
 
 jest.mock("@/hooks/plugins", () => ({ usePiPackages: () => mockResult }))
 
+// The global next/navigation mock returns empty params; override it so the
+// deep-link path (`?piInstall=<spec>`) can be exercised.
+const routerReplace = jest.fn()
+let mockSearchParams = new URLSearchParams()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: routerReplace, push: jest.fn(), prefetch: jest.fn() }),
+  usePathname: () => "/plugins",
+  useSearchParams: () => mockSearchParams,
+}))
+
 jest.mock("@xyflow/react", () => ({
   ReactFlow: () => <div data-testid="rf-canvas" />,
   Background: () => null,
@@ -100,7 +110,10 @@ function setup(options: Options = {}): { mutate: jest.Mock; setEnabled: jest.Moc
   return { mutate, setEnabled }
 }
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  mockSearchParams = new URLSearchParams()
+})
 
 describe("AgentPackagesPane", () => {
   it("shows a loading line and no panels while reading", () => {
@@ -243,6 +256,46 @@ describe("AgentPackagesPane", () => {
     await userEvent.click(screen.getByTestId("pi-preset-apply-starter"))
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled())
     expect(toastMock.success).not.toHaveBeenCalled()
+  })
+
+  /**
+   * ⌘K and the external-agent settings entry both land here with the spec in
+   * the URL. The deep link chooses a package; it must never install one.
+   */
+  it("opens the pre-install gate for a spec staged in the URL", async () => {
+    mockSearchParams = new URLSearchParams(
+      "section=agent-packages&piInstall=npm%3Api-memory%400.4.2"
+    )
+    const { mutate } = setup()
+    expect(screen.getByTestId("pi-install-dialog")).toBeInTheDocument()
+    expect(screen.getByText("npm:pi-memory@0.4.2")).toBeInTheDocument()
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it("ignores a blank piInstall param", () => {
+    mockSearchParams = new URLSearchParams("piInstall=")
+    setup()
+    expect(screen.queryByTestId("pi-install-dialog")).not.toBeInTheDocument()
+  })
+
+  /** Otherwise a reload, or Back into this route, reopens what was dismissed. */
+  it("strips the param and closes when the staged install is cancelled", async () => {
+    mockSearchParams = new URLSearchParams(
+      "section=agent-packages&piInstall=npm%3Api-memory%400.4.2"
+    )
+    setup()
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByTestId("pi-install-dialog")).not.toBeInTheDocument()
+    expect(routerReplace).toHaveBeenCalledWith("/plugins?section=agent-packages", { scroll: false })
+  })
+
+  it("strips the param after a staged install is confirmed", async () => {
+    mockSearchParams = new URLSearchParams("piInstall=npm%3Api-memory%400.4.2")
+    const { mutate } = setup()
+    await userEvent.click(screen.getByTestId("pi-install-confirm"))
+    await waitFor(() => expect(mutate).toHaveBeenCalled())
+    expect(routerReplace).toHaveBeenCalledWith("/plugins", { scroll: false })
+    expect(screen.queryByTestId("pi-install-dialog")).not.toBeInTheDocument()
   })
 
   it("opens the config editor for a package with reviewed defaults", async () => {

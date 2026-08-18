@@ -47,3 +47,42 @@ extension 经 `pi.on("tool_call")` 拦截每一次 Pi 原生工具调用，把�
 - 隔离会在 Cognia 发起的会话中停用用户自己的 Pi 扩展栈。这正是目的：`pi-permission-system` 等社区权限引擎同样 hook `tool_call`，两套引擎拦截同一次调用会产生重复确认与不可预测的阻断。
 - Cognia 从不读取 Pi 的凭证。认证诊断只调用 `pi auth check --provider <id> --json --no-refresh`；`--credentials`、`print-api-key`、`print-bearer-token` 一律禁用。
 - `pi-acp` 作为独立的 experimental 兼容 preset 保留。迁移是显式且可回滚的，原地更新配置以保住 team、scheduler 与 runtime 对 agent id 的引用，且不假定 ACP session id 能映射到 Pi session。
+
+## 修订记录
+
+### 2026-08-18 —— Pi 的配置面与扩展包系统
+
+原 ADR 只覆盖 Pi 的**运行时**。端到端复查这套集成后，缺口的形状很清楚：Pi 既是本仓库运行时集成最深的 vendor，同时也是配置面最空的一个 —— settings、slash command、subagent、skill、MCP、memory 六类导入全无；`VendorRoots` 里没有条目（于是 `PI_CODING_AGENT_DIR` 被忽略、会话路径被硬编码）；迁移向导里没有 Pi；而且**全仓库没有任何代码触及 Pi 的 npm packages**。
+
+本次修订关闭可关闭的那一半，并把其余部分写成显式非目标，而不是留作看起来像疏漏的空白。
+
+#### 有一条约束被收窄，而非撤销
+
+「影响」一节写道：
+
+> Cognia 从不读取 Pi 的凭证。认证诊断只调用 `pi auth check --provider <id> --json --no-refresh`；`--credentials`、`print-api-key`、`print-bearer-token` 一律禁用。
+
+这句话逐字仍然成立，因此上文保留原文而不改写。真正变化的是：Cognia 现在会**读写** `<pi agent dir>/settings.json` —— 这个文件此前从未打开过。边界由「不打开该文件」移动为：
+
+- **键白名单。** `lib/pi-packages/settings-io.ts` 只解析 `packages`，其余键一律不到达调用方：解析对象的其他部分被直接丢弃，不返回、不记日志、不进遥测、不进 support report。
+- **优先让 Pi 自己写。** 变更优先 shell 调用 `pi install` / `pi remove` / `pi update --extension`；只有 `pi` 不在 PATH 时才直接编辑 `settings.json`。
+- **绝不覆盖无法解析的文件。** 若 `settings.json` 存在但解析失败，则拒绝写入，与 `lib/claude/sync.ts` 中的守卫同源。
+- **`auth.json` 与 `models-store.json` 仍然从不打开。** Pi 把凭证放在单独的 mode-600 文件中，完全不在范围内。
+
+`ENV_PREFIX_ALLOWLIST` 中依然没有 `PI_` 前缀。这在原 ADR 中就是刻意为之，现在依然是 —— 它不是需要纠正的疏漏。
+
+#### 现已纳入范围
+
+settings / prompt template / subagent / skill / memory 导入；`VendorRoots.piAgentDir` 与 `piSessionDir`（尊重 `PI_CODING_AGENT_DIR`）；迁移向导中的 Pi，配一份诚实的 per-artifact 支持矩阵；经由第 14 个 adapter `pi-mcp-adapter` 的 MCP（用它自己的 id，因为 Pi 核心不带任何 MCP，那个文件属于第三方包）；以及 `/plugins` → Agent 扩展包 下的包管理器。
+
+#### 显式非目标
+
+1. **生命周期 hooks 保持 `sidecarOnly`。** 这不是 Pi 的限制 —— 所有外部后端一致如此。只为 Pi 改动会让 Pi 在一处「一致性即设计」的地方成为例外。
+2. **rate limits 与 MCP logs 保持 `sidecarOnly` / `agentOwned`。** 同上。
+3. **不支持 per-session `mcpServers`。** Pi 的 RPC 协议没有该参数 —— `mcpServers` 在其整个发行物中零命中。上文记录的 `COGNIA_TOOLHOST_*` 环境通道即是既定权衡；要关闭它需要上游改协议，而不是在这里改。
+4. **Windows 上不支持本地运行 Pi。** 这是强制沙箱的后果，上文已记录。Windows 现在可以**配置** Pi —— 读取其设置、为另一台机器管理其扩展包 —— 但依然无法在本地运行它。
+5. **不做包注册中心集成。** pi.dev/packages 是 npm 关键字画廊，没有 JSON API；npm 本身只能给出版本与下载量，永远给不出重叠组、上下文开销或维护信号 —— 而这些才是目录条目有价值的地方。因此目录在仓库内人工整理并带日期，散文走 i18n，使两个 locale 都可被校验。
+
+#### 已知限制
+
+Cognia 无法读取 Pi 各扩展包自己的配置文件，因此重叠检测只能依据人工整理的目录。具体地：`pi-permission-modes` 自带 Plan 模式，但推荐配置会把 `plan` 从它的 `cycleOrder` 中移除，让独立的 plan 包接管规划。因此目录中没有为它列出 `plan` —— 而若用户在那里重新启用 `plan`，将得不到任何重叠告警。

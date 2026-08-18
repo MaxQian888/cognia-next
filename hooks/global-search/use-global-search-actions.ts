@@ -25,6 +25,7 @@ import { guildFromSession } from "@/lib/claude/guild"
 import { revealActiveWorkbenchPanel } from "@/lib/context-workbench/active-context"
 import type { BuiltinCommandId } from "@/lib/global-search/providers/actions"
 import { clearAllGlobalSearchRecents, recordRecentItem } from "@/lib/global-search/recents"
+import { piPackageInstallHref } from "@/lib/pi-packages/deep-link"
 import type { GlobalSearchAction, GlobalSearchItem } from "@/lib/global-search/types"
 import { getQuickAction, runQuickAction } from "@/lib/plugin/registries/quick-action-registry"
 import { isTauri } from "@/lib/tauri"
@@ -267,6 +268,13 @@ export function useGlobalSearchActions({
           useUIStore.getState().setSelectedGuild({ kind: "dm" })
           return
         }
+        case "install":
+          // Route to the owning surface with the spec pre-selected; it opens
+          // its own pre-install gate. The palette never installs directly —
+          // skipping that gate would skip the overlap and budget warnings,
+          // which for Pi packages are the only warnings there are.
+          router.push(piPackageInstallHref(action.spec))
+          return
         case "callback":
           await action.run()
           return

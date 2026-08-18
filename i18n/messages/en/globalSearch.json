@@ -62,6 +62,7 @@
     "memory": "Memories",
     "message": "Messages",
     "navigation": "Pages",
+    "pi-package": "Pi package",
     "plugin": "Plugins",
     "plugin-action": "Plugin actions",
     "scheduled-task": "Scheduled tasks",
@@ -83,6 +84,11 @@
   "people": {
     "members": "{count, plural, one {# member} other {# members}}",
     "newChatWith": "New chat"
+  },
+  "piPackages": {
+    "avoid": "Not recommended",
+    "cost": "{tools} tools · {tokens} tokens",
+    "free": "No always-on cost"
   },
   "placeholder": "Search or jump to… (> commands, @ people)",
   "placeholders": {
@@ -123,6 +129,7 @@
     "before": "before:2026-08-16 — older than",
     "from": "from:me · from:assistant — message author",
     "in": "in:messages · in:skills — one kind only",
+    "inPi": "in:pi — Pi agent packages",
     "is": "is:archived — include archived conversations",
     "prefixes": "> commands · @ people",
     "title": "title:word — conversation titles only",

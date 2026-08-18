@@ -14,6 +14,7 @@ import {
   LayoutTemplateIcon,
   MessageSquareIcon,
   MessageSquareTextIcon,
+  PackageIcon,
   PanelRightIcon,
   PlugIcon,
   PuzzleIcon,
@@ -47,6 +48,7 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   "mcp-server": ServerCogIcon,
   "inbox-conversation": InboxIcon,
   "workbench-panel": PanelRightIcon,
+  "pi-package": PackageIcon,
 }
 
 export function kindIcon(kind: GlobalSearchKind): LucideIcon {

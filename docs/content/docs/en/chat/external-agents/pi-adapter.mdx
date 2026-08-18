@@ -158,3 +158,75 @@ Session history imports through the `pi` source in
 [session import](../../subsystems/cognia-agent-external-hosting/index): the active leaf becomes the
 main conversation and every other leaf imports as a nested conversation, so branches still reachable
 in Pi's `/tree` are not discarded.
+
+## Configuration and packages
+
+Pi's runtime integration is the deepest in the repo; until 2026-08-18 its configuration surface was
+the emptiest. Both are now covered, and the shape of Pi's own settings drives most of the design.
+
+**Where Pi's files are.** `$PI_CODING_AGENT_DIR` (falling back to `~/.pi/agent`) is resolved once in
+`src-tauri/src/agents/paths.rs` and mirrored in `lib/agent-roots/index.ts`. Session import, the
+settings importer and the package manager all read that resolved path — none of them hard-codes
+`~/.pi`, so relocating the directory moves everything together.
+
+**Importing.** Settings, prompt templates (Pi's slash commands), subagents and memory files import
+through the same registries every other vendor uses. Pi appears in the migration wizard with a
+per-artifact matrix rather than a blanket claim: `mcp` is `unsupported` there because Pi's core has
+no MCP at all, and `memory` is `shared` because `AGENTS.md` is an agent-neutral convention Cognia
+already scans.
+
+### Packages
+
+`/plugins` → **Agent packages** manages Pi's `packages[]`. Four properties of Pi's model shape it:
+
+- **There is no `enabled` field.** "Installed but inert" is `autoload: false` plus the four resource
+  filter arrays — exactly what `pi config` writes — so Cognia writes that and the two agree on one
+  source of truth instead of Cognia keeping a private list `pi list` cannot see.
+- **The two scopes are read separately, never merged.** Pi's generic settings merge treats arrays as
+  replace, so a merged view reports your other packages as gone the moment a repo declares one of
+  its own. (Pi's own merged-view accessor `getPackages()` has zero callers in its distribution.)
+  `resolvePiPackages` ports Pi's real resolution instead, including the rule that an
+  `autoload: false` project entry is a *delta* over the user entry, so both survive.
+- **Identity ignores the version.** `npm:x@1.0.0` and `npm:x@2.0.0` are the same package, so a
+  version bump replaces the entry rather than adding a second one.
+- **The CLI is preferred, and the fallback is weaker.** `pi install` also downloads; editing
+  `settings.json` only records intent, which Pi resolves on next launch. Cognia takes the CLI path
+  when `pi` is on PATH and labels the other one as degraded rather than equivalent.
+
+**The reviewed catalog** is curated in-repo (`lib/pi-packages/catalog.ts`) and dated, because no
+registry exposes what matters here: pi.dev/packages is an npm-keyword gallery with no JSON API, and
+npm can only report versions and download counts. The catalog carries overlap groups, always-on tool
+and token counts, tier, and whether a package can spawn extra model contexts; the prose lives in
+`i18n/messages/{en,zh-CN}/plugins/agentPackages.json` so both locales stay checkable.
+
+**Two visualisations exist because Pi will not warn you.** Pi has no package sandbox and no
+dependency resolver, so nothing stops two footers, two MCP adapters or two permission layers from
+being installed together. The overlap graph is the only place that surfaces it. The context-budget
+panel keeps three dimensions apart on purpose: always-on tokens and tool schemas, packages that can
+start extra *paid model contexts* (one subagent task outweighs every schema in the catalog
+combined), and packages Cognia has never reviewed — reported as cost-unmeasured, which is a
+different claim from free.
+
+**Per-package config files have no schema.** `~/.pi/agent/<name>.json` is a convention each
+extension invented; Pi's core does not define these files. The editor is therefore plain JSON with a
+parse check on save, plus a button that inserts the reviewed defaults where the research recorded
+some.
+
+### MCP
+
+Pi's core ships no MCP. It arrives only with the third-party `pi-mcp-adapter` package, which is why
+Cognia's adapter is registered under the id `pi-mcp-adapter` — `pi` still addresses `settings.json`
+for the importers. That adapter reads six layers and lets the **last** one win:
+
+```text
+~/.config/mcp/mcp.json  →  ~/.agents/mcp.json  →  ~/.agents/mcp/mcp.json
+  →  <pi agent dir>/mcp.json  →  ./.mcp.json  →  ./.pi/mcp.json   (highest)
+```
+
+That is the inverse of every other agent in the registry, where the user scope is authoritative.
+Cognia writes only `<pi agent dir>/mcp.json` and leaves the two project layers alone — they are
+version-controlled repo files — surfacing the inversion through the existing MCP drift banner.
+
+`ServerEntry` has no `type` discriminator: transport is inferred from `command` vs `url` vs
+`socket`. Cognia therefore writes no type key, and pins SSE with the adapter's own
+`httpTransport: "sse"` so an SSE server does not read back as HTTP on the next round trip.

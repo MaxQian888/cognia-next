@@ -84,6 +84,8 @@ const IN_ALIASES: Readonly<Record<string, GlobalSearchScope | GlobalSearchKind>>
   inbox: "inbox-conversation",
   panels: "workbench-panel",
   panel: "workbench-panel",
+  pi: "pi-package",
+  "pi-packages": "pi-package",
 }
 
 function isScope(value: string): value is GlobalSearchScope {

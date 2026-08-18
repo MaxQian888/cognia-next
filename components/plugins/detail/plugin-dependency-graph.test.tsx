@@ -38,7 +38,10 @@ describe("PluginDependencyGraph", () => {
       }),
     })
     render(<PluginDependencyGraph manifest={{ id: "alpha" }} />)
-    await waitFor(() => expect(screen.getByText("alpha")).toBeInTheDocument())
+    // A lone root is not a graph — the canvas is replaced by a plain sentence
+    // rather than drawing a single node in an empty field.
+    await waitFor(() => expect(screen.getByTestId("plugin-dependency-none")).toBeInTheDocument())
+    expect(screen.queryByTestId("plugin-dependency-canvas")).not.toBeInTheDocument()
   })
 
   it("renders resolved + missing dependencies and the unresolved badge", async () => {
@@ -69,9 +72,54 @@ describe("PluginDependencyGraph", () => {
         }}
       />
     )
-    await waitFor(() => expect(screen.getByText("@cognia/core")).toBeInTheDocument())
-    expect(screen.getByText("@external/lib")).toBeInTheDocument()
+    // Each id now appears twice: once as a graph node, once in the verdict
+    // list below it, which is where the installed/marketplace/missing source
+    // stays readable.
+    await waitFor(() => expect(screen.getAllByText("@cognia/core").length).toBeGreaterThan(0))
+    expect(screen.getAllByText("@external/lib").length).toBeGreaterThan(0)
     expect(screen.getByText("unresolved")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-dependency-canvas")).toBeInTheDocument()
+  })
+
+  it("draws a node for the root and for every dependency", async () => {
+    __resetPluginDependencyResolverForTests({
+      setInstalledPlugins: jest.fn(),
+      resolve: async () => ({
+        success: true,
+        resolved: [
+          { id: "a", version: "1.0.0", constraint: "^1", satisfies: true, source: "installed" },
+          { id: "b", version: "2.0.0", constraint: "^2", satisfies: true, source: "installed" },
+        ],
+        missing: [],
+        conflicts: [],
+        installOrder: ["a", "b"],
+        warnings: [],
+      }),
+    })
+    render(<PluginDependencyGraph manifest={{ id: "alpha" }} />)
+    await waitFor(() => expect(screen.getByTestId("rf__node-alpha")).toBeInTheDocument())
+    expect(screen.getByTestId("rf__node-a")).toBeInTheDocument()
+    expect(screen.getByTestId("rf__node-b")).toBeInTheDocument()
+  })
+
+  /** The arrangement carries the meaning, so a user must not scramble it. */
+  it("renders the graph as non-draggable", async () => {
+    __resetPluginDependencyResolverForTests({
+      setInstalledPlugins: jest.fn(),
+      resolve: async () => ({
+        success: true,
+        resolved: [
+          { id: "a", version: "1.0.0", constraint: "^1", satisfies: true, source: "installed" },
+        ],
+        missing: [],
+        conflicts: [],
+        installOrder: ["a"],
+        warnings: [],
+      }),
+    })
+    render(<PluginDependencyGraph manifest={{ id: "alpha" }} />)
+    await waitFor(() => expect(screen.getByTestId("rf__node-a")).toBeInTheDocument())
+    expect(screen.getByTestId("rf__node-a").className).not.toContain("draggable")
   })
 
   it("surfaces conflicts with their reason text", async () => {

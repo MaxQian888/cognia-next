@@ -342,6 +342,7 @@
     "piExtensionPolicyLabel": "Extension policy",
     "piExtensionPolicyTrustedProject": "Also trust project-local files",
     "piExtensionPolicyTrustedProjectWarning": "Project-local Pi files can execute arbitrary code from the repository you open. Only use this for repositories you trust.",
+    "piManagePackages": "Manage Pi packages",
     "piMigration": {
       "blocker": {
         "command_missing": "Pi is not installed, or not on PATH.",
