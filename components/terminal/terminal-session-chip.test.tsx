@@ -170,4 +170,50 @@ describe("TerminalSessionChip", () => {
     })
     expect(screen.getByTestId("terminal-session-chip")).toHaveAttribute("data-severity", "info")
   })
+
+  it("surfaces remote participants as a state and lists them in the popover (ADR-0133)", () => {
+    registry.info = sessionInfo({
+      currentController: "desktop",
+      participants: [
+        { clientId: "desktop", deviceId: null, local: true, role: "controller" },
+        { clientId: "companion:dev-1", deviceId: "dev-1", local: false, role: "viewer" },
+      ],
+    })
+    renderChip()
+    fireEvent.click(screen.getByTestId("terminal-session-chip"))
+    const details = screen.getByTestId("terminal-session-chip-details")
+    expect(details.querySelector('[data-state-key="shared"]')).toHaveTextContent("shared:1")
+    const roster = screen.getByTestId("terminal-chip-participants")
+    expect(roster.querySelectorAll("li")).toHaveLength(1)
+    expect(roster.querySelector('[data-client-id="companion:dev-1"]')).toHaveTextContent("dev-1")
+    expect(roster).toHaveTextContent("participantViewer")
+
+    // The lease moving to the phone re-renders the roster and the release button
+    // still keys off the roster's controller.
+    registry.info = sessionInfo({
+      currentController: "companion:dev-1",
+      participants: [
+        { clientId: "desktop", deviceId: null, local: true, role: "viewer" },
+        { clientId: "companion:dev-1", deviceId: "dev-1", local: false, role: "controller" },
+      ],
+    })
+    act(() => {
+      registry.listeners.forEach((listener) => listener())
+    })
+    expect(screen.getByTestId("terminal-chip-participants")).toHaveTextContent(
+      "participantController"
+    )
+  })
+
+  it("does not report sharing when only the desktop is attached or the host has no roster", () => {
+    registry.info = sessionInfo({
+      participants: [{ clientId: "desktop", deviceId: null, local: true, role: "controller" }],
+    })
+    renderChip()
+    fireEvent.click(screen.getByTestId("terminal-session-chip"))
+    expect(screen.queryByTestId("terminal-chip-participants")).toBeNull()
+    expect(
+      screen.getByTestId("terminal-session-chip-details").querySelector('[data-state-key="shared"]')
+    ).toBeNull()
+  })
 })

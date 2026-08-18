@@ -80,6 +80,24 @@ describe("parseLarkEventEnvelope", () => {
     })
   })
 
+  describe("reply linkage (parent_id → replyTo)", () => {
+    it("surfaces parent_id as replyTo with an empty snippet, and undefined without one", () => {
+      const withParent = structuredClone(dmTextFixture) as LarkEventEnvelope & {
+        event: { message: { parent_id?: string; root_id?: string } }
+      }
+      withParent.event.message.parent_id = "om_parent_001"
+      withParent.event.message.root_id = "om_root_001"
+      const replied = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, withParent)
+      expect(replied!.replyTo).toEqual({ messageId: "om_parent_001", snippet: "" })
+      const plain = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        dmTextFixture as LarkEventEnvelope
+      )
+      expect(plain!.replyTo).toBeUndefined()
+    })
+  })
+
   describe("reply-thread.json — message inside a thread", () => {
     const envelope = replyThreadFixture as LarkEventEnvelope
     const result = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)

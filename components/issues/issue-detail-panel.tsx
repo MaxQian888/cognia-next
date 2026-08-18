@@ -18,10 +18,13 @@ import {
   CircleSlashIcon,
   ExternalLinkIcon,
   MessageSquarePlusIcon,
+  PlayIcon,
+  SquareIcon,
   TagIcon,
   XIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 
 import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
@@ -30,12 +33,18 @@ import { Separator } from "@/components/ui/separator"
 import { useClientLiveQuery } from "@/hooks/data"
 import { parseGithubMirrorId } from "@/lib/db/github-issue-mirror"
 import { listIssueEvents } from "@/lib/db/issue-events"
+import { listIssueRuns } from "@/lib/db/issue-runs"
+import { setIssueAssignee } from "@/lib/db/issues"
 import { actorKey } from "@/lib/issues/board-model"
+import { cancelIssueRun } from "@/lib/issues/run/registry"
+import { isActiveIssueRunStatus, type IssueActor, type IssueRun } from "@/types/issues"
 import { parseUnifiedIssueId } from "@/types/issues/unified"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
+import { AssigneePicker } from "./assignee-picker"
 import { GithubWritebackDialog, type GithubWritebackKind } from "./github-writeback-dialog"
 import { IssuePriorityIcon, IssueStatusIcon } from "./issue-glyphs"
+import { RunIssueDialog } from "./run-issue-dialog"
 
 export interface IssueDetailPanelProps {
   item: UnifiedIssueItem
@@ -55,6 +64,7 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps) {
   const t = useTranslations("issues")
   const [writeback, setWriteback] = useState<GithubWritebackKind | null>(null)
+  const [runOpen, setRunOpen] = useState(false)
 
   // Only local rows have an activity trail in our own table.
   const parsed = parseUnifiedIssueId(item.unifiedId)
@@ -67,6 +77,32 @@ export function IssueDetailPanel({
     [localId],
     []
   )
+  // Runs are issue-side rows (`issueRuns`), so the same live query covers a
+  // dispatch from the IM card or a settlement from the engine watcher.
+  const runs = useClientLiveQuery(
+    () => (localId ? listIssueRuns({ issueId: localId }) : Promise.resolve([])),
+    [localId],
+    [] as IssueRun[]
+  )
+  const activeRun = (runs ?? []).find((run) => isActiveIssueRunStatus(run.status))
+
+  async function handleAssign(actor: IssueActor | null) {
+    if (!localId) return
+    try {
+      await setIssueAssignee(localId, actor, { kind: "human" })
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  async function handleCancelRun(runId: string) {
+    try {
+      await cancelIssueRun(runId)
+      toast.success(t("run.cancelled"))
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
 
   const labels = item.labelIds
     .map((id) => labelsById?.get(id))
@@ -125,14 +161,22 @@ export function IssueDetailPanel({
             </span>
           </PropertyRow>
           <PropertyRow label={t("detail.assignee")}>
-            <span
-              className={!item.assignee ? "italic opacity-70" : undefined}
-              data-testid={`issue-detail-assignee-${actorKey(item.assignee) ?? "none"}`}
-            >
-              {item.assignee
-                ? (item.assignee.label ?? t(`actor.${item.assignee.kind}`))
-                : t("actor.unassigned")}
-            </span>
+            {localId && item.capabilities.canAssign ? (
+              <AssigneePicker
+                value={item.assignee ?? null}
+                onChange={handleAssign}
+                data-testid="issue-detail-assignee-picker"
+              />
+            ) : (
+              <span
+                className={!item.assignee ? "italic opacity-70" : undefined}
+                data-testid={`issue-detail-assignee-${actorKey(item.assignee) ?? "none"}`}
+              >
+                {item.assignee
+                  ? (item.assignee.label ?? t(`actor.${item.assignee.kind}`))
+                  : t("actor.unassigned")}
+              </span>
+            )}
           </PropertyRow>
           {item.issueProjectId ? (
             <PropertyRow label={t("detail.project")}>
@@ -233,6 +277,104 @@ export function IssueDetailPanel({
                 kind={writeback}
                 target={githubTarget}
                 onCompleted={onWritebackCompleted}
+              />
+            ) : null}
+          </>
+        ) : null}
+
+        {localId && item.capabilities.canRun ? (
+          <>
+            <Separator />
+            <section className="flex flex-col gap-2" data-testid="issue-detail-runs">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("run.section")}
+                </h3>
+                <span className="flex-1" />
+                {activeRun ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleCancelRun(activeRun.id)}
+                    data-testid="issue-run-cancel"
+                  >
+                    <SquareIcon className="size-3.5" />
+                    {t("run.cancel")}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      item.statusCategory === "completed" || item.statusCategory === "canceled"
+                    }
+                    onClick={() => setRunOpen(true)}
+                    data-testid="issue-run-trigger"
+                  >
+                    <PlayIcon className="size-3.5" />
+                    {t("run.trigger")}
+                  </Button>
+                )}
+              </div>
+              {/*
+                The runtime owns `in_progress` while a run is active; the human
+                gets the issue back at `in_review`. Saying so here is what makes
+                the greyed-out drag on the board explicable.
+              */}
+              <p className="text-xs text-muted-foreground">
+                {activeRun ? t("run.activeHint") : t("run.sectionHint")}
+              </p>
+              {(runs ?? []).length > 0 ? (
+                <ol className="flex flex-col gap-2" data-testid="issue-run-list">
+                  {(runs ?? []).map((run) => (
+                    <li
+                      key={run.id}
+                      className="flex flex-col gap-1 rounded-md border px-2 py-1.5 text-xs"
+                      data-testid={`issue-run-${run.status}`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Badge
+                          variant={run.status === "failed" ? "destructive" : "secondary"}
+                          className="h-4 px-1 text-[10px]"
+                        >
+                          {t(`run.status.${run.status}`)}
+                        </Badge>
+                        <span className="text-muted-foreground">
+                          {t(`run.adapter.${run.adapterId}.name`)}
+                        </span>
+                      </span>
+                      {run.summary ? <p className="line-clamp-3">{run.summary}</p> : null}
+                      {run.error ? <p className="text-destructive">{run.error}</p> : null}
+                      {run.artifacts.length > 0 ? (
+                        <span className="flex flex-wrap gap-2">
+                          {run.artifacts.map((artifact) => (
+                            <a
+                              key={artifact.href}
+                              href={artifact.href}
+                              target={artifact.href.startsWith("/") ? undefined : "_blank"}
+                              rel="noreferrer noopener"
+                              className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                              data-testid="issue-run-artifact"
+                            >
+                              <ExternalLinkIcon className="size-3" />
+                              {artifact.label}
+                            </a>
+                          ))}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+            </section>
+            {runOpen ? (
+              <RunIssueDialog
+                open
+                onOpenChange={(next) => {
+                  if (!next) setRunOpen(false)
+                }}
+                issueId={localId}
+                identifier={item.identifier}
               />
             ) : null}
           </>

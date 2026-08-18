@@ -1392,8 +1392,11 @@ export interface AgentTeam {
   /**
    * Owning workspace id — Workspace isolation (Dexie v86). Live teams are
    * per-project; reusable team *templates* stay profile-shared. Stamped from
-   * the active project on create. Undefined on pre-isolation teams, which are
-   * grandfathered (visible in every workspace) until re-saved.
+   * the active project on create. Optional only for type-compat with rows
+   * mid-flight: agent-team-store persist v7 backfills every persisted
+   * pre-isolation team to `DEFAULT_PROJECT_ID`, and `updateTeam` stamps a
+   * missing value on the next save, so at runtime a workspace filter may treat
+   * an absent value as "not this workspace" — nothing is grandfathered.
    */
   projectId?: string
   /** Team name */

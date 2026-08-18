@@ -9,6 +9,7 @@ import type { GlobalSearchProvider } from "../types"
 import { actionsProvider } from "./actions"
 import { pluginActionsProvider, workbenchPanelsProvider } from "./host"
 import { inboxContactsProvider, inboxProvider } from "./inbox"
+import { issuesProvider } from "./issues"
 import { memoriesProvider, skillsProvider, templatesProvider, workflowsProvider } from "./library"
 import { createMessagesProvider, type MessagesProviderDeps } from "./messages"
 import { navigationProvider } from "./navigation"
@@ -51,6 +52,7 @@ export function builtinGlobalSearchProviders(
     // Desktop-only in effect: the provider returns [] outside the Tauri shell,
     // where Pi's config file and CLI do not exist.
     piPackagesProvider,
+    issuesProvider,
   ]
 }
 

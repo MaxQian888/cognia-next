@@ -44,9 +44,19 @@ TS bridge `lib/ai/agent/external/agent-hooks.ts`, and for the **goal judge** and
 | `PreCompact` | CLI `App` `compact` effect | just before the context window is trimmed |
 | `CwdChanged` | CLI `App` `addDir` effect | after `/add-dir` changes the agent's readable roots |
 
+## Worktree lifecycle — now firing (ADR-0111 decision 9)
+
+| Event | Source | Payload |
+|---|---|---|
+| `WorktreeCreate` | managed Registry (`crates/cognia-task-workspace/src/lifecycle.rs`, sink installed in `src-tauri/src/task_workspace.rs`) after a worktree is locked and Active; TS `lib/git/commands.ts:gitWorktreeAdd` (agent-team allocator, source-control panel) | `worktree_path`, `workspace_root`, `branch`, `base_ref` (TS) / `base` (Rust), `owner_type` (`session`/`team`/`user`/…), `owner_ref`, `source` (`managed-registry` / `agent-team-allocator` / `worktree-panel` / `git-command`) |
+| `WorktreeRemove` | Registry discard/prune; TS `gitWorktreeRemove` | same, plus `reason` (`discard`, `prune`, `cleanup`, `user`, `remove`) |
+
+Both are session-scoped observational events (`block` ignored). `session_id`
+is the owning chat session for session-owned worktrees and empty for
+user-driven ones. Never fired for materialized shadows of non-Git roots.
+
 ## Still dormant (no trigger source — do NOT wire a hook here)
 
-`WorktreeCreate`, `WorktreeRemove` (no worktree command in the CLI yet),
 `FileChanged`, `Elicitation`, `ElicitationResult`, `UserPromptExpansion`,
 `TeammateIdle`. These round-trip through settings but never fire; the settings
 UI badges them "no trigger source yet". Add a source before relying on them.

@@ -6,6 +6,7 @@
 
 mod bundle;
 mod ledger;
+mod lifecycle;
 mod registry;
 mod resource;
 mod sensitive;
@@ -21,6 +22,9 @@ mod worker_cli;
 pub use bundle::{
     execute_bundle_apply, plan_bundle_apply, plan_bundle_composition, ApplyStep, BundleApplier,
     BundleApplyPlan, BundleError, PhysicalLeaseGroup, RootRequest,
+};
+pub use lifecycle::{
+    WorktreeLifecycleEmitter, WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 pub use registry::{
     compose_lock_reason, parse_lock_reason, plan_directory_reclaim, plan_reconcile,

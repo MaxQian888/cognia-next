@@ -2,8 +2,8 @@
  * E2B-backed workspace backend for Marketplace integrations.
  *
  * The plugin registers this implementation through
- * `ctx.workspace.registerBackend(...)`. A deprecated `setE2BBackend` shim
- * remains for older hosts. Integrations that select `worktreeMode: "e2b"`
+ * `ctx.workspace.registerBackend(...)` (the former `setE2BBackend` shim has
+ * been removed). Integrations that select `worktreeMode: "e2b"`
  * run their AI loop inside a fresh Firecracker microVM instead of writing to
  * the host filesystem.
  *

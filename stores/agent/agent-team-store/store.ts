@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import { registerProjectBucketPurger } from "@/lib/project/project-bucket-purge"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
+import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import { initialState } from "./initial-state"
 import { createAgentTeamActionsSlice } from "./slices/actions.slice"
 import type { AgentTeamState } from "./types"
@@ -52,13 +53,24 @@ import type { AgentTeamState } from "./types"
  *     persisting the project Editor tab's open files / active file / selected
  *     root / layout. Older snapshots have none — default to `{}`.
  *
+ * v6 → v7 (workspace isolation backfill):
+ *   - `teams[*].projectId` is REQUIRED to be set. Teams persisted before
+ *     workspace isolation (Dexie v86) carried no `projectId` and were
+ *     "grandfathered" into every workspace by a lenient filter in
+ *     `components/agent/mode/mode-selector.tsx` — which also meant a workspace
+ *     purge never removed them. v7 stamps every project-less team with
+ *     `DEFAULT_PROJECT_ID` (`lib/db/project-defaults.ts`, a fixed id, so the
+ *     backfill is idempotent and needs no async lookup) and the lenient filter
+ *     is gone. The active workspace is deliberately NOT used: at migrate time
+ *     on a cold boot it is `null`.
+ *
  * Additive optional fields (NO version bump): `AgentTeam.dispatchDecision`
  * and `AgentTeam.externalPickup` (dispatch-completion work) stay `undefined`
  * on older rows; every consumer guards for absence, so no migration branch
  * is needed. `externalPickup` Dates round-trip as ISO strings through the
  * JSON storage — same as `routingAssessment.createdAt`.
  */
-const PERSIST_VERSION = 6
+const PERSIST_VERSION = 7
 const AGENT_TEAM_STORAGE_KEY = "cognia-agent-teams"
 
 function agentTeamAccountStorageKey(accountId: string): string {
@@ -202,7 +214,30 @@ export function migrateAgentTeamPersisted(
     raw.editorSession = {}
   }
 
+  // v7: every team belongs to a workspace. Backfill the pre-isolation rows.
+  backfillTeamProjectIds(raw.teams)
+
   return raw as unknown as AgentTeamState
+}
+
+/**
+ * Stamp `DEFAULT_PROJECT_ID` on every team that carries no `projectId`.
+ * Idempotent; mutates in place; ignores non-object rows. Applied by `migrate`
+ * (v6 → v7) AND by `activateAgentTeamAccountStorage`, whose read path bypasses
+ * `migrate` — an account switch onto an old snapshot must not resurrect
+ * workspace-less teams.
+ */
+export function backfillTeamProjectIds(teams: Record<string, unknown> | undefined): number {
+  if (!teams || typeof teams !== "object") return 0
+  let stamped = 0
+  for (const team of Object.values(teams)) {
+    if (!team || typeof team !== "object") continue
+    const row = team as { projectId?: unknown }
+    if (typeof row.projectId === "string" && row.projectId.length > 0) continue
+    row.projectId = DEFAULT_PROJECT_ID
+    stamped += 1
+  }
+  return stamped
 }
 
 /**
@@ -263,6 +298,7 @@ export function activateAgentTeamAccountStorage(accountId: string): void {
   // statuses here too — an account switch must not surface a phantom run.
   const restored = readAgentTeamPersistedState(storageKey)
   resetStaleTeamStatuses(restored.teams)
+  backfillTeamProjectIds(restored.teams)
   useAgentTeamStore.setState({
     ...initialState,
     ...restored,

@@ -49,49 +49,16 @@ export interface E2BBackend {
   remove(handle: WorkspaceHandle): Promise<boolean>
 }
 
-// Legacy singleton state is kept as a thin shim over the new
-// `workspace-backend-registry`. The registry is the source of truth;
-// `setE2BBackend` / `getE2BBackend` exist for backwards compatibility
-// with `plugins/e2b-sandbox/src/index.ts:21-22` and will be removed
-// after that plugin migrates to `ctx.workspace.registerBackend(...)`.
-// See ADR-0026 §2 §D.
-import {
-  registerWorkspaceBackend,
-  unregisterWorkspaceBackend,
-  getWorkspaceBackend,
-} from "./workspace-backend-registry"
+// The e2b backend is contributed by `plugins/e2b-sandbox` through
+// `ctx.workspace.registerBackend({ id: "e2b" })` (ADR-0026 §2 §D), which
+// namespaces it as `cognia-e2b-sandbox:e2b` in the shared registry. The host
+// dispatches by kind, so it never needs the plugin id.
+import { resolveWorkspaceBackendByKind } from "./workspace-backend-registry"
 
-const LEGACY_E2B_BACKEND_ID = "e2b"
+const E2B_BACKEND_KIND: WorkspaceBackend = "e2b"
 
-/**
- * @deprecated Use `ctx.workspace.registerBackend()` from a plugin context
- * or `registerWorkspaceBackend()` directly. This shim writes into the
- * shared `workspace-backend-registry` under the id `"e2b"` so the legacy
- * `getE2BBackend()` accessor (and the `cloneToWorkspace({ backend: "e2b" })`
- * dispatch below) keep working. ADR-0026 §2 §D migration path.
- */
-export function setE2BBackend(b: E2BBackend | null): void {
-  // Reset first so set(null) reliably clears and set(impl) is idempotent.
-  unregisterWorkspaceBackend(LEGACY_E2B_BACKEND_ID)
-  if (b === null) return
-  registerWorkspaceBackend({
-    backendId: LEGACY_E2B_BACKEND_ID,
-    pluginId: "host", // legacy callers don't carry plugin identity
-    label: "e2b Firecracker",
-    description: "Legacy setE2BBackend shim — migrate to ctx.workspace.registerBackend",
-    backend: b,
-  })
-}
-
-/**
- * @deprecated Read directly from the registry via
- * `getWorkspaceBackend(id)` if you need to dispatch by id. This wrapper
- * is kept for `cloneToWorkspace({ backend: "e2b" })` which still uses
- * the string-union backend selector.
- */
-export function getE2BBackend(): E2BBackend | null {
-  return getWorkspaceBackend(LEGACY_E2B_BACKEND_ID) ?? null
-}
+const E2B_NOT_REGISTERED_MESSAGE =
+  "e2b workspace backend not registered. Install the e2b-sandbox plugin and enable it."
 
 export interface CloneOptions {
   repoFullName: string
@@ -115,13 +82,9 @@ export interface CloneOptions {
  * the registered backend or throws if none is wired up yet.
  */
 export async function cloneToWorkspace(opts: CloneOptions): Promise<WorkspaceHandle> {
-  if (opts.backend === "e2b") {
-    const backend = getWorkspaceBackend(LEGACY_E2B_BACKEND_ID)
-    if (!backend) {
-      throw new Error(
-        "e2b workspace backend not registered. Install the e2b-sandbox plugin and enable it."
-      )
-    }
+  if (opts.backend === E2B_BACKEND_KIND) {
+    const backend = resolveWorkspaceBackendByKind(E2B_BACKEND_KIND)
+    if (!backend) throw new Error(E2B_NOT_REGISTERED_MESSAGE)
     return backend.clone({
       repoFullName: opts.repoFullName,
       branch: opts.branch,
@@ -173,13 +136,9 @@ export interface CommitAndPushOptions {
  * Returns the commit SHA.
  */
 export async function commitAndPush(opts: CommitAndPushOptions): Promise<string> {
-  if (opts.workspace.backend === "e2b") {
-    const backend = getWorkspaceBackend(LEGACY_E2B_BACKEND_ID)
-    if (!backend) {
-      throw new Error(
-        "e2b workspace backend not registered. Install the e2b-sandbox plugin and enable it."
-      )
-    }
+  if (opts.workspace.backend === E2B_BACKEND_KIND) {
+    const backend = resolveWorkspaceBackendByKind(E2B_BACKEND_KIND)
+    if (!backend) throw new Error(E2B_NOT_REGISTERED_MESSAGE)
     return backend.commitAndPush({
       workspace: opts.workspace,
       message: opts.message,
@@ -207,8 +166,8 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
  * doesn't abort the GC pass.
  */
 export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean> {
-  if (handle.backend === "e2b") {
-    const backend = getWorkspaceBackend(LEGACY_E2B_BACKEND_ID)
+  if (handle.backend === E2B_BACKEND_KIND) {
+    const backend = resolveWorkspaceBackendByKind(E2B_BACKEND_KIND)
     if (!backend) return false
     try {
       return await backend.remove(handle)

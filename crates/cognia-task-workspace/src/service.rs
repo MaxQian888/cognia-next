@@ -52,6 +52,8 @@ pub struct TaskWorkspaceService {
     upload_owners: Mutex<HashMap<String, UploadOwner>>,
     origin_hints: Mutex<HashMap<(String, String), ContributionOrigin>>,
     watchers: WatchManager,
+    /// `WorktreeCreate` / `WorktreeRemove` producer (ADR-0111 decision 9).
+    lifecycle: crate::lifecycle::WorktreeLifecycleEmitter,
 }
 
 #[derive(Clone)]
@@ -84,6 +86,7 @@ impl TaskWorkspaceService {
             upload_owners: Mutex::new(HashMap::new()),
             origin_hints: Mutex::new(HashMap::new()),
             watchers: WatchManager::new(),
+            lifecycle: crate::lifecycle::WorktreeLifecycleEmitter::default(),
         };
         service.recover_incomplete_runs()?;
         Ok(service)
@@ -328,6 +331,14 @@ impl TaskWorkspaceService {
                 self.discard_managed_workspace(&record, now);
                 return Err(error.to_string());
             }
+            // The worktree exists, is locked, and is Active: this is the
+            // `WorktreeCreate` moment ADR-0111 decision 9 names.
+            self.lifecycle.emit(
+                crate::lifecycle::WorktreeLifecycleKind::Created,
+                &record,
+                Some(&input.session_id),
+                None,
+            );
             (
                 baseline,
                 blobs,
@@ -510,6 +521,15 @@ impl TaskWorkspaceService {
     }
 
     fn discard_managed_workspace(&self, record: &WorkspaceRecord, now: i64) {
+        // Only an Active worktree was ever announced as created; a discard
+        // during provisioning rollback has no `WorktreeCreate` to pair with.
+        let was_active = self
+            .registry
+            .get(&record.workspace_id)
+            .ok()
+            .flatten()
+            .map(|current| current.state == WorkspaceState::Active)
+            .unwrap_or(false);
         let transitioned = self.registry.transition(
             &record.workspace_id,
             record.owner_type,
@@ -519,9 +539,17 @@ impl TaskWorkspaceService {
         );
         if transitioned.is_ok() {
             let reason = crate::registry::compose_lock_reason(&record.workspace_id);
-            let _ = self
+            let removed = self
                 .registry
                 .remove_workspace(&record.workspace_id, &reason);
+            if removed.is_ok() && was_active {
+                self.lifecycle.emit(
+                    crate::lifecycle::WorktreeLifecycleKind::Removed,
+                    record,
+                    None,
+                    Some("discard"),
+                );
+            }
         }
     }
 
@@ -871,6 +899,12 @@ impl TaskWorkspaceService {
                     self.registry
                         .remove_workspace(workspace_id, &reason)
                         .map_err(|error| error.to_string())?;
+                    self.lifecycle.emit(
+                        crate::lifecycle::WorktreeLifecycleKind::Removed,
+                        &record,
+                        None,
+                        Some("prune"),
+                    );
                     continue;
                 }
                 let execution_root = Path::new(&run.execution_root);
@@ -1305,6 +1339,20 @@ impl TaskWorkspaceService {
     pub fn abort_resource_upload(&self, handle_id: &str) -> Result<(), String> {
         self.upload_owners.lock().remove(handle_id);
         self.transfers.abort_upload(handle_id)
+    }
+
+    /// Install (or clear) the sink that receives `WorktreeCreate` /
+    /// `WorktreeRemove` lifecycle events. The host installs it once at boot;
+    /// tests install a recorder.
+    pub fn set_worktree_lifecycle_sink(
+        &self,
+        sink: Option<Arc<dyn crate::lifecycle::WorktreeLifecycleSink>>,
+    ) {
+        self.lifecycle.set_sink(sink);
+    }
+
+    pub fn has_worktree_lifecycle_sink(&self) -> bool {
+        self.lifecycle.has_sink()
     }
 
     pub fn watch_run(
@@ -2741,6 +2789,105 @@ mod tests {
             fs::read_to_string(workspace.path().join("tracked.txt")).unwrap(),
             "uncommitted baseline\n"
         );
+    }
+
+    #[test]
+    fn git_worktree_lifecycle_emits_worktree_create_and_remove() {
+        use crate::lifecycle::{
+            WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
+        };
+        use git2::{IndexAddOption, Repository, Signature};
+        use std::sync::Mutex as StdMutex;
+
+        struct Recorder(StdMutex<Vec<WorktreeLifecycleEvent>>);
+        impl WorktreeLifecycleSink for Recorder {
+            fn emit(&self, event: WorktreeLifecycleEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let repo = Repository::init(workspace.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Task Workspace Test").unwrap();
+            config.set_str("user.email", "task@example.com").unwrap();
+        }
+        fs::write(workspace.path().join("tracked.txt"), "committed\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["tracked.txt"], IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = Signature::now("Task Workspace Test", "task@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "seed", &tree, &[])
+            .unwrap();
+        drop(tree);
+
+        let mut config = ServiceConfig::new(data.path().into());
+        config.retention = Duration::ZERO;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        assert!(!service.has_worktree_lifecycle_sink());
+        let recorder = Arc::new(Recorder(StdMutex::new(Vec::new())));
+        service.set_worktree_lifecycle_sink(Some(recorder.clone()));
+        assert!(service.has_worktree_lifecycle_sink());
+
+        let run = service
+            .begin_run(input(&workspace, "task:lifecycle", "run:lifecycle"))
+            .unwrap();
+        assert_eq!(run.isolation_kind, IsolationKind::GitWorktree);
+        {
+            let events = recorder.0.lock().unwrap();
+            assert_eq!(events.len(), 1, "one WorktreeCreate after activation");
+            assert_eq!(events[0].kind, WorktreeLifecycleKind::Created);
+            assert_eq!(events[0].worktree_path, run.execution_root);
+            assert_eq!(
+                events[0].workspace_id.as_str(),
+                run.workspace_id.as_deref().unwrap()
+            );
+            assert_eq!(events[0].session_id.as_deref(), Some("session-1"));
+            assert_eq!(events[0].owner_type, WorkspaceOwnerType::Session);
+        }
+
+        // Settle + apply so the task becomes prunable, then prune → WorktreeRemove.
+        service.settle_run("run:lifecycle").unwrap();
+        service.apply_patch_set("run:lifecycle", &[]).unwrap();
+        let pruned = service.prune().unwrap();
+        assert_eq!(pruned.removed_task_ids, vec!["task:lifecycle"]);
+        let events = recorder.0.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].kind, WorktreeLifecycleKind::Removed);
+        assert_eq!(events[1].reason.as_deref(), Some("prune"));
+        assert_eq!(events[1].worktree_path, run.execution_root);
+        assert!(!Path::new(&run.execution_root).exists());
+    }
+
+    #[test]
+    fn shadow_runs_never_emit_worktree_lifecycle_events() {
+        use crate::lifecycle::{WorktreeLifecycleEvent, WorktreeLifecycleSink};
+        use std::sync::Mutex as StdMutex;
+
+        struct Recorder(StdMutex<Vec<WorktreeLifecycleEvent>>);
+        impl WorktreeLifecycleSink for Recorder {
+            fn emit(&self, event: WorktreeLifecycleEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("plain.txt"), "x\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let recorder = Arc::new(Recorder(StdMutex::new(Vec::new())));
+        service.set_worktree_lifecycle_sink(Some(recorder.clone()));
+        let run = service
+            .begin_run(input(&workspace, "task:shadow", "run:shadow"))
+            .unwrap();
+        assert_eq!(run.isolation_kind, IsolationKind::Shadow);
+        assert!(recorder.0.lock().unwrap().is_empty());
+        service.set_worktree_lifecycle_sink(None);
+        assert!(!service.has_worktree_lifecycle_sink());
     }
 
     #[test]

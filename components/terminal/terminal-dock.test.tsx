@@ -144,6 +144,27 @@ jest.mock("@/lib/terminal/ssh-connect", () => ({
 // The picker's own rendering (grouping, filtering, Radix menu) is covered by
 // `terminal-shell-picker.test.tsx`. Here it is reduced to the two affordances
 // the dock wires, keeping `terminal-dock-new` so the spawn tests still work.
+jest.mock("./terminal-share-dialog", () => ({
+  TerminalShareDialog: ({
+    sessionId,
+    open,
+    onOpenChange,
+  }: {
+    sessionId: string
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="terminal-share-dialog" data-session-id={sessionId}>
+        <button
+          type="button"
+          data-testid="terminal-share-close"
+          onClick={() => onOpenChange(false)}
+        />
+      </div>
+    ) : null,
+}))
+
 jest.mock("./terminal-shell-picker", () => ({
   TerminalShellPicker: ({
     onNew,
@@ -447,6 +468,46 @@ describe("TerminalDock", () => {
     expect(screen.getByTestId("terminal-empty-state-new")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("terminal-empty-state-new"))
     expect(mockSpawnFromDock).toHaveBeenCalled()
+  })
+
+  it("offers Share on the desktop host and opens the share dialog for the active session (ADR-0133)", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    expect(screen.queryByTestId("terminal-share-dialog")).toBeNull()
+    fireEvent.click(screen.getByTestId("terminal-dock-share"))
+    expect(screen.getByTestId("terminal-share-dialog")).toHaveAttribute("data-session-id", "s-1")
+    fireEvent.click(screen.getByTestId("terminal-share-close"))
+    expect(screen.queryByTestId("terminal-share-dialog")).toBeNull()
+  })
+
+  it("hides Share on remote transports — only the desktop host can grant devices", () => {
+    transportKind = "ws"
+    platformKind = "tauri"
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    expect(screen.queryByTestId("terminal-dock-share")).toBeNull()
+  })
+
+  it("routes pane keyboard shortcuts: find, split, command jumps, focus moves", async () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    const paneWrapper = screen.getByTestId("terminal-pane-group").parentElement!
+    // Ctrl/⌘+F opens the search overlay.
+    fireEvent.keyDown(paneWrapper, { key: "f", ctrlKey: true })
+    expect(screen.getByTestId("terminal-search-overlay")).toBeInTheDocument()
+    // Ctrl+\ splits; the split flow spawns a second pane.
+    await act(async () => {
+      fireEvent.keyDown(paneWrapper, { key: "\\", ctrlKey: true })
+    })
+    expect(mockSpawnFromDock).toHaveBeenCalled()
+    // Command jumps and pane focus moves must not throw with a single pane.
+    fireEvent.keyDown(paneWrapper, { key: "ArrowUp", metaKey: true })
+    fireEvent.keyDown(paneWrapper, { key: "ArrowDown", metaKey: true })
+    fireEvent.keyDown(paneWrapper, { key: "ArrowLeft", altKey: true })
+    fireEvent.keyDown(paneWrapper, { key: "ArrowRight", altKey: true })
+    // A plain key is ignored.
+    fireEvent.keyDown(paneWrapper, { key: "a" })
+    expect(screen.getByTestId("terminal-dock")).toBeInTheDocument()
   })
 
   it("keeps clearing available on every transport", () => {

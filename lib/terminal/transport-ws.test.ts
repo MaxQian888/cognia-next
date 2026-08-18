@@ -353,6 +353,33 @@ describe("RemoteTerminalSession canonical LAN transport", () => {
     expect(exit).toBe(7)
   })
 
+  it("applies unsolicited (sequence 0) session snapshots as roster refreshes (ADR-0133)", async () => {
+    const session = await completeSpawn()
+    const before = session.info
+    const infos: number[] = []
+    session.onInfo((info) => infos.push(info.participants?.length ?? -1))
+
+    latestSocket().fireFrame(
+      TerminalFrameKind.SessionSnapshot,
+      {
+        ...sessionInfo(),
+        currentController: "desktop",
+        attachedClients: 2,
+        participants: [
+          { clientId: "desktop", deviceId: null, local: true, role: "controller" },
+          { clientId: "companion:device-a", deviceId: "device-a", local: false, role: "viewer" },
+        ],
+      },
+      BigInt(0)
+    )
+    await flush()
+
+    expect(session.info).toBe(before)
+    expect(session.info.currentController).toBe("desktop")
+    expect(session.participants).toHaveLength(2)
+    expect(infos).toEqual([2])
+  })
+
   it("encodes stdin, resize, control, detach, and kill as binary commands", async () => {
     const session = await completeSpawn()
     await session.write("ls\n")
@@ -381,6 +408,43 @@ describe("RemoteTerminalSession canonical LAN transport", () => {
     latestSocket().fireFrame(TerminalFrameKind.Ack, { ok: true }, request.sequence)
     await detach
     expect(session.isExited).toBe(false)
+  })
+
+  it("releases the lease and kills through the host, logging non-replay host errors", async () => {
+    const session = await completeSpawn()
+    const controls: unknown[] = []
+    session.onControlState((state) => controls.push(state))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    // A host-side error that is not a replay gap is surfaced (not swallowed);
+    // a replay-gap error is handled by the ReplayGap frame path instead.
+    latestSocket().fireFrame(TerminalFrameKind.Error, { code: "replay_gap", message: "gap" })
+    latestSocket().fireFrame(TerminalFrameKind.Error, {
+      code: "permission_denied",
+      message: "nope",
+    })
+    await flush()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.[0]).toContain("permission_denied")
+
+    const release = session.releaseControl()
+    await flush()
+    let request = decodeTerminalFrame(latestSocket().sent.at(-1)!)
+    expect(request.kind).toBe(TerminalFrameKind.ReleaseControl)
+    latestSocket().fireFrame(TerminalFrameKind.Ack, { ok: true }, request.sequence)
+    await release
+    expect(controls).toContainEqual({ role: "viewer", controllerId: null, reason: "released" })
+
+    const kill = session.kill()
+    await flush()
+    request = decodeTerminalFrame(latestSocket().sent.at(-1)!)
+    expect(request.kind).toBe(TerminalFrameKind.Kill)
+    latestSocket().fireFrame(TerminalFrameKind.Ack, { ok: true }, request.sequence)
+    await kill
+    expect(session.isExited).toBe(true)
+    // Killing an exited session is a no-op.
+    await session.kill()
+    warn.mockRestore()
   })
 
   it("reattaches with replay sequence and flushes bounded pending input", async () => {

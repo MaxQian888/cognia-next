@@ -760,6 +760,26 @@ describe("getDb", () => {
     expect(byRun.map((r) => r.messageId)).toEqual(["m-frozen"])
   })
 
+  it("v174 opens the issue runs table with the indexes the run bridge queries", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(174)
+    expect(db.issueRuns.schema.primKey.name).toBe("id")
+    expect(db.issueRuns.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "issueId",
+        "[issueId+status]",
+        "projectId",
+        "[projectId+status]",
+        "adapterId",
+        "kind",
+        "targetId",
+        "status",
+      ])
+    )
+  })
+
   it("v123 opens the certification projection table", async () => {
     const db = getDb()
     await db.open()

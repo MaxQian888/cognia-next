@@ -4,25 +4,40 @@ import {
   sanitizeSegment,
   type WorktreeGitOps,
 } from "./allocator"
+import type { WorktreeHookContext } from "@/lib/git/commands"
+
+type AddCall = {
+  repo: string
+  path: string
+  branch: string
+  baseRef?: string
+  hookContext?: WorktreeHookContext
+}
+type RemoveCall = {
+  repo: string
+  path: string
+  force: boolean
+  deleteBranch?: string
+  hookContext?: WorktreeHookContext
+}
 
 function makeGit(over: Partial<WorktreeGitOps> = {}): WorktreeGitOps & {
-  addCalls: Array<{ repo: string; path: string; branch: string; baseRef?: string }>
-  removeCalls: Array<{ repo: string; path: string; force: boolean; deleteBranch?: string }>
+  addCalls: AddCall[]
+  removeCalls: RemoveCall[]
   pruneCalls: string[]
 } {
-  const addCalls: Array<{ repo: string; path: string; branch: string; baseRef?: string }> = []
-  const removeCalls: Array<{ repo: string; path: string; force: boolean; deleteBranch?: string }> =
-    []
+  const addCalls: AddCall[] = []
+  const removeCalls: RemoveCall[] = []
   const pruneCalls: string[] = []
   return {
     addCalls,
     removeCalls,
     pruneCalls,
-    add: async (repo, path, branch, baseRef) => {
-      addCalls.push({ repo, path, branch, baseRef })
+    add: async (repo, path, branch, baseRef, hookContext) => {
+      addCalls.push({ repo, path, branch, baseRef, hookContext })
     },
-    remove: async (repo, path, force, deleteBranch) => {
-      removeCalls.push({ repo, path, force, deleteBranch })
+    remove: async (repo, path, force, deleteBranch, hookContext) => {
+      removeCalls.push({ repo, path, force, deleteBranch, hookContext })
     },
     list: async () => [],
     commit: async () => "sha",
@@ -66,7 +81,14 @@ describe("AgentWorkspaceAllocator", () => {
     expect(h.branch).toBe("agent/run_1/Alice/t1")
     expect(h.path).toBe("/wt/run_1/t1-u")
     expect(git.addCalls).toEqual([
-      { repo: "/repo", path: "/wt/run_1/t1-u", branch: "agent/run_1/Alice/t1", baseRef: "HEAD" },
+      {
+        repo: "/repo",
+        path: "/wt/run_1/t1-u",
+        branch: "agent/run_1/Alice/t1",
+        baseRef: "HEAD",
+        // WorktreeCreate hook provenance: the run that owns the worktree.
+        hookContext: { source: "agent-team-allocator", ownerType: "team", ownerRef: "run_1" },
+      },
     ])
     expect(alloc.allocated()).toHaveLength(1)
   })
@@ -178,7 +200,18 @@ describe("AgentWorkspaceAllocator", () => {
 
     await alloc.remove(h, { deleteBranch: true })
     expect(git.removeCalls).toEqual([
-      { repo: "/repo", path: h.path, force: true, deleteBranch: h.branch },
+      {
+        repo: "/repo",
+        path: h.path,
+        force: true,
+        deleteBranch: h.branch,
+        hookContext: {
+          source: "agent-team-allocator",
+          ownerType: "team",
+          ownerRef: "r",
+          reason: "cleanup",
+        },
+      },
     ])
     expect(alloc.allocated()).toHaveLength(0)
   })

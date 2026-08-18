@@ -33,11 +33,54 @@ jest.mock("./github-writeback-dialog", () => ({
 }))
 
 let liveValue: unknown = []
+let runsValue: unknown[] = []
 jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: () => liveValue,
+  // Two live queries share the hook: the activity trail and the run history.
+  useClientLiveQuery: (fn: () => unknown) =>
+    fn.toString().includes("listIssueRuns") ? runsValue : liveValue,
+}))
+jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: jest.fn() }))
+
+const mockSetIssueAssignee = jest.fn()
+jest.mock("@/lib/db/issues", () => ({
+  setIssueAssignee: (...a: unknown[]) => mockSetIssueAssignee(...a),
+}))
+const mockCancelIssueRun = jest.fn()
+jest.mock("@/lib/issues/run/registry", () => ({
+  cancelIssueRun: (...a: unknown[]) => mockCancelIssueRun(...a),
+}))
+const mockToastSuccess = jest.fn()
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...a: unknown[]) => mockToastSuccess(...a),
+    error: (...a: unknown[]) => mockToastError(...a),
+  },
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+// The picker and the run dialog have their own suites; stubs expose their props.
+let pickerProps: { value: unknown; onChange: (actor: unknown) => void } | null = null
+jest.mock("./assignee-picker", () => ({
+  AssigneePicker: (props: { value: unknown; onChange: (actor: unknown) => void }) => {
+    pickerProps = props
+    return <div data-testid="assignee-picker-stub" />
+  },
+}))
+jest.mock("./run-issue-dialog", () => ({
+  RunIssueDialog: (props: {
+    open: boolean
+    issueId: string
+    onOpenChange: (o: boolean) => void
+  }) =>
+    props.open ? (
+      <div data-testid="run-dialog-stub">
+        {props.issueId}
+        <button data-testid="run-dialog-close" onClick={() => props.onOpenChange(false)} />
+      </div>
+    ) : null,
+}))
+
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { statusCategoryOf } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { FULL_ISSUE_CAPABILITIES, READ_ONLY_ISSUE_CAPABILITIES } from "@/types/issues/unified"
@@ -67,6 +110,10 @@ function item(over: Partial<UnifiedIssueItem> = {}): UnifiedIssueItem {
 beforeEach(() => {
   jest.clearAllMocks()
   liveValue = []
+  runsValue = []
+  pickerProps = null
+  mockSetIssueAssignee.mockResolvedValue(undefined)
+  mockCancelIssueRun.mockResolvedValue(undefined)
 })
 
 describe("IssueDetailPanel", () => {
@@ -78,16 +125,95 @@ describe("IssueDetailPanel", () => {
     expect(screen.getByText("priority.high")).toBeInTheDocument()
   })
 
-  it("marks an unassigned issue explicitly", () => {
-    render(<IssueDetailPanel item={item()} />)
+  it("marks an unassigned federated issue explicitly (read-only rows keep the text)", () => {
+    render(<IssueDetailPanel item={item({ kind: "github" })} />)
     expect(screen.getByTestId("issue-detail-assignee-none")).toHaveTextContent("actor.unassigned")
   })
 
-  it("prefers the assignee's cached label", () => {
+  it("prefers the assignee's cached label on a read-only row", () => {
     render(
-      <IssueDetailPanel item={item({ assignee: { kind: "team", id: "t1", label: "Falcon" } })} />
+      <IssueDetailPanel
+        item={item({ kind: "github", assignee: { kind: "team", id: "t1", label: "Falcon" } })}
+      />
     )
     expect(screen.getByTestId("issue-detail-assignee-team:t1")).toHaveTextContent("Falcon")
+  })
+
+  it("lets a local issue be (re)assigned through the picker", async () => {
+    render(<IssueDetailPanel item={item({ assignee: { kind: "agent", id: "c1" } })} />)
+    expect(screen.getByTestId("assignee-picker-stub")).toBeInTheDocument()
+    expect(pickerProps!.value).toEqual({ kind: "agent", id: "c1" })
+    pickerProps!.onChange({ kind: "team", id: "t1", label: "Squad" })
+    await waitFor(() =>
+      expect(mockSetIssueAssignee).toHaveBeenCalledWith(
+        "i1",
+        { kind: "team", id: "t1", label: "Squad" },
+        { kind: "human" }
+      )
+    )
+    mockSetIssueAssignee.mockRejectedValueOnce(new Error("nope"))
+    pickerProps!.onChange(null)
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("nope"))
+  })
+
+  it("offers Run on a local issue and opens the run dialog", async () => {
+    render(<IssueDetailPanel item={item()} />)
+    expect(screen.getByTestId("issue-detail-runs")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("issue-run-trigger"))
+    expect(await screen.findByTestId("run-dialog-stub")).toHaveTextContent("i1")
+    fireEvent.click(screen.getByTestId("run-dialog-close"))
+    await waitFor(() => expect(screen.queryByTestId("run-dialog-stub")).not.toBeInTheDocument())
+  })
+
+  it("greys Run out on finished issues and hides it on federated rows", () => {
+    const { unmount } = render(
+      <IssueDetailPanel item={item({ status: "done", statusCategory: "completed" })} />
+    )
+    expect(screen.getByTestId("issue-run-trigger")).toBeDisabled()
+    unmount()
+    render(<IssueDetailPanel item={item({ kind: "github" })} />)
+    expect(screen.queryByTestId("issue-detail-runs")).not.toBeInTheDocument()
+  })
+
+  it("lists run history with artifacts and cancels the active run", async () => {
+    runsValue = [
+      {
+        id: "run-2",
+        issueId: "i1",
+        adapterId: "agent-team",
+        kind: "agent-team",
+        status: "running",
+        artifacts: [],
+      },
+      {
+        id: "run-1",
+        issueId: "i1",
+        adapterId: "agent-task",
+        kind: "agent-task",
+        status: "failed",
+        error: "boom",
+        summary: "did some",
+        artifacts: [
+          { label: "PR #1", href: "https://gh/pr/1" },
+          { label: "Session", href: "/?session=s" },
+        ],
+      },
+    ]
+    render(<IssueDetailPanel item={item({ status: "in_progress", statusCategory: "started" })} />)
+    expect(screen.getByTestId("issue-run-running")).toHaveTextContent("run.adapter.agent-team.name")
+    expect(screen.getByTestId("issue-run-failed")).toHaveTextContent("boom")
+    expect(screen.getByTestId("issue-run-failed")).toHaveTextContent("did some")
+    const links = screen.getAllByTestId("issue-run-artifact")
+    expect(links[0]).toHaveAttribute("target", "_blank")
+    expect(links[1]).not.toHaveAttribute("target")
+    expect(screen.getByText("run.activeHint")).toBeInTheDocument()
+    expect(screen.queryByTestId("issue-run-trigger")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("issue-run-cancel"))
+    await waitFor(() => expect(mockCancelIssueRun).toHaveBeenCalledWith("run-2"))
+    expect(mockToastSuccess).toHaveBeenCalledWith("run.cancelled")
+    mockCancelIssueRun.mockRejectedValueOnce(new Error("cannot"))
+    fireEvent.click(screen.getByTestId("issue-run-cancel"))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("cannot"))
   })
 
   it("warns that a federated row is read-only, and does not for a local one", () => {

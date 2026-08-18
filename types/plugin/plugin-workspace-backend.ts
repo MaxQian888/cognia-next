@@ -5,17 +5,16 @@
  * issue-loop and similar agentic flows clone repos / run commands inside.
  * Today there are two built-ins — local git checkout (Tauri Rust commands)
  * and the e2b-firecracker sandbox (contributed by `plugins/e2b-sandbox/`).
- * The legacy wiring uses `lib/github/workspace.ts:setE2BBackend` as a
- * global singleton setter; this type set is the declarative replacement
- * that plugins should target instead.
+ * This type set is the declarative contract plugins target; the former
+ * `setE2BBackend` global singleton setter has been removed.
  *
  * Two registration paths, mirroring `plugin-ocr.ts`:
  * - **Manifest** `manifest.workspaceBackends[]` — lazy factory.
  * - **Imperative** `ctx.workspace.registerBackend(backend)` in `activate()`.
  *
- * Both flow through `lib/github/workspace-backend-registry.ts`. The legacy
- * `setE2BBackend` becomes a `@deprecated` shim that delegates to the
- * registry, so existing first-party plugins keep working.
+ * Both flow through `lib/github/workspace-backend-registry.ts`. The host
+ * resolves a backend by its unprefixed kind (`resolveWorkspaceBackendByKind`),
+ * so plugin-namespaced ids stay reachable.
  *
  * Permission gate: `process:spawn` + `filesystem:write`. See ADR-0026.
  *
@@ -44,9 +43,8 @@ export type WorkspaceProvider = E2BBackend
 export interface PluginWorkspaceBackendDef {
   /**
    * Backend id, unprefixed. The registry prefixes with the plugin id at
-   * registration time (`<pluginId>:<id>`) so two plugins cannot collide.
-   * Legacy `setE2BBackend` registers under id `"e2b"` (unprefixed) for
-   * back-compat.
+   * registration time (`<pluginId>:<id>`) so two plugins cannot collide;
+   * the host still finds it by kind (`resolveWorkspaceBackendByKind("e2b")`).
    */
   id: string
   /** Human label for picker UI. */

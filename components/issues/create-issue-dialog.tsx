@@ -37,7 +37,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { createIssue } from "@/lib/db/issues"
 import { createIssueProject, listTakenProjectKeys } from "@/lib/db/issue-projects"
 import { deriveProjectKey, isValidProjectKey } from "@/lib/issues/identifier"
-import type { IssueProject, IssueStatus } from "@/types/issues"
+import type { IssueActor, IssueProject, IssueStatus } from "@/types/issues"
+import { AssigneePicker } from "./assignee-picker"
 
 export interface CreateIssueDialogProps {
   open: boolean
@@ -63,6 +64,7 @@ export function CreateIssueDialog({
   const needsProject = projects.length === 0
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
+  const [assignee, setAssignee] = useState<IssueActor | null>(null)
   const [issueProjectId, setIssueProjectId] = useState<string>("")
   const [projectName, setProjectName] = useState("")
   const [projectKeyInput, setProjectKeyInput] = useState("")
@@ -117,12 +119,14 @@ export function CreateIssueDialog({
         issueProjectId: containerId,
         title,
         ...(description.trim() ? { description: description.trim() } : {}),
+        ...(assignee ? { assignee } : {}),
         status,
         createdBy: { kind: "human" },
       })
 
       setTitle("")
       setDescription("")
+      setAssignee(null)
       setProjectName("")
       setProjectKeyInput("")
       setKeyTouched(false)
@@ -215,6 +219,16 @@ export function CreateIssueDialog({
               onChange={(event) => setDescription(event.target.value)}
               rows={3}
               data-testid="create-issue-description"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="issue-assignee">{t("detail.assignee")}</Label>
+            <AssigneePicker
+              id="issue-assignee"
+              value={assignee}
+              onChange={setAssignee}
+              data-testid="create-issue-assignee"
             />
           </div>
 

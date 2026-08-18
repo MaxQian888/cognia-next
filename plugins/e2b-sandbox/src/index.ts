@@ -19,13 +19,6 @@ import type { PluginContext } from "@/types/plugin"
 import { defineMcpServerPreset, definePlugin } from "@cognia/plugin-sdk"
 import type { PluginManifest } from "@cognia/plugin-sdk/manifest"
 import manifestJson from "../plugin.json"
-// `setE2BBackend` kept as a fallback for hosts that don't expose
-// `ctx.workspace` yet (older bootstrap paths / unit-test contexts). When
-// the new API is present, we register through it for ADR-0026 §2 §D
-// lifecycle + multi-backend semantics; otherwise we fall back to the
-// legacy singleton path. The legacy path is now itself a shim over the
-// same registry (see `lib/github/workspace.ts`).
-import { setE2BBackend } from "@/lib/github/workspace"
 import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 import type { E2BSandboxConnection } from "./workspace-backend"
@@ -65,9 +58,8 @@ const E2B_PRESET = defineMcpServerPreset({
 })
 
 // Disposer returned by `ctx.workspace.registerBackend(...)`, stashed
-// across activate/deactivate so the v2 registration is torn down
-// explicitly rather than relying on the legacy `setE2BBackend(null)`
-// shim. Module-scoped because there's only ever one e2b plugin instance.
+// across activate/deactivate so the registration is torn down explicitly on
+// disable. Module-scoped because there's only ever one e2b plugin instance.
 let workspaceRegistrationDispose: (() => void) | undefined
 let configChangeDispose: (() => void) | undefined
 let sandboxConnection: E2BSandboxConnection = {}
@@ -155,27 +147,27 @@ const definition = definePlugin({
     // `@e2b/sdk`; if the SDK isn't installed it surfaces a helpful install
     // hint at the first clone attempt instead of failing at activation time.
     //
-    // Prefer ADR-0026 §2 §D `ctx.workspace.registerBackend(...)` when
-    // available so the registration carries the plugin id + auto-cleanup
-    // on disable. Fall back to the legacy `setE2BBackend(...)` shim when
-    // running under an older host that doesn't expose `ctx.workspace`
-    // (e.g. a sidecar harness or pre-v0.5 host). Both paths end up in the
-    // same `workspace-backend-registry` either way — see
-    // `lib/github/workspace.ts:setE2BBackend`.
-    const backend = new E2BWorkspaceBackend({ connection: () => sandboxConnection })
-    if (ctx.workspace) {
-      const handle = ctx.workspace.registerBackend({
-        id: "e2b",
-        label: "E2B Firecracker",
-        description:
-          "Runs each turn inside an ephemeral Firecracker microVM sandbox. Untrusted-code safe.",
-        backend,
-      })
-      workspaceRegistrationDispose = handle.unregister
-    } else {
-      setE2BBackend(backend)
-      workspaceRegistrationDispose = () => setE2BBackend(null)
+    // ADR-0026 §2 §D: `ctx.workspace.registerBackend(...)` is the only
+    // registration path. Every host context carries `ctx.workspace`
+    // (`lib/plugin/core/context.ts` sets it unconditionally), so a missing
+    // API is a host contract violation — fail loudly rather than fall back to
+    // a shim that would register under a different id than the host resolves.
+    // The registry namespaces the id as `cognia-e2b-sandbox:e2b`; the host
+    // dispatches by kind (`resolveWorkspaceBackendByKind("e2b")`).
+    if (!ctx.workspace) {
+      throw new Error(
+        "[e2b-sandbox] host context has no `workspace` API — cannot register the e2b workspace backend"
+      )
     }
+    const backend = new E2BWorkspaceBackend({ connection: () => sandboxConnection })
+    const handle = ctx.workspace.registerBackend({
+      id: "e2b",
+      label: "E2B Firecracker",
+      description:
+        "Runs each turn inside an ephemeral Firecracker microVM sandbox. Untrusted-code safe.",
+      backend,
+    })
+    workspaceRegistrationDispose = handle.unregister
 
     // ADR-0028 / T4 — register the microvm exec adapter so any session
     // with `sandboxTier: "microvm"` routes `sandbox_*` tool calls through

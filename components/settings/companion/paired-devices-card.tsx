@@ -8,7 +8,7 @@
  * the rest of the desktop pairing chrome.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PauseIcon, PlayIcon, RefreshCwIcon, TrashIcon } from "lucide-react"
@@ -34,12 +34,14 @@ import {
   setAgentControlAllowed,
   setLockedComputerUseAllowed,
   setRemoteControlAllowed,
-  setRemoteTerminalAllowed,
 } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import {
+  useDeviceGrants,
+  useRemoteTerminalGrantToggle,
+} from "@/hooks/companion/use-remote-terminal-grant"
 import { formatRelative } from "@cognia/time"
 import { isTauri, transport } from "@/lib/tauri"
-import type { TerminalHostDescriptor } from "@/types/mobile/paired-device"
 
 async function revokeDeviceRustSide(deviceId: string): Promise<void> {
   if (!isTauri()) return
@@ -59,31 +61,6 @@ async function setRemoteControlRustSide(deviceId: string, allowed: boolean): Pro
 async function setAgentControlRustSide(deviceId: string, allowed: boolean): Promise<void> {
   if (!isTauri()) return
   await transport.call<void>("companion_set_agent_control", { deviceId, allowed })
-}
-
-async function setRemoteTerminalRustSide(deviceId: string, allowed: boolean): Promise<void> {
-  if (!isTauri()) return
-  await transport.call<void>("companion_set_remote_terminal", { deviceId, allowed })
-}
-
-async function provisionTerminalHostDescriptor(
-  deviceId: string,
-  devicePublicKey: string
-): Promise<TerminalHostDescriptor> {
-  const status = await transport.call<{ descriptor?: TerminalHostDescriptor }>(
-    "terminal_host_service",
-    {
-      action: {
-        kind: "provision",
-        deviceId,
-        devicePublicKey,
-      },
-    }
-  )
-  if (!status.descriptor) {
-    throw new Error("terminal host did not return a descriptor")
-  }
-  return status.descriptor
 }
 
 async function setLockedComputerUseRustSide(deviceId: string, allowed: boolean): Promise<void> {
@@ -106,64 +83,6 @@ async function setLockedComputerUseRustSide(deviceId: string, allowed: boolean):
  * dormancy test name the other two.
  */
 const LOCKED_USE_AVAILABLE = false
-
-/** Which elevated grants a device holds, as reported by the host's SecurityStore. */
-type DeviceGrantSummary = {
-  deviceId: string
-  control: boolean
-  agentControl: boolean
-  terminal: boolean
-}
-
-/**
- * Read the three elevated grants from the host rather than the Dexie mirror.
- *
- * The mirror is written alongside each toggle, but it is not the authority —
- * the host's SecurityStore is, and it also moves when a device is enrolled
- * (owner devices start with the full set) or when the `cognia-server devices`
- * CLI is used. Rendering the mirror would put the switch position and the
- * permission it describes out of sync, which is the same class of bug as a
- * toggle writing a store nobody reads.
- *
- * Falls back to the mirror when the host cannot be asked (web/mobile shells,
- * where `transport.call` has no Tauri backend).
- */
-async function readDeviceGrants(): Promise<Map<string, DeviceGrantSummary> | undefined> {
-  if (!isTauri()) return undefined
-  try {
-    const rows = await transport.call<DeviceGrantSummary[]>("companion_list_device_grants")
-    // A host that answers with nothing is not an error — it just cannot tell
-    // us, so fall back to the mirror rather than rendering every grant off.
-    return Array.isArray(rows) ? new Map(rows.map((row) => [row.deviceId, row])) : undefined
-  } catch (err) {
-    // Showing the mirror is better than showing nothing, but never silently:
-    // a stale switch is exactly what this hook exists to prevent.
-    console.warn("companion_list_device_grants failed", err)
-    return undefined
-  }
-}
-
-function useDeviceGrants(): {
-  grants: Map<string, DeviceGrantSummary> | undefined
-  refresh: () => Promise<void>
-} {
-  const [grants, setGrants] = useState<Map<string, DeviceGrantSummary> | undefined>(undefined)
-  const refresh = useCallback(async () => {
-    setGrants(await readDeviceGrants())
-  }, [])
-  useEffect(() => {
-    // Settled in the callback rather than the effect body, and dropped if the
-    // card unmounts first.
-    let cancelled = false
-    void readDeviceGrants().then((next) => {
-      if (!cancelled) setGrants(next)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-  return { grants, refresh }
-}
 
 export function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
@@ -301,49 +220,9 @@ export function PairedDevicesCard() {
     [guard, refreshGrants, tAc]
   )
 
-  const onToggleRemoteTerminal = useCallback(
-    async (deviceId: string, devicePublicKey: string, label: string, next: boolean) => {
-      if (!next) {
-        await setRemoteTerminalRustSide(deviceId, false)
-        await setRemoteTerminalAllowed(deviceId, false)
-        await refreshGrants()
-        toast.success(tTerminal("disabledToast", { label }))
-        return
-      }
-      let result
-      try {
-        result = await guard(
-          {
-            reason: tTerminal("reason", { label }),
-            title: tTerminal("title"),
-            description: tTerminal("description"),
-          },
-          async () => {
-            const descriptor = await provisionTerminalHostDescriptor(deviceId, devicePublicKey)
-            await setRemoteTerminalAllowed(deviceId, true, descriptor)
-            try {
-              await setRemoteTerminalRustSide(deviceId, true)
-            } catch (error) {
-              await setRemoteTerminalAllowed(deviceId, false)
-              await setRemoteTerminalRustSide(deviceId, false).catch(() => undefined)
-              throw error
-            }
-          }
-        )
-      } catch {
-        toast.error(tTerminal("operationFailed"))
-        return
-      }
-      if (result.kind === "blocked") {
-        if (result.reason === "cancelled") return
-        toast.error(tTerminal("blocked", { reason: result.reason }))
-        return
-      }
-      await refreshGrants()
-      toast.success(tTerminal("enabledToast", { label }))
-    },
-    [guard, refreshGrants, tTerminal]
-  )
+  // Shared with the terminal share dialog (ADR-0133) so both surfaces drive
+  // the one enforcement point identically.
+  const onToggleRemoteTerminal = useRemoteTerminalGrantToggle(refreshGrants)
 
   const onToggleLockedComputerUse = useCallback(
     async (deviceId: string, label: string, next: boolean) => {

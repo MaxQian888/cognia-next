@@ -78,6 +78,28 @@ describe("buildDiscordA2UIPayload", () => {
     expect(binding?.conversationKey).toBe("discord:adp_dc:ch_xyz")
   })
 
+  it("records a Button's bindingKind / bindingPayload hint so the bus can short-circuit it", async () => {
+    const surface: A2UISegmentContent = {
+      components: {
+        root: { id: "root", component: "Column", children: ["run"] },
+        run: {
+          id: "run",
+          component: "Button",
+          text: "Run",
+          action: "run",
+          bindingKind: "issue_action",
+          bindingPayload: { action: "run", issueId: "iss-1" },
+        } as never,
+      },
+      dataModel: {},
+      rootId: "root",
+    }
+    await buildDiscordA2UIPayload(baseInput(surface))
+    const binding = await resolveCallbackBinding("adp_dc", "a2ui:sfc_1:run:run")
+    expect(binding?.kind).toBe("issue_action")
+    expect(binding?.payload).toEqual({ action: "run", issueId: "iss-1" })
+  })
+
   // ── modal two-hop (TextField / TextArea / Dialog) ──────────────────────────
 
   it("projects a Dialog with text inputs into a modal-open trigger button", async () => {

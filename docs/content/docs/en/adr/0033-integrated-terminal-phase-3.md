@@ -76,6 +76,7 @@ Per-file co-located tests (CLAUDE.md rule #3): `terminal-store.test.ts` (split m
 3. **Server-side workflow execution + consent bridge** — ADR-0031 follow-up #3.
 4. ~~**AI command assistance** in the dock~~ — superseded by ADR-0039 (terminal autocomplete), which shipped.
 5. ~~**Message-level locate-in-conversation**~~ — **shipped**: rows carry `agentSpawnerMessageId` and the dock routes through `messagePermalinkQuery` (ADR-0094 provided the scroll-to-message seam).
+6. ~~**Session sharing**~~ — **shipped** as ADR-0133: paired devices attach to the host session and share its controller lease; the host broadcasts the participant roster and the dock gains a Share dialog. The unwired `lib/terminal/collaboration/share-manager` invite/token model was removed in the same change.
 
 ## Phase 4 — dock usability (this change)
 

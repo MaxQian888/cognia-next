@@ -201,6 +201,29 @@ describe("event dispatch", () => {
       { role: "controller", controllerId: "desktop", reason: undefined },
     ])
   })
+
+  it("applies unsolicited session snapshots to info and notifies onInfo (ADR-0133)", async () => {
+    const session = await spawn()
+    const infos: number[] = []
+    session.onInfo((info) => infos.push(info.participants?.length ?? -1))
+
+    fire({
+      kind: "session_snapshot",
+      session: {
+        ...baseInfo,
+        currentController: "companion:dev-1",
+        attachedClients: 2,
+        participants: [
+          { clientId: "desktop", deviceId: null, local: true, role: "viewer" },
+          { clientId: "companion:dev-1", deviceId: "dev-1", local: false, role: "controller" },
+        ],
+      },
+    })
+
+    expect(infos).toEqual([2])
+    expect(session.info.currentController).toBe("companion:dev-1")
+    expect(session.participants.map((p) => p.clientId)).toEqual(["desktop", "companion:dev-1"])
+  })
 })
 
 describe("write / resize / ownership / kill", () => {

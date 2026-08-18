@@ -41,4 +41,42 @@ describe("session-registry", () => {
 
     expect(listener).toHaveBeenCalledTimes(2)
   })
+
+  it("re-notifies subscribers when a registered session's info is refreshed (ADR-0133)", () => {
+    let infoListener: (() => void) | undefined
+    const off = jest.fn()
+    const live = {
+      id: "live",
+      info: { id: "live" },
+      onInfo: jest.fn((cb: () => void) => {
+        infoListener = cb
+        return () => {
+          off()
+          infoListener = undefined
+        }
+      }),
+    } as unknown as BaseTerminalSession
+    const listener = jest.fn()
+    subscribeLiveSessions(listener)
+
+    registerLiveSession(live)
+    expect(listener).toHaveBeenCalledTimes(1)
+    infoListener?.()
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    // Re-registering the same id replaces the previous info subscription.
+    registerLiveSession(live)
+    expect(off).toHaveBeenCalledTimes(1)
+
+    unregisterLiveSession("live")
+    expect(off).toHaveBeenCalledTimes(2)
+    // A stale info callback after unregister must not notify.
+    infoListener?.()
+    expect(listener).toHaveBeenCalledTimes(4)
+  })
+
+  it("tolerates handles without onInfo (test doubles, legacy classes)", () => {
+    expect(() => registerLiveSession(session("bare"))).not.toThrow()
+    expect(getLiveSession("bare")).toBeDefined()
+  })
 })

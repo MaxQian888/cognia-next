@@ -4,6 +4,11 @@ const hasWebCompanionTargetMock = jest.fn()
 const callMock = jest.fn()
 const subscribeMock = jest.fn()
 
+const fireAgentHookMock = jest.fn(async () => null)
+jest.mock("@/lib/ai/agent/external/agent-hooks", () => ({
+  fireAgentHook: (...args: unknown[]) => fireAgentHookMock(...(args as [])),
+}))
+
 jest.mock("@/lib/platform/detect", () => ({
   isTauri: () => isTauriMock(),
   isCapacitor: () => isCapacitorMock(),
@@ -424,6 +429,74 @@ describe("when in Tauri", () => {
       old: "old",
       newName: "new",
     })
+  })
+
+  it("fires WorktreeCreate / WorktreeRemove hooks after the git op with the documented payload", async () => {
+    fireAgentHookMock.mockClear()
+    await gitWorktreeAdd("/r", "/wt", "agent/b", "HEAD", {
+      source: "agent-team-allocator",
+      sessionId: "s1",
+      ownerType: "team",
+      ownerRef: "run_1",
+    })
+    expect(fireAgentHookMock).toHaveBeenCalledWith(
+      "WorktreeCreate",
+      { agentId: "agent-team-allocator", sessionId: "s1", cwd: "/r" },
+      {
+        payload: {
+          worktree_path: "/wt",
+          workspace_root: "/r",
+          branch: "agent/b",
+          base_ref: "HEAD",
+          source: "agent-team-allocator",
+          owner_type: "team",
+          owner_ref: "run_1",
+        },
+      }
+    )
+    await gitWorktreeRemove("/r", "/wt", true, "agent/b", { reason: "cleanup" })
+    expect(fireAgentHookMock).toHaveBeenLastCalledWith(
+      "WorktreeRemove",
+      { agentId: "git-command", sessionId: "", cwd: "/r" },
+      {
+        payload: {
+          worktree_path: "/wt",
+          workspace_root: "/r",
+          branch: "agent/b",
+          force: true,
+          reason: "cleanup",
+          source: "git-command",
+        },
+      }
+    )
+    // Defaults without a context.
+    await gitWorktreeAdd("/r", "/wt2", "x")
+    expect(fireAgentHookMock).toHaveBeenLastCalledWith(
+      "WorktreeCreate",
+      { agentId: "git-command", sessionId: "", cwd: "/r" },
+      { payload: expect.objectContaining({ base_ref: null, source: "git-command" }) }
+    )
+    // Removal without a deleted branch reports null and the default reason.
+    await gitWorktreeRemove("/r", "/wt2", false)
+    expect(fireAgentHookMock).toHaveBeenLastCalledWith("WorktreeRemove", expect.anything(), {
+      payload: expect.objectContaining({ branch: null, force: false, reason: "remove" }),
+    })
+  })
+
+  it("does not fire worktree hooks off-desktop or when the git op failed", async () => {
+    fireAgentHookMock.mockClear()
+    isTauriMock.mockReturnValue(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    await gitWorktreeAdd(gitTargetFromRemote("w1"), "wt", "b")
+    expect(fireAgentHookMock).not.toHaveBeenCalled()
+    isTauriMock.mockReturnValue(true)
+    hasWebCompanionTargetMock.mockReturnValue(false)
+    callMock.mockRejectedValueOnce(new Error("git exploded"))
+    await expect(gitWorktreeAdd("/r", "/wt", "b")).rejects.toThrow("git exploded")
+    expect(fireAgentHookMock).not.toHaveBeenCalled()
+    // A hook runner failure never surfaces to the git caller.
+    fireAgentHookMock.mockRejectedValueOnce(new Error("runner down"))
+    await expect(gitWorktreeAdd("/r", "/wt", "b")).resolves.toBeUndefined()
   })
 
   it("worktree ops pass null defaults", async () => {

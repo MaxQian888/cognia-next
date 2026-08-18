@@ -32,6 +32,7 @@ import {
   Minimize2Icon,
   PanelBottomIcon,
   PanelRightIcon,
+  Share2Icon,
   XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -81,6 +82,7 @@ import { TerminalHostStateBanner } from "./terminal-host-state-banner"
 import { type TerminalInstanceHandle } from "./terminal-instance"
 import { TerminalPaneGroup } from "./terminal-pane-group"
 import { TerminalSearchOverlay } from "./terminal-search-overlay"
+import { TerminalShareDialog } from "./terminal-share-dialog"
 import { TerminalShellPicker } from "./terminal-shell-picker"
 import { TerminalTabContextMenu } from "./terminal-tab-context-menu"
 import { TerminalTabStrip } from "./terminal-tab-strip"
@@ -170,6 +172,8 @@ export function TerminalDock() {
     []
   )
   const [searchOpen, setSearchOpen] = useState(false)
+  // ADR-0133: share the focused session with paired devices.
+  const [shareOpen, setShareOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
   // Anchor id of the tab awaiting close confirmation (running-command guard).
   const [closeConfirmTarget, setCloseConfirmTarget] = useState<string | null>(null)
@@ -593,6 +597,17 @@ export function TerminalDock() {
                 <Columns2Icon className="h-3 w-3" />
               </DockToolbarButton>
             ) : null}
+            {/* Sharing (ADR-0133) rides the durable host: it needs a hosted
+                session, and only the desktop can grant paired devices. */}
+            {activeRow && transport === "tauri-channel" ? (
+              <DockToolbarButton
+                label={t("share")}
+                testId="terminal-dock-share"
+                onClick={() => setShareOpen(true)}
+              >
+                <Share2Icon className="h-3 w-3" />
+              </DockToolbarButton>
+            ) : null}
             {/* Clearing is pure xterm — no transport gate. A remote-host user
                 could not clear their own screen while this was gated. */}
             {activeRow ? (
@@ -705,6 +720,15 @@ export function TerminalDock() {
               onClose={() => setSearchOpen(false)}
               instanceRef={focusedHandleRef}
             />
+            {shareOpen ? (
+              <TerminalShareDialog
+                sessionId={
+                  focusedSessionId && sessions[focusedSessionId] ? focusedSessionId : activeRow.id
+                }
+                open={shareOpen}
+                onOpenChange={setShareOpen}
+              />
+            ) : null}
             <TerminalHistoryPanel
               sessionId={
                 focusedSessionId && sessions[focusedSessionId] ? focusedSessionId : activeRow.id

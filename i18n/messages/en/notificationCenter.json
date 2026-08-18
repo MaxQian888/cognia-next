@@ -62,6 +62,7 @@
   "sources": {
     "agent-team": "Agent team",
     "connector": "Messages",
+    "issue": "Issues",
     "plugin": "Plugins",
     "scheduler": "Scheduler",
     "session": "Sessions",

@@ -64,7 +64,7 @@ export async function activate(ctx: PluginContext) {
 
 ## ctx.workspace — 注册 issue-loop 后端
 
-后端形状沿用 `E2BBackend`（`clone / commitAndPush / remove`），替换旧的 `setE2BBackend()` singleton：
+后端形状沿用 `E2BBackend`（`clone / commitAndPush / remove`）。这是唯一的注册路径——旧的 `setE2BBackend()` singleton 已移除；宿主按未加前缀的 kind 解析你的后端：
 
 ```ts
 ctx.workspace.registerBackend({
@@ -435,7 +435,7 @@ ctx.contextPanels.setPinned(true) // 让自动 reveal 变成角标排队
 | 旧                                        | 新                                                               |
 | ----------------------------------------- | ---------------------------------------------------------------- |
 | 全局 `installOcrRuntime()`                | `ctx.ocr.registerProvider(...)`                                  |
-| `setE2BBackend(impl)`                     | `ctx.workspace.registerBackend({ id: "e2b", ... })`              |
+| `setE2BBackend(impl)`（**已移除**）        | `ctx.workspace.registerBackend({ id: "e2b", ... })`              |
 | `registerNodeExecutor` side-effect import | `ctx.workflow.registerNode(...)` 或 `manifest.workflows.nodes[]` |
 | `registerPluginI18n({ ... })`             | `manifest.i18n`（已自动 wire）                                   |
 | 直接 `isTauri()` import                   | `ctx.capabilities.tauri`                                         |

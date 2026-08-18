@@ -81,6 +81,14 @@ export interface LarkMessage {
   mentions?: LarkMention[]
   create_time?: string
   thread_id?: string | null
+  /**
+   * Reply linkage (Lark "reply"/quote): `parent_id` is the message being
+   * replied to, `root_id` the thread root. Both absent on top-level messages.
+   * Surfaced as `replyTo` so quote-message → issue (ADR-0132 slice ③) and the
+   * reply-aware policies work on Lark like they do on Telegram / Discord.
+   */
+  parent_id?: string | null
+  root_id?: string | null
 }
 
 export interface LarkEventHeader {
@@ -704,7 +712,11 @@ export function parseLarkEventEnvelope(
     },
     segments,
     plainText,
-    replyTo: undefined,
+    // Lark does not echo the quoted text in the event; the id is what the
+    // reply-aware paths need (`snippet` is best-effort by contract).
+    ...(message.parent_id
+      ? { replyTo: { messageId: message.parent_id, snippet: "" } }
+      : { replyTo: undefined }),
     mentions: { selfMentioned, users },
     timestamp: createTimeMs,
     raw: envelope,

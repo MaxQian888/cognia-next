@@ -4,6 +4,9 @@
 
 const mockRegisterLocalIssueSource = jest.fn()
 const mockRegisterGithubIssueSource = jest.fn()
+const mockRegisterAgentTaskIssueSource = jest.fn()
+const mockRegisterAgentTeamIssueSource = jest.fn()
+const mockInstallIssueRunBridge = jest.fn((..._args: unknown[]) => () => {})
 const mockSeedBuiltinIssueLabels = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/issues/sources/local-source", () => ({
@@ -11,6 +14,28 @@ jest.mock("@/lib/issues/sources/local-source", () => ({
 }))
 jest.mock("@/lib/issues/sources/github-source", () => ({
   registerGithubIssueSource: (...args: unknown[]) => mockRegisterGithubIssueSource(...args),
+}))
+jest.mock("@/lib/issues/sources/agent-task-source", () => ({
+  registerAgentTaskIssueSource: (...args: unknown[]) => mockRegisterAgentTaskIssueSource(...args),
+}))
+jest.mock("@/lib/issues/sources/agent-team-source", () => ({
+  registerAgentTeamIssueSource: (...args: unknown[]) => mockRegisterAgentTeamIssueSource(...args),
+}))
+jest.mock("@/lib/issues/run/install", () => ({
+  installIssueRunBridge: (...args: unknown[]) => mockInstallIssueRunBridge(...args),
+}))
+const mockInstallIssueNotifications = jest.fn((..._args: unknown[]) => () => {})
+const mockInstallIssueNotificationCommands = jest.fn((..._args: unknown[]) => () => {})
+jest.mock("@/lib/issues/notify", () => ({
+  installIssueNotifications: (...args: unknown[]) => mockInstallIssueNotifications(...args),
+  installIssueNotificationCommands: (...args: unknown[]) =>
+    mockInstallIssueNotificationCommands(...args),
+}))
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush }) }))
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${JSON.stringify(values)}` : key,
 }))
 jest.mock("@/lib/db/labels", () => ({
   seedBuiltinIssueLabels: (...args: unknown[]) => mockSeedBuiltinIssueLabels(...args),
@@ -45,12 +70,42 @@ describe("bootIssueTracker", () => {
     await bootIssueTracker()
     expect(mockRegisterLocalIssueSource).toHaveBeenCalledTimes(1)
     expect(mockRegisterGithubIssueSource).toHaveBeenCalledTimes(1)
+    expect(mockRegisterAgentTaskIssueSource).toHaveBeenCalledTimes(1)
+    expect(mockRegisterAgentTeamIssueSource).toHaveBeenCalledTimes(1)
     expect(mockSeedBuiltinIssueLabels).toHaveBeenCalledTimes(1)
+  })
+
+  it("installs the run bridge (adapters + engine watchers) with an error sink", async () => {
+    await bootIssueTracker()
+    expect(mockInstallIssueRunBridge).toHaveBeenCalledTimes(1)
+    const options = (mockInstallIssueRunBridge.mock.calls as unknown as unknown[][])[0]![0] as {
+      onError: (error: unknown) => void
+    }
+    options.onError(new Error("bridge boom"))
+    expect(mockWarn).toHaveBeenCalledWith(
+      "issue-tracker: run bridge error",
+      expect.objectContaining({ error: expect.stringContaining("bridge boom") })
+    )
   })
 
   it("registers the GitHub source even with no repo bound — it reads the mirror only", async () => {
     await bootIssueTracker()
     expect(mockRegisterGithubIssueSource).toHaveBeenCalled()
+  })
+
+  it("installs the notification watcher with the injected translator and an error sink", async () => {
+    await bootIssueTracker({ translate: (key) => `T:${key}` })
+    expect(mockInstallIssueNotifications).toHaveBeenCalledTimes(1)
+    const options = (mockInstallIssueNotifications.mock.calls as unknown as unknown[][])[0]![0] as {
+      translate: (key: string) => string
+      onError: (error: unknown) => void
+    }
+    expect(options.translate("x")).toBe("T:x")
+    options.onError(new Error("notify boom"))
+    expect(mockWarn).toHaveBeenCalledWith(
+      "issue-tracker: notify error",
+      expect.objectContaining({ error: expect.stringContaining("notify boom") })
+    )
   })
 
   it("reconciles the background refresh, so a binding survives a restart", async () => {
@@ -83,6 +138,25 @@ describe("IssueTrackerInitializer", () => {
     unlockedAccountId = "acct-1"
     const { container } = render(<IssueTrackerInitializer />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("threads the live translator into the watcher and mounts the issue.open command", async () => {
+    unlockedAccountId = "acct-1"
+    render(<IssueTrackerInitializer />)
+    await waitFor(() => expect(mockInstallIssueNotifications).toHaveBeenCalledTimes(1))
+    const options = (mockInstallIssueNotifications.mock.calls as unknown as unknown[][])[0]![0] as {
+      translate: (key: string, values?: Record<string, unknown>) => string
+    }
+    expect(options.translate("notify.open")).toBe("notify.open")
+    expect(options.translate("notify.assigned.title", { identifier: "MERC-1" })).toBe(
+      'notify.assigned.title:{"identifier":"MERC-1"}'
+    )
+    expect(mockInstallIssueNotificationCommands).toHaveBeenCalledTimes(1)
+    const commandDeps = (
+      mockInstallIssueNotificationCommands.mock.calls as unknown as unknown[][]
+    )[0]![0] as { navigate: (path: string) => void }
+    commandDeps.navigate("/issues?id=x")
+    expect(mockPush).toHaveBeenCalledWith("/issues?id=x")
   })
 
   it("never lets a failed seed block boot", async () => {

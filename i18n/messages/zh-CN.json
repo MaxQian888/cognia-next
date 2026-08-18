@@ -10203,6 +10203,7 @@
       "character": "角色",
       "inbox-contact": "联系人",
       "inbox-conversation": "收件箱会话",
+      "issue": "议题",
       "mcp-server": "MCP 服务器",
       "memory": "记忆",
       "message": "消息",
@@ -11641,6 +11642,11 @@
       "team": "小队",
       "unassigned": "未指派"
     },
+    "assignee": {
+      "agents": "Agent",
+      "missing": "已不存在",
+      "teams": "小队"
+    },
     "board": {
       "addIssue": "在「{status}」中新建议题",
       "agentsWorking": "{count, plural, =0 {0 个 Agent 在工作} other {# 个 Agent 在工作}}",
@@ -11688,6 +11694,43 @@
       "none": "暂无标签",
       "remove": "移除 {name}",
       "title": "标签"
+    },
+    "notify": {
+      "actor": {
+        "agent": "一个 Agent",
+        "human": "你",
+        "team": "一个小队"
+      },
+      "assigned": {
+        "body": "{title}",
+        "title": "{identifier} 已指派给 {to}"
+      },
+      "commented": {
+        "body": "{body}",
+        "title": "{by} 在 {identifier} 上发表了新评论"
+      },
+      "open": "打开议题",
+      "reassigned": {
+        "body": "{title}",
+        "title": "{identifier} 已改派给 {to}"
+      },
+      "run_failed": {
+        "body": "{error}",
+        "title": "{identifier} 运行失败"
+      },
+      "run_succeeded": {
+        "body": "{title}",
+        "title": "{identifier} 运行完成 —— 等待审阅"
+      },
+      "status": {
+        "canceled": "已取消",
+        "done": "完成",
+        "in_review": "待审阅"
+      },
+      "status_changed": {
+        "body": "{title}",
+        "title": "{identifier} 已移至 {to}"
+      }
     },
     "priority": {
       "high": "高",
@@ -11740,6 +11783,57 @@
       "summary": "{count, plural, =0 {暂无项目} other {# 个项目}}",
       "targetDate": "截止日期",
       "title": "项目"
+    },
+    "run": {
+      "activeHint": "运行进行中 —— 在引擎结束或你取消之前，议题会一直停在「进行中」。",
+      "adapter": {
+        "agent-task": {
+          "description": "为指派的 Agent 创建一个任务并通过调度器立即运行。",
+          "name": "Agent 任务"
+        },
+        "agent-team": {
+          "description": "向指派的小队追加一个任务并启动团队运行。",
+          "name": "Agent 团队"
+        },
+        "github-loop": {
+          "description": "克隆绑定的仓库，让 Agent 处理关联的 GitHub issue，推送分支并创建 pull request。",
+          "name": "GitHub issue 循环"
+        }
+      },
+      "baseBranch": "基线分支",
+      "baseBranchHint": "Pull request 的目标分支；源分支由议题编号自动推导。",
+      "cancel": "取消运行",
+      "cancelled": "运行已取消",
+      "description": "选择执行引擎。这一步就是确认 —— 按下「运行」后引擎立即启动。",
+      "engineLabel": "执行引擎",
+      "loading": "正在检查哪些引擎可以运行这个议题…",
+      "noAdapters": "尚未注册任何执行引擎。",
+      "refusal": {
+        "adapter-missing": "该执行引擎不可用。",
+        "assignee-kind-mismatch": "请先把议题指派给对应类型的 Agent 或小队。",
+        "assignee-not-found": "受让人已不存在。",
+        "desktop-only": "仅桌面端可用。",
+        "issue-finished": "已结束的议题不能运行。",
+        "no-github-account": "请先在 设置 → 连接 中接入 GitHub 账号。",
+        "no-github-ref": "请先把这个议题关联到一个 GitHub issue。",
+        "no-github-repo": "请先把项目绑定到该议题所在的 GitHub 仓库。",
+        "run-active": "这个议题已有一个运行在进行中。",
+        "team-busy": "该小队正在运行中，请等它结束。"
+      },
+      "reviewRule": "运行结束后议题进入「待审阅」—— 绝不会直接置为「完成」。",
+      "section": "运行",
+      "sectionHint": "把这个议题派发给指派的 Agent 或小队。运行期间由运行时持有「进行中」；结束后议题回到「待审阅」交还给你。",
+      "started": "{identifier} 已派发给 {adapter}",
+      "status": {
+        "cancelled": "已取消",
+        "failed": "失败",
+        "queued": "排队中",
+        "running": "运行中",
+        "succeeded": "成功"
+      },
+      "submit": "运行",
+      "title": "运行 {identifier}",
+      "trigger": "运行"
     },
     "source": {
       "agent-task": "Agent 任务",
@@ -11809,6 +11903,7 @@
       "agentsWorking": "工作中的 Agent",
       "issueSummary": "议题",
       "manage": "管理工作区",
+      "manageHint": "目录只有一个编辑入口 —— 工作区管理器。",
       "noProjects": "当前工作区还没有项目",
       "openIssues": "未完成议题",
       "overview": "总览",
@@ -11816,7 +11911,10 @@
       "recentActivity": "最近活动",
       "resources": "资源",
       "title": "工作区",
-      "trust": "工作区信任"
+      "trust": "工作区信任",
+      "trustUnknown": "未决定",
+      "trusted": "已信任",
+      "untrusted": "未信任"
     },
     "writeback": {
       "account": "以 {account} 的身份写入",
@@ -15649,6 +15747,7 @@
     "sources": {
       "agent-team": "智能体团队",
       "connector": "消息",
+      "issue": "议题",
       "plugin": "插件",
       "scheduler": "计划任务",
       "session": "会话",
@@ -34826,6 +34925,7 @@
       "resize": "拖动调整终端 dock 高度（方向键亦可）",
       "resizeVertical": "拖动以调整终端面板宽度（也可使用方向键）",
       "restore": "还原终端面板大小",
+      "share": "分享给已配对设备",
       "spawnDenied": "终端被插件拦截",
       "spawnError": "无法打开终端：{message}",
       "splitRight": "向右分屏（Ctrl+\\）",
@@ -34997,14 +35097,43 @@
       "integrationDegraded": "Shell 集成不可用",
       "outputThrottled": "输出受限 — 已暂停进程以等待处理",
       "outputThrottledBuffered": "输出受限 — 正在本窗口缓冲",
+      "participantController": "控制中",
+      "participantViewer": "查看中",
+      "participantsLabel": "已连接的设备",
       "readOnly": "只读",
       "releaseConfirm": "要释放此会话的控制权吗？释放后其他客户端可以接管。",
       "releaseControl": "释放控制权",
       "replayGap": "序列 {firstAvailable} 之前的输出已不可用。",
       "replayGapMarker": "由于回放缓冲区已截断，更早的终端输出不可用。",
       "sandboxed": "已沙箱化",
+      "shared": "已与 {count} 台设备共享",
       "takeControl": "接管控制",
       "takeoverConfirm": "要接管此会话吗？当前控制者将变为只读。"
+    },
+    "share": {
+      "description": "持有远程终端授权的已配对设备会通过伴侣链路接入这个宿主会话，并共用同一把控制权租约：同一时刻只有一个控制者，其余只读。不会复制任何内容，也不会生成链接。",
+      "devices": {
+        "attached": "已接入",
+        "blocked": "已撤销或已暂停",
+        "empty": "还没有已配对设备。先配对手机或另一台 Cognia 才能分享。",
+        "granted": "可以接入本机的终端",
+        "notGranted": "无法接入 — 打开以分享",
+        "pair": "配对设备",
+        "scope": "该授权作用于本机的所有终端，而不仅是当前会话。",
+        "title": "已配对设备",
+        "toggleAria": "允许 {label} 接入终端"
+      },
+      "openTerminalSettings": "打开终端设置",
+      "participants": {
+        "controller": "控制者",
+        "notLive": "此会话未在本窗口中接入。",
+        "thisDevice": "本设备",
+        "title": "本会话中",
+        "unknown": "{count, plural, =0 {宿主未报告任何已接入客户端} other {已接入 # 个客户端 — 该宿主不报告具体身份}}",
+        "viewer": "查看者"
+      },
+      "remoteAccessOff": "本机的远程终端访问已关闭，在「设置 → 终端」中打开之前任何设备都无法接入。",
+      "title": "分享终端"
     },
     "shellPicker": {
       "auto": "默认 Shell",

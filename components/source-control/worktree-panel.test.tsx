@@ -87,7 +87,8 @@ describe("WorktreePanel", () => {
         "/repo",
         "/work/feature-b",
         "feature/b",
-        "origin/main"
+        "origin/main",
+        { source: "worktree-panel", ownerType: "user" }
       )
     )
     await waitFor(() => expect(gitWorktreeList).toHaveBeenCalledTimes(2))
@@ -110,7 +111,8 @@ describe("WorktreePanel", () => {
         root,
         "worktrees/remote",
         "feature/remote",
-        undefined
+        undefined,
+        { source: "worktree-panel", ownerType: "user" }
       )
     )
     expect(screen.queryByTestId("worktree-pick-directory")).not.toBeInTheDocument()
@@ -170,7 +172,11 @@ describe("WorktreePanel", () => {
     await user.click(screen.getByTestId("worktree-remove-confirm"))
 
     await waitFor(() =>
-      expect(gitWorktreeRemove).toHaveBeenCalledWith("/repo", "/work/feature-a", false, undefined)
+      expect(gitWorktreeRemove).toHaveBeenCalledWith("/repo", "/work/feature-a", false, undefined, {
+        source: "worktree-panel",
+        ownerType: "user",
+        reason: "user",
+      })
     )
     await waitFor(() => expect(gitWorktreeList).toHaveBeenCalledTimes(2))
   })
@@ -185,7 +191,17 @@ describe("WorktreePanel", () => {
     await user.click(screen.getByTestId("worktree-remove-confirm"))
 
     await waitFor(() =>
-      expect(gitWorktreeRemove).toHaveBeenCalledWith("/repo", "/work/feature-a", true, "feature/a")
+      expect(gitWorktreeRemove).toHaveBeenCalledWith(
+        "/repo",
+        "/work/feature-a",
+        true,
+        "feature/a",
+        {
+          source: "worktree-panel",
+          ownerType: "user",
+          reason: "user",
+        }
+      )
     )
   })
 

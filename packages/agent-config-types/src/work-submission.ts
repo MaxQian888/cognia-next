@@ -151,9 +151,13 @@ export interface WorkScopeV1 {
   projectId?: string
 }
 
-/** Which business object this work reports back into, if any. */
+/**
+ * Which business object this work reports back into, if any. `issue` is the
+ * issue tracker's row (`types/issues`, ADR-0132) — the id is the opaque
+ * `Issue.id`, never the printed `KEY-n` identifier.
+ */
 export interface WorkItemRefV1 {
-  kind: "agent-task" | "goal" | "workflow-run" | "team-task"
+  kind: "agent-task" | "goal" | "workflow-run" | "team-task" | "issue"
   id: string
 }
 
@@ -221,6 +225,7 @@ const WORK_ITEM_KINDS: Record<WorkItemRefV1["kind"], true> = {
   goal: true,
   "workflow-run": true,
   "team-task": true,
+  issue: true,
 }
 
 function isMemberOf<T extends string>(table: Record<T, true>, value: unknown): value is T {

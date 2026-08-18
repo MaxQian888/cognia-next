@@ -116,13 +116,15 @@ export function AgentModeSelector({
   // Agent team store
   const teamsList = useAgentTeamStore(useShallow((s) => Object.values(s.teams)))
   // Workspace isolation (Dexie v86): only show teams owned by the active
-  // workspace. Legacy teams (no projectId) are grandfathered into every view.
+  // workspace. Every persisted team carries a projectId since agent-team-store
+  // persist v7 backfilled the pre-isolation rows to DEFAULT_PROJECT_ID, so a
+  // team is either this workspace's or hidden — nothing is grandfathered.
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const activeTeams = useMemo(
     () =>
       teamsList.filter(
         (t) =>
-          (!t.projectId || !activeProjectId || t.projectId === activeProjectId) &&
+          (!activeProjectId || t.projectId === activeProjectId) &&
           (t.status === "executing" || t.status === "planning" || t.status === "paused")
       ),
     [teamsList, activeProjectId]

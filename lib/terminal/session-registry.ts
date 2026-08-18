@@ -19,13 +19,24 @@ import type { BaseTerminalSession } from "./base-session"
 
 const sessions = new Map<string, BaseTerminalSession>()
 const listeners = new Set<() => void>()
+/** Per-session `onInfo` unsubscribers, so a replaced/removed handle stops notifying. */
+const infoSubscriptions = new Map<string, () => void>()
 
 export function registerLiveSession(session: BaseTerminalSession): void {
+  infoSubscriptions.get(session.id)?.()
   sessions.set(session.id, session)
+  // A host snapshot (roster / lease change, ADR-0133) mutates `session.info`
+  // in place; re-broadcast so `useSyncExternalStore` consumers of the
+  // registry (chip, share dialog) re-read it without polling.
+  const off = typeof session.onInfo === "function" ? session.onInfo(() => notify()) : undefined
+  if (off) infoSubscriptions.set(session.id, off)
+  else infoSubscriptions.delete(session.id)
   notify()
 }
 
 export function unregisterLiveSession(id: string): boolean {
+  infoSubscriptions.get(id)?.()
+  infoSubscriptions.delete(id)
   const removed = sessions.delete(id)
   if (removed) notify()
   return removed
@@ -58,6 +69,8 @@ function notify(): void {
 
 /** Test-only — drop accumulated state so suites are hermetic. */
 export function __clearLiveSessionsForTesting(): void {
+  for (const off of infoSubscriptions.values()) off()
+  infoSubscriptions.clear()
   sessions.clear()
   listeners.clear()
 }

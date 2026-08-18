@@ -7,6 +7,7 @@ import {
   linkAgentTaskAttemptExecution,
   listAgentTaskAttempts,
   listAgentTasks,
+  listAgentTasksByProject,
   moveAgentTask,
   reconcileAgentTaskAttempts,
   settleAgentTaskAttempt,
@@ -38,6 +39,30 @@ describe("single-Agent task persistence", () => {
     })
 
     expect((await listAgentTasks("agent-a")).map((task) => task.id)).toEqual(["task-1"])
+  })
+
+  it("lists tasks by workspace, skipping rows that never carried a projectId", async () => {
+    await createAgentTask({
+      id: "w1-a",
+      agentId: "a",
+      projectId: "w1",
+      title: "x",
+      description: "",
+    })
+    await createAgentTask({
+      id: "w1-b",
+      agentId: "b",
+      projectId: "w1",
+      title: "y",
+      description: "",
+    })
+    await createAgentTask({ id: "w2", agentId: "a", projectId: "w2", title: "z", description: "" })
+    await createAgentTask({ id: "none", agentId: "a", title: "n", description: "" })
+    expect((await listAgentTasksByProject("w1")).map((task) => task.id).sort()).toEqual([
+      "w1-a",
+      "w1-b",
+    ])
+    expect(await listAgentTasksByProject("w3")).toEqual([])
   })
 
   it("derives dependency blocking and refuses duplicate concurrent attempts", async () => {

@@ -5,7 +5,8 @@ use cognia_task_workspace::{
     PruneOutcome, ResourceChange, ResourceEvent, ResourceEventKind, ResourceRead,
     ResourceTrackingPolicy, RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary,
     TaskRun, TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,
-    TaskWorkspaceService, TransferChunk, UploadHandle,
+    TaskWorkspaceService, TransferChunk, UploadHandle, WorktreeLifecycleEvent,
+    WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -37,8 +38,61 @@ pub fn install(data_dir: PathBuf) -> Result<Arc<TaskWorkspaceService>, String> {
             .map_err(|error| format!("invalid COGNIA_TASK_WORKSPACE_MAX_BLOB_BYTES: {error}"))?;
     }
     let service = Arc::new(TaskWorkspaceService::open(config)?);
+    // ADR-0111 decision 9: the Registry is the producer of the
+    // `WorktreeCreate` / `WorktreeRemove` agent hook events. The crate cannot
+    // reach the hook runner, so the app installs this sink at boot.
+    service.set_worktree_lifecycle_sink(Some(Arc::new(HookWorktreeLifecycleSink)));
     *slot().write() = Some(Arc::clone(&service));
     Ok(service)
+}
+
+/// Runs the `WorktreeCreate` / `WorktreeRemove` lifecycle hooks for a
+/// registry event. Fire-and-forget on the Tauri async runtime: the registry
+/// state machine must never wait on user hook scripts, and a slow or failing
+/// hook must not fail the run that created the worktree (the runner already
+/// treats these as observational — `block` is ignored).
+pub struct HookWorktreeLifecycleSink;
+
+/// Wire payload for the two hook events. Exposed so the TS producer in
+/// `lib/git/commands.ts` and the catalog docs stay byte-identical with this.
+pub fn worktree_hook_fields(event: &WorktreeLifecycleEvent) -> serde_json::Value {
+    serde_json::json!({
+        "worktree_path": event.worktree_path,
+        "workspace_root": event.workspace_root,
+        "workspace_id": event.workspace_id,
+        "owner_type": event.owner_type,
+        "owner_ref": event.owner_ref,
+        "branch": event.branch,
+        "base": event.base,
+        "reason": event.reason,
+        "source": "managed-registry",
+    })
+}
+
+impl WorktreeLifecycleSink for HookWorktreeLifecycleSink {
+    fn emit(&self, event: WorktreeLifecycleEvent) {
+        let hook_event = match event.kind {
+            WorktreeLifecycleKind::Created => crate::hooks::HookEvent::WorktreeCreate,
+            WorktreeLifecycleKind::Removed => crate::hooks::HookEvent::WorktreeRemove,
+        };
+        let session_id = event.session_id.clone().unwrap_or_default();
+        let cwd = event.workspace_root.clone();
+        let fields = worktree_hook_fields(&event);
+        tauri::async_runtime::spawn(async move {
+            let settings = crate::hooks::load_effective_settings(Some(&cwd));
+            let decision = crate::hooks::run_session_scoped(
+                &settings,
+                hook_event,
+                &session_id,
+                Some(&cwd),
+                fields,
+            )
+            .await;
+            for warning in decision.warnings {
+                log::warn!("worktree lifecycle hook: {warning}");
+            }
+        });
+    }
 }
 
 pub fn service() -> Result<Arc<TaskWorkspaceService>, String> {
@@ -463,6 +517,44 @@ mod tests {
             surface: Some("test".into()),
             tracking_policy: ResourceTrackingPolicy::default(),
         }
+    }
+
+    #[test]
+    fn worktree_hook_fields_carry_the_documented_wire_names() {
+        let event = WorktreeLifecycleEvent {
+            kind: WorktreeLifecycleKind::Created,
+            workspace_id: "ws-1".into(),
+            workspace_root: "/repo".into(),
+            worktree_path: "/repo/.cognia/ws-1".into(),
+            owner_type: cognia_task_workspace::WorkspaceOwnerType::Session,
+            owner_ref: Some("sess-1".into()),
+            session_id: Some("sess-1".into()),
+            base: cognia_task_workspace::WorkspaceBaseSpec::WorkingState,
+            branch: Some("cognia/ws-1".into()),
+            reason: None,
+        };
+        let fields = worktree_hook_fields(&event);
+        assert_eq!(fields["worktree_path"], "/repo/.cognia/ws-1");
+        assert_eq!(fields["workspace_root"], "/repo");
+        assert_eq!(fields["workspace_id"], "ws-1");
+        assert_eq!(fields["owner_type"], "session");
+        assert_eq!(fields["owner_ref"], "sess-1");
+        assert_eq!(fields["branch"], "cognia/ws-1");
+        assert_eq!(fields["source"], "managed-registry");
+        assert!(fields["reason"].is_null());
+    }
+
+    #[test]
+    fn install_registers_the_hook_lifecycle_sink() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let service = install(data.path().to_path_buf()).unwrap();
+        assert!(
+            service.has_worktree_lifecycle_sink(),
+            "boot must install the WorktreeCreate/WorktreeRemove producer"
+        );
+        // Restore whatever the other tests expect: leave the slot populated.
+        assert!(super::service().is_ok());
     }
 
     fn turn_envelope(workspace: &TempDir, run_id: &str) -> TaskWorkspaceTurnEnvelope {

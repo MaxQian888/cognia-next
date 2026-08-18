@@ -435,7 +435,12 @@ export class RemoteTerminalSession extends BaseTerminalSession {
         this.dispatchReplayGap(decodeTerminalJson<TerminalReplayGap>(frame))
         break
       case TerminalFrameKind.SessionSnapshot:
-        if (frame.sequence === BigInt(0)) this.info = decodeTerminalJson<SessionInfo>(frame)
+        // Sequence 0 is the host's unsolicited roster / lease refresh
+        // (ADR-0133); replies to our own requests carry the request's
+        // sequence and are settled by `sendCommand`.
+        if (frame.sequence === BigInt(0)) {
+          this.applySessionSnapshot(decodeTerminalJson<SessionInfo>(frame))
+        }
         break
       case TerminalFrameKind.Error: {
         const error = decodeTerminalJson<{ code: TerminalErrorCode; message: string }>(frame)

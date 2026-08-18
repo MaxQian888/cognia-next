@@ -39,6 +39,7 @@ import {
 } from "./store"
 import { initialState } from "./initial-state"
 import { purgeProjectBuckets } from "@/lib/project/project-bucket-purge"
+import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 
 function persistedTeam(id: string, name: string) {
   return {
@@ -238,6 +239,24 @@ describe("agent-team account storage buckets", () => {
 
     activateAgentTeamAccountStorage("acct_a")
     expect(useAgentTeamStore.getState().teams.team_a?.status).toBe("idle")
+  })
+
+  it("stamps DEFAULT_PROJECT_ID on workspace-less teams on an account switch (bypasses migrate)", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({
+        state: {
+          teams: {
+            legacy: persistedTeam("legacy", "Legacy"),
+            scoped: { ...persistedTeam("scoped", "Scoped"), projectId: "proj-A" },
+          },
+        },
+      })
+    )
+    activateAgentTeamAccountStorage("acct_a")
+    const teams = useAgentTeamStore.getState().teams
+    expect(teams.legacy?.projectId).toBe(DEFAULT_PROJECT_ID)
+    expect(teams.scoped?.projectId).toBe("proj-A")
   })
 })
 

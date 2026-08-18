@@ -7,6 +7,7 @@
 import {
   BrainIcon,
   CalendarClockIcon,
+  CircleDotIcon,
   CommandIcon,
   CompassIcon,
   ContactIcon,
@@ -51,6 +52,7 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   "inbox-contact": ContactIcon,
   "workbench-panel": PanelRightIcon,
   "pi-package": PackageIcon,
+  issue: CircleDotIcon,
 }
 
 export function kindIcon(kind: GlobalSearchKind): LucideIcon {

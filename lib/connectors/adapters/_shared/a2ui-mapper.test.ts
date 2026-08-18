@@ -15,6 +15,7 @@ import {
   truncateActionId,
   walkA2UISurface,
   type A2UIWalkNode,
+  bindingHintFields,
 } from "./a2ui-mapper"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
@@ -243,5 +244,22 @@ describe("generatePlainTextMirror", () => {
       rootId: "root",
     }
     expect(generatePlainTextMirror(surface)).toBe("Pick: Alpha / Beta")
+  })
+})
+
+describe("bindingHintFields", () => {
+  it("returns {} without hints and forwards well-formed kind / payload hints", () => {
+    expect(bindingHintFields(undefined)).toEqual({})
+    expect(bindingHintFields({ component: "Button" })).toEqual({})
+    expect(bindingHintFields({ bindingKind: "issue_action" })).toEqual({ kind: "issue_action" })
+    expect(
+      bindingHintFields({
+        bindingKind: "issue_action",
+        bindingPayload: { action: "run", issueId: "i" },
+      })
+    ).toEqual({ kind: "issue_action", payload: { action: "run", issueId: "i" } })
+    // Non-string kinds and non-object payloads are ignored, not forwarded.
+    expect(bindingHintFields({ bindingKind: 3, bindingPayload: [1] })).toEqual({})
+    expect(bindingHintFields({ bindingPayload: "nope" })).toEqual({})
   })
 })

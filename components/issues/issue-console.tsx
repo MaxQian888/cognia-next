@@ -34,6 +34,11 @@ import {
   type IssueBoardFilter,
   type IssueGroupBy,
 } from "@/lib/issues/board-model"
+import {
+  listRunningIssueIds,
+  loadIssueViewerContext,
+  SELF_ACTOR_KEY,
+} from "@/lib/issues/run/running"
 import { getIssueSourceRegistry } from "@/lib/issues/sources/registry"
 import { runWorkspaceGithubSync } from "@/lib/issues/sync-runner"
 import {
@@ -49,7 +54,7 @@ import {
 import { useProjectStore } from "@/stores/project/project-store"
 import type { IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
-import { parseUnifiedIssueId } from "@/types/issues/unified"
+import { makeUnifiedIssueId, parseUnifiedIssueId } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 import { moveIssue, reorderIssues } from "@/lib/db/issues"
 import {
@@ -68,8 +73,12 @@ import { CreateIssueDialog } from "./create-issue-dialog"
 /** Stable empty reference, so the no-workspace path cannot churn memos. */
 const EMPTY_ITEMS: UnifiedIssueItem[] = []
 
-/** The local human has no id — see `IssueActor`. */
-const VIEWER: IssueViewerContext = { selfKey: "human:self", agentKeys: [] }
+/**
+ * The local human has no id — see `IssueActor`. `agentKeys` is filled in from
+ * the Character table and the AgentTeam store at runtime (`loadIssueViewerContext`);
+ * this is only the pre-load value.
+ */
+const INITIAL_VIEWER: IssueViewerContext = { selfKey: SELF_ACTOR_KEY, agentKeys: [] }
 
 export interface IssueConsoleProps {
   /** Deep-linked issue (`/issues?id=…`), since a static export has no `[id]`. */
@@ -106,6 +115,14 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
 
   const [federated, setFederated] = useState<UnifiedIssueItem[]>([])
   const [sourceErrors, setSourceErrors] = useState(0)
+  /** Who counts as "my agents and squads" — every local Character and AgentTeam. */
+  const [viewer, setViewer] = useState<IssueViewerContext>(INITIAL_VIEWER)
+  /** Local issue ids with an active run — the "N agents working" pill. */
+  const runningIds = useClientLiveQuery(
+    () => (projectId ? listRunningIssueIds(projectId) : Promise.resolve(new Set<string>())),
+    [projectId],
+    new Set<string>()
+  )
   /**
    * Manual re-read trigger for the federated sources. A GitHub write-back
    * changes nothing local, so `localSignature` cannot notice it — without this
@@ -140,6 +157,13 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
         setFederated(result.items)
         setSourceErrors(result.errors.length)
       })
+    // Re-read alongside the fan-out: a Character or team created while the
+    // board is open should count as "mine" on the next tick, not after reload.
+    void loadIssueViewerContext()
+      .then((context) => {
+        if (!cancelled) setViewer(context)
+      })
+      .catch(() => undefined)
     return () => {
       cancelled = true
     }
@@ -157,14 +181,22 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
   /** Federated rows are only meaningful inside a workspace. */
   const visibleFederated = projectId ? federated : EMPTY_ITEMS
   const scoped = useMemo(
-    () => applyViewScope(visibleFederated, view.scope, VIEWER),
-    [visibleFederated, view.scope]
+    () => applyViewScope(visibleFederated, view.scope, viewer),
+    [visibleFederated, view.scope, viewer]
   )
   const filtered = useMemo(() => applyIssueFilter(scoped, filter), [scoped, filter])
   const effectiveSort = sort ?? view.sort
   const sorted = useMemo(() => applyIssueSort(filtered, effectiveSort), [filtered, effectiveSort])
 
-  const runHint = useMemo(() => issueRunHint(sorted, new Set()), [sorted])
+  const runHint = useMemo(
+    () =>
+      issueRunHint(
+        sorted,
+        // `issueRunHint` keys on `unifiedId`; the run index holds local issue ids.
+        new Set([...(runningIds ?? [])].map((id) => makeUnifiedIssueId("local", id)))
+      ),
+    [sorted, runningIds]
+  )
   const effectiveLayout = layout ?? view.layout
   const effectiveGroupBy = groupBy ?? view.groupBy
   const groups = useMemo(

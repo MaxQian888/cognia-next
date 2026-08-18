@@ -74,6 +74,11 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
   useAgentTeamStore: (selector: (s: { teams: Record<string, unknown> }) => unknown) =>
     selector({ teams: teamsState }),
 }))
+let activeProjectIdState: string | null = null
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: (selector: (s: { activeProjectId: string | null }) => unknown) =>
+    selector({ activeProjectId: activeProjectIdState }),
+}))
 
 beforeEach(() => {
   customModeState.customModes = {}
@@ -82,6 +87,7 @@ beforeEach(() => {
   customModeState.recordModeUsage.mockClear()
   mockPluginModes.length = 0
   teamsState = {}
+  activeProjectIdState = null
 })
 
 /** The trigger is the only button carrying the compact `text-[11px]` class. */
@@ -198,5 +204,46 @@ describe("AgentModeSelector — teams + create actions", () => {
 
     clickMenuItemContaining("createTeam")
     expect(onCreateTeam).toHaveBeenCalledTimes(1)
+  })
+
+  it("lists only the active workspace's running teams — a workspace-less team is not grandfathered", () => {
+    activeProjectIdState = "proj-A"
+    teamsState = {
+      mine: {
+        id: "mine",
+        name: "Mine Team",
+        status: "executing",
+        task: "t",
+        teammateIds: [],
+        projectId: "proj-A",
+      },
+      other: {
+        id: "other",
+        name: "Other Team",
+        status: "executing",
+        task: "t",
+        teammateIds: [],
+        projectId: "proj-B",
+      },
+      legacy: {
+        id: "legacy",
+        name: "Legacy Team",
+        status: "executing",
+        task: "t",
+        teammateIds: [],
+      },
+    }
+    render(
+      <AgentModeSelector
+        selectedModeId="general"
+        onModeChange={jest.fn()}
+        onSelectTeam={jest.fn()}
+        onCreateTeam={jest.fn()}
+      />
+    )
+    fireEvent.click(getTrigger())
+    expect(screen.queryByText("Mine Team")).toBeInTheDocument()
+    expect(screen.queryByText("Other Team")).not.toBeInTheDocument()
+    expect(screen.queryByText("Legacy Team")).not.toBeInTheDocument()
   })
 })

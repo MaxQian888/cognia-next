@@ -1234,6 +1234,7 @@ mod tests {
             last_activity_at: 2,
             current_controller: Some("device-a".to_string()),
             attached_clients: 1,
+            participants: Vec::new(),
             alive: true,
             sandboxed: false,
             integration_capabilities: IntegrationCapabilities {

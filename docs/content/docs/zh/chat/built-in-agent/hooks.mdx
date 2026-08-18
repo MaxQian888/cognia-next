@@ -48,6 +48,10 @@ Provider manifest 只是审计过的安全上限。Cognia 只启用 manifest、�
 
 SDK callback 是内置执行的唯一 owner。Cognia 不会先在 Rust 预执行 `UserPromptSubmit` 或 `PreToolUse`，再在 SDK 中重复注册。
 
+### Worktree 生命周期事件
+
+`WorktreeCreate` 与 `WorktreeRemove` 由 Cognia 自身产生，而不是 SDK（ADR-0111 决策 9）：受管 worktree 注册表在 worktree 变为 Active 时、以及被丢弃或清理时触发它们；共享的 git 命令层则为 Agent Team 分配器和源代码管理面板触发。载荷包含 `worktree_path`、`workspace_root`、`branch`、`owner_type`、`owner_ref`、`source`，移除时另有 `reason`。它们是观察型事件 —— 钩子无法阻止 worktree 的创建或移除。
+
 ### Codex
 
 安装前，Cognia 会运行：

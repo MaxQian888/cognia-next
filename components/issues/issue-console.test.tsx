@@ -67,7 +67,20 @@ jest.mock("@/lib/db/labels", () => ({ listLabels: jest.fn() }))
 // Stable reference on purpose: a fresh array per render would mask whether
 // the console's fan-out effect is identity-fragile.
 const EMPTY_ROWS: unknown[] = []
-jest.mock("@/hooks/data", () => ({ useClientLiveQuery: () => EMPTY_ROWS }))
+// The running-run index is the only live query whose initial value is a Set;
+// tests swap `runningIdsForTest` to simulate active runs.
+let runningIdsForTest: ReadonlySet<string> = new Set()
+jest.mock("@/hooks/data", () => ({
+  useClientLiveQuery: (_query: unknown, _deps: unknown, initial: unknown) =>
+    initial instanceof Set ? runningIdsForTest : EMPTY_ROWS,
+}))
+
+let viewerForTest = { selfKey: "human:self", agentKeys: [] as string[] }
+jest.mock("@/lib/issues/run/running", () => ({
+  SELF_ACTOR_KEY: "human:self",
+  listRunningIssueIds: () => Promise.resolve(new Set()),
+  loadIssueViewerContext: () => Promise.resolve(viewerForTest),
+}))
 
 const mockListAll = jest.fn()
 jest.mock("@/lib/issues/sources/registry", () => ({
@@ -119,6 +132,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   boardProps = {}
   activeProjectId = "w1"
+  runningIdsForTest = new Set()
+  viewerForTest = { selfKey: "human:self", agentKeys: [] }
   mockListAll.mockResolvedValue({ items: [], errors: [] })
 })
 
@@ -157,10 +172,37 @@ describe("IssueConsole", () => {
     expect(await screen.findByTestId("list-stub")).toBeInTheDocument()
   })
 
-  it("reports how many agents are working", async () => {
+  it("reports how many agents are working from the live run index", async () => {
+    mockListAll.mockResolvedValue({
+      items: [item(), item({ unifiedId: "local:i2", sourceId: "i2" })],
+      errors: [],
+    })
+    runningIdsForTest = new Set(["i1"])
     render(<IssueConsole />)
-    expect(await screen.findByTestId("issue-agents-working")).toHaveTextContent(
-      "board.agentsWorking:0"
+    await waitFor(() =>
+      expect(screen.getByTestId("issue-agents-working")).toHaveTextContent("board.agentsWorking:1")
+    )
+  })
+
+  it("scopes the My agents view to the viewer's Characters and squads", async () => {
+    mockListAll.mockResolvedValue({
+      items: [
+        item({ unifiedId: "local:mine", sourceId: "mine", assignee: { kind: "agent", id: "a1" } }),
+        item({
+          unifiedId: "local:other",
+          sourceId: "other",
+          assignee: { kind: "agent", id: "zz" },
+        }),
+        item({ unifiedId: "local:none", sourceId: "none" }),
+      ],
+      errors: [],
+    })
+    viewerForTest = { selfKey: "human:self", agentKeys: ["agent:a1"] }
+    render(<IssueConsole />)
+    await screen.findByTestId("board-stub")
+    fireEvent.click(screen.getByTestId("issue-view-my-agents"))
+    await waitFor(() =>
+      expect((boardProps.items as UnifiedIssueItem[]).map((i) => i.sourceId)).toEqual(["mine"])
     )
   })
 

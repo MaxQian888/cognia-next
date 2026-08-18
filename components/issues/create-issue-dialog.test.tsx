@@ -12,6 +12,14 @@ jest.mock("@/lib/db/issue-projects", () => ({
   createIssueProject: (...a: unknown[]) => mockCreateIssueProject(...a),
   listTakenProjectKeys: (...a: unknown[]) => mockListTakenProjectKeys(...a),
 }))
+// Own suite; here it only needs to hand an actor back.
+let pickerOnChange: ((actor: unknown) => void) | null = null
+jest.mock("./assignee-picker", () => ({
+  AssigneePicker: (props: { onChange: (actor: unknown) => void }) => {
+    pickerOnChange = props.onChange
+    return <div data-testid="assignee-picker-stub" />
+  },
+}))
 
 import userEvent from "@testing-library/user-event"
 import { render, screen, waitFor } from "@testing-library/react"
@@ -74,6 +82,19 @@ describe("CreateIssueDialog", () => {
     await user.type(key, "abc")
     await user.type(await screen.findByTestId("create-issue-project-name"), "Cognia")
     expect(key).toHaveValue("ABC")
+  })
+
+  it("carries the picked assignee into createIssue", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await user.type(await screen.findByTestId("create-issue-title"), "Do it")
+    pickerOnChange!({ kind: "agent", id: "c1", label: "Ada" })
+    await user.click(screen.getByTestId("create-issue-submit"))
+    await waitFor(() =>
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ assignee: { kind: "agent", id: "c1", label: "Ada" } })
+      )
+    )
   })
 
   it("blocks submit until a title exists", async () => {
