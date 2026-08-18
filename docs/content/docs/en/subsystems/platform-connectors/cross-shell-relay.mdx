@@ -1,0 +1,104 @@
+---
+title: Cross-shell relay
+description: How an Inbox write executes on a phone, a browser, or a desktop driving a remote host — one shell-agnostic facade, one idempotency key, and two realtime signals.
+---
+
+# Cross-shell relay
+
+The Inbox used to work fully only on the machine running the adapters. Every reply surface decided for itself how to write, and only the desktop's decision worked: a phone's approval flipped a draft without ever enqueuing delivery, a browser rendered controls that did nothing, and a desktop driving a remote host wrote to the wrong database.
+
+ADR-0131 replaces those twelve decisions with one seam. **Components describe the write; `lib/connectors/inbox-writes/` decides where it runs.**
+
+## The four writes
+
+```ts
+import {
+  sendManualReply,
+  approveInboxDraft,
+  rejectInboxDraft,
+  mutateConversationOverride,
+} from "@/lib/connectors/inbox-writes"
+```
+
+No caller branches on `isTauri()` or the platform. `resolveInboxWriteRoute()` (`lib/connectors/inbox-writes/route.ts:77`) resolves one of three routes:
+
+| Route           | When                                                              | Executes                                                    |
+| --------------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
+| `"remote"`      | this desktop drives a remote host (`isRemoteHostActive()`)         | `mobileOutboundQueue` → RPC on the paired host               |
+| `"local"`       | this shell owns a connector runtime                                | `local.ts`, against this process's Dexie + delivery gateway  |
+| `"remote"`      | a companion target is active (paired phone, web companion)         | durable queue → RPC                                          |
+| `"unavailable"` | standalone browser / unpaired phone                                | throws `InboxWriteUnavailableError`                          |
+
+**Order matters.** A desktop driving a remote host still advertises `connector-runtime` from its capability baseline, but its local runtime is torn down while the remote is active. If `"local"` won, the reply would become an outbound job no running adapter would ever deliver.
+
+## One implementation, two callers
+
+`lib/connectors/inbox-writes/local.ts` holds the three primitives — `sendManualReplyLocally`, `approveDraftLocally`, `rejectDraftLocally` — lifted verbatim out of `components/chat/composer.tsx`.
+
+The **host RPC arms call the same functions**. `lib/companion/desktop-write-source.ts` dispatches `connector_enqueue_outbound` / `connector_approve_draft` / `connector_reject_draft` straight into `local.ts`, so a phone-originated reply and a desktop-originated reply produce byte-identical `outboundQueue` and `messages` rows. There is no second implementation to drift.
+
+## Idempotency is end to end
+
+The client mints **one** `crypto.randomUUID()` per write and threads it through every layer:
+
+1. the `mobileOutboundQueue` row's `idempotencyKey`;
+2. the `Idempotency-Key` header the Rust ledger dedupes on; and
+3. `OutboundRequest.metadata.idempotencyKey`, which the outbound runner dedupes on.
+
+The host arm looks the key up in `outboundQueue` before enqueuing and returns the existing job on a hit (`local.ts:104`). Draft approvals skip minting entirely and derive their key from the draft id (`cdr-approve:<id>`), so even a client that lost its queue row cannot produce a second outbound job for that draft.
+
+`sendManualReplyLocally` also closes the crash window between "job enqueued" and "message written": a replay that finds the job but not the message finishes the message instead of sending again.
+
+## Overrides travel as mutations
+
+Every override control — mode switcher, assignee chip, provider/model switcher, computer-use toggle, the override form, lifecycle chip, label picker, pin/archive/delete in settings — expresses its edit as one serialisable `ConversationOverrideMutation`.
+
+- On a host, `applyConversationOverrideMutation` dispatches to the **existing** `lib/db/conversation-overrides.ts` primitives, so audit rows and the assignment trail keep their exact semantics.
+- On a thin client, `applyOptimisticOverrideMutation` mirrors **only the named fields** — no audit, no trail. The host is authoritative and syncs back.
+
+`setPinned` / `setArchived` / `delete` address rows by `conversationKey` even though the legacy primitives take a row id: a thin client only knows the key, and the key is the unique index.
+
+### Why the optimistic write survives a sync pull
+
+Before ADR-0131 a phone flipping conversation mode wrote its local mirror, and the next `sync_pull` handed back the host's pre-change row and overwrote it — the pill flipped, flipped back, then flipped again.
+
+`pending-overrides.ts` closes that: a conversation key with an in-flight mutation is **skipped** by `lib/sync/handlers/conversation-overrides.ts`. It reads two sources — an in-memory refcount covering the window before the queue row is persisted, and the durable queue itself for everything after, which is what survives a reload.
+
+## Two realtime signals
+
+They are deliberately distinct, and conflating them is the mistake this design avoids.
+
+**`sync://invalidate`** says *"table X changed, re-pull it"*. Table-scoped, always sent, coalesced 150 ms on the host (`lib/sync/host-invalidate.ts`) plus 100 ms per table on the client. `conversationKey` rides along only when every write in the window targeted the same conversation; a mixed burst drops it so the client does one table-wide pull instead of N keyed ones. Skipped entirely while this desktop is itself a thin client — its rows are mirrors, not authority.
+
+**`connector://message-added`** is the *notifiable* one: one frame per inbound human message, carrying ids and a `/inbox/c?key=…` deep link. Rust registers a push trigger on it (`src-tauri/src/companion_api/commands.rs`), so a phone whose WebSocket is closed still gets a lock-screen notification.
+
+Three things are deliberately absent from that frame:
+
+- **Message text** — it transits APNs/FCM. The Rust body builder names the sender and the platform; the text is fetched over the authenticated sync once the app opens.
+- **Non-human events** — edits, deletes, reactions and the bot's own outbound echoes are filtered by `isNotifiableInboundEvent` (`lib/connectors/inbound-notifiability.ts`), the same predicate the desktop Notification Center uses, so the two can never disagree about what counts as a new message.
+- **Duplicate wake-ups** — suppressed when the operator is already viewing the conversation, when it is muted, or inside quiet hours, resolved with the same precedence the outbound runner uses.
+
+A headless brain has no Tauri runtime, so `lib/companion/host-event-publisher.ts` gives both hosts one call: registered publisher (brain, piping through `companion_event_publish`) → Tauri `emit` (desktop) → no-op. `ws_bridge.rs` validates the topic against a **closed allowlist** before publishing — the bridge peer is authenticated, but letting it name arbitrary topics would let a compromised brain forge frames clients treat as authoritative.
+
+<Callout type="warn">
+Push fan-out is bound to the Tauri `AppHandle`. A **headless-only** deployment therefore reaches foreground WebSocket clients but not lock screens. This is a known limitation, not an oversight; closing it needs a push path that does not go through Tauri.
+</Callout>
+
+## Handoff
+
+Losing the runtime lease is a third state, distinct from unmounting and from deferring to a remote host. `installConnectorRuntime` takes a teardown reason; on `"lease-lost"` it reclaims in-flight inbound jobs immediately (`reclaimAllRunning: true`) so they surface as `recovery_required` rather than sitting "running" with nothing running them, then notifies `onRuntimeReleased`. `ConnectorBusProvider` re-acquires on a 30 s → 5 min backoff, checking `isRemoteHostActive()` each time.
+
+Relayed writes that reach a process which no longer owns the runtime throw `connector_runtime_not_owner`. **The wording is load-bearing**: `lib/queue/retry-policy.ts` classifies it as retryable, so the phone's durable queue replays across the handoff window (5 attempts ≈ 31 s) instead of dead-lettering the reply.
+
+## Shells that cannot write
+
+A standalone browser tab or unpaired phone can read the Inbox but never write to it — no adapter runs in a browser. That is permanent, so it is documented on all three axes CLAUDE.md rule 7 requires: the surface contract is `standalone: "explain"` with `standaloneInboxRequiresHost` carrying the reason, `StateCard.RequiresHost` renders it and points at `/pair`, and both are pinned by tests.
+
+## Related
+
+<Cards>
+  <Card title="Outbound Queue" href="./outbound-queue" description="The queue relayed replies land in, and the mirrored rows a local runner must never dispatch." />
+  <Card title="UI & Plugins" href="./ui-and-plugins" description="The Inbox surfaces that call the facade — composer, draft reviewers, override controls." />
+  <Card title="Connector Bus" href="./connector-bus" description="The inbound pipeline that publishes connector://message-added after each new message." />
+  <Card title="Companion API" href="../companion-api" description="The RPC + sync plane the relay rides: command manifest, device identity, sync_pull deltas." />
+</Cards>

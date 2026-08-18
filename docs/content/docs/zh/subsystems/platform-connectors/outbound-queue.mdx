@@ -233,6 +233,7 @@ runner 把 `onStateChange` 接线为发出 `breaker.open` / `breaker.close` 遥�
 ## 相关
 
 <Cards>
+  <Card title="跨壳中继" href="./cross-shell-relay" description="手机或浏览器如何把回复送进这条队列，以及本地 runner 绝不能派发的镜像行。" />
   <Card title="ConnectorBus 与运行时" href="./connector-bus" description="其 ai-run 决策以入队一个出站作业收尾的入站流水线。" />
   <Card title="AI 与 A2UI" href="./ai-and-a2ui" description="runConnectorDigestTurn 背后的 resolveSendOptions、PII 关卡和 assistantReplyToSegments。" />
   <Card title="调度器" href="../scheduler" description="触发 connection:outbound:send 和 connection:scheduled:digest 的 TaskExecutor 宿主。" />

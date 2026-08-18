@@ -1,0 +1,104 @@
+---
+title: 跨壳中继
+description: 收件箱的写入如何在手机、浏览器、以及驱动远端宿主的桌面端上执行——唯一的与壳无关的 facade、唯一的幂等 key、两个刻意区分的实时信号。
+---
+
+# 跨壳中继
+
+收件箱过去只在运行 adapter 的那台机器上完整可用。每个回复面各自决定如何写入，而只有桌面端的那种决定是有效的：手机上的审批翻转了草稿却从未入队投递，浏览器渲染出的控件毫无作用，驱动远端宿主的桌面端写进了错误的数据库。
+
+ADR-0131 用一条接缝取代那十二处决定：**组件描述写什么，`lib/connectors/inbox-writes/` 决定在哪里执行。**
+
+## 四个写入
+
+```ts
+import {
+  sendManualReply,
+  approveInboxDraft,
+  rejectInboxDraft,
+  mutateConversationOverride,
+} from "@/lib/connectors/inbox-writes"
+```
+
+没有任何调用方判断 `isTauri()` 或平台。`resolveInboxWriteRoute()`（`lib/connectors/inbox-writes/route.ts:77`）解析出以下路由之一：
+
+| 路由            | 条件                                                        | 执行                                            |
+| --------------- | ----------------------------------------------------------- | ----------------------------------------------- |
+| `"remote"`      | 本桌面正在驱动远端宿主（`isRemoteHostActive()`）            | `mobileOutboundQueue` → 配对宿主上的 RPC        |
+| `"local"`       | 本壳拥有连接器运行时                                        | `local.ts`，作用于本进程的 Dexie 与投递网关     |
+| `"remote"`      | 存在活跃的 companion target（已配对手机、web companion）    | 持久化队列 → RPC                                |
+| `"unavailable"` | 独立浏览器 / 未配对手机                                     | 抛出 `InboxWriteUnavailableError`               |
+
+**顺序是有意义的。** 驱动远端宿主的桌面端在能力基线里仍然声明 `connector-runtime`，但远端激活期间其本地运行时已被拆除。若 `"local"` 胜出，这条回复会变成一个没有任何运行中 adapter 会投递的出站作业。
+
+## 一份实现，两个调用方
+
+`lib/connectors/inbox-writes/local.ts` 保存三个原语——`sendManualReplyLocally`、`approveDraftLocally`、`rejectDraftLocally`——从 `components/chat/composer.tsx` 原样抽出。
+
+**宿主 RPC arm 调用同一批函数。** `lib/companion/desktop-write-source.ts` 把 `connector_enqueue_outbound` / `connector_approve_draft` / `connector_reject_draft` 直接分发进 `local.ts`，因此手机发起的回复与桌面发起的回复产生逐字节相同的 `outboundQueue` 与 `messages` 行。不存在第二份实现，也就无从漂移。
+
+## 幂等是端到端的
+
+客户端每次写入只铸造**一个** `crypto.randomUUID()`，并贯穿每一层：
+
+1. `mobileOutboundQueue` 行的 `idempotencyKey`；
+2. Rust 账本去重所依据的 `Idempotency-Key` 头；
+3. 出站 runner 去重所依据的 `OutboundRequest.metadata.idempotencyKey`。
+
+宿主 arm 入队前先按该 key 查 `outboundQueue`，命中即返回既有作业（`local.ts:104`）。草稿审批完全跳过铸造，直接由草稿 id 派生（`cdr-approve:<id>`），因此即使客户端丢失了队列行，也不可能为该草稿产生第二个出站作业。
+
+`sendManualReplyLocally` 还关闭了"作业已入队但消息未写入"的崩溃窗口：重放时若发现作业存在而消息不存在，补写消息而非重新发送。
+
+## 覆盖以 mutation 传输
+
+每个覆盖控件——模式切换器、指派徽标、供应商/模型切换器、computer-use 开关、覆盖表单、生命周期徽标、标签选择器、设置里的置顶/归档/删除——都把自己的编辑表达为一个可序列化的 `ConversationOverrideMutation`。
+
+- 在宿主上，`applyConversationOverrideMutation` 分发到**既有的** `lib/db/conversation-overrides.ts` 原语，因此审计行与分配轨迹保持完全相同的语义。
+- 在薄客户端上，`applyOptimisticOverrideMutation` **只镜像 mutation 点名的字段**——无审计、无轨迹。宿主是权威，随后同步回来。
+
+`setPinned` / `setArchived` / `delete` 按 `conversationKey` 寻址（尽管旧原语接受行 id）：薄客户端只知道 key，而 key 就是唯一索引。
+
+### 乐观写为何能挺过一次同步拉取
+
+在 ADR-0131 之前，手机切换会话模式后写入本地镜像，下一次 `sync_pull` 返回宿主的变更前行并将其覆盖——徽标翻转、翻回、再翻转。
+
+`pending-overrides.ts` 关闭了这一点：存在在途 mutation 的会话 key 会被 `lib/sync/handlers/conversation-overrides.ts` **跳过**。它读两个来源——覆盖"队列行持久化之前"那个窗口的内存引用计数，以及此后的持久化队列本身（后者能跨重载存活）。
+
+## 两个实时信号
+
+它们是刻意区分的，把二者混为一谈正是本设计要避免的错误。
+
+**`sync://invalidate`** 表达的是*"表 X 变了，重新拉取"*。按表划分、总是发送，宿主侧合并 150 ms（`lib/sync/host-invalidate.ts`），客户端再按表合并 100 ms。只有当窗口内每一次写入都指向同一会话时才附带 `conversationKey`；混合突发会丢弃它，让客户端做一次全表拉取而非 N 次按 key 拉取。当本桌面自身是薄客户端时完全跳过——它的行是镜像而非权威。
+
+**`connector://message-added`** 是**可通知**的那个：每条入站真人消息一帧，携带 id 与 `/inbox/c?key=…` 深链。Rust 在其上注册推送触发器（`src-tauri/src/companion_api/commands.rs`），因此 WebSocket 已关闭的手机仍能收到锁屏通知。
+
+该帧刻意不含三样东西：
+
+- **消息正文**——它要经过 APNs/FCM。Rust 侧的正文构造器只写发送者与平台；正文在 App 打开后经已认证的同步获取。
+- **非真人事件**——编辑、删除、表情回应以及机器人自己的出站回声由 `isNotifiableInboundEvent`（`lib/connectors/inbound-notifiability.ts`）过滤，与桌面通知中心使用同一个谓词，因此两者对"什么算新消息"永远不会产生分歧。
+- **重复唤醒**——操作者正在查看该会话、会话已静音、或处于免打扰时段时抑制；判定精度与出站 runner 使用同一套优先级。
+
+headless brain 没有 Tauri 运行时，因此 `lib/companion/host-event-publisher.ts` 给两种宿主同一个调用：已注册的 publisher（brain，经 `companion_event_publish` 管道）→ Tauri `emit`（桌面）→ no-op。`ws_bridge.rs` 在发布前用**封闭白名单**校验 topic——桥接对端虽已认证，但允许它任意命名 topic 会让被攻陷的 brain 伪造客户端视为权威的帧。
+
+<Callout type="warn">
+推送扇出绑定在 Tauri `AppHandle` 上。因此**纯 headless** 部署只能触达前台 WebSocket 客户端，触达不了锁屏。这是已知限制而非疏漏；要关闭它需要一条不经 Tauri 的推送路径。
+</Callout>
+
+## 交接
+
+丢失运行时租约是第三种状态，与卸载、与让位给远端宿主都不同。`installConnectorRuntime` 接受拆除原因；在 `"lease-lost"` 时立即回收在途入站作业（`reclaimAllRunning: true`），使它们呈现为 `recovery_required`，而不是顶着"running"却无人在跑，随后回调 `onRuntimeReleased`。`ConnectorBusProvider` 按 30 秒 → 5 分钟退避重新获取，每次先查 `isRemoteHostActive()`。
+
+到达已不再持有运行时的进程的中继写入会抛出 `connector_runtime_not_owner`。**措辞是承重的**：`lib/queue/retry-policy.ts` 将其归类为可重试，因此手机的持久化队列会跨越交接窗口重放（5 次尝试 ≈ 31 秒），而不是把这条回复投入死信。
+
+## 无法写入的壳
+
+独立浏览器标签页或未配对手机可以读收件箱，但永远无法写入——浏览器里不运行任何 adapter。这是永久设计，因此按 CLAUDE.md 规则 7 要求的三个轴全部记录：surface contract 为 `standalone: "explain"` 并由 `standaloneInboxRequiresHost` 承载原因，`StateCard.RequiresHost` 渲染它并指向 `/pair`，两者均由测试钉住。
+
+## 相关
+
+<Cards>
+  <Card title="出站队列" href="./outbound-queue" description="中继回复落入的队列，以及本地 runner 绝不能派发的镜像行。" />
+  <Card title="UI 与插件" href="./ui-and-plugins" description="调用 facade 的收件箱界面——composer、草稿审阅面、覆盖控件。" />
+  <Card title="连接器总线" href="./connector-bus" description="每条新消息后发布 connector://message-added 的入站管线。" />
+  <Card title="Companion API" href="../companion-api" description="中继所依赖的 RPC 与同步平面：命令 manifest、设备身份、sync_pull 增量。" />
+</Cards>
