@@ -281,6 +281,96 @@ describe("useGithubMarketplaceSources", () => {
     warn.mockRestore()
   })
 
+  // A row with no repo reference can never yield a catalog. Fetching it would
+  // spend GitHub API budget to guarantee a failure, then write that failure back
+  // as the row's health — bad data turned into a permanent phantom error.
+  it("never fetches for rows that carry no repo reference", async () => {
+    liveRows = [
+      { id: "no-ref", name: "Broken", addedAt: 3 },
+      { id: "blank", repoRef: "   ", name: "Blank", addedAt: 2 },
+    ]
+    const { result } = renderHook(() => useGithubMarketplaceSources())
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(fetchAllSourceEntries).not.toHaveBeenCalled()
+    expect(recordSourceSync).not.toHaveBeenCalled()
+    expect(result.current.entries).toEqual([])
+    expect(result.current.errors).toEqual([])
+    // The rows still surface in the sources list — they're unfetchable, not hidden.
+    expect(result.current.sources).toHaveLength(2)
+  })
+
+  it("fetches only the fetchable refs when a blank one sits alongside a real one", async () => {
+    liveRows = [
+      { id: "blank", repoRef: "", name: "Blank", addedAt: 2 },
+      { id: "acme/store", repoRef: "acme/store", name: "Acme", addedAt: 1 },
+    ]
+    fetchAllSourceEntries.mockResolvedValue(
+      allEntriesResult([{ repoRef: "acme/store", entryIds: ["acme/store:Alpha"] }])
+    )
+    const { result } = renderHook(() => useGithubMarketplaceSources())
+    await waitFor(() => expect(result.current.entries).toHaveLength(1))
+    expect(fetchAllSourceEntries).toHaveBeenCalledWith(["acme/store"])
+  })
+
+  // `requestIdRef` only invalidates a *superseded* request; an unmounted hook's
+  // in-flight load is still the current id, so without a mount gate every
+  // post-await step runs against a torn-down tree.
+  it("drops a load that settles after unmount instead of persisting it", async () => {
+    liveRows = [{ id: "acme/store", repoRef: "acme/store", name: "Acme", addedAt: 1 }]
+    let settle!: (value: unknown) => void
+    fetchAllSourceEntries.mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve
+      })
+    )
+    const { unmount } = renderHook(() => useGithubMarketplaceSources())
+    await waitFor(() => expect(fetchAllSourceEntries).toHaveBeenCalled())
+
+    unmount()
+    await act(async () => {
+      settle(allEntriesResult([{ repoRef: "acme/store", entryIds: ["acme/store:Alpha"] }]))
+      await Promise.resolve()
+    })
+    expect(recordSourceSync).not.toHaveBeenCalled()
+  })
+
+  it("never starts a load when the hook unmounts before the scheduled fetch runs", async () => {
+    liveRows = [{ id: "acme/store", repoRef: "acme/store", name: "Acme", addedAt: 1 }]
+    const { unmount } = renderHook(() => useGithubMarketplaceSources())
+    unmount()
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(fetchAllSourceEntries).not.toHaveBeenCalled()
+  })
+
+  it("refreshSource() drops a single-source refresh that settles after unmount", async () => {
+    liveRows = [{ id: "acme/bad", repoRef: "acme/bad", name: "Bad", addedAt: 1 }]
+    let settle!: (value: MarketplaceCatalog) => void
+    fetchMarketplaceCatalog.mockReturnValue(
+      new Promise<MarketplaceCatalog>((resolve) => {
+        settle = resolve
+      })
+    )
+    const { result, unmount } = renderHook(() => useGithubMarketplaceSources())
+    let pending!: Promise<void>
+    act(() => {
+      pending = result.current.refreshSource("acme/bad")
+    })
+    await waitFor(() => expect(fetchMarketplaceCatalog).toHaveBeenCalled())
+
+    unmount()
+    await act(async () => {
+      settle(catalogFor("acme/bad", ["bad:1"]))
+      await pending
+    })
+    expect(recordSourceSync).not.toHaveBeenCalled()
+  })
+
   it("refreshSource() is a no-op for an id that is no longer saved", async () => {
     liveRows = []
     const { result } = renderHook(() => useGithubMarketplaceSources())

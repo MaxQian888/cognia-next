@@ -67,12 +67,37 @@ export function useGithubMarketplaceSources(): UseGithubMarketplaceSources {
   const [syncingIds, setSyncingIds] = useState<ReadonlySet<string>>(new Set())
   const [reloadKey, setReloadKey] = useState(0)
 
-  const repoRefs = useMemo(() => (sources ?? []).map((s) => s.repoRef), [sources])
+  // Only rows that actually carry a repo reference are fetchable. A row without
+  // one can never yield a catalog, so fetching it spends GitHub API budget to
+  // guarantee a failure and then writes that failure back as the row's health —
+  // turning bad data into a permanent, self-inflicted "last error". Filtering
+  // here also keeps `entries`/`errors` (both keyed off `repoRefs`) from carrying
+  // a bucket no fetch will ever fill.
+  const repoRefs = useMemo(
+    () =>
+      (sources ?? [])
+        .map((s) => s.repoRef)
+        .filter((ref): ref is string => typeof ref === "string" && ref.trim() !== ""),
+    [sources]
+  )
   const repoRefsKey = repoRefs.join("|")
   // Monotonic request id so a slow in-flight fetch can't overwrite the results
   // of a newer one (the effect kicks off `loadEntries`, which keeps the actual
   // setState out of the effect body).
   const requestIdRef = useRef(0)
+  // `requestIdRef` invalidates a *superseded* request, but an unmounted hook has
+  // nothing newer to compare against — its in-flight load is still the current
+  // id, so every post-await step would run against a torn-down tree. Closing the
+  // sources dialog mid-refresh is the ordinary way to hit that.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+  /** Still mounted **and** still the newest request — the gate for any setState. */
+  const isCurrent = (id: number) => mountedRef.current && id === requestIdRef.current
   const rows = sources ?? []
 
   /**
@@ -122,15 +147,16 @@ export function useGithubMarketplaceSources(): UseGithubMarketplaceSources {
     // setState-in-effect is satisfied — nothing below runs in the same tick as
     // the effect body that kicks this off.
     await Promise.resolve()
+    if (!mountedRef.current) return
     const id = ++requestIdRef.current
     setLoading(true)
     try {
       const result = await fetchAllSourceEntries(refs)
-      if (id !== requestIdRef.current) return
+      if (!isCurrent(id)) return
       applyResults(result.results)
       await Promise.all(result.results.map(persistResult))
     } finally {
-      if (id === requestIdRef.current) setLoading(false)
+      if (isCurrent(id)) setLoading(false)
     }
   }
 
@@ -216,14 +242,19 @@ export function useGithubMarketplaceSources(): UseGithubMarketplaceSources {
               message: err instanceof Error ? err.message : String(err),
             }
           }
+          // Same unmount gate as the full load: a single-source refresh must not
+          // write its result back after the dialog that started it is closed.
+          if (!mountedRef.current) return
           applyResults([result])
           await persistResult(result)
         } finally {
-          setSyncingIds((prev) => {
-            const next = new Set(prev)
-            next.delete(id)
-            return next
-          })
+          if (mountedRef.current) {
+            setSyncingIds((prev) => {
+              const next = new Set(prev)
+              next.delete(id)
+              return next
+            })
+          }
         }
       },
     }),
