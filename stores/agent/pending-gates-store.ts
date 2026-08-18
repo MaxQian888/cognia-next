@@ -103,6 +103,9 @@ export const usePendingGatesStore = create<PendingGatesState>()(
 export function gateTypeFromScope(scope: string): PendingGateType {
   switch (scope) {
     case "agent-team-budget":
+    // The USD cost ceiling opens the same modal variant as the team's token
+    // budget — same question, different unit.
+    case "cost-budget":
       return "budget"
     case "agent-team-deadlock":
       return "deadlock"

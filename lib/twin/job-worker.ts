@@ -36,6 +36,7 @@ import { runIngestJob } from "./ingest/job-runner"
 import { claimNextQueuedJob } from "@/lib/db/twin-jobs"
 import { runDistillJob } from "./distill/job-runner"
 import type { LlmClient } from "./distill/llm"
+import { recordSurfaceUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import { backoffMs, formatDeadLetter, shouldRetry } from "./job-retry"
 import {
   isTwinJobInterrupted,
@@ -154,6 +155,16 @@ async function processClaimedJob(
         return
       }
       throwIfTwinJobInterrupted(signal)
+      // Ingest embeds every chunk. That is billable input on a cloud embedder
+      // and was metered nowhere — a large corpus import showed as $0.
+      swallowUsageWrite(
+        recordSurfaceUsage({
+          surface: "embedding",
+          operationId: job.id,
+          scopeId: job.twinId,
+          usage: { inputTokens: result.totalEmbeddingTokens },
+        })
+      )
       await completeJob(job.id, {
         llmTokensUsed: 0,
         embeddingTokensUsed: result.totalEmbeddingTokens,
@@ -192,6 +203,26 @@ async function processClaimedJob(
         signal,
       })
       throwIfTwinJobInterrupted(signal)
+      // Meter the distillation. Five agent calls per job, each a real model
+      // request — the Usage tab counted none of it, so a twin rebuild could
+      // spend meaningfully and leave the tab's total unchanged.
+      swallowUsageWrite(
+        recordSurfaceUsage({
+          surface: "twin",
+          // Idempotent on the job: a retried job overwrites its earlier row
+          // rather than double-billing the same distillation.
+          operationId: job.id,
+          scopeId: job.twinId,
+          usage: {
+            // Defensive: a client that reports no snapshot must not be able to
+            // fail the distillation it just completed.
+            inputTokens: result.llmUsage?.inputTokens ?? 0,
+            outputTokens: result.llmUsage?.outputTokens ?? 0,
+            cacheReadTokens: result.llmUsage?.cacheReadTokens ?? 0,
+            cacheCreationTokens: result.llmUsage?.cacheCreationTokens ?? 0,
+          },
+        })
+      )
       await completeJob(job.id, {
         outputDraftIds: result.draftIds,
         llmTokensUsed: result.llmTokensUsed,

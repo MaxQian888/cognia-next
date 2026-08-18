@@ -1,0 +1,4906 @@
+{
+  "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+  "providers": {
+    "anthropic": {
+      "claude-3-7-sonnet-20250219": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "claude-3-haiku-20240307": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 1.25,
+        "cachedInputPer1M": 0.03,
+        "cacheCreationPer1M": 0.3,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096
+      },
+      "claude-3-opus-20240229": {
+        "promptPer1M": 15,
+        "completionPer1M": 75,
+        "cachedInputPer1M": 1.5,
+        "cacheCreationPer1M": 18.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096
+      },
+      "claude-4-opus-20250514": {
+        "promptPer1M": 15,
+        "completionPer1M": 75,
+        "cachedInputPer1M": 1.5,
+        "cacheCreationPer1M": 18.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-4-sonnet-20250514": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000
+      },
+      "claude-fable-5": {
+        "promptPer1M": 10,
+        "completionPer1M": 50,
+        "cachedInputPer1M": 1,
+        "cacheCreationPer1M": 12.5,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-haiku-4-5": {
+        "promptPer1M": 1,
+        "completionPer1M": 5,
+        "cachedInputPer1M": 0.1,
+        "cacheCreationPer1M": 1.25,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "claude-haiku-4-5-20251001": {
+        "promptPer1M": 1,
+        "completionPer1M": 5,
+        "cachedInputPer1M": 0.1,
+        "cacheCreationPer1M": 1.25,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "claude-mythos-5": {
+        "promptPer1M": 10,
+        "completionPer1M": 50,
+        "cachedInputPer1M": 1,
+        "cacheCreationPer1M": 12.5,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-mythos-preview": {
+        "promptPer1M": 10,
+        "completionPer1M": 50,
+        "cachedInputPer1M": 1,
+        "cacheCreationPer1M": 12.5,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-opus-4-1": {
+        "promptPer1M": 15,
+        "completionPer1M": 75,
+        "cachedInputPer1M": 1.5,
+        "cacheCreationPer1M": 18.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-1-20250805": {
+        "promptPer1M": 15,
+        "completionPer1M": 75,
+        "cachedInputPer1M": 1.5,
+        "cacheCreationPer1M": 18.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-20250514": {
+        "promptPer1M": 15,
+        "completionPer1M": 75,
+        "cachedInputPer1M": 1.5,
+        "cacheCreationPer1M": 18.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-5": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "claude-opus-4-5-20251101": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "claude-opus-4-6": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-opus-4-6-20260205": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-opus-4-7": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-opus-4-7-20260416": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-opus-4-8": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-opus-5": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-sonnet-4-20250514": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000
+      },
+      "claude-sonnet-4-5": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "claude-sonnet-4-5-20250929": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "claude-sonnet-4-6": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000
+      },
+      "claude-sonnet-5": {
+        "promptPer1M": 2,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.2,
+        "cacheCreationPer1M": 2.5,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      }
+    },
+    "cerebras": {
+      "gpt-oss-120b": {
+        "promptPer1M": 0.35,
+        "completionPer1M": 0.75,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 32768
+      },
+      "llama-3.3-70b": {
+        "promptPer1M": 0.85,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "llama3.1-70b": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "llama3.1-8b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "qwen-3-32b": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 0.8,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "zai-glm-4.6": {
+        "promptPer1M": 2.25,
+        "completionPer1M": 2.75,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "zai-glm-4.7": {
+        "promptPer1M": 2.25,
+        "completionPer1M": 2.75,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      }
+    },
+    "cohere": {
+      "command": {
+        "promptPer1M": 1,
+        "completionPer1M": 2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "command-a-03-2025": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 8000
+      },
+      "command-light": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "command-nightly": {
+        "promptPer1M": 1,
+        "completionPer1M": 2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "command-r": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "command-r-08-2024": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "command-r-plus": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "command-r-plus-08-2024": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "command-r7b-12-2024": {
+        "promptPer1M": 0.0375,
+        "completionPer1M": 0.15,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "embed-english-light-v2.0": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 1024
+      },
+      "embed-english-light-v3.0": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 1024
+      },
+      "embed-english-v2.0": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 4096
+      },
+      "embed-english-v3.0": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 1024
+      },
+      "embed-multilingual-light-v3.0": {
+        "promptPer1M": 100,
+        "maxInputTokens": 1024
+      },
+      "embed-multilingual-v2.0": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 768
+      },
+      "embed-multilingual-v3.0": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 1024
+      },
+      "embed-v4.0": {
+        "promptPer1M": 0.12,
+        "maxInputTokens": 128000
+      }
+    },
+    "deepseek": {
+      "deepseek-chat": {
+        "promptPer1M": 0.28,
+        "completionPer1M": 0.42,
+        "cachedInputPer1M": 0.028,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-coder": {
+        "promptPer1M": 0.14,
+        "completionPer1M": 0.28,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "deepseek-r1": {
+        "promptPer1M": 0.55,
+        "completionPer1M": 2.19,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-reasoner": {
+        "promptPer1M": 0.28,
+        "completionPer1M": 0.42,
+        "cachedInputPer1M": 0.028,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 65536
+      },
+      "deepseek-v3": {
+        "promptPer1M": 0.27,
+        "completionPer1M": 1.1,
+        "cachedInputPer1M": 0.07,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-v3.2": {
+        "promptPer1M": 0.28,
+        "completionPer1M": 0.4,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-v4-flash": {
+        "promptPer1M": 0.14,
+        "completionPer1M": 0.28,
+        "cachedInputPer1M": 0.0028,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 393216
+      },
+      "deepseek-v4-pro": {
+        "promptPer1M": 0.435,
+        "completionPer1M": 0.87,
+        "cachedInputPer1M": 0.003625,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 393216
+      }
+    },
+    "fireworks": {
+      "": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 40960,
+        "maxOutputTokens": 40960
+      },
+      "SSD-1B": {
+        "promptPer1M": 0.00013,
+        "completionPer1M": 0.00013,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "chronos-hermes-13b-v2": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "code-llama-13b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-llama-13b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-llama-13b-python": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-llama-34b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-llama-34b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-llama-34b-python": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-llama-70b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "code-llama-70b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "code-llama-70b-python": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "code-llama-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-llama-7b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-llama-7b-python": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "code-qwen-1p5-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 65536
+      },
+      "codegemma-2b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "codegemma-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "cogito-671b-v2-p1": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "cogito-v1-preview-llama-3b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "cogito-v1-preview-llama-70b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "cogito-v1-preview-llama-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "cogito-v1-preview-qwen-14b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "cogito-v1-preview-qwen-32b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "dbrx-instruct": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "deepseek-coder-1b-base": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "deepseek-coder-33b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "deepseek-coder-7b-base": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "deepseek-coder-7b-base-v1p5": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "deepseek-coder-7b-instruct-v1p5": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "deepseek-coder-v2-instruct": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 65536
+      },
+      "deepseek-coder-v2-lite-base": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-coder-v2-lite-instruct": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-prover-v2": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-r1": {
+        "promptPer1M": 3,
+        "completionPer1M": 8,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 20480
+      },
+      "deepseek-r1-0528": {
+        "promptPer1M": 3,
+        "completionPer1M": 8,
+        "maxInputTokens": 160000,
+        "maxOutputTokens": 160000
+      },
+      "deepseek-r1-0528-distill-qwen3-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "deepseek-r1-basic": {
+        "promptPer1M": 0.55,
+        "completionPer1M": 2.19,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 20480
+      },
+      "deepseek-r1-distill-llama-70b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "deepseek-r1-distill-llama-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "deepseek-r1-distill-qwen-14b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "deepseek-r1-distill-qwen-1p5b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "deepseek-r1-distill-qwen-32b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "deepseek-r1-distill-qwen-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "deepseek-v2-lite-chat": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-v2p5": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "deepseek-v3": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-v3-0324": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-v3p1": {
+        "promptPer1M": 0.56,
+        "completionPer1M": 1.68,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-v3p1-terminus": {
+        "promptPer1M": 0.56,
+        "completionPer1M": 1.68,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-v3p2": {
+        "promptPer1M": 0.56,
+        "completionPer1M": 1.68,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-v4-flash": {
+        "promptPer1M": 0.14,
+        "completionPer1M": 0.28,
+        "cachedInputPer1M": 0.028,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 384000
+      },
+      "deepseek-v4-pro": {
+        "promptPer1M": 1.74,
+        "completionPer1M": 3.48,
+        "cachedInputPer1M": 0.145,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 384000
+      },
+      "devstral-small-2505": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "dobby-mini-unhinged-plus-llama-3-1-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "dobby-unhinged-llama-3-3-70b-new": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "dolphin-2-9-2-qwen2-72b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "dolphin-2p6-mixtral-8x7b": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "ernie-4p5-21b-a3b-pt": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "ernie-4p5-300b-a47b-pt": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "fare-20b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "firefunction-v1": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "firefunction-v2": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "firellava-13b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "firesearch-ocr-v6": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "fireworks-ai-4.1b-to-16b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2
+      },
+      "fireworks-ai-56b-to-176b": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2
+      },
+      "fireworks-ai-above-16b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9
+      },
+      "fireworks-ai-moe-up-to-56b": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5
+      },
+      "fireworks-ai-up-to-4b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2
+      },
+      "flux-1-dev": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "flux-1-dev-controlnet-union": {
+        "promptPer1M": 0.001,
+        "completionPer1M": 0.001,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "flux-1-dev-fp8": {
+        "promptPer1M": 0.0005,
+        "completionPer1M": 0.0005,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "flux-1-schnell": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "flux-1-schnell-fp8": {
+        "promptPer1M": 0.00035,
+        "completionPer1M": 0.00035,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "flux-kontext-max": {
+        "promptPer1M": 0.08,
+        "completionPer1M": 0.08,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "flux-kontext-pro": {
+        "promptPer1M": 0.04,
+        "completionPer1M": 0.04,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "gemma-2b-it": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "gemma-3-27b-it": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "gemma-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "gemma-7b-it": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "gemma2-9b-it": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "glm-4p5": {
+        "promptPer1M": 0.55,
+        "completionPer1M": 2.19,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 96000
+      },
+      "glm-4p5-air": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.88,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 96000
+      },
+      "glm-4p5v": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "glm-4p6": {
+        "promptPer1M": 0.55,
+        "completionPer1M": 2.19,
+        "maxInputTokens": 202800,
+        "maxOutputTokens": 202800
+      },
+      "glm-4p7": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.2,
+        "cachedInputPer1M": 0.3,
+        "maxInputTokens": 202800,
+        "maxOutputTokens": 202800
+      },
+      "glm-5p1": {
+        "promptPer1M": 1.4,
+        "completionPer1M": 4.4,
+        "cachedInputPer1M": 0.26,
+        "maxInputTokens": 202800,
+        "maxOutputTokens": 131072
+      },
+      "glm-5p1-fast": {
+        "promptPer1M": 2.8,
+        "completionPer1M": 8.8,
+        "cachedInputPer1M": 0.52,
+        "maxInputTokens": 202800,
+        "maxOutputTokens": 131072
+      },
+      "glm-5p2": {
+        "promptPer1M": 1.4,
+        "completionPer1M": 4.4,
+        "cachedInputPer1M": 0.14,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 131072
+      },
+      "gpt-oss-120b": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "cachedInputPer1M": 0.015,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 32768
+      },
+      "gpt-oss-20b": {
+        "promptPer1M": 0.07,
+        "completionPer1M": 0.3,
+        "cachedInputPer1M": 0.035,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 32768
+      },
+      "gpt-oss-safeguard-120b": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "gpt-oss-safeguard-20b": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "hermes-2-pro-mistral-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "internvl3-38b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "internvl3-78b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "internvl3-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "japanese-stable-diffusion-xl": {
+        "promptPer1M": 0.00013,
+        "completionPer1M": 0.00013,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "kat-coder": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "kat-dev-32b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "kat-dev-72b-exp": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "kimi-k2-instruct": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.5,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 16384
+      },
+      "kimi-k2-instruct-0905": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 32768
+      },
+      "kimi-k2-thinking": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "kimi-k2p5": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 3,
+        "cachedInputPer1M": 0.1,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 32768
+      },
+      "kimi-k2p6": {
+        "promptPer1M": 0.95,
+        "completionPer1M": 4,
+        "cachedInputPer1M": 0.16,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 32768
+      },
+      "kimi-k2p6-fast": {
+        "promptPer1M": 2,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.3,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 32768
+      },
+      "kimi-k2p7-code": {
+        "promptPer1M": 0.95,
+        "completionPer1M": 4,
+        "cachedInputPer1M": 0.19,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 32768
+      },
+      "kimi-k2p7-code-fast": {
+        "promptPer1M": 1.9,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.38,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 32768
+      },
+      "llama-guard-2-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "llama-guard-3-1b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama-guard-3-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama-v2-13b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "llama-v2-13b-chat": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "llama-v2-70b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "llama-v2-70b-chat": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 2048,
+        "maxOutputTokens": 2048
+      },
+      "llama-v2-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "llama-v2-7b-chat": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "llama-v3-70b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "llama-v3-70b-instruct-hf": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "llama-v3-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "llama-v3-8b-instruct-hf": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "llama-v3p1-405b-instruct": {
+        "promptPer1M": 3,
+        "completionPer1M": 3,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "llama-v3p1-405b-instruct-long": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "llama-v3p1-70b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama-v3p1-70b-instruct-1b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "llama-v3p1-8b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "llama-v3p1-nemotron-70b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama-v3p2-11b-vision-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "llama-v3p2-1b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama-v3p2-1b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "llama-v3p2-3b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama-v3p2-3b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "llama-v3p2-90b-vision-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "llama-v3p3-70b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama4-maverick-instruct-basic": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.88,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama4-scout-instruct-basic": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llamaguard-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "llava-yi-34b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "minimax-m1-80k": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "minimax-m2": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "minimax-m2p1": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 1.2,
+        "cachedInputPer1M": 0.03,
+        "maxInputTokens": 204800,
+        "maxOutputTokens": 204800
+      },
+      "minimax-m2p7": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 1.2,
+        "cachedInputPer1M": 0.06,
+        "maxInputTokens": 196608,
+        "maxOutputTokens": 196608
+      },
+      "minimax-m3": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 1.2,
+        "cachedInputPer1M": 0.06,
+        "maxInputTokens": 512000,
+        "maxOutputTokens": 512000
+      },
+      "ministral-3-14b-instruct-2512": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "ministral-3-3b-instruct-2512": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "ministral-3-8b-instruct-2512": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "mistral-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mistral-7b-instruct-4k": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mistral-7b-instruct-v0p2": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mistral-7b-instruct-v3": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mistral-7b-v0p2": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mistral-large-3-fp8": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "mistral-nemo-base-2407": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "mistral-nemo-instruct-2407": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "mistral-small-24b-instruct-2501": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mixtral-8x22b": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 65536
+      },
+      "mixtral-8x22b-instruct": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 65536
+      },
+      "mixtral-8x22b-instruct-hf": {
+        "promptPer1M": 1.2,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 65536
+      },
+      "mixtral-8x7b": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mixtral-8x7b-instruct": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mixtral-8x7b-instruct-hf": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "mythomax-l2-13b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "nemotron-nano-v2-12b-vl": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "nous-capybara-7b-v1p9": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "nous-hermes-2-mixtral-8x7b-dpo": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "nous-hermes-2-yi-34b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "nous-hermes-llama2-13b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "nous-hermes-llama2-70b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "nous-hermes-llama2-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "nvidia-nemotron-nano-12b-v2": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "nvidia-nemotron-nano-9b-v2": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "openchat-3p5-0106-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "openhermes-2-mistral-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "openhermes-2p5-mistral-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "openorca-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "phi-2-3b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 2048,
+        "maxOutputTokens": 2048
+      },
+      "phi-3-mini-128k-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "phi-3-vision-128k-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32064,
+        "maxOutputTokens": 32064
+      },
+      "phind-code-llama-34b-python-v1": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "phind-code-llama-34b-v1": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "phind-code-llama-34b-v2": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "playground-v2-1024px-aesthetic": {
+        "promptPer1M": 0.00013,
+        "completionPer1M": 0.00013,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "playground-v2-5-1024px-aesthetic": {
+        "promptPer1M": 0.00013,
+        "completionPer1M": 0.00013,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "pythia-12b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 2048,
+        "maxOutputTokens": 2048
+      },
+      "qwen-qwq-32b-preview": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen-v2p5-14b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen-v2p5-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen1p5-72b-chat": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2-72b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2-7b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2-vl-2b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2-vl-72b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2-vl-7b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-0p5b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-14b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen2p5-1p5b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-32b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen2p5-32b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-72b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen2p5-72b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-7b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-0p5b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-0p5b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-14b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-14b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-1p5b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-1p5b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-32b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-32b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "qwen2p5-coder-32b-instruct-128k": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen2p5-coder-32b-instruct-32k-rope": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-32b-instruct-64k": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 65536
+      },
+      "qwen2p5-coder-3b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-3b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-coder-7b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "qwen2p5-math-72b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "qwen2p5-vl-32b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "qwen2p5-vl-3b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "qwen2p5-vl-72b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "qwen2p5-vl-7b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "qwen3-0p6b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 40960,
+        "maxOutputTokens": 40960
+      },
+      "qwen3-14b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 40960,
+        "maxOutputTokens": 40960
+      },
+      "qwen3-1p7b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen3-1p7b-fp8-draft": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-1p7b-fp8-draft-131072": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen3-1p7b-fp8-draft-40960": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 40960,
+        "maxOutputTokens": 40960
+      },
+      "qwen3-235b-a22b": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.88,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen3-235b-a22b-instruct-2507": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.88,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-235b-a22b-thinking-2507": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.88,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-30b-a3b": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen3-30b-a3b-instruct-2507": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 0.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-30b-a3b-thinking-2507": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-32b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "qwen3-4b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 40960,
+        "maxOutputTokens": 40960
+      },
+      "qwen3-4b-instruct-2507": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 40960,
+        "maxOutputTokens": 40960
+      },
+      "qwen3-coder-30b-a3b-instruct": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-coder-480b-a35b-instruct": {
+        "promptPer1M": 0.45,
+        "completionPer1M": 1.8,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-coder-480b-instruct-bf16": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "qwen3-next-80b-a3b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "qwen3-next-80b-a3b-thinking": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "qwen3-vl-235b-a22b-instruct": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.88,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-vl-235b-a22b-thinking": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.88,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-vl-30b-a3b-instruct": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-vl-30b-a3b-thinking": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-vl-32b-instruct": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "qwen3-vl-8b-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "qwen3p7-plus": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 1.6,
+        "cachedInputPer1M": 0.08,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
+      },
+      "qwq-32b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "rolm-ocr": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "snorkel-mistral-7b-pairrm-dpo": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "stable-diffusion-xl-1024-v1-0": {
+        "promptPer1M": 0.00013,
+        "completionPer1M": 0.00013,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "stablecode-3b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "starcoder-16b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "starcoder-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "starcoder2-15b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "starcoder2-3b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "starcoder2-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "toppy-m-7b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "yi-34b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "yi-34b-200k-capybara": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 200000
+      },
+      "yi-34b-chat": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "yi-6b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "yi-large": {
+        "promptPer1M": 3,
+        "completionPer1M": 3,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "zephyr-7b-beta": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      }
+    },
+    "google": {
+      "deep-research-pro-preview-12-2025": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 32768
+      },
+      "deepseek-ocr-maas": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 1.2
+      },
+      "gemini-1.5-flash": {
+        "promptPer1M": 0.075,
+        "maxInputTokens": 8192
+      },
+      "gemini-2.0-flash": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.0-flash-001": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.0-flash-lite": {
+        "promptPer1M": 0.075,
+        "completionPer1M": 0.3,
+        "cachedInputPer1M": 0.01875,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.0-flash-lite-001": {
+        "promptPer1M": 0.075,
+        "completionPer1M": 0.3,
+        "cachedInputPer1M": 0.01875,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.5-computer-use-preview-10-2025": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 64000
+      },
+      "gemini-2.5-flash": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.03,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-2.5-flash-image": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.03,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "gemini-2.5-flash-lite": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.01,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-2.5-flash-lite-preview-06-17": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-2.5-flash-lite-preview-09-2025": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.01,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-2.5-flash-native-audio-latest": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.5-flash-native-audio-preview-09-2025": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.5-flash-native-audio-preview-12-2025": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.5-flash-preview-09-2025": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-2.5-flash-preview-tts": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5
+      },
+      "gemini-2.5-pro": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-2.5-pro-preview-tts": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-3-flash-preview": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 3,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-3-pro-image": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 32768
+      },
+      "gemini-3-pro-image-preview": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 32768
+      },
+      "gemini-3-pro-preview": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-3.1-flash-image": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 32768
+      },
+      "gemini-3.1-flash-image-preview": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 32768
+      },
+      "gemini-3.1-flash-lite": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 1.5,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 1.5,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.1-flash-live-preview": {
+        "promptPer1M": 0.75,
+        "completionPer1M": 4.5,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.1-flash-tts-preview": {
+        "promptPer1M": 1,
+        "completionPer1M": 20,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 16384
+      },
+      "gemini-3.1-pro-preview": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.1-pro-preview-customtools": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.5-flash": {
+        "promptPer1M": 1.5,
+        "completionPer1M": 9,
+        "cachedInputPer1M": 0.15,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-3.5-flash-lite": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.03,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.6-flash": {
+        "promptPer1M": 1.5,
+        "completionPer1M": 7.5,
+        "cachedInputPer1M": 0.15,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.7-flash": {
+        "promptPer1M": 0.75,
+        "completionPer1M": 3.75,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-embedding-001": {
+        "promptPer1M": 0.15,
+        "maxInputTokens": 2048
+      },
+      "gemini-embedding-2": {
+        "promptPer1M": 0.2,
+        "maxInputTokens": 8192
+      },
+      "gemini-embedding-2-preview": {
+        "promptPer1M": 0.2,
+        "maxInputTokens": 8192
+      },
+      "gemini-exp-1206": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.03,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-flash-latest": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-flash-lite-latest": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-gemma-2-27b-it": {
+        "promptPer1M": 0.35,
+        "completionPer1M": 1.05,
+        "maxOutputTokens": 8192
+      },
+      "gemini-gemma-2-9b-it": {
+        "promptPer1M": 0.35,
+        "completionPer1M": 1.05,
+        "maxOutputTokens": 8192
+      },
+      "gemini-live-2.5-flash-preview-native-audio-09-2025": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-omni-flash-preview": {
+        "promptPer1M": 1.5,
+        "completionPer1M": 9,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-pro-latest": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-robotics-er-1.5-preview": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-robotics-er-1.6-preview": {
+        "promptPer1M": 1,
+        "completionPer1M": 5,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 65536
+      },
+      "gemini-robotics-er-2-preview": {
+        "promptPer1M": 2,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 65536
+      },
+      "gemini-robotics-er-2-streaming-preview": {
+        "promptPer1M": 2,
+        "completionPer1M": 10
+      },
+      "grok-4.1-fast-non-reasoning": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4.1-fast-reasoning": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4.20-non-reasoning": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4.20-reasoning": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      }
+    },
+    "groq": {
+      "gemma-7b-it": {
+        "promptPer1M": 0.05,
+        "completionPer1M": 0.08,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "gpt-oss-120b": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 65536
+      },
+      "gpt-oss-20b": {
+        "promptPer1M": 0.075,
+        "completionPer1M": 0.3,
+        "cachedInputPer1M": 0.0375,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 65536
+      },
+      "gpt-oss-safeguard-20b": {
+        "promptPer1M": 0.075,
+        "completionPer1M": 0.3,
+        "cachedInputPer1M": 0.037,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 65536
+      },
+      "kimi-k2-instruct-0905": {
+        "promptPer1M": 1,
+        "completionPer1M": 3,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 16384
+      },
+      "llama-3.1-8b-instant": {
+        "promptPer1M": 0.05,
+        "completionPer1M": 0.08,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "llama-3.3-70b-versatile": {
+        "promptPer1M": 0.59,
+        "completionPer1M": 0.79,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 32768
+      },
+      "llama-4-maverick-17b-128e-instruct": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 8192
+      },
+      "llama-4-scout-17b-16e-instruct": {
+        "promptPer1M": 0.11,
+        "completionPer1M": 0.34,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 8192
+      },
+      "llama-guard-4-12b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "llama-prompt-guard-2-22m": {
+        "promptPer1M": 0.03,
+        "completionPer1M": 0.03,
+        "maxInputTokens": 512,
+        "maxOutputTokens": 512
+      },
+      "llama-prompt-guard-2-86m": {
+        "promptPer1M": 0.04,
+        "completionPer1M": 0.04,
+        "maxInputTokens": 512,
+        "maxOutputTokens": 512
+      },
+      "qwen3-32b": {
+        "promptPer1M": 0.29,
+        "completionPer1M": 0.59,
+        "maxInputTokens": 131000,
+        "maxOutputTokens": 131000
+      },
+      "qwen3.6-27b": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 3,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 16384
+      }
+    },
+    "mistral": {
+      "codestral-2405": {
+        "promptPer1M": 1,
+        "completionPer1M": 3,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "codestral-2508": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.9,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "codestral-embed": {
+        "promptPer1M": 0.15,
+        "maxInputTokens": 8192
+      },
+      "codestral-embed-2505": {
+        "promptPer1M": 0.15,
+        "maxInputTokens": 8192
+      },
+      "codestral-latest": {
+        "promptPer1M": 1,
+        "completionPer1M": 3,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "codestral-mamba-latest": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 0.25,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "devstral-2512": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "devstral-latest": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "devstral-medium-2507": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "devstral-medium-latest": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "devstral-small-2505": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "devstral-small-2507": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "devstral-small-latest": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "labs-devstral-small-2512": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "magistral-medium-1-2-2509": {
+        "promptPer1M": 2,
+        "completionPer1M": 5,
+        "maxInputTokens": 40000,
+        "maxOutputTokens": 40000
+      },
+      "magistral-medium-2506": {
+        "promptPer1M": 2,
+        "completionPer1M": 5,
+        "maxInputTokens": 40000,
+        "maxOutputTokens": 40000
+      },
+      "magistral-medium-2509": {
+        "promptPer1M": 2,
+        "completionPer1M": 5,
+        "maxInputTokens": 40000,
+        "maxOutputTokens": 40000
+      },
+      "magistral-medium-latest": {
+        "promptPer1M": 2,
+        "completionPer1M": 5,
+        "maxInputTokens": 40000,
+        "maxOutputTokens": 40000
+      },
+      "magistral-small-1-2-2509": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 40000,
+        "maxOutputTokens": 40000
+      },
+      "magistral-small-2506": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 40000,
+        "maxOutputTokens": 40000
+      },
+      "magistral-small-latest": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 40000,
+        "maxOutputTokens": 40000
+      },
+      "ministral-3-14b-2512": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "ministral-3-3b-2512": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "ministral-3-8b-2512": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.15,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "ministral-8b-2512": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.15,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "ministral-8b-latest": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.15,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-embed": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 8192
+      },
+      "mistral-large-2402": {
+        "promptPer1M": 4,
+        "completionPer1M": 12,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "mistral-large-2407": {
+        "promptPer1M": 3,
+        "completionPer1M": 9,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "mistral-large-2411": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "mistral-large-2512": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-large-3": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-large-latest": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-medium": {
+        "promptPer1M": 2.7,
+        "completionPer1M": 8.1,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "mistral-medium-2312": {
+        "promptPer1M": 2.7,
+        "completionPer1M": 8.1,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "mistral-medium-2505": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 8191
+      },
+      "mistral-medium-2508": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "mistral-medium-2604": {
+        "promptPer1M": 1.5,
+        "completionPer1M": 7.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-medium-3-1-2508": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "mistral-medium-3-5": {
+        "promptPer1M": 1.5,
+        "completionPer1M": 7.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-medium-latest": {
+        "promptPer1M": 1.5,
+        "completionPer1M": 7.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-small": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "mistral-small-2603": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-small-3-2-2506": {
+        "promptPer1M": 0.06,
+        "completionPer1M": 0.18,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "mistral-small-latest": {
+        "promptPer1M": 0.06,
+        "completionPer1M": 0.18,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "mistral-tiny": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 0.25,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "open-codestral-mamba": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 0.25,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "open-mistral-7b": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 0.25,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "open-mistral-nemo": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "open-mistral-nemo-2407": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "open-mixtral-8x22b": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "maxInputTokens": 65336,
+        "maxOutputTokens": 8191
+      },
+      "open-mixtral-8x7b": {
+        "promptPer1M": 0.7,
+        "completionPer1M": 0.7,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 8191
+      },
+      "pixtral-12b-2409": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.15,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "pixtral-large-2411": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "pixtral-large-latest": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      }
+    },
+    "openai": {
+      "chatgpt-4o-latest": {
+        "promptPer1M": 5,
+        "completionPer1M": 15,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "chatgpt-image-latest": {
+        "promptPer1M": 5,
+        "cachedInputPer1M": 1.25
+      },
+      "codex-mini-latest": {
+        "promptPer1M": 1.5,
+        "completionPer1M": 6,
+        "cachedInputPer1M": 0.375,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "ft:gpt-3.5-turbo": {
+        "promptPer1M": 3,
+        "completionPer1M": 6,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "ft:gpt-3.5-turbo-0125": {
+        "promptPer1M": 3,
+        "completionPer1M": 6,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "ft:gpt-3.5-turbo-0613": {
+        "promptPer1M": 3,
+        "completionPer1M": 6,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "ft:gpt-3.5-turbo-1106": {
+        "promptPer1M": 3,
+        "completionPer1M": 6,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "ft:gpt-4-0613": {
+        "promptPer1M": 30,
+        "completionPer1M": 60,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 4096
+      },
+      "ft:gpt-4.1-2025-04-14": {
+        "promptPer1M": 3,
+        "completionPer1M": 12,
+        "cachedInputPer1M": 0.75,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "ft:gpt-4.1-mini-2025-04-14": {
+        "promptPer1M": 0.8,
+        "completionPer1M": 3.2,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "ft:gpt-4.1-nano-2025-04-14": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.8,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "ft:gpt-4o-2024-08-06": {
+        "promptPer1M": 3.75,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 1.875,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "ft:gpt-4o-2024-11-20": {
+        "promptPer1M": 3.75,
+        "completionPer1M": 15,
+        "cacheCreationPer1M": 1.875,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "ft:gpt-4o-mini-2024-07-18": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 1.2,
+        "cachedInputPer1M": 0.15,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "ft:o4-mini-2025-04-16": {
+        "promptPer1M": 4,
+        "completionPer1M": 16,
+        "cachedInputPer1M": 1,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "gpt-3.5-turbo": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "gpt-3.5-turbo-0125": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "gpt-3.5-turbo-1106": {
+        "promptPer1M": 1,
+        "completionPer1M": 2,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "gpt-3.5-turbo-16k": {
+        "promptPer1M": 3,
+        "completionPer1M": 4,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4": {
+        "promptPer1M": 30,
+        "completionPer1M": 60,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4-0125-preview": {
+        "promptPer1M": 10,
+        "completionPer1M": 30,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4-0314": {
+        "promptPer1M": 30,
+        "completionPer1M": 60,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4-0613": {
+        "promptPer1M": 30,
+        "completionPer1M": 60,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4-1106-preview": {
+        "promptPer1M": 10,
+        "completionPer1M": 30,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4-turbo": {
+        "promptPer1M": 10,
+        "completionPer1M": 30,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4-turbo-2024-04-09": {
+        "promptPer1M": 10,
+        "completionPer1M": 30,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4-turbo-preview": {
+        "promptPer1M": 10,
+        "completionPer1M": 30,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4.1": {
+        "promptPer1M": 2,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4.1-2025-04-14": {
+        "promptPer1M": 2,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4.1-mini": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 1.6,
+        "cachedInputPer1M": 0.1,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4.1-mini-2025-04-14": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 1.6,
+        "cachedInputPer1M": 0.1,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4.1-nano": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4.1-nano-2025-04-14": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4o": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-2024-05-13": {
+        "promptPer1M": 5,
+        "completionPer1M": 15,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4o-2024-08-06": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-2024-11-20": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-audio-preview": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-audio-preview-2024-12-17": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-audio-preview-2025-06-03": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-mini": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-mini-2024-07-18": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-mini-audio-preview": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-mini-audio-preview-2024-12-17": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-mini-realtime-preview": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "cachedInputPer1M": 0.3,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4o-mini-realtime-preview-2024-12-17": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "cachedInputPer1M": 0.3,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4o-mini-search-preview": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-mini-search-preview-2025-03-11": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-mini-transcribe": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 5,
+        "maxInputTokens": 16000,
+        "maxOutputTokens": 2000
+      },
+      "gpt-4o-mini-transcribe-2025-03-20": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 5,
+        "maxInputTokens": 16000,
+        "maxOutputTokens": 2000
+      },
+      "gpt-4o-mini-transcribe-2025-12-15": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 5,
+        "maxInputTokens": 16000,
+        "maxOutputTokens": 2000
+      },
+      "gpt-4o-mini-tts": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10
+      },
+      "gpt-4o-mini-tts-2025-03-20": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10
+      },
+      "gpt-4o-mini-tts-2025-12-15": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10
+      },
+      "gpt-4o-realtime-preview": {
+        "promptPer1M": 5,
+        "completionPer1M": 20,
+        "cachedInputPer1M": 2.5,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4o-realtime-preview-2024-12-17": {
+        "promptPer1M": 5,
+        "completionPer1M": 20,
+        "cachedInputPer1M": 2.5,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4o-realtime-preview-2025-06-03": {
+        "promptPer1M": 5,
+        "completionPer1M": 20,
+        "cachedInputPer1M": 2.5,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4o-search-preview": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-search-preview-2025-03-11": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-4o-transcribe": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 16000,
+        "maxOutputTokens": 2000
+      },
+      "gpt-4o-transcribe-diarize": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 16000,
+        "maxOutputTokens": 2000
+      },
+      "gpt-5": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-2025-08-07": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-chat": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-5-chat-latest": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-5-codex": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-mini": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-mini-2025-08-07": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-nano": {
+        "promptPer1M": 0.05,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.005,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-nano-2025-08-07": {
+        "promptPer1M": 0.05,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.005,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-pro": {
+        "promptPer1M": 15,
+        "completionPer1M": 120,
+        "maxInputTokens": 400000,
+        "maxOutputTokens": 272000
+      },
+      "gpt-5-pro-2025-10-06": {
+        "promptPer1M": 15,
+        "completionPer1M": 120,
+        "maxInputTokens": 400000,
+        "maxOutputTokens": 272000
+      },
+      "gpt-5-search-api": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-search-api-2025-10-14": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.1": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.1-2025-11-13": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.1-chat-latest": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-5.1-codex": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.1-codex-max": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.1-codex-mini": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.2": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.2-2025-12-11": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.2-chat-latest": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-5.2-codex": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.2-pro": {
+        "promptPer1M": 21,
+        "completionPer1M": 168,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.2-pro-2025-12-11": {
+        "promptPer1M": 21,
+        "completionPer1M": 168,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.3-chat-latest": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-5.3-codex": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.4": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.25,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.4-2026-03-05": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.25,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.4-mini": {
+        "promptPer1M": 0.75,
+        "completionPer1M": 4.5,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.4-mini-2026-03-17": {
+        "promptPer1M": 0.75,
+        "completionPer1M": 4.5,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.4-nano": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 1.25,
+        "cachedInputPer1M": 0.02,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.4-nano-2026-03-17": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 1.25,
+        "cachedInputPer1M": 0.02,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.4-pro": {
+        "promptPer1M": 30,
+        "completionPer1M": 180,
+        "cachedInputPer1M": 3,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.4-pro-2026-03-05": {
+        "promptPer1M": 30,
+        "completionPer1M": 180,
+        "cachedInputPer1M": 3,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.5": {
+        "promptPer1M": 5,
+        "completionPer1M": 30,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.5-2026-04-23": {
+        "promptPer1M": 5,
+        "completionPer1M": 30,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.5-pro": {
+        "promptPer1M": 30,
+        "completionPer1M": 180,
+        "cachedInputPer1M": 3,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.5-pro-2026-04-23": {
+        "promptPer1M": 30,
+        "completionPer1M": 180,
+        "cachedInputPer1M": 3,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.6": {
+        "promptPer1M": 5,
+        "completionPer1M": 30,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.6-luna": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 1.2,
+        "cachedInputPer1M": 0.02,
+        "cacheCreationPer1M": 0.25,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.6-sol": {
+        "promptPer1M": 5,
+        "completionPer1M": 30,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.6-terra": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "cachedInputPer1M": 0.2,
+        "cacheCreationPer1M": 2.5,
+        "maxInputTokens": 1050000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-audio": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-audio-1.5": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-audio-2025-08-28": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-audio-mini": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-audio-mini-2025-10-06": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-audio-mini-2025-12-15": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-image-1": {
+        "promptPer1M": 5,
+        "cachedInputPer1M": 1.25
+      },
+      "gpt-image-1-mini": {
+        "promptPer1M": 2,
+        "cachedInputPer1M": 0.2
+      },
+      "gpt-image-1.5": {
+        "promptPer1M": 5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25
+      },
+      "gpt-image-1.5-2025-12-16": {
+        "promptPer1M": 5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25
+      },
+      "gpt-image-2": {
+        "promptPer1M": 5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25
+      },
+      "gpt-image-2-2026-04-21": {
+        "promptPer1M": 5,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 1.25
+      },
+      "gpt-realtime": {
+        "promptPer1M": 4,
+        "completionPer1M": 16,
+        "cachedInputPer1M": 0.4,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-realtime-1.5": {
+        "promptPer1M": 4,
+        "completionPer1M": 16,
+        "cachedInputPer1M": 0.4,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-realtime-2": {
+        "promptPer1M": 4,
+        "completionPer1M": 16,
+        "cachedInputPer1M": 0.4,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-realtime-2.1": {
+        "promptPer1M": 4,
+        "completionPer1M": 24,
+        "cachedInputPer1M": 0.4,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 32000
+      },
+      "gpt-realtime-2.1-mini": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "cachedInputPer1M": 0.06,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-realtime-2025-08-28": {
+        "promptPer1M": 4,
+        "completionPer1M": 16,
+        "cachedInputPer1M": 0.4,
+        "maxInputTokens": 32000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-realtime-mini": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-realtime-mini-2025-10-06": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "cachedInputPer1M": 0.06,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-realtime-mini-2025-12-15": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "cachedInputPer1M": 0.06,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "o1": {
+        "promptPer1M": 15,
+        "completionPer1M": 60,
+        "cachedInputPer1M": 7.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o1-2024-12-17": {
+        "promptPer1M": 15,
+        "completionPer1M": 60,
+        "cachedInputPer1M": 7.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o1-pro": {
+        "promptPer1M": 150,
+        "completionPer1M": 600,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o1-pro-2025-03-19": {
+        "promptPer1M": 150,
+        "completionPer1M": 600,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3": {
+        "promptPer1M": 2,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3-2025-04-16": {
+        "promptPer1M": 2,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3-deep-research": {
+        "promptPer1M": 10,
+        "completionPer1M": 40,
+        "cachedInputPer1M": 2.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3-deep-research-2025-06-26": {
+        "promptPer1M": 10,
+        "completionPer1M": 40,
+        "cachedInputPer1M": 2.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3-mini": {
+        "promptPer1M": 1.1,
+        "completionPer1M": 4.4,
+        "cachedInputPer1M": 0.55,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3-mini-2025-01-31": {
+        "promptPer1M": 1.1,
+        "completionPer1M": 4.4,
+        "cachedInputPer1M": 0.55,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3-pro": {
+        "promptPer1M": 20,
+        "completionPer1M": 80,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3-pro-2025-06-10": {
+        "promptPer1M": 20,
+        "completionPer1M": 80,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o4-mini": {
+        "promptPer1M": 1.1,
+        "completionPer1M": 4.4,
+        "cachedInputPer1M": 0.275,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o4-mini-2025-04-16": {
+        "promptPer1M": 1.1,
+        "completionPer1M": 4.4,
+        "cachedInputPer1M": 0.275,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o4-mini-deep-research": {
+        "promptPer1M": 2,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o4-mini-deep-research-2025-06-26": {
+        "promptPer1M": 2,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "text-embedding-3-large": {
+        "promptPer1M": 0.13,
+        "maxInputTokens": 8191
+      },
+      "text-embedding-3-small": {
+        "promptPer1M": 0.02,
+        "maxInputTokens": 8191
+      },
+      "text-embedding-ada-002": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 8191
+      },
+      "text-embedding-ada-002-v2": {
+        "promptPer1M": 0.1,
+        "maxInputTokens": 8191
+      }
+    },
+    "openrouter": {
+      "claude-3-haiku": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 1.25,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096
+      },
+      "claude-3.5-sonnet": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 8192
+      },
+      "claude-3.7-sonnet": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 128000
+      },
+      "claude-haiku-4.5": {
+        "promptPer1M": 1,
+        "completionPer1M": 5,
+        "cachedInputPer1M": 0.1,
+        "cacheCreationPer1M": 1.25,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 200000
+      },
+      "claude-opus-4": {
+        "promptPer1M": 15,
+        "completionPer1M": 75,
+        "cachedInputPer1M": 1.5,
+        "cacheCreationPer1M": 18.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4.1": {
+        "promptPer1M": 15,
+        "completionPer1M": 75,
+        "cachedInputPer1M": 1.5,
+        "cacheCreationPer1M": 18.75,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4.5": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4.6": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-opus-4.7": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 0.5,
+        "cacheCreationPer1M": 6.25,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "claude-sonnet-4": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 64000
+      },
+      "claude-sonnet-4.5": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "claude-sonnet-4.6": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.3,
+        "cacheCreationPer1M": 3.75,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "deepseek-chat": {
+        "promptPer1M": 0.14,
+        "completionPer1M": 0.28,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-chat-v3-0324": {
+        "promptPer1M": 0.14,
+        "completionPer1M": 0.28,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-chat-v3.1": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.8,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-r1": {
+        "promptPer1M": 0.55,
+        "completionPer1M": 2.19,
+        "maxInputTokens": 65336,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-r1-0528": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 2.15,
+        "maxInputTokens": 65336,
+        "maxOutputTokens": 8192
+      },
+      "deepseek-v3.2": {
+        "promptPer1M": 0.28,
+        "completionPer1M": 0.4,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "deepseek-v3.2-exp": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.4,
+        "maxInputTokens": 163840,
+        "maxOutputTokens": 163840
+      },
+      "devstral-2512": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
+      },
+      "gemini-2.0-flash-001": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.5-flash": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.5,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-2.5-pro": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "gemini-3-flash-preview": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 3,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-3-pro-preview": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65535
+      },
+      "gemini-3.1-flash-lite": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 1.5,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.1-flash-lite-preview": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 1.5,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "gemini-3.1-pro-preview": {
+        "promptPer1M": 2,
+        "completionPer1M": 12,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536
+      },
+      "glm-4.6": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 1.75,
+        "maxInputTokens": 202800,
+        "maxOutputTokens": 131000
+      },
+      "glm-4.6:exacto": {
+        "promptPer1M": 0.45,
+        "completionPer1M": 1.9,
+        "maxInputTokens": 202800,
+        "maxOutputTokens": 131000
+      },
+      "glm-4.7": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 202752,
+        "maxOutputTokens": 64000
+      },
+      "glm-4.7-flash": {
+        "promptPer1M": 0.07,
+        "completionPer1M": 0.4,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 32000
+      },
+      "glm-5": {
+        "promptPer1M": 0.8,
+        "completionPer1M": 2.56,
+        "maxInputTokens": 202752,
+        "maxOutputTokens": 128000
+      },
+      "glm-5.1": {
+        "promptPer1M": 1.05,
+        "completionPer1M": 3.5,
+        "cachedInputPer1M": 0.525,
+        "maxInputTokens": 202752,
+        "maxOutputTokens": 65535
+      },
+      "gpt-3.5-turbo": {
+        "promptPer1M": 1.5,
+        "completionPer1M": 2,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "gpt-3.5-turbo-16k": {
+        "promptPer1M": 3,
+        "completionPer1M": 4,
+        "maxInputTokens": 16385,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4": {
+        "promptPer1M": 30,
+        "completionPer1M": 60,
+        "maxInputTokens": 8191,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4.1": {
+        "promptPer1M": 2,
+        "completionPer1M": 8,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4.1-mini": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 1.6,
+        "cachedInputPer1M": 0.1,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4.1-nano": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 1047576,
+        "maxOutputTokens": 32768
+      },
+      "gpt-4o": {
+        "promptPer1M": 2.5,
+        "completionPer1M": 10,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-4o-2024-05-13": {
+        "promptPer1M": 5,
+        "completionPer1M": 15,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096
+      },
+      "gpt-5": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-chat": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-5-codex": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-mini": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.025,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5-nano": {
+        "promptPer1M": 0.05,
+        "completionPer1M": 0.4,
+        "cachedInputPer1M": 0.005,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.1-codex-max": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 10,
+        "cachedInputPer1M": 0.125,
+        "maxInputTokens": 400000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.2": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.2-chat": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "gpt-5.2-codex": {
+        "promptPer1M": 1.75,
+        "completionPer1M": 14,
+        "cachedInputPer1M": 0.175,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-5.2-pro": {
+        "promptPer1M": 21,
+        "completionPer1M": 168,
+        "maxInputTokens": 272000,
+        "maxOutputTokens": 128000
+      },
+      "gpt-oss-120b": {
+        "promptPer1M": 0.18,
+        "completionPer1M": 0.8,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 32768
+      },
+      "gpt-oss-20b": {
+        "promptPer1M": 0.02,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 32768
+      },
+      "grok-4": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "kimi-k2.5": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 3,
+        "cachedInputPer1M": 0.1,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "llama-3-70b-instruct": {
+        "promptPer1M": 0.59,
+        "completionPer1M": 0.79,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8000
+      },
+      "mimo-v2-flash": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.3,
+        "cachedInputPer1M": 0.01,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 16384
+      },
+      "mimo-v2.5": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.08,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 131072
+      },
+      "mimo-v2.5-pro": {
+        "promptPer1M": 1,
+        "completionPer1M": 3,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 16384
+      },
+      "minimax-m2": {
+        "promptPer1M": 0.255,
+        "completionPer1M": 1.02,
+        "maxInputTokens": 204800,
+        "maxOutputTokens": 204800
+      },
+      "minimax-m2.1": {
+        "promptPer1M": 0.27,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 204000,
+        "maxOutputTokens": 64000
+      },
+      "minimax-m2.5": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 1.1,
+        "cachedInputPer1M": 0.15,
+        "maxInputTokens": 196608,
+        "maxOutputTokens": 65536
+      },
+      "ministral-14b-2512": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "ministral-3b-2512": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "ministral-8b-2512": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.15,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-7b-instruct": {
+        "promptPer1M": 0.13,
+        "completionPer1M": 0.13,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 8191
+      },
+      "mistral-large": {
+        "promptPer1M": 8,
+        "completionPer1M": 24,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 8191
+      },
+      "mistral-large-2512": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "mistral-small-3.1-24b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "mistral-small-3.2-24b-instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 128000
+      },
+      "mixtral-8x22b-instruct": {
+        "promptPer1M": 0.65,
+        "completionPer1M": 0.65,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 65536
+      },
+      "mythomax-l2-13b": {
+        "promptPer1M": 1.875,
+        "completionPer1M": 1.875
+      },
+      "nemotron-3.5-lightning": {
+        "promptPer1M": 0.05,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 262144
+      },
+      "o1": {
+        "promptPer1M": 15,
+        "completionPer1M": 60,
+        "cachedInputPer1M": 7.5,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 100000
+      },
+      "o3-mini": {
+        "promptPer1M": 1.1,
+        "completionPer1M": 4.4,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 65536
+      },
+      "o3-mini-high": {
+        "promptPer1M": 1.1,
+        "completionPer1M": 4.4,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 65536
+      },
+      "qwen-2.5-coder-32b-instruct": {
+        "promptPer1M": 0.18,
+        "completionPer1M": 0.18,
+        "maxInputTokens": 33792,
+        "maxOutputTokens": 33792
+      },
+      "qwen-vl-plus": {
+        "promptPer1M": 0.21,
+        "completionPer1M": 0.63,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 2048
+      },
+      "qwen3-235b-a22b-2507": {
+        "promptPer1M": 0.071,
+        "completionPer1M": 0.1,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-235b-a22b-thinking-2507": {
+        "promptPer1M": 0.11,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144
+      },
+      "qwen3-coder": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.95,
+        "maxInputTokens": 262100,
+        "maxOutputTokens": 262100
+      },
+      "qwen3-coder-plus": {
+        "promptPer1M": 1,
+        "completionPer1M": 5,
+        "maxInputTokens": 997952,
+        "maxOutputTokens": 65536
+      },
+      "qwen3.5-122b-a10b": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
+      },
+      "qwen3.5-27b": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 2.4,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
+      },
+      "qwen3.5-35b-a3b": {
+        "promptPer1M": 0.25,
+        "completionPer1M": 2,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
+      },
+      "qwen3.5-397b-a17b": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 3.6,
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 65536
+      },
+      "qwen3.5-flash-02-23": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.4,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 65536
+      },
+      "qwen3.5-plus-02-15": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 2.4,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 65536
+      },
+      "qwen3.6-plus": {
+        "promptPer1M": 0.325,
+        "completionPer1M": 1.95,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 65536
+      },
+      "remm-slerp-l2-13b": {
+        "promptPer1M": 1.875,
+        "completionPer1M": 1.875,
+        "maxInputTokens": 6144,
+        "maxOutputTokens": 4096
+      },
+      "router": {
+        "promptPer1M": 0.85,
+        "completionPer1M": 3.4,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "ui-tars-1.5-7b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 2048
+      },
+      "weaver": {
+        "promptPer1M": 5.625,
+        "completionPer1M": 5.625,
+        "maxInputTokens": 8000,
+        "maxOutputTokens": 2000
+      }
+    },
+    "sambanova": {
+      "DeepSeek-R1": {
+        "promptPer1M": 5,
+        "completionPer1M": 7,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "DeepSeek-R1-Distill-Llama-70B": {
+        "promptPer1M": 0.7,
+        "completionPer1M": 1.4,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "DeepSeek-V3-0324": {
+        "promptPer1M": 3,
+        "completionPer1M": 4.5,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "DeepSeek-V3.1": {
+        "promptPer1M": 3,
+        "completionPer1M": 4.5,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "DeepSeek-V3.2": {
+        "promptPer1M": 3,
+        "completionPer1M": 4.5,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "Llama-4-Maverick-17B-128E-Instruct": {
+        "promptPer1M": 0.63,
+        "completionPer1M": 1.8,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "Llama-4-Scout-17B-16E-Instruct": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 0.7,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "Meta-Llama-3.1-405B-Instruct": {
+        "promptPer1M": 5,
+        "completionPer1M": 10,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "Meta-Llama-3.1-8B-Instruct": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "Meta-Llama-3.2-1B-Instruct": {
+        "promptPer1M": 0.04,
+        "completionPer1M": 0.08,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "Meta-Llama-3.2-3B-Instruct": {
+        "promptPer1M": 0.08,
+        "completionPer1M": 0.16,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "Meta-Llama-3.3-70B-Instruct": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 1.2,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "Meta-Llama-Guard-3-8B": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.3,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "MiniMax-M2.7": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.4,
+        "maxInputTokens": 196608,
+        "maxOutputTokens": 131072
+      },
+      "QwQ-32B": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 1,
+        "maxInputTokens": 16384,
+        "maxOutputTokens": 16384
+      },
+      "Qwen2-Audio-7B-Instruct": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 100,
+        "maxInputTokens": 4096,
+        "maxOutputTokens": 4096
+      },
+      "Qwen3-32B": {
+        "promptPer1M": 0.4,
+        "completionPer1M": 0.8,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      },
+      "gemma-4-31B-it": {
+        "promptPer1M": 0.38,
+        "completionPer1M": 1.15,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "gpt-oss-120b": {
+        "promptPer1M": 0.22,
+        "completionPer1M": 0.59,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      }
+    },
+    "togetherai": {
+      "DeepSeek-R1": {
+        "promptPer1M": 3,
+        "completionPer1M": 7,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 20480
+      },
+      "DeepSeek-R1-0528-tput": {
+        "promptPer1M": 0.55,
+        "completionPer1M": 2.19,
+        "maxInputTokens": 128000
+      },
+      "DeepSeek-V3": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 1.25,
+        "maxInputTokens": 65536,
+        "maxOutputTokens": 8192
+      },
+      "DeepSeek-V3.1": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 1.7,
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16384
+      },
+      "GLM-4.5-Air-FP8": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 1.1,
+        "maxInputTokens": 128000
+      },
+      "GLM-4.6": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 2.2,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 200000
+      },
+      "GLM-4.7": {
+        "promptPer1M": 0.45,
+        "completionPer1M": 2,
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 200000
+      },
+      "Kimi-K2-Instruct": {
+        "promptPer1M": 1,
+        "completionPer1M": 3
+      },
+      "Kimi-K2-Instruct-0905": {
+        "promptPer1M": 1,
+        "completionPer1M": 3,
+        "maxInputTokens": 262144
+      },
+      "Kimi-K2.5": {
+        "promptPer1M": 0.5,
+        "completionPer1M": 2.8,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "Llama-3.3-70B-Instruct-Turbo": {
+        "promptPer1M": 0.88,
+        "completionPer1M": 0.88
+      },
+      "Llama-4-Maverick-17B-128E-Instruct-FP8": {
+        "promptPer1M": 0.27,
+        "completionPer1M": 0.85
+      },
+      "Llama-4-Scout-17B-16E-Instruct": {
+        "promptPer1M": 0.18,
+        "completionPer1M": 0.59
+      },
+      "Meta-Llama-3.1-405B-Instruct-Turbo": {
+        "promptPer1M": 3.5,
+        "completionPer1M": 3.5
+      },
+      "Meta-Llama-3.1-70B-Instruct-Turbo": {
+        "promptPer1M": 0.88,
+        "completionPer1M": 0.88
+      },
+      "Meta-Llama-3.1-8B-Instruct-Turbo": {
+        "promptPer1M": 0.18,
+        "completionPer1M": 0.18
+      },
+      "Mixtral-8x7B-Instruct-v0.1": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 0.6
+      },
+      "Qwen3-235B-A22B-Instruct-2507-tput": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 6,
+        "maxInputTokens": 262000
+      },
+      "Qwen3-235B-A22B-Thinking-2507": {
+        "promptPer1M": 0.65,
+        "completionPer1M": 3,
+        "maxInputTokens": 256000
+      },
+      "Qwen3-235B-A22B-fp8-tput": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 40000
+      },
+      "Qwen3-Coder-480B-A35B-Instruct-FP8": {
+        "promptPer1M": 2,
+        "completionPer1M": 2,
+        "maxInputTokens": 256000
+      },
+      "Qwen3-Next-80B-A3B-Instruct": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 262144
+      },
+      "Qwen3-Next-80B-A3B-Thinking": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 1.5,
+        "maxInputTokens": 262144
+      },
+      "Qwen3.5-397B-A17B": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 3.6,
+        "maxInputTokens": 262144
+      },
+      "bge-base-en-v1.5": {
+        "promptPer1M": 0.008,
+        "maxInputTokens": 512
+      },
+      "gpt-oss-120b": {
+        "promptPer1M": 0.15,
+        "completionPer1M": 0.6,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "gpt-oss-20b": {
+        "promptPer1M": 0.05,
+        "completionPer1M": 0.2,
+        "maxInputTokens": 128000
+      },
+      "together-ai-21.1b-41b": {
+        "promptPer1M": 0.8,
+        "completionPer1M": 0.8
+      },
+      "together-ai-4.1b-8b": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.2
+      },
+      "together-ai-41.1b-80b": {
+        "promptPer1M": 0.9,
+        "completionPer1M": 0.9
+      },
+      "together-ai-8.1b-21b": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.3
+      },
+      "together-ai-81.1b-110b": {
+        "promptPer1M": 1.8,
+        "completionPer1M": 1.8
+      },
+      "together-ai-embedding-151m-to-350m": {
+        "promptPer1M": 0.016
+      },
+      "together-ai-embedding-up-to-150m": {
+        "promptPer1M": 0.008
+      },
+      "together-ai-up-to-4b": {
+        "promptPer1M": 0.1,
+        "completionPer1M": 0.1
+      }
+    },
+    "xai": {
+      "grok-2": {
+        "promptPer1M": 2,
+        "completionPer1M": 10,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-2-1212": {
+        "promptPer1M": 2,
+        "completionPer1M": 10,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-2-latest": {
+        "promptPer1M": 2,
+        "completionPer1M": 10,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-2-vision": {
+        "promptPer1M": 2,
+        "completionPer1M": 10,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "grok-2-vision-1212": {
+        "promptPer1M": 2,
+        "completionPer1M": 10,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "grok-2-vision-latest": {
+        "promptPer1M": 2,
+        "completionPer1M": 10,
+        "maxInputTokens": 32768,
+        "maxOutputTokens": 32768
+      },
+      "grok-3": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.75,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-beta": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.75,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-fast-beta": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 1.25,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-fast-latest": {
+        "promptPer1M": 5,
+        "completionPer1M": 25,
+        "cachedInputPer1M": 1.25,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-latest": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "cachedInputPer1M": 0.75,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-mini": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-mini-beta": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-mini-fast": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 4,
+        "cachedInputPer1M": 0.15,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-mini-fast-beta": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 4,
+        "cachedInputPer1M": 0.15,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-mini-fast-latest": {
+        "promptPer1M": 0.6,
+        "completionPer1M": 4,
+        "cachedInputPer1M": 0.15,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-3-mini-latest": {
+        "promptPer1M": 0.3,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.075,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-4": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "grok-4-0709": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "grok-4-1-fast": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4-1-fast-non-reasoning": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4-1-fast-non-reasoning-latest": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4-1-fast-reasoning": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4-1-fast-reasoning-latest": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4-fast-non-reasoning": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4-fast-reasoning": {
+        "promptPer1M": 0.2,
+        "completionPer1M": 0.5,
+        "cachedInputPer1M": 0.05,
+        "maxInputTokens": 2000000,
+        "maxOutputTokens": 2000000
+      },
+      "grok-4-latest": {
+        "promptPer1M": 3,
+        "completionPer1M": 15,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "grok-4.20-0309-non-reasoning": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "grok-4.20-0309-reasoning": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "grok-4.20-beta-0309-non-reasoning": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "grok-4.20-beta-0309-reasoning": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "grok-4.20-multi-agent-0309": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "grok-4.20-multi-agent-beta-0309": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "grok-4.3": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "grok-4.3-latest": {
+        "promptPer1M": 1.25,
+        "completionPer1M": 2.5,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      "grok-4.5": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "cachedInputPer1M": 0.3,
+        "maxInputTokens": 500000,
+        "maxOutputTokens": 500000
+      },
+      "grok-4.5-latest": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "cachedInputPer1M": 0.3,
+        "maxInputTokens": 500000,
+        "maxOutputTokens": 500000
+      },
+      "grok-4.6": {
+        "promptPer1M": 2,
+        "completionPer1M": 6,
+        "cachedInputPer1M": 0.5,
+        "maxInputTokens": 500000,
+        "maxOutputTokens": 500000
+      },
+      "grok-beta": {
+        "promptPer1M": 5,
+        "completionPer1M": 15,
+        "maxInputTokens": 131072,
+        "maxOutputTokens": 131072
+      },
+      "grok-build-0.1": {
+        "promptPer1M": 1,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "grok-code-fast": {
+        "promptPer1M": 1,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "grok-code-fast-1": {
+        "promptPer1M": 1,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "grok-code-fast-1-0825": {
+        "promptPer1M": 1,
+        "completionPer1M": 2,
+        "cachedInputPer1M": 0.2,
+        "maxInputTokens": 256000,
+        "maxOutputTokens": 256000
+      },
+      "grok-vision-beta": {
+        "promptPer1M": 5,
+        "completionPer1M": 15,
+        "maxInputTokens": 8192,
+        "maxOutputTokens": 8192
+      }
+    }
+  }
+}

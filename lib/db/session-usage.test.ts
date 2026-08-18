@@ -4,8 +4,11 @@ import {
   deleteUsageForSession,
   listUsageForSession,
   pruneSessionUsageOlderThan,
+  isLocalSpend,
   recordConnectorUsage,
   recordGoalUsage,
+  recordImportedUsage,
+  recordSurfaceUsage,
   recordResultUsage,
   recordTeamUsage,
   recordWorkflowStepUsage,
@@ -169,12 +172,35 @@ describe("recordConnectorUsage", () => {
     expect(list).toHaveLength(1)
   })
 
-  it("skips empty connector usage and missing ids", async () => {
+  it("records a cost-only turn that reported no tokens", async () => {
+    // A turn carrying real cost is not an empty turn. Dropping it silently lost
+    // spend from the billing table — and disagreed with the chat writer
+    // (`recordResultUsage`), which applies no emptiness filter at all.
+    const written = await recordConnectorUsage({
+      adapterId: "telegram",
+      conversationKey: "thread",
+      usage: { totalCostUsd: 0.001 },
+    })
+    expect(written).not.toBeNull()
+    expect(written?.costUsd).toBe(0.001)
+  })
+
+  it("records a fully cache-served turn with zero fresh input/output tokens", async () => {
+    const written = await recordConnectorUsage({
+      adapterId: "telegram",
+      conversationKey: "cached",
+      usage: { cacheReadInputTokens: 17_817 },
+    })
+    expect(written).not.toBeNull()
+    expect(written?.cacheReadTokens).toBe(17_817)
+  })
+
+  it("skips genuinely empty connector usage and missing ids", async () => {
     expect(
       await recordConnectorUsage({
         adapterId: "telegram",
         conversationKey: "thread",
-        usage: { totalCostUsd: 0.001 },
+        usage: {},
       })
     ).toBeNull()
     expect(
@@ -226,12 +252,22 @@ describe("recordGoalUsage", () => {
     expect(list).toHaveLength(1)
   })
 
-  it("skips goal usage with empty ids or empty token usage", async () => {
+  it("records a cost-only goal turn that reported no tokens", async () => {
+    const written = await recordGoalUsage({
+      goalId: "goal-1",
+      turnId: "turn-1",
+      usage: { totalCostUsd: 0.001 },
+    })
+    expect(written).not.toBeNull()
+    expect(written?.costUsd).toBe(0.001)
+  })
+
+  it("skips goal usage with empty ids or genuinely empty usage", async () => {
     expect(
       await recordGoalUsage({
         goalId: "goal-1",
         turnId: "turn-1",
-        usage: { totalCostUsd: 0.001 },
+        usage: {},
       })
     ).toBeNull()
     expect(
@@ -366,7 +402,7 @@ describe("totalsByAllSessions + topByCost", () => {
     await upsertSessionUsage(row("a1", "s1", { costUsd: 0.5, inputTokens: 1 }))
     await upsertSessionUsage(row("a2", "s1", { costUsd: 0.5 }))
     await upsertSessionUsage(row("b1", "s2", { costUsd: 0.2 }))
-    await upsertSessionUsage(row("c1", "s3", { costUsd: 0 })) // free turn — skipped
+    await upsertSessionUsage(row("c1", "s3", { costUsd: 0 })) // no cost, no tokens — skipped
     await upsertSessionUsage(row("d1", "s4", { costUsd: 0.7 }))
   })
 
@@ -377,10 +413,20 @@ describe("totalsByAllSessions + topByCost", () => {
     expect(map.get("s1")?.costUsd).toBeCloseTo(1.0)
   })
 
-  it("topByCost orders by cost desc and skips zero-cost sessions", async () => {
+  it("topByCost orders by cost desc and skips sessions with no recorded activity", async () => {
     const top = await topByCost(10)
     expect(top.map((r) => r.sessionId)).toEqual(["s1", "s4", "s2"])
-    expect(top.every((r) => r.totals.costUsd > 0)).toBe(true)
+  })
+
+  it("topByCost surfaces free / locally-hosted sessions that carry tokens", async () => {
+    // Filtering on `costUsd <= 0` used to hide these entirely, so a local model
+    // dominating token volume never appeared — and so did every session whose
+    // price was merely unknown, which is stored identically to $0.
+    await upsertSessionUsage(row("e1", "s5-local", { costUsd: 0, inputTokens: 900_000 }))
+    const top = await topByCost(10)
+    expect(top.map((r) => r.sessionId)).toContain("s5-local")
+    // Ranked below every paid session, but present.
+    expect(top[top.length - 1]?.sessionId).toBe("s5-local")
   })
 
   it("topByCost respects the limit", async () => {
@@ -563,5 +609,240 @@ describe("recordResultUsage", () => {
     expect(written).not.toBeNull()
     expect(written!.inputTokens).toBe(0)
     expect(written!.costUsd).toBeCloseTo(0.05)
+  })
+})
+
+describe("v172 frozen cost + identity capture", () => {
+  function resultWith(usage: Record<string, unknown>, costUsd = 0) {
+    return {
+      type: "result",
+      subtype: "success",
+      total_cost_usd: costUsd,
+      duration_ms: 100,
+      usage,
+    } as unknown as Parameters<typeof recordResultUsage>[0]["result"]
+  }
+
+  it("freezes an SDK-reported cost as authoritative", () => {
+    return recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-sdk",
+      result: resultWith({ input_tokens: 10, output_tokens: 5 }, 0.25),
+    }).then((row) => {
+      expect(row).toMatchObject({ costUsd: 0.25, costSource: "sdk", costKnown: true })
+    })
+  })
+
+  it("marks a zero-cost turn unknown rather than free", () => {
+    // The non-Anthropic dispatch paths always report 0; treating that as "free"
+    // is what made unpriced spend invisible.
+    return recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-zero",
+      result: resultWith({ input_tokens: 10, output_tokens: 5 }, 0),
+    }).then((row) => {
+      expect(row).toMatchObject({ costSource: "unknown", costKnown: false })
+    })
+  })
+
+  it("persists the cache-TTL split when the provider reports it", () => {
+    return recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-ttl",
+      result: resultWith({
+        input_tokens: 86,
+        cache_creation_input_tokens: 7345,
+        cache_creation: {
+          ephemeral_5m_input_tokens: 5000,
+          ephemeral_1h_input_tokens: 2345,
+        },
+      }),
+    }).then((row) => {
+      expect(row?.cacheCreation5mTokens).toBe(5000)
+      expect(row?.cacheCreation1hTokens).toBe(2345)
+      // The flat total is still carried for callers that don't split.
+      expect(row?.cacheCreationTokens).toBe(7345)
+    })
+  })
+
+  it("omits the TTL split when the provider reports only a flat total", () => {
+    return recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-flat",
+      result: resultWith({ input_tokens: 5, cache_creation_input_tokens: 500 }),
+    }).then((row) => {
+      expect(row?.cacheCreation5mTokens).toBeUndefined()
+      expect(row?.cacheCreation1hTokens).toBeUndefined()
+    })
+  })
+
+  it("persists server-tool invocation counts", () => {
+    // Web search bills $10 per 1,000 requests — dropping the count made that
+    // spend structurally unrepresentable.
+    return recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-tools",
+      result: resultWith({
+        input_tokens: 105,
+        output_tokens: 6039,
+        server_tool_use: { web_search: 3 },
+      }),
+    }).then((row) => {
+      expect(row?.unitBreakdown?.requests).toEqual({ web_search: 3 })
+    })
+  })
+
+  it("carries the execution identity and pricing modifiers onto the row", () => {
+    return recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-identity",
+      result: resultWith({ input_tokens: 1 }, 0.01),
+      projectId: "p1",
+      runId: "run-1",
+      turnId: "turn-1",
+      attemptId: "attempt-1",
+      speed: "fast",
+      inferenceGeo: "us",
+      batch: false,
+    }).then((row) => {
+      expect(row).toMatchObject({
+        projectId: "p1",
+        runId: "run-1",
+        turnId: "turn-1",
+        attemptId: "attempt-1",
+        speed: "fast",
+        inferenceGeo: "us",
+        batch: false,
+      })
+    })
+  })
+
+  it("records a shadow turn that carried only 1-hour cache writes", async () => {
+    // Previously dropped: no fresh tokens, no flat cache total, no cost.
+    const row = await recordWorkflowStepUsage({
+      runId: "r1",
+      stepId: "s1",
+      usage: { cacheCreation1hTokens: 2345 },
+    })
+    expect(row).not.toBeNull()
+    expect(row?.cacheCreation1hTokens).toBe(2345)
+  })
+
+  it("records a shadow turn that carried only server-tool calls", async () => {
+    const row = await recordWorkflowStepUsage({
+      runId: "r2",
+      stepId: "s2",
+      usage: { unitBreakdown: { requests: { web_search: 1 } } },
+    })
+    expect(row).not.toBeNull()
+    expect(row?.unitBreakdown?.requests).toEqual({ web_search: 1 })
+  })
+})
+
+describe("recordSurfaceUsage — non-conversational surfaces", () => {
+  it("records an embedding batch under its own surface and scope", async () => {
+    const row = await recordSurfaceUsage({
+      surface: "embedding",
+      operationId: "job-1",
+      scopeId: "twin-7",
+      usage: { inputTokens: 12_000, providerId: "openai", model: "text-embedding-3-small" },
+    })
+    expect(row).toMatchObject({
+      messageId: "embedding:job-1",
+      sessionId: "embedding:twin-7",
+      surface: "embedding",
+      inputTokens: 12_000,
+    })
+  })
+
+  it("is idempotent so a retried job overwrites instead of double-billing", async () => {
+    await recordSurfaceUsage({
+      surface: "twin",
+      operationId: "job-2",
+      usage: { inputTokens: 100, outputTokens: 50 },
+    })
+    await recordSurfaceUsage({
+      surface: "twin",
+      operationId: "job-2",
+      usage: { inputTokens: 200, outputTokens: 60 },
+    })
+    const rows = await getDb().sessionUsage.where("sessionId").equals("twin:twin").toArray()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].inputTokens).toBe(200)
+  })
+
+  it("records a page-billed OCR run that reports no tokens at all", async () => {
+    const row = await recordSurfaceUsage({
+      surface: "ocr",
+      operationId: "doc-1",
+      usage: { unitBreakdown: { pages: 120 }, costUsd: 0.36 },
+    })
+    // Tokens are all zero here; only the page count and cost make it non-empty.
+    expect(row?.unitBreakdown?.pages).toBe(120)
+    expect(row?.costUsd).toBeCloseTo(0.36)
+  })
+
+  it("records a character-billed TTS utterance", async () => {
+    const row = await recordSurfaceUsage({
+      surface: "tts",
+      operationId: "utt-1",
+      usage: { unitBreakdown: { characters: 4_200 }, providerId: "elevenlabs" },
+    })
+    expect(row?.unitBreakdown?.characters).toBe(4_200)
+    expect(row?.surface).toBe("tts")
+  })
+
+  it("refuses a call with no surface or no operation id", async () => {
+    expect(
+      await recordSurfaceUsage({ surface: "ocr", operationId: "", usage: { inputTokens: 1 } })
+    ).toBeNull()
+  })
+
+  it("still skips a genuinely empty operation", async () => {
+    expect(
+      await recordSurfaceUsage({ surface: "memory", operationId: "noop", usage: {} })
+    ).toBeNull()
+  })
+})
+
+describe("imported spend provenance", () => {
+  it("marks an imported row and keeps it out of local totals", async () => {
+    await upsertSessionUsage({
+      messageId: "local-1",
+      sessionId: "s-local",
+      at: 1,
+      inputTokens: 100,
+      outputTokens: 100,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      costUsd: 1,
+      durationMs: 0,
+    })
+    const imported = await recordImportedUsage({
+      operationId: "msg-9",
+      sessionId: "s-local",
+      usage: { inputTokens: 500, outputTokens: 500, costUsd: 9 },
+    })
+    expect(imported).toMatchObject({ imported: true, surface: "imported" })
+
+    // This spend was paid in another agent, on another machine — counting it
+    // would inflate "what this install cost me".
+    const local = await totalsByAllSessions()
+    expect(local.get("s-local")?.costUsd).toBeCloseTo(1)
+
+    const all = await totalsByAllSessions({ includeImported: true })
+    expect(all.get("s-local")?.costUsd).toBeCloseTo(10)
+  })
+
+  it("classifies rows with isLocalSpend", () => {
+    expect(isLocalSpend({ imported: undefined })).toBe(true)
+    expect(isLocalSpend({ imported: false })).toBe(true)
+    expect(isLocalSpend({ imported: true })).toBe(false)
+  })
+
+  it("refuses an imported row with no source id or session", async () => {
+    expect(
+      await recordImportedUsage({ operationId: "", sessionId: "s", usage: { costUsd: 1 } })
+    ).toBeNull()
   })
 })

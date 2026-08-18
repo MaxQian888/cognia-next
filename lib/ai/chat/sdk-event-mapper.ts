@@ -28,6 +28,7 @@
 //   { type: "result", subtype, session_id, usage, total_cost_usd, duration_ms, num_turns }
 
 import type { SDKMessage } from "@cognia/agent-config-types"
+import { normalizeUsageBlock } from "./usage-normalize"
 
 const randomUUID = (): string => globalThis.crypto.randomUUID()
 
@@ -866,27 +867,10 @@ export function createSdkEventMapper(ctx: SdkEventMapperContext): SdkEventMapper
         duration_api_ms: Date.now() - startedAt,
         num_turns: 1,
         total_cost_usd: info?.totalCostUsd ?? 0,
-        usage: {
-          input_tokens: usage.promptTokens ?? usage.inputTokens ?? 0,
-          output_tokens: usage.completionTokens ?? usage.outputTokens ?? 0,
-          ...(typeof usage.contextInputTokens === "number"
-            ? { context_input_tokens: usage.contextInputTokens }
-            : {}),
-          cache_creation_input_tokens:
-            usage.cacheCreationInputTokens ?? usage.inputTokenDetails?.cacheWriteTokens ?? 0,
-          cache_read_input_tokens:
-            usage.cacheReadInputTokens ??
-            usage.cachedInputTokens ??
-            usage.inputTokenDetails?.cacheReadTokens ??
-            usage.prompt_cache_hit_tokens ??
-            usage.promptCacheHitTokens ??
-            0,
-          reasoning_tokens:
-            usage.reasoningTokens ??
-            usage.reasoning_tokens ??
-            usage.outputTokenDetails?.reasoningTokens ??
-            0,
-        },
+        // Shared with the sidecar's `usage-normalize.mjs` mirror (pinned by
+        // `usage-normalize.parity.test.ts`) so both dispatch paths surface the
+        // same fields — including the cache-TTL split and server-tool counters.
+        usage: normalizeUsageBlock(usage),
       }
       out.push(result as unknown as SDKMessage)
       return out

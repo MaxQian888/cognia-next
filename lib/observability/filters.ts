@@ -17,6 +17,9 @@ export interface TraceFilters {
   operation?: SpanOperationName[]
   tool?: string[]
   session?: string[]
+  /** Cost-attribution dimensions (ADR-0130). */
+  provider?: string[]
+  project?: string[]
 }
 
 /**
@@ -50,7 +53,9 @@ export function isFilterEmpty(f: TraceFilters): boolean {
     !f.surface?.length &&
     !f.operation?.length &&
     !f.tool?.length &&
-    !f.session?.length
+    !f.session?.length &&
+    !f.provider?.length &&
+    !f.project?.length
   )
 }
 
@@ -69,6 +74,13 @@ export function applyFilters(spans: AgentTraceSpan[], f: TraceFilters): AgentTra
       matches(f.surface, s.surface) &&
       matches(f.operation, s.operationName) &&
       matches(f.tool, s.toolName) &&
-      matches(f.session, s.sessionId)
+      matches(f.session, s.sessionId) &&
+      // Same resolution as the breakdown dimension: the raw provider id when
+      // the emitter kept one, else the OTel vendor name.
+      matches(
+        f.provider,
+        typeof s.metadata?.providerId === "string" ? s.metadata.providerId : s.providerName
+      ) &&
+      matches(f.project, s.projectId)
   )
 }

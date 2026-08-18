@@ -122,6 +122,10 @@ const LogsSection = dynamic(() => import("./sections/logs-section").then((m) => 
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const UsageCostSection = dynamic(
+  () => import("./sections/usage-cost-section").then((m) => m.UsageCostSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const DiagnosticsSection = dynamic(
   () => import("./sections/diagnostics-section").then((m) => m.DiagnosticsSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -617,6 +621,8 @@ function SectionContent({
       return <LogsSection onClose={onClose} />
     case "diagnostics":
       return <DiagnosticsSection />
+    case "usage-cost":
+      return <UsageCostSection />
     case "desktop":
       return <DesktopSection />
     case "about":

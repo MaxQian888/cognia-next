@@ -677,6 +677,22 @@ export async function approveTool(
       updatedInput,
       ...(context ? { remoteExecutionContext: context } : {}),
     })
+    // Canonical event log (ADR-0090). Recorded here rather than at the call
+    // sites because every resolution path — plugin firewall, allowlist,
+    // auto-mode, the modal, a remote device, the backstop deny — funnels
+    // through this one call.
+    try {
+      const { recordChatCanonicalEvents } = await import("@/lib/chat/canonical-sink")
+      recordChatCanonicalEvents(sessionId, [
+        {
+          kind: "permission-resolved",
+          requestId,
+          behavior: decision === "deny" ? "deny" : "allow",
+        },
+      ])
+    } catch {
+      // The journal must never be able to fail an approval the user already made.
+    }
     try {
       await recordToolAuthorizationGovernance({
         sessionId,

@@ -70,3 +70,87 @@ describe("reset", () => {
     expect(state.getTodaySpend("openai")).toBe(0)
   })
 })
+
+describe("rollbackCost", () => {
+  it("reverses an optimistic add whose durable write never landed", () => {
+    const s = useProviderCostMirrorStore.getState()
+    s.addCost("openai", 0.5, NOON)
+    s.addCost("openai", 0.25, NOON)
+    s.rollbackCost("openai", 0.25, NOON)
+    expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBeCloseTo(0.5, 6)
+  })
+
+  it("clamps at 0 so an over-rollback cannot make the mirror under-report", () => {
+    const s = useProviderCostMirrorStore.getState()
+    s.addCost("openai", 0.1, NOON)
+    s.rollbackCost("openai", 99, NOON)
+    expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
+  })
+
+  it("ignores a rollback for a day the mirror has already rolled past", () => {
+    const s = useProviderCostMirrorStore.getState()
+    s.addCost("openai", 1, NOON)
+    s.addCost("openai", 2, TOMORROW_NOON) // rollover resets to a fresh bucket
+    s.rollbackCost("openai", 1, NOON)
+    expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(2)
+  })
+
+  it("ignores unknown providers and invalid amounts", () => {
+    const s = useProviderCostMirrorStore.getState()
+    s.addCost("openai", 1, NOON)
+    s.rollbackCost("", 1, NOON)
+    s.rollbackCost("openai", 0, NOON)
+    s.rollbackCost("openai", Number.NaN, NOON)
+    s.rollbackCost("never-seen", 1, NOON)
+    expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(1)
+  })
+})
+
+describe("reconcileProvider", () => {
+  it("snaps a provider to the committed durable total", () => {
+    const day = localDayString(NOON)
+    const s = useProviderCostMirrorStore.getState()
+    s.addCost("openai", 0.5, NOON)
+    // Durable truth disagrees (an earlier write was lost) — Dexie wins.
+    s.reconcileProvider("openai", day, 1.75)
+    expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBeCloseTo(1.75, 6)
+  })
+
+  it("adopts the committed day when the mirror has not hydrated yet", () => {
+    const day = localDayString(NOON)
+    useProviderCostMirrorStore.getState().reconcileProvider("openai", day, 2)
+    const state = useProviderCostMirrorStore.getState()
+    expect(state.day).toBe(day)
+    expect(state.getTodaySpend("openai")).toBe(2)
+  })
+
+  it("ignores a total committed against a different day", () => {
+    const s = useProviderCostMirrorStore.getState()
+    s.hydrate({ openai: 3 }, localDayString(NOON))
+    // A turn that committed just before local midnight must not resurrect
+    // yesterday's spend into today's bucket.
+    s.reconcileProvider("openai", localDayString(TOMORROW_NOON), 99)
+    expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(3)
+  })
+
+  it("leaves other providers untouched", () => {
+    const day = localDayString(NOON)
+    const s = useProviderCostMirrorStore.getState()
+    s.hydrate({ openai: 1, anthropic: 2 }, day)
+    s.reconcileProvider("openai", day, 5)
+    const state = useProviderCostMirrorStore.getState()
+    expect(state.getTodaySpend("openai")).toBe(5)
+    expect(state.getTodaySpend("anthropic")).toBe(2)
+  })
+
+  it("ignores invalid input", () => {
+    const day = localDayString(NOON)
+    const s = useProviderCostMirrorStore.getState()
+    s.hydrate({ openai: 1 }, day)
+    s.reconcileProvider("", day, 5)
+    s.reconcileProvider("openai", "", 5)
+    s.reconcileProvider("openai", day, -1)
+    s.reconcileProvider("openai", day, Number.NaN)
+    expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(1)
+  })
+})

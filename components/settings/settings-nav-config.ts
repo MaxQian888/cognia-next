@@ -21,6 +21,7 @@ import {
   Volume2Icon,
   ScrollTextIcon,
   BugIcon,
+  WalletIcon,
   PlugZapIcon,
   BotIcon,
   ClockIcon,
@@ -114,6 +115,7 @@ export type SettingsSectionId =
   | "network"
   | "logs"
   | "diagnostics"
+  | "usage-cost"
   | "desktop"
   | "automation"
   | "lsp"
@@ -578,6 +580,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "diagnostics",
     group: "observability",
     icon: BugIcon,
+  },
+  {
+    id: "usage-cost",
+    labelKey: "usageCost",
+    descriptionKey: "usageCost",
+    group: "observability",
+    icon: WalletIcon,
   },
 
   // === System ===
@@ -1220,6 +1229,29 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "日志",
     "日志级别",
     "采样",
+  ],
+  "usage-cost": [
+    "usage",
+    "cost",
+    "spend",
+    "spending",
+    "budget",
+    "limit",
+    "quota",
+    "billing",
+    "price",
+    "pricing",
+    "usd",
+    "debug session",
+    "trace debug",
+    "用量",
+    "成本",
+    "花费",
+    "预算",
+    "上限",
+    "配额",
+    "计费",
+    "调试会话",
   ],
   diagnostics: [
     "crash",

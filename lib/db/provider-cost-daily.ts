@@ -46,9 +46,25 @@ export function buildCostDailyId(day: string, providerId: string, modelId: strin
 }
 
 /**
+ * Result of a committed increment — the authority the in-memory budget mirror
+ * reconciles against.
+ */
+export interface ProviderCostIncrementResult {
+  /** Local day the increment landed in. */
+  day: string
+  providerId: string
+  /** The provider's committed total for `day`, summed across all its models. */
+  providerTotalUsd: number
+}
+
+/**
  * Add one successful turn's cost to today's rollup row (atomic upsert inside a
  * rw transaction so concurrent fire-and-forget writes never lose updates).
- * Invalid input (missing ids, non-positive/non-finite cost) is a silent no-op.
+ * Invalid input (missing ids, non-positive/non-finite cost) is a silent no-op
+ * and returns `null`.
+ *
+ * Returns the provider's committed day total so the caller can snap the
+ * synchronous budget mirror to durable state.
  */
 export async function incrementProviderCost(input: {
   providerId: string
@@ -58,23 +74,24 @@ export async function incrementProviderCost(input: {
   inputTokens?: number
   outputTokens?: number
   now?: number
-}): Promise<void> {
+}): Promise<ProviderCostIncrementResult | null> {
   const { providerId, modelId, costUsd } = input
-  if (!providerId || !modelId) return
-  if (!Number.isFinite(costUsd) || costUsd < 0) return
+  if (!providerId || !modelId) return null
+  if (!Number.isFinite(costUsd) || costUsd < 0) return null
   const inputTokens = Number.isFinite(input.inputTokens) ? Math.max(0, input.inputTokens ?? 0) : 0
   const outputTokens = Number.isFinite(input.outputTokens)
     ? Math.max(0, input.outputTokens ?? 0)
     : 0
   // A zero-cost turn only counts when it carried tokens (a local / free-tier
   // model); a bare `costUsd: 0` with nothing else stays the legacy no-op.
-  if (costUsd === 0 && inputTokens === 0 && outputTokens === 0) return
+  if (costUsd === 0 && inputTokens === 0 && outputTokens === 0) return null
 
   const now = input.now ?? Date.now()
   const day = localDayString(now)
   const id = buildCostDailyId(day, providerId, modelId)
   const db = getDb()
 
+  let providerTotalUsd = 0
   await db.transaction("rw", db.providerCostDaily, async () => {
     const existing = await db.providerCostDaily.get(id)
     if (existing) {
@@ -99,7 +116,19 @@ export async function incrementProviderCost(input: {
         updatedAt: now,
       })
     }
+    // Sum the provider's rows for the day INSIDE the same transaction so the
+    // returned figure is the committed truth, not a racy follow-up read. This is
+    // what lets the in-memory budget mirror snap to durable state instead of
+    // drifting: the mirror's optimistic increment and this write can otherwise
+    // disagree permanently if the app dies between them.
+    const dayRows = await db.providerCostDaily
+      .where("[providerId+day]")
+      .equals([providerId, day])
+      .toArray()
+    providerTotalUsd = dayRows.reduce((sum, r) => sum + (r.totalCostUsd ?? 0), 0)
   })
+
+  return { day, providerId, providerTotalUsd }
 }
 
 /**

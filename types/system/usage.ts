@@ -66,7 +66,15 @@ export interface ProviderUsage {
   requests: number
 }
 
-// Model pricing (per 1M tokens, Standard tier) - updated April 2026
+/**
+ * Model pricing (per 1M tokens, Standard tier) — updated August 2026.
+ *
+ * This is the *lowest-priority* pricing layer: `lib/usage/pricing.ts` consults
+ * custom-provider metadata, account-discovered rates, and the synced models.dev
+ * catalog first. It exists so a fresh install with no catalog sync still prices
+ * common models. Base (non-cached, non-batch) rates only — cache, batch, and
+ * per-call server-tool rates come from the richer layers.
+ */
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // OpenAI - GPT-5.4 family (Apr 2026)
   "gpt-5.4": { input: 2.5, output: 15 },
@@ -101,7 +109,15 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   "o3-mini": { input: 1.1, output: 4.4 },
   "o4-mini": { input: 1.1, output: 4.4 },
 
-  // Anthropic - Claude 4.6 family (latest)
+  // Anthropic - Claude 5 family (latest)
+  "claude-fable-5": { input: 10, output: 50 },
+  "claude-mythos-5": { input: 10, output: 50 },
+  "claude-opus-5": { input: 5, output: 25 },
+  "claude-sonnet-5": { input: 2, output: 10 },
+  // Anthropic - Claude 4.8 / 4.7
+  "claude-opus-4-8": { input: 5, output: 25 },
+  "claude-opus-4-7": { input: 5, output: 25 },
+  // Anthropic - Claude 4.6 family
   "claude-opus-4-6": { input: 5, output: 25 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
   "claude-opus-4-6-20260205": { input: 5, output: 25 },
@@ -287,10 +303,20 @@ export const MODEL_PRICING_CNY: Record<string, { input: number; output: number }
 }
 
 /**
- * Get pricing for a model, checking USD table, CNY table, and finally the
- * built-in provider catalog when a `providerId` is supplied. The catalog
- * fallback is what gives OpenCode Zen / Go specific models (e.g. `kimi-k2.6`,
- * `glm-5.1`) a price even when they are absent from the global tables.
+ * Get BASE (prompt/completion) pricing for a model, checking the USD table, the
+ * CNY table, and finally the built-in provider catalog when a `providerId` is
+ * supplied. The catalog fallback is what gives OpenCode Zen / Go specific models
+ * (e.g. `kimi-k2.6`, `glm-5.1`) a price even when they are absent from the
+ * global tables.
+ *
+ * NOT a costing entry point. It returns base rates only — no cache, batch,
+ * fast-mode, or data-residency dimensions — so pricing a turn from it
+ * under-reports any cached or batched work. Cost is computed exclusively by
+ * `lib/usage/pricing.ts` (`resolveModelPricingUsd` + `costFromTokensUsd`),
+ * which layers this table under the live catalog and the user's overrides.
+ * The `calculateCost` / `calculateCostFromTokens` helpers that used to sit here
+ * were removed for exactly that reason: they were a second, cache-blind costing
+ * path with no production callers.
  */
 export function getModelPricingUSD(
   model: string,
@@ -322,37 +348,6 @@ export function getModelPricingUSD(
   }
 
   return null
-}
-
-/**
- * Calculate cost from token usage
- */
-export function calculateCost(model: string, tokens: TokenUsage, providerId?: string): number {
-  const pricing = getModelPricingUSD(model, providerId)
-  if (!pricing) return 0
-
-  const inputCost = (tokens.prompt / 1_000_000) * pricing.input
-  const outputCost = (tokens.completion / 1_000_000) * pricing.output
-
-  return inputCost + outputCost
-}
-
-/**
- * Calculate cost from input/output tokens (AI SDK naming convention)
- */
-export function calculateCostFromTokens(
-  model: string,
-  inputTokens: number,
-  outputTokens: number,
-  providerId?: string
-): number {
-  const pricing = getModelPricingUSD(model, providerId)
-  if (!pricing) return 0
-
-  const inputCost = (inputTokens / 1_000_000) * pricing.input
-  const outputCost = (outputTokens / 1_000_000) * pricing.output
-
-  return inputCost + outputCost
 }
 
 /**
@@ -490,10 +485,20 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyConfig> = {
   },
   CNY: {
     code: "CNY",
+    /**
+     * Pinned reference rate (as of 2026-08), not a live FX quote. Deliberately
+     * static: the app is a static export with no server, and a display-currency
+     * conversion does not justify a network dependency on every shell.
+     *
+     * Blast radius is wider than display, though — `lib/usage/pricing.ts:toUsd()`
+     * divides CNY-native catalog rates by this number to normalize them to USD,
+     * so drift here biases *cost* for CNY-native providers (DeepSeek, Qwen, GLM,
+     * Moonshot, …). Call {@link updateExchangeRate} to override at runtime.
+     */
+    rateFromUSD: 7.25,
     symbol: "¥",
     name: "人民币",
     locale: "zh-CN",
-    rateFromUSD: 7.25,
     decimals: 2,
     freeLabel: "免费",
     symbolPosition: "prefix",
@@ -597,11 +602,22 @@ export function formatModelPricing(
 }
 
 /**
- * Update the exchange rate for a currency
- * Useful for runtime updates from external APIs
+ * Override a currency's USD conversion rate at runtime.
+ *
+ * The shipped rates are pinned reference values (see {@link CURRENCIES}); this
+ * is the seam for replacing one from an external quote. It is validated rather
+ * than trusting the caller because the rate divides into cost normalization in
+ * `lib/usage/pricing.ts:toUsd()` — a zero, negative, or `NaN` rate there would
+ * turn every CNY-native model's price into `Infinity` or `NaN` and silently
+ * poison the billing table.
+ *
+ * Returns `true` when the rate was applied, `false` when it was rejected.
  */
-export function updateExchangeRate(currency: CurrencyCode, rateFromUSD: number): void {
-  if (CURRENCIES[currency]) {
-    CURRENCIES[currency].rateFromUSD = rateFromUSD
+export function updateExchangeRate(currency: CurrencyCode, rateFromUSD: number): boolean {
+  if (!CURRENCIES[currency]) return false
+  if (typeof rateFromUSD !== "number" || !Number.isFinite(rateFromUSD) || rateFromUSD <= 0) {
+    return false
   }
+  CURRENCIES[currency].rateFromUSD = rateFromUSD
+  return true
 }

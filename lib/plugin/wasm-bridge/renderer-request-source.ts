@@ -51,6 +51,7 @@ import {
   type WasmRendererRequest,
   type WasmRendererResponse,
 } from "./protocol"
+import { instrumentSpan } from "@/lib/agent-trace/instrument"
 
 /** Tiny Tauri shape so the file type-checks (and tests run) in pure node. */
 interface TauriBridge {
@@ -179,6 +180,29 @@ async function handleRequest(raw: unknown, bridge: TauriBridge): Promise<void> {
 
 /** Exposed for tests — production goes through the listener above. */
 export async function dispatchWasmOperation(
+  request: WasmRendererRequest,
+  signal: AbortSignal
+): Promise<unknown> {
+  // A WASM plugin calling back into the renderer can spend real time and real
+  // money (`ai.generate-text` is a model call) and emitted no span at all, so
+  // plugin-attributed latency and failures were invisible. `server` kind: this
+  // is the receiving side of the guest → host hop.
+  return instrumentSpan(
+    {
+      operationName: request.operation === "ai.generate-text" ? "chat" : "invoke_workflow",
+      providerName: "cognia.plugin",
+      sessionId: request.pluginId,
+      surface: "plugin",
+      spanKind: "server",
+      pluginId: request.pluginId,
+      toolName: request.operation,
+      metadata: { operation: request.operation, requestId: request.requestId },
+    },
+    () => runWasmOperation(request, signal)
+  )
+}
+
+async function runWasmOperation(
   request: WasmRendererRequest,
   signal: AbortSignal
 ): Promise<unknown> {

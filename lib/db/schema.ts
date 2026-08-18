@@ -4120,6 +4120,68 @@ export class CogniaDB extends Dexie {
         "&id, repoFullName, &[repoFullName+number], issueProjectId, state, updatedAt, syncedAt",
     })
 
+    // v172 — ADR-0130 unified cost metering + execution trajectory.
+    //
+    // `sessionUsage` gains the ADR-0090 execution identity (run/turn/attempt)
+    // so a billing row can be joined to the span tree and the canonical event
+    // log, `projectId` for per-project attribution (agentTraces already had
+    // it), and the frozen-cost columns: cost is now decided once at write time
+    // and never recomputed, so the row must carry the price source, the rates
+    // it was priced against, and whether the figure is known at all.
+    //
+    // New indexes cover reads that were full-table scans: `surface` and
+    // `providerId` are filtered on by the Usage tab, the agent-runtime sessions
+    // tab, and the connector presence runner.
+    //
+    // `agentTraces` gains the same identity triple plus `spanKind` and
+    // `status`; `status` is indexed so the boot sweep can find spans left
+    // `pending` by a crash and settle them as `incomplete`.
+    //
+    // Purely additive — every legacy row stays readable with the new columns
+    // absent, and the upgrade only fills what it can prove.
+    this.version(172)
+      .stores({
+        sessionUsage:
+          "&messageId, sessionId, [sessionId+at], at, model, characterId, surface, providerId, projectId, [projectId+at], runId",
+        agentTraces:
+          "&id, startTime, sessionId, [sessionId+startTime], traceId, [traceId+startTime], parentSpanId, surface, projectId, [projectId+startTime], runId, status",
+      })
+      .upgrade(async (tx) => {
+        // Idempotent: rows that already carry `costSource` are skipped, so a
+        // re-run (or a partially applied upgrade) converges rather than
+        // rewriting.
+        //
+        // Deliberately does NOT price legacy rows with today's rates. A row the
+        // SDK priced (`costUsd > 0`) was already authoritative, so it is marked
+        // `sdk`/known. A row at 0 is genuinely ambiguous after the fact — free
+        // model, or a model we had no price for — and inventing a number now
+        // would recreate exactly the retroactive drift this migration exists to
+        // eliminate. Those stay `backfilled`/unknown and render as "—".
+        const usage = tx.table("sessionUsage")
+        const pending: Array<Record<string, unknown>> = []
+        await usage.toCollection().each((row: Record<string, unknown>) => {
+          if (row.costSource !== undefined) return
+          const cost = typeof row.costUsd === "number" ? row.costUsd : 0
+          pending.push({
+            ...row,
+            costSource: cost > 0 ? "sdk" : "backfilled",
+            costKnown: cost > 0,
+          })
+        })
+        if (pending.length > 0) await usage.bulkPut(pending)
+
+        // Every span already in the table finished writing (rows were only
+        // ever written at endSpan before this version), so they are `ok`
+        // unless they recorded an error.
+        const traces = tx.table("agentTraces")
+        const spans: Array<Record<string, unknown>> = []
+        await traces.toCollection().each((row: Record<string, unknown>) => {
+          if (row.status !== undefined) return
+          spans.push({ ...row, status: row.errorType ? "error" : "ok" })
+        })
+        if (spans.length > 0) await traces.bulkPut(spans)
+      })
+
     // v173 — ADR-0131 cross-shell inbox relay (Slice 2.3).
     //
     // `outboundQueue` and `connectorDrafts` join the companion sync whitelist

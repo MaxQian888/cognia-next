@@ -7,9 +7,16 @@
 //
 // Reused by BOTH the CLI stats controller (in-memory, over parsed conversations)
 // and `useSessionReport` (falls back to these rows when a session has no live
-// `sessionUsage`). Imported usage is deliberately NOT written into the billing
-// `sessionUsage` table — that would fold spend the user incurred in *other*
-// agents into cognia's own cost totals.
+// `sessionUsage`).
+//
+// Imported spend was paid in ANOTHER agent, on another machine, often on
+// another account. The separation from local spend used to be enforced by
+// simply never persisting these rows — which also meant the numbers existed
+// only for whoever happened to be looking at a report. Every row now carries
+// `surface: "imported"` and `imported: true`, so the separation is a property
+// of the data rather than of who reads it: `isLocalSpend` excludes them from
+// billing totals and the daily rollup, while a session's own report can still
+// show them, labelled.
 
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { StoredMessage } from "@cognia/agent-config-types"
@@ -77,6 +84,12 @@ export function deriveImportedUsageRows(
       cacheReadTokens: usage.cacheReadInputTokens ?? 0,
       costUsd: usage.totalCostUsd ?? 0,
       durationMs: usage.durationMs ?? 0,
+      surface: "imported",
+      imported: true,
+      // The source transcript reported this figure; we did not price it. Saying
+      // so is what stops a later reader from re-pricing it at OUR rates.
+      costSource: usage.totalCostUsd !== undefined ? "sdk" : "unknown",
+      costKnown: usage.totalCostUsd !== undefined,
     })
   }
   return rows

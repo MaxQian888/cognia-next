@@ -8,6 +8,7 @@ import {
   handleSdkEventForToolSpans,
   setToolSpanEventPublisher,
   reapStaleToolSpans,
+  toolSpanIdFor,
   TOOL_SPAN_SYSTEM_EVENTS,
 } from "./chat-tool-spans"
 
@@ -461,5 +462,146 @@ describe("clearToolSpansForSession", () => {
 
   it("is a no-op when nothing is pending", () => {
     expect(() => clearToolSpansForSession("nope")).not.toThrow()
+  })
+
+  it("forgets remembered parent span ids so a later turn cannot reuse them", () => {
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_task", name: "Task" }] },
+      },
+    })
+    expect(toolSpanIdFor("s1", "toolu_task")).toBeDefined()
+    clearToolSpansForSession("s1")
+    expect(toolSpanIdFor("s1", "toolu_task")).toBeUndefined()
+  })
+})
+
+describe("handleSdkEventForToolSpans — subagent nesting", () => {
+  it("parents a subagent's tool calls under the Task span, not the turn root", () => {
+    const spans = captureWriter()
+    // The parent turn calls `Task`, which spawns a subagent.
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_task", name: "Task" }] },
+      },
+    })
+    const taskSpanId = toolSpanIdFor("s1", "toolu_task")
+    expect(taskSpanId).toBeDefined()
+
+    // The subagent's own tool call arrives tagged with the Task call's id.
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "assistant",
+        parent_tool_use_id: "toolu_task",
+        message: { content: [{ type: "tool_use", id: "toolu_read", name: "Read" }] },
+      },
+    })
+    // Close both so the writer sees them.
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "user",
+        parent_tool_use_id: "toolu_task",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_read" }] },
+      },
+    })
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_task" }] },
+      },
+    })
+
+    const read = spans.find((s) => s.toolName === "Read")
+    const task = spans.find((s) => s.toolName === "Task")
+    expect(task?.parentSpanId).toBe("root-span")
+    // Three levels: root → Task → Read. Before this, Read was a sibling of Task.
+    expect(read?.parentSpanId).toBe(taskSpanId)
+  })
+
+  it("falls back to the turn root when the parent tool call was never seen", () => {
+    const spans = captureWriter()
+    // A resumed session whose opening `Task` frame is not in this stream.
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "assistant",
+        parent_tool_use_id: "toolu_unknown",
+        message: { content: [{ type: "tool_use", id: "toolu_read", name: "Read" }] },
+      },
+    })
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_read" }] },
+      },
+    })
+    // Orphaning it off the trace would lose the span entirely in the waterfall.
+    expect(spans.find((s) => s.toolName === "Read")?.parentSpanId).toBe("root-span")
+  })
+
+  it("still parents under a Task span that already closed", () => {
+    const spans = captureWriter()
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_task", name: "Task" }] },
+      },
+    })
+    const taskSpanId = toolSpanIdFor("s1", "toolu_task")
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_task" }] },
+      },
+    })
+    // A late frame from the subagent — parenting is by id, not by liveness.
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "assistant",
+        parent_tool_use_id: "toolu_task",
+        message: { content: [{ type: "tool_use", id: "toolu_late", name: "Grep" }] },
+      },
+    })
+    handleSdkEventForToolSpans({
+      sessionId: "s1",
+      traceId: "t",
+      parentSpanId: "root-span",
+      event: {
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_late" }] },
+      },
+    })
+    expect(spans.find((s) => s.toolName === "Grep")?.parentSpanId).toBe(taskSpanId)
   })
 })

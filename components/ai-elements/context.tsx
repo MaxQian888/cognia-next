@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import type { LanguageModelUsage } from "ai"
 import type { ComponentProps } from "react"
 import { createContext, useContext, useMemo } from "react"
-import { getUsage } from "tokenlens"
+import { priceTokensForModel, type CostTokens } from "@/lib/usage/pricing"
 
 const PERCENT_MAX = 100
 const ICON_RADIUS = 10
@@ -167,6 +167,30 @@ export const ContextContentBody = ({ children, className, ...props }: ContextCon
   </div>
 )
 
+/**
+ * Format the cost of a token slice for this popover.
+ *
+ * Previously `tokenlens.getUsage()` — a third-party price table completely
+ * independent of the app's own, so this popover could show a different number
+ * from the session cost badge inches away. It now shares `lib/usage/pricing.ts`,
+ * the single pricing authority, which also brings cache-tier and CNY-native
+ * rates that tokenlens did not model.
+ *
+ * No `providerId` is in scope here, so resolution falls through to the
+ * model-keyed layers (synced catalog, then the static tables) — the same
+ * information tokenlens had.
+ *
+ * Returns `undefined` when no layer knows the model so the caller can render
+ * "—". Formatting an unknown price as "$0.00" is what made an unpriced model
+ * indistinguishable from a free one.
+ */
+function formatSliceCost(modelId: string | undefined, tokens: CostTokens): string | undefined {
+  if (!modelId) return undefined
+  const { cost, known } = priceTokensForModel(undefined, modelId, tokens)
+  if (!known) return undefined
+  return new Intl.NumberFormat("en-US", { currency: "USD", style: "currency" }).format(cost)
+}
+
 export type ContextContentFooterProps = ComponentProps<"div">
 
 export const ContextContentFooter = ({
@@ -175,19 +199,11 @@ export const ContextContentFooter = ({
   ...props
 }: ContextContentFooterProps) => {
   const { modelId, usage } = useContextValue()
-  const costUSD = modelId
-    ? getUsage({
-        modelId,
-        usage: {
-          input: usage?.inputTokens ?? 0,
-          output: usage?.outputTokens ?? 0,
-        },
-      }).costUSD?.totalUSD
-    : undefined
-  const totalCost = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(costUSD ?? 0)
+  const totalCost =
+    formatSliceCost(modelId, {
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+    }) ?? "—"
 
   return (
     <div
@@ -233,16 +249,7 @@ export const ContextInputUsage = ({ className, children, ...props }: ContextInpu
     return null
   }
 
-  const inputCost = modelId
-    ? getUsage({
-        modelId,
-        usage: { input: inputTokens, output: 0 },
-      }).costUSD?.totalUSD
-    : undefined
-  const inputCostText = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(inputCost ?? 0)
+  const inputCostText = formatSliceCost(modelId, { inputTokens })
 
   return (
     <div className={cn("flex items-center justify-between text-xs", className)} {...props}>
@@ -266,16 +273,7 @@ export const ContextOutputUsage = ({ className, children, ...props }: ContextOut
     return null
   }
 
-  const outputCost = modelId
-    ? getUsage({
-        modelId,
-        usage: { input: 0, output: outputTokens },
-      }).costUSD?.totalUSD
-    : undefined
-  const outputCostText = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(outputCost ?? 0)
+  const outputCostText = formatSliceCost(modelId, { outputTokens })
 
   return (
     <div className={cn("flex items-center justify-between text-xs", className)} {...props}>
@@ -305,16 +303,9 @@ export const ContextReasoningUsage = ({
     return null
   }
 
-  const reasoningCost = modelId
-    ? getUsage({
-        modelId,
-        usage: { reasoningTokens },
-      }).costUSD?.totalUSD
-    : undefined
-  const reasoningCostText = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(reasoningCost ?? 0)
+  // Reasoning tokens are a subset of output tokens and are billed at the output
+  // rate by every provider that reports them, so they price as output here.
+  const reasoningCostText = formatSliceCost(modelId, { outputTokens: reasoningTokens })
 
   return (
     <div className={cn("flex items-center justify-between text-xs", className)} {...props}>
@@ -340,16 +331,9 @@ export const ContextCacheUsage = ({ className, children, ...props }: ContextCach
     return null
   }
 
-  const cacheCost = modelId
-    ? getUsage({
-        modelId,
-        usage: { cacheReads: cacheTokens, input: 0, output: 0 },
-      }).costUSD?.totalUSD
-    : undefined
-  const cacheCostText = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(cacheCost ?? 0)
+  // Priced at the model's real cache-read rate when the catalog knows one,
+  // otherwise 0.1x base input — tokenlens modelled neither.
+  const cacheCostText = formatSliceCost(modelId, { cacheReadInputTokens: cacheTokens })
 
   return (
     <div className={cn("flex items-center justify-between text-xs", className)} {...props}>

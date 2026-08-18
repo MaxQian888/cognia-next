@@ -1,4 +1,8 @@
 {
+  "droppedSpans": {
+    "label": "{count, plural, =1 {# span dropped} other {# spans dropped}}",
+    "tooltip": "{count, plural, =1 {# provider span was} other {# provider spans were}} not recorded because no trace context was threaded through the call. The waterfall below is missing them."
+  },
   "empty": {
     "hint": "Agent runs, tool calls, chats and workflows record spans here. Start a conversation or run an agent, or widen the time range to see older telemetry.",
     "title": "No telemetry in this window",
@@ -36,6 +40,8 @@
   "noData": "No data in this window",
   "panels": {
     "byModel": "Spans by model",
+    "byProject": "By project",
+    "byProvider": "By provider",
     "bySurface": "Spans by surface",
     "cacheHitRate": "Cache hit rate",
     "costOverTime": "Cost over time",

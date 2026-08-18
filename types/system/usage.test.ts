@@ -1,7 +1,5 @@
 import {
   cacheHitRate,
-  calculateCost,
-  calculateCostFromTokens,
   formatDuration,
   formatModelPricing,
   formatPercent,
@@ -44,31 +42,11 @@ describe("getModelPricingUSD", () => {
   })
 })
 
-describe("calculateCost", () => {
-  it("uses the catalog fallback when providerId is supplied", () => {
-    const cost = calculateCost(
-      "kimi-k2.6",
-      { prompt: 1_000_000, completion: 1_000_000, total: 2_000_000 },
-      "opencode-go"
-    )
-    expect(cost).toBeCloseTo(0.95 + 4, 6)
-  })
-
-  it("returns 0 for unknown models", () => {
-    expect(
-      calculateCost("unknown", { prompt: 1_000_000, completion: 1_000_000, total: 2_000_000 })
-    ).toBe(0)
-  })
-})
-
-describe("calculateCostFromTokens", () => {
-  it("uses the catalog fallback when providerId is supplied", () => {
-    expect(calculateCostFromTokens("glm-5.1", 1_000_000, 1_000_000, "opencode-go")).toBeCloseTo(
-      1.4 + 4.4,
-      6
-    )
-  })
-})
+// `calculateCost` / `calculateCostFromTokens` were removed: a second,
+// cache-blind costing path with no production callers. Costing now lives only
+// in `lib/usage/pricing.ts`, and the catalog-fallback rates these tests
+// exercised are pinned there (see "prices catalog-fallback models through the
+// unified path") plus by the `getModelPricingUSD` cases above.
 
 describe("formatModelPricing", () => {
   it("uses the catalog fallback when providerId is supplied", () => {

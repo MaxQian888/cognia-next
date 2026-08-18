@@ -31,6 +31,7 @@ const OP_ORDER: readonly SpanOperationName[] = [
   "chat",
   "invoke_workflow",
   "retrieval",
+  "embeddings",
 ]
 
 export interface TraceWaterfallDrawerProps {

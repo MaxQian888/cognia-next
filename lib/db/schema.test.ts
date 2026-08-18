@@ -638,6 +638,128 @@ describe("getDb", () => {
     ).toBe(true)
   })
 
+  it("v172 indexes the sessionUsage columns the cost surfaces filter on", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(172)
+    // `surface` and `providerId` were filtered on without an index, so every
+    // Usage-tab read was a full-table scan justified by an unenforced "low
+    // thousands of rows" assumption.
+    expect(db.sessionUsage.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "surface",
+        "providerId",
+        "projectId",
+        "[projectId+at]",
+        "runId",
+        "[sessionId+at]",
+      ])
+    )
+    expect(db.sessionUsage.schema.primKey.name).toBe("messageId")
+  })
+
+  it("v172 indexes agentTraces by run identity and lifecycle status", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.agentTraces.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["runId", "status", "traceId", "parentSpanId"])
+    )
+  })
+
+  it("v172 freezes legacy cost provenance without inventing prices", async () => {
+    const db = getDb()
+    await db.open()
+
+    // An SDK-priced legacy row was already authoritative.
+    await db.sessionUsage.put({
+      messageId: "m-priced",
+      sessionId: "s1",
+      at: 1,
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      costUsd: 0.25,
+      durationMs: 0,
+      costSource: "sdk",
+      costKnown: true,
+    })
+    // A zero-cost legacy row is genuinely ambiguous after the fact — free
+    // model, or a model we had no price for. It must stay unknown rather than
+    // being re-priced with today's rates.
+    await db.sessionUsage.put({
+      messageId: "m-ambiguous",
+      sessionId: "s1",
+      at: 2,
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      costUsd: 0,
+      durationMs: 0,
+      costSource: "backfilled",
+      costKnown: false,
+    })
+
+    const priced = await db.sessionUsage.get("m-priced")
+    expect(priced).toMatchObject({ costSource: "sdk", costKnown: true })
+    const ambiguous = await db.sessionUsage.get("m-ambiguous")
+    expect(ambiguous).toMatchObject({ costSource: "backfilled", costKnown: false })
+  })
+
+  it("v172 round-trips the frozen cost dimensions and execution identity", async () => {
+    const db = getDb()
+    await db.open()
+
+    await db.sessionUsage.put({
+      messageId: "m-frozen",
+      sessionId: "s2",
+      projectId: "p1",
+      runId: "run-1",
+      turnId: "turn-1",
+      attemptId: "attempt-1",
+      at: 3,
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreation5mTokens: 100,
+      cacheCreation1hTokens: 200,
+      speed: "fast",
+      inferenceGeo: "us",
+      batch: false,
+      unitBreakdown: { requests: { web_search: 2 } },
+      priceSnapshot: { promptPer1M: 5, completionPer1M: 25, currency: "USD" },
+      costUsd: 1.5,
+      costSource: "catalog",
+      costKnown: true,
+      durationMs: 0,
+    })
+
+    const row = await db.sessionUsage.get("m-frozen")
+    expect(row).toMatchObject({
+      projectId: "p1",
+      runId: "run-1",
+      turnId: "turn-1",
+      attemptId: "attempt-1",
+      cacheCreation5mTokens: 100,
+      cacheCreation1hTokens: 200,
+      speed: "fast",
+      inferenceGeo: "us",
+      costSource: "catalog",
+      costKnown: true,
+    })
+    expect(row?.unitBreakdown?.requests?.web_search).toBe(2)
+    expect(row?.priceSnapshot?.promptPer1M).toBe(5)
+
+    // The new identity index is queryable, which is what makes a billing row
+    // joinable to its span tree.
+    const byRun = await db.sessionUsage.where("runId").equals("run-1").toArray()
+    expect(byRun.map((r) => r.messageId)).toEqual(["m-frozen"])
+  })
+
   it("v123 opens the certification projection table", async () => {
     const db = getDb()
     await db.open()

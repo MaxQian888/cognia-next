@@ -6,7 +6,17 @@
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { modelKeyOf } from "./model-key"
 
-export type Dimension = "model" | "surface" | "operation" | "tool" | "session"
+export type Dimension =
+  | "model"
+  | "surface"
+  | "operation"
+  | "tool"
+  | "session"
+  // Cost attribution dimensions (ADR-0130). `provider` answers "which vendor is
+  // this money going to?" and `project` answers "which workspace is spending
+  // it?" — neither was answerable from this dashboard before.
+  | "provider"
+  | "project"
 
 export interface BreakdownRow {
   key: string
@@ -60,6 +70,16 @@ function dimValue(span: AgentTraceSpan, dim: Dimension): string | null {
       return span.toolName ?? null
     case "session":
       return span.sessionId
+    case "provider":
+      // The RAW provider id when the emitter kept one, else the resolved OTel
+      // vendor name — grouping every custom endpoint under "openai" would make
+      // the breakdown lie about where the money went.
+      return (
+        (typeof span.metadata?.providerId === "string" ? span.metadata.providerId : null) ??
+        span.providerName
+      )
+    case "project":
+      return span.projectId ?? null
   }
 }
 

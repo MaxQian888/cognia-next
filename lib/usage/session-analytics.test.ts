@@ -8,6 +8,7 @@ import {
   analyzeUsageContributors,
   buildUsageFilename,
   effectiveCostUsd,
+  effectiveCostUsdDetailed,
   estimateCostFromTotals,
   fillDailyRange,
   filterByRange,
@@ -75,6 +76,52 @@ describe("effectiveCostUsd", () => {
 
   it("returns 0 for an unknown model", () => {
     expect(effectiveCostUsd(row({ costUsd: 0, model: "mystery" }), priceFor)).toBe(0)
+  })
+
+  describe("effectiveCostUsdDetailed", () => {
+    it("marks an SDK-reported cost as known", () => {
+      expect(effectiveCostUsdDetailed(row({ costUsd: 0.42 }), priceFor)).toEqual({
+        cost: 0.42,
+        known: true,
+        source: "sdk",
+      })
+    })
+
+    it("marks a locally priced cost as known", () => {
+      const out = effectiveCostUsdDetailed(
+        row({
+          costUsd: 0,
+          model: "test-model",
+          inputTokens: 1_000_000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        }),
+        priceFor
+      )
+      expect(out.known).toBe(true)
+      expect(out.source).toBe("priced")
+      expect(out.cost).toBeCloseTo(3, 6)
+    })
+
+    it("distinguishes an unpriced model from a genuinely free one", () => {
+      // Both report cost 0; only the first is "we don't know". Rendering the
+      // unknown case as $0.00 silently understates spend.
+      const unknown = effectiveCostUsdDetailed(row({ costUsd: 0, model: "mystery" }), priceFor)
+      expect(unknown).toEqual({ cost: 0, known: false, source: "unknown" })
+
+      const free = effectiveCostUsdDetailed(
+        row({ costUsd: 0, model: "free-model", inputTokens: 1_000_000 }),
+        (_p, m) =>
+          m === "free-model" ? { promptPer1M: 0, completionPer1M: 0, currency: "USD" } : null
+      )
+      expect(free).toEqual({ cost: 0, known: true, source: "priced" })
+    })
+
+    it("keeps effectiveCostUsd as the numeric projection of the detailed form", () => {
+      const r = row({ costUsd: 0, model: "test-model", outputTokens: 2_000_000 })
+      expect(effectiveCostUsd(r, priceFor)).toBe(effectiveCostUsdDetailed(r, priceFor).cost)
+    })
   })
 
   it("returns 0 when the model is missing", () => {
@@ -488,5 +535,80 @@ describe("export", () => {
   it("date-stamps the filename", () => {
     expect(buildUsageFilename("csv", NOW)).toBe("cognia-usage-2026-05-31.csv")
     expect(buildUsageFilename("json", NOW)).toBe("cognia-usage-2026-05-31.json")
+  })
+})
+
+describe("frozen cost is never re-priced (v172)", () => {
+  it("returns a frozen sdk cost as stored, ignoring the current price table", () => {
+    // The point of freezing: editing a price table must not rewrite history.
+    const out = effectiveCostUsdDetailed(
+      row({
+        costUsd: 0.42,
+        costSource: "sdk",
+        costKnown: true,
+        model: "test-model",
+        inputTokens: 999_999_999,
+      }),
+      priceFor
+    )
+    expect(out).toEqual({ cost: 0.42, known: true, source: "sdk" })
+  })
+
+  it("returns a frozen locally-priced cost as stored", () => {
+    const out = effectiveCostUsdDetailed(
+      row({ costUsd: 1.75, costSource: "catalog", costKnown: true, model: "test-model" }),
+      priceFor
+    )
+    expect(out).toEqual({ cost: 1.75, known: true, source: "priced" })
+  })
+
+  it("reports a frozen-unknown row as unknown even though the model is priceable now", () => {
+    // A model we could not price at the time stays unknown; back-filling it at
+    // today's rates would be inventing history.
+    const out = effectiveCostUsdDetailed(
+      row({ costUsd: 0, costSource: "unknown", costKnown: false, model: "test-model" }),
+      priceFor
+    )
+    expect(out).toEqual({ cost: 0, known: false, source: "unknown" })
+  })
+
+  it("treats a backfilled legacy row as unknown", () => {
+    const out = effectiveCostUsdDetailed(
+      row({ costUsd: 0, costSource: "backfilled", costKnown: false, model: "test-model" }),
+      priceFor
+    )
+    expect(out.known).toBe(false)
+  })
+
+  it("still prices a pre-v172 row that carries no provenance", () => {
+    const out = effectiveCostUsdDetailed(
+      row({
+        costUsd: 0,
+        model: "test-model",
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      }),
+      priceFor
+    )
+    expect(out.source).toBe("priced")
+    expect(out.cost).toBeCloseTo(3, 6)
+  })
+
+  it("prices a legacy row's 1-hour cache writes at the 2x rate", () => {
+    const out = effectiveCostUsdDetailed(
+      row({
+        costUsd: 0,
+        model: "test-model",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        cacheCreation1hTokens: 1_000_000,
+      }),
+      priceFor
+    )
+    expect(out.cost).toBeCloseTo(3 * 2, 6)
   })
 })

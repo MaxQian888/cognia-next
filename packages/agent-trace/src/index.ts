@@ -11,6 +11,7 @@
 
 export * from "./emitter"
 export * from "./types"
+export * from "./provider-name"
 export * from "./cost-formatter"
 export * from "./span-to-otlp"
 export * from "./span-to-log-entry"

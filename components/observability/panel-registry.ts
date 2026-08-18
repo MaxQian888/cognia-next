@@ -83,6 +83,10 @@ export const PANELS: readonly PanelDef[] = [
   // Breakdown.
   { id: "bd-model", kind: "donut", titleKey: "byModel", dimension: "model" },
   { id: "bd-surface", kind: "bar", titleKey: "bySurface", dimension: "surface" },
+  // Cost attribution (ADR-0130). "Which vendor is this money going to?" and
+  // "which workspace is spending it?" were both unanswerable from here.
+  { id: "bd-provider", kind: "donut", titleKey: "byProvider", dimension: "provider" },
+  { id: "bd-project", kind: "bar", titleKey: "byProject", dimension: "project" },
   // Recent traces.
   { id: "traces", kind: "traces", titleKey: "recentTraces" },
 ] as const
@@ -110,7 +114,9 @@ export function defaultLayouts(): PanelLayouts {
       { i: "ts-tokens", x: 0, y: 14, w: 12, h: 6, minW: 4, minH: 4 },
       { i: "bd-model", x: 0, y: 20, w: 6, h: 7, minW: 3, minH: 5 },
       { i: "bd-surface", x: 6, y: 20, w: 6, h: 7, minW: 3, minH: 5 },
-      { i: "traces", x: 0, y: 27, w: 12, h: 8, minW: 4, minH: 5 },
+      { i: "bd-provider", x: 0, y: 27, w: 6, h: 7, minW: 3, minH: 5 },
+      { i: "bd-project", x: 6, y: 27, w: 6, h: 7, minW: 3, minH: 5 },
+      { i: "traces", x: 0, y: 34, w: 12, h: 8, minW: 4, minH: 5 },
     ],
     md: [
       { i: "kpi-cost", x: 0, y: 0, w: 4, h: 2, minW: 2, minH: 2 },
@@ -125,7 +131,9 @@ export function defaultLayouts(): PanelLayouts {
       { i: "ts-tokens", x: 0, y: 30, w: 8, h: 6, minW: 4, minH: 4 },
       { i: "bd-model", x: 0, y: 36, w: 4, h: 7, minW: 3, minH: 5 },
       { i: "bd-surface", x: 4, y: 36, w: 4, h: 7, minW: 3, minH: 5 },
-      { i: "traces", x: 0, y: 43, w: 8, h: 8, minW: 4, minH: 5 },
+      { i: "bd-provider", x: 0, y: 43, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "bd-project", x: 4, y: 43, w: 4, h: 7, minW: 3, minH: 5 },
+      { i: "traces", x: 0, y: 50, w: 8, h: 8, minW: 4, minH: 5 },
     ],
     sm: PANELS.map((p, i) => ({
       i: p.id,

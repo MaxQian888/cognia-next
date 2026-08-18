@@ -64,6 +64,7 @@ import {
 import { getCompactionStrategy } from "@/lib/plugin/registries/compaction-strategy-registry"
 import { loggers } from "@cognia/logging"
 import { startRootTrace, toTraceparent } from "@/lib/agent-trace/trace-context"
+import { providerNameFromId } from "@cognia/agent-trace/provider-name"
 import type { SpanSurface } from "@/types/agent-trace/span"
 import type { TraceContext } from "@/types/agent-trace/trace-context"
 import type {
@@ -3588,11 +3589,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const promptPreview = ctx.routingContextHint?.promptText
       const { ctx: traceCtx } = startRootTrace({
         operationName: "invoke_agent",
-        // The root is the agent invocation, not the LLM call — keep
-        // providerName "anthropic" historically; the real provider rides the
-        // provider child span (Phase 2) + `metadata.providerId`. Avoids
-        // widening the narrow `SpanProviderName` union here.
-        providerName: "anthropic",
+        // The root is the agent invocation, not the LLM call, but it should
+        // still name the provider that actually served the turn — reporting
+        // every root as "anthropic" mis-attributed provider rollups built from
+        // root spans. `metadata.providerId` keeps the raw id.
+        providerName: providerNameFromId(providerId),
         sessionId: session?.id ?? "",
         surface: ctx.traceSurface ?? "chat",
         requestModel: opts.model,

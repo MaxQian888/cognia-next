@@ -82,6 +82,7 @@ import {
   finishDirectChatExecutionRun,
   projectDirectChatSdkMessage,
 } from "@/lib/execution/direct-chat-run"
+import { recordChatCanonicalEvents } from "@/lib/chat/canonical-sink"
 import { settleChatTurnForSession } from "@/lib/work-submission/chat-adapter"
 import type { UIMessage } from "ai"
 import {
@@ -498,6 +499,19 @@ export async function handleEvent(
       return
     }
     case "permission_request": {
+      // Canonical event log: recorded at the TOP of the case so every exit path
+      // below (plugin deny, plugin modify, allowlist auto-approve, subagent
+      // auto-deny, remote routing, the modal) leaves the same record that the
+      // gate was reached. The matching `permission-resolved` is emitted by
+      // `approveTool`. Tool ARGUMENTS stay out unless the `toolDetails` debug
+      // tier is armed — they are the payload, not the decision.
+      recordChatCanonicalEvents(evt.sessionId, [
+        {
+          kind: "permission-request",
+          requestId: evt.requestId,
+          toolName: evt.toolName,
+        },
+      ])
       // Remember the call for the post-tool (`tool_result_review`) hook.
       rememberChatToolCall(
         evt.toolUseID ?? "",
@@ -747,6 +761,15 @@ export async function handleEvent(
             options: useChatStore.getState().lastSendBySession[sessionId]?.options,
           })
           nextMessages = attachCheckpointCapture(nextMessages, checkpoint)
+          if (checkpoint.state === "stored") {
+            // The `compact` event says the context was compacted; this says
+            // which checkpoint it can be recovered from. Only a STORED one —
+            // recording a locked/failed capture would name a checkpoint that
+            // cannot be read back.
+            recordChatCanonicalEvents(sessionId, [
+              { kind: "checkpoint", checkpointId: checkpoint.checkpointId },
+            ])
+          }
         }
       }
       const pendingTag = pendingBranchTagRef.current.get(sessionId)

@@ -15,6 +15,7 @@ import { RefreshSelect } from "./refresh-select"
 import { RefreshStatus } from "./refresh-status"
 import { ExportMenu } from "./export-menu"
 import { VariableFilterBar } from "./variable-filter-bar"
+import { DroppedSpansBadge } from "./dropped-spans-badge"
 import type { RangePreset } from "@/lib/observability/time-range"
 import type { TraceFilters } from "@/lib/observability/filters"
 import type { RefreshMs } from "@/stores/observability/observability-store"
@@ -57,6 +58,7 @@ export function ObservabilityToolbar(props: ObservabilityToolbarProps) {
         onChange={props.onFilters}
       />
       <div className="flex w-full min-w-0 flex-wrap items-center gap-2 lg:ml-auto lg:w-auto">
+        <DroppedSpansBadge refreshKey={props.lastUpdated} />
         <RefreshStatus lastUpdated={props.lastUpdated} onRefresh={props.onRefresh} />
         <TimeRangePicker
           preset={props.preset}

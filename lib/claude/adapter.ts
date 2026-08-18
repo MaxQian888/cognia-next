@@ -93,6 +93,21 @@ export interface UsageInfo {
   cacheCreationInputTokens?: number
   cacheReadInputTokens?: number
   /**
+   * Cache-creation tokens split by TTL, when the provider reports it. Anthropic
+   * bills a 5-minute write at 1.25× base input and a 1-hour write at 2×, so the
+   * two cannot share `cacheCreationInputTokens` without under-billing the
+   * 1-hour case. `undefined` when the provider reports only the flat total.
+   */
+  cacheCreation5mInputTokens?: number
+  cacheCreation1hInputTokens?: number
+  /**
+   * Server-side tool invocation counts (`usage.server_tool_use`), normalized to
+   * bare tool names. These are billed per call independently of tokens — web
+   * search is $10 per 1,000 requests — so a turn's cost is incomplete without
+   * them. `undefined` when the provider reported none.
+   */
+  serverToolUse?: Record<string, number>
+  /**
    * Reasoning / "thinking" tokens reported separately by the provider (a subset
    * of output tokens, already billed at the output rate). Surfaced for
    * observability; `undefined` when the provider bundles thinking into output
@@ -1307,6 +1322,27 @@ export function extractUsage(result: SDKResultMessage): UsageInfo | null {
 
   const reasoning = num("reasoning_tokens")
   const contextInput = num("context_input_tokens")
+
+  // Cache-TTL split and server-tool counters, emitted by the shared usage
+  // normalizer (`lib/ai/chat/usage-normalize.ts` and its sidecar mirror). Both
+  // are absent unless the provider actually reported them, so "no 1-hour
+  // writes" stays distinguishable from "TTL not reported".
+  const cacheCreationDetail = raw?.cache_creation as
+    { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number } | undefined
+  const positive = (v: unknown) =>
+    typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined
+
+  const rawServerToolUse = raw?.server_tool_use as Record<string, unknown> | undefined
+  let serverToolUse: Record<string, number> | undefined
+  if (rawServerToolUse && typeof rawServerToolUse === "object") {
+    const counts: Record<string, number> = {}
+    for (const [tool, value] of Object.entries(rawServerToolUse)) {
+      const n = positive(value)
+      if (n !== undefined) counts[tool] = n
+    }
+    if (Object.keys(counts).length > 0) serverToolUse = counts
+  }
+
   const info: UsageInfo = {
     inputTokens: num("input_tokens"),
     outputTokens: num("output_tokens"),
@@ -1318,6 +1354,9 @@ export function extractUsage(result: SDKResultMessage): UsageInfo | null {
         : undefined,
     cacheCreationInputTokens: num("cache_creation_input_tokens"),
     cacheReadInputTokens: num("cache_read_input_tokens"),
+    cacheCreation5mInputTokens: positive(cacheCreationDetail?.ephemeral_5m_input_tokens),
+    cacheCreation1hInputTokens: positive(cacheCreationDetail?.ephemeral_1h_input_tokens),
+    serverToolUse,
     // Only attach when the provider actually reported reasoning tokens (> 0) so
     // non-reasoning turns don't carry a noisy `reasoningTokens: 0`.
     reasoningTokens: typeof reasoning === "number" && reasoning > 0 ? reasoning : undefined,

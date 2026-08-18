@@ -14,20 +14,77 @@
 
 /** Top-level OTel `gen_ai.operation.name`. */
 export type SpanOperationName =
-  "invoke_agent" | "execute_tool" | "chat" | "invoke_workflow" | "retrieval"
+  "invoke_agent" | "execute_tool" | "chat" | "invoke_workflow" | "retrieval" | "embeddings"
 
-/** OTel `gen_ai.provider.name` plus our vendor extensions. */
+/**
+ * OTel `gen_ai.provider.name` well-known values, plus our vendor extensions.
+ *
+ * Open on purpose: the semantic convention requires a well-known value when one
+ * applies and permits a custom value otherwise, so an unrecognized provider id
+ * is emitted verbatim rather than mislabelled. Resolve one with
+ * `providerNameFromId()` from `@cognia/agent-trace`.
+ *
+ * Mirrors `packages/agent-trace/src/types.ts` — keep the two in step.
+ */
 export type SpanProviderName =
+  // OTel GenAI well-known values.
   | "anthropic"
+  | "aws.bedrock"
+  | "azure.ai.inference"
+  | "azure.ai.openai"
+  | "cohere"
+  | "deepseek"
+  | "gcp.gemini"
+  | "gcp.gen_ai"
+  | "gcp.vertex_ai"
+  | "groq"
+  | "ibm.watsonx.ai"
+  | "mistral_ai"
   | "openai"
+  | "perplexity"
+  | "x_ai"
+  // Cognia vendor extensions — non-model surfaces that still emit spans.
   | "cognia.plugin"
   | "cognia.team"
   | "cognia.connector"
   | "cognia.workflow"
   | "cognia.twin"
+  // Any other provider id, carried verbatim as a spec-legal custom value.
+  | (string & {})
 
 /** Surface that produced the span — drives the agent-trace UI grouping. */
-export type SpanSurface = "chat" | "agent-team" | "plugin-hook" | "connector" | "workflow"
+export type SpanSurface =
+  | "chat"
+  | "agent-team"
+  | "plugin-hook"
+  | "connector"
+  | "workflow"
+  // Surfaces that emit spans of their own rather than riding a chat turn.
+  // `plugin-hook` stays the hook-GATE surface; `plugin` is direct plugin
+  // execution (the WASM bridge).
+  | "mcp"
+  | "retrieval"
+  | "embedding"
+  | "plugin"
+
+/**
+ * OTel span kind. Every span was `INTERNAL` before v172, which meant no backend
+ * could render the renderer → sidecar → provider hop as a distributed trace.
+ * `client` marks the caller side of a process/network boundary and `server` the
+ * receiving side.
+ */
+export type SpanKind = "internal" | "client" | "server"
+
+/**
+ * Lifecycle state of a persisted span.
+ *
+ * Rows used to be written only at `endSpan`, so a crash mid-turn erased the
+ * whole trajectory — `reapStaleSpans` dropped in-flight spans instead of
+ * persisting them. A span is now written `pending` at start and settled on end;
+ * a span still `pending` at boot is settled as `incomplete` rather than
+ * vanishing.
+ */
+export type SpanStatus = "pending" | "ok" | "error" | "incomplete"
 
 /** Mid-span discrete event recorded via `recordEvent`. */
 export interface SpanEvent {
@@ -42,6 +99,14 @@ export interface SpanUsage {
   outputTokens: number
   cacheCreationTokens: number
   cacheReadTokens: number
+  /**
+   * Cache-write split by TTL. Both are subsets of `cacheCreationTokens` and are
+   * present only when the provider reported the breakdown — a 1-hour write bills
+   * at 2x base input against 1.25x for a 5-minute one, so collapsing them loses
+   * the only signal that separates the two rates.
+   */
+  cacheCreation5mTokens?: number
+  cacheCreation1hTokens?: number
 }
 
 /** Optional Agent Team handoff payload captured on the dispatcher side. */
@@ -95,6 +160,23 @@ export interface AgentTraceSpan {
   // Error info.
   errorType?: string
   errorMessage?: string
+
+  /**
+   * OTel span kind. Absent on rows written before v172 ⇒ read as `"internal"`,
+   * which is what they were.
+   */
+  spanKind?: SpanKind
+
+  /**
+   * Lifecycle state. Absent on pre-v172 rows ⇒ read as `"ok"` (or `"error"`
+   * when `errorType` is set), which is what a persisted row meant then.
+   */
+  status?: SpanStatus
+
+  /* ── ADR-0090 execution identity — lets a span join the canonical event log. */
+  runId?: string
+  turnId?: string
+  attemptId?: string
 
   // Vendor (`cognia.*`).
   sessionId: string

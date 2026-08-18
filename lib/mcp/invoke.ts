@@ -20,6 +20,7 @@ import {
   type RuntimeInvokeInput,
 } from "./runtime-gateway"
 import type { McpExecutionGrant, McpExecutionSurface } from "./policy"
+import { instrumentSpan } from "@/lib/agent-trace/instrument"
 
 /** Thrown when neither a stored row nor a preset matches `serverId`. Callers map this to a non-retryable failure. */
 export class McpServerNotFoundError extends Error {
@@ -45,6 +46,9 @@ export interface InvokeMcpToolInput {
   grant?: McpExecutionGrant
   /** Caller deadline, capped by the Gateway's 60-second default. */
   deadlineMs?: number
+  /** Reuse the caller's trace so the round-trip nests under the work that asked for it. */
+  traceId?: string
+  parentSpanId?: string
 }
 
 export interface InvokeMcpToolResult {
@@ -116,14 +120,45 @@ export async function invokeMcpTool(
       clientInfo: input.clientInfo,
       deadlineMs: input.deadlineMs,
     }
-    const result = await gateway.invoke(gatewayInput)
-    return {
-      serverId,
-      toolName,
-      isError: result.isError ?? false,
-      content: result.content ?? [],
-      structuredContent: (result as { structuredContent?: unknown }).structuredContent,
-    }
+    // An MCP round-trip leaves this process and can block a turn for seconds,
+    // yet produced no span — so a slow server showed up in the waterfall only
+    // as unexplained time inside its caller. `client` kind because this IS the
+    // caller side of a process hop.
+    return await instrumentSpan(
+      {
+        operationName: "execute_tool",
+        providerName: "cognia.plugin",
+        sessionId: input.scopeId ?? serverId,
+        surface: "mcp",
+        spanKind: "client",
+        toolName,
+        ...(input.traceId ? { traceId: input.traceId } : {}),
+        ...(input.parentSpanId ? { parentSpanId: input.parentSpanId } : {}),
+        metadata: {
+          serverId,
+          transport: server.transport,
+          executionSurface: input.surface ?? "cli",
+        },
+      },
+      async () => {
+        const result = await gateway.invoke(gatewayInput)
+        return {
+          serverId,
+          toolName,
+          isError: result.isError ?? false,
+          content: result.content ?? [],
+          structuredContent: (result as { structuredContent?: unknown }).structuredContent,
+        }
+      },
+      // A tool that answered with `isError` did not throw, so the span would
+      // otherwise read as a success.
+      (result) => ({
+        metadata: {
+          isError: result.isError,
+          contentBlocks: result.content.length,
+        },
+      })
+    )
   } finally {
     if (ephemeral) await gateway.closeScope(scopeId)
   }

@@ -23,6 +23,7 @@ import type {
   AgentTraceSpan,
   SpanEvent,
   SpanHandoff,
+  SpanKind,
   SpanOperationName,
   SpanProviderName,
   SpanSurface,
@@ -52,6 +53,26 @@ export interface StartSpanInput {
   toolName?: string
   pluginId?: string
   handoff?: SpanHandoff
+
+  /**
+   * OTel span kind. Defaults to `"internal"`. Set `"client"` on the caller side
+   * of a process hop (renderer → sidecar) and `"server"` on the receiving side,
+   * so a backend can render the hop as a distributed trace instead of a flat
+   * list of internal spans.
+   */
+  spanKind?: SpanKind
+
+  /* ── ADR-0090 execution identity ─────────────────────────────────────────
+   * Carrying these makes a span joinable to the canonical event log and to the
+   * billing row for the same turn. Without them the two substrates describe the
+   * same work with no shared key.
+   */
+  runId?: string
+  turnId?: string
+  attemptId?: string
+
+  /** Owning workspace/project — mirrors the billing row's `projectId`. */
+  projectId?: string
 
   inputPreview?: string
   metadata?: Record<string, unknown>
@@ -132,9 +153,18 @@ export function generateSpanId(): string {
 }
 
 /**
- * Drop in-progress spans that have exceeded the retention window. This does
- * not emit ended spans: it is a leak guard for work that never reached its
- * terminal callback.
+ * Settle in-progress spans that have exceeded the retention window.
+ *
+ * These are spans whose work never reached its terminal callback — an aborted
+ * turn, a provider stream that died, a tool whose result never came back. They
+ * used to be silently deleted, which meant the trajectory showed no trace of
+ * the abandoned work at all: a turn that hung looked identical to a turn that
+ * never started.
+ *
+ * They are now emitted with `status: "incomplete"` and no `endTime`, so the
+ * waterfall can render them as unfinished rather than losing them. The writer
+ * is invoked exactly once per span, and failures are swallowed for the same
+ * reason as in `endSpan`.
  */
 export function reapStaleSpans(maxAgeMs = DEFAULT_STALE_SPAN_MAX_AGE_MS): number {
   const maxAge =
@@ -145,6 +175,14 @@ export function reapStaleSpans(maxAgeMs = DEFAULT_STALE_SPAN_MAX_AGE_MS): number
     if (now - span.startTime > maxAge) {
       activeSpans.delete(spanId)
       removed += 1
+      span.status = "incomplete"
+      if (writer) {
+        try {
+          writer(span)
+        } catch {
+          // Never let an unwired transport break the reaper.
+        }
+      }
     }
   }
   return removed
@@ -172,6 +210,14 @@ export function startSpan(input: StartSpanInput): SpanHandle {
     toolName: input.toolName,
     pluginId: input.pluginId,
     handoff: input.handoff,
+    spanKind: input.spanKind ?? "internal",
+    // In-flight until `endSpan` settles it. Persisted this way so a crash
+    // leaves an inspectable `pending` row instead of erasing the span.
+    status: "pending",
+    runId: input.runId,
+    turnId: input.turnId,
+    attemptId: input.attemptId,
+    projectId: input.projectId,
     inputPreview: input.inputPreview,
     metadata: input.metadata,
   }
@@ -208,6 +254,9 @@ export function endSpan(spanId: string, input: EndSpanInput = {}): AgentTraceSpa
   if (input.errorMessage) span.errorMessage = input.errorMessage
   if (input.outputPreview) span.outputPreview = input.outputPreview
   if (input.metadata) span.metadata = { ...(span.metadata ?? {}), ...input.metadata }
+
+  // Settle the lifecycle state the span was created `pending` in.
+  span.status = span.errorType ? "error" : "ok"
 
   if (writer) {
     try {
@@ -255,6 +304,10 @@ export function emitFinishedSpan(span: Partial<AgentTraceSpan>): AgentTraceSpan 
     providerName: span.providerName,
     sessionId: span.sessionId,
     surface: span.surface,
+    spanKind: span.spanKind ?? "internal",
+    // A one-shot span is already terminal by construction, so it never passes
+    // through `pending`.
+    status: span.status ?? (span.errorType ? "error" : "ok"),
   }
   if (writer) {
     try {

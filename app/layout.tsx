@@ -78,6 +78,7 @@ import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toas
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import { McpLogProvider } from "@/components/providers/mcp-log-provider"
+import { SidecarSpanProvider } from "@/components/providers/sidecar-span-provider"
 import {
   BackgroundApplier,
   ComponentStyleApplier,
@@ -308,32 +309,34 @@ export default async function RootLayout({
                                               <ConnectorDeepLinkRouter>
                                                 <SubscriptionUsageProvider>
                                                   <McpLogProvider>
-                                                    <CompanionBootProvider>
-                                                      <WebCompanionBootProvider>
-                                                        <DesktopSyncSourceProvider>
-                                                          <DesktopMessageSourceProvider>
-                                                            {/* id="app" is the scope root for user
+                                                    <SidecarSpanProvider>
+                                                      <CompanionBootProvider>
+                                                        <WebCompanionBootProvider>
+                                                          <DesktopSyncSourceProvider>
+                                                            <DesktopMessageSourceProvider>
+                                                              {/* id="app" is the scope root for user
                                                         custom CSS when `customCssScope` is
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                            <div
-                                                              id="app"
-                                                              data-bg-target="global"
-                                                              className="contents"
-                                                            >
-                                                              <MobileShellWrapper>
-                                                                <DesktopAppShell>
-                                                                  <SurfaceAvailabilityBoundary>
-                                                                    {children}
-                                                                  </SurfaceAvailabilityBoundary>
-                                                                </DesktopAppShell>
-                                                              </MobileShellWrapper>
-                                                            </div>
-                                                          </DesktopMessageSourceProvider>
-                                                        </DesktopSyncSourceProvider>
-                                                      </WebCompanionBootProvider>
-                                                    </CompanionBootProvider>
+                                                              <div
+                                                                id="app"
+                                                                data-bg-target="global"
+                                                                className="contents"
+                                                              >
+                                                                <MobileShellWrapper>
+                                                                  <DesktopAppShell>
+                                                                    <SurfaceAvailabilityBoundary>
+                                                                      {children}
+                                                                    </SurfaceAvailabilityBoundary>
+                                                                  </DesktopAppShell>
+                                                                </MobileShellWrapper>
+                                                              </div>
+                                                            </DesktopMessageSourceProvider>
+                                                          </DesktopSyncSourceProvider>
+                                                        </WebCompanionBootProvider>
+                                                      </CompanionBootProvider>
+                                                    </SidecarSpanProvider>
                                                   </McpLogProvider>
                                                 </SubscriptionUsageProvider>
                                               </ConnectorDeepLinkRouter>

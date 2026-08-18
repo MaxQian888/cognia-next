@@ -58,6 +58,10 @@ export const SETTINGS_SYNC = {
   profile: { category: "shared" },
   ocrSettings: { category: "desktop-only" },
   storageRetention: { category: "desktop-only" },
+  // A spending ceiling is about the ACCOUNT, not the device: hitting the daily
+  // cap on the desktop must also stop the phone, or the limit is only a limit
+  // on whichever device you happen to be holding.
+  costBudget: { category: "shared" },
   providerDiagnostics: { category: "desktop-only" },
   // Host-side scheduler config: the fallback ops chat is only ever read by the
   // host that runs the scheduler and delivers its notifications. A phone never

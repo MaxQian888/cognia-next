@@ -8,6 +8,9 @@ import {
 import { generateEmbedding, type EmbeddingConfig } from "@cognia/provider-embedding/embedding"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
+import { providerNameFromId } from "@cognia/agent-trace"
+
+import { instrumentSpan } from "@/lib/agent-trace/instrument"
 
 export interface GenerateSafeEmbeddingOptions {
   profileId: string
@@ -17,6 +20,11 @@ export interface GenerateSafeEmbeddingOptions {
   allowLocalOriginalText?: boolean
   /** Existing provider/vector adapter; receives only gateway-approved text. */
   transport?: (safeText: string) => Promise<number[]>
+  /** Session the embedding belongs to, for trace correlation. */
+  sessionId?: string
+  /** Reuse the caller's trace so the embedding nests under the work that asked for it. */
+  traceId?: string
+  parentSpanId?: string
 }
 
 /**
@@ -49,5 +57,34 @@ export async function generateSafeEmbedding(
         ? options.transport(safeText)
         : (await generateEmbedding(safeText, options.embedding)).embedding,
   })
-  return gateway.embed({ profile, purpose: options.purpose, text })
+  // `embeddings` is an OTel GenAI well-known operation, and embedding calls are
+  // billed spend that produced no span at all before — an embed-heavy ingest
+  // was invisible in both the waterfall and the cost rollups.
+  return instrumentSpan(
+    {
+      operationName: "embeddings",
+      providerName: providerNameFromId(options.embedding.provider),
+      sessionId: options.sessionId ?? options.profileId,
+      surface: "embedding",
+      requestModel: options.embedding.model,
+      ...(options.traceId ? { traceId: options.traceId } : {}),
+      ...(options.parentSpanId ? { parentSpanId: options.parentSpanId } : {}),
+      metadata: {
+        purpose: options.purpose,
+        profileId: options.profileId,
+        vectorBackend: options.vectorBackend,
+      },
+    },
+    () => gateway.embed({ profile, purpose: options.purpose, text }),
+    // Shape and provenance, never the vector itself: an embedding is derived
+    // from user text and has no place in a trace.
+    (result) => ({
+      metadata: {
+        dimensions: result.dimensions,
+        locality: result.locality,
+        redacted: result.redacted,
+        cacheHit: result.cacheHit,
+      },
+    })
+  )
 }

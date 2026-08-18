@@ -99,6 +99,25 @@ describe("childSpanInput", () => {
     expect(input.traceId).toBe(ctx.traceId)
     expect(input.parentSpanId).toBe(ctx.rootSpanId)
   })
+
+  it("nests under an explicit intermediate parent while keeping the context's trace", () => {
+    const toolSpanId = "c".repeat(16)
+    const input = childSpanInput(
+      ctx,
+      {
+        operationName: "chat",
+        providerName: "anthropic",
+        sessionId: "session-1",
+        surface: "chat",
+      },
+      toolSpanId
+    )
+
+    // The trace is still forced — that is the invariant. The parent is not:
+    // without this every trace was exactly one level deep.
+    expect(input.traceId).toBe(ctx.traceId)
+    expect(input.parentSpanId).toBe(toolSpanId)
+  })
 })
 
 describe("W3C traceparent", () => {

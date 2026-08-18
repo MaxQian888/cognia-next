@@ -15657,6 +15657,10 @@
     }
   },
   "observability": {
+    "droppedSpans": {
+      "label": "{count, plural, other {丢失 # 条 span}}",
+      "tooltip": "{count, plural, other {有 # 条 provider span 未被记录}}，原因是调用未传递 trace 上下文。下方的瀑布图缺少这些 span。"
+    },
     "empty": {
       "hint": "Agent 运行、工具调用、对话和工作流都会在此记录 span。发起一次对话或运行一个 Agent，或放宽时间范围以查看更早的遥测数据。",
       "title": "该时间窗口内暂无遥测数据",
@@ -15694,6 +15698,8 @@
     "noData": "该时间窗口内暂无数据",
     "panels": {
       "byModel": "按模型分布",
+      "byProject": "按项目",
+      "byProvider": "按提供商",
       "bySurface": "按来源分布",
       "cacheHitRate": "缓存命中率",
       "costOverTime": "成本走势",
@@ -28234,6 +28240,7 @@
       "teams": "多角色协作 — 轮询 / 主管 / 手动。",
       "terminal": "集成终端面板 — 默认 shell、字体、回滚行数，以及按项目覆盖。",
       "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
+      "usageCost": "支出上限与本机链路调试会话",
       "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。",
       "workspaceTrust": "在智能体于文件夹内执行命令前先信任它。未受信任的工作区以受限模式运行。"
     },
@@ -31452,6 +31459,7 @@
       "teams": "团队",
       "terminal": "终端",
       "tools": "内置工具",
+      "usageCost": "用量与成本",
       "workflows": "工作流",
       "workspaceTrust": "工作区信任"
     },
@@ -32069,6 +32077,24 @@
         "remove": "删除字段",
         "required": "必填",
         "submitOnEnter": "回车提交"
+      }
+    },
+    "usageCost": {
+      "budget": {
+        "dailyLabel": "每日上限（美元）",
+        "description": "美元硬性上限。与「提供商」下的路由预算不同，达到上限会拦截下一次请求，直到你确认放行。",
+        "hardBlockHint": "达到 80% 与 95% 时提醒；达到 100% 时下一次请求会被拦截，需你确认后才放行一次。",
+        "monthlyLabel": "每月上限（美元）",
+        "noLimit": "不限制",
+        "title": "支出上限"
+      },
+      "debug": {
+        "activeBadge": "{minutes, plural, =0 {即将到期} =1 {剩余 1 分钟} other {剩余 # 分钟}}",
+        "armFor": "{minutes} 分钟",
+        "description": "在本机捕获流式增量、提示词与工具载荷，用于复现问题。到期自动关闭，数据不会离开本设备。",
+        "disarm": "立即停止",
+        "privacyHint": "捕获的内容不会进入备份、导出或诊断报告。会话默认时长为 {minutes} 分钟。",
+        "title": "链路调试会话"
       }
     },
     "workflow": {

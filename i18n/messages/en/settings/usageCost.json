@@ -1,0 +1,18 @@
+{
+  "budget": {
+    "title": "Spending limits",
+    "description": "Hard USD ceilings. Unlike the routing budget under Providers, reaching one of these blocks the next request until you approve it.",
+    "dailyLabel": "Daily limit (USD)",
+    "monthlyLabel": "Monthly limit (USD)",
+    "noLimit": "No limit",
+    "hardBlockHint": "You are warned at 80% and 95%. At 100% the next request is held until you approve one more."
+  },
+  "debug": {
+    "title": "Trace debug session",
+    "description": "Captures streaming deltas, prompts and tool payloads locally so a problem can be reproduced. Expires on its own and never leaves this device.",
+    "activeBadge": "{minutes, plural, =0 {expiring} =1 {1 min left} other {# min left}}",
+    "armFor": "{minutes} min",
+    "disarm": "Stop now",
+    "privacyHint": "Captured content is excluded from backups, exports and diagnostic reports. Sessions default to {minutes} minutes."
+  }
+}

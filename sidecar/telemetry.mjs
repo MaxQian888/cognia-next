@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto"
+
 import { ROOT_CONTEXT, SpanStatusCode, context, propagation, trace } from "@opentelemetry/api"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { NodeSDK } from "@opentelemetry/sdk-node"
@@ -118,22 +120,95 @@ export function aiSdkTelemetry({ sessionId, traceId, provider, traceparent }) {
   }
 }
 
-export function traceAsyncIterable(name, traceparent, attributes, iterable) {
-  if (!sdk) return iterable
-  const span = trace
-    .getTracer("cognia.sidecar.anthropic")
-    .startSpan(name, { attributes }, parentContext(traceparent))
+/**
+ * Random lower-case hex, for a locally-minted span id. `randomUUID` is not
+ * usable here: OTLP span ids are 8 bytes, not 16.
+ */
+function randomSpanId() {
+  const bytes = randomBytes(8)
+  let out = ""
+  for (const byte of bytes) out += byte.toString(16).padStart(2, "0")
+  return out
+}
+
+/**
+ * Emit one finished sidecar span back to the renderer.
+ *
+ * Repatriation, not export: the sidecar's spans used to exist ONLY as OTLP, so
+ * a default install — which configures no collector — recorded nothing at all
+ * for the half of every turn that runs out-of-process. The renderer's waterfall
+ * showed a `chat` span with a multi-second gap in the middle and no way to see
+ * inside it.
+ *
+ * The `traceparent` is echoed back verbatim rather than parsed here: the
+ * renderer minted it and already owns a parser (`lib/agent-trace/trace-context`),
+ * so echoing keeps exactly one implementation of the W3C wire format.
+ */
+function emitLocalSpan(emit, span) {
+  if (typeof emit !== "function") return
+  try {
+    emit({ type: "agent_trace_span", ...span })
+  } catch {
+    // A span must never break the stream it was measuring.
+  }
+}
+
+/**
+ * Wrap an async iterable so the work it drives is measured.
+ *
+ * Two independent sinks, either of which may be absent:
+ *  - the OTel SDK, when an OTLP endpoint is configured;
+ *  - `options.emit`, which repatriates the span to the local renderer.
+ *
+ * With neither, the iterable is returned untouched so there is no proxy on the
+ * hot path.
+ *
+ * @param {{ emit?: (event: any) => void, sessionId?: string,
+ *           operationName?: string, providerName?: string }} [options]
+ */
+export function traceAsyncIterable(name, traceparent, attributes, iterable, options = {}) {
+  const localEmit = options.emit
+  if (!sdk && typeof localEmit !== "function") return iterable
+
+  const span = sdk
+    ? trace
+        .getTracer("cognia.sidecar.anthropic")
+        .startSpan(name, { attributes }, parentContext(traceparent))
+    : null
+  const startTime = Date.now()
+  const spanId = randomSpanId()
   let ended = false
   const finish = (error) => {
     if (ended) return
     ended = true
-    if (error) {
-      span.recordException(error)
-      span.setStatus({ code: SpanStatusCode.ERROR, message: String(error?.message ?? error) })
-    } else {
-      span.setStatus({ code: SpanStatusCode.OK })
+    if (span) {
+      if (error) {
+        span.recordException(error)
+        span.setStatus({ code: SpanStatusCode.ERROR, message: String(error?.message ?? error) })
+      } else {
+        span.setStatus({ code: SpanStatusCode.OK })
+      }
+      span.end()
     }
-    span.end()
+    const endTime = Date.now()
+    emitLocalSpan(localEmit, {
+      sessionId: options.sessionId,
+      traceparent,
+      spanId,
+      name,
+      operationName: options.operationName ?? "invoke_agent",
+      providerName: options.providerName ?? "anthropic",
+      startTime,
+      endTime,
+      durationMs: Math.max(0, endTime - startTime),
+      attributes,
+      ...(error
+        ? {
+            errorType: error?.name ? String(error.name) : "sidecar_error",
+            errorMessage: String(error?.message ?? error),
+          }
+        : {}),
+    })
   }
   return new Proxy(iterable, {
     get(target, property, receiver) {
@@ -156,4 +231,4 @@ export function traceAsyncIterable(name, traceparent, attributes, iterable) {
   })
 }
 
-export const __TESTING__ = { parseHeaders }
+export const __TESTING__ = { parseHeaders, randomSpanId }

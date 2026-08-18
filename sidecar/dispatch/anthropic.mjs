@@ -748,7 +748,11 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       "gen_ai.request.model": sendOptions.model ?? "unknown",
       "cognia.session.id": sessionId,
     },
-    rawQuery
+    rawQuery,
+    // Repatriate the span to the renderer over the same event channel the
+    // stream already uses, so a default install with no OTLP collector still
+    // records what the sidecar did instead of leaving a hole in the waterfall.
+    { emit, sessionId, operationName: "invoke_agent", providerName: "anthropic" }
   )
 
   // First-connection self-healing: the SDK's `system/init` event reports each

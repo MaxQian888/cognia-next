@@ -21,20 +21,62 @@ export interface StructuredLogEntry {
 
 /** Top-level OTel `gen_ai.operation.name`. */
 export type SpanOperationName =
-  "invoke_agent" | "execute_tool" | "chat" | "invoke_workflow" | "retrieval"
+  "invoke_agent" | "execute_tool" | "chat" | "invoke_workflow" | "retrieval" | "embeddings"
 
-/** OTel `gen_ai.provider.name` plus Cognia vendor extensions. */
+/**
+ * OTel `gen_ai.provider.name` well-known values, plus Cognia vendor extensions.
+ *
+ * Open on purpose: the semantic convention requires a well-known value when one
+ * applies and permits a custom value otherwise, so an unrecognized provider id
+ * is emitted verbatim rather than mislabelled. Use
+ * `providerNameFromId()` from `./provider-name` to resolve one.
+ */
 export type SpanProviderName =
+  // OTel GenAI well-known values.
   | "anthropic"
+  | "aws.bedrock"
+  | "azure.ai.inference"
+  | "azure.ai.openai"
+  | "cohere"
+  | "deepseek"
+  | "gcp.gemini"
+  | "gcp.gen_ai"
+  | "gcp.vertex_ai"
+  | "groq"
+  | "ibm.watsonx.ai"
+  | "mistral_ai"
   | "openai"
+  | "perplexity"
+  | "x_ai"
+  // Cognia vendor extensions — non-model surfaces that still emit spans.
   | "cognia.plugin"
   | "cognia.team"
   | "cognia.connector"
   | "cognia.workflow"
   | "cognia.twin"
+  // Any other provider id, carried verbatim as a spec-legal custom value.
+  | (string & {})
 
 /** Surface that produced the span. */
-export type SpanSurface = "chat" | "agent-team" | "plugin-hook" | "connector" | "workflow"
+export type SpanSurface =
+  | "chat"
+  | "agent-team"
+  | "plugin-hook"
+  | "connector"
+  | "workflow"
+  // Surfaces that emit spans of their own rather than riding a chat turn.
+  // `plugin-hook` stays the hook-GATE surface; `plugin` is direct plugin
+  // execution (the WASM bridge).
+  | "mcp"
+  | "retrieval"
+  | "embedding"
+  | "plugin"
+
+/** OTel span kind — `client`/`server` mark the two sides of a process hop. */
+export type SpanKind = "internal" | "client" | "server"
+
+/** Lifecycle state of a persisted span. */
+export type SpanStatus = "pending" | "ok" | "error" | "incomplete"
 
 export interface SpanEvent {
   name: string
@@ -47,6 +89,14 @@ export interface SpanUsage {
   outputTokens: number
   cacheCreationTokens: number
   cacheReadTokens: number
+  /**
+   * Cache-write split by TTL. Both are subsets of `cacheCreationTokens` and are
+   * present only when the provider reported the breakdown — a 1-hour write bills
+   * at 2x base input against 1.25x for a 5-minute one, so collapsing them loses
+   * the only signal that separates the two rates.
+   */
+  cacheCreation5mTokens?: number
+  cacheCreation1hTokens?: number
 }
 
 export interface SpanHandoff {
@@ -76,6 +126,11 @@ export interface AgentTraceSpan {
   finishReasons?: string[]
   errorType?: string
   errorMessage?: string
+  spanKind?: SpanKind
+  status?: SpanStatus
+  runId?: string
+  turnId?: string
+  attemptId?: string
   sessionId: string
   surface: SpanSurface
   pluginId?: string

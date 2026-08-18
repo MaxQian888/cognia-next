@@ -262,3 +262,63 @@ describe("pruneProviderCostOlderThan", () => {
     expect(await pruneProviderCostOlderThan(90, NOON)).toBe(0)
   })
 })
+
+describe("incrementProviderCost return value", () => {
+  it("returns the provider's committed day total summed across models", async () => {
+    const now = new Date(2026, 5, 5, 12, 0, 0).getTime()
+    const first = await incrementProviderCost({
+      providerId: "openai",
+      modelId: "gpt-5",
+      costUsd: 0.25,
+      now,
+    })
+    expect(first).toEqual({
+      day: localDayString(now),
+      providerId: "openai",
+      providerTotalUsd: 0.25,
+    })
+
+    // A second model for the same provider rolls into the same provider total.
+    const second = await incrementProviderCost({
+      providerId: "openai",
+      modelId: "gpt-5-mini",
+      costUsd: 0.75,
+      now,
+    })
+    expect(second?.providerTotalUsd).toBeCloseTo(1.0, 6)
+
+    // Another provider does not contaminate it.
+    const other = await incrementProviderCost({
+      providerId: "anthropic",
+      modelId: "claude-opus-5",
+      costUsd: 4,
+      now,
+    })
+    expect(other?.providerTotalUsd).toBeCloseTo(4, 6)
+    expect(other?.providerId).toBe("anthropic")
+  })
+
+  it("returns null for input the writer rejects", async () => {
+    expect(await incrementProviderCost({ providerId: "", modelId: "m", costUsd: 1 })).toBeNull()
+    expect(await incrementProviderCost({ providerId: "p", modelId: "", costUsd: 1 })).toBeNull()
+    expect(
+      await incrementProviderCost({ providerId: "p", modelId: "m", costUsd: Number.NaN })
+    ).toBeNull()
+    expect(await incrementProviderCost({ providerId: "p", modelId: "m", costUsd: -1 })).toBeNull()
+    // Zero cost with no tokens stays the legacy no-op.
+    expect(await incrementProviderCost({ providerId: "p", modelId: "m", costUsd: 0 })).toBeNull()
+  })
+
+  it("returns a total for a zero-cost turn that carried tokens", async () => {
+    const now = new Date(2026, 5, 5, 12, 0, 0).getTime()
+    const res = await incrementProviderCost({
+      providerId: "ollama",
+      modelId: "llama-3",
+      costUsd: 0,
+      inputTokens: 1200,
+      now,
+    })
+    expect(res).not.toBeNull()
+    expect(res?.providerTotalUsd).toBe(0)
+  })
+})

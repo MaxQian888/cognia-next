@@ -22,7 +22,7 @@ import {
 import { generateEmbedding } from "@cognia/vector/embedding"
 import type { TwinDraft, TwinJob } from "@/types/twin"
 import type { EmbeddingConfig } from "@/lib/twin/ingest/embed"
-import type { LlmClient } from "./llm"
+import type { LlmClient, LlmUsageSnapshot } from "./llm"
 import { runOrchestrator } from "./orchestrator"
 import { throwIfTwinJobInterrupted } from "@/lib/twin/job-control"
 
@@ -50,6 +50,8 @@ export interface RunDistillResult {
   entityCount: number
   /** Total prompt + completion tokens consumed across the five agents. */
   llmTokensUsed: number
+  /** Full usage snapshot — the four token classes bill at four different rates. */
+  llmUsage: LlmUsageSnapshot
   /** Per-agent failure messages when isolation kicked in (empty on a clean run). */
   partialFailures: Record<string, string>
 }
@@ -68,6 +70,7 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
       playbookCount: 0,
       entityCount: 0,
       llmTokensUsed: 0,
+      llmUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       partialFailures: {},
     }
   }
@@ -193,6 +196,7 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
     playbookCount: result.playbooks.length,
     entityCount: result.entities.length,
     llmTokensUsed: result.llmTokensUsed ?? 0,
+    llmUsage: result.llmUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
     partialFailures: result.partialFailures ?? {},
   }
 }

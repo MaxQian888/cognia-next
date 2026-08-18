@@ -437,3 +437,105 @@ describe("agent-trace emitter", () => {
     })
   })
 })
+
+describe("span lifecycle status and identity (ADR-0130)", () => {
+  beforeEach(() => {
+    __resetAgentTraceEmitterForTesting()
+  })
+
+  afterEach(() => {
+    __setAgentTraceNowForTesting(null)
+  })
+
+  const base = {
+    operationName: "chat" as const,
+    providerName: "anthropic" as const,
+    sessionId: "s1",
+    surface: "chat" as const,
+  }
+
+  it("creates a span pending and settles it ok on a clean end", () => {
+    const { spanId } = startSpan(base)
+    expect(__getActiveSpanForTesting(spanId)?.status).toBe("pending")
+    const ended = endSpan(spanId)
+    expect(ended?.status).toBe("ok")
+  })
+
+  it("settles a span with an error type as error", () => {
+    const { spanId } = startSpan(base)
+    expect(endSpan(spanId, { errorType: "provider_error" })?.status).toBe("error")
+  })
+
+  it("defaults spanKind to internal and carries an explicit kind through", () => {
+    const { spanId } = startSpan(base)
+    expect(endSpan(spanId)?.spanKind).toBe("internal")
+
+    const client = startSpan({ ...base, spanKind: "client" })
+    expect(endSpan(client.spanId)?.spanKind).toBe("client")
+  })
+
+  it("carries the execution identity onto the finished span", () => {
+    // Without these a span cannot be joined to the canonical event log or the
+    // billing row describing the same turn.
+    const { spanId } = startSpan({
+      ...base,
+      runId: "run-1",
+      turnId: "turn-2",
+      attemptId: "attempt-3",
+      projectId: "proj-4",
+    })
+    expect(endSpan(spanId)).toMatchObject({
+      runId: "run-1",
+      turnId: "turn-2",
+      attemptId: "attempt-3",
+      projectId: "proj-4",
+    })
+  })
+
+  it("emits an abandoned span as incomplete instead of erasing it", () => {
+    // A turn that hung used to look identical to a turn that never started.
+    const written: AgentTraceSpan[] = []
+    setAgentTraceWriter((span) => written.push(span))
+
+    let now = 1_000
+    __setAgentTraceNowForTesting(() => now)
+    const { spanId } = startSpan(base)
+    now = 1_000 + 60_000
+
+    expect(reapStaleSpans(1_000)).toBe(1)
+    expect(written).toHaveLength(1)
+    expect(written[0]!.spanId).toBe(spanId)
+    expect(written[0]!.status).toBe("incomplete")
+    // No end time — the work genuinely never finished, so claiming a duration
+    // would be a fabricated measurement.
+    expect(written[0]!.endTime).toBeUndefined()
+  })
+
+  it("does not emit a reaped span twice", () => {
+    const written: AgentTraceSpan[] = []
+    setAgentTraceWriter((span) => written.push(span))
+    let now = 1_000
+    __setAgentTraceNowForTesting(() => now)
+    startSpan(base)
+    now = 1_000 + 60_000
+    reapStaleSpans(1_000)
+    reapStaleSpans(1_000)
+    expect(written).toHaveLength(1)
+  })
+
+  it("survives a writer that throws while reaping", () => {
+    setAgentTraceWriter(() => {
+      throw new Error("transport down")
+    })
+    let now = 1_000
+    __setAgentTraceNowForTesting(() => now)
+    startSpan(base)
+    now = 1_000 + 60_000
+    expect(() => reapStaleSpans(1_000)).not.toThrow()
+  })
+
+  it("marks a one-shot finished span ok or error without passing through pending", () => {
+    expect(emitFinishedSpan({ ...base, durationMs: 5 })?.status).toBe("ok")
+    expect(emitFinishedSpan({ ...base, durationMs: 5, errorType: "boom" })?.status).toBe("error")
+  })
+})

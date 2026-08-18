@@ -25,6 +25,8 @@ import { NativeVectorStore, type IVectorStore, type PayloadFilter } from "@cogni
 import { ensureCollectionDimensionCompatible } from "@cognia/vector/dimension-guard"
 import type { EmbeddingModelConfig } from "@cognia/vector/embedding"
 
+import { instrumentSpan } from "@/lib/agent-trace/instrument"
+
 /** Machine-readable failure modes the tool layer maps onto typed tool errors. */
 export type VectorServiceErrorCode =
   | "unsupported-platform"
@@ -169,28 +171,58 @@ export function createAgentVectorService(deps: AgentVectorServiceDeps): AgentVec
     async search(nativeCollection, query, options = {}) {
       const { store } = resolve()
       throwIfAborted(options.signal)
-      try {
-        // Probe first: a missing collection is an empty result, and checking
-        // before embedding also avoids spending the user's embedding quota on
-        // a query that can have no hits.
-        if (!(await collectionExists(store, nativeCollection))) return []
-        throwIfAborted(options.signal)
+      // `retrieval` is one of the five OTel operation names this app declares,
+      // and it had NO producer: a vector query embedded the text, hit the
+      // store, and left no trace, so retrieval latency was only ever visible as
+      // unexplained time inside the tool that asked for it.
+      return instrumentSpan(
+        {
+          operationName: "retrieval",
+          providerName: "cognia.plugin",
+          // The collection is the only stable identity here; the service is
+          // deliberately blind to project ids and logical names.
+          sessionId: nativeCollection,
+          surface: "retrieval",
+          metadata: {
+            collection: nativeCollection,
+            topK: options.topK ?? 5,
+            ...(options.threshold !== undefined ? { threshold: options.threshold } : {}),
+            filterCount: options.filters?.length ?? 0,
+          },
+        },
+        async () => {
+          try {
+            // Probe first: a missing collection is an empty result, and checking
+            // before embedding also avoids spending the user's embedding quota on
+            // a query that can have no hits.
+            if (!(await collectionExists(store, nativeCollection))) return []
+            throwIfAborted(options.signal)
 
-        const results = await store.searchDocuments(nativeCollection, query, {
-          topK: options.topK ?? 5,
-          ...(options.threshold !== undefined ? { threshold: options.threshold } : {}),
-          ...(options.filters?.length ? { filters: options.filters } : {}),
+            const results = await store.searchDocuments(nativeCollection, query, {
+              topK: options.topK ?? 5,
+              ...(options.threshold !== undefined ? { threshold: options.threshold } : {}),
+              ...(options.filters?.length ? { filters: options.filters } : {}),
+            })
+            throwIfAborted(options.signal)
+            return results.map((r) => ({
+              id: r.id,
+              content: r.content,
+              score: r.score,
+              ...(r.metadata ? { metadata: r.metadata as Record<string, unknown> } : {}),
+            }))
+          } catch (err) {
+            throw asServiceError(err)
+          }
+        },
+        // Hit count and top score, never the retrieved content — that is user
+        // data and the whole point of the `data-only` retrieval policy.
+        (results) => ({
+          metadata: {
+            hitCount: results.length,
+            topScore: results[0]?.score ?? 0,
+          },
         })
-        throwIfAborted(options.signal)
-        return results.map((r) => ({
-          id: r.id,
-          content: r.content,
-          score: r.score,
-          ...(r.metadata ? { metadata: r.metadata as Record<string, unknown> } : {}),
-        }))
-      } catch (err) {
-        throw asServiceError(err)
-      }
+      )
     },
 
     async addDocument(nativeCollection, input) {

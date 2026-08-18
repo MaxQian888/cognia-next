@@ -27,6 +27,7 @@ import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirr
 import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
 import { deploymentKeyOf, DEPLOYMENT_MODEL_WILDCARD } from "@cognia/provider-types/deployment"
 import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
+import { providerNameFromId } from "@cognia/agent-trace/provider-name"
 import type { SpanSurface } from "@/types/agent-trace/span"
 
 export interface ProviderOutcome {
@@ -168,7 +169,8 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
     // (local / free-tier models) still roll up their token volume so the
     // settings Cost tab — which reads this table — is not blank for them.
     if (ok && modelId && (effectiveCostUsd > 0 || (inputTokens ?? 0) + (outputTokens ?? 0) > 0)) {
-      if (effectiveCostUsd > 0) {
+      const optimistic = effectiveCostUsd > 0
+      if (optimistic) {
         useProviderCostMirrorStore.getState().addCost(providerId, effectiveCostUsd)
       }
       void import("@/lib/db/provider-cost-daily")
@@ -181,7 +183,26 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
             outputTokens,
           })
         )
-        .catch(() => {})
+        .then((committed) => {
+          // Snap the mirror to what actually landed. Without this the optimistic
+          // add above and the durable rollup drift apart permanently whenever a
+          // write is lost, and the drift only surfaces as a budget that fires at
+          // the wrong threshold after the next boot re-hydrates from Dexie.
+          if (committed) {
+            useProviderCostMirrorStore
+              .getState()
+              .reconcileProvider(committed.providerId, committed.day, committed.providerTotalUsd)
+          } else if (optimistic) {
+            // The write was rejected as invalid — the mirror must not keep spend
+            // that will never be persisted.
+            useProviderCostMirrorStore.getState().rollbackCost(providerId, effectiveCostUsd)
+          }
+        })
+        .catch(() => {
+          if (optimistic) {
+            useProviderCostMirrorStore.getState().rollbackCost(providerId, effectiveCostUsd)
+          }
+        })
     }
   } catch {
     // Telemetry must never break a send.
@@ -199,10 +220,10 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
         traceId: outcome.traceId,
         parentSpanId: outcome.parentSpanId,
         operationName: "chat",
-        // The narrow `SpanProviderName` union only models anthropic|openai|
-        // cognia.*; arbitrary providerIds bucket to "openai" with the true id
-        // preserved in `metadata.providerId` (OTLP / waterfall read metadata).
-        providerName: providerId === "anthropic" ? "anthropic" : "openai",
+        // Resolved to an OTel GenAI well-known value when one applies, else the
+        // provider id verbatim as a spec-legal custom value. `metadata.providerId`
+        // still carries the raw id for callers that key off it.
+        providerName: providerNameFromId(providerId),
         sessionId,
         surface: outcome.surface ?? "chat",
         requestModel: modelId,

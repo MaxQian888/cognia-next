@@ -15657,6 +15657,10 @@
     }
   },
   "observability": {
+    "droppedSpans": {
+      "label": "{count, plural, =1 {# span dropped} other {# spans dropped}}",
+      "tooltip": "{count, plural, =1 {# provider span was} other {# provider spans were}} not recorded because no trace context was threaded through the call. The waterfall below is missing them."
+    },
     "empty": {
       "hint": "Agent runs, tool calls, chats and workflows record spans here. Start a conversation or run an agent, or widen the time range to see older telemetry.",
       "title": "No telemetry in this window",
@@ -15694,6 +15698,8 @@
     "noData": "No data in this window",
     "panels": {
       "byModel": "Spans by model",
+      "byProject": "By project",
+      "byProvider": "By provider",
       "bySurface": "Spans by surface",
       "cacheHitRate": "Cache hit rate",
       "costOverTime": "Cost over time",
@@ -28234,6 +28240,7 @@
       "teams": "Multi-character coordination — round-robin, supervisor, manual.",
       "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
+      "usageCost": "Spending limits and the local trace debug session",
       "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
       "workspaceTrust": "Trust folders before agents run commands in them. Untrusted workspaces run in Restricted Mode."
     },
@@ -31452,6 +31459,7 @@
       "teams": "Teams",
       "terminal": "Terminal",
       "tools": "Tools",
+      "usageCost": "Usage & cost",
       "workflows": "Workflows",
       "workspaceTrust": "Workspace Trust"
     },
@@ -32069,6 +32077,24 @@
         "remove": "Remove field",
         "required": "Required",
         "submitOnEnter": "Enter submits"
+      }
+    },
+    "usageCost": {
+      "budget": {
+        "dailyLabel": "Daily limit (USD)",
+        "description": "Hard USD ceilings. Unlike the routing budget under Providers, reaching one of these blocks the next request until you approve it.",
+        "hardBlockHint": "You are warned at 80% and 95%. At 100% the next request is held until you approve one more.",
+        "monthlyLabel": "Monthly limit (USD)",
+        "noLimit": "No limit",
+        "title": "Spending limits"
+      },
+      "debug": {
+        "activeBadge": "{minutes, plural, =0 {expiring} =1 {1 min left} other {# min left}}",
+        "armFor": "{minutes} min",
+        "description": "Captures streaming deltas, prompts and tool payloads locally so a problem can be reproduced. Expires on its own and never leaves this device.",
+        "disarm": "Stop now",
+        "privacyHint": "Captured content is excluded from backups, exports and diagnostic reports. Sessions default to {minutes} minutes.",
+        "title": "Trace debug session"
       }
     },
     "workflow": {

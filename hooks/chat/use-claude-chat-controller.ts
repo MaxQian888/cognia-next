@@ -149,6 +149,7 @@ import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { chatTurnPerformance } from "@/lib/perf/chat-turn-performance"
+import { enforceCostBudget, isCostBudgetConfigured } from "@/lib/usage/cost-budget-gate"
 import type { UIMessage } from "ai"
 import { registerInteractiveWorkSubmissionEvents } from "@/lib/work-submission/terminal-events"
 import {
@@ -1001,6 +1002,37 @@ export function useClaudeChat() {
         ? resolveSessionWorkspaceRoot(executionContext)
         : undefined
       const executionRunId = runIdForTurn(sessionId, chatRunId)
+
+      // ADR-0130 hard cost ceiling. Evaluated BEFORE any durable acceptance so
+      // a refused overrun leaves no half-open run behind. Fails open on any
+      // infrastructure error — the user asked for a spending limit, not for
+      // their app to stop when Dexie hiccups.
+      //
+      // The synchronous pre-check keeps the default install (no ceiling
+      // configured) on exactly the code path it had before: no extra await, no
+      // Dexie read, nothing to pay for a feature that is switched off.
+      const budgetDecision = isCostBudgetConfigured()
+        ? await enforceCostBudget({
+            ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
+            runId: executionRunId,
+          })
+        : null
+      if (budgetDecision && !budgetDecision.allowed) {
+        store.getState().setSessionStatus(sessionId, "idle")
+        store.getState().setSessionDiagnostic(
+          sessionId,
+          toDiagnostic(new Error("cost_budget_exceeded"), {
+            source: "chat",
+            meta: { sessionId, blockedBy: budgetDecision.blockedBy.map((v) => v.scopeKey) },
+          })
+        )
+        chatTurnPerformance.finish(sessionId, "failed")
+        await settleChatTurnForSession(sessionId, {
+          outcome: "failed",
+          errorCode: "cost_budget_exceeded",
+        })
+        return
+      }
       // Durable acceptance (ADR-0123), phase A. `effectiveContent` has been
       // final since the Workbench payload gate — plugin hooks, pipes and
       // redaction all ran before it, and nothing below reassigns it — so
@@ -1061,6 +1093,7 @@ export function useClaudeChat() {
         await startDirectChatExecutionRun({
           sessionId,
           runId: executionRunId,
+          ...(providerText ? { prompt: providerText } : {}),
           ...(session?.projectId ? { projectId: session.projectId } : {}),
           ...((boundWorkspaceRoot ?? sendOptions.cwd)
             ? { workspaceRoot: boundWorkspaceRoot ?? sendOptions.cwd }

@@ -38,7 +38,7 @@ import { runKnowledgeAgent } from "./agents/knowledge-agent"
 import { runEntityMergeAgent } from "./agents/entity-merge-agent"
 import { runSynthesizer, type SynthDraft } from "./agents/synthesizer"
 import { runEvaluator } from "./agents/evaluator"
-import type { LlmClient } from "./llm"
+import type { LlmClient, LlmUsageSnapshot } from "./llm"
 import { DEFAULT_AGENT_TIMEOUT_MS, withTimeout, withTimeoutOrFallback } from "./with-timeout"
 import { runWithConcurrency } from "@/lib/plugin/core/concurrency"
 import { throwIfTwinJobInterrupted } from "@/lib/twin/job-control"
@@ -96,6 +96,16 @@ export interface OrchestratorOutput {
   partialFailures: Record<string, string>
   /** Cumulative LLM tokens consumed across all agents (0 when client doesn't track). */
   llmTokensUsed: number
+  /**
+   * The FULL usage snapshot the client reported.
+   *
+   * `llmTokensUsed` collapses it to one number, which is enough for the Jobs
+   * tab but not for billing: input, output and the two cache tiers bill at
+   * four different rates, so a distillation could spend real money and be
+   * metered as an undifferentiated token count that no pricing layer could
+   * turn back into a cost.
+   */
+  llmUsage: LlmUsageSnapshot
 }
 
 export async function runOrchestrator(input: OrchestratorInput): Promise<OrchestratorOutput> {
@@ -272,7 +282,13 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   throwIfTwinJobInterrupted(input.signal)
   await onProgress?.("evaluator", 1.0)
 
-  const usage = llm.getUsageSnapshot?.() ?? { totalTokens: 0 }
+  // A client that tracks nothing reports a zeroed snapshot, not a partial one:
+  // the billing path reads all four token classes and must not see `undefined`.
+  const usage: LlmUsageSnapshot = llm.getUsageSnapshot?.() ?? {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  }
 
   return {
     styleSamples: styleResult.value.samples,
@@ -285,6 +301,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     evaluations: evalResult.value.evaluations,
     partialFailures,
     llmTokensUsed: usage.totalTokens ?? 0,
+    llmUsage: usage,
   }
 }
 

@@ -233,6 +233,135 @@ describe("spanToOtlp", () => {
     const out = spanToOtlp(makeSpan({ endTime: undefined, startTime: 1_700_000_000_000 }))
     expect(out.resourceSpans[0].scopeSpans[0].spans[0].endTimeUnixNano).toBe("1700000000000000000")
   })
+
+  it("maps spanKind onto the OTLP numeric kind and defaults legacy rows to internal", () => {
+    const kindOf = (over: Partial<AgentTraceSpan>): number =>
+      spanToOtlp(makeSpan(over)).resourceSpans[0].scopeSpans[0].spans[0].kind
+    expect(kindOf({ spanKind: "client" })).toBe(3)
+    expect(kindOf({ spanKind: "server" })).toBe(2)
+    expect(kindOf({ spanKind: "internal" })).toBe(1)
+    // Pre-v172 rows carry no kind and really were internal.
+    expect(kindOf({ spanKind: undefined })).toBe(1)
+  })
+
+  it("emits the OpenInference semantic kind for every operation name", () => {
+    const kindAttr = (operationName: AgentTraceSpan["operationName"]): unknown =>
+      spanToOtlp(
+        makeSpan({ operationName })
+      ).resourceSpans[0].scopeSpans[0].spans[0].attributes.find(
+        (a) => a.key === "openinference.span.kind"
+      )?.value
+    expect(kindAttr("chat")).toEqual({ stringValue: "LLM" })
+    expect(kindAttr("execute_tool")).toEqual({ stringValue: "TOOL" })
+    expect(kindAttr("invoke_agent")).toEqual({ stringValue: "AGENT" })
+    expect(kindAttr("invoke_workflow")).toEqual({ stringValue: "CHAIN" })
+    expect(kindAttr("retrieval")).toEqual({ stringValue: "RETRIEVER" })
+    expect(kindAttr("embeddings")).toEqual({ stringValue: "EMBEDDING" })
+  })
+
+  it("reports an unfinished span as UNSET rather than OK", () => {
+    const statusOf = (over: Partial<AgentTraceSpan>): number | undefined =>
+      spanToOtlp(makeSpan(over)).resourceSpans[0].scopeSpans[0].spans[0].status?.code
+    // A `pending`/`incomplete` span has no outcome — claiming OK would tell the
+    // backend the work succeeded.
+    expect(statusOf({ status: "pending", endTime: undefined })).toBe(0)
+    expect(statusOf({ status: "incomplete", endTime: undefined })).toBe(0)
+    expect(statusOf({ status: "ok" })).toBe(1)
+    expect(statusOf({ status: "error", errorType: "boom" })).toBe(2)
+    // Legacy rows have no status and keep the old error-flag inference.
+    expect(statusOf({ status: undefined, errorType: "boom" })).toBe(2)
+    expect(statusOf({ status: undefined })).toBe(1)
+  })
+
+  it("ends an unfinished span at its last observed event, not at its start", () => {
+    const out = spanToOtlp(
+      makeSpan({
+        status: "incomplete",
+        endTime: undefined,
+        startTime: 1_700_000_000_000,
+        events: [
+          { name: "tool_use", at: 1_700_000_000_400 },
+          { name: "retry", at: 1_700_000_000_200 },
+        ],
+      })
+    )
+    // Lower bound on real duration — never a claim that the work finished.
+    expect(out.resourceSpans[0].scopeSpans[0].spans[0].endTimeUnixNano).toBe("1700000000400000000")
+  })
+
+  it("emits the execution identity and lifecycle status as vendor attributes", () => {
+    const out = spanToOtlp(
+      makeSpan({
+        runId: "run-1",
+        turnId: "turn-2",
+        attemptId: "attempt-3",
+        projectId: "proj-4",
+        status: "ok",
+      })
+    )
+    const attrs = out.resourceSpans[0].scopeSpans[0].spans[0].attributes
+    const value = (key: string): unknown => attrs.find((a) => a.key === key)?.value
+    expect(value("cognia.run.id")).toEqual({ stringValue: "run-1" })
+    expect(value("cognia.turn.id")).toEqual({ stringValue: "turn-2" })
+    expect(value("cognia.attempt.id")).toEqual({ stringValue: "attempt-3" })
+    expect(value("cognia.project.id")).toEqual({ stringValue: "proj-4" })
+    expect(value("cognia.span.status")).toEqual({ stringValue: "ok" })
+  })
+
+  it("splits cache-creation tokens by TTL when the provider reported it", () => {
+    const out = spanToOtlp(
+      makeSpan({
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheCreationTokens: 900,
+          cacheReadTokens: 20,
+          cacheCreation5mTokens: 400,
+          cacheCreation1hTokens: 500,
+        },
+      })
+    )
+    const attrs = out.resourceSpans[0].scopeSpans[0].spans[0].attributes
+    const value = (key: string): unknown => attrs.find((a) => a.key === key)?.value
+    expect(value("gen_ai.usage.cache_creation.input_tokens")).toEqual({ intValue: "900" })
+    expect(value("cognia.usage.cache_creation.ephemeral_5m.input_tokens")).toEqual({
+      intValue: "400",
+    })
+    expect(value("cognia.usage.cache_creation.ephemeral_1h.input_tokens")).toEqual({
+      intValue: "500",
+    })
+  })
+
+  it("omits the TTL split when the provider did not report it", () => {
+    const attrs = spanToOtlp(makeSpan()).resourceSpans[0].scopeSpans[0].spans[0].attributes
+    expect(attrs.some((a) => a.key.includes("ephemeral_"))).toBe(false)
+  })
+
+  it("promotes joinable metadata keys instead of burying them under cognia.metadata.*", () => {
+    const out = spanToOtlp(
+      makeSpan({
+        metadata: {
+          toolUseId: "toolu_01",
+          requestId: "req_99",
+          statusCode: 429,
+          attempt: 2,
+          toolResultSizeBytes: 4096,
+          branch: "main",
+        },
+      })
+    )
+    const attrs = out.resourceSpans[0].scopeSpans[0].spans[0].attributes
+    const value = (key: string): unknown => attrs.find((a) => a.key === key)?.value
+    expect(value("gen_ai.tool.call.id")).toEqual({ stringValue: "toolu_01" })
+    expect(value("cognia.api.request_id")).toEqual({ stringValue: "req_99" })
+    expect(value("http.response.status_code")).toEqual({ intValue: "429" })
+    expect(value("cognia.attempt.number")).toEqual({ intValue: "2" })
+    expect(value("cognia.tool.result_size_bytes")).toEqual({ intValue: "4096" })
+    // Promoted keys are not also emitted under the vendor bag.
+    expect(attrs.some((a) => a.key === "cognia.metadata.toolUseId")).toBe(false)
+    // Unrecognised keys still land there.
+    expect(value("cognia.metadata.branch")).toEqual({ stringValue: "main" })
+  })
 })
 
 describe("spansToOtlp", () => {

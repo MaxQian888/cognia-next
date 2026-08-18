@@ -29,16 +29,22 @@ export function startRootTrace(input: StartSpanInput): { ctx: TraceContext; span
 }
 
 /**
- * Derive a `StartSpanInput` for a child span that nests under `ctx`. Forces the
- * child onto the parent's trace and parent span; any caller-supplied
- * `traceId`/`parentSpanId` are stripped by the `Omit` so they cannot break the
- * hierarchy.
+ * Derive a `StartSpanInput` for a child span that nests under `ctx`.
+ *
+ * The trace is always the context's — that is the invariant worth forcing, and
+ * the `Omit` keeps a caller from breaking it. The PARENT is not: pass
+ * `parentSpanId` to nest under an intermediate span (a tool call, a subagent
+ * dispatch) instead of the turn root. Defaulting to the root is what made every
+ * trace exactly one level deep — a subagent's work appeared as a sibling of the
+ * tool call that spawned it, so the waterfall could not show that one caused the
+ * other.
  */
 export function childSpanInput(
   ctx: TraceContext,
-  input: Omit<StartSpanInput, "traceId" | "parentSpanId">
+  input: Omit<StartSpanInput, "traceId" | "parentSpanId">,
+  parentSpanId: string = ctx.rootSpanId
 ): StartSpanInput {
-  return { ...input, traceId: ctx.traceId, parentSpanId: ctx.rootSpanId }
+  return { ...input, traceId: ctx.traceId, parentSpanId }
 }
 
 /** Format the explicit renderer context for a sampled W3C propagation hop. */

@@ -70,6 +70,46 @@ export async function listAnnotations(): Promise<TraceAnnotationRow[]> {
   return rows
 }
 
+/** An annotation together with whether the trace it describes still exists. */
+export interface AnnotationWithTraceState extends TraceAnnotationRow {
+  /**
+   * `true` when no span carries this `traceId` any more — the annotation
+   * outlived the 30-day span retention window. The note and its failure-mode
+   * label are still meaningful for taxonomy roll-ups, but the trace can no
+   * longer be opened, so callers must not offer a drill-down for it.
+   */
+  orphaned: boolean
+}
+
+/**
+ * List annotations, resolving whether each one's trace still exists.
+ *
+ * `traceAnnotations` is deliberately permanent while `agentTraces` is pruned at
+ * 30 days (see the retention override in
+ * `lib/data-governance/table-catalog.ts`), so an annotation naturally outlives
+ * its subject. Without this the error-analysis surface offers a drill-down that
+ * silently opens nothing.
+ *
+ * One indexed `anyOf` lookup over the annotated trace ids — not a scan per row.
+ */
+export async function listAnnotationsWithTraceState(): Promise<AnnotationWithTraceState[]> {
+  const rows = await listAnnotations()
+  if (rows.length === 0) return []
+  const traceIds = [...new Set(rows.map((r) => r.traceId).filter(Boolean))]
+  const live = new Set<string>()
+  if (traceIds.length > 0) {
+    const spans = await getDb().agentTraces.where("traceId").anyOf(traceIds).toArray()
+    for (const span of spans) live.add(span.traceId)
+  }
+  return rows.map((r) => ({ ...r, orphaned: !live.has(r.traceId) }))
+}
+
+/** Count annotations whose trace has been pruned away. */
+export async function orphanedAnnotationCount(): Promise<number> {
+  const rows = await listAnnotationsWithTraceState()
+  return rows.reduce((n, r) => n + (r.orphaned ? 1 : 0), 0)
+}
+
 /** Count annotations grouped by `failureMode`; unlabeled rows are ignored. */
 export async function failureModeCounts(): Promise<Record<string, number>> {
   const rows = await getDb().traceAnnotations.toArray()

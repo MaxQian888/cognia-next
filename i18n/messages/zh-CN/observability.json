@@ -1,4 +1,8 @@
 {
+  "droppedSpans": {
+    "label": "{count, plural, other {丢失 # 条 span}}",
+    "tooltip": "{count, plural, other {有 # 条 provider span 未被记录}}，原因是调用未传递 trace 上下文。下方的瀑布图缺少这些 span。"
+  },
   "empty": {
     "hint": "Agent 运行、工具调用、对话和工作流都会在此记录 span。发起一次对话或运行一个 Agent，或放宽时间范围以查看更早的遥测数据。",
     "title": "该时间窗口内暂无遥测数据",
@@ -36,6 +40,8 @@
   "noData": "该时间窗口内暂无数据",
   "panels": {
     "byModel": "按模型分布",
+    "byProject": "按项目",
+    "byProvider": "按提供商",
     "bySurface": "按来源分布",
     "cacheHitRate": "缓存命中率",
     "costOverTime": "成本走势",

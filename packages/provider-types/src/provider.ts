@@ -33,6 +33,35 @@ export interface ModelPricing {
   audioInputPer1M?: number
   /** Audio output token price. */
   audioOutputPer1M?: number
+
+  /* ── Non-token billing units (ADR-0130) ─────────────────────────────────
+   * Some real charges are not per-token at all, so a token-only price record
+   * structurally cannot express them. Anthropic bills web search per request
+   * and code execution per container-hour; OCR providers bill per page and TTS
+   * per character. Rates are per ONE unit (not per 1M) because the quantities
+   * are small integers.
+   */
+
+  /**
+   * USD per server-tool invocation, keyed by the normalized tool name emitted
+   * in `usage.server_tool_use` (`web_search`, `code_execution`, …). Example:
+   * web search at $10 per 1,000 searches is `{ web_search: 0.01 }`.
+   */
+  perRequestUsd?: Record<string, number>
+  /** USD per page — document/OCR providers. */
+  perPageUsd?: number
+  /** USD per character — TTS providers. */
+  perCharUsd?: number
+  /** USD per container-hour — sandboxed code execution. */
+  perContainerHourUsd?: number
+  /**
+   * Container-hours included per calendar month before {@link perContainerHourUsd}
+   * applies. Anthropic includes 1,550. The *consumed* portion is state and lives
+   * with the caller, which passes the remaining allowance in at costing time —
+   * the pricing module stays pure.
+   */
+  freeContainerHoursPerMonth?: number
+
   /**
    * Currency of the pricing values.
    * Defaults to 'USD'. Chinese providers may specify 'CNY'.

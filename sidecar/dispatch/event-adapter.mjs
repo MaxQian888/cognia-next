@@ -19,6 +19,7 @@
 //   { type: "result", subtype, session_id, usage, total_cost_usd, duration_ms, num_turns }
 
 import { randomUUID } from "node:crypto"
+import { normalizeUsageBlock } from "./usage-normalize.mjs"
 
 /**
  * Shape a tool-result payload for the renderer's `tool_result` content block.
@@ -902,41 +903,10 @@ export function createEventAdapter(ctx) {
         duration_api_ms: Date.now() - startedAt,
         num_turns: 1,
         total_cost_usd: info?.totalCostUsd ?? 0,
-        usage: {
-          input_tokens: usage.promptTokens ?? usage.inputTokens ?? 0,
-          output_tokens: usage.completionTokens ?? usage.outputTokens ?? 0,
-          // Window-prompt size (last agent-loop leg) when it differs from the
-          // summed `input_tokens`; lets the renderer report true context-window
-          // occupancy instead of the cumulative-billing total. Omitted (0) on
-          // single-leg turns where the two coincide.
-          ...(typeof usage.contextInputTokens === "number"
-            ? { context_input_tokens: usage.contextInputTokens }
-            : {}),
-          cache_creation_input_tokens:
-            usage.cacheCreationInputTokens ?? usage.inputTokenDetails?.cacheWriteTokens ?? 0,
-          // Cache-read candidates, most-normalized first: AI SDK v6 maps
-          // OpenAI-compatible `prompt_tokens_details.cached_tokens` to
-          // `cachedInputTokens`; DeepSeek additionally reports raw
-          // `prompt_cache_hit_tokens` (their context-caching-on-disk hit
-          // counter). Surfacing these makes per-turn cache hit rate
-          // observable for every openai-protocol provider.
-          cache_read_input_tokens:
-            usage.cacheReadInputTokens ??
-            usage.cachedInputTokens ??
-            usage.inputTokenDetails?.cacheReadTokens ??
-            usage.prompt_cache_hit_tokens ??
-            usage.promptCacheHitTokens ??
-            0,
-          // Reasoning / "thinking" tokens, when the provider breaks them out
-          // (AI SDK v6 surfaces `reasoningTokens` for OpenAI o-series/gpt-5,
-          // DeepSeek-reasoner, …). A SUBSET of output_tokens — already billed
-          // at the output rate — surfaced for observability. 0 when absent.
-          reasoning_tokens:
-            usage.reasoningTokens ??
-            usage.reasoning_tokens ??
-            usage.outputTokenDetails?.reasoningTokens ??
-            0,
-        },
+        // Alias normalization lives in one place (mirrored at
+        // `lib/ai/chat/usage-normalize.ts`, pinned by a parity test) so a new
+        // provider field reaches every consumer instead of one of three copies.
+        usage: normalizeUsageBlock(usage),
       }
       out.push(result)
       return out

@@ -2,6 +2,7 @@ import { buildModel as defaultBuildModel } from "./protocol-adapters/ai-sdk-adap
 import { resolveAdapter as defaultResolveProtocolAdapter } from "./protocol-adapters/registry.mjs"
 import { buildBedrockProviderOptions, discoverBedrockModels } from "./bedrock.mjs"
 import { discoverMcpServer as defaultDiscoverMcpServer } from "./mcp-runtime-gateway.mjs"
+import { toLanguageModelUsage } from "./usage-normalize.mjs"
 
 function modelInput(message) {
   const credentials = message.credentials ?? {}
@@ -113,50 +114,10 @@ function scrubError(error, credentials = {}) {
   return message
 }
 
-function numberOrUndefined(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-function adapterUsageToLanguageModelUsage(usage = {}) {
-  const input =
-    numberOrUndefined(usage.promptTokens) ??
-    numberOrUndefined(usage.inputTokens?.total) ??
-    numberOrUndefined(usage.inputTokens)
-  const output =
-    numberOrUndefined(usage.completionTokens) ??
-    numberOrUndefined(usage.outputTokens?.total) ??
-    numberOrUndefined(usage.outputTokens)
-  // `cachedInputTokens` / `cacheCreationInputTokens` / `reasoningTokens` are the
-  // AI SDK's deprecated top-level mirrors, removed in v7 — keep them as the
-  // first candidate for adapter payloads that still use those names, but fall
-  // through to the canonical `*TokenDetails` objects (populated since v6) before
-  // the repo's own nested shape.
-  const cacheRead =
-    numberOrUndefined(usage.cachedInputTokens) ??
-    numberOrUndefined(usage.inputTokenDetails?.cacheReadTokens) ??
-    numberOrUndefined(usage.inputTokens?.cacheRead)
-  const cacheWrite =
-    numberOrUndefined(usage.cacheCreationInputTokens) ??
-    numberOrUndefined(usage.inputTokenDetails?.cacheWriteTokens) ??
-    numberOrUndefined(usage.inputTokens?.cacheWrite)
-  const reasoning =
-    numberOrUndefined(usage.reasoningTokens) ??
-    numberOrUndefined(usage.outputTokenDetails?.reasoningTokens) ??
-    numberOrUndefined(usage.outputTokens?.reasoning)
-  return {
-    inputTokens: {
-      total: input,
-      noCache: input === undefined ? undefined : Math.max(0, input - (cacheRead ?? 0)),
-      cacheRead,
-      cacheWrite,
-    },
-    outputTokens: {
-      total: output,
-      text: output === undefined ? undefined : Math.max(0, output - (reasoning ?? 0)),
-      reasoning,
-    },
-  }
-}
+// The alias table this used to carry inline now lives in `usage-normalize.mjs`
+// alongside the snake_case normalizer, so a new provider spelling is understood
+// by both dispatch paths instead of only one.
+const adapterUsageToLanguageModelUsage = toLanguageModelUsage
 
 function languageModelFinishReason(value) {
   const raw = typeof value === "string" && value ? value : "stop"

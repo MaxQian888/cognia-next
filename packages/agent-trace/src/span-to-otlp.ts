@@ -15,7 +15,7 @@
  * https://opentelemetry.io/docs/specs/otlp/#otlphttp
  */
 
-import type { AgentTraceSpan, SpanEvent } from "./types"
+import type { AgentTraceSpan, SpanEvent, SpanKind, SpanOperationName } from "./types"
 
 /** Service identity attached to every batch. Configurable via the OTLP
  * transport options so users can tag traces with their own service name. */
@@ -36,13 +36,40 @@ const INSTRUMENTATION_SCOPE = {
   version: "1.0.0",
 } as const
 
-/** OTLP `Span.kind` enum (numeric per the proto). All agent-trace spans
- * are internal — we're not modeling client/server boundaries here. */
-const SPAN_KIND_INTERNAL = 1
+/**
+ * OTLP `Span.kind` enum (numeric per the proto):
+ * 0 unspecified, 1 internal, 2 server, 3 client, 4 producer, 5 consumer.
+ *
+ * A span with no `spanKind` predates the field and really was internal, so it
+ * maps to `internal` rather than `unspecified`.
+ */
+const OTLP_SPAN_KIND: Record<SpanKind, number> = {
+  internal: 1,
+  server: 2,
+  client: 3,
+}
 
 /** OTLP `Status.code`: 0 unset, 1 ok, 2 error. */
+const STATUS_UNSET = 0
 const STATUS_OK = 1
 const STATUS_ERROR = 2
+
+/**
+ * OpenInference `openinference.span.kind` — the attribute Phoenix / Arize and
+ * a growing set of GenAI backends key their span rendering on. It is a
+ * *semantic* role, orthogonal to the OTel `Span.kind` transport role above:
+ * both are emitted because consumers read one or the other, never both.
+ *
+ * https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md
+ */
+const OPENINFERENCE_SPAN_KIND: Record<SpanOperationName, string> = {
+  chat: "LLM",
+  embeddings: "EMBEDDING",
+  execute_tool: "TOOL",
+  invoke_agent: "AGENT",
+  invoke_workflow: "CHAIN",
+  retrieval: "RETRIEVER",
+}
 
 export interface OtlpResourceSpans {
   resourceSpans: OtlpResourceSpan[]
@@ -151,25 +178,61 @@ function buildResourceAttributes(resource: OtlpResourceMetadata): OtlpAttribute[
 
 function buildOtlpSpan(span: AgentTraceSpan): OtlpSpan {
   const startNs = msToNanoString(span.startTime)
-  const endNs = msToNanoString(span.endTime ?? span.startTime)
   const attrs = buildSpanAttributes(span)
   const isError = Boolean(span.errorType || span.errorMessage)
   const out: OtlpSpan = {
     traceId: hexToBase64(span.traceId, 16),
     spanId: hexToBase64(span.spanId, 8),
     name: buildSpanName(span),
-    kind: SPAN_KIND_INTERNAL,
+    kind: OTLP_SPAN_KIND[span.spanKind ?? "internal"] ?? OTLP_SPAN_KIND.internal,
     startTimeUnixNano: startNs,
-    endTimeUnixNano: endNs,
+    endTimeUnixNano: msToNanoString(effectiveEndTime(span)),
     attributes: attrs,
     status: {
-      code: isError ? STATUS_ERROR : STATUS_OK,
+      code: statusCode(span, isError),
       ...(isError && span.errorMessage ? { message: span.errorMessage } : {}),
     },
   }
   if (span.parentSpanId) out.parentSpanId = hexToBase64(span.parentSpanId, 8)
   if (span.events && span.events.length > 0) out.events = span.events.map(buildOtlpEvent)
   return out
+}
+
+/** True when the span never reached a terminal callback. */
+function isUnfinished(span: AgentTraceSpan): boolean {
+  return span.status === "pending" || span.status === "incomplete"
+}
+
+/**
+ * End timestamp for the wire.
+ *
+ * A finished span carries its own. An *unfinished* one (`pending` /
+ * `incomplete`) has none, and OTLP has no way to say "still open" — a zero
+ * would make every consumer compute a negative duration. So the exported end is
+ * the last moment the span was observed alive: its newest recorded event, or
+ * its start. That is a lower bound on real duration rather than a claim the
+ * work completed instantly, and `cognia.span.status` on the same span says
+ * which of the two it is.
+ */
+function effectiveEndTime(span: AgentTraceSpan): number {
+  if (typeof span.endTime === "number") return span.endTime
+  let latest = span.startTime
+  for (const event of span.events ?? []) {
+    if (typeof event.at === "number" && event.at > latest) latest = event.at
+  }
+  return latest
+}
+
+/**
+ * Map the span lifecycle onto the OTLP status code. An unfinished span has no
+ * outcome yet, so it is `UNSET` — reporting `OK` would tell a backend the work
+ * succeeded. Rows written before the `status` field fall back to the old
+ * error-flag inference, which is exactly what they meant then.
+ */
+function statusCode(span: AgentTraceSpan, isError: boolean): number {
+  if (isUnfinished(span)) return STATUS_UNSET
+  if (span.status === "error" || isError) return STATUS_ERROR
+  return STATUS_OK
 }
 
 function buildSpanName(span: AgentTraceSpan): string {
@@ -189,6 +252,8 @@ function buildSpanAttributes(span: AgentTraceSpan): OtlpAttribute[] {
   push("gen_ai.operation.name", strAttr(span.operationName))
   push("gen_ai.provider.name", strAttr(span.providerName))
   push("gen_ai.conversation.id", strAttr(span.sessionId))
+  const openInferenceKind = OPENINFERENCE_SPAN_KIND[span.operationName]
+  if (openInferenceKind) push("openinference.span.kind", strAttr(openInferenceKind))
   if (span.requestModel) push("gen_ai.request.model", strAttr(span.requestModel))
   if (span.responseModel) push("gen_ai.response.model", strAttr(span.responseModel))
   if (span.agentId) push("gen_ai.agent.id", strAttr(span.agentId))
@@ -206,6 +271,20 @@ function buildSpanAttributes(span: AgentTraceSpan): OtlpAttribute[] {
     if (span.usage.cacheCreationTokens > 0) {
       push("gen_ai.usage.cache_creation.input_tokens", intAttr(span.usage.cacheCreationTokens))
     }
+    // The TTL split has no semconv attribute yet, so it rides as a vendor pair.
+    // Without it a consumer cannot tell a 1.25x write from a 2x one.
+    if (span.usage.cacheCreation5mTokens !== undefined) {
+      push(
+        "cognia.usage.cache_creation.ephemeral_5m.input_tokens",
+        intAttr(span.usage.cacheCreation5mTokens)
+      )
+    }
+    if (span.usage.cacheCreation1hTokens !== undefined) {
+      push(
+        "cognia.usage.cache_creation.ephemeral_1h.input_tokens",
+        intAttr(span.usage.cacheCreation1hTokens)
+      )
+    }
   }
   if (typeof span.costUsdEstimate === "number" && span.costUsdEstimate > 0) {
     push("cognia.cost.usd_estimate", doubleAttr(span.costUsdEstimate))
@@ -217,6 +296,14 @@ function buildSpanAttributes(span: AgentTraceSpan): OtlpAttribute[] {
   // attribute keys, just don't surface them in pre-built dashboards.
   push("cognia.surface", strAttr(span.surface))
   if (span.pluginId) push("cognia.plugin.id", strAttr(span.pluginId))
+  // ADR-0090 execution identity — the join key between a span, its canonical
+  // envelope and its billing row. Exported so an external backend can correlate
+  // the same three substrates we correlate locally.
+  if (span.runId) push("cognia.run.id", strAttr(span.runId))
+  if (span.turnId) push("cognia.turn.id", strAttr(span.turnId))
+  if (span.attemptId) push("cognia.attempt.id", strAttr(span.attemptId))
+  if (span.projectId) push("cognia.project.id", strAttr(span.projectId))
+  if (span.status) push("cognia.span.status", strAttr(span.status))
   if (span.handoff) {
     push("cognia.handoff.from_agent", strAttr(span.handoff.fromAgent))
     push("cognia.handoff.to_agent", strAttr(span.handoff.toAgent))
@@ -231,10 +318,31 @@ function buildSpanAttributes(span: AgentTraceSpan): OtlpAttribute[] {
   if (span.metadata) {
     for (const [k, v] of Object.entries(span.metadata)) {
       const attr = coerceAttribute(v)
-      if (attr) push(`cognia.metadata.${k}`, attr)
+      if (!attr) continue
+      // Keys with a real home get promoted rather than buried under the
+      // vendor metadata bag, and are not emitted twice.
+      push(PROMOTED_METADATA_ATTRIBUTES[k] ?? `cognia.metadata.${k}`, attr)
     }
   }
   return attrs
+}
+
+/**
+ * Metadata keys that map onto a first-class attribute.
+ *
+ * These are the fields Claude Code's own OTel surface exposes on `api_request`,
+ * `api_error` and `tool_result`. They were reaching the wire as
+ * `cognia.metadata.*`, which no backend keys off — a tool-call id under a
+ * vendor prefix cannot be joined to anything.
+ */
+const PROMOTED_METADATA_ATTRIBUTES: Readonly<Record<string, string>> = {
+  toolUseId: "gen_ai.tool.call.id",
+  requestId: "cognia.api.request_id",
+  clientRequestId: "cognia.api.client_request_id",
+  statusCode: "http.response.status_code",
+  attempt: "cognia.attempt.number",
+  toolInputSizeBytes: "cognia.tool.input_size_bytes",
+  toolResultSizeBytes: "cognia.tool.result_size_bytes",
 }
 
 function buildOtlpEvent(event: SpanEvent): OtlpEvent {

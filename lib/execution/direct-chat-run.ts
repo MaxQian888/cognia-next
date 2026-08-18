@@ -9,6 +9,13 @@ import {
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
 import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
+import {
+  __resetChatCanonicalSinkForTesting,
+  closeChatCanonicalLog,
+  openChatCanonicalLog,
+  recordChatCanonicalEvents,
+  recordChatSdkMessage,
+} from "@/lib/chat/canonical-sink"
 
 export interface StartDirectChatExecutionRunInput {
   sessionId: string
@@ -16,6 +23,11 @@ export interface StartDirectChatExecutionRunInput {
   projectId?: string
   workspaceRoot?: string
   startedAt?: number
+  /**
+   * The turn's prompt. Reaches the canonical log only while the `prompts` debug
+   * tier is armed — `messages` already stores it verbatim.
+   */
+  prompt?: string
 }
 
 interface ActiveDirectChatRun {
@@ -76,6 +88,14 @@ export async function startDirectChatExecutionRun(
     toolCalls: new Map(),
     seenToolCalls: new Set(),
   })
+  // ADR-0090 canonical event log. Opened on the SAME run id as the execution
+  // journal so a cost row, a span and an envelope for one turn share a join
+  // key. Before this, a desktop chat turn produced no canonical log at all.
+  openChatCanonicalLog({
+    sessionId: input.sessionId,
+    runId: input.runId,
+    ...(input.prompt ? { prompt: input.prompt } : {}),
+  })
   if (run.currentRevision === 0) {
     await producer.start(startedAt, { surface: "chat" })
   }
@@ -92,6 +112,11 @@ export async function projectDirectChatSdkMessage(
 ): Promise<void> {
   const active = activeRuns.get(sessionId)
   if (!active) return
+
+  // The canonical log takes EVERY frame, including the ones the execution
+  // journal narrows away below — that narrowing is what makes the journal a
+  // timeline rather than a record.
+  recordChatSdkMessage(sessionId, message)
 
   const compact = compactBoundaryFromInner(message)
   if (compact) {
@@ -189,6 +214,17 @@ export async function finishDirectChatExecutionRun(
   const active = activeRuns.get(sessionId)
   if (!active) return
   activeRuns.delete(sessionId)
+  // Recorded here rather than at each of the four call sites in the chat hook:
+  // every terminal path already funnels through this function, so this is the
+  // one place a failed turn cannot be sealed without saying it failed.
+  if (status === "failed") {
+    recordChatCanonicalEvents(sessionId, [
+      { kind: "failure", code: "chat_turn_failed", message: summary ?? "chat turn failed" },
+    ])
+  }
+  // Sealed first and awaited: the flush is what makes the buffered tail
+  // durable, and an early return below must not skip it.
+  await closeChatCanonicalLog(sessionId, status === "cancelled" ? "interrupted" : "ended")
   const run = await getExecutionRun(active.runId)
   if (!run || isTerminal(run.status)) return
   await active.producer.finish(status, ts, summary)
@@ -224,4 +260,5 @@ export async function recoverStaleDirectChatExecutionRuns(
 
 export function __resetDirectChatExecutionRunsForTesting(): void {
   activeRuns.clear()
+  __resetChatCanonicalSinkForTesting()
 }

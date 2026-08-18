@@ -47,27 +47,89 @@ export const CACHE_WRITE_MULT = DEFAULT_CACHE_WRITE_MULT
 
 const DAY_MS = 86_400_000
 
+/** Where a turn's effective cost figure came from. */
+export type CostSource =
+  /** The SDK reported a non-zero `total_cost_usd` — the most accurate figure. */
+  | "sdk"
+  /** Locally priced from the token breakdown against known rates. */
+  | "priced"
+  /** No pricing layer knew this model — the accompanying `0` means "unknown". */
+  | "unknown"
+
+/** A turn's cost together with whether the number is meaningful. */
+export interface EffectiveCost {
+  cost: number
+  /**
+   * `false` only when no pricing layer knew the model. Callers must render an
+   * unknown cost as "—" rather than "$0.00": a genuinely free model and a model
+   * whose price we simply do not have are both `0`, and conflating them
+   * understates spend silently.
+   */
+  known: boolean
+  source: CostSource
+}
+
 /**
- * Cost of one turn in USD. Prefers the SDK-reported `costUsd` when present
- * (`> 0`); otherwise resolves the model's full pricing and prices the token
- * breakdown — explicit cache rates when the catalog knows them, else the
- * Anthropic multipliers. Returns 0 when the model has no known pricing.
+ * Cost of one turn in USD, with provenance.
+ *
+ * A row written at v172 or later carries its cost frozen: `costSource` records
+ * where the figure came from and `costKnown` whether it means anything. Those
+ * rows are returned as stored and NEVER re-priced — that is the entire point of
+ * freezing. Re-deriving them against today's rates is what made a price-table
+ * edit silently rewrite last year's spend.
+ *
+ * Older rows (no `costSource`) keep the legacy behaviour: prefer a positive
+ * SDK figure, otherwise price the token breakdown at current rates.
+ */
+export function effectiveCostUsdDetailed(
+  row: SessionUsageRow,
+  resolve: PricingResolver = resolveModelPricingUsd
+): EffectiveCost {
+  if (row.costSource !== undefined) {
+    // `unknown` and `backfilled` both mean "this 0 is not a price".
+    const known = row.costKnown === true
+    const source: CostSource = row.costSource === "sdk" ? "sdk" : known ? "priced" : "unknown"
+    return { cost: known ? row.costUsd : 0, known, source }
+  }
+
+  if (row.costUsd > 0) return { cost: row.costUsd, known: true, source: "sdk" }
+  const pricing = resolve(row.providerId, row.model)
+  if (pricing === null) return { cost: 0, known: false, source: "unknown" }
+  return {
+    cost: costFromTokensUsd(
+      {
+        inputTokens: row.inputTokens,
+        outputTokens: row.outputTokens,
+        cacheReadInputTokens: row.cacheReadTokens,
+        // Legacy rows never carry the TTL split, but pass it when present so a
+        // row written between the schema bump and full write-site rollout is
+        // still priced with the correct 1-hour rate.
+        cacheCreationInputTokens: row.cacheCreationTokens,
+        cacheCreation5mInputTokens: row.cacheCreation5mTokens,
+        cacheCreation1hInputTokens: row.cacheCreation1hTokens,
+        requests: row.unitBreakdown?.requests,
+        pages: row.unitBreakdown?.pages,
+        characters: row.unitBreakdown?.characters,
+        containerHours: row.unitBreakdown?.containerHours,
+      },
+      pricing
+    ),
+    known: true,
+    source: "priced",
+  }
+}
+
+/**
+ * Cost of one turn in USD. Thin wrapper over {@link effectiveCostUsdDetailed}
+ * for summing call sites; returns 0 when the model has no known pricing. Prefer
+ * the detailed form anywhere the figure is rendered, so "unknown" stays
+ * distinguishable from "free".
  */
 export function effectiveCostUsd(
   row: SessionUsageRow,
   resolve: PricingResolver = resolveModelPricingUsd
 ): number {
-  if (row.costUsd > 0) return row.costUsd
-  const pricing = resolve(row.providerId, row.model)
-  return costFromTokensUsd(
-    {
-      inputTokens: row.inputTokens,
-      outputTokens: row.outputTokens,
-      cacheReadInputTokens: row.cacheReadTokens,
-      cacheCreationInputTokens: row.cacheCreationTokens,
-    },
-    pricing
-  )
+  return effectiveCostUsdDetailed(row, resolve).cost
 }
 
 /** Summed token counts for a session (camel-cased, as the live UI carries them). */

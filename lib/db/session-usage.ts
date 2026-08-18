@@ -19,8 +19,95 @@ import { getDb } from "./schema"
  * Which surface produced a usage row. Lets the Subscription → Usage tab show
  * total spend across every LLM-driven surface — not just interactive chat.
  * Legacy rows have no `surface`; readers treat `undefined` as `"chat"`.
+ *
+ * The second group are surfaces that spend real money and reported none of it:
+ * an embed-heavy ingest, a twin distillation, an OCR batch or a TTS render
+ * could run all day and the Usage tab stayed at the same number. Metering them
+ * is what makes the tab's total the app's actual spend rather than only its
+ * conversational spend.
  */
-export type UsageSurface = "chat" | "workflow" | "agent-team" | "connector" | "goal"
+export type UsageSurface =
+  | "chat"
+  | "workflow"
+  | "agent-team"
+  | "connector"
+  | "goal"
+  | "embedding"
+  | "twin"
+  | "memory"
+  | "eval"
+  | "subagent"
+  | "plugin"
+  | "ocr"
+  | "tts"
+  | "web-search"
+  | "imported"
+
+/** Every metered surface, for exhaustive UI filters. */
+export const USAGE_SURFACES: readonly UsageSurface[] = [
+  "chat",
+  "workflow",
+  "agent-team",
+  "connector",
+  "goal",
+  "embedding",
+  "twin",
+  "memory",
+  "eval",
+  "subagent",
+  "plugin",
+  "ocr",
+  "tts",
+  "web-search",
+  "imported",
+]
+
+/**
+ * Where a persisted row's `costUsd` came from. Frozen at write time (v172) so
+ * the figure never silently changes when a price table is updated.
+ */
+export type UsageCostSource =
+  /** The provider/SDK reported the cost directly — the most authoritative. */
+  | "sdk"
+  /** Priced locally against the synced models.dev catalog. */
+  | "catalog"
+  /** Priced locally against the built-in fallback price table. */
+  | "static"
+  /** Priced locally against a user-supplied custom/discovered rate. */
+  | "custom"
+  /** Written before v172; provenance cannot be recovered retroactively. */
+  | "backfilled"
+  /** No pricing layer knew the model — `costUsd` is 0 but means "unknown". */
+  | "unknown"
+
+/**
+ * The per-1M rates a row was actually priced against, captured at write time.
+ * Lets a stored cost be re-derived and audited later even after the catalog has
+ * moved on; absent on `sdk` rows (the provider did the arithmetic) and on
+ * legacy rows.
+ */
+export interface UsagePriceSnapshot {
+  promptPer1M?: number
+  completionPer1M?: number
+  cachedInputPer1M?: number
+  cacheCreationPer1M?: number
+  /** Multiplier applied for fast mode / data residency, when either was in play. */
+  rateMultiplier?: number
+  currency?: "USD"
+}
+
+/**
+ * Non-token billable quantities for a turn (server tools, OCR pages, TTS
+ * characters, container time). Keyed by unit so a single pricing resolver can
+ * price them alongside tokens.
+ */
+export interface UsageUnitBreakdown {
+  /** Server-tool invocations, e.g. `{ "web_search": 3 }`. */
+  requests?: Record<string, number>
+  pages?: number
+  characters?: number
+  containerHours?: number
+}
 
 /** Persisted per-turn usage. All token fields default to 0 when missing. */
 export interface SessionUsageRow {
@@ -64,6 +151,57 @@ export interface SessionUsageRow {
   contextInputTokens?: number
   /** Producing surface. Absent on legacy rows ⇒ treated as `"chat"`. */
   surface?: UsageSurface
+
+  /* ── v172: ADR-0090 execution identity ─────────────────────────────────── */
+  /** Owning workspace/project — mirrors `agentTraces.projectId`. */
+  projectId?: string
+  /** Canonical run this turn belongs to (`session→run→turn→attempt`). */
+  runId?: string
+  /** Canonical turn id within the run. */
+  turnId?: string
+  /** Attempt id — a retry produces a new attempt under the same turn. */
+  attemptId?: string
+
+  /* ── v172: frozen cost ─────────────────────────────────────────────────── */
+  /**
+   * Provenance of `costUsd`. Absent on rows written before v172 that the
+   * upgrade has not yet visited; readers treat absent as `"backfilled"`.
+   */
+  costSource?: UsageCostSource
+  /**
+   * `false` when no pricing layer knew the model, so `costUsd: 0` means
+   * "unknown", not "free". Renderers must show "—" rather than "$0.00".
+   */
+  costKnown?: boolean
+  /** Rates the cost was computed against; absent for `sdk`-sourced rows. */
+  priceSnapshot?: UsagePriceSnapshot
+  /**
+   * Cache-creation tokens split by TTL. Anthropic bills 5-minute writes at
+   * 1.25× base input and 1-hour writes at 2×, so the two cannot share a
+   * bucket. `cacheCreationTokens` remains the un-split total for legacy rows
+   * and providers that report only one figure.
+   */
+  cacheCreation5mTokens?: number
+  cacheCreation1hTokens?: number
+  /** `"fast"` when the turn ran in fast mode (premium rates). */
+  speed?: "fast" | "normal"
+  /** Inference geography — `"us"` carries a 1.1× multiplier on all classes. */
+  inferenceGeo?: "us" | "global"
+  /** True when the turn was served through a batch API (50% discount). */
+  batch?: boolean
+  /** Non-token billable quantities (server tools, pages, characters, hours). */
+  unitBreakdown?: UsageUnitBreakdown
+  /**
+   * True when the row was reconstructed from an IMPORTED transcript rather than
+   * observed locally.
+   *
+   * Imported spend was paid on another machine, often by another account, and
+   * blending it into local totals would silently inflate "what this install
+   * cost me" — and, through the daily rollup, misfire the budget. Readers that
+   * report local spend must exclude these rows; readers that report a session's
+   * history include them and label them.
+   */
+  imported?: boolean
 }
 
 /**
@@ -94,11 +232,21 @@ export async function recordResultUsage(args: {
   model?: string
   providerId?: string
   result: SDKResultMessage
+  /** ADR-0090 execution identity, when the caller has it. */
+  projectId?: string
+  runId?: string
+  turnId?: string
+  attemptId?: string
+  /** Pricing modifiers in effect for this turn. */
+  speed?: "fast" | "normal"
+  inferenceGeo?: "us" | "global"
+  batch?: boolean
 }): Promise<SessionUsageRow | null> {
   const { sessionId, messageId, characterId, model, providerId, result } = args
   if (!sessionId || !messageId) return null
   const usage = extractUsage(result)
   if (!usage) return null
+  const costUsd = usage.totalCostUsd ?? 0
   const row: SessionUsageRow = {
     messageId,
     sessionId,
@@ -110,7 +258,7 @@ export async function recordResultUsage(args: {
     outputTokens: usage.outputTokens ?? 0,
     cacheCreationTokens: usage.cacheCreationInputTokens ?? 0,
     cacheReadTokens: usage.cacheReadInputTokens ?? 0,
-    costUsd: usage.totalCostUsd ?? 0,
+    costUsd,
     durationMs: usage.durationMs ?? 0,
     reasoningTokens:
       typeof usage.reasoningTokens === "number" && usage.reasoningTokens > 0
@@ -121,6 +269,24 @@ export async function recordResultUsage(args: {
         ? usage.contextInputTokens
         : undefined,
     surface: "chat",
+    // Frozen at write time. A positive figure came from the provider and is
+    // authoritative; a zero one means this path reported no cost, and the
+    // reader must price it rather than treating 0 as "free". Nothing here is
+    // ever recomputed against a later price table.
+    costSource: costUsd > 0 ? "sdk" : "unknown",
+    costKnown: costUsd > 0,
+    ...carryFrozenFields({
+      cacheCreation5mTokens: usage.cacheCreation5mInputTokens,
+      cacheCreation1hTokens: usage.cacheCreation1hInputTokens,
+      unitBreakdown: usage.serverToolUse ? { requests: usage.serverToolUse } : undefined,
+      projectId: args.projectId,
+      runId: args.runId,
+      turnId: args.turnId,
+      attemptId: args.attemptId,
+      speed: args.speed,
+      inferenceGeo: args.inferenceGeo,
+      batch: args.batch,
+    }),
   }
   await upsertSessionUsage(row)
   return row
@@ -147,6 +313,48 @@ export interface SurfaceUsageInput {
   contextInputTokens?: number
   model?: string
   providerId?: string
+
+  /* ── v172 frozen-cost + identity passthrough ───────────────────────────── */
+  cacheCreation5mTokens?: number
+  cacheCreation1hTokens?: number
+  costSource?: UsageCostSource
+  costKnown?: boolean
+  priceSnapshot?: UsagePriceSnapshot
+  speed?: "fast" | "normal"
+  inferenceGeo?: "us" | "global"
+  batch?: boolean
+  unitBreakdown?: UsageUnitBreakdown
+  projectId?: string
+  runId?: string
+  turnId?: string
+  attemptId?: string
+  /** Marks spend that was paid elsewhere and must not blend into local totals. */
+  imported?: boolean
+}
+
+/**
+ * Copy the frozen-cost and identity fields onto a row, omitting absent ones so
+ * a legacy caller does not write a wall of `undefined` keys into Dexie.
+ */
+function carryFrozenFields(usage: SurfaceUsageInput): Partial<SessionUsageRow> {
+  const out: Partial<SessionUsageRow> = {}
+  if (usage.imported !== undefined) out.imported = usage.imported
+  if (usage.costSource !== undefined) out.costSource = usage.costSource
+  if (usage.costKnown !== undefined) out.costKnown = usage.costKnown
+  if (usage.priceSnapshot !== undefined) out.priceSnapshot = usage.priceSnapshot
+  if (usage.speed !== undefined) out.speed = usage.speed
+  if (usage.inferenceGeo !== undefined) out.inferenceGeo = usage.inferenceGeo
+  if (usage.batch !== undefined) out.batch = usage.batch
+  if (usage.unitBreakdown !== undefined) out.unitBreakdown = usage.unitBreakdown
+  if (usage.projectId !== undefined) out.projectId = usage.projectId
+  if (usage.runId !== undefined) out.runId = usage.runId
+  if (usage.turnId !== undefined) out.turnId = usage.turnId
+  if (usage.attemptId !== undefined) out.attemptId = usage.attemptId
+  const c5 = num(usage.cacheCreation5mTokens)
+  const c1h = num(usage.cacheCreation1hTokens)
+  if (c5 > 0) out.cacheCreation5mTokens = c5
+  if (c1h > 0) out.cacheCreation1hTokens = c1h
+  return out
 }
 
 const num = (v: number | undefined): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
@@ -162,9 +370,33 @@ function buildSurfaceRow(args: {
   const { usage } = args
   const inputTokens = num(usage.inputTokens)
   const outputTokens = num(usage.outputTokens)
-  // Stub / no-op steps (e.g. the ai.prompt echo) report 0/0 — don't pollute
-  // the billing table with empty turns.
-  if (inputTokens === 0 && outputTokens === 0) return null
+  const cacheCreationTokens = num(usage.cacheCreationTokens)
+  const cacheReadTokens = num(usage.cacheReadTokens)
+  const costUsd = num(usage.costUsd)
+  // Stub / no-op steps (e.g. the ai.prompt echo) report nothing at all — don't
+  // pollute the billing table with empty turns. A fully cache-served turn bills
+  // real money while reporting `inputTokens === 0 && outputTokens === 0`, so the
+  // emptiness test must consider the cache tiers and the cost as well; testing
+  // only input/output silently dropped those rows, which also made this writer
+  // disagree with `recordResultUsage` (the chat path applies no such filter).
+  const splitCacheCreation = num(usage.cacheCreation5mTokens) + num(usage.cacheCreation1hTokens)
+  const unitCount = Object.values(usage.unitBreakdown?.requests ?? {}).reduce(
+    (n, v) => n + (typeof v === "number" && Number.isFinite(v) ? v : 0),
+    num(usage.unitBreakdown?.pages) +
+      num(usage.unitBreakdown?.characters) +
+      num(usage.unitBreakdown?.containerHours)
+  )
+  if (
+    inputTokens === 0 &&
+    outputTokens === 0 &&
+    cacheCreationTokens === 0 &&
+    cacheReadTokens === 0 &&
+    splitCacheCreation === 0 &&
+    unitCount === 0 &&
+    costUsd === 0
+  ) {
+    return null
+  }
   return {
     messageId: args.messageId,
     sessionId: args.sessionId,
@@ -173,14 +405,15 @@ function buildSurfaceRow(args: {
     providerId: usage.providerId,
     inputTokens,
     outputTokens,
-    cacheCreationTokens: num(usage.cacheCreationTokens),
-    cacheReadTokens: num(usage.cacheReadTokens),
-    costUsd: num(usage.costUsd),
+    cacheCreationTokens,
+    cacheReadTokens,
+    costUsd,
     durationMs: num(usage.durationMs),
     reasoningTokens: num(usage.reasoningTokens) > 0 ? num(usage.reasoningTokens) : undefined,
     contextInputTokens:
       num(usage.contextInputTokens) > 0 ? num(usage.contextInputTokens) : undefined,
     surface: args.surface,
+    ...carryFrozenFields(usage),
   }
 }
 
@@ -302,6 +535,71 @@ export async function recordTeamUsage(args: {
   return row
 }
 
+/**
+ * Shadow-write usage for any of the non-conversational metered surfaces
+ * (embeddings, twin distillation, memory, eval, subagents, plugins, OCR, TTS,
+ * web search, imported transcripts).
+ *
+ * The caller owns idempotency by supplying a deterministic `operationId`; the
+ * row key is `<surface>:<operationId>` so a retried operation overwrites its
+ * earlier attempt exactly like the chat path overwrites on message id.
+ * Grouping key is `<surface>:<scopeId>` — a project, a session, a job — so the
+ * Usage tab can roll these up without inventing a fake chat session.
+ */
+export async function recordSurfaceUsage(args: {
+  surface: UsageSurface
+  /** Deterministic per-operation id. Retries MUST reuse it. */
+  operationId: string
+  /** Grouping key (project id, session id, job id). Defaults to the surface. */
+  scopeId?: string
+  usage: SurfaceUsageInput
+  at?: number
+}): Promise<SessionUsageRow | null> {
+  if (!args.surface || !args.operationId) return null
+  const row = buildSurfaceRow({
+    messageId: `${args.surface}:${args.operationId}`,
+    sessionId: `${args.surface}:${args.scopeId ?? args.surface}`,
+    surface: args.surface,
+    usage: args.usage,
+    at: args.at ?? Date.now(),
+  })
+  if (!row) return null
+  await upsertSessionUsage(row)
+  return row
+}
+
+/**
+ * Record usage reconstructed from an imported transcript.
+ *
+ * Always written with `imported: true` and never with `surface` set to the
+ * originating surface: this spend was paid on another machine and must be
+ * separable from local spend at read time by a single predicate.
+ */
+export async function recordImportedUsage(args: {
+  /** Deterministic id from the source transcript (message/entry id). */
+  operationId: string
+  sessionId: string
+  usage: SurfaceUsageInput
+  at?: number
+}): Promise<SessionUsageRow | null> {
+  if (!args.operationId || !args.sessionId) return null
+  const row = buildSurfaceRow({
+    messageId: `imported:${args.operationId}`,
+    sessionId: args.sessionId,
+    surface: "imported",
+    usage: { ...args.usage, imported: true },
+    at: args.at ?? Date.now(),
+  })
+  if (!row) return null
+  await upsertSessionUsage(row)
+  return row
+}
+
+/** True when the row records spend this install actually paid for. */
+export function isLocalSpend(row: Pick<SessionUsageRow, "imported">): boolean {
+  return row.imported !== true
+}
+
 /** Read all rows for one session, oldest-first (matches the message order). */
 export async function listUsageForSession(sessionId: string): Promise<SessionUsageRow[]> {
   return getDb().sessionUsage.where("sessionId").equals(sessionId).sortBy("at")
@@ -343,10 +641,15 @@ export async function totalsBySession(sessionId: string): Promise<SessionUsageTo
  * cardinality (≤ low thousands of turns). Used by the Subscription Usage
  * tab's "Top sessions by cost" widget.
  */
-export async function totalsByAllSessions(): Promise<Map<string, SessionUsageTotals>> {
+export async function totalsByAllSessions(
+  options: { includeImported?: boolean } = {}
+): Promise<Map<string, SessionUsageTotals>> {
   const rows = await getDb().sessionUsage.toArray()
   const grouped = new Map<string, SessionUsageRow[]>()
   for (const r of rows) {
+    // Imported spend was paid on another machine, often by another account.
+    // Counting it here would inflate "what this install cost me".
+    if (!options.includeImported && !isLocalSpend(r)) continue
     const list = grouped.get(r.sessionId)
     if (list) list.push(r)
     else grouped.set(r.sessionId, [r])
@@ -356,9 +659,20 @@ export async function totalsByAllSessions(): Promise<Map<string, SessionUsageTot
   return out
 }
 
+/** Billable token volume for a session — the cost-independent ranking signal. */
+function totalTokens(t: SessionUsageTotals): number {
+  return t.inputTokens + t.outputTokens + t.cacheCreationTokens + t.cacheReadTokens
+}
+
 /**
- * Top N sessions by cumulative cost. `0` totals are skipped; ties broken by
- * turn count then by sessionId so the order is deterministic in tests.
+ * Top N sessions by cumulative cost. Sessions with no recorded activity at all
+ * are skipped; ties are broken by token volume, then turn count, then sessionId
+ * so the order is deterministic in tests.
+ *
+ * Zero-cost sessions are deliberately NOT excluded: free and locally-hosted
+ * models legitimately cost $0 while dominating token volume, and filtering on
+ * `costUsd <= 0` made them invisible here. It also hid every row whose price
+ * was merely unknown, which reads identically to $0 in storage.
  */
 export async function topByCost(
   limit = 10
@@ -366,11 +680,14 @@ export async function topByCost(
   const map = await totalsByAllSessions()
   const entries: Array<{ sessionId: string; totals: SessionUsageTotals }> = []
   for (const [sessionId, totals] of map) {
-    if (totals.costUsd <= 0) continue
+    if (totals.costUsd <= 0 && totalTokens(totals) === 0) continue
     entries.push({ sessionId, totals })
   }
   entries.sort((a, b) => {
     if (b.totals.costUsd !== a.totals.costUsd) return b.totals.costUsd - a.totals.costUsd
+    const at = totalTokens(a.totals)
+    const bt = totalTokens(b.totals)
+    if (bt !== at) return bt - at
     if (b.totals.turns !== a.totals.turns) return b.totals.turns - a.totals.turns
     return a.sessionId.localeCompare(b.sessionId)
   })

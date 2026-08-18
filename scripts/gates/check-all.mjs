@@ -106,6 +106,12 @@ const REGISTRY = [
   // were hand-maintained and had drifted (dead keys, fields writable up but
   // never mirrored down, transport config classified backwards).
   { script: "settings-sync:check", group: "artifacts" },
+  // The bundled model price catalog is derived from LiteLLM's cost map by
+  // `pnpm pricing:sync`. This check is OFFLINE on purpose — it validates the
+  // committed artifact's shape, ordering, formatting and size ceiling rather
+  // than re-fetching, so an unreachable third-party host cannot fail the build.
+  // The size ceiling matters because the same static export ships to phones.
+  { script: "pricing:catalog:check", group: "artifacts" },
   // The bundled Pi extension is pinned by SHA-256 and refused when the digest
   // does not match, so a forgotten re-pin ships an extension that blocks every
   // Pi session on the user's machine. Its own docstring said this had to fail

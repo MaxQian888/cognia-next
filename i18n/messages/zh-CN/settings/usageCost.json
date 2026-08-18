@@ -1,0 +1,18 @@
+{
+  "budget": {
+    "title": "支出上限",
+    "description": "美元硬性上限。与「提供商」下的路由预算不同，达到上限会拦截下一次请求，直到你确认放行。",
+    "dailyLabel": "每日上限（美元）",
+    "monthlyLabel": "每月上限（美元）",
+    "noLimit": "不限制",
+    "hardBlockHint": "达到 80% 与 95% 时提醒；达到 100% 时下一次请求会被拦截，需你确认后才放行一次。"
+  },
+  "debug": {
+    "title": "链路调试会话",
+    "description": "在本机捕获流式增量、提示词与工具载荷，用于复现问题。到期自动关闭，数据不会离开本设备。",
+    "activeBadge": "{minutes, plural, =0 {即将到期} =1 {剩余 1 分钟} other {剩余 # 分钟}}",
+    "armFor": "{minutes} 分钟",
+    "disarm": "立即停止",
+    "privacyHint": "捕获的内容不会进入备份、导出或诊断报告。会话默认时长为 {minutes} 分钟。"
+  }
+}
