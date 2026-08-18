@@ -253,3 +253,24 @@ it("leaves the pane background alone when the editor link is off", async () => {
   await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalled())
   expect(setPaneBackground).not.toHaveBeenCalled()
 })
+
+describe("trust-domain profile", () => {
+  it("paints the managed profile by default", async () => {
+    renderHook(() => useCodeServerSettingsSync(true))
+
+    await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalled())
+    expect(client.readUserSettings).toHaveBeenCalledWith("managed")
+    expect(client.writeUserSettings.mock.calls.at(-1)![1]).toBe("managed")
+  })
+
+  it("paints the profile the pane is actually showing", async () => {
+    // The two profiles keep physically separate `user-data-dir`s. Writing the
+    // managed one while the native workbench is on screen would leave the user
+    // looking at stock VS Code colours and silently edit the other editor.
+    renderHook(() => useCodeServerSettingsSync(true, "native"))
+
+    await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalled())
+    expect(client.readUserSettings).toHaveBeenCalledWith("native")
+    expect(client.writeUserSettings.mock.calls.at(-1)![1]).toBe("native")
+  })
+})

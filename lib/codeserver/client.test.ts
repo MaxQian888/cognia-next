@@ -1,22 +1,31 @@
 jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
+jest.mock("@/lib/tauri/companion-auth", () => ({
+  companionAuthorizationHeaders: async () => ({ Authorization: "Bearer device-access-token" }),
+}))
 
 import { transport } from "@/lib/tauri"
 import { __resetRoutingForTests, setActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
 import { CODESERVER_EVENTS, codeServerClient } from "./client"
+import { __resetRemoteIdeRelayForTesting } from "./remote-relay"
 
 const call = transport.call as jest.Mock
 
 beforeEach(() => {
   __resetRoutingForTests()
+  __resetRemoteIdeRelayForTesting()
   call.mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(() => {
   __resetRoutingForTests()
+  // Leaves no refresh interval behind to fire into the next test's mocks.
+  __resetRemoteIdeRelayForTesting()
 })
 
-it("fails closed until the remote relay uses a canonical browser socket ticket", async () => {
+it("binds the pinned desktop relay and reports its loopback port", async () => {
+  // A remote instance serves a loopback port on the HOST, so `port` is null and
+  // meaningless here. The pane must navigate to the desktop's own relay instead.
   setActiveRemoteEndpoint({
     baseUrl: "https://remote.example:27890",
     deviceId: "device-1",
@@ -25,16 +34,46 @@ it("fails closed until the remote relay uses a canonical browser socket ticket",
     serverVersion: "1.0.0",
     serverFingerprint: "ab".repeat(32),
   })
-  call.mockResolvedValueOnce({
-    running: true,
-    port: null,
-    version: "4.128.0",
-    profile: "managed",
-    relayPath: "/ide/relay/session/",
+  call.mockImplementation(async (name: string) => {
+    if (name === "codeserver_ensure") {
+      return {
+        running: true,
+        port: null,
+        version: "4.128.0",
+        profile: "managed",
+        relayPath: "/ide/relay/session/",
+      }
+    }
+    if (name === "codeserver_remote_relay_ensure") {
+      return { port: 51234, url: "http://127.0.0.1:51234/" }
+    }
+    return undefined
   })
 
+  await expect(codeServerClient.ensure("/remote/work")).resolves.toEqual(
+    expect.objectContaining({ running: true, port: 51234, relayPath: "/ide/relay/session/" })
+  )
+  expect(call).toHaveBeenCalledWith("codeserver_remote_relay_ensure", {
+    baseUrl: "https://remote.example:27890",
+    deviceJwt: "device-access-token",
+    serverFingerprint: "ab".repeat(32),
+    relayPath: "/ide/relay/session/",
+  })
+})
+
+it("fails closed when the remote host advertises no relay path", async () => {
+  setActiveRemoteEndpoint({
+    baseUrl: "https://remote.example:27890",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
+    serverVersion: "1.0.0",
+    serverFingerprint: "ab".repeat(32),
+  })
+  call.mockResolvedValueOnce({ running: true, port: null, version: "4.128.0", relayPath: null })
+
   await expect(codeServerClient.ensure("/remote/work")).rejects.toThrow(
-    "canonical browser socket-ticket adapter"
+    "did not provide a managed IDE relay path"
   )
   expect(call).toHaveBeenCalledTimes(1)
 })
@@ -234,4 +273,48 @@ it("creates and redeems scoped broker content handles", () => {
     permission: "filesystem:write",
     handleId: "handle",
   })
+})
+
+it("still tears down the relay when the caller detaches mid-stop", async () => {
+  // `deactivate()` issues the stop and then clears the routing plane
+  // synchronously. Re-reading the endpoint after the first await would report
+  // "local" and skip the relay teardown for the host being left behind.
+  setActiveRemoteEndpoint({
+    baseUrl: "https://remote.example:27890",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
+    serverVersion: "1.0.0",
+    serverFingerprint: "ab".repeat(32),
+  })
+  call.mockImplementation(async (name: string) => {
+    if (name === "codeserver_stop_all" || name === "codeserver_stop") setActiveRemoteEndpoint(null)
+    return true
+  })
+
+  await codeServerClient.stopAll()
+  expect(call.mock.calls.map((c) => c[0])).toEqual([
+    "codeserver_stop_all",
+    "codeserver_remote_relay_stop",
+  ])
+
+  call.mockClear()
+  setActiveRemoteEndpoint({
+    baseUrl: "https://remote.example:27890",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
+    serverVersion: "1.0.0",
+    serverFingerprint: "ab".repeat(32),
+  })
+  await codeServerClient.stop("/work/proj")
+  expect(call.mock.calls.map((c) => c[0])).toEqual([
+    "codeserver_stop",
+    "codeserver_remote_relay_stop",
+  ])
+})
+
+it("does not touch the relay when no remote host was active", async () => {
+  await codeServerClient.stopAll()
+  expect(call.mock.calls.map((c) => c[0])).toEqual(["codeserver_stop_all"])
 })

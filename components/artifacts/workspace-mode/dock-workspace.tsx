@@ -8,7 +8,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { CodeServerPane, joinProjectPath } from "@/components/editor/project/code-server-pane"
 import { EditorEngineToggle } from "@/components/editor/project/editor-engine-toggle"
-import { codeServerClient } from "@/lib/codeserver/client"
+import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import { ProjectEditorTabs } from "@/components/editor/project/project-editor-tabs"
 import { ProjectRootSwitcher } from "@/components/editor/project/project-root-switcher"
 import {
@@ -163,6 +163,9 @@ function WorkspaceEditorBody({
   const persistedEngine = useProjectEditorSessionStore(
     (state) => state.sessions[scopeKey]?.editorMode
   )
+  const persistedProfile = useProjectEditorSessionStore(
+    (state) => state.sessions[scopeKey]?.proIdeProfile
+  )
   const setEditorSession = useProjectEditorSessionStore((state) => state.setSession)
   const proIdeAllowed = isTauri() && layout !== "mobile"
   const taskWorkspaceEnabled = useSettingsStore(
@@ -188,6 +191,14 @@ function WorkspaceEditorBody({
       : "monaco"
   const setEngine = useCallback(
     (next: "monaco" | "codeserver") => setEditorSession(scopeKey, { editorMode: next }),
+    [scopeKey, setEditorSession]
+  )
+  // Shares the per-scope record with the Agent Team editor's switcher, exactly
+  // like `editorMode` — the two hosts must not disagree about which code-server
+  // process this scope is looking at.
+  const proIdeProfile: CodeServerProfile = persistedProfile === "native" ? "native" : "managed"
+  const setProIdeProfile = useCallback(
+    (next: CodeServerProfile) => setEditorSession(scopeKey, { proIdeProfile: next }),
     [scopeKey, setEditorSession]
   )
   const proIdeSupport = useCodeServerSupported(proIdeAllowed)
@@ -419,6 +430,8 @@ function WorkspaceEditorBody({
                   onChange={setEngine}
                   proIdeSupport={proIdeSupport}
                   projectRoot={rootPath}
+                  proIdeProfile={proIdeProfile}
+                  onProIdeProfileChange={setProIdeProfile}
                 />
               ) : undefined
             }
@@ -459,6 +472,7 @@ function WorkspaceEditorBody({
               <CodeServerPane
                 root={rootPath}
                 ownerId={scopeKey}
+                profile={proIdeProfile}
                 beforeOpen={showFileSurface}
                 onRevoked={() => setEngine("monaco")}
                 onCancelled={() => setEngine("monaco")}

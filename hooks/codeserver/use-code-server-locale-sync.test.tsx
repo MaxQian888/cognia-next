@@ -158,3 +158,21 @@ describe("languages VS Code cannot translate", () => {
     await waitFor(() => expect(restart).toHaveBeenCalled())
   })
 })
+
+describe("trust-domain profile", () => {
+  it("reads and writes argv.json in the managed profile by default", async () => {
+    renderHook(() => useCodeServerLocaleSync(true, { restart }))
+
+    await waitFor(() => expect(client.writeRuntimeArgs).toHaveBeenCalled())
+    expect(client.readRuntimeArgs).toHaveBeenCalledWith("managed")
+    expect(client.writeRuntimeArgs.mock.calls.at(-1)![1]).toBe("managed")
+  })
+
+  it("follows the pane into the native profile", async () => {
+    renderHook(() => useCodeServerLocaleSync(true, { restart }, "native"))
+
+    await waitFor(() => expect(client.writeRuntimeArgs).toHaveBeenCalled())
+    expect(client.readRuntimeArgs).toHaveBeenCalledWith("native")
+    expect(client.writeRuntimeArgs.mock.calls.at(-1)![1]).toBe("native")
+  })
+})

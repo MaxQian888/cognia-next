@@ -10,6 +10,7 @@
  */
 import type { ElementRect } from "@/lib/browser/protocol"
 import type { ActiveEditorContext, ActiveEditorDiagnostic } from "@/lib/files/project-editor-bridge"
+import { ensureRemoteIdeRelay, stopRemoteIdeRelayRefresh } from "@/lib/codeserver/remote-relay"
 import { transport } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
@@ -185,25 +186,49 @@ export const codeServerClient = {
     if (!status.relayPath) {
       throw new Error("remote host did not provide a managed IDE relay path")
     }
-    if (!endpoint.serverFingerprint) {
-      throw new Error("remote host is missing its paired certificate fingerprint")
-    }
-    throw new Error("remote managed IDE relay requires the canonical browser socket-ticket adapter")
+    // A remote instance answers on a loopback port on the HOST, which `status`
+    // reports as null because it means nothing here. What the pane can navigate
+    // to is the desktop's own pinned relay in front of it, so the port it gets
+    // back is the relay's — see `lib/codeserver/remote-relay.ts` for why that
+    // also needs a credential refresh behind it.
+    const relay = await ensureRemoteIdeRelay(endpoint, status.relayPath)
+    return { ...status, port: relay.port }
   },
   /** Current status for `root` without spawning. */
   status: (root: string) => transport.call<CodeServerStatus>("codeserver_status", { root }),
-  /** Stop the code-server serving `root`. Returns whether one was running. */
+  /**
+   * Stop the code-server serving `root`. Returns whether one was running.
+   *
+   * The remote check is snapshotted BEFORE the first await, not read after it:
+   * a caller that is detaching from a host issues the stop and then clears the
+   * routing plane synchronously, so re-reading the endpoint afterwards would
+   * report "local" and skip the relay teardown for the host being left.
+   */
   stop: async (root: string) => {
+    const hadRemote = getActiveRemoteEndpoint() != null
     const stopped = await transport.call<boolean>("codeserver_stop", { root })
-    if (getActiveRemoteEndpoint()) {
+    if (hadRemote) {
+      stopRemoteIdeRelayRefresh()
       await transport.call<boolean>("codeserver_remote_relay_stop", {})
     }
     return stopped
   },
-  /** Stop every running code-server (global shutdown / kill switch). */
+  /**
+   * Stop every running code-server on the host this call routes to, and drop
+   * the desktop relay if one is up.
+   *
+   * `codeserver_stop_all` is not a local-only command, so under an active
+   * remote host this reaches THAT host — which is the point: nothing else ever
+   * will. `list_managed_processes` is local-only, so a remote host's IDE
+   * children never appear in Managed Processes, and `RemoteCodeServerState` has
+   * no idle reaper. Detaching without this leaves them running for the life of
+   * the remote process. Same pre-await snapshot as {@link stop}.
+   */
   stopAll: async () => {
+    const hadRemote = getActiveRemoteEndpoint() != null
     await transport.call<void>("codeserver_stop_all", {})
-    if (getActiveRemoteEndpoint()) {
+    if (hadRemote) {
+      stopRemoteIdeRelayRefresh()
       await transport.call<boolean>("codeserver_remote_relay_stop", {})
     }
   },

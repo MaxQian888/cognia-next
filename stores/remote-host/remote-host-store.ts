@@ -32,6 +32,7 @@ import {
   type HostFeatureId,
   type HostFeatureManifest,
 } from "@/lib/platform/host-feature-manifest"
+import { codeServerClient } from "@/lib/codeserver/client"
 import { CompanionTransport } from "@/lib/tauri/transport-companion"
 import { transport } from "@/lib/tauri/transport-instance"
 import { setActiveRemoteEndpoint, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
@@ -429,9 +430,17 @@ export const useRemoteHostStore = create<RemoteHostState>()(
 
       deactivate: () => {
         const activeHostId = get().activeHostId
+        // Must precede the detach below. `codeserver_stop_all` is not a
+        // local-only command, so issued here it reaches the host that is still
+        // active; detaching first would send it to the desktop and leave the
+        // remote host's IDE children running for the life of that process —
+        // `list_managed_processes` IS local-only, so they never show up in
+        // Managed Processes, and `RemoteCodeServerState` has no idle reaper.
+        // This also drops the desktop relay, which is why no separate
+        // `codeserver_remote_relay_stop` call is needed here.
+        void codeServerClient.stopAll().catch(() => undefined)
         setActiveRemoteTransport(null)
         setActiveRemoteEndpoint(null)
-        void transport.call("codeserver_remote_relay_stop", {}).catch(() => undefined)
         set({
           activeHostId: null,
           hosts: get().hosts.map((host) =>

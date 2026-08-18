@@ -1,10 +1,12 @@
 {
   "cancel": "取消",
+  "cancelDownload": "取消下载",
   "clean": "清理旧版本",
   "cleanDone": "已释放 {size}。",
   "description": "项目编辑器可选的内嵌 VS Code。此处管理安装；正在运行的实例见「性能 → 托管进程」。",
   "diskUsage": "磁盘占用",
   "download": "立即下载",
+  "downloadCancelled": "已取消下载，未完成的安装包已删除。",
   "downloadDone": "已安装 code-server {version}。",
   "failed": "操作失败：{error}",
   "installed": "已安装",

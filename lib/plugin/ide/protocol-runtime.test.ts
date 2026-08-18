@@ -18,7 +18,14 @@ jest.mock("@/lib/plugin/core/vscode-loader", () => ({
 jest.mock("@/lib/tauri/transport-routing", () => ({
   isRemoteHostActive: () => mockIsRemoteHostActive(),
 }))
+// `isTauri` / `isCapacitor` are not used by this suite directly, but the module
+// under test pulls in `@/stores/settings` (for `readSetting`), which reaches
+// `lib/credentials/keyring-store` at import time and calls both. A mock that
+// omits them makes the whole suite fail to load — zero tests run — rather than
+// fail a case, so the gap is invisible in the summary line.
 jest.mock("@/lib/tauri", () => ({
+  isTauri: () => false,
+  isCapacitor: () => false,
   transport: {
     call: (command: string, payload?: unknown) => mockTransportCall(command, payload),
   },

@@ -4,7 +4,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
-jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
 
 let mockIsTauri = true
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
@@ -23,6 +23,7 @@ jest.mock("@/lib/codeserver/client", () => ({
     supported: jest.fn(),
     diskUsage: jest.fn(),
     download: jest.fn(),
+    cancelDownload: jest.fn(),
     uninstall: jest.fn(),
   },
 }))
@@ -30,14 +31,14 @@ jest.mock("@/lib/codeserver/pane-manager", () => ({
   destroyCodeServerPane: jest.fn().mockResolvedValue(undefined),
 }))
 
-import { codeServerClient } from "@/lib/codeserver/client"
+import { type CodeServerInstallInfo, codeServerClient } from "@/lib/codeserver/client"
 import { destroyCodeServerPane } from "@/lib/codeserver/pane-manager"
 import { toast } from "sonner"
 import { ProIdeSection } from "./pro-ide-section"
 
 const client = codeServerClient as jest.Mocked<typeof codeServerClient>
 const destroyPane = destroyCodeServerPane as jest.Mock
-const toasts = toast as unknown as { success: jest.Mock; error: jest.Mock }
+const toasts = toast as unknown as { success: jest.Mock; error: jest.Mock; info: jest.Mock }
 
 const USAGE = {
   version: "4.128.0",
@@ -59,9 +60,11 @@ beforeEach(() => {
     binaryPath: "/d/bin/code-server",
   })
   client.uninstall.mockReset().mockResolvedValue(120 * 1024 * 1024)
+  client.cancelDownload.mockReset().mockResolvedValue(undefined)
   destroyPane.mockClear()
   toasts.success.mockReset()
   toasts.error.mockReset()
+  toasts.info.mockReset()
 })
 
 it("explains that the platform has no code-server build", async () => {
@@ -187,4 +190,43 @@ it("degrades to placeholders when the disk probe fails", async () => {
 
   expect(await screen.findByTestId("pro-ide-version")).toHaveTextContent("—")
   expect(screen.getByTestId("pro-ide-clean")).toBeDisabled()
+})
+
+it("offers a way out of the pre-fetch and reports the cancel as a cancel", async () => {
+  // The pre-fetch is ~100-200MB. Before this the card committed the user to the
+  // whole transfer on a single mis-click, while the editor pane had a cancel.
+  let fail: (cause: unknown) => void = () => {}
+  client.download.mockReturnValue(
+    new Promise<CodeServerInstallInfo>((_resolve, reject) => {
+      fail = reject
+    })
+  )
+  client.diskUsage.mockResolvedValue({ ...USAGE, installed: false })
+  render(<ProIdeSection />)
+
+  await waitFor(() => expect(screen.getByTestId("pro-ide-download")).toBeEnabled())
+  expect(screen.queryByTestId("pro-ide-cancel-download")).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByTestId("pro-ide-download"))
+  fireEvent.click(await screen.findByTestId("pro-ide-cancel-download"))
+  expect(client.cancelDownload).toHaveBeenCalledTimes(1)
+
+  // The backend drops the streaming future, so the in-flight download rejects.
+  // That rejection is the user's own cancel, not a failure.
+  fail(new Error("download cancelled"))
+  await waitFor(() => expect(toasts.info).toHaveBeenCalledWith("downloadCancelled"))
+  expect(toasts.error).not.toHaveBeenCalled()
+  expect(screen.queryByTestId("pro-ide-cancel-download")).not.toBeInTheDocument()
+})
+
+it("keeps reporting a genuine pre-fetch failure as a failure", async () => {
+  client.download.mockRejectedValueOnce(new Error("checksum mismatch"))
+  client.diskUsage.mockResolvedValue({ ...USAGE, installed: false })
+  render(<ProIdeSection />)
+
+  await waitFor(() => expect(screen.getByTestId("pro-ide-download")).toBeEnabled())
+  fireEvent.click(screen.getByTestId("pro-ide-download"))
+
+  await waitFor(() => expect(toasts.error).toHaveBeenCalledWith("failed"))
+  expect(toasts.info).not.toHaveBeenCalled()
 })

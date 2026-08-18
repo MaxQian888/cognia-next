@@ -12,6 +12,16 @@ remote workbench through a local ephemeral relay that pins the paired
 certificate SPKI fingerprint, then sends the existing device JWT in an
 `Authorization` header. The real remote port and credentials stay loopback-only.
 
+The relay is mounted on the companion front door at `/ide/relay/<opaque-id>/`
+(`protocol/companion-api-routes.json`) behind `require_device_access`, so the
+credential it forwards is an ordinary device access token — the same one every
+other device request carries. Those live five minutes, and only the renderer
+holds the device private key needed to mint one, so `lib/codeserver/remote-relay.ts`
+re-mints ahead of expiry and re-`ensure`s the relay. A re-ensure for the same
+host, path and fingerprint swaps the token **in place** and keeps the bound
+port: rebinding would hand the webview a new URL and reboot the workbench,
+losing exactly the session the pane exists to protect.
+
 Plugin updates use a durable transaction:
 
 1. `plugin_stage_version` downloads and verifies checksum/signature, extracts

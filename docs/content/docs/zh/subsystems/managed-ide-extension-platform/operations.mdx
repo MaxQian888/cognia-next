@@ -10,6 +10,14 @@ proxy 与协议进程全部属于远程 Cognia host；桌面端不会升级该�
 本地临时 relay 访问远端 workbench：先固定配对证书 SPKI fingerprint，再把现有
 device JWT 放进 `Authorization` header。真实远端端口和凭据始终仅限 loopback。
 
+relay 挂载在 companion 前门的 `/ide/relay/<opaque-id>/`
+（`protocol/companion-api-routes.json`），位于 `require_device_access` 之后，
+因此它转发的凭据就是普通的 device access token——与其他设备请求所用的一致。
+该 token 有效期五分钟，而只有渲染端持有签发所需的设备私钥，所以
+`lib/codeserver/remote-relay.ts` 会在过期前重新签发并重新 `ensure` relay。
+对同一 host、path 与 fingerprint 的重复 ensure 会**原地**替换 token 并保留已绑定
+端口：重新绑定会给 webview 一个新 URL 并重启 workbench，正好丢掉 pane 要保护的会话。
+
 插件更新使用持久事务：
 
 1. `plugin_stage_version` 下载并校验 checksum/signature，在 host-owned transaction

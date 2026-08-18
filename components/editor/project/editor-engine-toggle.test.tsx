@@ -25,9 +25,15 @@ const renderToggle = (
     value: "monaco" | "codeserver"
     onChange: (next: "monaco" | "codeserver") => void
     proIdeSupport: CodeServerSupportStatus
+    proIdeProfile: "managed" | "native"
+    onProIdeProfileChange: ((next: "managed" | "native") => void) | null
   }> = {}
 ) => {
   const onChange = props.onChange ?? jest.fn()
+  // `null` means "this host pins the managed profile"; `undefined` (the default)
+  // means the caller wants the selector.
+  const onProIdeProfileChange =
+    props.onProIdeProfileChange === null ? undefined : (props.onProIdeProfileChange ?? jest.fn())
   // Rendered bare on purpose: the toggle carries its own TooltipProvider, so a
   // host that forgot to mount one gets a working tooltip rather than a crash.
   render(
@@ -36,9 +42,11 @@ const renderToggle = (
       onChange={onChange}
       proIdeSupport={props.proIdeSupport ?? "supported"}
       projectRoot="/work/proj"
+      proIdeProfile={props.proIdeProfile ?? "managed"}
+      onProIdeProfileChange={onProIdeProfileChange}
     />
   )
-  return { onChange }
+  return { onChange, onProIdeProfileChange }
 }
 
 beforeEach(() => {
@@ -181,5 +189,45 @@ describe("local VS Code fallback", () => {
     // build, only that we could not ask.
     await waitFor(() => expect(client.localVsCodeAvailable).not.toHaveBeenCalled())
     expect(screen.queryByTestId("editor-open-local-vscode")).not.toBeInTheDocument()
+  })
+})
+
+describe("trust-domain profile selector", () => {
+  it("stays hidden while Monaco is the live engine", () => {
+    renderToggle({ value: "monaco" })
+    expect(screen.queryByTestId("pro-ide-profile-toggle")).not.toBeInTheDocument()
+  })
+
+  it("stays hidden when this platform has no Pro IDE build", () => {
+    renderToggle({ value: "codeserver", proIdeSupport: "unsupported" })
+    expect(screen.queryByTestId("pro-ide-profile-toggle")).not.toBeInTheDocument()
+  })
+
+  it("stays hidden for a host that pins the managed profile", () => {
+    renderToggle({ value: "codeserver", onProIdeProfileChange: null })
+    expect(screen.queryByTestId("pro-ide-profile-toggle")).not.toBeInTheDocument()
+  })
+
+  it("reports the persisted profile and switches trust domains", () => {
+    const { onProIdeProfileChange } = renderToggle({
+      value: "codeserver",
+      proIdeProfile: "managed",
+    })
+    expect(screen.getByTestId("pro-ide-profile-managed")).toHaveAttribute("data-state", "on")
+    expect(screen.getByTestId("pro-ide-profile-native")).toHaveAttribute("data-state", "off")
+
+    fireEvent.click(screen.getByTestId("pro-ide-profile-native"))
+    expect(onProIdeProfileChange).toHaveBeenCalledWith("native")
+  })
+
+  it("ignores Radix deselecting the active profile", () => {
+    // Same trap the engine switch guards: an empty value would leave the pane
+    // with no trust domain to serve from at all.
+    const { onProIdeProfileChange } = renderToggle({
+      value: "codeserver",
+      proIdeProfile: "native",
+    })
+    fireEvent.click(screen.getByTestId("pro-ide-profile-native"))
+    expect(onProIdeProfileChange).not.toHaveBeenCalled()
   })
 })

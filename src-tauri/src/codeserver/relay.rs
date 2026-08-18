@@ -38,6 +38,12 @@ struct RunningRelay {
     key: String,
     port: u16,
     task: tokio::task::JoinHandle<()>,
+    /// Kept so a re-`ensure` for the same target can swap in a fresh device
+    /// access token WITHOUT rebinding the port. Device access tokens live five
+    /// minutes (`ACCESS_TOKEN_TTL_SECS`); rebinding instead would hand the
+    /// webview a new URL every refresh and reboot the VS Code workbench, which
+    /// is exactly the session loss the pane exists to prevent.
+    target: Arc<RelayTarget>,
 }
 
 impl RunningRelay {
@@ -63,11 +69,20 @@ impl DesktopRelayState {
         server_fingerprint: String,
         relay_path: String,
     ) -> Result<DesktopRelayStatus, String> {
-        let target = RelayTarget::new(base_url, device_jwt, server_fingerprint, relay_path)?;
+        let target = Arc::new(RelayTarget::new(
+            base_url,
+            device_jwt.clone(),
+            server_fingerprint,
+            relay_path,
+        )?);
         let key = target.key();
         let mut running = self.running.lock().await;
         if let Some(existing) = running.as_ref() {
             if existing.key == key && !existing.task.is_finished() {
+                // Same host, same relay, same pinned certificate — only the
+                // short-lived credential can have changed. Swap it and keep the
+                // port so the live workbench never notices.
+                existing.target.set_device_jwt(device_jwt).await;
                 return Ok(relay_status(existing.port));
             }
         }
@@ -83,13 +98,18 @@ impl DesktopRelayState {
             .port();
         let router = Router::new()
             .fallback(any(desktop_relay_handler))
-            .with_state(Arc::new(target));
+            .with_state(Arc::clone(&target));
         let task = tokio::spawn(async move {
             if let Err(error) = axum::serve(listener, router).await {
                 log::warn!("desktop managed IDE relay stopped: {error}");
             }
         });
-        *running = Some(RunningRelay { key, port, task });
+        *running = Some(RunningRelay {
+            key,
+            port,
+            task,
+            target,
+        });
         Ok(relay_status(port))
     }
 
@@ -113,7 +133,11 @@ fn relay_status(port: u16) -> DesktopRelayStatus {
 struct RelayTarget {
     base_url: url::Url,
     relay_path: String,
-    device_jwt: String,
+    /// Device access token, replaceable in place — see [`RunningRelay::target`].
+    /// A `tokio` lock rather than `parking_lot`: it is read on every proxied
+    /// request and upgrade, all of which are `async`, and a sync guard held
+    /// across the send would be the classic guard-across-await hazard.
+    device_jwt: tokio::sync::RwLock<String>,
     fingerprint: String,
     tls: Arc<ClientConfig>,
     http: reqwest::Client,
@@ -154,11 +178,25 @@ impl RelayTarget {
         Ok(Self {
             base_url,
             relay_path,
-            device_jwt,
+            device_jwt: tokio::sync::RwLock::new(device_jwt),
             fingerprint,
             tls,
             http,
         })
+    }
+
+    /// Replace the device access token used by subsequent requests.
+    async fn set_device_jwt(&self, device_jwt: String) {
+        if device_jwt.trim().is_empty() {
+            return;
+        }
+        *self.device_jwt.write().await = device_jwt;
+    }
+
+    /// Snapshot the current token. Cloned out rather than returning a guard so
+    /// no lock is held across the upstream send.
+    async fn bearer(&self) -> String {
+        self.device_jwt.read().await.clone()
     }
 
     fn key(&self) -> String {
@@ -197,7 +235,7 @@ fn normalize_fingerprint(value: &str) -> Result<String, String> {
 
 fn normalize_relay_path(value: &str) -> Result<String, String> {
     let path = value.trim();
-    if !path.starts_with("/ide/v1/relay/")
+    if !path.starts_with("/ide/relay/")
         || path.contains("..")
         || path.contains('?')
         || path.contains('#')
@@ -312,10 +350,11 @@ async fn relay_pinned_http(target: Arc<RelayTarget>, request: Request) -> Respon
     let method = request.method().clone();
     let headers = filtered_headers(request.headers());
     let stream = request.into_body().into_data_stream();
+    let bearer = target.bearer().await;
     let mut upstream = target
         .http
         .request(method, url)
-        .bearer_auth(&target.device_jwt)
+        .bearer_auth(&bearer)
         .body(reqwest::Body::wrap_stream(stream));
     for (name, value) in headers {
         upstream = upstream.header(name, value);
@@ -349,7 +388,7 @@ async fn relay_pinned_websocket(
         let _ = downstream.close().await;
         return;
     };
-    let Ok(auth) = HeaderValue::from_str(&format!("Bearer {}", target.device_jwt)) else {
+    let Ok(auth) = HeaderValue::from_str(&format!("Bearer {}", target.bearer().await)) else {
         let _ = downstream.close().await;
         return;
     };
@@ -462,11 +501,16 @@ mod tests {
     #[test]
     fn only_managed_relay_paths_are_accepted() {
         assert_eq!(
-            normalize_relay_path("/ide/v1/relay/opaque").unwrap(),
-            "/ide/v1/relay/opaque/"
+            normalize_relay_path("/ide/relay/opaque").unwrap(),
+            "/ide/relay/opaque/"
         );
-        assert!(normalize_relay_path("/api/v1/_rpc/x").is_err());
-        assert!(normalize_relay_path("/ide/v1/relay/../secret").is_err());
+        assert!(normalize_relay_path("/api/_rpc/x").is_err());
+        assert!(normalize_relay_path("/ide/relay/../secret").is_err());
+        // The mount the companion actually serves is `/ide/relay/...`
+        // (protocol/companion-api-routes.json). A `/ide/v1/relay/...` path was
+        // advertised and accepted by both halves for a while; every request
+        // through it 404s at the front door.
+        assert!(normalize_relay_path("/ide/v1/relay/opaque").is_err());
     }
 
     #[test]

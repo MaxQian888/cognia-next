@@ -1,6 +1,8 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 
 import { CODESERVER_EVENTS, type CodeServerEditorEvent } from "@/lib/codeserver/client"
 import { startNewSession } from "@/lib/chat/start-session"
@@ -34,16 +36,20 @@ export interface ChatContextPayload {
 }
 
 /**
- * Built-in prompt strings mapped to chat context actions. `null` means the
- * action stages context without pre-filling a prompt (the user types their own).
+ * Actions that pre-fill the composer, keyed by their `projectEditor.proIde`
+ * translation key. Anything absent stages context without a prompt (the user
+ * types their own) — `addSelection`, `addFile`, and `custom`, which carries its
+ * own text from the extension.
+ *
+ * Translated rather than hard-coded: this text lands in the user's composer as
+ * visible, editable input, exactly like the selection toolbar's
+ * `promptForAction` (`components/providers/initializers/selection-toolbar-initializer.tsx`),
+ * which reads the same kind of prompt through the translator.
  */
-const ACTION_PROMPTS: Record<string, string | null> = {
-  addSelection: null,
-  addFile: null,
-  explain: "Please explain this code.",
-  fix: "Please fix the issues in this code.",
-  review: "Please review this code for potential bugs and improvements.",
-  custom: null,
+const ACTION_PROMPT_KEYS: Record<string, string | undefined> = {
+  explain: "chatPrompts.explain",
+  fix: "chatPrompts.fix",
+  review: "chatPrompts.review",
 }
 
 /**
@@ -58,10 +64,26 @@ const ACTION_PROMPTS: Record<string, string | null> = {
  * Follows the same staging pattern as `SelectionToolbarInitializer`: create a
  * context selection, stage an intent, then route the user to the composer.
  *
+ * The route is not optional. Only the composer mounted for `sessionId` consumes
+ * a staged intent (`components/chat/composer.tsx`), and one of the two Pro IDE
+ * hosts is the Agent Team workspace Editor tab — a route with no composer on it
+ * at all. Without the push, "Add to Chat" from VS Code staged context into a
+ * surface the user could not see and read as a dead menu item.
+ *
  * Scoped to `root` when given — a renderer can host two panes, and one
  * project's action should not interfere with the other's.
  */
 export function useCodeServerChatBridge(enabled: boolean, root?: string): void {
+  const router = useRouter()
+  const t = useTranslations("projectEditor.proIde")
+  // The next-intl translator isn't a stable reference, so it rides in a ref
+  // rather than in the deps — depending on it would tear down and rebuild the
+  // listener on every render.
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
+
   useEffect(() => {
     if (!enabled || !isTauri()) return
     let cancelled = false
@@ -75,7 +97,9 @@ export function useCodeServerChatBridge(enabled: boolean, root?: string): void {
       const payload = event.payload as unknown as ChatContextPayload | null
       if (!payload) return
 
-      void stageContext(payload)
+      void stageContext(payload, tRef.current).then(() => {
+        if (!cancelled) router.push("/")
+      })
     }).then((fn) => {
       if (cancelled) fn()
       else unlisten = fn
@@ -85,10 +109,13 @@ export function useCodeServerChatBridge(enabled: boolean, root?: string): void {
       cancelled = true
       safeUnlisten(unlisten)
     }
-  }, [enabled, root])
+  }, [enabled, root, router])
 }
 
-async function stageContext(payload: ChatContextPayload): Promise<void> {
+async function stageContext(
+  payload: ChatContextPayload,
+  t: (key: string) => string
+): Promise<void> {
   const chat = useChatStore.getState()
   const current = chat.activeSessionId
   const sessionId = current ?? (await startNewSession()).id
@@ -124,7 +151,8 @@ async function stageContext(payload: ChatContextPayload): Promise<void> {
   if (payload.action === "custom" && payload.customPrompt) {
     prompt = payload.customPrompt.replace(/\$\{selection\}/g, payload.selectedText ?? "")
   } else {
-    prompt = ACTION_PROMPTS[payload.action] ?? null
+    const key = ACTION_PROMPT_KEYS[payload.action]
+    prompt = key ? t(key) : null
   }
 
   // Stage the composer intent (focuses composer, optionally fills prompt)

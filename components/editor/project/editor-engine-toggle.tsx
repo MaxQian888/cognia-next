@@ -7,13 +7,19 @@
 
 import { useEffect, useId, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CodeIcon, ExternalLinkIcon, SquareCodeIcon } from "lucide-react"
+import {
+  CodeIcon,
+  ExternalLinkIcon,
+  PuzzleIcon,
+  ShieldCheckIcon,
+  SquareCodeIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { codeServerClient } from "@/lib/codeserver/client"
+import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import type { CodeServerSupportStatus } from "@/hooks/codeserver/use-code-server-supported"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
@@ -30,6 +36,17 @@ interface Props {
   proIdeSupport: CodeServerSupportStatus
   /** Absolute project root, opened by the local-VS-Code fallback. */
   projectRoot: string
+  /**
+   * Which code-server trust domain the Pro IDE pane runs in. Only meaningful
+   * while `value === "codeserver"`; the selector is hidden otherwise.
+   */
+  proIdeProfile?: CodeServerProfile
+  /**
+   * Omit to hide the profile selector entirely — for hosts that deliberately
+   * pin the managed profile (agent drive and the plugin IDE capabilities only
+   * exist there).
+   */
+  onProIdeProfileChange?: (next: CodeServerProfile) => void
   className?: string
 }
 
@@ -38,6 +55,8 @@ export function EditorEngineToggle({
   onChange,
   proIdeSupport,
   projectRoot,
+  proIdeProfile = "managed",
+  onProIdeProfileChange,
   className,
 }: Props) {
   const t = useTranslations("projectEditor")
@@ -142,6 +161,72 @@ export function EditorEngineToggle({
           </TooltipProvider>
         )}
       </ToggleGroup>
+
+      {/* The two profiles are separate processes with separate extension and
+          user-data directories, and only the managed one holds Cognia broker
+          credentials — so this is a trust-domain switch, not a preference.
+          Rendered next to the engine switch because it answers the same
+          question ("which editor am I looking at"), and only while Pro IDE is
+          the live engine: it means nothing to Monaco. */}
+      {value === "codeserver" && proIdeSupported && onProIdeProfileChange ? (
+        <TooltipProvider>
+          <ToggleGroup
+            type="single"
+            value={proIdeProfile}
+            onValueChange={(next) => {
+              if (next) onProIdeProfileChange(next as CodeServerProfile)
+            }}
+            variant="outline"
+            size="sm"
+            aria-label={t("proIde.profileLabel")}
+            className="h-7"
+            data-testid="pro-ide-profile-toggle"
+          >
+            {/* The trigger hangs on a wrapping span rather than on the item
+                itself: `asChild` merges the tooltip's own `data-state`
+                (open/closed) onto its child, which would overwrite the
+                ToggleGroupItem's on/off state — the attribute Radix styles the
+                selected profile from. Same reason the disabled engine item
+                above wraps. */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <ToggleGroupItem
+                    value="managed"
+                    data-testid="pro-ide-profile-managed"
+                    aria-label={t("proIde.profileManaged")}
+                    className="gap-1 px-2 text-xs"
+                  >
+                    <ShieldCheckIcon className="size-3.5" />
+                    {t("proIde.profileManaged")}
+                  </ToggleGroupItem>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                {t("proIde.profileManagedTooltip")}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <ToggleGroupItem
+                    value="native"
+                    data-testid="pro-ide-profile-native"
+                    aria-label={t("proIde.profileNative")}
+                    className="gap-1 px-2 text-xs"
+                  >
+                    <PuzzleIcon className="size-3.5" />
+                    {t("proIde.profileNative")}
+                  </ToggleGroupItem>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                {t("proIde.profileNativeTooltip")}
+              </TooltipContent>
+            </Tooltip>
+          </ToggleGroup>
+        </TooltipProvider>
+      ) : null}
 
       {proIdeSupport === "unsupported" && localVsCode ? (
         <Button

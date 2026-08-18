@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { useCodeServerSupported } from "@/hooks/codeserver/use-code-server-supported"
+import type { CodeServerProfile } from "@/lib/codeserver/client"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { CodeServerPane } from "@/components/editor/project/code-server-pane"
@@ -50,12 +51,22 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
   const persistedMode = useProjectEditorSessionStore(
     (state) => state.sessions[scopeKey]?.editorMode
   )
+  const persistedProfile = useProjectEditorSessionStore(
+    (state) => state.sessions[scopeKey]?.proIdeProfile
+  )
   const setEditorSession = useProjectEditorSessionStore((state) => state.setSession)
   // Persist the engine selection so a Chat → Editor file jump remounts the
   // editor that the user actually selected, including CodeServer.
   const mode = isTauri() && persistedMode === "codeserver" ? "codeserver" : "monaco"
   const setMode = (next: "monaco" | "codeserver") => {
     setEditorSession(scopeKey, { editorMode: next })
+  }
+  // The trust domain rides in the same per-scope record as the engine, so the
+  // tab reopens into the editor the user actually left — the profile is a
+  // different code-server process, not a setting on one.
+  const proIdeProfile = persistedProfile === "native" ? "native" : "managed"
+  const setProIdeProfile = (next: CodeServerProfile) => {
+    setEditorSession(scopeKey, { proIdeProfile: next })
   }
   const proIdeSupport = useCodeServerSupported(isTauri())
 
@@ -85,6 +96,8 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
             onChange={setMode}
             proIdeSupport={proIdeSupport}
             projectRoot={rootPath}
+            proIdeProfile={proIdeProfile}
+            onProIdeProfileChange={setProIdeProfile}
           />
         )}
       </div>
@@ -93,6 +106,7 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
           <CodeServerPane
             root={rootPath}
             ownerId={scopeKey}
+            profile={proIdeProfile}
             onRevoked={() => setMode("monaco")}
             onCancelled={() => setMode("monaco")}
           />

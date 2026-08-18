@@ -6,7 +6,7 @@ import { useTheme } from "next-themes"
 
 import { resolveAppPalette } from "@/lib/appearance/resolve-app-palette"
 import { getShellColors } from "@/lib/appearance/shell-sync"
-import { codeServerClient } from "@/lib/codeserver/client"
+import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import { setCodeServerPaneBackground } from "@/lib/codeserver/pane-manager"
 import {
   CODESERVER_THEME_SETTING_KEYS,
@@ -51,8 +51,16 @@ function getServerPluginThemes(): PluginTheme[] {
  * — the non-colour preferences still sync either way.
  *
  * Runs whenever `enabled` and re-runs on every input.
+ *
+ * `profile` selects which trust domain's `settings.json` is written. The two
+ * profiles keep physically separate `user-data-dir`s, so painting the wrong one
+ * leaves the visible workbench in stock VS Code colours while quietly editing
+ * an editor the user is not looking at.
  */
-export function useCodeServerSettingsSync(enabled: boolean): void {
+export function useCodeServerSettingsSync(
+  enabled: boolean,
+  profile: CodeServerProfile = "managed"
+): void {
   const { resolvedTheme } = useTheme()
   const colorTheme = useSettingsStore((s) => s.colorTheme)
   const activeCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
@@ -120,13 +128,14 @@ export function useCodeServerSettingsSync(enabled: boolean): void {
         linkTheme,
       })
       // Read-merge-write so anything the user set from inside VS Code survives.
-      const existing = await codeServerClient.readUserSettings().catch(() => "")
+      const existing = await codeServerClient.readUserSettings(profile).catch(() => "")
       if (cancelled) return
       await codeServerClient
         .writeUserSettings(
           mergeCodeServerSettings(existing, managed, {
             preserve: linkTheme ? undefined : CODESERVER_THEME_SETTING_KEYS,
-          })
+          }),
+          profile
         )
         // A theming failure must never take the editor down with it.
         .catch(() => undefined)
@@ -136,6 +145,7 @@ export function useCodeServerSettingsSync(enabled: boolean): void {
     }
   }, [
     enabled,
+    profile,
     resolvedTheme,
     colorTheme,
     activeCustomThemeId,

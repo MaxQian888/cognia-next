@@ -20,6 +20,10 @@ let paneOwner: string | null = null
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
 jest.mock("@/lib/tauri/safe-unlisten", () => ({ safeUnlisten: jest.fn() }))
+let mockRemoteHostActive = false
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => mockRemoteHostActive,
+}))
 jest.mock("@/lib/tauri/events", () => ({
   onTauriEvent: (name: string, cb: (payload: never) => void) => {
     listeners.set(name, cb)
@@ -70,9 +74,16 @@ const RECT: ElementRect = { x: 0, y: 0, width: 100, height: 100 }
 const ROOT = "/work/proj"
 const OWNER = "team:t1"
 
-const options = (overrides: Partial<{ root: string; onRevoked: () => void }> = {}) => ({
+const options = (
+  overrides: Partial<{
+    root: string
+    profile: "managed" | "native"
+    onRevoked: () => void
+  }> = {}
+) => ({
   root: overrides.root ?? ROOT,
   ownerId: OWNER,
+  ...(overrides.profile ? { profile: overrides.profile } : {}),
   onRevoked: overrides.onRevoked ?? jest.fn(),
 })
 
@@ -99,6 +110,7 @@ beforeEach(() => {
   mockOnRect = undefined
   mockVisible = true
   mockIsTauri = true
+  mockRemoteHostActive = false
   listeners.clear()
   paneOwner = null
   client.supported.mockReset().mockResolvedValue(true)
@@ -135,7 +147,7 @@ it("ensures code-server and claims the shared pane at the loopback port", async 
   deliverRect()
   await flush()
 
-  expect(client.ensure).toHaveBeenCalledWith(ROOT)
+  expect(client.ensure).toHaveBeenCalledWith(ROOT, "managed")
   expect(result.current.phase).toBe("ready")
   expect(claim).toHaveBeenCalledWith(OWNER, "http://127.0.0.1:43117/", RECT, expect.any(Function))
 })
@@ -154,7 +166,7 @@ it("re-claims with the new url when the selected project root changes", async ()
   rerender()
   await flush()
 
-  expect(client.ensure).toHaveBeenLastCalledWith("/work/other")
+  expect(client.ensure).toHaveBeenLastCalledWith("/work/other", "managed")
   expect(claim).toHaveBeenLastCalledWith(
     OWNER,
     "http://127.0.0.1:43118/",
@@ -447,7 +459,7 @@ describe("restart", () => {
     await flush()
 
     expect(client.stop).toHaveBeenCalledWith(ROOT)
-    expect(client.ensure).toHaveBeenCalledWith(ROOT)
+    expect(client.ensure).toHaveBeenCalledWith(ROOT, "managed")
     expect(result.current.phase).toBe("ready")
   })
 
@@ -478,7 +490,92 @@ describe("restart", () => {
     act(() => result.current.restart())
     await flush()
 
-    expect(client.ensure).toHaveBeenCalledWith(ROOT)
+    expect(client.ensure).toHaveBeenCalledWith(ROOT, "managed")
     expect(result.current.phase).toBe("ready")
+  })
+})
+
+describe("trust-domain profile", () => {
+  it("serves the root from the requested profile", async () => {
+    renderHook(() => useCodeServerPane(ref, options({ profile: "native" })))
+    await flush()
+
+    expect(client.ensure).toHaveBeenCalledWith(ROOT, "native")
+  })
+
+  it("re-ensures and re-claims when the profile switches", async () => {
+    // Managed and native are separate processes on separate ports, so a switch
+    // has to replace the workbench — reconfiguring the running one is not an
+    // option and would silently leave the user in the old trust domain.
+    client.ensure
+      .mockResolvedValueOnce({ running: true, port: 43117, version: "4.128.0" })
+      .mockResolvedValueOnce({ running: true, port: 43119, version: "4.128.0" })
+    let profile: "managed" | "native" = "managed"
+    const { rerender } = renderHook(() => useCodeServerPane(ref, options({ profile })))
+    await flush()
+    deliverRect()
+    await flush()
+
+    profile = "native"
+    rerender()
+    await flush()
+
+    expect(client.ensure).toHaveBeenLastCalledWith(ROOT, "native")
+    expect(claim).toHaveBeenLastCalledWith(
+      OWNER,
+      "http://127.0.0.1:43119/",
+      RECT,
+      expect.any(Function)
+    )
+  })
+})
+
+describe("crash watchdog through a remote relay", () => {
+  it("matches a remote exit by root, since the ports cannot line up", async () => {
+    // The host emits its OWN loopback port; `port` here is the desktop relay's.
+    // Matching on port would never fire and the pane would sit on a dead page.
+    mockRemoteHostActive = true
+    const { result } = renderHook(() => useCodeServerPane(ref, options()))
+    await flush()
+    deliverRect()
+    await flush()
+    expect(result.current.phase).toBe("ready")
+
+    act(() => exitedEvent({ root: ROOT, port: 61999 }))
+    expect(result.current.phase).toBe("error")
+  })
+
+  it("tolerates a trailing-slash difference in the reported root", async () => {
+    mockRemoteHostActive = true
+    const { result } = renderHook(() => useCodeServerPane(ref, options()))
+    await flush()
+    deliverRect()
+    await flush()
+
+    act(() => exitedEvent({ root: `${ROOT}/`, port: 61999 }))
+    expect(result.current.phase).toBe("error")
+  })
+
+  it("ignores a remote exit for a different project root", async () => {
+    mockRemoteHostActive = true
+    const { result } = renderHook(() => useCodeServerPane(ref, options()))
+    await flush()
+    deliverRect()
+    await flush()
+
+    act(() => exitedEvent({ root: "/work/other", port: 43117 }))
+    expect(result.current.phase).toBe("ready")
+  })
+
+  it("keeps matching on port when no remote host is active", async () => {
+    const { result } = renderHook(() => useCodeServerPane(ref, options()))
+    await flush()
+    deliverRect()
+    await flush()
+
+    // Locally `root` is the backend's canonicalized spelling and may differ, so
+    // the port stays the sharper key.
+    act(() => exitedEvent({ root: "/private/work/proj", port: 43117 }))
+    expect(result.current.phase).toBe("error")
   })
 })

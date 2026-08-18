@@ -20,6 +20,11 @@
   "previewTab": "{name} — preview tab, double-click to keep it open",
   "proIde": {
     "cancelDownload": "Cancel",
+    "chatPrompts": {
+      "explain": "Please explain this code.",
+      "fix": "Please fix the issues in this code.",
+      "review": "Please review this code for potential bugs and improvements."
+    },
     "checkingTooltip": "Checking whether Pro IDE is available…",
     "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
     "downloading": "Downloading VS Code… {percent}%",
@@ -29,6 +34,12 @@
     "localVsCodeFailed": "Couldn't open your local VS Code: {error}",
     "openFileFailed": "Couldn't open the file in VS Code: {error}",
     "openLocalVsCode": "Open in VS Code",
+    "profileLabel": "Extension profile",
+    "profileManaged": "Managed",
+    "profileManagedTooltip": "Pinned built-ins, the Cognia broker, and signed generated proxies. Agent drive, chat context, and plugin IDE capabilities all need this profile.",
+    "profileNative": "Extensions",
+    "profileNativeTooltip": "Your Open VSX extensions, in a separate process with its own settings and extension directory. It never receives Cognia broker credentials, so agent drive and plugin IDE capabilities are unavailable here.",
+    "profileSwitchRestarts": "Switching profile starts a separate VS Code. Open editors and terminals stay in the other profile.",
     "retry": "Retry",
     "revokedToMonaco": "Switched back to Monaco — the VS Code pane was taken by another editor or stopped.",
     "starting": "Starting VS Code…",

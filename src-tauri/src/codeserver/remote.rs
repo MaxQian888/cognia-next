@@ -354,7 +354,7 @@ fn running_status(profile: IdeProfile, relay_id: &str) -> RemoteCodeServerStatus
         port: None,
         version: CODE_SERVER_VERSION.to_string(),
         profile: Some(profile),
-        relay_path: Some(format!("/ide/v1/relay/{relay_id}/")),
+        relay_path: Some(format!("/ide/relay/{relay_id}/")),
     }
 }
 
@@ -997,7 +997,7 @@ mod tests {
     fn relay_status_never_exposes_the_loopback_port() {
         let status = running_status(IdeProfile::Managed, "opaque");
         let value = serde_json::to_value(status).unwrap();
-        assert_eq!(value["relayPath"], "/ide/v1/relay/opaque/");
+        assert_eq!(value["relayPath"], "/ide/relay/opaque/");
         assert!(value["port"].is_null());
     }
 

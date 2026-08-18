@@ -12,6 +12,24 @@ jest.mock("@/lib/remote-host/credential-vault", () => ({
   remoteHostCredentialRef: (id: string) => `remote-host:${id}`,
 }))
 
+/**
+ * Records whether a remote host was still active at the moment `stopAll` was
+ * issued. `deactivate` clears the routing plane synchronously, and
+ * `codeserver_stop_all` is NOT a local-only command — so a stop issued after
+ * the clear would hit the desktop and leave the remote host's IDE children
+ * running with nothing able to list or stop them.
+ */
+const stopAllSawRemote: Array<unknown> = []
+// Reads through the module-scoped `getActiveRemoteEndpoint` imported below.
+// `transport-routing` is not mocked, so that binding is the same module
+// instance the store mutates — no `require()` indirection needed.
+const mockStopAll = jest.fn(async () => {
+  stopAllSawRemote.push(getActiveRemoteEndpoint())
+})
+jest.mock("@/lib/codeserver/client", () => ({
+  codeServerClient: { stopAll: () => mockStopAll() },
+}))
+
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import type { CapabilityId } from "@/lib/platform/capabilities"
 import {
@@ -689,5 +707,35 @@ describe("persisted host migration", () => {
     expect(mockClearRemoteHostCredential).toHaveBeenCalledWith("legacy-host")
     expect(useRemoteHostStore.getState().hosts).toEqual([])
     expect(useRemoteHostStore.getState().activeHostId).toBeNull()
+  })
+})
+
+describe("deactivate stops the remote host's IDE instances", () => {
+  beforeEach(() => {
+    mockStopAll.mockClear()
+    stopAllSawRemote.length = 0
+  })
+
+  it("issues the stop while the host is still the active route", () => {
+    const host = useRemoteHostStore.getState().addHost({ config: makeConfig() })
+    useRemoteHostStore.getState().activateHost(host.id)
+    expect(getActiveRemoteEndpoint()).not.toBeNull()
+
+    useRemoteHostStore.getState().deactivate()
+
+    expect(mockStopAll).toHaveBeenCalledTimes(1)
+    // Ordering is the whole point: after the clear this command routes local.
+    expect(stopAllSawRemote).toHaveLength(1)
+    expect(stopAllSawRemote[0]).not.toBeNull()
+    expect(getActiveRemoteEndpoint()).toBeNull()
+  })
+
+  it("runs on the implicit deactivate inside removeHost", () => {
+    const host = useRemoteHostStore.getState().addHost({ config: makeConfig() })
+    useRemoteHostStore.getState().activateHost(host.id)
+    useRemoteHostStore.getState().removeHost(host.id)
+
+    expect(mockStopAll).toHaveBeenCalledTimes(1)
+    expect(stopAllSawRemote[0]).not.toBeNull()
   })
 })

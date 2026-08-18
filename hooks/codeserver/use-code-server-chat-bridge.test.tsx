@@ -6,6 +6,23 @@ let mockIsTauri = true
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
 
+const push = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
+
+// Resolved against the real catalogue rather than stubbed to the key, so the
+// prompt assertions below pin BOTH that the key exists and the text the user
+// ends up with in their composer.
+jest.mock("next-intl", () => ({
+  useTranslations: (namespace: string) => (key: string) => {
+    const messages = jest.requireActual("@/i18n/messages/en/projectEditor.json")
+    return [...namespace.split(".").slice(1), ...key.split(".")].reduce(
+      (node: Record<string, unknown> | undefined, part: string) =>
+        node?.[part] as Record<string, unknown> | undefined,
+      messages as Record<string, unknown>
+    )
+  },
+}))
+
 const mockStartNewSession = jest.fn().mockResolvedValue({ id: "new-session-123" })
 jest.mock("@/lib/chat/start-session", () => ({
   startNewSession: () => mockStartNewSession(),
@@ -77,6 +94,7 @@ beforeEach(() => {
   mockStartNewSession.mockClear()
   mockChatState.activeSessionId = "session-1"
   mockChatState.contextSelections = []
+  push.mockClear()
 })
 
 it("stages a FileSelectionRef when chatContextRequested event fires", async () => {
@@ -284,4 +302,42 @@ it("creates a new session when none is active", async () => {
 
   expect(mockStartNewSession).toHaveBeenCalledTimes(1)
   expect(stage).toHaveBeenCalledWith("new-session-123", expect.anything())
+})
+
+it("routes to the composer after staging", async () => {
+  // Only the composer mounted for this session consumes a staged intent, and one
+  // Pro IDE host is the Agent Team workspace Editor tab — a route with no
+  // composer. Without the push, "Add to Chat" staged into a surface the user
+  // could not see.
+  renderHook(() => useCodeServerChatBridge(true, "/work/proj"))
+  await flush()
+
+  emit(makeChatEvent({ action: "explain" }))
+  await flush()
+
+  expect(stage).toHaveBeenCalledTimes(1)
+  expect(push).toHaveBeenCalledWith("/")
+})
+
+it("does not route for an event belonging to another project's pane", async () => {
+  renderHook(() => useCodeServerChatBridge(true, "/work/proj"))
+  await flush()
+
+  emit({ ...makeChatEvent(), root: "/work/other" })
+  await flush()
+
+  expect(stage).not.toHaveBeenCalled()
+  expect(push).not.toHaveBeenCalled()
+})
+
+it("does not route after the hook has been torn down", async () => {
+  const { unmount } = renderHook(() => useCodeServerChatBridge(true, "/work/proj"))
+  await flush()
+
+  const [handler] = handlers
+  unmount()
+  handler(makeChatEvent({ action: "explain" }))
+  await flush()
+
+  expect(push).not.toHaveBeenCalled()
 })

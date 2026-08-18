@@ -17,7 +17,7 @@ import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-ed
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
 import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
-import { codeServerClient } from "@/lib/codeserver/client"
+import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import { createCodeServerOpenQueue } from "@/lib/codeserver/open-file-queue"
 import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
 import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
@@ -27,6 +27,13 @@ interface Props {
   root: string
   /** Stable id for this surface in the shared-pane ownership handoff. */
   ownerId: string
+  /**
+   * Which code-server trust domain to run in. `managed` (the default) loads the
+   * Cognia broker and signed generated proxies; `native` loads the user's Open
+   * VSX extensions in an isolated process with no broker credentials. They are
+   * separate processes on separate ports, so switching replaces the workbench.
+   */
+  profile?: CodeServerProfile
   /** Called when another surface claims the shared pane away from this one. */
   onRevoked: () => void
   /**
@@ -47,7 +54,14 @@ export function joinProjectPath(root: string, relative: string): string {
   return clean ? `${base}/${clean}` : base
 }
 
-export function CodeServerPane({ root, ownerId, onRevoked, onCancelled, beforeOpen }: Props) {
+export function CodeServerPane({
+  root,
+  ownerId,
+  profile = "managed",
+  onRevoked,
+  onCancelled,
+  beforeOpen,
+}: Props) {
   const t = useTranslations("projectEditor")
   const ref = useRef<HTMLDivElement>(null)
   // A1: the single native pane is shared with the Agent Team editor tab; claiming
@@ -61,6 +75,7 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled, beforeOp
   const { phase, mounted, progress, error, retry, restart } = useCodeServerPane(ref, {
     root,
     ownerId,
+    profile,
     onRevoked: handleRevoked,
   })
   const percent = progress != null ? Math.round(progress * 100) : null
@@ -75,7 +90,7 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled, beforeOp
   // Paint + configure code-server from the app's own appearance and editor
   // preferences. Kept outside the phase gate so the very first spawn already
   // reads a synced settings.json rather than booting stock and repainting.
-  useCodeServerSettingsSync(true)
+  useCodeServerSettingsSync(true, profile)
   // Display language is a *runtime argument*, not a setting: it needs argv.json
   // plus a workbench restart (which is also what installs the language pack), so
   // it gets its own sync rather than riding along with the hot-applied ones.
@@ -91,10 +106,14 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled, beforeOp
     },
     [t]
   )
-  useCodeServerLocaleSync(true, {
-    restart: handleLocaleChanged,
-    onUntranslated: handleUntranslated,
-  })
+  useCodeServerLocaleSync(
+    true,
+    {
+      restart: handleLocaleChanged,
+      onUntranslated: handleUntranslated,
+    },
+    profile
+  )
   // Republish the extension's pushed editor changes as the app's active-editor
   // signal, so "what the user is looking at" stays live without anyone polling.
   useCodeServerEditorEvents(phase === "ready", root)

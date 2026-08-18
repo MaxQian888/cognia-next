@@ -1,10 +1,12 @@
 {
   "cancel": "Cancel",
+  "cancelDownload": "Cancel download",
   "clean": "Clean up old versions",
   "cleanDone": "Freed {size}.",
   "description": "The optional embedded VS Code used by the project editors. This card manages the install; running instances appear under Performance → Managed Processes.",
   "diskUsage": "Disk usage",
   "download": "Download now",
+  "downloadCancelled": "Download cancelled. The partial archive was removed.",
   "downloadDone": "code-server {version} installed.",
   "failed": "Failed: {error}",
   "installed": "Installed",

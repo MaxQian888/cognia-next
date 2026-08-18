@@ -8,9 +8,9 @@
 // the pinned version, the on-disk footprint, pre-fetching the ~100-200MB
 // tarball before the first switch, and reclaiming space afterwards.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, Loader2Icon, RotateCwIcon, Trash2Icon } from "lucide-react"
+import { DownloadIcon, Loader2Icon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -50,6 +50,14 @@ export function ProIdeSection() {
   const [busy, setBusy] = useState<Busy>(null)
   const [progress, setProgress] = useState<number | null>(null)
   const [confirmUninstall, setConfirmUninstall] = useState(false)
+  /**
+   * Set when the user backs out of a pre-fetch, so the rejection the backend
+   * hands the in-flight `download()` is reported as "you cancelled" instead of
+   * as a failure. A ref rather than state: it is read inside the `run` catch of
+   * the very call that is unwinding, and a re-render in between would be a
+   * cascading state write for no visual benefit.
+   */
+  const cancelledRef = useRef(false)
 
   const refresh = useCallback(async () => {
     const next = await codeServerClient.diskUsage().catch(() => null)
@@ -97,7 +105,10 @@ export function ProIdeSection() {
     try {
       toast.success(await task())
     } catch (cause) {
-      toast.error(t("failed", { error: String(cause) }))
+      // A cancelled pre-fetch rejects through this same path. Reporting it as a
+      // failure would tell the user their own click went wrong.
+      if (cancelledRef.current) toast.info(t("downloadCancelled"))
+      else toast.error(t("failed", { error: String(cause) }))
     } finally {
       setBusy(null)
       setProgress(null)
@@ -105,11 +116,26 @@ export function ProIdeSection() {
     }
   }
 
-  const download = () =>
-    run("download", async () => {
+  const download = () => {
+    cancelledRef.current = false
+    return run("download", async () => {
       const info = await codeServerClient.download()
       return t("downloadDone", { version: info.version })
     })
+  }
+
+  /**
+   * Back out of the ~100-200MB pre-fetch. Fire-and-forget by design: the backend
+   * drops the streaming future and removes the partial archive, and the in-flight
+   * `download()` above rejects on its own — so a cancel can never itself raise at
+   * the user. Mirrors the editor pane's cancel affordance
+   * (`components/editor/project/code-server-pane.tsx`); without it a mis-click on
+   * "Download now" committed the user to the whole transfer.
+   */
+  const cancelDownload = () => {
+    cancelledRef.current = true
+    void codeServerClient.cancelDownload().catch(() => {})
+  }
 
   /**
    * `codeserver_uninstall` stops every running instance before it touches the
@@ -206,6 +232,17 @@ export function ProIdeSection() {
             )}
             {t("download")}
           </Button>
+          {busy === "download" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={cancelDownload}
+              data-testid="pro-ide-cancel-download"
+            >
+              <XIcon className="size-3.5" />
+              {t("cancelDownload")}
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="outline"

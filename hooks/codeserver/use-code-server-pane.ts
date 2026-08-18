@@ -11,6 +11,7 @@ import {
   CODESERVER_EVENTS,
   type CodeServerDownloadProgress,
   type CodeServerExited,
+  type CodeServerProfile,
   codeServerClient,
 } from "@/lib/codeserver/client"
 import {
@@ -22,6 +23,7 @@ import {
 } from "@/lib/codeserver/pane-manager"
 import { isTauri } from "@/lib/tauri"
 import { onTauriEvent } from "@/lib/tauri/events"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 /**
@@ -61,6 +63,13 @@ export interface UseCodeServerPaneOptions {
   root: string
   /** Stable id identifying this surface to the pane manager. */
   ownerId: string
+  /**
+   * Which code-server trust domain to serve `root` from. Defaults to `managed`,
+   * matching the backend default. The two profiles are separate processes on
+   * separate ports, so switching this re-`ensure`s and re-navigates the pane
+   * rather than reconfiguring the running one.
+   */
+  profile?: CodeServerProfile
   /** Called when another surface claims the shared pane away from this one. */
   onRevoked: () => void
 }
@@ -79,7 +88,7 @@ export function useCodeServerPane(
   ref: RefObject<HTMLElement | null>,
   options: UseCodeServerPaneOptions
 ): UseCodeServerPane {
-  const { root, ownerId, onRevoked } = options
+  const { root, ownerId, profile = "managed", onRevoked } = options
   const [phase, setPhase] = useState<CodeServerPhase>("starting")
   const [mounted, setMounted] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
@@ -163,7 +172,7 @@ export function useCodeServerPane(
         else unlistenProgress = fn
       })
       try {
-        const status = await codeServerClient.ensure(root)
+        const status = await codeServerClient.ensure(root, profile)
         if (cancelled) return
         const nextPort = status.port ?? null
         urlRef.current = nextPort != null ? `http://127.0.0.1:${nextPort}/` : null
@@ -181,7 +190,7 @@ export function useCodeServerPane(
       cancelled = true
       safeUnlisten(unlistenProgress)
     }
-  }, [root, attempt, claimPane])
+  }, [root, profile, attempt, claimPane])
 
   // Claim the pane once the port (→ url) is known.
   useEffect(() => {
@@ -200,7 +209,17 @@ export function useCodeServerPane(
     let cancelled = false
     let unlisten: (() => void) | null = null
     void onTauriEvent<CodeServerExited>(CODESERVER_EVENTS.instanceExited, (payload) => {
-      if (cancelled || payload.port !== port) return
+      if (cancelled) return
+      // Locally the port is the sharper key — `root` is the backend's
+      // canonicalized spelling and may not equal the one this surface holds.
+      // Through a remote host it is the *only* wrong key: the event carries the
+      // host's own loopback port while `port` here is the desktop relay's, so a
+      // port match can never happen and a crashed remote instance would sit
+      // there as a dead page. Fall back to the root in that case.
+      const matches = isRemoteHostActive()
+        ? payload.root === root || payload.root.replace(/\/+$/, "") === root.replace(/\/+$/, "")
+        : payload.port === port
+      if (!matches) return
       setError(`code-server for ${payload.root} stopped responding`)
       setPhase("error")
     }).then((fn) => {
@@ -211,7 +230,7 @@ export function useCodeServerPane(
       cancelled = true
       safeUnlisten(unlisten)
     }
-  }, [port])
+  }, [port, root])
 
   // Reflect visibility onto the native webview. Two things park it: the region
   // going off-screen (tab switch / modal), and any phase other than `ready` —

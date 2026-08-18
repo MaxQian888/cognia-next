@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react"
 
-import { codeServerClient } from "@/lib/codeserver/client"
+import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import {
   readRuntimeArgsLocale,
   vscodeLocaleForAppLanguage,
@@ -46,7 +46,8 @@ export interface UseCodeServerLocaleSyncOptions {
  */
 export function useCodeServerLocaleSync(
   enabled: boolean,
-  options: UseCodeServerLocaleSyncOptions
+  options: UseCodeServerLocaleSyncOptions,
+  profile: CodeServerProfile = "managed"
 ): void {
   const language = useSettingsStore((s) => s.language)
   // Held in a ref so a re-render caused by anything else can't re-trigger a
@@ -63,11 +64,14 @@ export function useCodeServerLocaleSync(
     let cancelled = false
     void (async () => {
       const desired = vscodeLocaleForAppLanguage(language)
-      const existingRaw = await codeServerClient.readRuntimeArgs().catch(() => "")
+      const existingRaw = await codeServerClient.readRuntimeArgs(profile).catch(() => "")
       if (cancelled) return
       if (readRuntimeArgsLocale(existingRaw) === desired) return
       try {
-        await codeServerClient.writeRuntimeArgs(withRuntimeArgsLocale(existingRaw, desired))
+        await codeServerClient.writeRuntimeArgs(
+          withRuntimeArgsLocale(existingRaw, desired),
+          profile
+        )
       } catch {
         // A read-only state dir means the editor stays in its current language;
         // that must not take the pane down with it.
@@ -91,5 +95,5 @@ export function useCodeServerLocaleSync(
     return () => {
       cancelled = true
     }
-  }, [enabled, language])
+  }, [enabled, language, profile])
 }
