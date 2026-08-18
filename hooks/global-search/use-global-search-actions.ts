@@ -23,10 +23,11 @@ import { messagesToMarkdown } from "@/components/ai-elements/conversation"
 import { jumpToSessionMessage } from "@/lib/chat/cross-session-jump"
 import { guildFromSession } from "@/lib/claude/guild"
 import { revealActiveWorkbenchPanel } from "@/lib/context-workbench/active-context"
+import { inboxConversationHref } from "@/lib/inbox/conversation-href"
 import type { BuiltinCommandId } from "@/lib/global-search/providers/actions"
 import { clearAllGlobalSearchRecents, recordRecentItem } from "@/lib/global-search/recents"
-import { piPackageInstallHref } from "@/lib/pi-packages/deep-link"
 import type { GlobalSearchAction, GlobalSearchItem } from "@/lib/global-search/types"
+import { piPackageInstallHref } from "@/lib/pi-packages/deep-link"
 import { getQuickAction, runQuickAction } from "@/lib/plugin/registries/quick-action-registry"
 import { isTauri } from "@/lib/tauri"
 import { checkForUpdate } from "@/lib/tauri/updater"
@@ -224,6 +225,9 @@ export function useGlobalSearchActions({
       switch (action.type) {
         case "open-session":
           openSession(action.sessionId, action.messageId)
+          return
+        case "open-inbox-conversation":
+          router.push(inboxConversationHref(action.conversationKey, action.messageId))
           return
         case "navigate":
           router.push(action.href)

@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { getDb } from "@/lib/db/schema"
-import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
+import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 interface ProviderModelSwitcherProps {
@@ -132,11 +132,14 @@ export function ProviderModelSwitcher({
     }
     setPending(true)
     try {
-      await upsertByConversationKey({
-        conversationKey,
-        sessionId,
-        providerOverride: next.providerOverride,
-        modelOverride: next.modelOverride,
+      await mutateConversationOverride({
+        kind: "upsert",
+        input: {
+          conversationKey,
+          sessionId,
+          providerOverride: next.providerOverride,
+          modelOverride: next.modelOverride,
+        },
       })
       onChange?.(next)
     } finally {

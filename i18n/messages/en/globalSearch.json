@@ -53,10 +53,15 @@
   "groups": {
     "messagesInChats": "Conversations mentioning “{query}”"
   },
+  "inbox": {
+    "openAdapter": "Open in Inbox",
+    "openConversation": "Open conversation"
+  },
   "jumpFailed": "The matching message could not be opened.",
   "kinds": {
     "action": "Commands",
     "character": "Characters",
+    "inbox-contact": "Contacts",
     "inbox-conversation": "Inbox conversations",
     "mcp-server": "MCP servers",
     "memory": "Memories",

@@ -42,6 +42,16 @@ jest.mock("dexie-react-hooks", () => ({
 }))
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
+
+// ADR-0131 §2.2 — the shell swaps itself for `StateCard.RequiresHost` when
+// this shell can neither run connectors nor relay to a host.
+jest.mock("@/lib/connectors/inbox-writes", () => ({ useInboxWriteRoute: jest.fn(() => "local") }))
+// Partial mock: `detect` also exports `isCapacitor`, which the transport
+// picker calls at import time — replacing the whole module breaks it.
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: jest.fn(() => false),
+}))
 // The sidebar header's view-mode toggles are tooltip-wrapped and always
 // render now; `app/layout.tsx` supplies the provider in the real app.
 jest.mock("@/components/ui/tooltip")
@@ -57,6 +67,13 @@ jest.mock("./notices/notice-area", () => ({
 // Drive the breakpoint per test. `useIsMobile` is retained for any child that
 // still consumes it.
 const mockBreakpoint = jest.fn().mockReturnValue("desktop")
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockWriteRoute = (require("@/lib/connectors/inbox-writes") as {
+  useInboxWriteRoute: jest.Mock
+}).useInboxWriteRoute
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const mockIsTauri = (require("@/lib/platform/detect") as { isTauri: jest.Mock }).isTauri
 jest.mock("@/hooks/ui", () => ({
   useBreakpoint: () => mockBreakpoint(),
   useIsMobile: () => mockBreakpoint() === "mobile",
@@ -144,6 +161,44 @@ import { InboxShell } from "./inbox-shell"
 describe("InboxShell", () => {
   beforeEach(() => {
     mockBreakpoint.mockReturnValue("desktop")
+    mockWriteRoute.mockReturnValue("local")
+    mockIsTauri.mockReturnValue(false)
+  })
+
+  // ── ADR-0131 §2.2: standalone shells cannot write ────────────────────────
+  describe("requires-host state", () => {
+    it.each(["desktop", "tablet", "mobile"])(
+      "replaces the whole shell on %s when nothing can execute a write",
+      (bp) => {
+        // Showing the normal panes here would render an empty conversation
+        // list ("you have no conversations" — a lie) plus reply controls that
+        // silently do nothing.
+        mockBreakpoint.mockReturnValue(bp)
+        mockWriteRoute.mockReturnValue("unavailable")
+        render(<InboxShell view="all" />)
+
+        expect(screen.getByTestId("inbox-requires-host")).toBeInTheDocument()
+        expect(screen.queryByTestId("inbox-conversation-list-pane")).not.toBeInTheDocument()
+        expect(screen.queryByTestId("inbox-detail-pane")).not.toBeInTheDocument()
+      }
+    )
+
+    it.each(["local", "remote"] as const)("renders the normal shell on route %s", (route) => {
+      mockWriteRoute.mockReturnValue(route)
+      render(<InboxShell view="all" />)
+      expect(screen.queryByTestId("inbox-requires-host")).not.toBeInTheDocument()
+      expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
+    })
+
+    it("never shows it on the desktop, where `unavailable` just means still booting", () => {
+      // A Tauri window always ends up with a runtime (or drives a remote
+      // host); flashing the pairing card during boot would be pure noise.
+      mockIsTauri.mockReturnValue(true)
+      mockWriteRoute.mockReturnValue("unavailable")
+      render(<InboxShell view="all" />)
+      expect(screen.queryByTestId("inbox-requires-host")).not.toBeInTheDocument()
+      expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
+    })
   })
 
   // The five notice strips used to mount from two different places — two here,

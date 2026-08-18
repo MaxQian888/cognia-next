@@ -138,6 +138,7 @@
     "unmerge": "Unmerge"
   },
   "conversation": {
+    "jumpFailed": "The linked message could not be opened.",
     "loading": "Loading…"
   },
   "conversationHeader": {
@@ -199,6 +200,7 @@
     "more": "More",
     "moreAttention": "More — needs attention",
     "openContact": "Contact profile",
+    "openInChat": "Open in chat",
     "openOverrides": "Conversation settings",
     "openOverridesAria": "Open per-conversation settings",
     "openSidebar": "Open sidebar",
@@ -591,6 +593,12 @@
     "label": "Quiet hours",
     "tooltip": "Outbound replies pause during quiet hours ({from}–{to} {tz})."
   },
+  "relay": {
+    "hostUnsupported": "This host is too old for cross-device replies. Update it and try again.",
+    "queued": "Queued — it will send as soon as the host is reachable.",
+    "sendFailed": "Couldn't send. Pair a host, or check that it's reachable.",
+    "unavailable": "Replying needs a paired host."
+  },
   "shell": {
     "resize": {
       "detailHandle": "Resize conversation list",
@@ -632,6 +640,11 @@
       "description": "The Inbox surface failed to render. Try again, or copy the stack trace into an incident ticket.",
       "retry": "Retry",
       "title": "Something went wrong"
+    },
+    "requiresHost": {
+      "title": "Connect a host to use the Inbox",
+      "description": "This device doesn't run connector bots. Pair it with your desktop or server to read and reply to platform conversations.",
+      "pairAction": "Pair a host"
     },
     "syncing": {
       "label": "Loading from cache…"

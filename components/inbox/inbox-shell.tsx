@@ -20,6 +20,7 @@
  */
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { motion } from "motion/react"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
@@ -35,6 +36,9 @@ import {
 import { InboxSidebar, InboxSidebarContent } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
 import { InboxNoticeArea } from "./notices/notice-area"
+import { StateCard } from "./state/state-card"
+import { useInboxWriteRoute } from "@/lib/connectors/inbox-writes"
+import { isTauri } from "@/lib/platform/detect"
 
 export type InboxView = "all" | "by-adapter" | "by-platform" | "conversation"
 
@@ -177,6 +181,29 @@ export function InboxShell({
 }: InboxShellProps) {
   const t = useTranslations("inbox.shell")
   const breakpoint = useBreakpoint()
+  const writeRoute = useInboxWriteRoute()
+  const router = useRouter()
+
+  // ADR-0131 §2.2 — a standalone browser tab or an unpaired phone has no
+  // connector runtime and no host to relay to, so every Inbox write is
+  // impossible here. Rendering the normal shell would show an empty list that
+  // reads as "you have no conversations" and reply controls that silently do
+  // nothing. Say so instead, and point at pairing.
+  //
+  // Deliberately NOT applied on the desktop: a Tauri window always has a
+  // runtime (or is driving a remote host), so `"unavailable"` there means the
+  // runtime is still booting, and swapping the whole shell out mid-boot would
+  // flash this card on every cold start.
+  if (writeRoute === "unavailable" && !isTauri()) {
+    return (
+      <div
+        className="flex h-full min-h-0 flex-1 items-center justify-center overflow-auto safe-area-pt safe-area-pb"
+        data-testid="inbox-requires-host"
+      >
+        <StateCard.RequiresHost onPair={() => router.push("/pair")} />
+      </div>
+    )
+  }
 
   if (breakpoint === "desktop") {
     return (

@@ -281,7 +281,21 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         audience: ChannelAudience::Any,
         default_on: true,
         tauri_forwarded: true,
-        note: "table-scoped sync invalidation; table names only",
+        note: "table-scoped sync invalidation; table names (+ optional conversation key) only",
+    },
+    EventChannelSpec {
+        // ADR-0131 cross-shell inbox relay. Distinct from `sync://invalidate`
+        // because it is the NOTIFIABLE half: invalidate says "re-pull table
+        // X", this says "a human message arrived in conversation Y" and is
+        // what `register_push_trigger` wakes a backgrounded phone for.
+        // Ids + href only — never message text (it transits APNs/FCM).
+        // `default_on: false` so a client that never asked keeps its
+        // bandwidth; the mobile shell subscribes explicitly.
+        pattern: "connector://message-added",
+        audience: ChannelAudience::Any,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "inbound IM message arrived; ids + deep-link href only",
     },
     EventChannelSpec {
         pattern: "git://status-changed",
@@ -1271,6 +1285,29 @@ mod tests {
     /// Channels whose remote delivery is a targeted or direct publish must not
     /// also get a listener — `perf://frame` in particular would go from
     /// "delivered to the one device that asked" to "broadcast to everyone".
+    /// ADR-0131 cross-shell inbox relay pins both of its channels: the
+    /// invalidate channel must stay `default_on` (every companion already
+    /// relies on it) while the new notifiable channel must stay opt-in, and
+    /// both must be Tauri-forwarded or the desktop host's `emit` never
+    /// reaches a paired device.
+    #[test]
+    fn inbox_relay_channels_keep_their_contract() {
+        let invalidate = spec_for("sync://invalidate").expect("catalogued");
+        assert!(invalidate.default_on, "companions rely on this by default");
+        assert!(invalidate.tauri_forwarded);
+
+        let added = spec_for("connector://message-added").expect("catalogued");
+        assert!(
+            !added.default_on,
+            "message-added is opt-in; it wakes push and must be asked for"
+        );
+        assert!(
+            added.tauri_forwarded,
+            "the desktop host publishes it with a Tauri emit"
+        );
+        assert!(matches!(added.audience, ChannelAudience::Any));
+    }
+
     #[test]
     fn directly_published_channels_are_not_also_listened_for() {
         for channel in ["perf://frame", "host-state://action"] {

@@ -24,6 +24,28 @@ import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
 import { append as appendConnectorAudit } from "./connector-audit"
 import { resolveScopeProjectId } from "./project-scope"
+import { publishSyncInvalidate } from "@/lib/sync/host-invalidate"
+
+/**
+ * Companion fan-out (ADR-0131 inbox relay). Every status write below stamps
+ * the indexed `updatedAt` (v173 — the companion sync cursor for this table)
+ * and asks paired thin clients to re-pull the `outboundQueue` status
+ * projection. Coalesced (150 ms per table) and best-effort inside
+ * `publishSyncInvalidate`; a no-op off the connector host.
+ */
+function invalidate(conversationKey?: string): void {
+  publishSyncInvalidate("outboundQueue", conversationKey)
+}
+
+/**
+ * Rows mirrored from a paired host (`syncedFromHost: true`) are status
+ * projections, never work for THIS runner. Applied to every due-queue and
+ * stale-claim reader so a thin client's local runner (which exists on the
+ * desktop-as-thin-client) can never dispatch the host's job a second time.
+ */
+function isLocallyDispatchable(row: OutboundJobRow): boolean {
+  return row.syncedFromHost !== true
+}
 
 /**
  * Soft cap on the ACTIVE (`pending` / `failed` / `sending`) rows in the
@@ -215,6 +237,7 @@ export async function enqueueOutboundMany(
             status: "pending" as const,
             attempts: 0,
             createdAt: now,
+            updatedAt: now,
             orderSeq,
             nextAttemptAt: input.nextAttemptAt ?? now,
             idempotencyKey: input.request.metadata.idempotencyKey,
@@ -230,6 +253,7 @@ export async function enqueueOutboundMany(
 
     await enforceQueueSoftCap(now)
     emitOutboundEnqueued()
+    for (const conversationKey of conversationKeys) invalidate(conversationKey)
     return rows
   })
 }
@@ -361,7 +385,9 @@ async function enforceQueueSoftCap(now: number): Promise<void> {
       status: "deadlettered",
       lastErrorCode: "queue_capped",
       lastError: `outboundQueue exceeded soft cap of ${outboundQueueSoftCap}`,
+      updatedAt: now,
     })
+    invalidate(job.conversationKey)
     try {
       await appendConnectorAudit({
         adapterId: job.adapterId,
@@ -443,7 +469,7 @@ export async function recoverStaleSendingJobs(
     .filter((row) => row.claimedAt === undefined && row.createdAt <= cutoff)
     .limit(STALE_LEGACY_SCAN_BATCH)
     .toArray()
-  const sending = [...indexed, ...legacy]
+  const sending = [...indexed, ...legacy].filter(isLocallyDispatchable)
   const recovered: OutboundJobRow[] = []
   for (const row of sending) {
     if ((row.claimedAt ?? row.createdAt) > cutoff) continue
@@ -457,10 +483,12 @@ export async function recoverStaleSendingJobs(
         lastErrorCode: "stale_sending_recovered",
         lastError: "Recovered from a stale sending claim (runner interrupted mid-send)",
         nextAttemptAt: now,
+        updatedAt: now,
       })
       return true
     })
     if (flipped) {
+      invalidate(row.conversationKey)
       recovered.push({
         ...row,
         status: "failed",
@@ -581,6 +609,7 @@ export async function listDueNow(
     db.outboundQueue
       .where("[status+nextAttemptAt]")
       .between(["pending", -Infinity], ["pending", now], true, true)
+      .filter(isLocallyDispatchable)
       .limit(pendingLimit)
       .toArray(),
     failedLimit === 0
@@ -588,6 +617,7 @@ export async function listDueNow(
       : db.outboundQueue
           .where("[status+nextAttemptAt]")
           .between(["failed", -Infinity], ["failed", now], true, true)
+          .filter(isLocallyDispatchable)
           .limit(failedLimit)
           .toArray(),
   ])
@@ -599,6 +629,7 @@ export async function listDueNow(
       ...(await db.outboundQueue
         .where("[status+nextAttemptAt]")
         .between(["pending", -Infinity], ["pending", now], true, true)
+        .filter(isLocallyDispatchable)
         .offset(pending.length)
         .limit(remaining)
         .toArray())
@@ -608,6 +639,7 @@ export async function listDueNow(
       ...(await db.outboundQueue
         .where("[status+nextAttemptAt]")
         .between(["failed", -Infinity], ["failed", now], true, true)
+        .filter(isLocallyDispatchable)
         .offset(failed.length)
         .limit(remaining)
         .toArray())
@@ -639,10 +671,12 @@ export async function peekNextWakeAt(now: number = Date.now()): Promise<number |
     db.outboundQueue
       .where("[status+nextAttemptAt]")
       .between(["pending", now], ["pending", Infinity], false, true)
+      .filter(isLocallyDispatchable)
       .first(),
     db.outboundQueue
       .where("[status+nextAttemptAt]")
       .between(["failed", now], ["failed", Infinity], false, true)
+      .filter(isLocallyDispatchable)
       .first(),
   ])
   const times = [pending?.nextAttemptAt, failed?.nextAttemptAt].filter(
@@ -680,14 +714,20 @@ export async function markSending(jobId: string, now: number = Date.now()): Prom
     if (!row || (row.status !== "pending" && row.status !== "failed")) {
       return false
     }
+    // A host-mirrored projection is never claimable by this runner.
+    if (!isLocallyDispatchable(row)) return false
     await queue.update(jobId, {
       status: "sending",
       attempts: (row.attempts ?? 0) + 1,
       // Claim stamp — lets `recoverStaleSendingJobs` distinguish a
       // legitimately in-flight send from a claim orphaned by a crash.
       claimedAt: now,
+      updatedAt: now,
     })
     return true
+  }).then((claimed) => {
+    if (claimed) invalidate()
+    return claimed
   })
 }
 
@@ -715,7 +755,9 @@ export async function unclaimSending(
       lastErrorCode: errorCode,
       lastError: message,
       nextAttemptAt,
+      updatedAt: Date.now(),
     })
+    invalidate(row.conversationKey)
   })
 }
 
@@ -729,7 +771,9 @@ export async function markSent(jobId: string, platformMessageId: string): Promis
   await getDb().outboundQueue.update(jobId, {
     status: "sent",
     platformMessageId,
+    updatedAt: Date.now(),
   })
+  invalidate()
 }
 
 /** Transition a job to "failed" with error info and next retry time. */
@@ -744,7 +788,9 @@ export async function markFailed(
     lastErrorCode: errorCode,
     lastError: message,
     nextAttemptAt,
+    updatedAt: Date.now(),
   })
+  invalidate()
 }
 
 /** Ambiguous remote outcome: never retry without operator reconciliation. */
@@ -757,7 +803,9 @@ export async function markDeliveryUnknown(
     status: "delivery_unknown",
     lastErrorCode: errorCode,
     lastError: message,
+    updatedAt: Date.now(),
   })
+  invalidate()
 }
 
 /**
@@ -778,8 +826,10 @@ export async function markDeadlettered(
     status: "deadlettered",
     lastErrorCode: errorCode,
     lastError: message,
+    updatedAt: Date.now(),
     ...(reroute ? { reroutedToJobId: reroute.toJobId, reroutedMechanism: reroute.mechanism } : {}),
   })
+  invalidate()
 }
 
 /**
@@ -805,8 +855,10 @@ export async function replayDeadlettered(jobId: string): Promise<OutboundJobRow 
     lastError: undefined,
     lastErrorCode: undefined,
     nextAttemptAt: now,
+    updatedAt: now,
   }
   await db.outboundQueue.update(jobId, updated)
   emitOutboundEnqueued()
+  invalidate(row.conversationKey)
   return { ...row, ...updated }
 }

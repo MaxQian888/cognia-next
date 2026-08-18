@@ -36,6 +36,9 @@ describe("parseGlobalSearchQuery", () => {
     )
     expect(parseGlobalSearchQuery("in:skill foo").filters.kinds).toEqual(["skill"])
     expect(parseGlobalSearchQuery("in:mcp foo").filters.kinds).toEqual(["mcp-server"])
+    expect(parseGlobalSearchQuery("in:contact foo").filters.kinds).toEqual(["inbox-contact"])
+    expect(parseGlobalSearchQuery("in:contacts foo").filters.kinds).toEqual(["inbox-contact"])
+    expect(parseGlobalSearchQuery("in:inbox foo").filters.kinds).toEqual(["inbox-conversation"])
     expect(parseGlobalSearchQuery("in:pages foo").filters.kinds).toEqual(
       expect.arrayContaining(["navigation", "settings"])
     )
@@ -141,14 +144,18 @@ describe("scope helpers", () => {
   })
 
   it("lists kinds per scope", () => {
-    expect(kindsForScope("people")).toEqual(["character", "team"])
+    expect(kindsForScope("people")).toEqual(["character", "team", "inbox-contact"])
     expect(kindsForScope("all").length).toBeGreaterThan(10)
   })
 
   it("intersects in: with the tab, falling back to the filter when disjoint", () => {
     expect(kindsToRun(parseGlobalSearchQuery("in:messages x"), "chats")).toEqual(["message"])
     expect(kindsToRun(parseGlobalSearchQuery("in:skills x"), "people")).toEqual(["skill"])
-    expect(kindsToRun(parseGlobalSearchQuery("x"), "people")).toEqual(["character", "team"])
+    expect(kindsToRun(parseGlobalSearchQuery("x"), "people")).toEqual([
+      "character",
+      "team",
+      "inbox-contact",
+    ])
   })
 
   it("setFilterToken replaces an existing token for the key", () => {

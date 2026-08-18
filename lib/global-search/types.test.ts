@@ -41,4 +41,13 @@ describe("global-search types", () => {
     expect(primaryScopeOf("workflow")).toBe("library")
     expect(primaryScopeOf("navigation")).toBe("pages")
   })
+
+  it("files IM conversations under chats and IM contacts under people", () => {
+    expect(KIND_SCOPES["inbox-conversation"]).toEqual(["chats"])
+    expect(KIND_SCOPES["inbox-contact"]).toEqual(["people"])
+    expect(kindInScope("inbox-conversation", "library")).toBe(false)
+    expect(kindInScope("inbox-contact", "people")).toBe(true)
+    // Contacts rank right after conversations, at the tail of the static order.
+    expect(KIND_PRIORITY["inbox-contact"]).toBeGreaterThan(KIND_PRIORITY["inbox-conversation"])
+  })
 })

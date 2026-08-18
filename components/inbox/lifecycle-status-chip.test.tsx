@@ -5,9 +5,12 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-const mockSetStatus = jest.fn().mockResolvedValue(undefined)
-jest.mock("@/lib/db/conversation-overrides", () => ({
-  setStatus: (...a: unknown[]) => mockSetStatus(...a),
+const mockMutate = jest.fn().mockResolvedValue({ route: "local", conversationKey: "k" })
+// ADR-0131: override writes go through the shell-agnostic facade, which
+// picks local-host vs. relay-to-paired-host. The control just describes
+// its edit as one mutation.
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  mutateConversationOverride: (...a: unknown[]) => mockMutate(...a),
 }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
@@ -30,15 +33,18 @@ describe("LifecycleStatusChip", () => {
     await user.click(screen.getByTestId("lifecycle-status-chip"))
     await user.click(await screen.findByText("Resolved"))
     await waitFor(() =>
-      expect(mockSetStatus).toHaveBeenCalledWith("k", "resolved", {
+      expect(mockMutate).toHaveBeenCalledWith({
+        kind: "setStatus",
+        conversationKey: "k",
+        status: "resolved",
         sessionId: "s",
         snoozeUntil: undefined,
       })
     )
   })
 
-  it("surfaces a toast when setStatus rejects", async () => {
-    mockSetStatus.mockRejectedValueOnce(new Error("boom"))
+  it("surfaces a toast when the write rejects", async () => {
+    mockMutate.mockRejectedValueOnce(new Error("boom"))
     const user = userEvent.setup()
     render(<LifecycleStatusChip conversationKey="k" sessionId="s" status="open" />)
     await user.click(screen.getByTestId("lifecycle-status-chip"))

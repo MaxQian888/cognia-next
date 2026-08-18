@@ -4,24 +4,21 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
-jest.mock("@/lib/db/outbound-jobs", () => ({
-  enqueueOutbound: jest.fn().mockResolvedValue({ id: "oqj_1" }),
-}))
-
-jest.mock("@/lib/db/connector-drafts", () => ({
-  approveDraft: jest.fn().mockResolvedValue(undefined),
-  rejectDraft: jest.fn().mockResolvedValue(undefined),
+// ADR-0131: the editor no longer enqueues delivery itself — `useDraftApproval`
+// hands the (edited) segments to the inbox-write facade, which enqueues the
+// governed job on a connector host or relays it to a paired one.
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  approveInboxDraft: jest.fn().mockResolvedValue({ route: "local", draftId: "cdr_1" }),
+  rejectInboxDraft: jest.fn().mockResolvedValue({ route: "local", draftId: "cdr_1" }),
 }))
 
 import { DraftEditor } from "./draft-editor"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
-import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
+import { approveInboxDraft, rejectInboxDraft } from "@/lib/connectors/inbox-writes"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import type { MessageSegment } from "@/types/connectors/segment"
 
-const mockEnqueue = enqueueOutbound as jest.Mock
-const mockApprove = approveDraft as jest.Mock
-const mockReject = rejectDraft as jest.Mock
+const mockApprove = approveInboxDraft as jest.Mock
+const mockReject = rejectInboxDraft as jest.Mock
 
 function makeDraft(segments: MessageSegment[], hasPreview = true): ConnectorDraftRow {
   return {
@@ -42,9 +39,8 @@ function makeDraft(segments: MessageSegment[], hasPreview = true): ConnectorDraf
 }
 
 beforeEach(() => {
-  mockEnqueue.mockReset().mockResolvedValue({ id: "oqj_1" })
-  mockApprove.mockReset().mockResolvedValue(undefined)
-  mockReject.mockReset().mockResolvedValue(undefined)
+  mockApprove.mockReset().mockResolvedValue({ route: "local", draftId: "cdr_1" })
+  mockReject.mockReset().mockResolvedValue({ route: "local", draftId: "cdr_1" })
 })
 
 describe("DraftEditor", () => {
@@ -61,7 +57,7 @@ describe("DraftEditor", () => {
     expect(ta).toHaveValue("# heading")
   })
 
-  it("editing a text segment forwards the new value into enqueueOutbound on approve", async () => {
+  it("editing a text segment forwards the new value to the facade on approve", async () => {
     const draft = makeDraft([{ type: "text", text: "old" }])
     const onClose = jest.fn()
     render(<DraftEditor draft={draft} onClose={onClose} />)
@@ -72,16 +68,10 @@ describe("DraftEditor", () => {
     fireEvent.click(screen.getByTestId("draft-approve-btn"))
 
     await waitFor(() => {
-      expect(mockEnqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          adapterId: "a1",
-          conversationKey: "ck1",
-          request: expect.objectContaining({
-            segments: [{ type: "text", text: "edited" }],
-          }),
-        })
+      expect(mockApprove).toHaveBeenCalledWith(
+        draft,
+        expect.objectContaining({ segments: [{ type: "text", text: "edited" }] })
       )
-      expect(mockApprove).toHaveBeenCalledWith("cdr_1")
       expect(onClose).toHaveBeenCalled()
     })
   })
@@ -96,12 +86,9 @@ describe("DraftEditor", () => {
     fireEvent.click(screen.getByTestId("draft-approve-btn"))
 
     await waitFor(() => {
-      expect(mockEnqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          request: expect.objectContaining({
-            segments: [{ type: "markdown", md: "# new" }],
-          }),
-        })
+      expect(mockApprove).toHaveBeenCalledWith(
+        draft,
+        expect.objectContaining({ segments: [{ type: "markdown", md: "# new" }] })
       )
     })
   })
@@ -166,7 +153,10 @@ describe("DraftEditor", () => {
     expect(preview).toHaveTextContent(/no text mirror|interactive surface|无文本镜像/i)
   })
 
-  it("approve skips enqueueOutbound when the draft has no outboundPreview", async () => {
+  it("still approves a draft with no outboundPreview — the facade resolves the binding", async () => {
+    // Every `draft-prepare` draft lands without a preview; resolving the
+    // delivery target from the session is the facade's job now, so the editor
+    // must not gate the approve on it.
     const draft = makeDraft([{ type: "text", text: "hi" }], false)
     const onClose = jest.fn()
     render(<DraftEditor draft={draft} onClose={onClose} />)
@@ -174,13 +164,12 @@ describe("DraftEditor", () => {
     fireEvent.click(screen.getByTestId("draft-approve-btn"))
 
     await waitFor(() => {
-      expect(mockApprove).toHaveBeenCalledWith("cdr_1")
+      expect(mockApprove).toHaveBeenCalledWith(draft, expect.anything())
       expect(onClose).toHaveBeenCalled()
     })
-    expect(mockEnqueue).not.toHaveBeenCalled()
   })
 
-  it("reject calls rejectDraft and onClose without touching enqueueOutbound", async () => {
+  it("reject routes through the facade and closes, without approving", async () => {
     const draft = makeDraft([{ type: "text", text: "no" }])
     const onClose = jest.fn()
     render(<DraftEditor draft={draft} onClose={onClose} />)
@@ -188,10 +177,10 @@ describe("DraftEditor", () => {
     fireEvent.click(screen.getByTestId("draft-reject-btn"))
 
     await waitFor(() => {
-      expect(mockReject).toHaveBeenCalledWith("cdr_1")
+      expect(mockReject).toHaveBeenCalledWith(draft, expect.anything())
       expect(onClose).toHaveBeenCalled()
     })
-    expect(mockEnqueue).not.toHaveBeenCalled()
+    expect(mockApprove).not.toHaveBeenCalled()
   })
 
   it("cancel button invokes onClose without dispatching any side-effect", () => {

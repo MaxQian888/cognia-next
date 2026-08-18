@@ -52,8 +52,13 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 22 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(22)
+  it("maps all 24 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(24)
+    // ADR-0131 inbox relay: drafts + outbound status projection are mirrored.
+    expect(COMPANION_SYNC_TABLES.has("connectorDrafts")).toBe(true)
+    expect(COMPANION_SYNC_TABLES.has("outboundQueue")).toBe(true)
+    expect(policyForTable("outboundQueue")?.syncPolicy.mode).not.toBe("none")
+    expect(policyForTable("connectorDrafts")?.syncPolicy.mode).not.toBe("none")
     expect(tableNamesForCategory("other")).toContain("agentTraces")
     expect(tableNamesForCategory("other")).toContain("workflowRunEvents")
   })

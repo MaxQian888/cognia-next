@@ -5,17 +5,20 @@
 import { renderHook, act } from "@testing-library/react"
 
 import { useDraftApproval } from "./use-draft-approval"
-import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
+import { approveInboxDraft, rejectInboxDraft } from "@/lib/connectors/inbox-writes"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import type { MessageSegment } from "@/types/connectors/segment"
 
-jest.mock("@/lib/db/connector-drafts", () => ({
-  approveDraft: jest.fn().mockResolvedValue(undefined),
-  rejectDraft: jest.fn().mockResolvedValue(undefined),
+// ADR-0131: the hook delegates to the shell-agnostic inbox-write facade
+// instead of poking Dexie directly, so the route (local host vs. relayed to a
+// paired host) is decided in one place rather than per surface.
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  approveInboxDraft: jest.fn().mockResolvedValue({ route: "local", draftId: "cdr_1" }),
+  rejectInboxDraft: jest.fn().mockResolvedValue({ route: "local", draftId: "cdr_1" }),
 }))
 
-const mockApprove = approveDraft as jest.Mock
-const mockReject = rejectDraft as jest.Mock
+const mockApprove = approveInboxDraft as jest.Mock
+const mockReject = rejectInboxDraft as jest.Mock
 
 function makeDraft(overrides: Partial<ConnectorDraftRow> = {}): ConnectorDraftRow {
   return {
@@ -30,8 +33,8 @@ function makeDraft(overrides: Partial<ConnectorDraftRow> = {}): ConnectorDraftRo
 }
 
 beforeEach(() => {
-  mockApprove.mockReset().mockResolvedValue(undefined)
-  mockReject.mockReset().mockResolvedValue(undefined)
+  mockApprove.mockReset().mockResolvedValue({ route: "local", draftId: "cdr_1" })
+  mockReject.mockReset().mockResolvedValue({ route: "local", draftId: "cdr_1" })
 })
 
 describe("useDraftApproval", () => {
@@ -87,15 +90,34 @@ describe("useDraftApproval", () => {
     expect(result.current.segments).toEqual(draft.segments)
   })
 
-  it("approve calls approveDraft and onComplete in order", async () => {
+  it("approve delegates to the facade with the draft, then calls onComplete", async () => {
     const draft = makeDraft()
     const onComplete = jest.fn()
-    const { result } = renderHook(() => useDraftApproval(draft, { onComplete }))
+    const { result } = renderHook(() =>
+      useDraftApproval(draft, { onComplete, label: "Reply to Ada" })
+    )
     await act(async () => {
       await result.current.approve()
     })
-    expect(mockApprove).toHaveBeenCalledWith("cdr_1")
+    expect(mockApprove).toHaveBeenCalledWith(draft, {
+      segments: draft.segments,
+      label: "Reply to Ada",
+    })
     expect(onComplete).toHaveBeenCalledTimes(1)
+  })
+
+  it("approve ships the EDITED segments, not the draft's originals", async () => {
+    // The whole point of the editor: what the operator approved is what gets
+    // delivered — on the phone that means the edits ride the relay RPC.
+    const draft = makeDraft({ segments: [{ type: "text", text: "original" }] })
+    const { result } = renderHook(() => useDraftApproval(draft))
+    act(() => {
+      result.current.setSegment(0, "edited")
+    })
+    await act(async () => {
+      await result.current.approve()
+    })
+    expect(mockApprove.mock.calls[0][1].segments).toEqual([{ type: "text", text: "edited" }])
   })
 
   it("approve runs beforeApprove with the current edited segments", async () => {
@@ -154,7 +176,7 @@ describe("useDraftApproval", () => {
     expect(onComplete).not.toHaveBeenCalled()
   })
 
-  it("approve propagates errors thrown from beforeApprove without calling approveDraft", async () => {
+  it("approve propagates errors thrown from beforeApprove without writing", async () => {
     const draft = makeDraft()
     const beforeApprove = jest.fn().mockRejectedValue(new Error("preflight"))
     const { result } = renderHook(() => useDraftApproval(draft, { beforeApprove }))
@@ -167,7 +189,7 @@ describe("useDraftApproval", () => {
     expect(result.current.busy).toBe(false)
   })
 
-  it("reject calls rejectDraft, beforeReject, then onComplete", async () => {
+  it("reject runs beforeReject, delegates to the facade, then onComplete", async () => {
     const draft = makeDraft()
     const beforeReject = jest.fn().mockResolvedValue(undefined)
     const onComplete = jest.fn()
@@ -176,7 +198,7 @@ describe("useDraftApproval", () => {
       await result.current.reject()
     })
     expect(beforeReject).toHaveBeenCalledWith({ draft })
-    expect(mockReject).toHaveBeenCalledWith("cdr_1")
+    expect(mockReject).toHaveBeenCalledWith(draft, { label: undefined })
     expect(onComplete).toHaveBeenCalledTimes(1)
     expect(beforeReject.mock.invocationCallOrder[0]).toBeLessThan(
       mockReject.mock.invocationCallOrder[0]

@@ -273,10 +273,12 @@
     "tableLabels": {
       "adapterInstances": "Connectors",
       "characters": "Characters",
+      "connectorDrafts": "Connector drafts",
       "conversationOverrides": "Conversation overrides",
       "goals": "Goals",
       "memories": "Memories",
       "messages": "Messages",
+      "outboundQueue": "Outbound delivery status",
       "plugins": "Plugins",
       "sessions": "Sessions",
       "settings": "App settings",

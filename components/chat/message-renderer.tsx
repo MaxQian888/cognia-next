@@ -129,6 +129,7 @@ import { resolveMessageActionCommands } from "@/lib/chat/message-action-commands
 import { loggers } from "@cognia/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
+import { MessageImActions } from "@/components/chat/message-im-actions"
 import { BranchDialog } from "@/components/chat/branch-dialog"
 import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
@@ -859,6 +860,11 @@ function MessageRendererInner({
                 />
               )}
 
+              {/* IM cross-links: forward this text to an IM conversation, or
+                  lift an inbound IM message into a fresh main chat. Self-hide
+                  when they do not apply. */}
+              <MessageImActions message={message} text={messageText} sessionId={branchSessionId} />
+
               <BranchNavigator message={message} className="mx-1" />
               {branchSessionId && (
                 <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
@@ -1052,6 +1058,8 @@ function MessageRendererInner({
                   <RefreshCcwIcon className="size-3.5" />
                 </MessageAction>
               )}
+
+              <MessageImActions message={message} text={messageText} sessionId={branchSessionId} />
 
               <PluginExtensionSlot
                 point="chat.message.footer"

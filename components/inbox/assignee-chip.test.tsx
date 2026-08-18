@@ -6,8 +6,8 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mockSetAssignee = jest.fn().mockResolvedValue(undefined)
-jest.mock("@/lib/db/conversation-overrides", () => ({
-  setAssignee: (...a: unknown[]) => mockSetAssignee(...a),
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  mutateConversationOverride: (...a: unknown[]) => mockSetAssignee(...a),
 }))
 const mockUseCharacters = jest.fn()
 jest.mock("@/lib/data-hooks/context", () => ({
@@ -59,11 +59,14 @@ describe("AssigneeChip", () => {
     await user.click(screen.getByTestId("assignee-chip"))
     await user.click(await screen.findByText("Me"))
     await waitFor(() =>
-      expect(mockSetAssignee).toHaveBeenCalledWith(
-        "k",
-        { kind: "human" },
-        { sessionId: "s", via: "manual", adapterId: undefined }
-      )
+      expect(mockSetAssignee).toHaveBeenCalledWith({
+        kind: "setAssignee",
+        conversationKey: "k",
+        assignee: { kind: "human" },
+        sessionId: "s",
+        via: "manual",
+        adapterId: undefined,
+      })
     )
     await waitFor(() =>
       expect(mockNotifyAssignmentChanged).toHaveBeenCalledWith({
@@ -81,11 +84,14 @@ describe("AssigneeChip", () => {
     await user.click(screen.getByTestId("assignee-chip"))
     await user.click(await screen.findByText("Bo"))
     await waitFor(() =>
-      expect(mockSetAssignee).toHaveBeenCalledWith(
-        "k",
-        { kind: "character", id: "char-2", label: "Bo" },
-        { sessionId: "s", via: "manual", adapterId: undefined }
-      )
+      expect(mockSetAssignee).toHaveBeenCalledWith({
+        kind: "setAssignee",
+        conversationKey: "k",
+        assignee: { kind: "character", id: "char-2", label: "Bo" },
+        sessionId: "s",
+        via: "manual",
+        adapterId: undefined,
+      })
     )
   })
 
@@ -104,11 +110,14 @@ describe("AssigneeChip", () => {
     expect(items.map((el) => el.textContent)).toEqual(["Alpha team", "Zed team"])
     await user.click(screen.getByTestId("assignee-team-t1"))
     await waitFor(() =>
-      expect(mockSetAssignee).toHaveBeenCalledWith(
-        "k",
-        { kind: "team", id: "t1", label: "Alpha team" },
-        { sessionId: "s", via: "manual", adapterId: "adp-1" }
-      )
+      expect(mockSetAssignee).toHaveBeenCalledWith({
+        kind: "setAssignee",
+        conversationKey: "k",
+        assignee: { kind: "team", id: "t1", label: "Alpha team" },
+        sessionId: "s",
+        via: "manual",
+        adapterId: "adp-1",
+      })
     )
     await waitFor(() =>
       expect(mockNotifyAssignmentChanged).toHaveBeenCalledWith(
@@ -133,7 +142,10 @@ describe("AssigneeChip", () => {
     await user.click(screen.getByTestId("assignee-chip"))
     await user.click(await screen.findByText("Unassign"))
     await waitFor(() =>
-      expect(mockSetAssignee).toHaveBeenCalledWith("k", null, {
+      expect(mockSetAssignee).toHaveBeenCalledWith({
+        kind: "setAssignee",
+        conversationKey: "k",
+        assignee: null,
         sessionId: "s",
         via: "manual",
         adapterId: undefined,

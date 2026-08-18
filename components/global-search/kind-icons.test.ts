@@ -10,6 +10,10 @@ describe("kind icons", () => {
     }
   })
 
+  it("gives IM contacts their own icon, distinct from conversations", () => {
+    expect(KIND_ICONS["inbox-contact"]).not.toBe(KIND_ICONS["inbox-conversation"])
+  })
+
   it("falls back to the command icon for an unknown kind", () => {
     expect(kindIcon("nope" as GlobalSearchKind)).toBe(KIND_ICONS.action)
   })

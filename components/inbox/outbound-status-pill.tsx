@@ -78,8 +78,13 @@ export function OutboundStatusPill(props: OutboundStatusPillProps) {
     await getDb().outboundQueue.update(job.id, {
       status: "pending",
       nextAttemptAt: Date.now(),
+      updatedAt: Date.now(),
     })
   }
+  // A row mirrored from a paired host (ADR-0131 projection) is delivered by
+  // the host; retrying it here would only flip a local status that the next
+  // sync overwrites, so the retry affordance is hidden for those rows.
+  const canRetry = job.status === "failed" && job.syncedFromHost !== true
 
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -93,7 +98,7 @@ export function OutboundStatusPill(props: OutboundStatusPillProps) {
           >
             <Icon className={cn("size-3", job.status === "sending" && "animate-spin")} />
             <span>{statusLabel}</span>
-            {job.status === "failed" && (
+            {canRetry && (
               <Button
                 size="sm"
                 variant="ghost"

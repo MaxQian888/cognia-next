@@ -46,6 +46,8 @@ import { syncMessages } from "./handlers/messages"
 import { syncPlugins } from "./handlers/plugins"
 import { syncSessions } from "./handlers/sessions"
 import { syncSkills } from "./handlers/skills"
+import { syncConnectorDrafts } from "./handlers/connector-drafts"
+import { syncOutboundQueue } from "./handlers/outbound-queue"
 import { syncTerminalHistory } from "./handlers/terminal-history"
 import { syncTwinProfile } from "./handlers/twin-profile"
 import { syncWorkflows } from "./handlers/workflows"
@@ -111,6 +113,11 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "templateDefinitions", run: syncTemplateDefinitions },
   { table: "templatePackages", run: syncTemplatePackages },
   { table: "templateInstances", run: syncTemplateInstances },
+  // ADR-0131 cross-shell inbox relay — drafts in full (the phone edits and
+  // approves them), outbound as a status projection (`syncedFromHost`), so a
+  // thin client's Inbox shows delivery state without running any adapter.
+  { table: "connectorDrafts", run: syncConnectorDrafts },
+  { table: "outboundQueue", run: syncOutboundQueue },
 ]
 
 /**
@@ -169,6 +176,10 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   templateDefinitions: syncDomain("tombstone"),
   templatePackages: syncDomain("tombstone"),
   templateInstances: syncDomain("tombstone"),
+  connectorDrafts: syncDomain("tombstone"),
+  // Terminal projections age out client-side (handlers/outbound-queue.ts);
+  // the host prunes without tombstones after 14 days.
+  outboundQueue: syncDomain("ttl"),
 })
 
 interface SyncState {
@@ -500,16 +511,54 @@ export function installForegroundSync(opts: RunSyncDownOptions = {}): () => void
  */
 export function installEventDrivenSync(opts: RunSyncDownOptions = {}): () => void {
   const t = opts.transport ?? transport
+  // ADR-0131: a chatty connector host (an ai-run reply touches the outbound
+  // row three times, an inbound burst adds N messages) still yields one
+  // `sync_pull` per table per window. Keyed invalidations coalesce per table;
+  // an untabled ("pull everything") frame collapses every pending window into
+  // one full run.
+  const pending = new Map<SyncableTable | "*", ReturnType<typeof setTimeout>>()
+  let disposed = false
+  const flush = (key: SyncableTable | "*"): void => {
+    pending.delete(key)
+    if (disposed) return
+    if (key === "*") {
+      for (const timer of pending.values()) clearTimeout(timer)
+      pending.clear()
+      void runSyncDown(opts)
+      return
+    }
+    const only = opts.only === undefined ? [key] : opts.only.filter((table) => table === key)
+    if (only.length === 0) return
+    void runSyncDown({ ...opts, only })
+  }
   const unsub = t.subscribe<{ table?: SyncableTable }>("sync://invalidate", (payload) => {
-    const only = payload?.table
-      ? opts.only === undefined
-        ? [payload.table]
-        : opts.only.filter((table) => table === payload.table)
-      : opts.only
-    void runSyncDown({ ...opts, ...(only === undefined ? {} : { only }) })
+    if (disposed) return
+    const key: SyncableTable | "*" = payload?.table ?? "*"
+    if (pending.has(key)) return
+    // Skip tables this installer was scoped away from — no timer, no pull.
+    if (key !== "*" && opts.only !== undefined && !opts.only.includes(key)) return
+    if (key === "*") {
+      // A full pull supersedes every keyed window already armed.
+      for (const timer of pending.values()) clearTimeout(timer)
+      pending.clear()
+    } else if (pending.has("*")) {
+      return
+    }
+    pending.set(
+      key,
+      setTimeout(() => flush(key), EVENT_SYNC_COALESCE_MS)
+    )
   })
-  return unsub
+  return () => {
+    disposed = true
+    for (const timer of pending.values()) clearTimeout(timer)
+    pending.clear()
+    unsub()
+  }
 }
+
+/** Per-table coalescing window for `sync://invalidate` → `sync_pull` (ADR-0131). */
+export const EVENT_SYNC_COALESCE_MS = 100
 
 /**
  * Re-run the sync whenever the network reports `connected: true`. This is

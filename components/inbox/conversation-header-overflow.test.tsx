@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import messages from "@/i18n/messages/en.json"
@@ -79,6 +79,23 @@ jest.mock("./adapter-health-badge", () => ({
 jest.mock("./overrides/computer-use-toggle", () => ({
   ComputerUseToggle: () => <div data-testid="computer-use-toggle" />,
 }))
+
+// "Open in chat": the shared ⌘K focus primitive + the session hook's `select`
+// + the router. All three are seams here; their behaviour is covered in their
+// own suites.
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  ...jest.requireActual("next/navigation"),
+  useRouter: () => ({ push: mockPush, replace: jest.fn(), prefetch: jest.fn() }),
+}))
+const mockSelect = jest.fn()
+jest.mock("@/hooks/chat/use-sessions", () => ({ useSessions: () => ({ select: mockSelect }) }))
+const mockFocusSession = jest.fn()
+jest.mock("@/hooks/global-search/use-global-search-actions", () => ({
+  focusSession: (...args: unknown[]) => mockFocusSession(...args),
+}))
+const mockGetSession = jest.fn(async (_id: string) => undefined as unknown)
+jest.mock("@/lib/db/sessions", () => ({ getSession: (id: string) => mockGetSession(id) }))
 
 import { ConversationHeaderOverflow, hasOverflowAttention } from "./conversation-header-overflow"
 
@@ -242,6 +259,28 @@ describe("ConversationHeaderOverflow", () => {
 
     await userEvent.click(screen.getByTestId("conversation-header-bindings"))
     expect(onOpenBindings).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens the conversation in the main chat: focus via the shared primitive, then home", async () => {
+    const row = { id: "s1", projectId: "p1", kind: "direct" }
+    mockGetSession.mockResolvedValueOnce(row)
+    renderOverflow()
+    await userEvent.click(screen.getByTestId("conversation-header-open-in-chat"))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/"))
+    expect(mockGetSession).toHaveBeenCalledWith("s1")
+    expect(mockFocusSession).toHaveBeenCalledWith(row, "s1", mockSelect)
+    // Focus happens before the route change.
+    expect(mockFocusSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPush.mock.invocationCallOrder[0]!
+    )
+  })
+
+  it("still opens the main chat when the session row cannot be read", async () => {
+    mockGetSession.mockResolvedValueOnce(undefined)
+    renderOverflow()
+    await userEvent.click(screen.getByTestId("conversation-header-open-in-chat"))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/"))
+    expect(mockFocusSession).toHaveBeenCalledWith(undefined, "s1", mockSelect)
   })
 
   it("renders the last-inbound chip inside the status group", () => {

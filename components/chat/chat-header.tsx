@@ -2,12 +2,14 @@
 
 import { useState } from "react"
 import { createPortal } from "react-dom"
+import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
 import { useTranslations } from "next-intl"
 import {
   Columns2Icon,
   ExternalLinkIcon,
+  InboxIcon,
   Loader2Icon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -25,6 +27,7 @@ import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
+import { inboxConversationHref } from "@/lib/inbox/conversation-href"
 import { isTauri } from "@/lib/tauri"
 import { useUIStore } from "@/stores/ui"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -70,6 +73,7 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [codexDispatching, setCodexDispatching] = useState(false)
+  const router = useRouter()
 
   const handleOpenInCodexApp = async () => {
     setCodexDispatching(true)
@@ -148,6 +152,23 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
       <PlanModeTasksSheet sessionId={session.id} />
 
       <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
+
+      {/* A platform-bound (IM) conversation has a second home: the Inbox route,
+          where the connector chrome (mode, assignee, delivery state) lives.
+          The reverse link sits in the Inbox header's overflow. */}
+      {session.platformBinding ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={HEADER_ICON_BUTTON}
+          aria-label={t("openInInbox")}
+          title={t("openInInbox")}
+          data-testid="chat-header-open-in-inbox"
+          onClick={() => router.push(inboxConversationHref(session.platformBinding!.conversationKey))}
+        >
+          <InboxIcon className="size-4" />
+        </Button>
+      ) : null}
 
       {isTauri() ? (
         <Button

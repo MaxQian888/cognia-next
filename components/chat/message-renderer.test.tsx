@@ -179,6 +179,16 @@ jest.mock("@/components/chat/branch-navigator", () => ({
   BranchNavigator: () => null,
 }))
 
+// IM cross-links have their own suite; here only the mount points matter.
+jest.mock("@/components/chat/message-im-actions", () => ({
+  MessageImActions: ({ text, sessionId }: { text: string; sessionId?: string | null }) =>
+    ReactForMocks.createElement("div", {
+      "data-test": "message-im-actions",
+      "data-text": text,
+      "data-session": sessionId ?? "",
+    }),
+}))
+
 jest.mock("@/components/chat/branch-dialog", () => ({
   BranchDialog: ({ open, messageId }: { open: boolean; messageId: string }) =>
     open
@@ -363,6 +373,29 @@ function userMsg(id = "u1", text = "Hi"): UIMessage {
 }
 
 describe("message display actions", () => {
+  it("mounts the IM cross-link actions in both the hover bar and the full bar", () => {
+    useChatStore.setState({ activeSessionId: "sess-im" })
+    const message = assistantMsg("im1", "Forward me")
+    const { unmount } = render(
+      <MessageRenderer
+        message={message}
+        messageDisplay={resolveMessageDisplayOptions({ preset: "balanced" })}
+      />
+    )
+    const hover = document.querySelector("[data-test='message-im-actions']")
+    expect(hover).toHaveAttribute("data-text", "Forward me")
+    expect(hover).toHaveAttribute("data-session", "sess-im")
+    unmount()
+    render(
+      <MessageRenderer
+        message={message}
+        messageDisplay={resolveMessageDisplayOptions({ preset: "inspector" })}
+      />
+    )
+    expect(document.querySelectorAll("[data-test='message-im-actions']")).toHaveLength(1)
+    useChatStore.setState({ activeSessionId: null })
+  })
+
   it("keeps Copy and More stable while moving secondary actions into overflow", () => {
     render(
       <MessageRenderer

@@ -8,6 +8,7 @@ import { registerGlobalSearchProvider } from "../registry"
 import type { GlobalSearchProvider } from "../types"
 import { actionsProvider } from "./actions"
 import { pluginActionsProvider, workbenchPanelsProvider } from "./host"
+import { inboxContactsProvider, inboxProvider } from "./inbox"
 import { memoriesProvider, skillsProvider, templatesProvider, workflowsProvider } from "./library"
 import { createMessagesProvider, type MessagesProviderDeps } from "./messages"
 import { navigationProvider } from "./navigation"
@@ -15,12 +16,7 @@ import { charactersProvider, teamsProvider } from "./people"
 import { piPackagesProvider } from "./pi-packages"
 import { sessionsProvider } from "./sessions"
 import { settingsProvider } from "./settings"
-import {
-  inboxProvider,
-  mcpServersProvider,
-  pluginsProvider,
-  scheduledTasksProvider,
-} from "./system"
+import { mcpServersProvider, pluginsProvider, scheduledTasksProvider } from "./system"
 import { workspacesProvider } from "./workspaces"
 
 export interface BuiltinProviderOptions {
@@ -51,6 +47,7 @@ export function builtinGlobalSearchProviders(
     pluginActionsProvider,
     mcpServersProvider,
     inboxProvider,
+    inboxContactsProvider,
     // Desktop-only in effect: the provider returns [] outside the Tauri shell,
     // where Pi's config file and CLI do not exist.
     piPackagesProvider,

@@ -107,6 +107,7 @@ async function retryJob(id: string) {
       status: "pending",
       attempts: 0,
       nextAttemptAt: Date.now(),
+      updatedAt: Date.now(),
     })
   }
   void appendAudit({

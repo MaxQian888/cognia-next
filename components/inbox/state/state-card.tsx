@@ -12,6 +12,7 @@
  *   <StateCard.Loading rows={6} />
  *   <StateCard.Error title="…" onRetry={…} stackTrace={…} />
  *   <StateCard.Syncing label="Loading from cache…" />
+ *   <StateCard.RequiresHost onPair={…} />
  *
  * Compound shape (Linear / Notion style) keeps related variants
  * discoverable without forcing every caller to learn a `variant` enum.
@@ -25,6 +26,7 @@ import {
   ClipboardIcon,
   InboxIcon,
   LoaderIcon,
+  PlugZapIcon,
   RefreshCwIcon,
 } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -172,9 +174,51 @@ function StateCardSyncing({ label, className }: StateCardSyncingProps) {
   )
 }
 
+export interface StateCardRequiresHostProps {
+  /** Opens the pairing flow (`/pair`). Omitted when there is nowhere to send them. */
+  onPair?: () => void
+  className?: string
+}
+
+/**
+ * The Inbox is unreachable because THIS shell has no connector runtime and no
+ * paired host to relay to — a standalone browser tab, or a phone that has not
+ * been paired yet (ADR-0131 §2.2).
+ *
+ * This is a deliberate, permanent state for those shells, not a failure: the
+ * browser cannot dial Telegram, and a phone was never meant to. Rendering the
+ * usual empty state instead would read as "you have no conversations", which
+ * is a lie — the conversations exist, on a host this shell cannot see. The
+ * three-axis dormancy contract for it lives in
+ * `lib/runtime/surface-contract.ts:standaloneInboxRequiresHost`.
+ */
+function StateCardRequiresHost({ onPair, className }: StateCardRequiresHostProps) {
+  const t = useTranslations("inbox.state.requiresHost")
+  return (
+    <Empty
+      className={cn("rounded-none border-0 p-4 md:p-6", className)}
+      data-testid="state-card-requires-host"
+    >
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <PlugZapIcon className="size-6" />
+        </EmptyMedia>
+        <EmptyTitle className="text-sm">{t("title")}</EmptyTitle>
+        <EmptyDescription className="text-xs">{t("description")}</EmptyDescription>
+      </EmptyHeader>
+      {onPair && (
+        <Button type="button" size="sm" variant="outline" onClick={onPair} className="mt-3">
+          {t("pairAction")}
+        </Button>
+      )}
+    </Empty>
+  )
+}
+
 export const StateCard = {
   Empty: StateCardEmpty,
   Loading: StateCardLoading,
   Error: StateCardError,
   Syncing: StateCardSyncing,
+  RequiresHost: StateCardRequiresHost,
 }

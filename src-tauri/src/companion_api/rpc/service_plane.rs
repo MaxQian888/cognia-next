@@ -40,6 +40,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "connectors_ws_send",
     "connectors_ws_close",
     "connectors_onebot_send",
+    "connectors_onebot_probe",
+    "connectors_discord_upload",
     "connectors_lark_ws_open",
     "connectors_lark_ws_close",
     "connectors_reset_all_ws",
@@ -748,6 +750,25 @@ pub(super) async fn dispatch(
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
+        }
+
+        // ADR-0131 — reverse-WS OneBot liveness probe. Deliberately NOT gated
+        // on `host.headless()`: it reads the in-process WS registry, which
+        // exists on the desktop shell too, and a host gate would add a
+        // class-C host-parity entry (that baseline may only shrink).
+        "connectors_onebot_probe" => to_json(crate::connectors::ws_server::live_clients()),
+
+        // ADR-0131 — Discord multipart upload. Same reasoning as the probe:
+        // pure HTTP against Discord, no AppHandle, so no host gate.
+        "connectors_discord_upload" => {
+            let req: crate::connectors::discord_upload::ConnectorDiscordUploadRequest =
+                serde_json::from_value(args).map_err(|e| {
+                    RpcError::malformed(format!("connectors_discord_upload args: {e}"))
+                })?;
+            let message_id = crate::connectors::discord_upload::upload(req)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(message_id)
         }
 
         "connectors_lark_ws_open" => {

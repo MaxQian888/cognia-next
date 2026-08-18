@@ -1,5 +1,6 @@
 import {
   HOST_FEATURE_MANIFEST_SCHEMA_VERSION,
+  INBOX_RELAY_HOST_OPERATIONS,
   buildLocalHostFeatureManifest,
   parseHostFeatureManifest,
   supportsHostFeatureOperation,
@@ -32,6 +33,32 @@ describe("host feature manifest", () => {
     expect(
       buildLocalHostFeatureManifest({ platform: "mobile" }).features["session.state-sync"]
     ).toBeUndefined()
+  })
+
+  it("advertises the ADR-0131 inbox relay on every connector host, never on thin clients", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      const manifest = buildLocalHostFeatureManifest({ platform })
+      expect(manifest.features["connectors.inbox-relay"]).toEqual({
+        version: 1,
+        operations: [...INBOX_RELAY_HOST_OPERATIONS],
+      })
+      for (const operation of INBOX_RELAY_HOST_OPERATIONS) {
+        expect(supportsHostFeatureOperation(manifest, "connectors.inbox-relay", operation)).toBe(true)
+      }
+      // The relay round-trips through parse: a v2 client must accept it.
+      expect(parseHostFeatureManifest(manifest)?.features["connectors.inbox-relay"]).toBeDefined()
+    }
+    for (const platform of ["web", "mobile"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["connectors.inbox-relay"]
+      ).toBeUndefined()
+    }
+    // A pre-relay host manifest simply lacks the feature — the client gate is
+    // `supportsHostFeatureOperation`, not a version bump.
+    const legacy = buildLocalHostFeatureManifest({ platform: "tauri" })
+    delete legacy.features["connectors.inbox-relay"]
+    legacy.operations = legacy.operations.filter((op) => op.feature !== "connectors.inbox-relay")
+    expect(supportsHostFeatureOperation(legacy, "connectors.inbox-relay")).toBe(false)
   })
 
   it("advertises the versioned Twin draft review operation on execution hosts", () => {

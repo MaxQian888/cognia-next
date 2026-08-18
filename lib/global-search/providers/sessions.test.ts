@@ -36,6 +36,19 @@ const sessions: ChatSession[] = [
     lastMessagePreview: "  last words ",
     lastMessageAt: TEST_NOW,
   }),
+  // Platform-bound (IM) conversations belong to the inbox provider.
+  session({
+    id: "im",
+    title: "Deploy bot DM",
+    projectId: "p1",
+    updatedAt: TEST_NOW,
+    platformBinding: {
+      platform: "telegram",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:1",
+      conversationRef: { platform: "telegram", adapterId: "a1" },
+    },
+  }),
 ]
 
 const ctx = (over = {}) =>
@@ -46,7 +59,7 @@ const ctx = (over = {}) =>
   })
 
 describe("sessions provider", () => {
-  it("hides subagent transcripts and archived sessions by default", () => {
+  it("hides subagent transcripts, archived sessions and IM-bound sessions by default", () => {
     const rows = visibleSessions(ctx(), {})
     expect(rows.map((s) => s.id)).toEqual(["a", "c", "e"])
     expect(visibleSessions(ctx(), { archived: true }).map((s) => s.id)).toEqual([
@@ -55,6 +68,8 @@ describe("sessions provider", () => {
       "c",
       "e",
     ])
+    // Even a title hit does not surface a platform-bound session here.
+    expect(visibleSessions(ctx(), {}).some((s) => s.id === "im")).toBe(false)
   })
 
   it("restricts to the active workspace with workspace:current", () => {

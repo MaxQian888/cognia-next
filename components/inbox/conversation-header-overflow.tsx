@@ -26,12 +26,21 @@
  */
 
 import { useTranslations } from "next-intl"
-import { ListChecksIcon, MoreHorizontalIcon, UserRoundIcon } from "lucide-react"
+import { useRouter } from "next/navigation"
+import {
+  ListChecksIcon,
+  MessageSquareIcon,
+  MoreHorizontalIcon,
+  UserRoundIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { useLatestOutboundJob } from "@/hooks/connectors/use-latest-outbound-job"
+import { useSessions } from "@/hooks/chat/use-sessions"
+import { focusSession } from "@/hooks/global-search/use-global-search-actions"
+import { getSession } from "@/lib/db/sessions"
 import { decideBadge } from "./adapter-health-decision"
 import { effectiveStatus } from "@/lib/db/conversation-overrides"
 import type { ConversationOverrideRow, OutboundJobStatus } from "@/lib/db/connector-types"
@@ -122,6 +131,17 @@ export function ConversationHeaderOverflow({
 }: ConversationHeaderOverflowProps) {
   const t = useTranslations("inbox.conversationHeader")
   const tBindings = useTranslations("inbox.bindingsInspector")
+  const router = useRouter()
+  const { select } = useSessions()
+  // The reverse of the chat header's "open in Inbox": follow the session into
+  // its workspace + guild (the shared ⌘K primitive), focus it, and leave for
+  // the main chat. The row is read at click time — the header only holds the
+  // id, and the workspace / guild hop needs the session's projectId + kind.
+  const openInChat = async () => {
+    const session = await getSession(sessionId)
+    focusSession(session, sessionId, select)
+    router.push("/")
+  }
   // Resolved here rather than inside AdapterHealthBadge so the attention dot
   // can reflect a degraded adapter while the popover is still closed.
   const health = useAdapterHealth(adapterId || null)
@@ -238,6 +258,17 @@ export function ConversationHeaderOverflow({
               operator still sees the elevated-permission state even when the
               biometric toggle isn't available (web build / mobile shell). */}
           {!desktop && <ComputerUseChip active={overrideRow?.allowComputerUse === true} />}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={() => void openInChat()}
+            data-testid="conversation-header-open-in-chat"
+          >
+            <MessageSquareIcon className="size-3.5" aria-hidden />
+            {t("openInChat")}
+          </Button>
           <Button
             type="button"
             variant="outline"

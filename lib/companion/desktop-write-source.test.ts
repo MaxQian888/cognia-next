@@ -7,6 +7,20 @@ import "fake-indexeddb/auto"
 import { getDb } from "@/lib/db/schema"
 
 const mockActiveRuntimeTarget = jest.fn()
+// ADR-0131 §2.7 — relayed Inbox writes only run on the process that owns the
+// connector runtime. These tests exercise the host arms, so model an owner;
+// the refusal path gets its own test below.
+jest.mock("@/lib/connectors/bootstrap/install-connector-runtime", () => ({
+  isConnectorRuntimeOwnedHere: jest.fn(() => true),
+}))
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ownsRuntimeMock = (
+  require("@/lib/connectors/bootstrap/install-connector-runtime") as {
+    isConnectorRuntimeOwnedHere: jest.Mock
+  }
+).isConnectorRuntimeOwnedHere
+
 jest.mock("@/lib/runtime/runtime-target-context", () => ({
   getActiveRuntimeTargetContext: () => mockActiveRuntimeTarget(),
 }))
@@ -32,6 +46,7 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 import { dispatchCommand } from "./desktop-write-source"
+import { isRetryable } from "@/lib/queue/retry-policy"
 
 const mockExportForPairing = jest.fn()
 jest.mock("@/lib/rag/profile-dek-store", () => ({
@@ -282,8 +297,10 @@ describe("dispatchCommand: connector_approve_draft", () => {
       createdAt: Date.now(),
     } as never)
 
+    // ADR-0131: the arm reports what it did, so the phone learns the job id
+    // (and whether the approval was a replay) instead of a bare `null`.
     const result = await dispatchCommand("connector_approve_draft", { draftId: "d1" })
-    expect(result).toBe(null)
+    expect(result).toEqual({ draftId: "d1", jobId: undefined, alreadyApproved: false })
     const row = await db.connectorDrafts.get("d1")
     expect(row?.status).toBe("approved")
     expect(await db.outboundQueue.count()).toBe(0)
@@ -378,6 +395,39 @@ describe("dispatchCommand: connector_reject_draft", () => {
     await expect(dispatchCommand("connector_reject_draft", {})).rejects.toThrow(
       /draftId is required/
     )
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-0131 §2.7 — runtime-ownership guard
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("relayed inbox writes on a process that lost the connector runtime", () => {
+  beforeEach(() => ownsRuntimeMock.mockReturnValue(false))
+  afterEach(() => ownsRuntimeMock.mockReturnValue(true))
+
+  it.each([
+    "connector_enqueue_outbound",
+    "connector_approve_draft",
+    "connector_reject_draft",
+  ])("refuses %s instead of enqueuing a job nothing will deliver", async (command) => {
+    // During a desktop ⇄ brain handoff the bridge can route a phone's reply to
+    // the side that just released the lease. Running it there would enqueue an
+    // outbound job no runner picks up — or double-send once the real owner
+    // also handles the retry.
+    await expect(dispatchCommand(command, { draftId: "d1" })).rejects.toThrow(
+      /connector_runtime_not_owner/
+    )
+  })
+
+  it("throws a message the durable queue treats as RETRYABLE", async () => {
+    // The phone's queue must replay across the handoff window (5 attempts of
+    // backoff ≈ 31 s), not dead-letter the reply. `isRetryable` keys off the
+    // message, so the wording is load-bearing.
+    const error = await dispatchCommand("connector_reject_draft", { draftId: "d1" }).catch(
+      (e: unknown) => e
+    )
+    expect(isRetryable(error)).toBe(true)
   })
 })
 

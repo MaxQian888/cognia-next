@@ -27,6 +27,8 @@ import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { ExecutionRun } from "@/types/execution/run"
 import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
+import type { ConnectorDraftRow, OutboundJobRow } from "@/lib/db/connector-types"
+import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "@/lib/db/schema"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
 import { getProvisionedTurnSnapshot } from "@/lib/signaling/provisioned-turn-state"
@@ -189,6 +191,10 @@ export async function readDexieDelta(
       return readTemplatePackagesDelta(since)
     case "templateInstances":
       return readTemplateInstancesDelta(since)
+    case "connectorDrafts":
+      return readConnectorDraftsDelta(since)
+    case "outboundQueue":
+      return readOutboundQueueDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -370,6 +376,80 @@ async function readConversationOverridesDelta(since: number): Promise<SyncDelta<
   // archived / lastReadAt so the Inbox renders correct buckets offline.
   const rows = await getDb().conversationOverrides.where("updatedAt").above(since).toArray()
   return finalizeDelta("conversationOverrides", rows as unknown as UpdatedAtRow[], since)
+}
+
+/**
+ * ADR-0131 inbox relay — drafts are mirrored in FULL (segments included): a
+ * thin client renders and edits them before approving. Cursor is the v173
+ * `updatedAt` index that every writer in `lib/db/connector-drafts.ts` stamps.
+ */
+async function readConnectorDraftsDelta(since: number): Promise<SyncDelta<ConnectorDraftRow>> {
+  const rows = await getDb().connectorDrafts.where("updatedAt").above(since).toArray()
+  return finalizeDelta("connectorDrafts", rows, since)
+}
+
+/**
+ * The status PROJECTION of one outbound job as mirrored to a thin client
+ * (ADR-0131). Deliberately excludes the payload — `request.segments` is
+ * emptied and only the delivery-target reference + metadata travel — so the
+ * wire carries delivery state, not message bodies (those already sync
+ * through `messages`), and a client can never re-dispatch it:
+ * `nextAttemptAt: 0` + `syncedFromHost: true` keep it out of every local
+ * runner query (`lib/db/outbound-jobs.ts:isLocallyDispatchable`).
+ */
+export type OutboundQueueProjectionRow = Pick<
+  OutboundJobRow,
+  | "id"
+  | "adapterId"
+  | "conversationKey"
+  | "status"
+  | "lastError"
+  | "lastErrorCode"
+  | "attempts"
+  | "createdAt"
+  | "updatedAt"
+  | "orderSeq"
+  | "source"
+  | "platformMessageId"
+  | "idempotencyKey"
+> & {
+  request: Pick<OutboundRequest, "conversationRef" | "metadata"> & { segments: [] }
+  nextAttemptAt: 0
+  syncedFromHost: true
+}
+
+export function projectOutboundJobRow(row: OutboundJobRow): OutboundQueueProjectionRow {
+  return {
+    id: row.id,
+    adapterId: row.adapterId,
+    conversationKey: row.conversationKey,
+    status: row.status,
+    ...(row.lastError !== undefined ? { lastError: row.lastError } : {}),
+    ...(row.lastErrorCode !== undefined ? { lastErrorCode: row.lastErrorCode } : {}),
+    attempts: row.attempts,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt ?? row.createdAt,
+    ...(row.orderSeq !== undefined ? { orderSeq: row.orderSeq } : {}),
+    source: row.source,
+    ...(row.platformMessageId !== undefined ? { platformMessageId: row.platformMessageId } : {}),
+    idempotencyKey: row.idempotencyKey,
+    request: {
+      conversationRef: row.request.conversationRef,
+      segments: [],
+      metadata: row.request.metadata,
+    },
+    nextAttemptAt: 0,
+    syncedFromHost: true,
+  }
+}
+
+async function readOutboundQueueDelta(since: number): Promise<SyncDelta<OutboundQueueProjectionRow>> {
+  const rows = await getDb().outboundQueue.where("updatedAt").above(since).toArray()
+  // Never re-export a projection this host itself mirrored from a further
+  // upstream host (desktop-as-thin-client): its own paired phones would see a
+  // row this host does not own.
+  const owned = rows.filter((row) => row.syncedFromHost !== true)
+  return finalizeDelta("outboundQueue", owned.map(projectOutboundJobRow), since)
 }
 
 async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {

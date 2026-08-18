@@ -11,6 +11,16 @@ import type { MessageSegment } from "@/types/connectors/segment"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
 import { resolveSessionProjectId } from "./project-scope"
+import { publishSyncInvalidate } from "@/lib/sync/host-invalidate"
+
+/**
+ * Companion fan-out (ADR-0131): drafts are mirrored in full to thin clients,
+ * so every status write here bumps the indexed `updatedAt` (v173 sync
+ * cursor) and asks paired clients to re-pull. Coalesced + best-effort.
+ */
+function invalidate(conversationKey?: string): void {
+  publishSyncInvalidate("connectorDrafts", conversationKey)
+}
 
 function newId(): string {
   return "cdr_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -35,11 +45,13 @@ export async function createDraft(input: CreateDraftInput): Promise<ConnectorDra
     segments: input.segments,
     status: "pending",
     createdAt: Date.now(),
+    updatedAt: Date.now(),
     expiresAt: input.expiresAt,
     sourceMessageId: input.sourceMessageId,
     outboundPreview: input.outboundPreview,
   }
   await getDb().connectorDrafts.add(row)
+  invalidate(input.conversationKey)
   return row
 }
 
@@ -66,14 +78,26 @@ export async function listAllPendingDrafts(): Promise<ConnectorDraftRow[]> {
   return rows
 }
 
+/** Read one draft by id (undefined when absent). */
+export async function getDraft(id: string): Promise<ConnectorDraftRow | undefined> {
+  return getDb().connectorDrafts.get(id)
+}
+
+async function transition(id: string, status: ConnectorDraftRow["status"]): Promise<void> {
+  const db = getDb()
+  await db.connectorDrafts.update(id, { status, updatedAt: Date.now() })
+  const row = await db.connectorDrafts.get(id)
+  invalidate(row?.conversationKey)
+}
+
 /** Approve a draft — transitions status to "approved". */
 export async function approveDraft(id: string): Promise<void> {
-  await getDb().connectorDrafts.update(id, { status: "approved" })
+  await transition(id, "approved")
 }
 
 /** Reject a draft — transitions status to "rejected". */
 export async function rejectDraft(id: string): Promise<void> {
-  await getDb().connectorDrafts.update(id, { status: "rejected" })
+  await transition(id, "rejected")
 }
 
 /**
@@ -88,6 +112,9 @@ export async function sweepExpired(now = Date.now()): Promise<number> {
     .filter((r) => r.expiresAt !== undefined && r.expiresAt < now)
     .toArray()
   if (expired.length === 0) return 0
-  await db.connectorDrafts.bulkPut(expired.map((r) => ({ ...r, status: "expired" as const })))
+  await db.connectorDrafts.bulkPut(
+    expired.map((r) => ({ ...r, status: "expired" as const, updatedAt: now }))
+  )
+  invalidate()
   return expired.length
 }

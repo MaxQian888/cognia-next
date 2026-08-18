@@ -42,6 +42,8 @@ import type { AgentExecutionSendSpec } from "@cognia/agent-config-types/agent-ex
 import type { AuditKind } from "@/types/connectors/audit"
 import type { InboxSendPolicy } from "@/lib/claude/build-options"
 import { getDb } from "@/lib/db/schema"
+import { publishSyncInvalidate } from "@/lib/sync/host-invalidate"
+import { publishInboundMessageAdded } from "@/lib/connectors/inbox-relay/host-events"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { createDraft } from "@/lib/db/connector-drafts"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -628,6 +630,18 @@ export async function insertInboundMessage(
   await getDb()
     .sessions.update(sessionId, { updatedAt: now })
     .catch(() => undefined)
+  // ADR-0131 cross-shell relay. Both calls are reached ONLY for a genuinely
+  // new row — the `existing` early-return above means a redelivered platform
+  // message never re-invalidates or re-notifies.
+  //
+  // Two distinct signals on purpose: `sync://invalidate` keeps a foreground
+  // thin client's mirror current (coalesced, table-scoped, always sent),
+  // while `connector://message-added` is the notifiable one that wakes a
+  // BACKGROUNDED phone through the Rust push trigger and is suppressed when
+  // the operator is already looking, has muted the conversation, or is inside
+  // quiet hours. Both are best-effort and never throw.
+  publishSyncInvalidate("messages", event.conversationKey)
+  void publishInboundMessageAdded(event, { sessionId, messageId: row.id })
   return row
 }
 

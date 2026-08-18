@@ -13,8 +13,8 @@ jest.mock("@/components/ui/tooltip")
 jest.mock("@/components/ui/dropdown-menu")
 
 const mockUpsert = jest.fn().mockResolvedValue(undefined)
-jest.mock("@/lib/db/conversation-overrides", () => ({
-  upsertByConversationKey: (input: unknown) => mockUpsert(input),
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  mutateConversationOverride: (m: unknown) => mockUpsert(m),
 }))
 
 const mockSettingsGet = jest.fn<Promise<AppSettings | undefined>, []>()
@@ -94,7 +94,7 @@ describe("ProviderModelSwitcher", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("selecting an option calls upsertByConversationKey with both overrides", async () => {
+  it("selecting an option relays an upsert mutation with both overrides", async () => {
     mockSettingsValue = {
       providerSettings: {
         codex: { enabled: true, models: ["gpt-5"] },
@@ -112,10 +112,13 @@ describe("ProviderModelSwitcher", () => {
 
     await waitFor(() => {
       expect(mockUpsert).toHaveBeenCalledWith({
-        conversationKey: "telegram:tg:9",
-        sessionId: "s_abc",
-        providerOverride: "codex",
-        modelOverride: "gpt-5",
+        kind: "upsert",
+        input: {
+          conversationKey: "telegram:tg:9",
+          sessionId: "s_abc",
+          providerOverride: "codex",
+          modelOverride: "gpt-5",
+        },
       })
     })
     expect(onChange).toHaveBeenCalledWith({
@@ -137,10 +140,13 @@ describe("ProviderModelSwitcher", () => {
 
     await waitFor(() => {
       expect(mockUpsert).toHaveBeenCalledWith({
-        conversationKey: "telegram:tg:1",
-        sessionId: "s1",
-        providerOverride: undefined,
-        modelOverride: undefined,
+        kind: "upsert",
+        input: {
+          conversationKey: "telegram:tg:1",
+          sessionId: "s1",
+          providerOverride: undefined,
+          modelOverride: undefined,
+        },
       })
     })
   })

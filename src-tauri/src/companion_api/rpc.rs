@@ -547,8 +547,15 @@ const KNOWN_COMMANDS: &[&str] = &[
     // with the OpenAPI spec; the in-file `mobile_queue_commands_are_known`
     // test below asserts they stay in lockstep with the TS enum.
     "connector_send",
+    // ADR-0131 cross-shell relay: the real "enqueue an outbound job"
+    // command. `connector_send` only appends a local user message and is
+    // kept for older clients.
+    "connector_enqueue_outbound",
     "connector_approve_draft",
     "connector_reject_draft",
+    // ADR-0131: moved off the client plane so a headless brain can run them.
+    "connectors_discord_upload",
+    "connectors_onebot_probe",
     "workflow_trigger_manual",
     "twin_ingest_source",
     // ADR-0060 — a paired device reports its platform capability manifest
@@ -1555,6 +1562,13 @@ pub(crate) fn device_can_control(device_id: &str) -> bool {
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
 const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
+    // ADR-0131 cross-shell inbox relay — the host stamps the audit row /
+    // assignment trail with `device:<callerDeviceId>` so a phone-originated
+    // reply or override is attributable to the device that sent it.
+    "connector_enqueue_outbound",
+    "connector_approve_draft",
+    "connector_reject_draft",
+    "conversation_overrides_update",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
     "provider_diagnostics_start",

@@ -21,7 +21,7 @@ import { ComputerIcon, LoaderIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
-import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
+import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import { appendAudit } from "@/lib/connectors/audit"
 import { requireBiometric } from "@/lib/biometric/prompt"
 import { cn } from "@/lib/utils"
@@ -58,10 +58,9 @@ export function ComputerUseToggle({
           toast.message(t("cancelled"))
           return
         }
-        await upsertByConversationKey({
-          conversationKey,
-          sessionId,
-          allowComputerUse: true,
+        await mutateConversationOverride({
+          kind: "upsert",
+          input: { conversationKey, sessionId, allowComputerUse: true },
         })
         await appendAudit({
           adapterId,
@@ -76,10 +75,9 @@ export function ComputerUseToggle({
         })
         toast.success(t("enabled"))
       } else {
-        await upsertByConversationKey({
-          conversationKey,
-          sessionId,
-          allowComputerUse: undefined,
+        await mutateConversationOverride({
+          kind: "upsert",
+          input: { conversationKey, sessionId, allowComputerUse: undefined },
         })
         await appendAudit({
           adapterId,

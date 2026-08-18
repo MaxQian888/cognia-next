@@ -856,6 +856,33 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 _ => log::warn!("companion-api ws-bridge: bad HostState publish payload"),
             }
         }
+        // ADR-0131 cross-shell inbox relay — the headless brain has no Tauri
+        // runtime, so it cannot `emit` onto the event bus the way the desktop
+        // webview does (`lib/companion/host-event-publisher.ts`). It pipes
+        // host events through here instead.
+        //
+        // The topic is checked against a CLOSED allowlist rather than passed
+        // through: `route_respond` runs on an authenticated bridge, but the
+        // bridge peer is the brain process, and letting it name arbitrary
+        // topics would let a compromised brain publish e.g.
+        // `host-state://action` frames that clients treat as authoritative.
+        // Both allowed topics carry ids only.
+        "companion_event_publish" => {
+            const ALLOWED_TOPICS: &[&str] = &["sync://invalidate", "connector://message-added"];
+            let topic = payload.get("topic").and_then(Value::as_str);
+            let event = payload.get("event").cloned();
+            match (topic, event) {
+                (Some(topic), Some(event)) if ALLOWED_TOPICS.contains(&topic) => {
+                    state.event_bus.publish(topic.to_string(), event);
+                }
+                (Some(topic), _) => {
+                    log::warn!(
+                        "companion-api ws-bridge: refusing to publish disallowed topic {topic:?}"
+                    );
+                }
+                _ => log::warn!("companion-api ws-bridge: bad event publish payload"),
+            }
+        }
         "orchestration_proxy_response" => {
             if let Err(error) = resolve_orchestration_response(payload) {
                 log::warn!("companion-api ws-bridge: bad orchestration respond payload: {error}");
@@ -1528,6 +1555,61 @@ mod tests {
             json!({ "ok": true }),
         );
         assert_eq!(state.sync_bridge.pending_count(), 0);
+    }
+
+    /// ADR-0131 — the brain publishes host events through the bridge. Only the
+    /// two id-only relay topics may pass; anything else is dropped, so a
+    /// compromised brain cannot forge e.g. `host-state://action` frames that
+    /// clients treat as authoritative.
+    #[test]
+    fn companion_event_publish_honours_the_topic_allowlist() {
+        let state = test_state();
+        let seen = |topic: &str| -> bool {
+            match state.event_bus.subscribe(Some(0), 0) {
+                super::super::event_bus::SubscribeResult::Ok { replay, .. } => {
+                    replay.iter().any(|frame| frame.event_type == topic)
+                }
+                _ => panic!("replay from seq 0 must be available in-test"),
+            }
+        };
+
+        route_respond(
+            &state,
+            "companion_event_publish",
+            json!({ "topic": "sync://invalidate", "event": { "table": "outboundQueue" } }),
+        );
+        route_respond(
+            &state,
+            "companion_event_publish",
+            json!({
+                "topic": "connector://message-added",
+                "event": { "conversationKey": "telegram:tg:1", "messageId": "m1" }
+            }),
+        );
+        assert!(seen("sync://invalidate"));
+        assert!(seen("connector://message-added"));
+
+        // Not on the allowlist → dropped, not published.
+        route_respond(
+            &state,
+            "companion_event_publish",
+            json!({ "topic": "host-state://action", "event": { "kind": "session.create" } }),
+        );
+        route_respond(
+            &state,
+            "companion_event_publish",
+            json!({ "topic": "notification://remote", "event": {} }),
+        );
+        assert!(!seen("host-state://action"));
+        assert!(!seen("notification://remote"));
+
+        // Malformed payloads must not panic.
+        route_respond(&state, "companion_event_publish", json!({ "topic": 7 }));
+        route_respond(
+            &state,
+            "companion_event_publish",
+            json!({ "topic": "sync://invalidate" }),
+        );
     }
 
     #[tokio::test]

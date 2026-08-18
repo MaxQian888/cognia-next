@@ -107,14 +107,16 @@ import { ComposerCheatsheet } from "./composer/composer-cheatsheet"
 import { ComposerAttachMenu } from "./composer/attach-menu"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
-import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
+import {
+  InboxWriteUnavailableError,
+  approveInboxDraft,
+  rejectInboxDraft,
+  sendManualReply,
+} from "@/lib/connectors/inbox-writes"
 import { showMainWindow } from "@/lib/tauri/pet-window"
 import { getDb } from "@/lib/db/schema"
-import {
-  listPendingForConversation as listPendingDrafts,
-  approveDraft,
-  rejectDraft,
-} from "@/lib/db/connector-drafts"
+import { listPendingForConversation as listPendingDrafts } from "@/lib/db/connector-drafts"
+import type { MessageSegment } from "@/types/connectors/segment"
 import {
   Dialog,
   DialogContent,
@@ -2475,6 +2477,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tShell = useTranslations("chat.composer.shell")
   const tMemory = useTranslations("chat.composer.memory")
   const tAttach = useTranslations("chat.composer.attachments")
+  // ADR-0131 relay failures (no paired host / host predates the relay) are
+  // reported here rather than thrown at the user as a stack trace.
+  const tInbox = useTranslations("inbox")
   const tWebSearch = useTranslations("webSearchToggle")
   const tDraftReview = useTranslations("chat.composer.draftReview")
   const compactLayout = useSettingsStore(
@@ -2681,27 +2686,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         const { adapterId, conversationKey, conversationRef } = session.platformBinding
         if (resolvedMode === "manual") {
           if (!trimmed && files.length === 0) return true
-          // Build outbound job for manual delivery
-          const job = await enqueueOutbound({
-            adapterId,
-            conversationKey,
-            request: {
+          // ADR-0131: one shell-agnostic call. On a connector host this is
+          // the same `enqueueGoverned(source: "manual")` + `messages` write it
+          // always was; on a phone / web companion / desktop driving a remote
+          // host it relays through the durable queue instead. The composer no
+          // longer knows (or needs to know) which.
+          try {
+            await sendManualReply({
+              adapterId,
+              conversationKey,
+              sessionId: session.id,
               conversationRef,
-              segments: [{ type: "text", text: trimmed }],
-              metadata: { idempotencyKey: crypto.randomUUID() },
-            },
-            source: "manual",
-          })
-          // Insert StoredMessage with outboundJobId
-          const now = Date.now()
-          await getDb().messages.add({
-            id: crypto.randomUUID(),
-            sessionId: session.id,
-            role: "user",
-            parts: [{ type: "text", text: trimmed }],
-            metadata: { outboundJobId: job.id },
-            createdAt: now,
-          })
+              text: trimmed,
+              label: session.title ?? conversationKey,
+            })
+          } catch (error) {
+            if (error instanceof InboxWriteUnavailableError) {
+              toast.error(tInbox("relay.sendFailed"))
+              return true
+            }
+            throw error
+          }
           return true // skip standard sendPrompt — caller's input cleared by ComposerInner
         }
         if (resolvedMode === "draft") {
@@ -2858,30 +2863,45 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         : "ready"
 
   // ── Draft review dialog helpers ─────────────────────────────────────────
+  // Both draft actions route through the ADR-0131 facade so the phone's
+  // reviewer and this dialog share one code path (and one idempotency key
+  // derived from the draft id — a retried approval can never send twice).
   const handleApproveDraft = useCallback(
-    async (draft: ConnectorDraftRow) => {
+    async (draft: ConnectorDraftRow, segments?: MessageSegment[]) => {
       const binding = session?.platformBinding
-      if (!binding) return
-      await enqueueOutbound({
-        adapterId: binding.adapterId,
-        conversationKey: binding.conversationKey,
-        request: {
-          conversationRef: binding.conversationRef,
-          segments: draft.segments,
-          metadata: { idempotencyKey: crypto.randomUUID() },
-        },
-        source: "draft-approved",
-      })
-      await approveDraft(draft.id)
+      try {
+        await approveInboxDraft(draft, {
+          segments,
+          ...(binding ? { binding } : {}),
+          label: session?.title ?? draft.conversationKey,
+        })
+      } catch (error) {
+        if (error instanceof InboxWriteUnavailableError) {
+          toast.error(tInbox("relay.sendFailed"))
+          return
+        }
+        throw error
+      }
       setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))
     },
-    [session?.platformBinding]
+    [session?.platformBinding, session?.title, tInbox]
   )
 
-  const handleRejectDraft = useCallback(async (draft: ConnectorDraftRow) => {
-    await rejectDraft(draft.id)
-    setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))
-  }, [])
+  const handleRejectDraft = useCallback(
+    async (draft: ConnectorDraftRow) => {
+      try {
+        await rejectInboxDraft(draft)
+      } catch (error) {
+        if (error instanceof InboxWriteUnavailableError) {
+          toast.error(tInbox("relay.sendFailed"))
+          return
+        }
+        throw error
+      }
+      setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))
+    },
+    [tInbox]
+  )
 
   return (
     <div

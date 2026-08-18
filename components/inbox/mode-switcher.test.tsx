@@ -16,8 +16,12 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn().mockReturnValue(false),
 }))
 
-jest.mock("@/lib/db/conversation-overrides", () => ({
-  upsertByConversationKey: jest.fn().mockResolvedValue({}),
+const mockMutate = jest.fn().mockResolvedValue({ route: "local", conversationKey: "ck" })
+// ADR-0131: override writes go through the shell-agnostic facade, which
+// picks local-host vs. relay-to-paired-host. The control just describes
+// its edit as one mutation.
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  mutateConversationOverride: (...a: unknown[]) => mockMutate(...a),
 }))
 
 jest.mock("@/components/ui/dropdown-menu")
@@ -29,11 +33,10 @@ jest.mock("@/components/ui/dropdown-menu")
 import { ModeSwitcher } from "./mode-switcher"
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
-import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
 
 const mockInvoke = invoke as jest.Mock
 const mockIsTauri = isTauri as jest.Mock
-const mockUpsert = upsertByConversationKey as jest.Mock
+const mockUpsert = mockMutate
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -41,7 +44,7 @@ const mockUpsert = upsertByConversationKey as jest.Mock
 
 describe("ModeSwitcher", () => {
   beforeEach(() => {
-    mockUpsert.mockReset().mockResolvedValue({})
+    mockUpsert.mockReset().mockResolvedValue({ route: "local", conversationKey: "ck1" })
     mockInvoke.mockReset().mockResolvedValue(undefined)
     mockIsTauri.mockReturnValue(false)
   })
@@ -73,9 +76,14 @@ describe("ModeSwitcher", () => {
     fireEvent.click(screen.getByTestId("mode-option-manual"))
 
     await waitFor(() => {
-      expect(mockUpsert).toHaveBeenCalledWith(
-        expect.objectContaining({ conversationKey: "ck1", sessionId: "s1", mode: "manual" })
-      )
+      expect(mockUpsert).toHaveBeenCalledWith({
+        kind: "upsert",
+        input: expect.objectContaining({
+          conversationKey: "ck1",
+          sessionId: "s1",
+          mode: "manual",
+        }),
+      })
     })
     expect(onModeChange).toHaveBeenCalledWith("manual")
   })

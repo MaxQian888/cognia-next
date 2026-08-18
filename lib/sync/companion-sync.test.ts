@@ -19,6 +19,7 @@ import {
   __resetSyncStateForTests,
   SYNC_HANDLER_TABLES,
   installEventDrivenSync,
+  EVENT_SYNC_COALESCE_MS,
   installForegroundSync,
   installNetworkSync,
   installResumeSync,
@@ -369,10 +370,107 @@ describe("installEventDrivenSync", () => {
       ],
     })
     subscriber?.({ table: "messages" })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, EVENT_SYNC_COALESCE_MS + 100))
 
     expect(messages).toHaveBeenCalledTimes(1)
     expect(characters).not.toHaveBeenCalled()
+    teardown()
+  })
+
+  it("coalesces a burst of same-table invalidations into one pull per window (ADR-0131)", async () => {
+    const outbound = jest.fn().mockResolvedValue(makeOkOutcome("outboundQueue"))
+    const drafts = jest.fn().mockResolvedValue(makeOkOutcome("connectorDrafts"))
+    let subscriber: ((payload: { table?: "outboundQueue" | "connectorDrafts" }) => void) | undefined
+    const transport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as typeof subscriber
+        return jest.fn()
+      }),
+    }
+    const teardown = installEventDrivenSync({
+      transport,
+      handlers: [
+        { table: "outboundQueue", run: outbound },
+        { table: "connectorDrafts", run: drafts },
+      ],
+    })
+    for (let i = 0; i < 6; i++) subscriber?.({ table: "outboundQueue" })
+    subscriber?.({ table: "connectorDrafts" })
+    subscriber?.({ table: "connectorDrafts" })
+    await new Promise((resolve) => setTimeout(resolve, EVENT_SYNC_COALESCE_MS + 150))
+
+    expect(outbound).toHaveBeenCalledTimes(1)
+    expect(drafts).toHaveBeenCalledTimes(1)
+    teardown()
+  })
+
+  it("an untabled invalidation collapses pending keyed windows into one full run", async () => {
+    const outbound = jest.fn().mockResolvedValue(makeOkOutcome("outboundQueue"))
+    const drafts = jest.fn().mockResolvedValue(makeOkOutcome("connectorDrafts"))
+    let subscriber: ((payload: { table?: "outboundQueue" }) => void) | undefined
+    const transport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as typeof subscriber
+        return jest.fn()
+      }),
+    }
+    const teardown = installEventDrivenSync({
+      transport,
+      handlers: [
+        { table: "outboundQueue", run: outbound },
+        { table: "connectorDrafts", run: drafts },
+      ],
+    })
+    subscriber?.({ table: "outboundQueue" })
+    subscriber?.({})
+    await new Promise((resolve) => setTimeout(resolve, EVENT_SYNC_COALESCE_MS + 150))
+
+    // Exactly one full run — the keyed window did not fire separately.
+    expect(outbound).toHaveBeenCalledTimes(1)
+    expect(drafts).toHaveBeenCalledTimes(1)
+    teardown()
+  })
+
+  it("teardown cancels a pending window so no pull fires after unsubscribe", async () => {
+    const outbound = jest.fn().mockResolvedValue(makeOkOutcome("outboundQueue"))
+    let subscriber: ((payload: { table?: "outboundQueue" }) => void) | undefined
+    const transport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as typeof subscriber
+        return jest.fn()
+      }),
+    }
+    const teardown = installEventDrivenSync({
+      transport,
+      handlers: [{ table: "outboundQueue", run: outbound }],
+    })
+    subscriber?.({ table: "outboundQueue" })
+    teardown()
+    await new Promise((resolve) => setTimeout(resolve, EVENT_SYNC_COALESCE_MS + 100))
+    expect(outbound).not.toHaveBeenCalled()
+  })
+
+  it("ignores invalidations for tables outside an `only` scope", async () => {
+    const outbound = jest.fn().mockResolvedValue(makeOkOutcome("outboundQueue"))
+    let subscriber: ((payload: { table?: "connectorDrafts" }) => void) | undefined
+    const transport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as typeof subscriber
+        return jest.fn()
+      }),
+    }
+    const teardown = installEventDrivenSync({
+      transport,
+      only: ["outboundQueue"],
+      handlers: [{ table: "outboundQueue", run: outbound }],
+    })
+    subscriber?.({ table: "connectorDrafts" })
+    await new Promise((resolve) => setTimeout(resolve, EVENT_SYNC_COALESCE_MS + 100))
+    expect(outbound).not.toHaveBeenCalled()
     teardown()
   })
 
@@ -398,8 +496,9 @@ describe("installEventDrivenSync", () => {
     expect(transport.subscribe).toHaveBeenCalledWith("sync://invalidate", expect.any(Function))
 
     subscribers[0]?.({})
-    // Wave 4 — ensureHydrated awaits Dexie; give the IDB open a moment.
-    await new Promise((r) => setTimeout(r, 50))
+    // Wave 4 — ensureHydrated awaits Dexie; give the IDB open a moment (plus
+    // the ADR-0131 coalescing window).
+    await new Promise((r) => setTimeout(r, EVENT_SYNC_COALESCE_MS + 100))
 
     expect(handlers[0].run).toHaveBeenCalled()
 

@@ -7,6 +7,7 @@
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { NotificationChannel } from "@/types/notifications"
 import { getBus } from "@/lib/connectors/bus"
+import { isNotifiableInboundEvent as isNotifiable } from "@/lib/connectors/inbound-notifiability"
 import { resolvePreferences } from "./preferences"
 import { isViewingConversation } from "@/stores/inbox/active-conversation-store"
 import { notify } from "./runtime"
@@ -17,15 +18,6 @@ const PREVIEW_MAX = 140
 function previewOf(text: string): string {
   const t = text.trim()
   return t.length > PREVIEW_MAX ? `${t.slice(0, PREVIEW_MAX - 1)}…` : t
-}
-
-/** Only "create" message events are user-meaningful; skip edits/deletes/system. */
-function isNotifiable(event: NormalizedInboundEvent): boolean {
-  if (event.kind && event.kind !== "create") return false
-  // Skip the bot's own outbound echoes.
-  if (event.sender?.remoteUserId && event.sender.remoteUserId === event.selfId) return false
-  // Need at least some text to preview.
-  return Boolean(event.plainText && event.plainText.trim())
 }
 
 export function buildConnectorNotification(event: NormalizedInboundEvent): {

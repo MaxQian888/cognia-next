@@ -11722,6 +11722,14 @@ paths:
               properties:
                 draftId:
                   type: string
+                segments:
+                  type: array
+                  description: Edited segments replacing the draft's own (ADR-0131 — the phone's draft editor sends what the operator
+                    actually approved).
+                  items:
+                    type: object
+                    additionalProperties: {}
+                    example: {}
               additionalProperties: false
       responses:
         "200":
@@ -11739,6 +11747,158 @@ paths:
                 x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
                   command remains contract-covered at the JSON value boundary until its owning domain publishes a
                   narrower stable wire type.
+                x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connector_enqueue_outbound:
+    post:
+      operationId: internalRpcConnectorEnqueueOutbound
+      tags:
+        - headless-rpc
+      summary: connector_enqueue_outbound (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Relay a human-authored reply into a platform conversation (ADR-0131). The host replays idempotently on
+                `request.metadata.idempotencyKey`.
+              required:
+                - adapterId
+                - conversationKey
+                - sessionId
+                - clientMessageId
+                - request
+              properties:
+                adapterId:
+                  type: string
+                conversationKey:
+                  type: string
+                sessionId:
+                  type: string
+                clientMessageId:
+                  type: string
+                  description: Client-minted id for the local `messages` row; the host reuses it so the optimistic mirror and the
+                    authoritative row converge.
+                request:
+                  type: object
+                  required:
+                    - conversationRef
+                    - segments
+                    - metadata
+                  properties:
+                    conversationRef:
+                      type: object
+                      additionalProperties: {}
+                      example: {}
+                    segments:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: {}
+                        example: {}
+                    metadata:
+                      type: object
+                      required:
+                        - idempotencyKey
+                      properties:
+                        idempotencyKey:
+                          type: string
+                      additionalProperties: false
+                    replyTo:
+                      type: object
+                      additionalProperties: {}
+                      example: {}
+                    threadId:
+                      type: string
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
+                  compatibility remains owned by that domain.
                 x-cognia-schema-owner: connectors
         "202":
           description: Command is still running under the durable operation ledger.
@@ -12235,6 +12395,142 @@ paths:
                 x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
                   compatibility remains owned by that domain.
                 x-cognia-schema-owner: connectors
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_discord_upload:
+    post:
+      operationId: internalRpcConnectorsDiscordUpload
+      tags:
+        - headless-rpc
+      summary: connectors_discord_upload (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - botToken
+                - channelId
+                - files
+              properties:
+                botToken:
+                  type: string
+                channelId:
+                  type: string
+                content:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - sourceUrl
+                      - filename
+                    properties:
+                      sourceUrl:
+                        type: string
+                      filename:
+                        type: string
+                      contentType:
+                        type: string
+                      description:
+                        type: string
+                      durationSecs:
+                        type: number
+                      waveform:
+                        type: string
+                    additionalProperties: false
+                replyToMessageId:
+                  type: string
+                flags:
+                  type: integer
+                nonce:
+                  type: string
+                  description: Deterministic dedupe nonce (≤25 chars); Discord returns the already-created message on a retry.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: string
         "202":
           description: Command is still running under the durable operation ledger.
           content:
@@ -15072,6 +15368,114 @@ paths:
               schema:
                 $ref: "#/components/schemas/RpcError"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_onebot_probe:
+    post:
+      operationId: internalRpcConnectorsOnebotProbe
+      tags:
+        - headless-rpc
+      summary: connectors_onebot_probe (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                description: Reverse-WS OneBot clients currently dialed in to the in-app server.
+                items:
+                  type: object
+                  required:
+                    - adapterId
+                    - connectedAtMs
+                  properties:
+                    adapterId:
+                      type: string
+                    connectedAtMs:
+                      type: integer
+                  additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/connectors_onebot_send:
     post:
       operationId: internalRpcConnectorsOnebotSend
@@ -16240,14 +16644,42 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - input
-              properties:
-                input:
-                  type: object
-                  additionalProperties: {}
-                  example: {}
-              additionalProperties: false
+              description: Legacy `{ input }` upsert, or an ADR-0131 `{ mutation }` envelope the host applies with full audit +
+                assignment-trail semantics.
+              oneOf:
+                - type: object
+                  required:
+                    - input
+                  properties:
+                    input:
+                      type: object
+                      additionalProperties: {}
+                      example: {}
+                  additionalProperties: false
+                - type: object
+                  required:
+                    - mutation
+                  properties:
+                    mutation:
+                      type: object
+                      required:
+                        - kind
+                      properties:
+                        kind:
+                          type: string
+                          enum:
+                            - upsert
+                            - patch
+                            - configSection
+                            - setStatus
+                            - setAssignee
+                            - addLabel
+                            - removeLabel
+                            - setPinned
+                            - setArchived
+                            - delete
+                      additionalProperties: false
+                  additionalProperties: false
       responses:
         "200":
           description: Command completed.
@@ -60309,10 +60741,12 @@ components:
           - companion_can_control
           - companion_endpoints
           - connector_approve_draft
+          - connector_enqueue_outbound
           - connector_reject_draft
           - connector_send
           - connectors_attachment_fetch
           - connectors_attachment_read
+          - connectors_discord_upload
           - connectors_health
           - connectors_http_request
           - connectors_keyring_delete
@@ -60337,6 +60771,7 @@ components:
           - connectors_matrix_encrypted_media_fetch
           - connectors_matrix_encrypted_media_upload
           - connectors_media_upload
+          - connectors_onebot_probe
           - connectors_onebot_send
           - connectors_register
           - connectors_reset_all_ws
@@ -60822,10 +61257,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 493
-  generatedRequestSchemaCount: 493
+  internalCommandCount: 496
+  generatedRequestSchemaCount: 496
   runtimeInferredRequestSchemaCount: 64
-  contractRequestSchemaCount: 429
+  contractRequestSchemaCount: 432
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 493
+  generatedResponseSchemaCount: 496
   loopbackOnly: true

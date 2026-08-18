@@ -273,10 +273,12 @@
     "tableLabels": {
       "adapterInstances": "连接器",
       "characters": "角色",
+      "connectorDrafts": "连接器草稿",
       "conversationOverrides": "会话覆盖",
       "goals": "目标",
       "memories": "记忆",
       "messages": "消息",
+      "outboundQueue": "出站投递状态",
       "plugins": "插件",
       "sessions": "会话",
       "settings": "应用设置",

@@ -9,6 +9,7 @@ import {
   CalendarClockIcon,
   CommandIcon,
   CompassIcon,
+  ContactIcon,
   FolderIcon,
   InboxIcon,
   LayoutTemplateIcon,
@@ -47,6 +48,7 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   "plugin-action": PuzzleIcon,
   "mcp-server": ServerCogIcon,
   "inbox-conversation": InboxIcon,
+  "inbox-contact": ContactIcon,
   "workbench-panel": PanelRightIcon,
   "pi-package": PackageIcon,
 }

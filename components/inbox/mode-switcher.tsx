@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { isTauri } from "@/lib/tauri"
-import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
+import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { ALL_MODES } from "@/types/connectors/policy"
 
@@ -49,11 +49,12 @@ export function ModeSwitcher({
     if (mode === currentMode || pending) return
     setPending(true)
     try {
-      // 1. Persist the override.
-      await upsertByConversationKey({
-        conversationKey,
-        sessionId,
-        mode,
+      // 1. Persist the override. ADR-0131: on a connector host this is the
+      //    same Dexie upsert; on a thin client it mirrors locally and relays
+      //    the authoritative write to the paired host.
+      await mutateConversationOverride({
+        kind: "upsert",
+        input: { conversationKey, sessionId, mode },
       })
 
       // 2. Cancel any in-flight AI run for this conversation.

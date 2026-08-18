@@ -12,6 +12,16 @@ import { parseConversationKey } from "@/types/connectors/event"
 import { getDb } from "./schema"
 import { appendAssignmentEvent } from "./conversation-assignment-events"
 import { resolveSessionProjectId } from "./project-scope"
+import { publishSyncInvalidate } from "@/lib/sync/host-invalidate"
+
+/**
+ * Companion fan-out (ADR-0131): every write primitive below tells paired thin
+ * clients to re-pull this table. Coalesced + best-effort inside
+ * `publishSyncInvalidate`; a no-op off the connector host.
+ */
+function invalidate(conversationKey: string): void {
+  publishSyncInvalidate("conversationOverrides", conversationKey)
+}
 
 function newId(): string {
   return "cov_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -72,6 +82,7 @@ export async function upsertByConversationKey(
       updatedAt: now,
     }
     await db.conversationOverrides.put(updated)
+    invalidate(input.conversationKey)
     return updated
   }
 
@@ -86,7 +97,22 @@ export async function upsertByConversationKey(
     updatedAt: now,
   }
   await db.conversationOverrides.add(row)
+  invalidate(input.conversationKey)
   return row
+}
+
+/**
+ * Delete the override row for a conversation key (no-op when absent). The
+ * single primitive behind the settings "delete override" actions and the
+ * `delete` inbox-write mutation (ADR-0131) so a thin client and the host
+ * remove the row through the same path.
+ */
+export async function deleteByConversationKey(conversationKey: string): Promise<boolean> {
+  const row = await readForResolution(conversationKey)
+  if (!row) return false
+  await getDb().conversationOverrides.delete(row.id)
+  invalidate(conversationKey)
+  return true
 }
 
 /** Return the override row for a conversation key, or undefined. */
@@ -116,6 +142,7 @@ export async function patchConversationOverride(
   const row = await ensureRow(conversationKey, sessionId)
   const updated: ConversationOverrideRow = { ...row, ...patch, updatedAt: Date.now() }
   await db.conversationOverrides.put(updated)
+  invalidate(conversationKey)
   return updated
 }
 
@@ -159,7 +186,7 @@ export async function updateConversationConfigSection(input: {
   const changedKeys = Object.keys(input.patch).sort()
   if (changedKeys.length === 0 && existing) return existing
 
-  return db.transaction("rw", db.conversationOverrides, db.connectorAudit, async () => {
+  const result = await db.transaction("rw", db.conversationOverrides, db.connectorAudit, async () => {
     const latest =
       (await db.conversationOverrides
         .where("conversationKey")
@@ -193,16 +220,24 @@ export async function updateConversationConfigSection(input: {
     })
     return row
   })
+  invalidate(input.conversationKey)
+  return result
 }
 
 /** Set or clear the `pinned` flag. */
 export async function setPinned(id: string, pinned: boolean): Promise<void> {
-  await getDb().conversationOverrides.update(id, { pinned, updatedAt: Date.now() })
+  const db = getDb()
+  await db.conversationOverrides.update(id, { pinned, updatedAt: Date.now() })
+  const row = await db.conversationOverrides.get(id)
+  if (row) invalidate(row.conversationKey)
 }
 
 /** Set or clear the `archived` flag. */
 export async function setArchived(id: string, archived: boolean): Promise<void> {
-  await getDb().conversationOverrides.update(id, { archived, updatedAt: Date.now() })
+  const db = getDb()
+  await db.conversationOverrides.update(id, { archived, updatedAt: Date.now() })
+  const row = await db.conversationOverrides.get(id)
+  if (row) invalidate(row.conversationKey)
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +270,7 @@ export async function setStatus(
     ...(status === "resolved" ? { escalatedStep: undefined, escalatedAt: undefined } : {}),
     updatedAt: Date.now(),
   })
+  invalidate(conversationKey)
   if (fromStatus !== status) {
     await appendAssignmentEvent({
       conversationKey,
@@ -260,6 +296,7 @@ export async function wakeSnoozedConversations(now: number = Date.now()): Promis
         snoozeUntil: undefined,
         updatedAt: now,
       })
+      invalidate(row.conversationKey)
       await appendAssignmentEvent({
         conversationKey: row.conversationKey,
         kind: "status.open",
@@ -341,6 +378,7 @@ export async function clearAssignmentRoutingMarker(conversationKey: string): Pro
     ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
     updatedAt: Date.now(),
   })
+  invalidate(conversationKey)
 }
 
 function snapshotRouting(row: ConversationOverrideRow): AssignmentRoutingSnapshot {
@@ -517,6 +555,7 @@ export async function setAssignee(
       })
     }
   )
+  invalidate(conversationKey)
 }
 
 /** Add a label to a conversation (idempotent); emits `label.added`. */
@@ -533,6 +572,7 @@ export async function addLabel(
     labelIds: [...current, labelId],
     updatedAt: Date.now(),
   })
+  invalidate(conversationKey)
   await appendAssignmentEvent({ conversationKey, kind: "label.added", fields: { labelId } })
 }
 
@@ -550,6 +590,7 @@ export async function removeLabel(
     labelIds: current.filter((l) => l !== labelId),
     updatedAt: Date.now(),
   })
+  invalidate(conversationKey)
   await appendAssignmentEvent({ conversationKey, kind: "label.removed", fields: { labelId } })
 }
 
@@ -565,6 +606,7 @@ export async function setSlaDue(
   if (due.firstResponseDueAt !== undefined) patch.firstResponseDueAt = due.firstResponseDueAt
   if (due.nextResponseDueAt !== undefined) patch.nextResponseDueAt = due.nextResponseDueAt
   await db.conversationOverrides.update(row.id, patch)
+  invalidate(conversationKey)
 }
 
 /**
@@ -587,4 +629,5 @@ export async function markResponded(
   }
   if (row.firstRespondedAt === undefined) patch.firstRespondedAt = now
   await getDb().conversationOverrides.update(row.id, patch)
+  invalidate(conversationKey)
 }

@@ -138,6 +138,7 @@
     "unmerge": "取消合并"
   },
   "conversation": {
+    "jumpFailed": "无法打开链接的消息。",
     "loading": "加载中…"
   },
   "conversationHeader": {
@@ -199,6 +200,7 @@
     "more": "更多",
     "moreAttention": "更多 — 有待处理项",
     "openContact": "联系人资料",
+    "openInChat": "在主聊天打开",
     "openOverrides": "会话设置",
     "openOverridesAria": "打开该会话的覆盖设置",
     "openSidebar": "打开侧边栏",
@@ -591,6 +593,12 @@
     "label": "安静时段",
     "tooltip": "安静时段（{from}–{to} {tz}）内暂停发送回复。"
   },
+  "relay": {
+    "hostUnsupported": "该宿主版本过旧，暂不支持跨设备回复。请升级后重试。",
+    "queued": "已加入队列——宿主可达时会立即发送。",
+    "sendFailed": "发送失败。请先配对宿主，或检查宿主是否可达。",
+    "unavailable": "回复需要已配对的宿主。"
+  },
   "shell": {
     "resize": {
       "detailHandle": "调整会话列表宽度",
@@ -632,6 +640,11 @@
       "description": "Inbox 渲染失败。可以重试，或复制堆栈贴到工单。",
       "retry": "重试",
       "title": "出错了"
+    },
+    "requiresHost": {
+      "title": "连接宿主后才能使用收件箱",
+      "description": "此设备不运行连接器机器人。与你的桌面端或服务器配对后，即可查看并回复平台会话。",
+      "pairAction": "配对宿主"
     },
     "syncing": {
       "label": "正在加载缓存…"

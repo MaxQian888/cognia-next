@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { LabelChip } from "./label-chip"
 import { useConversationLabels } from "@/hooks/connectors/use-conversation-labels"
-import { addLabel, removeLabel } from "@/lib/db/conversation-overrides"
+import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 
 export interface LabelPickerProps {
   conversationKey: string
@@ -39,8 +39,12 @@ export function LabelPicker({ conversationKey, sessionId, selectedIds }: LabelPi
 
   const toggle = async (labelId: string, next: boolean) => {
     try {
-      if (next) await addLabel(conversationKey, labelId, sessionId)
-      else await removeLabel(conversationKey, labelId, sessionId)
+      await mutateConversationOverride({
+        kind: next ? "addLabel" : "removeLabel",
+        conversationKey,
+        labelId,
+        sessionId,
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }

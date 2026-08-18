@@ -101,6 +101,7 @@ import {
   type ResumeReconnectHandle,
 } from "@/lib/connectors/bootstrap/resume-reconnect"
 import { liveQuery } from "dexie"
+import { recoverStaleConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
 import { createConnectorRuntimeLease } from "@/lib/connectors/runtime-lease"
 import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
 
@@ -148,10 +149,52 @@ export interface InstallConnectorRuntimeOptions {
    * Dexie `liveQuery` over `listEnabledAdapterInstances`. Test seam.
    */
   subscribeAdapterChanges?: (onChange: () => void) => () => void
+  /**
+   * Called after the runtime released ownership for a reason OTHER than this
+   * caller tearing it down — today only `"lease-lost"`, i.e. another process
+   * (a headless brain taking over, ADR-0131 §2.7) claimed the runtime lease
+   * while this window was running. `components/connectors/connector-bus-provider.tsx`
+   * uses it to re-arm a backoff that re-acquires the runtime once the peer
+   * hands it back, so a desktop that lost a handoff race recovers without a
+   * restart. Never fires for `"unmount"`.
+   */
+  onRuntimeReleased?: (reason: ConnectorRuntimeReleaseReason) => void
 }
+
+/** Why the runtime stopped owning itself. */
+export type ConnectorRuntimeReleaseReason = "unmount" | "lease-lost"
 
 /** The Web Locks name — one exclusive holder per origin across all webviews. */
 export const CONNECTOR_RUNTIME_LOCK = "cognia-connector-runtime"
+
+/**
+ * How many installs in THIS JS context currently hold the runtime. A counter
+ * rather than a boolean because a StrictMode remount briefly overlaps two
+ * installs; decrementing keeps "does this context own the runtime" honest
+ * across that window.
+ *
+ * Read through {@link isConnectorRuntimeOwnedHere} by the host RPC arms in
+ * `lib/companion/desktop-write-source.ts`: a relayed Inbox write must only be
+ * executed by the process that actually runs the adapters. A non-owner throws
+ * `connector_runtime_not_owner`, which `lib/queue/retry-policy.ts` classifies
+ * as retryable, so the phone's durable queue replays across the handoff
+ * window (5 attempts ≈ 31 s) instead of dead-lettering the reply.
+ */
+let runtimeOwnerCount = 0
+
+/**
+ * Does THIS JS context own the singleton connector runtime? `false` in a
+ * second webview, in the browser, on a phone, and on a desktop whose runtime
+ * was torn down because a remote brain took over.
+ */
+export function isConnectorRuntimeOwnedHere(): boolean {
+  return runtimeOwnerCount > 0
+}
+
+/** Test-only reset of the ownership counter. */
+export function __resetConnectorRuntimeOwnershipForTests(): void {
+  runtimeOwnerCount = 0
+}
 
 /**
  * Default singleton guard via the Web Locks API. Issues a QUEUED exclusive
@@ -430,7 +473,9 @@ export function installConnectorRuntime(
     return observed === "running" || observed === "starting" || observed === "degraded"
   }
 
-  const teardownRuntime = (): Promise<void> => {
+  const teardownRuntime = (
+    reason: ConnectorRuntimeReleaseReason = "unmount"
+  ): Promise<void> => {
     if (teardownPromise) return teardownPromise
     teardownPromise = (async () => {
       cancelled = true
@@ -454,6 +499,8 @@ export function installConnectorRuntime(
       // A window that never acquired the singleton runtime owns none of the
       // shared adapter transports below.
       if (!ownsRuntime) return
+      ownsRuntime = false
+      runtimeOwnerCount = Math.max(0, runtimeOwnerCount - 1)
       // Plugin adapters are contribution-owned, but must stop while a remote
       // brain owns connector routing to avoid double-dial. Suspend them first
       // so their restart closures survive the local runtime teardown.
@@ -468,6 +515,28 @@ export function installConnectorRuntime(
       await Promise.allSettled(removals)
       serverAdapterIds.clear()
       await connectorsStopServer().catch(() => undefined)
+      // ADR-0131 §2.7 — the lease moved to another process while jobs were
+      // mid-run. Their leases would only expire on the sweep interval, so the
+      // operator would stare at "running" rows nothing is running. Reclaim
+      // them NOW: `inbound-recovery-panel.tsx` renders them as
+      // `recovery_required` immediately, and the new owner's
+      // `resumeDurableInboundJobs` can pick them up. Only on lease loss — an
+      // unmount (window closed, app quit) is not a handoff and the rows stay
+      // leased for the normal expiry path.
+      if (reason === "lease-lost") {
+        await recoverStaleConnectorInboundJobs({ reclaimAllRunning: true }).catch(
+          (error: unknown) => {
+            log(
+              "error",
+              `[connector-bus] inbound recovery after lease loss failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            )
+            return 0
+          }
+        )
+        opts.onRuntimeReleased?.("lease-lost")
+      }
     })()
     return teardownPromise
   }
@@ -481,7 +550,9 @@ export function installConnectorRuntime(
     // Losing the lease mid-run means another process took ownership; tear
     // this runtime down the same way an unmount would, so the two never
     // answer the same message.
-    const acquire = opts.acquireRuntimeLock ?? makeDefaultAcquireRuntimeLock(log, teardownRuntime)
+    const acquire =
+      opts.acquireRuntimeLock ??
+      makeDefaultAcquireRuntimeLock(log, () => teardownRuntime("lease-lost"))
     const owns = await acquire(lockAc.signal)
     if (cancelled) return
     if (!owns) {
@@ -492,6 +563,7 @@ export function installConnectorRuntime(
       return
     }
     ownsRuntime = true
+    runtimeOwnerCount += 1
 
     // Task-scheduler executors are process-lifetime registrations; they must
     // only exist in the lock-owning window, otherwise a second webview that
@@ -883,7 +955,7 @@ export function installConnectorRuntime(
   })
 
   return async () => {
-    await teardownRuntime()
+    await teardownRuntime("unmount")
     lockAc.abort()
   }
 }

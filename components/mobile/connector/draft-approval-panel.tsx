@@ -27,7 +27,6 @@ import { SwipeRow } from "@/components/interactions/swipe-row"
 import { useDraftApproval } from "@/hooks/use-draft-approval"
 import { listAllPendingDrafts, sweepExpired } from "@/lib/db/connector-drafts"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
@@ -54,7 +53,6 @@ interface RowProps {
   approveLabel: string
   rejectLabel: string
   queueLabelApprove: string
-  queueLabelReject: string
 }
 
 function DraftApprovalRow({
@@ -62,24 +60,12 @@ function DraftApprovalRow({
   approveLabel,
   rejectLabel,
   queueLabelApprove,
-  queueLabelReject,
 }: RowProps) {
-  const { approve, reject } = useDraftApproval(row, {
-    beforeApprove: async () => {
-      await enqueue({
-        command: "connector_approve_draft",
-        payload: { draftId: row.id },
-        label: queueLabelApprove,
-      })
-    },
-    beforeReject: async () => {
-      await enqueue({
-        command: "connector_reject_draft",
-        payload: { draftId: row.id },
-        label: queueLabelReject,
-      })
-    },
-  })
+  // ADR-0131: the phone used to hand-roll its own `mobileOutboundQueue` rows
+  // here. The hook now routes through `lib/connectors/inbox-writes`, which
+  // enqueues the same RPCs under a draft-derived idempotency key AND flips
+  // the local mirror — so a retried approval can never send twice.
+  const { approve, reject } = useDraftApproval(row, { label: queueLabelApprove })
 
   return (
     <SwipeRow
@@ -187,7 +173,6 @@ export function DraftApprovalPanel({ className }: DraftApprovalPanelProps) {
                 approveLabel={t("approve")}
                 rejectLabel={t("reject")}
                 queueLabelApprove={t("queueLabelApprove")}
-                queueLabelReject={t("queueLabelReject")}
               />
             </motion.li>
           ))}

@@ -23,6 +23,7 @@ import {
 import type { ChatSearchTextRow } from "@/lib/db/chat-search-text"
 import { normalizeMessageScore } from "../scoring"
 import type {
+  GlobalSearchAction,
   GlobalSearchContext,
   GlobalSearchCoverage,
   GlobalSearchItem,
@@ -64,6 +65,26 @@ export function toChatSearchQuery(
   }
 }
 
+/**
+ * Where a hit opens. Messages of a platform-bound (IM) session live in the
+ * Inbox route, not the main chat — sending the user to `/` for one would land
+ * them in a pane that cannot reply on the platform.
+ */
+export function messageHitAction(
+  result: Pick<ChatSearchResult, "sessionId" | "messageId">,
+  ctx: Pick<GlobalSearchContext, "sessions">
+): GlobalSearchAction {
+  const binding = ctx.sessions.find((s) => s.id === result.sessionId)?.platformBinding
+  if (binding) {
+    return {
+      type: "open-inbox-conversation",
+      conversationKey: binding.conversationKey,
+      messageId: result.messageId,
+    }
+  }
+  return { type: "open-session", sessionId: result.sessionId, messageId: result.messageId }
+}
+
 export function messageResultToItem(
   result: ChatSearchResult,
   ctx: GlobalSearchContext
@@ -86,7 +107,7 @@ export function messageResultToItem(
       occurrenceCount: result.count,
       snippet: result.snippet,
     },
-    action: { type: "open-session", sessionId: result.sessionId, messageId: result.messageId },
+    action: messageHitAction(result, ctx),
   }
 }
 

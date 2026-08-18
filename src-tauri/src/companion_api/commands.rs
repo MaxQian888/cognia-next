@@ -648,7 +648,18 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // supervision silently didn't work whenever the screen was off.
     // The payload is sanitized down to ids by `push_data_for_channel`.
     register_push_trigger(app, AUTOMATION_CONSENT_CHANNEL);
+    // ADR-0131 cross-shell inbox relay — an inbound IM message landed on this
+    // host. Without a push a paired phone only learns about it when it next
+    // comes to the foreground, which is exactly the case the relay exists to
+    // fix (bot on the desktop, operator on the phone). Payload is ids + the
+    // `/inbox/c?key=…` deep link; message text never rides the push.
+    register_push_trigger(app, CONNECTOR_MESSAGE_ADDED_CHANNEL);
 }
+
+/// Channel announcing an inbound IM message (ADR-0131). Named because the
+/// event-bus registration, the push trigger, and the body builder all
+/// reference it.
+pub(crate) const CONNECTOR_MESSAGE_ADDED_CHANNEL: &str = "connector://message-added";
 
 /// Channel carrying host computer-use consent prompts. Named because both the
 /// event-bus registration and the push trigger reference it, and because its
@@ -682,6 +693,26 @@ fn push_body_for_channel(
         {
             Some(process) => format!("Confirm {command} in {process}"),
             None => format!("Confirm {command}"),
+        };
+    }
+    if channel == CONNECTOR_MESSAGE_ADDED_CHANNEL {
+        // Name the conversation, never the message. `senderName` is already
+        // the display name the operator sees in the Inbox list; when the
+        // adapter could not resolve one, fall back to the platform so the
+        // notification still says *where* rather than nothing.
+        let who = data
+            .get("senderName")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let platform = data
+            .get("platform")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        return match (who, platform) {
+            (Some(who), Some(platform)) => format!("New message from {who} on {platform}"),
+            (Some(who), None) => format!("New message from {who}"),
+            (None, Some(platform)) => format!("New message on {platform}"),
+            (None, None) => "New message".to_string(),
         };
     }
     match channel.split_once("://") {
@@ -1711,6 +1742,32 @@ mod tests {
         assert_eq!(
             push_body_for_channel("no-scheme", &empty_data()),
             "no-scheme"
+        );
+    }
+
+    /// ADR-0131 — the inbound-IM push says WHO and WHERE, never WHAT. The
+    /// body is readable on a lock screen, so the message text must never
+    /// reach it; `push_data_for_channel` likewise passes ids + href only.
+    #[test]
+    fn connector_message_added_push_body_names_sender_not_message() {
+        let mut data = serde_json::Map::new();
+        data.insert("senderName".into(), serde_json::json!("Ada"));
+        data.insert("platform".into(), serde_json::json!("Telegram"));
+        data.insert("text".into(), serde_json::json!("the secret is 42"));
+        let body = push_body_for_channel(CONNECTOR_MESSAGE_ADDED_CHANNEL, &data);
+        assert_eq!(body, "New message from Ada on Telegram");
+        assert!(!body.contains("42"), "message text must never ride the push");
+
+        // Missing display name / platform degrade, never panic.
+        assert_eq!(
+            push_body_for_channel(CONNECTOR_MESSAGE_ADDED_CHANNEL, &empty_data()),
+            "New message"
+        );
+        let mut only_platform = serde_json::Map::new();
+        only_platform.insert("platform".into(), serde_json::json!("Slack"));
+        assert_eq!(
+            push_body_for_channel(CONNECTOR_MESSAGE_ADDED_CHANNEL, &only_platform),
+            "New message on Slack"
         );
     }
 

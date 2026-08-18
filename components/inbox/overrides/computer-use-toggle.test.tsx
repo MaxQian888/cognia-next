@@ -23,6 +23,7 @@ jest.mock("sonner", () => ({
 }))
 
 import { ComputerUseToggle } from "./computer-use-toggle"
+import { __setInboxWriteRouteDepsForTests } from "@/lib/connectors/inbox-writes/route"
 
 function wrap(ui: React.ReactElement) {
   return render(
@@ -39,7 +40,16 @@ function wrap(ui: React.ReactElement) {
 jest.setTimeout(20000)
 const WAIT = { timeout: 10000 } as const
 
+// ADR-0131: keep the REAL mutation path so the Dexie + audit assertions below
+// still mean something — only pin the ROUTE, as a connector host would.
+let restoreRoute: () => void = () => undefined
+afterEach(() => restoreRoute())
+
 beforeEach(async () => {
+  restoreRoute = __setInboxWriteRouteDepsForTests({
+    isRemoteHostActive: () => false,
+    hasConnectorRuntime: () => true,
+  })
   await getDb().delete()
   __resetDbForTesting()
   mockRequireBiometric.mockReset()

@@ -4120,6 +4120,40 @@ export class CogniaDB extends Dexie {
         "&id, repoFullName, &[repoFullName+number], issueProjectId, state, updatedAt, syncedAt",
     })
 
+    // v173 — ADR-0131 cross-shell inbox relay (Slice 2.3).
+    //
+    // `outboundQueue` and `connectorDrafts` join the companion sync whitelist
+    // (host → thin client, host authoritative). Companion sync is an
+    // `updatedAt`-cursor delta (`lib/sync/desktop-sync-source.ts`), so both
+    // tables gain an indexed `updatedAt` that every writer in
+    // `lib/db/outbound-jobs.ts` / `lib/db/connector-drafts.ts` stamps. Legacy
+    // rows backfill `updatedAt = createdAt` (the only timestamp they carry) so
+    // a first pull sees them once. `syncedFromHost` on the mirrored outbound
+    // projection is a plain non-indexed column — the local runner filters it
+    // out in `listDueNow` / `pickNextDue` / `recoverStaleSendingJobs`.
+    this.version(173)
+      .stores({
+        outboundQueue:
+          "&id, conversationKey, [conversationKey+createdAt], [conversationKey+orderSeq], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt], [status+claimedAt], projectId, [projectId+status], updatedAt",
+        connectorDrafts:
+          "&id, conversationKey, sessionId, [conversationKey+createdAt], status, expiresAt, projectId, updatedAt",
+      })
+      .upgrade(async (tx) => {
+        // Idempotent: rows that already carry `updatedAt` are left alone.
+        for (const tableName of ["outboundQueue", "connectorDrafts"] as const) {
+          const table = tx.table(tableName)
+          const pending: Array<Record<string, unknown>> = []
+          await table.toCollection().each((row: Record<string, unknown>) => {
+            if (typeof row.updatedAt === "number") return
+            pending.push({
+              ...row,
+              updatedAt: typeof row.createdAt === "number" ? row.createdAt : 0,
+            })
+          })
+          if (pending.length > 0) await table.bulkPut(pending)
+        }
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {

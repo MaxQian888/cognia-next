@@ -30,13 +30,18 @@ function sessionTimestamp(session: ChatSession): number {
   return typeof last === "number" && last > session.updatedAt ? last : session.updatedAt
 }
 
-/** Sessions the current query is allowed to see. */
+/**
+ * Sessions the current query is allowed to see. Platform-bound (IM) sessions
+ * are the inbox provider's (`./inbox`): they open in the Inbox route, and
+ * listing them here too would show every IM conversation twice.
+ */
 export function visibleSessions(
   ctx: GlobalSearchContext,
   filters: ParsedGlobalSearchQuery["filters"]
 ): ChatSession[] {
   const exposed = filterExposedSessions(ctx.sessions, "global-search")
   return exposed.filter((session) => {
+    if (session.platformBinding) return false
     if (!filters.archived && isArchived(session)) return false
     if (filters.workspace === "current" && ctx.activeProjectId) {
       if ((session.projectId ?? "") !== ctx.activeProjectId) return false

@@ -40,6 +40,7 @@ export type GlobalSearchKind =
   | "plugin-action"
   | "mcp-server"
   | "inbox-conversation"
+  | "inbox-contact"
   | "workbench-panel"
   /** A package for the Pi coding agent (ADR-0119), not a Cognia plugin. */
   | "pi-package"
@@ -80,7 +81,8 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   plugin: ["library"],
   "plugin-action": ["commands"],
   "mcp-server": ["library"],
-  "inbox-conversation": ["library"],
+  "inbox-conversation": ["chats"],
+  "inbox-contact": ["people"],
   "workbench-panel": ["commands"],
   "pi-package": ["library"],
 }
@@ -109,6 +111,7 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   "plugin-action": 15,
   "mcp-server": 16,
   "inbox-conversation": 17,
+  "inbox-contact": 18,
   // Last of the library kinds: these are another agent's packages, so they
   // should never outrank the user's own workflows, skills or plugins.
   "pi-package": 19,
@@ -117,6 +120,11 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
 /** What the dialog does when an item is chosen. */
 export type GlobalSearchAction =
   | { type: "open-session"; sessionId: string; messageId?: string }
+  /**
+   * Open a platform-bound (IM) conversation in the Inbox route rather than the
+   * main chat, optionally landing on one message (`/inbox/c?key=…&messageId=…`).
+   */
+  | { type: "open-inbox-conversation"; conversationKey: string; messageId?: string }
   | { type: "navigate"; href: string }
   | { type: "open-settings"; tab: string; focus?: string }
   | { type: "command"; id: string }

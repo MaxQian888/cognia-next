@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Cross-shell inbox relay (ADR-0131): reply to platform conversations from any shell, not just the desktop that runs the bots. Every Inbox write — manual replies, draft approve/reject (carrying the segments you actually edited), and every per-conversation override (mode, assignee, labels, status, pin/archive, provider/model, computer-use) — now goes through one shell-agnostic path that executes locally on a connector host and relays to the paired host from a phone, a web companion, or a desktop driving a remote host. Writes are idempotent end to end, so a dropped connection replays instead of double-sending, and a host handoff retries instead of dead-lettering your reply. Hosts push `sync://invalidate` and a new `connector://message-added` notification so a backgrounded phone gets a lock-screen alert that deep-links straight to the conversation, with the message text deliberately kept off the notification. A standalone browser tab or unpaired phone now explains that the Inbox needs a paired host instead of showing an empty list with controls that silently do nothing.

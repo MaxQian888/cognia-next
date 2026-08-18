@@ -1580,6 +1580,82 @@
       "properties": {
         "draftId": {
           "type": "string"
+        },
+        "segments": {
+          "type": "array",
+          "description": "Edited segments replacing the draft's own (ADR-0131 — the phone's draft editor sends what the operator actually approved).",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "connector_enqueue_outbound": {
+      "type": "object",
+      "description": "Relay a human-authored reply into a platform conversation (ADR-0131). The host replays idempotently on `request.metadata.idempotencyKey`.",
+      "required": [
+        "adapterId",
+        "conversationKey",
+        "sessionId",
+        "clientMessageId",
+        "request"
+      ],
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "conversationKey": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "clientMessageId": {
+          "type": "string",
+          "description": "Client-minted id for the local `messages` row; the host reuses it so the optimistic mirror and the authoritative row converge."
+        },
+        "request": {
+          "type": "object",
+          "required": [
+            "conversationRef",
+            "segments",
+            "metadata"
+          ],
+          "properties": {
+            "conversationRef": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "segments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "metadata": {
+              "type": "object",
+              "required": [
+                "idempotencyKey"
+              ],
+              "properties": {
+                "idempotencyKey": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "replyTo": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "threadId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": false
@@ -1667,6 +1743,67 @@
         },
         "maxBytes": {
           "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_discord_upload": {
+      "type": "object",
+      "required": [
+        "botToken",
+        "channelId",
+        "files"
+      ],
+      "properties": {
+        "botToken": {
+          "type": "string"
+        },
+        "channelId": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "sourceUrl",
+              "filename"
+            ],
+            "properties": {
+              "sourceUrl": {
+                "type": "string"
+              },
+              "filename": {
+                "type": "string"
+              },
+              "contentType": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "durationSecs": {
+                "type": "number"
+              },
+              "waveform": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "replyToMessageId": {
+          "type": "string"
+        },
+        "flags": {
+          "type": "integer"
+        },
+        "nonce": {
+          "type": "string",
+          "description": "Deterministic dedupe nonce (≤25 chars); Discord returns the already-created message on a retry."
         }
       },
       "additionalProperties": false
@@ -2063,6 +2200,11 @@
       },
       "additionalProperties": false
     },
+    "connectors_onebot_probe": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "connectors_onebot_send": {
       "type": "object",
       "required": [
@@ -2229,16 +2371,55 @@
     },
     "conversation_overrides_update": {
       "type": "object",
-      "required": [
-        "input"
-      ],
-      "properties": {
-        "input": {
+      "description": "Legacy `{ input }` upsert, or an ADR-0131 `{ mutation }` envelope the host applies with full audit + assignment-trail semantics.",
+      "oneOf": [
+        {
           "type": "object",
-          "additionalProperties": true
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "mutation"
+          ],
+          "properties": {
+            "mutation": {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "upsert",
+                    "patch",
+                    "configSection",
+                    "setStatus",
+                    "setAssignee",
+                    "addLabel",
+                    "removeLabel",
+                    "setPinned",
+                    "setArchived",
+                    "delete"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "default_export_dir": {
       "type": "object"

@@ -6,11 +6,12 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ConversationLabelRow } from "@/lib/db/crm-types"
 
-const mockAddLabel = jest.fn().mockResolvedValue(undefined)
-const mockRemoveLabel = jest.fn().mockResolvedValue(undefined)
-jest.mock("@/lib/db/conversation-overrides", () => ({
-  addLabel: (...a: unknown[]) => mockAddLabel(...a),
-  removeLabel: (...a: unknown[]) => mockRemoveLabel(...a),
+const mockMutate = jest.fn().mockResolvedValue({ route: "local", conversationKey: "k" })
+// ADR-0131: override writes go through the shell-agnostic facade, which
+// picks local-host vs. relay-to-paired-host. The control just describes
+// its edit as one mutation.
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  mutateConversationOverride: (...a: unknown[]) => mockMutate(...a),
 }))
 
 const CATALOG: ConversationLabelRow[] = [
@@ -47,7 +48,12 @@ describe("LabelPicker", () => {
     render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={["l1"]} />)
     await user.click(screen.getByTestId("label-picker-trigger"))
     await user.click(await screen.findByRole("menuitemcheckbox", { name: /Bug/ }))
-    await waitFor(() => expect(mockAddLabel).toHaveBeenCalledWith("k", "l2", "s"))
+    await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({
+        kind: "addLabel",
+        conversationKey: "k",
+        labelId: "l2",
+        sessionId: "s",
+      }))
   })
 
   it("removes a selected label from the popover", async () => {
@@ -55,18 +61,28 @@ describe("LabelPicker", () => {
     render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={["l1"]} />)
     await user.click(screen.getByTestId("label-picker-trigger"))
     await user.click(await screen.findByRole("menuitemcheckbox", { name: /VIP/ }))
-    await waitFor(() => expect(mockRemoveLabel).toHaveBeenCalledWith("k", "l1", "s"))
+    await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({
+        kind: "removeLabel",
+        conversationKey: "k",
+        labelId: "l1",
+        sessionId: "s",
+      }))
   })
 
   it("removes a label via the chip × affordance", async () => {
     const user = userEvent.setup()
     render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={["l1"]} />)
     await user.click(screen.getByRole("button", { name: /Remove label VIP/i }))
-    await waitFor(() => expect(mockRemoveLabel).toHaveBeenCalledWith("k", "l1", "s"))
+    await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({
+        kind: "removeLabel",
+        conversationKey: "k",
+        labelId: "l1",
+        sessionId: "s",
+      }))
   })
 
   it("surfaces a toast when a toggle rejects", async () => {
-    mockAddLabel.mockRejectedValueOnce(new Error("dup"))
+    mockMutate.mockRejectedValueOnce(new Error("dup"))
     const user = userEvent.setup()
     render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={[]} />)
     await user.click(screen.getByTestId("label-picker-trigger"))

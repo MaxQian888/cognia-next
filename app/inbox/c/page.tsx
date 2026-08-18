@@ -1,19 +1,23 @@
 "use client"
 
 /**
- * /inbox/c?key=… — single conversation view.
+ * /inbox/c?key=…[&messageId=…] — single conversation view.
  *
  * Static route reading the conversation key from the query string (replaces the
  * old `/inbox/c/[conversationKey]` dynamic route, unservable for runtime keys
  * under `output: "export"`). `URLSearchParams.get` returns the already-decoded
- * value, so no manual decodeURIComponent here.
+ * value, so no manual decodeURIComponent here. An optional `messageId` lands
+ * the pane on one message once the session's history hydrates — the ⌘K message
+ * hits and cross-links point here for IM conversations.
  */
 
 import { Suspense, useEffect } from "react"
 import { notFound, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { toast } from "sonner"
 import { getDb } from "@/lib/db/schema"
+import { jumpToSessionMessage } from "@/lib/chat/cross-session-jump"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { ConversationHeader } from "@/components/inbox/conversation-header"
@@ -31,14 +35,23 @@ import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 
 function ConversationInner() {
-  const conversationKey = useSearchParams().get("key") ?? ""
+  const params = useSearchParams()
+  const conversationKey = params.get("key") ?? ""
+  const messageId = params.get("messageId") ?? undefined
   if (!conversationKey) {
     notFound()
   }
-  return <ConversationDetail conversationKey={conversationKey} />
+  return <ConversationDetail conversationKey={conversationKey} messageId={messageId} />
 }
 
-function ConversationDetail({ conversationKey }: { conversationKey: string }) {
+function ConversationDetail({
+  conversationKey,
+  messageId,
+}: {
+  conversationKey: string
+  /** Land on this message after the session hydrates (`&messageId=`). */
+  messageId?: string
+}) {
   const t = useTranslations("inbox.conversation")
   const router = useRouter()
   const session = useLiveQuery<ChatSession | undefined>(
@@ -71,6 +84,19 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
       select(session.id)
     }
   }, [session?.id, select])
+
+  // Deep link to one message: wait for the (now active) session's history via
+  // the cross-session primitive, then jump. Fires once per (session, message).
+  useEffect(() => {
+    if (!session?.id || !messageId) return
+    let cancelled = false
+    void jumpToSessionMessage(session.id, messageId, { align: "center" }).then((landed) => {
+      if (!landed && !cancelled) toast.error(t("jumpFailed"))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [session?.id, messageId, t])
 
   // Expose the viewed conversation so the connector inbound bridge can suppress
   // an OS notification for the conversation already on screen (focus-aware).

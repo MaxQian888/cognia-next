@@ -993,6 +993,9 @@ fn service_only_commands_are_known_and_not_control_gated() {
         "connectors_ws_send",
         "connectors_ws_close",
         "connectors_onebot_send",
+        // ADR-0131 — moved off the client plane onto the service plane.
+        "connectors_onebot_probe",
+        "connectors_discord_upload",
         "connectors_lark_ws_open",
         "connectors_lark_ws_close",
         "connectors_reset_all_ws",

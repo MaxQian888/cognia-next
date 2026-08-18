@@ -162,6 +162,25 @@ describe("useGlobalSearchActions", () => {
     expect(jump).not.toHaveBeenCalled()
   })
 
+  it("opens IM conversations in the Inbox route, with the message id when given", async () => {
+    const { result, select } = setup()
+    await act(() =>
+      result.current.runAction({ type: "open-inbox-conversation", conversationKey: "lark:a1:oc 1" })
+    )
+    expect(push).toHaveBeenLastCalledWith("/inbox/c?key=lark%3Aa1%3Aoc%201")
+    await act(() =>
+      result.current.runAction({
+        type: "open-inbox-conversation",
+        conversationKey: "k",
+        messageId: "m/1",
+      })
+    )
+    expect(push).toHaveBeenLastCalledWith("/inbox/c?key=k&messageId=m%2F1")
+    // The route owns focusing + jumping; the palette does not touch the chat store.
+    expect(select).not.toHaveBeenCalled()
+    expect(jump).not.toHaveBeenCalled()
+  })
+
   it("routes navigate / settings / panel / workspace / guild / character actions", async () => {
     const { result, host, create, select } = setup()
     await act(() => result.current.runAction({ type: "navigate", href: "/x" }))

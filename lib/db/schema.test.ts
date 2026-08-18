@@ -1140,6 +1140,95 @@ describe("getDb", () => {
   )
 
   fullSchemaIt(
+    "v173 indexes updatedAt on the two relay-synced tables and backfills legacy rows",
+    async () => {
+      // ADR-0131 §2.3: `outboundQueue` and `connectorDrafts` join the companion
+      // sync whitelist, and companion sync is an `updatedAt`-cursor delta. A
+      // legacy row with no `updatedAt` would never appear in any delta, so the
+      // upgrade backfills it from `createdAt` — the only timestamp it carries.
+      const name = `cognia-inbox-relay-v173-${Date.now()}`
+      const legacy = new Dexie(name)
+      legacy.version(172).stores({
+        outboundQueue:
+          "&id, conversationKey, [conversationKey+createdAt], [conversationKey+orderSeq], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt], [status+claimedAt], projectId, [projectId+status]",
+        connectorDrafts:
+          "&id, conversationKey, sessionId, [conversationKey+createdAt], status, expiresAt, projectId",
+      })
+      await legacy.open()
+      await legacy.table("outboundQueue").bulkPut([
+        {
+          id: "job-legacy",
+          adapterId: "adapter-1",
+          conversationKey: "slack:adapter-1:C1",
+          request: {
+            conversationRef: { platform: "slack", adapterId: "adapter-1" },
+            segments: [{ type: "text", text: "hello" }],
+            metadata: { idempotencyKey: "legacy" },
+          },
+          status: "pending",
+          attempts: 0,
+          createdAt: 4242,
+          nextAttemptAt: 0,
+          idempotencyKey: "legacy",
+          source: "manual",
+        },
+        {
+          // Already stamped by a newer writer — the upgrade must not rewrite it.
+          id: "job-fresh",
+          adapterId: "adapter-1",
+          conversationKey: "slack:adapter-1:C1",
+          request: {
+            conversationRef: { platform: "slack", adapterId: "adapter-1" },
+            segments: [{ type: "text", text: "hi" }],
+            metadata: { idempotencyKey: "fresh" },
+          },
+          status: "pending",
+          attempts: 0,
+          createdAt: 1,
+          updatedAt: 9999,
+          nextAttemptAt: 0,
+          idempotencyKey: "fresh",
+          source: "manual",
+        },
+      ])
+      await legacy.table("connectorDrafts").put({
+        id: "draft-legacy",
+        conversationKey: "slack:adapter-1:C1",
+        sessionId: "s-1",
+        segments: [{ type: "text", text: "draft" }],
+        status: "pending",
+        createdAt: 777,
+      })
+      legacy.close()
+
+      const upgraded = new CogniaDB(name)
+      await upgraded.open()
+
+      expect(upgraded.verno).toBeGreaterThanOrEqual(173)
+      expect(upgraded.outboundQueue.schema.indexes.map((index) => index.name)).toContain(
+        "updatedAt"
+      )
+      expect(upgraded.connectorDrafts.schema.indexes.map((index) => index.name)).toContain(
+        "updatedAt"
+      )
+
+      expect((await upgraded.outboundQueue.get("job-legacy"))?.updatedAt).toBe(4242)
+      expect((await upgraded.outboundQueue.get("job-fresh"))?.updatedAt).toBe(9999)
+      expect((await upgraded.connectorDrafts.get("draft-legacy"))?.updatedAt).toBe(777)
+
+      // The backfilled rows are reachable through the cursor query the host
+      // delta actually runs — an unindexed column would make this throw.
+      expect(
+        (await upgraded.outboundQueue.where("updatedAt").above(0).toArray()).map((r) => r.id).sort()
+      ).toEqual(["job-fresh", "job-legacy"])
+
+      upgraded.close()
+      await Dexie.delete(name)
+    },
+    30_000
+  )
+
+  fullSchemaIt(
     "v159 backfills stable outbound order and connector retention indexes",
     async () => {
       const name = `cognia-connector-queue-v159-${Date.now()}`

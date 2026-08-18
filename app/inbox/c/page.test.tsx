@@ -2,25 +2,34 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
 let mockKey: string | null = "ck1"
+let mockMessageId: string | null = null
 
 const mockRouterPush = jest.fn()
 const mockNotFound = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockRouterPush, replace: jest.fn() }),
-  useSearchParams: () => ({ get: (k: string) => (k === "key" ? mockKey : null) }),
+  useSearchParams: () => ({
+    get: (k: string) => (k === "key" ? mockKey : k === "messageId" ? mockMessageId : null),
+  }),
   usePathname: () => "/inbox/c",
   redirect: jest.fn(),
   notFound: (...args: unknown[]) => mockNotFound(...args),
 }))
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
+const mockJump = jest.fn(async (..._a: unknown[]) => true)
+jest.mock("@/lib/chat/cross-session-jump", () => ({
+  jumpToSessionMessage: (...a: unknown[]) => mockJump(...a),
+}))
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => mockToastError(...a) } }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/lib/db/conversation-overrides", () => ({
@@ -129,7 +138,9 @@ describe("ConversationPage (/inbox/c?key=)", () => {
     jest.clearAllMocks()
     mockSession = undefined
     mockKey = "ck1"
+    mockMessageId = null
     lastChatPaneProps = null
+    mockJump.mockResolvedValue(true)
   })
 
   it("calls notFound when the key query param is missing", () => {
@@ -226,6 +237,40 @@ describe("ConversationPage (/inbox/c?key=)", () => {
     mockSession = makeSession("s1", "ck1")
     render(<ConversationPage />)
     expect(mockSelect).toHaveBeenCalledWith("s1")
+  })
+
+  it("jumps to the linked message once the session resolves (?messageId=)", async () => {
+    mockMessageId = "m-42"
+    mockSession = makeSession("s1", "ck1")
+    render(<ConversationPage />)
+    await waitFor(() => expect(mockJump).toHaveBeenCalledWith("s1", "m-42", { align: "center" }))
+    // Selection precedes the jump so the pane that owns the list is the target.
+    expect(mockSelect.mock.invocationCallOrder[0]).toBeLessThan(mockJump.mock.invocationCallOrder[0]!)
+    expect(mockToastError).not.toHaveBeenCalled()
+  })
+
+  it("does not jump without a messageId, and reports a jump that never landed", async () => {
+    mockSession = makeSession("s1", "ck1")
+    const { unmount } = render(<ConversationPage />)
+    await act(async () => {})
+    expect(mockJump).not.toHaveBeenCalled()
+    unmount()
+    mockMessageId = "stale"
+    mockJump.mockResolvedValueOnce(false)
+    render(<ConversationPage />)
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("The linked message could not be opened."))
+  })
+
+  it("ignores a jump result that arrives after the route moved on", async () => {
+    mockMessageId = "m-1"
+    mockSession = makeSession("s1", "ck1")
+    let finish!: (landed: boolean) => void
+    mockJump.mockImplementationOnce(() => new Promise<boolean>((resolve) => (finish = resolve)))
+    const { unmount } = render(<ConversationPage />)
+    await waitFor(() => expect(mockJump).toHaveBeenCalled())
+    unmount()
+    await act(async () => finish(false))
+    expect(mockToastError).not.toHaveBeenCalled()
   })
 
   it("mounts HistoryLoadEarlier under the header for a history.fetch-capable platform", () => {

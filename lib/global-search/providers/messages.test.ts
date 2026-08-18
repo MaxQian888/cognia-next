@@ -5,6 +5,7 @@ import {
   MIN_MESSAGE_QUERY_LENGTH,
   coverageOf,
   createMessagesProvider,
+  messageHitAction,
   messageResultToItem,
   toChatSearchQuery,
 } from "./messages"
@@ -87,6 +88,38 @@ describe("messageResultToItem", () => {
     expect(messageResultToItem(result({ role: "assistant" }), makeTestContext()).meta).toBe(
       "globalSearch.roles.assistant"
     )
+  })
+
+  it("sends hits in a platform-bound session to the Inbox route with the message id", () => {
+    const ctx = makeTestContext({
+      sessions: [
+        {
+          id: "s1",
+          title: "Ops",
+          platformBinding: { platform: "lark", adapterId: "a1", conversationKey: "lark:a1:oc" },
+        },
+        { id: "s2", title: "Plain" },
+      ] as never,
+    })
+    expect(messageHitAction({ sessionId: "s1", messageId: "m1" }, ctx)).toEqual({
+      type: "open-inbox-conversation",
+      conversationKey: "lark:a1:oc",
+      messageId: "m1",
+    })
+    expect(messageHitAction({ sessionId: "s2", messageId: "m2" }, ctx)).toEqual({
+      type: "open-session",
+      sessionId: "s2",
+      messageId: "m2",
+    })
+    // Unknown session (not in the dialog's list) → the plain chat action.
+    expect(messageHitAction({ sessionId: "ghost", messageId: "m3" }, ctx).type).toBe(
+      "open-session"
+    )
+    expect(messageResultToItem(result(), ctx).action).toEqual({
+      type: "open-inbox-conversation",
+      conversationKey: "lark:a1:oc",
+      messageId: "m1",
+    })
   })
 })
 

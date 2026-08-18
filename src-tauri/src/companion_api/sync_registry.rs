@@ -201,6 +201,17 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Template instance provenance and update baselines".to_string(),
             has_tombstones: false,
         },
+        // ADR-0131 cross-shell inbox relay.
+        SyncTableDescriptor {
+            name: "connectorDrafts".to_string(),
+            description: "Connector reply drafts awaiting approval (full rows; approve/reject travel back as RPC)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "outboundQueue".to_string(),
+            description: "Connector outbound delivery status projection (no message payload; host-owned, never dispatched by the client)".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -226,7 +237,9 @@ mod tests {
         assert!(r.contains("templateDefinitions"));
         assert!(r.contains("templatePackages"));
         assert!(r.contains("templateInstances"));
-        assert_eq!(r.list().len(), 22);
+        assert!(r.contains("connectorDrafts"));
+        assert!(r.contains("outboundQueue"));
+        assert_eq!(r.list().len(), 24);
         assert!(!r.contains("ohai"));
     }
 

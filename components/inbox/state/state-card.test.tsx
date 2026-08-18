@@ -114,3 +114,20 @@ describe("StateCard.Syncing", () => {
     expect(screen.getByText("Pulling cache…")).toBeInTheDocument()
   })
 })
+
+describe("StateCard.RequiresHost", () => {
+  it("explains why the Inbox is unreachable instead of showing an empty list", () => {
+    wrap(<StateCard.RequiresHost />)
+    expect(screen.getByTestId("state-card-requires-host")).toBeInTheDocument()
+  })
+
+  it("offers the pairing action only when there is somewhere to send the user", () => {
+    wrap(<StateCard.RequiresHost />)
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+
+    const onPair = jest.fn()
+    wrap(<StateCard.RequiresHost onPair={onPair} />)
+    fireEvent.click(screen.getByRole("button"))
+    expect(onPair).toHaveBeenCalledTimes(1)
+  })
+})

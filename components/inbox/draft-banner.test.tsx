@@ -10,6 +10,21 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
+// ADR-0131: `useDraftApproval` routes both actions through the inbox-write
+// facade, so the notice no longer enqueues delivery itself.
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  approveInboxDraft: jest.fn().mockResolvedValue({ route: "local", draftId: "d1" }),
+  rejectInboxDraft: jest.fn().mockResolvedValue({ route: "local", draftId: "d1" }),
+}))
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const inboxWrites = require("@/lib/connectors/inbox-writes") as {
+  approveInboxDraft: jest.Mock
+  rejectInboxDraft: jest.Mock
+}
+const mockApproveInbox = inboxWrites.approveInboxDraft
+const mockRejectInbox = inboxWrites.rejectInboxDraft
+
 jest.mock("@/lib/db/outbound-jobs", () => ({
   enqueueOutbound: jest.fn().mockResolvedValue({ id: "oqj_1" }),
 }))
@@ -96,8 +111,10 @@ describe("DraftNotice", () => {
     fireEvent.click(screen.getByTestId("draft-approve-btn"))
 
     await waitFor(() => {
-      expect(mockEnqueue).toHaveBeenCalledWith(expect.objectContaining({ conversationKey: "ck1" }))
-      expect(mockApprove).toHaveBeenCalledWith("cdr_1")
+      expect(mockApproveInbox).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "cdr_1" }),
+        expect.anything()
+      )
     })
   })
 
@@ -108,7 +125,10 @@ describe("DraftNotice", () => {
     fireEvent.click(screen.getByTestId("draft-reject-btn"))
 
     await waitFor(() => {
-      expect(mockReject).toHaveBeenCalledWith("cdr_1")
+      expect(mockRejectInbox).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "cdr_1" }),
+        expect.anything()
+      )
     })
   })
 })

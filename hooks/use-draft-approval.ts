@@ -2,24 +2,30 @@
 
 import { useCallback, useState } from "react"
 
-import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
+import { approveInboxDraft, rejectInboxDraft } from "@/lib/connectors/inbox-writes"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import type { MessageSegment } from "@/types/connectors/segment"
 
 export interface UseDraftApprovalOptions {
   /**
-   * Side-effect run before `approveDraft` flips status. Receives the (possibly
-   * edited) segments so callers like the desktop inbox can hand them to
-   * `enqueueOutbound`. Throwing here aborts the approve and surfaces to caller.
+   * Side-effect run BEFORE the draft is approved. Receives the (possibly
+   * edited) segments. Throwing aborts the approve and surfaces to the caller.
+   *
+   * Delivery is NOT a job for this hook any more (ADR-0131): both the desktop
+   * editor and the phone's panel used to run their own shell-specific enqueue
+   * here — `enqueueOutbound` on one side, a `mobileOutboundQueue` row on the
+   * other — which is exactly the branch the inbox-write facade removes.
    */
   beforeApprove?: (ctx: {
     draft: ConnectorDraftRow
     segments: MessageSegment[]
   }) => Promise<void> | void
-  /** Side-effect run before `rejectDraft` flips status. */
+  /** Side-effect run before the draft is rejected. */
   beforeReject?: (ctx: { draft: ConnectorDraftRow }) => Promise<void> | void
-  /** Fires after the Dexie transition succeeds. */
+  /** Fires after the transition succeeds. */
   onComplete?: () => void
+  /** Human label for the offline-queue UI on the relayed route. */
+  label?: string
 }
 
 export interface UseDraftApprovalResult {
@@ -55,7 +61,11 @@ export function useDraftApproval(
       if (opts.beforeApprove) {
         await opts.beforeApprove({ draft, segments })
       }
-      await approveDraft(draft.id)
+      // One call for every shell: a connector host enqueues the governed
+      // outbound job and flips the draft; a thin client relays both to its
+      // paired host under a draft-derived idempotency key. The EDITED
+      // segments travel with it, so the phone's edits are what get sent.
+      await approveInboxDraft(draft, { segments, label: opts.label })
       opts.onComplete?.()
     } finally {
       setBusy(false)
@@ -68,7 +78,7 @@ export function useDraftApproval(
       if (opts.beforeReject) {
         await opts.beforeReject({ draft })
       }
-      await rejectDraft(draft.id)
+      await rejectInboxDraft(draft, { label: opts.label })
       opts.onComplete?.()
     } finally {
       setBusy(false)

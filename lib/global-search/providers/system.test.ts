@@ -1,15 +1,14 @@
-import type { ChatSession, McpServer } from "@cognia/agent-config-types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { ScheduledTask } from "@/types/scheduler"
 
 import { __resetGlobalSearchCachesForTesting } from "../cache"
-import { makeProviderInput, makeTestContext, TEST_NOW } from "../testing"
+import { makeProviderInput, TEST_NOW } from "../testing"
 import {
   createMcpServersProvider,
   createPluginsProvider,
   createScheduledTasksProvider,
-  inboxProvider,
 } from "./system"
 
 jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: jest.fn(async () => []) }))
@@ -57,22 +56,6 @@ const servers = [
   { id: "m2", name: "Files", transport: "http", enabled: false, pluginId: "p2" },
 ] as McpServer[]
 
-const sessions = [
-  {
-    id: "s1",
-    title: "Ops room",
-    updatedAt: TEST_NOW,
-    platformBinding: { platform: "lark", conversationKey: "lark:oc_1" },
-  },
-  {
-    id: "s2",
-    title: "",
-    updatedAt: TEST_NOW - 1,
-    platformBinding: { platform: "slack", conversationKey: "slack:C1" },
-  },
-  { id: "s3", title: "Plain chat", updatedAt: TEST_NOW },
-] as unknown as ChatSession[]
-
 describe("system providers", () => {
   afterEach(() => __resetGlobalSearchCachesForTesting())
 
@@ -119,20 +102,5 @@ describe("system providers", () => {
     const byTransport = await provider.search(makeProviderInput("http"))
     expect(byTransport.items[0]!.id).toBe("mcp-server:m2")
     expect(byTransport.items[0]!.extra?.archived).toBe(true)
-  })
-
-  it("inbox: only platform-bound sessions, falls back to the conversation key as title", async () => {
-    const ctx = makeTestContext({ sessions })
-    const out = await inboxProvider.search(makeProviderInput("ops", { ctx }))
-    expect(out.items.map((i) => i.id)).toEqual(["inbox-conversation:s1"])
-    expect(out.items[0]).toMatchObject({
-      subtitle: "lark:oc_1",
-      meta: "lark",
-      action: { type: "navigate", href: "/inbox/c?key=lark%3Aoc_1" },
-    })
-    const byKey = await inboxProvider.search(makeProviderInput("slack", { ctx }))
-    expect(byKey.items[0]!.title).toBe("slack:C1")
-    const plain = await inboxProvider.search(makeProviderInput("plain", { ctx }))
-    expect(plain.items).toEqual([])
   })
 })

@@ -586,6 +586,23 @@ export interface OutboundJobRow {
   lastErrorCode?: string
   createdAt: number
   /**
+   * Last status/state write (Dexie v173, indexed). Every writer in
+   * `lib/db/outbound-jobs.ts` stamps it so companion sync can pull an
+   * `updatedAt`-cursor delta of this table (ADR-0131 inbox relay). Optional
+   * only so pre-v173 backup payloads still type-check; the v173 upgrade
+   * backfills `updatedAt = createdAt`.
+   */
+  updatedAt?: number
+  /**
+   * `true` on rows mirrored from a paired host by companion sync (ADR-0131).
+   * A mirrored row is a status PROJECTION — `request.segments` is empty and
+   * the host owns delivery. The local outbound runner never dispatches these
+   * (`listDueNow` / `pickNextDue` / `recoverStaleSendingJobs` filter them);
+   * they exist so `OutboundStatusPill` / saturation readers work unchanged
+   * on a thin client. Non-indexed column.
+   */
+  syncedFromHost?: true
+  /**
    * Monotonic sequence allocated transactionally within a conversation.
    * New rows always carry it; optional only so pre-v151 backup payloads can
    * still be imported and backfilled without lying to TypeScript.
@@ -1088,6 +1105,12 @@ export interface ConnectorDraftRow {
   segments: MessageSegment[]
   status: ConnectorDraftStatus
   createdAt: number
+  /**
+   * Last status write (Dexie v173, indexed) — the companion sync cursor for
+   * this table (ADR-0131). Optional only for pre-v173 backup payloads; the
+   * upgrade backfills `updatedAt = createdAt`.
+   */
+  updatedAt?: number
   expiresAt?: number
   /** The inbound StoredMessage.id this draft is replying to. */
   sourceMessageId?: string

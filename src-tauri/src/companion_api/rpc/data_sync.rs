@@ -40,6 +40,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "provider_diagnostics_start",
     "provider_diagnostics_cancel",
     "connector_send",
+    "connector_enqueue_outbound",
     "connector_approve_draft",
     "connector_reject_draft",
     "workflow_trigger_manual",
@@ -580,6 +581,10 @@ pub(super) async fn dispatch(
         // Mobile outbound-queue RPCs — same generic bridge, different
         // TS-side dispatch arms in `lib/companion/desktop-write-source.ts`.
         | "connector_send"
+        // ADR-0131 cross-shell inbox relay — a phone / web companion /
+        // desktop driving this host enqueues the real outbound job here;
+        // the TS arm replays idempotently on `request.metadata.idempotencyKey`.
+        | "connector_enqueue_outbound"
         | "connector_approve_draft"
         | "connector_reject_draft"
         | "workflow_trigger_manual"

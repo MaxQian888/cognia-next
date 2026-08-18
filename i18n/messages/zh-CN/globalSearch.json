@@ -53,10 +53,15 @@
   "groups": {
     "messagesInChats": "提到“{query}”的会话"
   },
+  "inbox": {
+    "openAdapter": "在收件箱打开",
+    "openConversation": "打开会话"
+  },
   "jumpFailed": "无法打开匹配的消息。",
   "kinds": {
     "action": "命令",
     "character": "角色",
+    "inbox-contact": "联系人",
     "inbox-conversation": "收件箱会话",
     "mcp-server": "MCP 服务器",
     "memory": "记忆",

@@ -34,7 +34,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ConversationOverrideDialog } from "@/components/inbox/overrides/conversation-override-dialog"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
-import { setArchived, setPinned } from "@/lib/db/conversation-overrides"
+import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import { parseConversationKey } from "@/types/connectors/event"
 
 export function ConversationsTab() {
@@ -61,16 +61,31 @@ export function ConversationsTab() {
     return haystack.includes(trimmedSearch)
   })
 
-  const handleDelete = async (id: string) => {
-    await getDb().conversationOverrides.delete(id)
+  // ADR-0131: address rows by conversation KEY, not id — a thin client only
+  // knows the key, and the key is the unique index the host resolves against.
+  const handleDelete = async (row: ConversationOverrideRow) => {
+    await mutateConversationOverride({
+      kind: "delete",
+      conversationKey: row.conversationKey,
+    })
   }
 
   const handleTogglePin = async (row: ConversationOverrideRow) => {
-    await setPinned(row.id, !row.pinned)
+    await mutateConversationOverride({
+      kind: "setPinned",
+      conversationKey: row.conversationKey,
+      pinned: !row.pinned,
+      sessionId: row.sessionId,
+    })
   }
 
   const handleToggleArchive = async (row: ConversationOverrideRow) => {
-    await setArchived(row.id, !row.archived)
+    await mutateConversationOverride({
+      kind: "setArchived",
+      conversationKey: row.conversationKey,
+      archived: !row.archived,
+      sessionId: row.sessionId,
+    })
   }
 
   const editingAdapterId = (() => {
@@ -281,7 +296,7 @@ export function ConversationsTab() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-destructive hover:text-destructive"
-                      onClick={() => void handleDelete(row.id)}
+                      onClick={() => void handleDelete(row)}
                       aria-label={t("deleteOverride")}
                       data-testid={`delete-btn-${row.id}`}
                     >

@@ -33,11 +33,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  ASSIGNMENT_ROUTING_MARKER_CLEAR,
-  upsertByConversationKey,
-  updateConversationConfigSection,
-} from "@/lib/db/conversation-overrides"
+import { ASSIGNMENT_ROUTING_MARKER_CLEAR } from "@/lib/db/conversation-overrides"
+import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { EscalationPolicy } from "@/types/connectors/escalation"
 import { EscalationPolicyEditor } from "./escalation-policy-editor"
@@ -310,7 +307,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         nextCharacterDisabled !== initialRow?.characterDisabled ||
         nextTeamId !== initialRow?.teamId ||
         nextTeamDisabled !== initialRow?.teamDisabled
-      await updateConversationConfigSection({
+      await mutateConversationOverride({
+        kind: "configSection",
         adapterId,
         conversationKey,
         sessionId,
@@ -349,14 +347,17 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           quietHours: resolvedQuietHours,
         },
       })
-      await upsertByConversationKey({
-        conversationKey,
-        sessionId,
-        pinned: pinned ? true : undefined,
-        archived: archived ? true : undefined,
-        slaResponseMinutes: parseSlaMinutes(slaMinutes),
-        // undefined = inherit the adapter default (`defaultEscalation`).
-        escalation,
+      await mutateConversationOverride({
+        kind: "upsert",
+        input: {
+          conversationKey,
+          sessionId,
+          pinned: pinned ? true : undefined,
+          archived: archived ? true : undefined,
+          slaResponseMinutes: parseSlaMinutes(slaMinutes),
+          // undefined = inherit the adapter default (`defaultEscalation`).
+          escalation,
+        },
       })
       onDone?.()
     } finally {

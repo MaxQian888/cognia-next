@@ -9,6 +9,9 @@ jest.mock("@/lib/db/skills", () => ({ listSkills: jest.fn(async () => []) }))
 jest.mock("@/lib/db/workflows", () => ({ listWorkflowsByUpdated: jest.fn(async () => []) }))
 jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: jest.fn(async () => []) }))
 jest.mock("@/lib/db/plugins", () => ({ listPlugins: jest.fn(async () => []) }))
+jest.mock("@/lib/db/platform-identities", () => ({
+  listMergedGroups: jest.fn(async () => []),
+}))
 jest.mock("@/lib/scheduler/scheduler-data-source", () => ({
   getSchedulerDataSource: () => ({ listTasks: jest.fn(async () => []) }),
 }))

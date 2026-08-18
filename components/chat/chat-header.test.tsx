@@ -35,6 +35,12 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+const mockRouterPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  ...jest.requireActual("next/navigation"),
+  useRouter: () => ({ push: mockRouterPush, replace: jest.fn(), prefetch: jest.fn() }),
+}))
+
 const mockDispatchSessionToCodexApp = jest.fn()
 jest.mock("@/lib/chat/dispatch-to-codex-app", () => ({
   dispatchSessionToCodexApp: (session: unknown) => mockDispatchSessionToCodexApp(session),
@@ -273,6 +279,33 @@ describe("ChatHeader", () => {
     finish({ threadId: "thread-1" })
     await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled())
     expect(button).not.toBeDisabled()
+  })
+
+  it("offers 'open in Inbox' only for a platform-bound conversation, routing to /inbox/c", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { rerender } = render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.queryByTestId("chat-header-open-in-inbox")).not.toBeInTheDocument()
+    rerender(
+      <Wrapper>
+        <ChatHeader
+          session={mkSession({
+            platformBinding: {
+              adapterId: "a1",
+              platform: "telegram",
+              conversationKey: "telegram:a1:1001",
+              conversationRef: { platform: "telegram", adapterId: "a1" },
+            },
+          })}
+        />
+      </Wrapper>
+    )
+    const button = screen.getByRole("button", { name: /open in inbox/i })
+    fireEvent.click(button)
+    expect(mockRouterPush).toHaveBeenCalledWith("/inbox/c?key=telegram%3Aa1%3A1001")
   })
 
   it("hides the Codex App dispatch action outside Tauri", () => {

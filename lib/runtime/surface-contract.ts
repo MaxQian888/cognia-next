@@ -90,7 +90,10 @@ export const SURFACE_CONTRACTS = [
     id: "inbox",
     route: "/inbox",
     navigation: true,
-    standalone: "full",
+    // Reads work standalone (the mirror is local), but every WRITE needs a
+    // connector runtime this shell does not have — see
+    // {@link standaloneInboxRequiresHost}.
+    standalone: "explain",
     companion: "remote",
     offline: "cached-read",
   },
@@ -284,6 +287,33 @@ export const SURFACE_CONTRACTS = [
     offline: "local",
   },
 ] as const satisfies readonly SurfaceContract[]
+
+/**
+ * ADR-0131 §2.2 — a standalone browser tab or an unpaired phone can READ the
+ * Inbox (its Dexie mirror is local) but can never WRITE to it: replying,
+ * approving a draft, or flipping an override all require a connector runtime,
+ * and no browser or phone runs adapters.
+ *
+ * This is intentional and permanent, not a gap to close, so it is documented
+ * on all three axes required by CLAUDE.md rule 7:
+ *
+ *  1. **Type** — the `inbox` contract above is `standalone: "explain"`, and
+ *     this constant carries the reason.
+ *  2. **UI** — `components/inbox/state/state-card.tsx:StateCard.RequiresHost`
+ *     is rendered by `components/inbox/inbox-shell.tsx` whenever
+ *     `resolveInboxWriteRoute()` is `"unavailable"`, pointing the user at
+ *     `/pair` rather than showing an empty list.
+ *  3. **Test** — pinned by `components/inbox/inbox-shell.test.tsx` and
+ *     `lib/runtime/surface-contract.test.ts`.
+ *
+ * Pairing to a host (or running the desktop app) lifts it: the write route
+ * becomes `"remote"` / `"local"` and every control works again.
+ */
+export const standaloneInboxRequiresHost = {
+  surfaceId: "inbox",
+  reason: "connector-runtime-absent",
+  remedy: "/pair",
+} as const
 
 export const INTERNAL_ROUTE_EXEMPTIONS = [
   "/deep-link",

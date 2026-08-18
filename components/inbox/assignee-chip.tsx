@@ -28,7 +28,8 @@ import {
 import { cn } from "@/lib/utils"
 import { useCharacters } from "@/lib/data-hooks/context"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { setAssignee, type ConversationAssignee } from "@/lib/db/conversation-overrides"
+import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
+import type { ConversationAssignee } from "@/lib/db/conversation-overrides"
 import { notifyAssignmentChanged } from "@/lib/connectors/assignment/notify-assignment"
 
 const KIND_DOT: Record<ConversationAssignee["kind"], string> = {
@@ -58,7 +59,14 @@ export function AssigneeChip({
 
   const apply = async (next: ConversationAssignee | null) => {
     try {
-      await setAssignee(conversationKey, next, { sessionId, via: "manual", adapterId })
+      await mutateConversationOverride({
+        kind: "setAssignee",
+        conversationKey,
+        assignee: next,
+        sessionId,
+        via: "manual",
+        adapterId,
+      })
       await notifyAssignmentChanged({
         conversationKey,
         from: assignee ?? null,

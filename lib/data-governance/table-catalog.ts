@@ -398,6 +398,10 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "templateDefinitions",
   "templatePackages",
   "templateInstances",
+  // ADR-0131 cross-shell inbox relay: drafts sync in full; outboundQueue
+  // syncs as a status projection (`syncedFromHost: true`, no segments).
+  "connectorDrafts",
+  "outboundQueue",
 ])
 
 /** Public protocol names. `goals` is the stable wire alias for `chatGoals`. */
@@ -424,6 +428,8 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "templateDefinitions",
   "templatePackages",
   "templateInstances",
+  "connectorDrafts",
+  "outboundQueue",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]
@@ -723,6 +729,19 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     enforcement: "central",
     executorId: "agentTraces",
     reason: "The storage retention sweeper prunes spans through the global startTime index.",
+  },
+  // Deliberately permanent even though its subject (`agentTraces`) is not.
+  // An annotation is hand-authored error analysis — the open-coded "first
+  // failure" note and its axial-coding cluster label — so it is authoritative
+  // user data, not telemetry, and outliving the span it describes is correct.
+  // Do NOT give this table a TTL to "match" agentTraces: that deletes the
+  // user's own analysis. Annotations whose trace has been pruned are surfaced
+  // as orphaned by `listAnnotationsWithTraceState`.
+  traceAnnotations: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Hand-authored failure analysis is authoritative user data and deliberately outlives the 30-day span window it annotates.",
   },
   evalSamples: {
     mode: "ttl",

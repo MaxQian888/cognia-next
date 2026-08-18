@@ -14,6 +14,8 @@ import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
 } from "@/lib/runtime/runtime-target-context"
+import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { INBOX_RELAY_HOST_OPERATIONS } from "@/lib/platform/host-feature-manifest"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => {
@@ -30,6 +32,26 @@ jest.mock("next-intl", () => ({
 
 beforeEach(async () => {
   setActiveRuntimeTargetContext("acct_draft", "mobile-draft-test")
+  // ADR-0131: the panel now writes through `lib/connectors/inbox-writes`,
+  // which refuses on an unpaired shell. Model a real paired phone — a
+  // companion target whose host advertises the relay and has granted this
+  // device `workspace.write` — so the assertions below exercise the actual
+  // relay path into `mobileOutboundQueue` rather than a mocked seam.
+  setRuntimeSnapshot({
+    target: {
+      kind: "companion",
+      id: "mobile-draft-test",
+      hostKind: "desktop",
+      platform: "mobile",
+    },
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: {
+      compatible: true,
+      operations: [...INBOX_RELAY_HOST_OPERATIONS],
+      grants: ["workspace.write"],
+    },
+  })
   // Clear Dexie tables.
   const db = getDb()
   await db.connectorDrafts.clear()
@@ -38,6 +60,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   clearActiveRuntimeTargetContext()
+  setRuntimeSnapshot({ target: null, vaultState: "unlocked", connectionState: "online" })
 })
 
 describe("<DraftApprovalPanel />", () => {

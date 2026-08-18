@@ -5462,6 +5462,7 @@
       "openBrowser": "Open browser panel",
       "openInCodexApp": "Open in Codex app",
       "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
+      "openInInbox": "Open in Inbox",
       "openedInCodexApp": "Opened in the Codex app.",
       "permissionModeAppDefault": "Use app default",
       "permissionModeLabel": "Permission mode",
@@ -5718,6 +5719,7 @@
       "bringBackDone": "Added to the main conversation's message box",
       "bringBackLabel": "Bring back to the main conversation",
       "bringBackTooltip": "Quote into the main conversation",
+      "continueInNewChat": "Continue in a new chat",
       "copyDone": "Copied!",
       "copyLabel": "Copy message",
       "copyLinkDone": "Link copied!",
@@ -5778,6 +5780,13 @@
         "timeout": "The request took too long — retry, or raise the timeout.",
         "unauthorized": "Authentication failed — check your API key or token in Settings."
       },
+      "imPicker": {
+        "description": "Choose the platform conversation this message goes to.",
+        "empty": "No matching conversations.",
+        "noPlatformSessions": "No platform-bound conversations yet.",
+        "search": "Search conversations by title, key or platform…",
+        "title": "Send to IM conversation"
+      },
       "moreLabel": "More message actions",
       "pluginMenu": "Plugin actions",
       "quoteLabel": "Quote in composer",
@@ -5789,6 +5798,10 @@
       },
       "regenerateLabel": "Regenerate",
       "regenerateTooltip": "Regenerate",
+      "sendToIm": "Send to IM…",
+      "sendToImDone": "Sent to the IM conversation.",
+      "sendToImFailed": "Couldn't send to the IM conversation.",
+      "sendToImOpen": "Open in Inbox",
       "shareCardLabel": "Share as card",
       "shareCardTooltip": "Share as card",
       "shareDone": "Shared!",
@@ -10180,10 +10193,15 @@
     "groups": {
       "messagesInChats": "Conversations mentioning “{query}”"
     },
+    "inbox": {
+      "openAdapter": "Open in Inbox",
+      "openConversation": "Open conversation"
+    },
     "jumpFailed": "The matching message could not be opened.",
     "kinds": {
       "action": "Commands",
       "character": "Characters",
+      "inbox-contact": "Contacts",
       "inbox-conversation": "Inbox conversations",
       "mcp-server": "MCP servers",
       "memory": "Memories",
@@ -10920,6 +10938,7 @@
       "unmerge": "Unmerge"
     },
     "conversation": {
+      "jumpFailed": "The linked message could not be opened.",
       "loading": "Loading…"
     },
     "conversationHeader": {
@@ -10981,6 +11000,7 @@
       "more": "More",
       "moreAttention": "More — needs attention",
       "openContact": "Contact profile",
+      "openInChat": "Open in chat",
       "openOverrides": "Conversation settings",
       "openOverridesAria": "Open per-conversation settings",
       "openSidebar": "Open sidebar",
@@ -11373,6 +11393,12 @@
       "label": "Quiet hours",
       "tooltip": "Outbound replies pause during quiet hours ({from}–{to} {tz})."
     },
+    "relay": {
+      "hostUnsupported": "This host is too old for cross-device replies. Update it and try again.",
+      "queued": "Queued — it will send as soon as the host is reachable.",
+      "sendFailed": "Couldn't send. Pair a host, or check that it's reachable.",
+      "unavailable": "Replying needs a paired host."
+    },
     "shell": {
       "resize": {
         "detailHandle": "Resize conversation list",
@@ -11414,6 +11440,11 @@
         "description": "The Inbox surface failed to render. Try again, or copy the stack trace into an incident ticket.",
         "retry": "Retry",
         "title": "Something went wrong"
+      },
+      "requiresHost": {
+        "description": "This device doesn't run connector bots. Pair it with your desktop or server to read and reply to platform conversations.",
+        "pairAction": "Pair a host",
+        "title": "Connect a host to use the Inbox"
       },
       "syncing": {
         "label": "Loading from cache…"
@@ -13741,10 +13772,12 @@
         "tableLabels": {
           "adapterInstances": "Connectors",
           "characters": "Characters",
+          "connectorDrafts": "Connector drafts",
           "conversationOverrides": "Conversation overrides",
           "goals": "Goals",
           "memories": "Memories",
           "messages": "Messages",
+          "outboundQueue": "Outbound delivery status",
           "plugins": "Plugins",
           "sessions": "Sessions",
           "settings": "App settings",

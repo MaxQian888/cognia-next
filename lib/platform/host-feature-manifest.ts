@@ -25,6 +25,7 @@ export const HOST_FEATURE_IDS = [
   "source-control.git",
   "twin.runtime",
   "session.state-sync",
+  "connectors.inbox-relay",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -110,6 +111,27 @@ const DEFAULT_LIMITS: HostFeatureLimits = Object.freeze({
   hostStateReplayRetentionMs: 24 * 60 * 60 * 1000,
 })
 
+/**
+ * ADR-0131 cross-shell inbox relay. A thin client (mobile / web companion /
+ * desktop driving this host) that sees this feature may relay Inbox writes
+ * through the four RPCs, expects the two realtime channels, and can mirror
+ * the two extra companion-sync tables. Absence = pre-relay host: the client
+ * shows `StateCard.RequiresHost` / disables Send instead of dead-lettering
+ * queue rows. Advertised by every connector host (tauri + headless) because
+ * the arms carry no host gate — `lib/companion/desktop-write-source.ts` runs
+ * the same `lib/connectors/inbox-writes/local.ts` code on both.
+ */
+export const INBOX_RELAY_HOST_OPERATIONS = Object.freeze([
+  "connector_enqueue_outbound",
+  "connector_approve_draft",
+  "connector_reject_draft",
+  "conversation_overrides_update",
+  "event:sync://invalidate",
+  "event:connector://message-added",
+  "sync:connectorDrafts",
+  "sync:outboundQueue",
+] as const)
+
 /** Git operations implemented by the remote execution host (native watchers remain client-local). */
 export const SOURCE_CONTROL_HOST_OPERATIONS = Object.freeze(
   getCommandManifest()
@@ -178,6 +200,10 @@ export function buildLocalHostFeatureManifest({
     features["twin.runtime"] = {
       version: 1,
       operations: ["twin_draft_review"],
+    }
+    features["connectors.inbox-relay"] = {
+      version: 1,
+      operations: [...INBOX_RELAY_HOST_OPERATIONS],
     }
     features["notifications.remote"] = {
       version: 1,

@@ -6,9 +6,10 @@
  * shown read-only.
  *
  * Buttons:
- *  - Approve & Send  → enqueueOutbound (via the draft's outboundPreview) +
- *                      markDraft "approved"
- *  - Reject          → markDraft "rejected"
+ *  - Approve & Send  → `approveInboxDraft` (ADR-0131) — enqueues the governed
+ *                      outbound job on a connector host, relays it to the
+ *                      paired host on a thin client, then marks "approved"
+ *  - Reject          → `rejectInboxDraft`, marks "rejected"
  *  - Cancel          → onClose()
  */
 
@@ -18,7 +19,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item"
 import { useDraftApproval } from "@/hooks/use-draft-approval"
-import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 
 interface DraftEditorProps {
@@ -28,17 +28,12 @@ interface DraftEditorProps {
 
 export function DraftEditor({ draft, onClose }: DraftEditorProps) {
   const t = useTranslations("inbox.draftEditor")
+  // ADR-0131: the hook owns delivery for every shell now — this editor no
+  // longer enqueues the outbound job itself, and the edited segments reach
+  // the platform whether the runtime is here or on a paired host.
   const { segments, setSegment, busy, approve, reject } = useDraftApproval(draft, {
-    beforeApprove: async ({ segments: edited }) => {
-      if (!draft.outboundPreview) return
-      await enqueueOutbound({
-        adapterId: draft.outboundPreview.conversationRef.adapterId,
-        conversationKey: draft.conversationKey,
-        request: { ...draft.outboundPreview, segments: edited },
-        source: "draft-approved",
-      })
-    },
     onComplete: onClose,
+    label: draft.conversationKey,
   })
 
   return (

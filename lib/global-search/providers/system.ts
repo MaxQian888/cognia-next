@@ -1,26 +1,23 @@
 /**
- * System (ADR-0129): scheduled tasks, installed plugins, MCP servers, and
- * platform-bound inbox conversations. Each opens its management surface.
- * Scheduled tasks go through the scheduler data source (host-neutral,
- * ADR-0128); the rest read Dexie via the list-provider cache.
+ * System (ADR-0129): scheduled tasks, installed plugins and MCP servers. Each
+ * opens its management surface. Scheduled tasks go through the scheduler data
+ * source (host-neutral, ADR-0128); the rest read Dexie via the list-provider
+ * cache. Inbox conversations and contacts live in `./inbox`.
  */
 
-import type { ChatSession, McpServer } from "@cognia/agent-config-types"
-import { CalendarClockIcon, InboxIcon, PlugIcon, ServerCogIcon } from "lucide-react"
+import type { McpServer } from "@cognia/agent-config-types"
+import { CalendarClockIcon, PlugIcon, ServerCogIcon } from "lucide-react"
 
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listPlugins } from "@/lib/db/plugins"
 import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
 import type { ScheduledTask } from "@/types/scheduler"
-import { matchTitles } from "./helpers"
 import { createListProvider } from "./list-provider"
-import type { GlobalSearchProvider } from "../types"
 
 export const SCHEDULED_TASKS_PROVIDER_ID = "builtin.scheduled-tasks"
 export const PLUGINS_PROVIDER_ID = "builtin.plugins"
 export const MCP_SERVERS_PROVIDER_ID = "builtin.mcp-servers"
-export const INBOX_PROVIDER_ID = "builtin.inbox"
 
 export interface SystemProviderDeps {
   listTasks: () => Promise<ScheduledTask[]>
@@ -105,44 +102,6 @@ export function createMcpServersProvider(deps: Pick<SystemProviderDeps, "listMcp
       action: { type: "open-settings", tab: "mcp", focus: row.id },
     }),
   })
-}
-
-/** Platform-bound conversations, from the session list the dialog already holds. */
-export const inboxProvider: GlobalSearchProvider = {
-  id: INBOX_PROVIDER_ID,
-  kind: "inbox-conversation",
-  search({ query, ctx, limit }) {
-    const bound = ctx.sessions.filter(
-      (s): s is ChatSession & { platformBinding: NonNullable<ChatSession["platformBinding"]> } =>
-        s.platformBinding != null
-    )
-    const { hits, total, truncated } = matchTitles(bound, query.needle, {
-      getTitle: (s) => s.title || s.platformBinding.conversationKey,
-      getKeywords: (s) => [s.platformBinding.platform, s.platformBinding.conversationKey],
-      getTimestamp: (s) => s.updatedAt,
-      now: ctx.now,
-      limit,
-    })
-    return {
-      items: hits.map(({ row, match }) => ({
-        id: `inbox-conversation:${row.id}`,
-        kind: "inbox-conversation" as const,
-        title: row.title || row.platformBinding.conversationKey,
-        titlePositions: match.positions,
-        subtitle: row.platformBinding.conversationKey,
-        meta: row.platformBinding.platform,
-        icon: { lucide: InboxIcon },
-        score: match.score,
-        timestamp: row.updatedAt,
-        action: {
-          type: "navigate" as const,
-          href: `/inbox/c?key=${encodeURIComponent(row.platformBinding.conversationKey)}`,
-        },
-      })),
-      total,
-      truncated,
-    }
-  },
 }
 
 export const scheduledTasksProvider = createScheduledTasksProvider({

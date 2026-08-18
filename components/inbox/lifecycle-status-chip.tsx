@@ -23,7 +23,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { setStatus, type ConversationStatus } from "@/lib/db/conversation-overrides"
+import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
+import type { ConversationStatus } from "@/lib/db/conversation-overrides"
 
 const STATUS_DOT: Record<ConversationStatus, string> = {
   open: "bg-emerald-500",
@@ -53,7 +54,13 @@ export function LifecycleStatusChip({
 
   const apply = async (next: ConversationStatus, snoozeUntil?: number) => {
     try {
-      await setStatus(conversationKey, next, { sessionId, snoozeUntil })
+      await mutateConversationOverride({
+        kind: "setStatus",
+        conversationKey,
+        status: next,
+        sessionId,
+        snoozeUntil,
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }

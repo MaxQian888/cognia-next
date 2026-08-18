@@ -10,12 +10,20 @@
 //   1. At least one production UI surface enqueues it (grep `enqueue\({`
 //      across components/mobile + app/share-target).
 //   2. The Rust RPC dispatcher (`src-tauri/src/companion_api/rpc.rs`) lists
-//      the same name in `KNOWN_COMMANDS` AND has a `match` arm that routes
-//      it to a real handler. Drift here surfaces as 404 unknown_command
-//      when the queue runner drains.
+//      the same name in `KNOWN_COMMANDS` AND one of the per-domain modules
+//      under `src-tauri/src/companion_api/rpc/` (`data_sync.rs` for the
+//      bridged desktop writes) has a `match` arm that routes it to a real
+//      handler. Drift here surfaces as 404 unknown_command when the queue
+//      runner drains.
 //   3. The TS-side dispatch lives either in `lib/companion/desktop-write-source.ts`
 //      (mutations against desktop Dexie) or in a direct Tauri command
 //      (`claude_*`, `read_agent_config`, etc.).
+//   4. Idempotency: the row's `idempotencyKey` is minted ONCE at enqueue and
+//      reused on every retry (`Idempotency-Key` header → Rust ledger replay).
+//      Commands whose host arm has its own dedupe (ADR-0131 inbox relay:
+//      `connector_enqueue_outbound` on `outboundQueue.idempotencyKey`,
+//      `connector_approve_draft` on draft status) MUST be enqueued with the
+//      SAME key the arm dedupes on — see `lib/connectors/inbox-writes/remote.ts`.
 //
 // Audit-pass 2026-05-17 trimmed `session_send` / `session_delete` /
 // `session_pin` / `session_mute` / `backup_export` / `rpc_generic` from the
@@ -27,6 +35,14 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "connector_send",
   "connector_approve_draft",
   "connector_reject_draft",
+  // ADR-0131 cross-shell inbox relay (`lib/connectors/inbox-writes/remote.ts`):
+  // a thin client's manual reply → the host's governed outboundQueue
+  // (`connector_send` only appends a local user message; it never delivers),
+  // and every Inbox override control (mode / assignee / pin / archive /
+  // label / status / computer-use / model) → the host's authoritative
+  // `conversationOverrides` row.
+  "connector_enqueue_outbound",
+  "conversation_overrides_update",
   // Workflow subsystem (mobile trigger button + delete mirror + schedule
   // pause/resume from the row-actions sheet).
   "workflow_trigger_manual",

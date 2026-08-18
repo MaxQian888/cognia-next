@@ -158,6 +158,16 @@ describe("OutboundStatusPill", () => {
     expect(screen.queryByTestId("outbound-retry-btn-j-unknown")).not.toBeInTheDocument()
   })
 
+  it("hides Retry on a host-mirrored projection row (ADR-0131)", () => {
+    mockJob = { ...makeJob("j-mirror", "failed"), syncedFromHost: true }
+    render(<OutboundStatusPill jobId="j-mirror" />)
+    expect(screen.getByTestId("outbound-status-pill-j-mirror")).toHaveAttribute(
+      "data-status",
+      "failed"
+    )
+    expect(screen.queryByTestId("outbound-retry-btn-j-mirror")).not.toBeInTheDocument()
+  })
+
   it("Retry button resets status to pending", async () => {
     mockJob = makeJob("j6", "failed")
     render(<OutboundStatusPill jobId="j6" />)
