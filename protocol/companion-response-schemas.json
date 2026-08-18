@@ -1115,7 +1115,15 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "connector_enqueue_outbound": {
-      "$ref": "#/$defs/LegacyRecord"
+      "type": "object",
+      "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job — i.e. this was a retry replay, not a second send.",
+      "required": ["jobId", "messageId", "reused"],
+      "properties": {
+        "jobId": { "type": "string" },
+        "messageId": { "type": "string" },
+        "reused": { "type": "boolean" }
+      },
+      "additionalProperties": false
     },
     "connector_reject_draft": {
       "$ref": "#/$defs/LegacyResult"

@@ -11896,10 +11896,20 @@ paths:
             application/json:
               schema:
                 type: object
-                additionalProperties: true
-                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
-                  compatibility remains owned by that domain.
-                x-cognia-schema-owner: connectors
+                description: What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an
+                  existing job — i.e. this was a retry replay, not a second send.
+                required:
+                  - jobId
+                  - messageId
+                  - reused
+                properties:
+                  jobId:
+                    type: string
+                  messageId:
+                    type: string
+                  reused:
+                    type: boolean
+                additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger.
           content:
