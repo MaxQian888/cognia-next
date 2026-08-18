@@ -127,6 +127,7 @@
     "0126-plugin-subsystem-governance",
     "0127-chat-render-transport-efficiency",
     "0128-scheduler-host-neutral",
-    "0129-unified-global-search"
+    "0129-unified-global-search",
+    "0131-cross-shell-inbox-relay"
   ]
 }

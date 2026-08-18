@@ -118,6 +118,13 @@ is no proactive-send path, so `send()` rejects when no live token exists, and
 (`wechat-personal-config.tsx`) surfaces the **account-ban risk** and
 session-expiry re-scan prominently — it's an unofficial integration.
 
+## Revision — 2026-08-18 (ADR-0131 cross-shell inbox relay)
+
+The adapters here are unchanged, but who can *drive* them is not. An operator on a phone or in a browser now approves drafts and sends manual replies for these connectors through the relay (ADR-0131), which reaches the host that owns the adapter rather than acting locally. Two consequences worth naming:
+
+- The edited segments the operator approves on a phone are what get delivered — `connector_approve_draft` carries an optional `segments` array, so the draft's own text is no longer silently authoritative.
+- Nothing in this ADR's method matrix changes for a thin client: an unsupported method is still unsupported, and the relay surfaces the same capability errors it would on the desktop.
+
 ## Consequences
 
 - WeCom works with no public ingress, no message crypto, no IP whitelist — the

@@ -58,6 +58,13 @@ reconciled or recreated, cards are compacted below 30 KB, and entities older tha
 recreated. Completion freezes the card and sends the authoritative final answer as a normal reply
 in the same topic.
 
+## Revision — 2026-08-18 (ADR-0131 cross-shell inbox relay)
+
+Two clarifications the relay forced into the open:
+
+- **Reply quoting and follow-up bubbles are independent.** Quoting decides whether an outbound message references the message that triggered it; follow-up bubbling decides how a multi-part answer is split. A relayed manual reply carries `replyTo` through `connector_enqueue_outbound` unchanged, so a phone reply quotes exactly like a desktop reply.
+- **Inbound *notifiability* is now a shared predicate.** `lib/connectors/inbound-notifiability.ts:isNotifiableInboundEvent` — extracted from the Notification Center bridge — is what both the desktop notification path and the relay's `connector://message-added` push consult. Edits, deletes, reactions and the bot's own outbound echoes are excluded in exactly one place, so the two surfaces can never disagree about what counts as a new message.
+
 ## Consequences
 
 - Dexie v120 adds `connectorConversationStates` and `connectorInboundJobs` and extends execution

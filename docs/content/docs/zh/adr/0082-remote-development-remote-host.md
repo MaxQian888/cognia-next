@@ -162,3 +162,14 @@ generation、request id、签发/过期时间）。传输层现在只把带上�
 `source-control.git` 在 `host_feature_manifest` 中逐一广告所有现有 Git 操作。交互式变更必须使用 `host_admin_lease_issue` 签发的设备绑定、精确命令 lease，TTL 为 120 秒；客户端不会自动续期，也不会重试已过期或送达不确定的变更。Source Control 在 Tauri 与已配对客户端显示，在独立 Web 隐藏；远程界面仅在可见时每五秒轮询。
 
 **Headless 工作区来源（2026-08-16）。** 桌面端的不透明工作区来自 renderer 通过 `fs_set_allowed_roots` 注册的根目录；headless brain 从不运行 renderer，因此该注册表始终为空，`source-control.git` 也一直未向 headless 主机公开（ADR-0059 host-parity Class E）。现在 headless 主机改由策略所有的 workspaces 根目录派生 Git 工作区：其下每个直接子目录都是一个工作区，`workspaceId` 即目录名，经 `SpawnPolicy::validate_workspace_root` 解析——与 `authorize_workspace_root` 对 `workspace.files` 施加的信任边界完全相同。两种主机公开完全一致的 `source-control.git` 操作集；桌面注册表与 headless 策略根目录互不认识对方的 id。
+
+## 2026-08 ADR-0131 修正 —— 收件箱跟随活跃宿主
+
+激活远端宿主只改写了 RPC 路由，没有改写 Dexie，于是收件箱一直渲染着一个无人对话的宿主的本地镜像，其写入控件也作用在那个陈旧的数据库上。
+
+在 ADR-0131 下，只要 `isRemoteHostActive()`，收件箱写路径就解析为 `"remote"`，且优先于本地运行时检查——桌面端在基线里仍声明 `connector-runtime`，但远端激活期间其本地运行时已被拆除，因此若路由为 `"local"`，这次写入会变成一个没有任何运行中 adapter 会投递的出站作业。
+
+`lib/sync/host-invalidate.ts` 同样在本桌面作为薄客户端时跳过：它的行是远端宿主行的镜像而非权威，让它自己配对的手机从这里重新拉取只会拿到陈旧数据。
+
+按远端宿主整体切换应用数据库——使读取像现在的写入一样完整地跟随活跃宿主——仍然待办。在它落地之前，驱动远端的桌面端的读取由 companion 同步提供，而非切库。
+

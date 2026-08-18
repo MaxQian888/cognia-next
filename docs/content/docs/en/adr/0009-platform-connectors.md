@@ -395,6 +395,14 @@ Matrix now uses the existing matrix-sdk-crypto machine as a required transport b
   changes, pump completion, restart, and bounded backoff, and retained as `recovery_required` after
   repeated failure. At 10,000 active rows the cursor is held so the homeserver replays the batch.
 
+## Revision — 2026-08-18 (ADR-0131 cross-shell inbox relay)
+
+Delivery is no longer the desktop's private business.
+
+- **`connector_send` is not a delivery command.** Its host arm appends a local `user` message and returns; the name is historical. The command that actually enqueues an outbound job is **`connector_enqueue_outbound`** (ADR-0131 §5). Both keep their own manifest entries so an older client keeps working.
+- **Manual replies, draft approvals and rejections have exactly one implementation.** `lib/connectors/inbox-writes/local.ts` holds the primitives; the desktop UI and the host RPC arms call the same functions, so a phone-originated reply produces byte-identical `outboundQueue` + `messages` rows.
+- **Delivery ambiguity closes on one client-minted idempotency key.** The key rides the queue row, the `Idempotency-Key` header, and `OutboundRequest.metadata.idempotencyKey`. Combined with the per-adapter idempotency already documented above (Lark / Matrix `remote_idempotent`, Discord nonce, QQ `msg_seq`), a retry across any layer resolves to one platform message.
+- **`outboundQueue` now also holds mirrored rows** (`syncedFromHost: true`) synced down to thin clients for status display. `listDueNow` / `pickNextDue` / `recoverStaleSendingJobs` filter them out — a local runner must never dispatch a mirror.
 ## References
 
 - Original spec: `C:\Users\qwdma\.claude\plans\d-project-agentforge-astrbot-fluttering-cerf.md`

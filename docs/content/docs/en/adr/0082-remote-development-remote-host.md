@@ -166,6 +166,16 @@ the implementation plan):
      any `forwarded-tcpip` whose port does not belong to an enabled rule on that
      session, and rejects server-initiated `direct-tcpip` outright.
 
+## 2026-08 ADR-0131 amendment — the Inbox follows the active host
+
+Activating a remote host re-routed RPC traffic but not Dexie, so the Inbox kept rendering the local mirror of a host nobody was talking to, and its write controls acted on that stale database.
+
+Under ADR-0131 the Inbox write path resolves `"remote"` whenever `isRemoteHostActive()`, ahead of the local-runtime check — the desktop still advertises `connector-runtime` from its baseline, but its local runtime is torn down while the remote is active, so a write routed `"local"` would become an outbound job no running adapter would ever deliver.
+
+`lib/sync/host-invalidate.ts` is likewise skipped while this desktop is a thin client: its rows are mirrors of the remote host's, not authority, and telling its own paired phones to re-pull from here would hand back stale data.
+
+Whole-application database switching per remote host — so reads follow the active host as completely as writes now do — remains open. Until it lands, reads on a remote-driving desktop are served by companion sync rather than by a swapped Dexie.
+
 ## Consequences
 
 - With no active remote host the desktop transport is unchanged; remote routing

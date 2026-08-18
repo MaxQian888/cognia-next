@@ -277,3 +277,12 @@ Matrix 现在把既有 matrix-sdk-crypto machine 作为强制传输边界：
 - 原始规格：`C:\Users\qwdma\.claude\plans\d-project-agentforge-astrbot-fluttering-cerf.md`
 - 实施计划：`docs/superpowers/plans/2026-05-05-platform-connectors.md`
 - 关键文件：`lib/connectors/`、`types/connectors/`、`src-tauri/src/connectors/`、`components/settings/connections/`、`components/inbox/`、`app/inbox/`
+
+## 修订 — 2026-08-18（ADR-0131 跨壳收件箱中继）
+
+投递不再是桌面端的私事。
+
+- **`connector_send` 不是投递命令。** 它的宿主 arm 只追加一条本地 `user` 消息就返回，名字属于历史遗留。真正入队出站作业的是 **`connector_enqueue_outbound`**（ADR-0131 §5）。两者各自保留 manifest 条目，旧客户端继续可用。
+- **人工回复、草稿审批与拒绝只有一份实现。** 原语位于 `lib/connectors/inbox-writes/local.ts`；桌面 UI 与宿主 RPC arm 调用同一批函数，因此手机发起的回复产生逐字节相同的 `outboundQueue` + `messages` 行。
+- **投递歧义由客户端铸造的唯一幂等 key 关闭。** 该 key 同时出现在队列行、`Idempotency-Key` 头与 `OutboundRequest.metadata.idempotencyKey` 上。结合上文已记录的各 adapter 幂等（Lark / Matrix `remote_idempotent`、Discord nonce、QQ `msg_seq`），任一层的重试都收敛到同一条平台消息。
+- **`outboundQueue` 现在还保存镜像行**（`syncedFromHost: true`），同步给薄客户端用于状态展示。`listDueNow` / `pickNextDue` / `recoverStaleSendingJobs` 会过滤掉它们——本地 runner 绝不能派发镜像。
