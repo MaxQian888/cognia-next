@@ -1,0 +1,55 @@
+{
+  "errors": {
+    "empty": "该文档没有内容。",
+    "hostUnsupported": "云端文档仅在桌面端可用。",
+    "invalidRef": "该链接不是此来源可读取的文档。",
+    "network": "无法连接文档服务。",
+    "noPermission": "你没有该文档的访问权限。",
+    "notAuthorized": "授权已失效，请到设置中重新连接账号。",
+    "notConfigured": "该文档来源尚未连接账号。",
+    "notFound": "该文档不存在。",
+    "rateLimited": "文档服务限流中，请稍后重试。",
+    "unsupportedType": "暂不支持读取该类型的文档。"
+  },
+  "kind": {
+    "bitable": "多维表格",
+    "doc": "文档",
+    "sheet": "电子表格",
+    "wiki": "知识库"
+  },
+  "label": "飞书云文档",
+  "labelGoogle": "Google 文档",
+  "picker": {
+    "accountLabel": "账号",
+    "attached": "已附加「{title}」",
+    "fetching": "正在获取「{title}」…",
+    "hostUnsupported": "云端文档仅在桌面端可用。",
+    "linkOnlyHint": "该来源不支持搜索，请粘贴文档链接。",
+    "noAccount": "请先在设置中连接账号。",
+    "noMatches": "没有匹配「{query}」的文档",
+    "pasteHint": "输入关键词，或粘贴文档链接。",
+    "searching": "搜索中…",
+    "title": "云端文档",
+    "truncated": "「{title}」内容过大，已截断。"
+  },
+  "settings": {
+    "connect": "连接",
+    "connectFailed": "无法开始授权：{reason}",
+    "connectSucceeded": "已连接 Google Workspace。",
+    "connectedAs": "已连接：{email}",
+    "connecting": "等待授权…",
+    "description": "在聊天中用 @ 引用飞书与 Google 文档。",
+    "desktopOnly": "仅桌面端可用。",
+    "disconnect": "断开连接",
+    "googleClientHint": "请在 Google Cloud Console 创建「桌面应用」类型的凭据。",
+    "googleClientId": "OAuth 客户端 ID",
+    "googleClientSecret": "OAuth 客户端密钥",
+    "googleScopes": "仅申请 Drive、Docs、Sheets 的只读权限。",
+    "larkAccountCount": "已连接 {count} 个",
+    "larkDescription": "复用已连接的飞书账号，无需额外配置。",
+    "larkManage": "管理飞书账号",
+    "larkNoAccount": "尚未连接飞书账号。",
+    "notConnected": "未连接",
+    "title": "云端文档"
+  }
+}

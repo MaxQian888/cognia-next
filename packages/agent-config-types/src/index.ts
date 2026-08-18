@@ -4203,6 +4203,17 @@ export interface AppSettings {
    */
   backupDestinations?: BackupDestinationsSettings
 
+  /**
+   * Remote document providers reachable from the composer's `@` picker
+   * (ADR-0134). Non-secret fields only — the Google OAuth client secret and the
+   * refresh/access tokens live in the host keyring under the `docs-providers`
+   * namespace (`lib/docs-providers/providers/google/config.ts`).
+   *
+   * Feishu has no entry here on purpose: it acts as an already-bound Lark
+   * connector instance and owns no settings of its own.
+   */
+  docsProviders?: DocsProvidersSettings
+
   // ---- A2UI defaults (schema v13) ----
   /**
    * Global A2UI on/off. New characters default to this; per-character
@@ -4873,6 +4884,31 @@ export interface GoogleDriveBackupDestinationSettings {
 export interface BackupDestinationsSettings {
   github?: GithubBackupDestinationSettings
   googleDrive?: GoogleDriveBackupDestinationSettings
+}
+
+/**
+ * Google Workspace document-reading connection (ADR-0134).
+ *
+ * Deliberately separate from {@link GoogleDriveBackupDestinationSettings}: the
+ * backup connection holds the minimum `drive.file` scope (it may only touch
+ * files this app created), while reading a user's existing Docs and Sheets
+ * needs broad read scopes. Widening the backup connection would hand a
+ * write-only-to-its-own-folder integration a read of the user's entire Drive,
+ * so the two are separate connections and may be separate Google accounts.
+ */
+export interface GoogleDocsProviderSettings {
+  /** OAuth 2.0 client id of the user's Google Cloud "Desktop app" credential. */
+  clientId?: string
+  /** Google account email the tokens belong to (display only). */
+  accountEmail?: string
+  /** True once a refresh token has been stored (display only; tokens live in the keyring). */
+  connected?: boolean
+  /** Space-separated scopes Google actually granted at the last connect. */
+  grantedScopes?: string
+}
+
+export interface DocsProvidersSettings {
+  google?: GoogleDocsProviderSettings
 }
 
 /** Defaults applied when the user hasn't customized the schedule yet. */

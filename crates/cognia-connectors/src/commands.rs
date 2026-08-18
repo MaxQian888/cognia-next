@@ -129,6 +129,42 @@ pub async fn connectors_start_server(
     Ok(bound)
 }
 
+/// Start the loopback server if it is not already up, and return the bound
+/// address either way.
+///
+/// `connectors_start_server` deliberately errors when a server is already
+/// running — it is the boot path, and a second boot means a lifecycle bug. But
+/// the remote-document OAuth flow (ADR-0134) needs a *guarantee* that the
+/// loopback listener exists for the duration of a Google consent round-trip,
+/// and it has no way to know whether a webhook adapter already started one. So
+/// it asks for the address instead of the transition, and never learns which
+/// of the two happened.
+///
+/// Always binds loopback-only: an OAuth redirect target has no business being
+/// reachable off-box.
+#[tauri::command]
+pub async fn connectors_ensure_server(
+    app: AppHandle,
+    state: State<'_, ConnectorsState>,
+    server: State<'_, ConnectorsServer>,
+    port: u16,
+) -> Result<String, String> {
+    let mut handle_lock = server.0.lock().await;
+    if let Some(handle) = handle_lock.as_ref() {
+        return Ok(handle.bound_addr.to_string());
+    }
+    let emitter: Arc<dyn EventEmitter> = Arc::new(AppHandleEmitter(app));
+    let handle = start_server(
+        state.inner_state(),
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+        emitter,
+    )
+    .await?;
+    let bound = handle.bound_addr.to_string();
+    *handle_lock = Some(handle);
+    Ok(bound)
+}
+
 #[tauri::command]
 pub async fn connectors_stop_server(
     state: State<'_, ConnectorsState>,

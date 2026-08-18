@@ -1,0 +1,152 @@
+---
+title: 飞书 provider
+description: "用已绑定 Lark 连接器的凭证读取文档、知识库节点、电子表格与多维表格，共用一份抽取出来的鉴权 harness。"
+---
+
+# 飞书 provider
+
+`lib/docs-providers/providers/lark/` · 前缀 `@lark:` · 类型 `doc`、`wiki`、`sheet`、`bitable`
+
+## 凭证是借用的，从不新建
+
+`listAccounts()` 投影启用的 Lark 适配器行 —— 与 `components/twin/lark-account-picker.tsx` 展示的是同一份
+列表 —— 并在存在 OAuth 连接用户时附上其姓名：
+
+```ts
+const rows = await listAdapterInstancesByType("lark")
+return rows
+  .filter((row) => row.enabled)
+  .map((row) => {
+    const connected = (row.settings as { connectedUser?: LarkConnectedUser }).connectedUser
+    return {
+      id: row.id,
+      label: connected?.name ? `${row.displayName} · ${connected.name}` : row.displayName,
+    }
+  })
+```
+
+账号 id **就是**适配器 id，因此抓取严格跑在用户选中的那个租户上。这里不读 keyring —— 那发生在鉴权
+harness 内部。
+
+## 一份鉴权 harness
+
+「解析最佳飞书身份、静默刷新、回落机器人」此前只在 `lib/twin/ingest/lark-doc-fetcher.ts` 里实现过一次。
+与其为电子表格和多维表格复制一份，不如把它抽到 `lib/connectors/adapters/lark/authed-api.ts` 并改写
+fetcher 使用它。fetcher 原有的 41 个测试钉死了行为未发生位移。
+
+```ts
+export async function withLarkAuthedApi<T>(
+  opts: WithLarkAuthedApiOptions,
+  fn: (api: LarkAuthedApi, account: LarkAuthedApiAccount) => Promise<T>
+): Promise<T>
+```
+
+harness 的顺序：
+
+1. 非 Tauri 且未注入 transport 时直接拒绝（`LarkAccessError("browserUnsupported")`）；
+2. 加载适配器行，再从连接器 keyring 取 `appId` / `appSecret`；
+3. 优先使用 OAuth **用户**令牌，使文档 ACL 以连接用户的身份评估，并静默刷新；
+4. 仅当用户身份不可恢复时回落到租户（机器人）令牌 —— 即令牌在重试后仍然无效，或刷新本身失败。
+
+身份顺序不是优化：机器人能看到的严格少于用户，所以机器人是回落，绝不是捷径。
+
+<Callout type="info" title="requireUserIdentity">
+  少数端点只接受 `user_access_token`。设置 `requireUserIdentity` 会让 harness 直接以 `notAuthorized` 提前
+  失败，而不是以机器人身份重试并产生误导性的权限错误。目前唯一的调用方是飞书云文档搜索。
+</Callout>
+
+## URL 与 token 识别
+
+`matchRef` 委托给 `lib/twin/ingest/lark-url.ts` 里的 `parseLarkResourceUrl`，它是在数字分身管线的
+`parseLarkDocUrl` 基础上加宽而来，覆盖两种网格类型。
+
+| 路径 | 类型 | 裸 token 前缀 |
+| --- | --- | --- |
+| `/docx/<token>` | doc | `doxcn`、`doxbc` |
+| `/docs/<token>` | doc（旧版） | `doccn` |
+| `/wiki/<token>` | wiki | `wikcn` |
+| `/sheets/<token>` | sheet | `shtcn` |
+| `/base/<token>` | bitable | `bascn`、`basbc` |
+
+`parseLarkDocUrl` 现在是一个收窄包装，只放行三种文档类型，因此数字分身管线字节级不变 —— 由一个测试钉死：
+两个解析器在每种文档形状上一致，在表格与多维表格上不一致。
+
+`.feishu.cn`、`.larksuite.com`、`.larkoffice.com` 之外的主机仍按路径模式匹配，并标记 `lowConfidence`；
+误判无害，因为 fetcher 只会带着解析出的 token 调用 `open.feishu.cn`，从不使用原始主机。
+
+## 各类型的读取
+
+### 文档与知识库节点
+
+整体委托给 `fetchLarkDocAsRawSource`。provider 有 `ref.url` 时传 URL（这样租户主机能解析），否则传裸
+token —— 这正是裸 token 分支必须学会旧版 `doccn` 前缀的原因：搜索返回的是 token，不是 URL。
+
+### 电子表格
+
+`lib/docs-providers/providers/lark/sheets.ts`，三次调用：
+
+```
+GET /open-apis/sheets/v3/spreadsheets/{token}                → 标题
+GET /open-apis/sheets/v3/spreadsheets/{token}/sheets/query   → 工作表
+GET /open-apis/sheets/v2/spreadsheets/{token}/values/{range} → 单元格，逐工作表
+```
+
+取值端点仍是 v2 —— v3 没有批量区间读 —— 且接受 A1 区间，由
+`lib/docs-providers/providers/lark/a1.ts` 构造。`columnLetters` 实现双射 26 进制（没有零位，直接取模会把
+第 26 列渲染错）。
+
+### 多维表格
+
+`lib/docs-providers/providers/lark/bitable.ts`，三次调用：
+
+```
+GET  /open-apis/bitable/v1/apps/{app}                            → 名称
+GET  /open-apis/bitable/v1/apps/{app}/tables                     → 数据表
+POST /open-apis/bitable/v1/apps/{app}/tables/{id}/records/search  → 记录
+```
+
+用 `records/search` 而非 `records/list`，因为前者接受空筛选并返回可直接展示的字段值。列顺序取自记录键的
+并集（按首次出现顺序）并随后固定，这样缺字段的记录会落在正确的列上，而不是把后面每个单元格都挤位。
+
+字段值是异构的 —— 文本、数字、链接对象数组、附件描述符。`csvCell` 对任何非标量做 JSON 编码而不是压平，
+因此没有东西被静默丢失。
+
+### 两种网格共同点
+
+隐藏工作表会被跳过。它们对用户是隐藏的，喂给模型等于展示得比打开链接更多。
+
+输出是经 `lib/docs-providers/csv.ts` 渲染的分节 CSV：每个工作表或数据表一个 `## <名称>` 标题、RFC 4180
+转义、以及该节单独被截断时的分节标记。
+
+## 搜索
+
+```
+POST /open-apis/suite/docs-api/search/object
+```
+
+要求飞书应用具备 `drive:drive`、`drive:drive:readonly` 或 `search:docs:read` 之一，且只接受
+`user_access_token` —— 因此使用 `requireUserIdentity`。请求只索取 `doc`、`sheet`、`bitable`；
+`slides`、`mindnote`、`file` 被省略，因为列出它们等于给用户一个必然在抓取时失败的选项。
+
+## 错误映射
+
+`lib/docs-providers/providers/lark/errors.ts` 复用数字分身 fetcher 的 `mapLarkError`，而不是重述飞书业务
+错误码表（`LARK_FORBIDDEN_CODES`、`LARK_NOT_FOUND_CODES`、`LARK_RATE_LIMIT_CODES`）。一张码表，两个
+消费者；新增的只有从 ingest 分类法到 provider 分类法的最后一跳。
+
+| Ingest code | Provider code |
+| --- | --- |
+| `larkInvalidUrl` | `invalidRef` |
+| `larkNoAccount` | `notConfigured` |
+| `larkNotAuthorized` | `notAuthorized` |
+| `larkNoPermission` | `noPermission` |
+| `larkNotFound` | `notFound` |
+| `larkUnsupportedType` | `unsupportedType` |
+| `larkRateLimited` | `rateLimited` |
+| `larkEmptyDoc` | `empty` |
+| `larkBrowserUnsupported` | `hostUnsupported` |
+| `larkCliUnavailable` | `notConfigured` |
+| `larkNetwork` | `network` |
+
+来自 harness 的 `LarkAccessError` 单独映射：`browserUnsupported` 到 `hostUnsupported`、`noAccount` 到
+`notConfigured`、`notAuthorized` 到 `notAuthorized`。

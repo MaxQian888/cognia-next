@@ -16,7 +16,8 @@
  * URL format and handler pipeline are identical. No-op in web mode.
  */
 
-import { useEffect } from "react"
+import { useCallback, useEffect } from "react"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
@@ -32,6 +33,20 @@ import type { PlatformKind } from "@/types/connectors/platform-kind"
 
 /** Matches: cognia://connector/oauth/<adapterType>?code=…&state=… */
 const OAUTH_PATH_RE = /^cognia:\/\/connector\/oauth\/([^?#/]+)/
+
+/**
+ * Document-provider OAuth (ADR-0134) rides the same deep-link subscription but
+ * a different scheme path, and validates `state` against the provider's own
+ * durable pending record rather than the connector state store. Handled here
+ * because this component already owns the desktop + Capacitor + cold-start
+ * plumbing; duplicating that for one more scheme would be the real cost.
+ */
+const DOCS_OAUTH_RE = /^cognia:\/\/docs-provider\/oauth\/([^?#/]+)/
+
+/** True when a URL is any OAuth deep link this router claims. */
+function isRoutableOAuthUrl(raw: string): boolean {
+  return OAUTH_PATH_RE.test(raw) || DOCS_OAUTH_RE.test(raw)
+}
 
 /** Read the pending OAuth state — session first, durable localStorage fallback. */
 function readStoredOAuthState(): string {
@@ -129,6 +144,29 @@ async function handleOAuthUrl(raw: string): Promise<void> {
 }
 
 export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNode }) {
+  const tDocs = useTranslations("docsProviders")
+
+  // One entry point for both schemes so every host path (desktop live, desktop
+  // cold-start, Capacitor live, Capacitor cold-start) routes identically.
+  const dispatchUrl = useCallback(
+    async (raw: string): Promise<void> => {
+      if (!DOCS_OAUTH_RE.test(raw)) {
+        await handleOAuthUrl(raw)
+        return
+      }
+      const { completeDocsOAuthDeepLink } = await import("@/lib/docs-providers/oauth-deep-link")
+      const outcome = await completeDocsOAuthDeepLink(raw)
+      if (outcome.status === "ok") {
+        toast.success(tDocs("settings.connectSucceeded"))
+      } else if (outcome.status === "failed") {
+        toast.error(tDocs("settings.connectFailed", { reason: outcome.reason }))
+      } else if (outcome.status === "unknown-provider") {
+        toast.error(tDocs("errors.notConfigured"))
+      }
+    },
+    [tDocs]
+  )
+
   useEffect(() => {
     if (isTauri()) {
       let unlisten: (() => void) | null = null
@@ -136,9 +174,9 @@ export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNod
       // Dedup: a cold-start launch URL can also be re-delivered via onOpenUrl.
       const seen = new Set<string>()
       const dispatch = (raw: string) => {
-        if (!OAUTH_PATH_RE.test(raw) || seen.has(raw)) return
+        if (!isRoutableOAuthUrl(raw) || seen.has(raw)) return
         seen.add(raw)
-        void handleOAuthUrl(raw)
+        void dispatchUrl(raw)
       }
 
       void (async () => {
@@ -173,12 +211,12 @@ export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNod
       let cancelled = false
       const seen = new Set<string>()
       const dispatch = (raw: string) => {
-        if (!OAUTH_PATH_RE.test(raw) || seen.has(raw)) return
+        if (!isRoutableOAuthUrl(raw) || seen.has(raw)) return
         seen.add(raw)
         // The authorize page was opened in the in-app browser sheet
         // (lib/native/opener); dismiss it so the exchange toast is visible.
         void closeCapacitorBrowser()
-        void handleOAuthUrl(raw)
+        void dispatchUrl(raw)
       }
 
       void (async () => {
@@ -199,7 +237,7 @@ export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNod
     }
 
     return
-  }, [])
+  }, [dispatchUrl])
 
   return <>{children}</>
 }

@@ -90,6 +90,7 @@ import {
   type MentionableWorkflowElement,
   type MentionMode,
 } from "./composer-trigger"
+import { useRemoteDocStaging, type RemoteDocStagingItem } from "@/hooks/chat/use-remote-doc-staging"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
 import { getMentionPickHandler } from "@/lib/chat/mentions/pick-registry"
 import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
@@ -849,6 +850,13 @@ function ComposerInner(props: InnerProps) {
     [workflowOnHighlight]
   )
 
+  // `useRemoteDocStaging` needs `acceptFiles`, which is declared far below this
+  // callback. A latest-value ref bridges the ordering without reshuffling a
+  // 3k-line component; it is written from an effect, never during render.
+  const stageRemoteDocRef = useRef<(item: RemoteDocStagingItem) => Promise<void>>(
+    async () => undefined
+  )
+
   const onPickPopoverItem = useCallback(
     async (item: PopoverItem) => {
       if (!trigger) return
@@ -929,6 +937,7 @@ function ComposerInner(props: InnerProps) {
             addReferencedWorkflowElement: (el) =>
               useChatStore.getState().addReferencedWorkflowElement(el),
             applyPreset: (preset, session) => applyPreset(preset, session).then(() => {}),
+            stageRemoteDoc: (item) => stageRemoteDocRef.current(item),
             session: props.session,
             clearWorkflowHighlight: () => props.workflowMention?.onHighlight?.([]),
             strings: {
@@ -1482,6 +1491,13 @@ function ComposerInner(props: InnerProps) {
   }, [])
 
   // --- Paste / drag for attachments -------------------------------------
+  const stageRemoteDocImpl = useRemoteDocStaging({
+    acceptFiles: (files) => void acceptFiles(files),
+  })
+  useEffect(() => {
+    stageRemoteDocRef.current = stageRemoteDocImpl
+  }, [stageRemoteDocImpl])
+
   const acceptFiles = useCallback(
     async (files: FileList | File[]) => {
       const list = [...files]
@@ -2884,7 +2900,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       }
       setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))
     },
-    [session?.platformBinding, session?.title, tInbox]
+    // `session` whole, not its two fields: the React Compiler infers the
+    // object here and refuses to preserve a narrower manual dep list.
+    [session, tInbox]
   )
 
   const handleRejectDraft = useCallback(

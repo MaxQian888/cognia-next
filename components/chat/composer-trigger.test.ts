@@ -349,3 +349,54 @@ describe("spliceToken", () => {
     expect(result.caret).toBe("/clear".length)
   })
 })
+
+describe("detectTrigger — remote document namespaces (@lark: / @gdoc:)", () => {
+  it("flips to the doc picker and records which provider was addressed", () => {
+    expect(detectTrigger("@lark:spec", 10)).toEqual({
+      kind: "doc",
+      tokenStart: 0,
+      tokenEnd: 10,
+      query: "spec",
+      namespace: "lark:",
+    })
+    expect(detectTrigger("@gdoc:budget", 12)).toMatchObject({
+      kind: "doc",
+      query: "budget",
+      namespace: "gdoc:",
+    })
+  })
+
+  it("yields an empty query the moment the prefix is complete", () => {
+    expect(detectTrigger("@lark:", 6)).toMatchObject({ kind: "doc", query: "", namespace: "lark:" })
+  })
+
+  it("keeps a pasted document URL in the query as one token", () => {
+    const url = "https://acme.feishu.cn/docx/doxcnAbCdEfGh1234567890"
+    const value = `@lark:${url}`
+    expect(detectTrigger(value, value.length)).toMatchObject({ kind: "doc", query: url })
+  })
+
+  it("is still a plain file trigger before the prefix is finished", () => {
+    expect(detectTrigger("@lar", 4)).toMatchObject({ kind: "file", query: "lar" })
+  })
+
+  it("does not claim the prefixes in the agent-team composer", () => {
+    expect(detectTrigger("@lark:spec", 10, { mentionMode: "agents" })).toMatchObject({
+      kind: "agent",
+      query: "lark:spec",
+    })
+  })
+
+  it("does not claim the prefixes in the workflow composer", () => {
+    expect(detectTrigger("@lark:spec", 10, { mentionMode: "workflow" })).toMatchObject({
+      kind: "wfNode",
+      query: "lark:spec",
+    })
+  })
+
+  it("never sets `namespace` on a non-document trigger", () => {
+    expect(detectTrigger("@skill:x", 8)).not.toHaveProperty("namespace")
+    expect(detectTrigger("@preset:x", 9)).not.toHaveProperty("namespace")
+    expect(detectTrigger("@src/app.ts", 11)).not.toHaveProperty("namespace")
+  })
+})

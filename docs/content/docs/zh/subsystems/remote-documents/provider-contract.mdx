@@ -1,0 +1,133 @@
+---
+title: Provider 契约
+description: "DocsProvider、引用与内容的形状、十个错误码的分类法，以及拒绝重复 id 与重复提及前缀的注册表。"
+---
+
+# Provider 契约
+
+本页涉及的一切都在 `lib/docs-providers/types.ts` 与 `lib/docs-providers/registry.ts` 里。
+
+## DocsProvider
+
+```ts
+export interface DocsProvider {
+  readonly id: string
+  readonly mentionPrefix: string
+  readonly kinds: readonly RemoteDocKind[]
+  readonly hosts: readonly Platform[]
+
+  listAccounts(): Promise<DocsProviderAccount[]>
+  matchRef(input: string): Omit<RemoteDocRef, "providerId" | "title"> | null
+  search?(query: string, opts: DocsProviderSearchOptions): Promise<RemoteDocRef[]>
+  fetch(ref: RemoteDocRef, opts: DocsProviderCallOptions): Promise<RemoteDocContent>
+}
+```
+
+三个属性承载了设计意图：
+
+- **`mentionPrefix` 以冒号结尾**（`"lark:"`），与 `components/chat/composer-trigger.ts` 里
+  `CHAT_NAMESPACE_PREFIXES` 的形状一致。注册表会拒绝不以冒号结尾的前缀。
+- **`matchRef` 是纯函数。** 输入框每次按键都会调用它，因此它不能触网、不能读 keyring。它返回除
+  `providerId` 与 `title` 之外的全部字段，这两项由调用方补齐。
+- **`search` 是可选的。** 没有可用搜索 API 的 provider 直接省略它，面板转而提供粘贴链接 —— 对手上已有
+  链接的用户，这是完整答案。这是一次能力声明，不是失败。
+
+`Platform` 复用 `lib/platform/detect.ts` 的联合类型（`"tauri" | "mobile" | "web" | "headless"`）而非私有
+定义，这样宿主门控就不会与应用自身的检测逻辑发生漂移。
+
+## 引用与内容
+
+```ts
+export type RemoteDocKind = "doc" | "wiki" | "sheet" | "bitable"
+export type RemoteDocFormat = "markdown" | "text" | "csv"
+
+export interface RemoteDocRef {
+  providerId: string
+  kind: RemoteDocKind
+  id: string
+  title: string
+  url?: string
+  sublabel?: string
+  updatedAtMs?: number
+}
+
+export interface RemoteDocContent {
+  ref: RemoteDocRef
+  title: string
+  text: string
+  format: RemoteDocFormat
+  truncated?: boolean
+}
+```
+
+`RemoteDocRef` 是廉价的：`search` 与 `matchRef` 都能在不抓取正文的情况下产出它。`format` 决定暂存附件的
+扩展名与 MIME 类型，进而决定 `lib/chat/attachments/dispatch.ts` 里 `detectDocumentType` 如何分流。
+
+`wiki` 与 `doc` 保持区分，尽管飞书知识库节点在抓取时会解析成一篇文档：两者的 token 命名空间不同
+（`wikcn…` 对 `doxcn…`），面板上的标注也不同。
+
+## 错误分类法
+
+`DocsProviderError` 携带一个 code 与可选 params，形状对齐 `LarkIngestError`，使飞书 provider 能把一套映射
+到另一套，而不必新造第二张表。
+
+```ts
+export type DocsProviderErrorCode =
+  | "notConfigured"
+  | "notAuthorized"
+  | "noPermission"
+  | "notFound"
+  | "unsupportedType"
+  | "rateLimited"
+  | "empty"
+  | "hostUnsupported"
+  | "network"
+  | "invalidRef"
+```
+
+每个 code 在两个语言下都有 `docsProviders.errors.<code>` 对应文案，因此 provider 永远不格式化面向用户的
+copy。面板与暂存 toast 用同一种方式查表。
+
+<Callout type="info" title="params 会进入文案，而不只是日志">
+  `params` 直接传给翻译器，因此 `notAuthorized` 能点名账号、`empty` 能点名文档。其中的 `reason` 键会额外
+  折进 `Error.message`，那是出现在日志里的部分。
+</Callout>
+
+## 账号
+
+```ts
+export interface DocsProviderAccount {
+  id: string
+  label: string
+}
+```
+
+飞书为每个启用的 Lark 连接器实例返回一项（用户可能绑定多个租户），标签在存在 OAuth 连接用户时会附上其
+姓名。Google 最多返回一项，id 固定为 `"default"`，因为它的连接就是单个 OAuth 客户端。
+
+空列表意味着该 provider 尚未配置，面板会明说，而不是展示一个空结果列表。
+
+## 注册表
+
+```ts
+registerDocsProvider(provider)        // id 重复或 mentionPrefix 重复都抛错
+getDocsProvider(id)
+getDocsProviderByPrefix(prefix)
+listDocsProviders()
+listAvailableDocsProviders()          // 按 detectPlatform() 过滤
+isDocsProviderHostSupported(provider)
+docsProviderPrefixes()                // [{ prefix, providerId }]
+```
+
+风格沿用 `lib/chat/mentions/pick-registry.ts` 与 `lib/plugin/registries/*`：模块级 `Map`、重复注册抛错、
+内置项在 `lib/docs-providers/index.ts` 模块加载时播种，而非首次渲染时。
+
+两处行为是刻意的：
+
+- **`docsProviderPrefixes()` 返回全部 provider，包括宿主不支持的。** `@lark:` 触发器在 web 上仍必须触发，
+  面板才有机会解释自己为什么是空的。只有 `listAvailableDocsProviders()` 做过滤。
+- **前缀冲突检查与 id 检查分开。** 两个 id 不同但都声称 `@doc:` 的 provider 会让
+  `getDocsProviderByPrefix` 变得不确定，因此注册在模块加载时就大声失败。
+
+`__resetDocsProvidersForTests()`（从 `index.ts` 而非 `registry.ts` 导出）清空 map 并重新播种内置项，因此
+测试不会给下一个文件留下一个空注册表。

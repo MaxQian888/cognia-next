@@ -1,0 +1,10 @@
+{
+  "title": "Remote Documents",
+  "pages": [
+    "index",
+    "provider-contract",
+    "lark-provider",
+    "google-provider",
+    "composer-integration"
+  ]
+}

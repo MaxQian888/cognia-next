@@ -29,6 +29,7 @@ import {
   BlocksIcon,
   BookMarkedIcon,
   BoxIcon,
+  CloudIcon,
   BrainIcon,
   CircleHelpIcon,
   CornerDownRightIcon,
@@ -45,7 +46,9 @@ import {
   Settings2Icon,
   SparklesIcon,
   SplineIcon,
+  SheetIcon,
   SquareTerminalIcon,
+  TableIcon,
   TargetIcon,
   TerminalIcon,
   WandSparklesIcon,
@@ -53,7 +56,16 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { searchWorkspace } from "@/lib/files/workspace-search"
+import { useRemoteDocSearch } from "@/hooks/chat/use-remote-doc-search"
+import type { RemoteDocRef } from "@/lib/docs-providers"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
 import type { SystemPromptPreset } from "@cognia/agent-config-types"
@@ -114,6 +126,14 @@ export type PopoverItem =
   | { kind: "skill"; skill: SkillMentionTarget }
   | { kind: "preset"; preset: SystemPromptPreset }
   | { kind: "wfElement"; element: MentionableWorkflowElement }
+  | {
+      kind: "doc"
+      /** Owning `DocsProvider.id`, so the pick handler can resolve the fetcher. */
+      providerId: string
+      /** Account the fetch must run as. */
+      accountId: string
+      doc: RemoteDocRef
+    }
 
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
@@ -210,6 +230,15 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
   const tAgent = useTranslations("agentTeamsWorkspace.chat.composer")
+  const tDocs = useTranslations("docsProviders")
+
+  // Remote documents (`@lark:` / `@gdoc:`). The hook is called unconditionally
+  // — it no-ops with a null namespace — because hooks cannot be conditional and
+  // the trigger kind changes on every keystroke.
+  const docSearch = useRemoteDocSearch({
+    namespace: trigger?.kind === "doc" ? (trigger.namespace ?? null) : null,
+    query: trigger?.kind === "doc" ? trigger.query : "",
+  })
   // File-scoped memory writes go through a Tauri command, so the two CLAUDE.md
   // rows are inert off the desktop shell.
   const isDesktop = usePlatform() === "tauri"
@@ -413,6 +442,43 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           list.length === 0 ? t("noPresets") : t("noPresetMatches", { query: trigger.query }),
       }
     }
+    if (trigger.kind === "doc") {
+      if (!docSearch.provider) {
+        return { items: [], loading: false, error: null, emptyMessage: "" }
+      }
+      if (!docSearch.hostSupported) {
+        // Intentional dormancy (project rule 7, UI axis): say WHY, never show
+        // an empty list that reads like "you have no documents".
+        return {
+          items: [],
+          loading: false,
+          error: null,
+          emptyMessage: tDocs("picker.hostUnsupported"),
+        }
+      }
+      const accountId = docSearch.accountId
+      const items: PopoverItem[] = accountId
+        ? docSearch.items.map((doc) => ({
+            kind: "doc" as const,
+            providerId: docSearch.provider!.id,
+            accountId,
+            doc,
+          }))
+        : []
+      const empty = !accountId
+        ? tDocs("picker.noAccount")
+        : docSearch.error
+          ? tDocs(`errors.${docSearch.error.code}`, docSearch.error.params ?? {})
+          : !trigger.query.trim()
+            ? tDocs(docSearch.linkOnly ? "picker.linkOnlyHint" : "picker.pasteHint")
+            : tDocs("picker.noMatches", { query: trigger.query })
+      return {
+        items,
+        loading: docSearch.loading,
+        error: null,
+        emptyMessage: empty,
+      }
+    }
     if (trigger.kind === "wfNode" || trigger.kind === "wfEdge") {
       const wantType = trigger.kind === "wfNode" ? "node" : "edge"
       const list = (workflowElements ?? []).filter((el) => el.type === wantType)
@@ -473,6 +539,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     workflowElements,
     recentCommands,
     pinnedCommands,
+    docSearch,
+    tDocs,
   ])
 
   // A changed search result set should always start from its most relevant
@@ -533,7 +601,10 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   useImperativeHandle(ref, () => ({ navigate, confirm }), [navigate, confirm])
 
   const open = trigger !== null && anchor !== null
-  const title = useMemo(() => triggerTitle(trigger?.kind, t, tAgent), [trigger?.kind, t, tAgent])
+  const title = useMemo(
+    () => triggerTitle(trigger?.kind, t, tAgent, tDocs),
+    [trigger?.kind, t, tAgent, tDocs]
+  )
   const argumentCommand =
     trigger?.kind === "slash" && trigger.argumentQuery !== undefined
       ? slashCommands.find((command) => command.name === trigger.query)
@@ -690,6 +761,39 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
             })}
           </ul>
         )}
+        {trigger?.kind === "doc" && docSearch.hostSupported && docSearch.accounts?.length ? (
+          <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+            <span className="shrink-0">{tDocs("picker.accountLabel")}</span>
+            {docSearch.accounts.length === 1 ? (
+              <span className="truncate" data-testid="composer-doc-account">
+                {docSearch.accounts[0].label}
+              </span>
+            ) : (
+              <Select
+                value={docSearch.accountId ?? undefined}
+                onValueChange={docSearch.setAccountId}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="h-6 border-none bg-transparent px-1 text-[11px] shadow-none"
+                  data-testid="composer-doc-account"
+                  // The composer keeps the textarea focused; a mousedown here
+                  // must not blur it and dismiss the popover before the click.
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {docSearch.accounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        ) : null}
         {trigger?.kind === "slash" || trigger?.kind === "skill" ? (
           <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
             {trigger.kind === "slash" ? (
@@ -708,7 +812,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
 function triggerTitle(
   kind: TriggerKind | undefined,
   t: (key: string) => string,
-  tAgent: (key: string) => string
+  tAgent: (key: string) => string,
+  tDocs: (key: string) => string
 ): {
   icon: React.ReactNode
   label: string
@@ -733,6 +838,8 @@ function triggerTitle(
       return { icon: <BoxIcon className="size-3.5" />, label: t("wfNodeTitle") }
     case "wfEdge":
       return { icon: <SplineIcon className="size-3.5" />, label: t("wfEdgeTitle") }
+    case "doc":
+      return { icon: <CloudIcon className="size-3.5" />, label: tDocs("picker.title") }
     case "agent":
       return {
         icon: <AtSignIcon className="size-3.5" />,
@@ -849,6 +956,7 @@ function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "skill") return `skill-${item.skill.id}`
   if (item.kind === "preset") return `preset-${item.preset.id}`
   if (item.kind === "wfElement") return `wf-${item.element.type}-${item.element.id}`
+  if (item.kind === "doc") return `doc-${item.providerId}-${item.doc.kind}-${item.doc.id}`
   return `idx-${idx}`
 }
 
@@ -865,6 +973,7 @@ const ItemRow = memo(function ItemRow({
 }) {
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
+  const tDocs = useTranslations("docsProviders")
   if (item.kind === "slash") {
     const c = item.command
     const hintParts = argumentHintParts(c.argumentHint)
@@ -970,6 +1079,19 @@ const ItemRow = memo(function ItemRow({
         {!e.isDir && e.size > 0 ? (
           <span className="ml-auto text-[10px] text-muted-foreground">{formatBytes(e.size)}</span>
         ) : null}
+      </>
+    )
+  }
+  if (item.kind === "doc") {
+    const { doc } = item
+    const Icon = doc.kind === "sheet" ? SheetIcon : doc.kind === "bitable" ? TableIcon : CloudIcon
+    return (
+      <>
+        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{doc.title}</span>
+        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+          {tDocs(`kind.${doc.kind}`)}
+        </span>
       </>
     )
   }

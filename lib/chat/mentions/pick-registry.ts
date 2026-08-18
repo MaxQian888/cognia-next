@@ -34,6 +34,13 @@ export interface MentionPickContext {
     kind: string
   }): void
   applyPreset(preset: SystemPromptPreset, session: ChatSession | null | undefined): Promise<void>
+  /**
+   * Fetch a remote document (Feishu / Google) and stage it as a composer
+   * attachment. Bound by the composer to `useRemoteDocStaging`, which owns the
+   * toast lifecycle because the fetch is a network round-trip whose outcome the
+   * user has to see.
+   */
+  stageRemoteDoc(item: Extract<PopoverItem, { kind: "doc" }>): Promise<void>
   session: ChatSession | null | undefined
   clearWorkflowHighlight(): void
   /** Pre-bound i18n string builders (registry code must not hardcode copy). */
@@ -141,6 +148,21 @@ function registerBuiltinMentionPickHandlers(): void {
       await ctx.applyPreset(item.preset, ctx.session)
     },
     toContextRef: () => null, // chip-style
+  })
+
+  registerMentionPickHandler({
+    kind: "doc",
+    onPick: async (item, ctx) => {
+      // Chip-style: the body is fetched now and staged as an attachment, so no
+      // `@…` token survives in the text. Dropping the token FIRST keeps the
+      // composer clean even when the fetch then fails — the user gets a toast,
+      // not a half-typed `@lark:https://…` to delete by hand.
+      ctx.removeTriggerToken()
+      await ctx.stageRemoteDoc(item)
+    },
+    // Staged as an attachment, not an inline token: the attachment manifest
+    // already carries the provenance, so there is no message mention to persist.
+    toContextRef: () => null,
   })
 
   registerMentionPickHandler({

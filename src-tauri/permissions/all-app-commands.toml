@@ -264,6 +264,7 @@ commands.allow = [
   "connectors_runtime_lease_release",
   "connectors_runtime_lease_renew",
   "connectors_start_server",
+  "connectors_ensure_server",
   "connectors_stop_server",
   "connectors_unregister_adapter",
   "connectors_ws_close",

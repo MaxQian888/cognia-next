@@ -1,0 +1,140 @@
+---
+title: Provider contract
+description: "DocsProvider, the reference and content shapes, the ten-code error taxonomy, and the registry that refuses duplicate ids and duplicate mention prefixes."
+---
+
+# Provider contract
+
+Everything in this page lives in `lib/docs-providers/types.ts` and `lib/docs-providers/registry.ts`.
+
+## DocsProvider
+
+```ts
+export interface DocsProvider {
+  readonly id: string
+  readonly mentionPrefix: string
+  readonly kinds: readonly RemoteDocKind[]
+  readonly hosts: readonly Platform[]
+
+  listAccounts(): Promise<DocsProviderAccount[]>
+  matchRef(input: string): Omit<RemoteDocRef, "providerId" | "title"> | null
+  search?(query: string, opts: DocsProviderSearchOptions): Promise<RemoteDocRef[]>
+  fetch(ref: RemoteDocRef, opts: DocsProviderCallOptions): Promise<RemoteDocContent>
+}
+```
+
+Three properties carry design weight:
+
+- **`mentionPrefix`** is colon-terminated (`"lark:"`) and matches the shape of `CHAT_NAMESPACE_PREFIXES` in
+  `components/chat/composer-trigger.ts`. The registry rejects a prefix that is not.
+- **`matchRef` is pure.** The composer calls it on every keystroke, so it must not touch the network or the
+  keyring. It returns everything except `providerId` and `title`, both of which the caller fills in.
+- **`search` is optional.** A provider without a usable search API omits it; the picker then offers
+  link-pasting, which is a complete answer for a user who already has the link. That is a capability
+  statement, not a failure.
+
+`Platform` is reused from `lib/platform/detect.ts` (`"tauri" | "mobile" | "web" | "headless"`) rather than a
+private union, so host gating cannot drift from the app's own detection.
+
+## Reference and content
+
+```ts
+export type RemoteDocKind = "doc" | "wiki" | "sheet" | "bitable"
+export type RemoteDocFormat = "markdown" | "text" | "csv"
+
+export interface RemoteDocRef {
+  providerId: string
+  kind: RemoteDocKind
+  id: string
+  title: string
+  url?: string
+  sublabel?: string
+  updatedAtMs?: number
+}
+
+export interface RemoteDocContent {
+  ref: RemoteDocRef
+  title: string
+  text: string
+  format: RemoteDocFormat
+  truncated?: boolean
+}
+```
+
+A `RemoteDocRef` is cheap: both `search` and `matchRef` produce one without fetching a body. `format` decides
+the staged attachment's extension and MIME type, which in turn decides how `detectDocumentType` routes it in
+`lib/chat/attachments/dispatch.ts`.
+
+`wiki` stays distinct from `doc` even though a Feishu wiki node resolves to a document at fetch time: the
+token namespaces differ (`wikcn…` vs `doxcn…`) and the picker labels them differently.
+
+## Error taxonomy
+
+`DocsProviderError` carries a code and optional params, mirroring `LarkIngestError` so the Feishu provider can
+map one onto the other without inventing a second table.
+
+```ts
+export type DocsProviderErrorCode =
+  | "notConfigured"
+  | "notAuthorized"
+  | "noPermission"
+  | "notFound"
+  | "unsupportedType"
+  | "rateLimited"
+  | "empty"
+  | "hostUnsupported"
+  | "network"
+  | "invalidRef"
+```
+
+Every code has a message under `docsProviders.errors.<code>` in both locales, so a provider never formats
+user-facing copy. The picker and the staging toast both look codes up the same way.
+
+<Callout type="info" title="params reach the message, not just the log">
+  `params` is passed straight to the translator, so `notAuthorized` can name the account and `empty` can name
+  the document. The `reason` key is additionally folded into `Error.message`, which is what appears in logs.
+</Callout>
+
+## Accounts
+
+```ts
+export interface DocsProviderAccount {
+  id: string
+  label: string
+}
+```
+
+Feishu returns one entry per enabled Lark connector instance — a user may bind several tenants — and the label
+appends the connected OAuth user's name when there is one. Google returns at most one entry with the fixed id
+`"default"`, because its connection is a single OAuth client.
+
+An empty list means the provider is unconfigured, and the picker says so rather than showing an empty result
+list.
+
+## Registry
+
+```ts
+registerDocsProvider(provider)        // throws on duplicate id OR duplicate mentionPrefix
+getDocsProvider(id)
+getDocsProviderByPrefix(prefix)
+listDocsProviders()
+listAvailableDocsProviders()          // filtered by detectPlatform()
+isDocsProviderHostSupported(provider)
+docsProviderPrefixes()                // [{ prefix, providerId }]
+```
+
+Style follows `lib/chat/mentions/pick-registry.ts` and `lib/plugin/registries/*`: a module-level `Map`,
+duplicate registration throws, and built-ins are seeded at module load in `lib/docs-providers/index.ts` rather
+than on first render.
+
+Two behaviours are deliberate:
+
+- **`docsProviderPrefixes()` returns every provider, including host-unsupported ones.** The `@lark:` trigger
+  must still fire on the web so the panel can explain why it is empty. Only `listAvailableDocsProviders()`
+  filters.
+- **The prefix collision check is separate from the id check.** Two providers with different ids claiming
+  `@doc:` would make `getDocsProviderByPrefix` non-deterministic, so registration fails loudly at module load
+  instead.
+
+`__resetDocsProvidersForTests()` (exported from `index.ts`, not `registry.ts`) clears the map and re-seeds the
+built-ins, so a test never leaves the registry empty for the next file.

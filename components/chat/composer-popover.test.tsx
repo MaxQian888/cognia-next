@@ -7,6 +7,29 @@ import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import { ComposerPopover, type ComposerPopoverHandle } from "./composer-popover"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
 import type { ComposerTrigger, MentionableWorkflowElement } from "./composer-trigger"
+import { useRemoteDocSearch } from "@/hooks/chat/use-remote-doc-search"
+import type { RemoteDocSearchState } from "@/hooks/chat/use-remote-doc-search"
+
+const useRemoteDocSearchMock = useRemoteDocSearch as jest.MockedFunction<typeof useRemoteDocSearch>
+
+function docSearchState(overrides: Partial<RemoteDocSearchState> = {}): RemoteDocSearchState {
+  return {
+    provider: null,
+    hostSupported: false,
+    accounts: null,
+    accountId: null,
+    setAccountId: jest.fn(),
+    items: [],
+    loading: false,
+    error: null,
+    linkOnly: false,
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  useRemoteDocSearchMock.mockReturnValue(docSearchState())
+})
 
 // Stable `t` per the real next-intl contract (its `t` identity is memoized).
 // A fresh function each render would churn effect deps (the file-search effect
@@ -16,6 +39,10 @@ jest.mock("next-intl", () => {
     params ? `${key}:${JSON.stringify(params)}` : key
   return { useTranslations: () => t }
 })
+
+jest.mock("@/hooks/chat/use-remote-doc-search", () => ({
+  useRemoteDocSearch: jest.fn(),
+}))
 
 // Descriptions are blank (except /review) so the secondary description match
 // can't pull extra commands into a short-query result — keeps name-ranking
@@ -630,5 +657,117 @@ describe("ComposerPopover — highlight, grouping & pinning", () => {
       onTogglePin: jest.fn(),
     })
     expect(screen.getAllByRole("button", { name: /unpinAction/ }).length).toBeGreaterThan(0)
+  })
+})
+
+describe("ComposerPopover — remote documents", () => {
+  const provider = { id: "lark", mentionPrefix: "lark:" } as RemoteDocSearchState["provider"]
+
+  function docTrigger(query: string): ComposerTrigger {
+    return {
+      kind: "doc",
+      namespace: "lark:",
+      tokenStart: 0,
+      tokenEnd: 6 + query.length,
+      query,
+    }
+  }
+
+  it("lists the provider's hits and labels each document kind", () => {
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({
+        provider,
+        hostSupported: true,
+        accounts: [{ id: "cai_1", label: "Acme" }],
+        accountId: "cai_1",
+        items: [
+          { providerId: "lark", kind: "doc", id: "d1", title: "Spec" },
+          { providerId: "lark", kind: "bitable", id: "b1", title: "Roadmap" },
+        ],
+      })
+    )
+    setup(docTrigger("spec"))
+    const texts = rowTexts()
+    expect(texts.some((t) => t.includes("Spec") && t.includes("kind.doc"))).toBe(true)
+    expect(texts.some((t) => t.includes("Roadmap") && t.includes("kind.bitable"))).toBe(true)
+  })
+
+  it("hands the picked document its provider and account", () => {
+    const onPick = jest.fn()
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({
+        provider,
+        hostSupported: true,
+        accounts: [{ id: "cai_1", label: "Acme" }],
+        accountId: "cai_1",
+        items: [{ providerId: "lark", kind: "doc", id: "d1", title: "Spec" }],
+      })
+    )
+    const { ref } = setup(docTrigger("spec"), onPick)
+    act(() => ref.current?.confirm())
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "doc",
+      providerId: "lark",
+      accountId: "cai_1",
+      doc: { providerId: "lark", kind: "doc", id: "d1", title: "Spec" },
+    })
+  })
+
+  it("explains the desktop-only limitation instead of showing an empty list", () => {
+    useRemoteDocSearchMock.mockReturnValue(docSearchState({ provider, hostSupported: false }))
+    setup(docTrigger("spec"))
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0)
+    expect(screen.getByText("picker.hostUnsupported")).toBeInTheDocument()
+  })
+
+  it("asks the user to connect an account when none is selected", () => {
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({ provider, hostSupported: true, accounts: [], accountId: null })
+    )
+    setup(docTrigger("spec"))
+    expect(screen.getByText("picker.noAccount")).toBeInTheDocument()
+  })
+
+  it("surfaces a provider error over the generic no-matches message", () => {
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({
+        provider,
+        hostSupported: true,
+        accounts: [{ id: "cai_1", label: "Acme" }],
+        accountId: "cai_1",
+        error: { code: "noPermission" },
+      })
+    )
+    setup(docTrigger("spec"))
+    // The next-intl mock renders `key:<params>`; the params object is always
+    // passed so a message with placeholders keeps working.
+    expect(screen.getByText("errors.noPermission:{}")).toBeInTheDocument()
+  })
+
+  it("tells a search-less provider's user to paste a link", () => {
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({
+        provider,
+        hostSupported: true,
+        accounts: [{ id: "cai_1", label: "Acme" }],
+        accountId: "cai_1",
+        linkOnly: true,
+      })
+    )
+    setup(docTrigger(""))
+    expect(screen.getByText("picker.linkOnlyHint")).toBeInTheDocument()
+  })
+
+  it("shows the single connected account in the footer", () => {
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({
+        provider,
+        hostSupported: true,
+        accounts: [{ id: "cai_1", label: "Acme Feishu" }],
+        accountId: "cai_1",
+      })
+    )
+    setup(docTrigger(""))
+    expect(screen.getByTestId("composer-doc-account")).toHaveTextContent("Acme Feishu")
   })
 })

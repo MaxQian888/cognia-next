@@ -130,6 +130,7 @@
     "0129-unified-global-search",
     "0131-cross-shell-inbox-relay",
     "0132-issue-tracker",
-    "0133-terminal-session-sharing"
+    "0133-terminal-session-sharing",
+    "0134-remote-document-providers"
   ]
 }

@@ -1,0 +1,164 @@
+---
+title: Feishu provider
+description: "Docs, wiki nodes, spreadsheets and Bitable through a bound Lark connector's credentials, on one extracted authentication harness."
+---
+
+# Feishu provider
+
+`lib/docs-providers/providers/lark/` · prefix `@lark:` · kinds `doc`, `wiki`, `sheet`, `bitable`
+
+## Credentials are borrowed, never new
+
+`listAccounts()` projects the enabled Lark adapter rows — the same list
+`components/twin/lark-account-picker.tsx` shows — and labels each with the connected OAuth user when there is
+one:
+
+```ts
+const rows = await listAdapterInstancesByType("lark")
+return rows
+  .filter((row) => row.enabled)
+  .map((row) => {
+    const connected = (row.settings as { connectedUser?: LarkConnectedUser }).connectedUser
+    return {
+      id: row.id,
+      label: connected?.name ? `${row.displayName} · ${connected.name}` : row.displayName,
+    }
+  })
+```
+
+The account id *is* the adapter id, so a fetch runs against exactly the tenant the user picked. Nothing here
+reads the keyring — that happens inside the auth harness.
+
+## One authentication harness
+
+`lib/twin/ingest/lark-doc-fetcher.ts` owned the only implementation of "resolve the best Lark identity,
+refresh silently, fall back to the bot". Rather than copy it for spreadsheets and Bitable, it was extracted to
+`lib/connectors/adapters/lark/authed-api.ts` and the fetcher rewritten onto it. Its existing 41 tests pin that
+the behaviour did not move.
+
+```ts
+export async function withLarkAuthedApi<T>(
+  opts: WithLarkAuthedApiOptions,
+  fn: (api: LarkAuthedApi, account: LarkAuthedApiAccount) => Promise<T>
+): Promise<T>
+```
+
+The harness, in order:
+
+1. refuses off Tauri unless a transport is injected (`LarkAccessError("browserUnsupported")`);
+2. loads the adapter row, then `appId` / `appSecret` from the connectors keyring;
+3. prefers the OAuth **user** token so document ACLs are evaluated as the connected user, with silent refresh;
+4. falls back to the tenant (bot) token only when the user identity is unrecoverable — the token stayed
+   invalid after a retry, or the refresh itself failed.
+
+Identity order is not an optimization: the bot can see strictly less than the user, so the bot is a fallback,
+never a shortcut.
+
+<Callout type="info" title="requireUserIdentity">
+  Some endpoints accept only a `user_access_token`. Setting `requireUserIdentity` makes the harness fail with
+  `notAuthorized` up front instead of retrying as the bot and producing a misleading permission error. Feishu
+  cloud-doc search is the one caller today.
+</Callout>
+
+## URL and token recognition
+
+`matchRef` delegates to `parseLarkResourceUrl` in `lib/twin/ingest/lark-url.ts`, which was widened from the
+twin pipeline's `parseLarkDocUrl` to cover the two grid kinds.
+
+| Path | Kind | Bare token prefix |
+| --- | --- | --- |
+| `/docx/<token>` | doc | `doxcn`, `doxbc` |
+| `/docs/<token>` | doc (legacy) | `doccn` |
+| `/wiki/<token>` | wiki | `wikcn` |
+| `/sheets/<token>` | sheet | `shtcn` |
+| `/base/<token>` | bitable | `bascn`, `basbc` |
+
+`parseLarkDocUrl` is now a narrowing wrapper that admits only the three document kinds, so the twin ingest
+pipeline is byte-identically unchanged — pinned by a test that asserts the two parsers agree on every document
+shape and disagree on sheets and Bitable.
+
+Hosts outside `.feishu.cn`, `.larksuite.com` and `.larkoffice.com` still match by path pattern and are flagged
+`lowConfidence`; a false positive is harmless because the fetcher only ever calls `open.feishu.cn` with the
+parsed token, never the original host.
+
+## Reading each kind
+
+### Documents and wiki nodes
+
+Delegated wholesale to `fetchLarkDocAsRawSource`. The provider passes `ref.url` when it has one (so a tenant
+host resolves) and the bare token otherwise, which is why the bare-token branch had to learn the legacy
+`doccn` prefix: search returns tokens, not URLs.
+
+### Spreadsheets
+
+`lib/docs-providers/providers/lark/sheets.ts`, three calls:
+
+```
+GET /open-apis/sheets/v3/spreadsheets/{token}                → title
+GET /open-apis/sheets/v3/spreadsheets/{token}/sheets/query   → worksheets
+GET /open-apis/sheets/v2/spreadsheets/{token}/values/{range} → cells, per worksheet
+```
+
+The values endpoint is still v2 — v3 has no bulk range read — and takes an A1 range, which
+`lib/docs-providers/providers/lark/a1.ts` builds. `columnLetters` implements bijective base-26 (there is no
+zero digit, so a plain modulo renders column 26 wrongly).
+
+### Bitable
+
+`lib/docs-providers/providers/lark/bitable.ts`, three calls:
+
+```
+GET  /open-apis/bitable/v1/apps/{app}                            → name
+GET  /open-apis/bitable/v1/apps/{app}/tables                     → tables
+POST /open-apis/bitable/v1/apps/{app}/tables/{id}/records/search  → records
+```
+
+`records/search` is used rather than `records/list` because it accepts an empty filter and returns
+display-ready field values. Column order is taken from the union of the records' keys in first-seen order and
+then held fixed, so a record missing a field lands in the right column instead of shifting every later cell.
+
+Field values are heterogeneous — text, numbers, arrays of link objects, attachment descriptors. `csvCell`
+JSON-encodes anything non-scalar rather than flattening it, so nothing is silently lost.
+
+### Both grids
+
+Hidden worksheets are skipped. They are hidden from the user, so feeding them to a model would show more than
+opening the link does.
+
+Output is sectioned CSV via `lib/docs-providers/csv.ts`: one `## <name>` heading per worksheet or table, RFC
+4180 escaping, and a per-section truncation note when that section alone was capped.
+
+## Search
+
+```
+POST /open-apis/suite/docs-api/search/object
+```
+
+Requires one of `drive:drive`, `drive:drive:readonly` or `search:docs:read` on the Feishu app, and accepts a
+`user_access_token` only — hence `requireUserIdentity`. The request asks for `doc`, `sheet` and `bitable`
+only; `slides`, `mindnote` and `file` are omitted because listing them would offer the user something that
+always fails at fetch time.
+
+## Error mapping
+
+`lib/docs-providers/providers/lark/errors.ts` reuses `mapLarkError` from the twin fetcher rather than
+restating the Lark business-code tables (`LARK_FORBIDDEN_CODES`, `LARK_NOT_FOUND_CODES`,
+`LARK_RATE_LIMIT_CODES`). One code table, two consumers; the only thing added is the last hop from the ingest
+taxonomy to the provider taxonomy.
+
+| Ingest code | Provider code |
+| --- | --- |
+| `larkInvalidUrl` | `invalidRef` |
+| `larkNoAccount` | `notConfigured` |
+| `larkNotAuthorized` | `notAuthorized` |
+| `larkNoPermission` | `noPermission` |
+| `larkNotFound` | `notFound` |
+| `larkUnsupportedType` | `unsupportedType` |
+| `larkRateLimited` | `rateLimited` |
+| `larkEmptyDoc` | `empty` |
+| `larkBrowserUnsupported` | `hostUnsupported` |
+| `larkCliUnavailable` | `notConfigured` |
+| `larkNetwork` | `network` |
+
+The `LarkAccessError` codes from the harness map separately: `browserUnsupported` to `hostUnsupported`,
+`noAccount` to `notConfigured`, `notAuthorized` to `notAuthorized`.

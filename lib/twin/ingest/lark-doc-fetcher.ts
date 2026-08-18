@@ -21,19 +21,14 @@
  * call. No model calls happen here.
  */
 
-import { isTauri } from "@/lib/tauri"
-import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsHttpRequest, connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
-import { getTenantAccessToken, getUserAccessToken } from "@/lib/connectors/adapters/lark/auth"
+import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { LarkApiError } from "@/lib/connectors/adapters/lark/auth-retry"
 import {
-  LarkApiError,
-  isLarkUserTokenInvalidation,
-  withTatRefresh,
-  withUserTokenRefresh,
-} from "@/lib/connectors/adapters/lark/auth-retry"
+  LarkAccessError,
+  withLarkAuthedApi,
+  type LarkAuthedApi,
+} from "@/lib/connectors/adapters/lark/authed-api"
 import { parseLarkDocUrl, type LarkDocRef } from "./lark-url"
-
-const LARK_API_BASE = "https://open.feishu.cn"
 
 export type LarkFetchChannel = "api" | "cli"
 
@@ -133,12 +128,6 @@ export interface FetchLarkDocOptions {
   execImpl?: ExecLarkCliLike
 }
 
-interface LarkEnvelope<T> {
-  code: number
-  msg?: string
-  data?: T
-}
-
 /**
  * Fetch a Lark doc (docx / wiki node / legacy doc) as raw text ready for
  * twin-source staging. Throws `LarkIngestError` on every failure path.
@@ -165,145 +154,92 @@ async function fetchViaApi(
   ref: LarkDocRef,
   opts: FetchLarkDocOptions
 ): Promise<LarkFetchedDoc> {
-  const http = opts.httpImpl
-  if (!http && !isTauri()) {
-    // open.feishu.cn sends no CORS headers — a browser fetch can never work.
-    throw new LarkIngestError("larkBrowserUnsupported")
+  try {
+    return await withLarkAuthedApi(
+      { adapterId: opts.adapterId, httpImpl: opts.httpImpl, mapError: mapLarkError },
+      (api) => readDoc(api, input, ref, opts.adapterId)
+    )
+  } catch (err) {
+    throw mapAccessError(err)
   }
-  const httpImpl = http ?? connectorsHttpRequest
+}
 
-  const row = await getAdapterInstance(opts.adapterId)
-  if (!row || row.type !== "lark" || !row.enabled) {
-    throw new LarkIngestError("larkNoAccount")
+/** Translate the shared harness's pre-flight failures into ingest error codes. */
+function mapAccessError(err: unknown): unknown {
+  if (!(err instanceof LarkAccessError)) return err
+  switch (err.code) {
+    case "browserUnsupported":
+      return new LarkIngestError("larkBrowserUnsupported")
+    case "noAccount":
+      return new LarkIngestError("larkNoAccount")
+    case "notAuthorized":
+      return new LarkIngestError("larkNotAuthorized", { account: err.account ?? "" })
   }
-  const [appId, appSecret] = await Promise.all([
-    connectorsKeyringGet(opts.adapterId, "appId"),
-    connectorsKeyringGet(opts.adapterId, "appSecret"),
-  ])
-  if (!appId || !appSecret) {
-    throw new LarkIngestError("larkNotAuthorized", { account: row.displayName })
-  }
+}
 
-  const apiGet = async <T>(path: string, authHeader: string): Promise<T> => {
-    const resp = await httpImpl({
-      url: `${LARK_API_BASE}${path}`,
-      method: "GET",
-      headers: {
-        Authorization: authHeader,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-    })
-    let parsed: LarkEnvelope<T> | null = null
-    try {
-      parsed = resp.body ? (JSON.parse(resp.body) as LarkEnvelope<T>) : null
-    } catch {
-      // Non-JSON body — fall through to the status check below.
-    }
-    if (resp.status >= 400 || !parsed || parsed.code !== 0) {
-      throw new LarkApiError({
-        status: resp.status,
-        code: parsed?.code ?? null,
-        message: `Lark ${path} failed: code=${parsed?.code ?? "?"}, msg=${parsed?.msg ?? resp.body?.slice(0, 200) ?? "unknown"}`,
-      })
-    }
-    return parsed.data as T
-  }
+/** Resolve a wiki node if needed, then pull the body. Runs under one identity. */
+async function readDoc(
+  api: LarkAuthedApi,
+  input: string,
+  ref: LarkDocRef,
+  adapterId: string
+): Promise<LarkFetchedDoc> {
+  let docToken = ref.token
+  let objType: "docx" | "doc" = ref.kind === "doc" ? "doc" : "docx"
+  let wikiToken: string | undefined
+  let title = ""
 
-  /**
-   * Run `fn` with the best available identity: OAuth user token (document
-   * ACLs apply as the connected user) with silent refresh; tenant token
-   * fallback only when the user token is unrecoverably invalid or absent.
-   */
-  const runWithAuth = async <T>(fn: (authHeader: string) => Promise<T>): Promise<T> => {
-    const ctx = { adapterId: opts.adapterId, appId, appSecret }
-    const userToken = await getUserAccessToken(opts.adapterId)
-    if (userToken) {
-      try {
-        return await withUserTokenRefresh(ctx, async () => {
-          const token = (await getUserAccessToken(opts.adapterId)) ?? userToken
-          return fn(`Bearer ${token}`)
-        })
-      } catch (err) {
-        // Fall back to the bot identity only when the user identity is
-        // unrecoverable: the token stayed invalid after the retry, or the
-        // refresh itself failed (e.g. no refresh token in the keyring).
-        const refreshFailed = err instanceof Error && err.message.includes("user token refresh")
-        if (!isLarkUserTokenInvalidation(err) && !refreshFailed) {
-          throw mapLarkError(err, row.displayName)
-        }
-      }
+  if (ref.kind === "wiki") {
+    wikiToken = ref.token
+    const node = await api.get<{
+      node?: { obj_token?: string; obj_type?: string; title?: string }
+    }>(`/open-apis/wiki/v2/spaces/get_node?token=${encodeURIComponent(ref.token)}`)
+    const objTokenRaw = node.node?.obj_token
+    const objTypeRaw = node.node?.obj_type
+    if (!objTokenRaw || (objTypeRaw !== "docx" && objTypeRaw !== "doc")) {
+      throw new LarkIngestError("larkUnsupportedType", { type: objTypeRaw ?? "unknown" })
     }
-    try {
-      return await withTatRefresh(ctx, async () => {
-        const tat = await getTenantAccessToken({ appId, appSecret })
-        return fn(`Bearer ${tat}`)
-      })
-    } catch (err) {
-      throw mapLarkError(err, row.displayName)
-    }
+    docToken = objTokenRaw
+    objType = objTypeRaw
+    title = node.node?.title ?? ""
   }
 
-  return runWithAuth(async (authHeader) => {
-    let docToken = ref.token
-    let objType: "docx" | "doc" = ref.kind === "doc" ? "doc" : "docx"
-    let wikiToken: string | undefined
-    let title = ""
+  let text: string
+  if (objType === "docx") {
+    const [content, meta] = await Promise.all([
+      api.get<{ content?: string }>(
+        `/open-apis/docx/v1/documents/${encodeURIComponent(docToken)}/raw_content`
+      ),
+      title
+        ? Promise.resolve(null)
+        : api.get<{ document?: { title?: string } }>(
+            `/open-apis/docx/v1/documents/${encodeURIComponent(docToken)}`
+          ),
+    ])
+    text = content.content ?? ""
+    if (!title) title = meta?.document?.title ?? ""
+  } else {
+    // Legacy doc (docs/<token>) — old v2 API still serves raw content.
+    const content = await api.get<{ content?: string }>(
+      `/open-apis/doc/v2/${encodeURIComponent(docToken)}/raw_content`
+    )
+    text = content.content ?? ""
+  }
 
-    if (ref.kind === "wiki") {
-      wikiToken = ref.token
-      const node = await apiGet<{
-        node?: { obj_token?: string; obj_type?: string; title?: string }
-      }>(`/open-apis/wiki/v2/spaces/get_node?token=${encodeURIComponent(ref.token)}`, authHeader)
-      const objTokenRaw = node.node?.obj_token
-      const objTypeRaw = node.node?.obj_type
-      if (!objTokenRaw || (objTypeRaw !== "docx" && objTypeRaw !== "doc")) {
-        throw new LarkIngestError("larkUnsupportedType", { type: objTypeRaw ?? "unknown" })
-      }
-      docToken = objTokenRaw
-      objType = objTypeRaw
-      title = node.node?.title ?? ""
-    }
-
-    let text: string
-    if (objType === "docx") {
-      const [content, meta] = await Promise.all([
-        apiGet<{ content?: string }>(
-          `/open-apis/docx/v1/documents/${encodeURIComponent(docToken)}/raw_content`,
-          authHeader
-        ),
-        title
-          ? Promise.resolve(null)
-          : apiGet<{ document?: { title?: string } }>(
-              `/open-apis/docx/v1/documents/${encodeURIComponent(docToken)}`,
-              authHeader
-            ),
-      ])
-      text = content.content ?? ""
-      if (!title) title = meta?.document?.title ?? ""
-    } else {
-      // Legacy doc (docs/<token>) — old v2 API still serves raw content.
-      const content = await apiGet<{ content?: string }>(
-        `/open-apis/doc/v2/${encodeURIComponent(docToken)}/raw_content`,
-        authHeader
-      )
-      text = content.content ?? ""
-    }
-
-    if (!text.trim()) {
-      throw new LarkIngestError("larkEmptyDoc", { title: title || docToken })
-    }
-    return {
-      url: input,
-      title: title || docToken,
-      contentType: "text/plain",
-      text,
-      docToken,
-      objType,
-      wikiToken,
-      adapterId: opts.adapterId,
-      channel: "api" as const,
-    }
-  })
+  if (!text.trim()) {
+    throw new LarkIngestError("larkEmptyDoc", { title: title || docToken })
+  }
+  return {
+    url: input,
+    title: title || docToken,
+    contentType: "text/plain",
+    text,
+    docToken,
+    objType,
+    wikiToken,
+    adapterId,
+    channel: "api" as const,
+  }
 }
 
 /** Map a raw API/transport failure into a localized `LarkIngestError`. */

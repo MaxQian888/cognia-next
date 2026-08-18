@@ -10,6 +10,7 @@ import type {
 } from "@cognia/agent-config-types"
 import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
+import type { ContextRef } from "@/lib/chat/mentions/types"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
@@ -434,6 +435,16 @@ interface ChatState {
    */
   referencedWorkflowElements: WorkflowElementRef[]
   /**
+   * Remote documents (Feishu / Google Workspace, ADR-0134) cited by the draft.
+   *
+   * Their BODIES ride as staged attachments — this array only records provenance
+   * (`<providerId>:<documentId>` + title + URL) so the sent message carries an
+   * auditable `metadata.mentions` entry. A remote document leaves no `@…` token
+   * in the text, so unlike every other mention kind it cannot be recovered by
+   * re-parsing the message. Cleared on send with the attachments.
+   */
+  referencedDocs: ContextRef[]
+  /**
    * Material the user pointed at + commented on, staged as context chips for
    * the next send. Cleared on send (like attachments) and on focus change.
    *
@@ -567,6 +578,9 @@ interface ChatState {
   removeReferencedPath: (absolute: string) => void
   clearReferencedPaths: () => void
   /** Stage a workflow element as a reference chip for the next copilot turn. */
+  addReferencedDoc: (ref: ContextRef) => void
+  removeReferencedDoc: (id: string) => void
+  clearReferencedDocs: () => void
   addReferencedWorkflowElement: (ref: WorkflowElementRef) => void
   removeReferencedWorkflowElement: (type: "node" | "edge", id: string) => void
   clearReferencedWorkflowElements: () => void
@@ -621,6 +635,7 @@ export const useChatStore = create<ChatState>((set) => ({
   permissionMode: null,
   referencedPaths: [],
   referencedWorkflowElements: [],
+  referencedDocs: [],
   contextSelections: [],
   pendingCommandOverrides: null,
   bookmarkedIds: [],
@@ -643,6 +658,7 @@ export const useChatStore = create<ChatState>((set) => ({
         permissionMode: null,
         referencedPaths: [],
         referencedWorkflowElements: [],
+        referencedDocs: [],
         contextSelections: [],
         pendingCommandOverrides: null,
         bookmarkedIds: [],
@@ -924,6 +940,16 @@ export const useChatStore = create<ChatState>((set) => ({
     })),
   setPendingCommandOverrides: (overrides) => set({ pendingCommandOverrides: overrides }),
   clearReferencedPaths: () => set({ referencedPaths: [] }),
+  addReferencedDoc: (ref) =>
+    set((s) =>
+      s.referencedDocs.some((r) => r.id === ref.id)
+        ? s
+        : { referencedDocs: [...s.referencedDocs, ref] }
+    ),
+  removeReferencedDoc: (id) =>
+    set((s) => ({ referencedDocs: s.referencedDocs.filter((r) => r.id !== id) })),
+  clearReferencedDocs: () =>
+    set((s) => (s.referencedDocs.length === 0 ? s : { referencedDocs: [] })),
   addReferencedWorkflowElement: (ref) =>
     set((s) =>
       s.referencedWorkflowElements.some((r) => r.type === ref.type && r.id === ref.id)
@@ -1051,6 +1077,7 @@ export const useChatStore = create<ChatState>((set) => ({
       permissionMode: null,
       referencedPaths: [],
       referencedWorkflowElements: [],
+      referencedDocs: [],
       contextSelections: [],
       pendingCommandOverrides: null,
       bookmarkedIds: [],

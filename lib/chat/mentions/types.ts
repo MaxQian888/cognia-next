@@ -12,10 +12,15 @@
  * Chip-style picks (skill / preset / workflow element) mutate session state
  * rather than inserting a token — they are session context, not message
  * mentions, and are deliberately NOT captured here.
+ *
+ * `doc` (a remote Feishu / Google document, ADR-0134) IS captured: its body is
+ * fetched at pick time and staged as an attachment, so no `@…` token survives
+ * in the text and the ContextRef is the ONLY record that the turn cited that
+ * document. Its `id` is `<providerId>:<documentId>`.
  */
 
 export type ContextRefKind =
-  "file" | "agent" | "subagent" | "skill" | "preset" | "wfNode" | "wfEdge"
+  "file" | "agent" | "subagent" | "skill" | "preset" | "wfNode" | "wfEdge" | "doc"
 
 export interface ContextRef {
   kind: ContextRefKind

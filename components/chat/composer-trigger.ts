@@ -21,9 +21,10 @@
 
 import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-boundary"
 import { tokenizeLine } from "@/lib/slash-commands/parse-segments"
+import { docsProviderPrefixes } from "@/lib/docs-providers"
 
 export type TriggerKind =
-  "slash" | "file" | "bash" | "memory" | "agent" | "skill" | "preset" | "wfNode" | "wfEdge"
+  "slash" | "file" | "bash" | "memory" | "agent" | "skill" | "preset" | "wfNode" | "wfEdge" | "doc"
 
 export type MentionMode = "files" | "agents" | "combined" | "workflow"
 
@@ -49,6 +50,13 @@ export interface MentionableWorkflowElement {
 
 export interface ComposerTrigger {
   kind: TriggerKind
+  /**
+   * The namespace prefix that produced this trigger (`"lark:"`, `"gdoc:"`),
+   * when one did. Only `"doc"` triggers carry it — every other namespaced kind
+   * maps 1:1 to a `TriggerKind`, but the document providers share one kind and
+   * are told apart by which prefix the user typed.
+   */
+  namespace?: string
   /** Inclusive start of the token (the trigger char) in `value`. */
   tokenStart: number
   /** Exclusive end — equals caret unless the caret has moved past the token. */
@@ -97,15 +105,29 @@ const SKILL_TRIGGER: TriggerKind = "skill"
 const PRESET_TRIGGER: TriggerKind = "preset"
 const WFNODE_TRIGGER: TriggerKind = "wfNode"
 const WFEDGE_TRIGGER: TriggerKind = "wfEdge"
+const DOC_TRIGGER: TriggerKind = "doc"
 
 // Namespaced `@` prefixes that flip the mention into a typed picker instead of
 // the file/agent panel. Mirrors the CLI's `@skill:` / `@agent:` mention
 // vocabulary (cli/src/tui/mention/detector.ts). The set is mode-dependent so
 // `@node:` only means a workflow node inside the workflow-editor composer.
-const CHAT_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: TriggerKind }> = [
+const STATIC_CHAT_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: TriggerKind }> = [
   { prefix: "skill:", kind: SKILL_TRIGGER },
   { prefix: "preset:", kind: PRESET_TRIGGER },
 ]
+
+/**
+ * Chat namespace prefixes = the two static ones plus one per registered remote
+ * document provider (`@lark:`, `@gdoc:`). Read from the registry on every call
+ * rather than snapshotted at module load, so a test that resets the registry
+ * does not leave this list stale.
+ */
+function chatNamespacePrefixes(): ReadonlyArray<{ prefix: string; kind: TriggerKind }> {
+  return [
+    ...STATIC_CHAT_NAMESPACE_PREFIXES,
+    ...docsProviderPrefixes().map(({ prefix }) => ({ prefix, kind: DOC_TRIGGER })),
+  ]
+}
 const WORKFLOW_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: TriggerKind }> = [
   { prefix: "node:", kind: WFNODE_TRIGGER },
   { prefix: "edge:", kind: WFEDGE_TRIGGER },
@@ -117,7 +139,7 @@ function namespacePrefixesFor(
   if (mode === "workflow") return WORKFLOW_NAMESPACE_PREFIXES
   // The team workspace (`agents`) reserves `@` for members — no typed prefixes.
   if (mode === "agents") return []
-  return CHAT_NAMESPACE_PREFIXES
+  return chatNamespacePrefixes()
 }
 
 /**
@@ -268,6 +290,7 @@ export function detectTrigger(
             tokenStart: i,
             tokenEnd: queryEnd,
             query: beforeCaret.slice(prefix.length),
+            ...(kind === DOC_TRIGGER ? { namespace: prefix } : {}),
           }
         }
       }

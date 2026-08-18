@@ -1,4 +1,4 @@
-import { isLarkDocUrl, parseLarkDocUrl } from "./lark-url"
+import { isLarkDocUrl, isLarkResourceUrl, parseLarkDocUrl, parseLarkResourceUrl } from "./lark-url"
 
 describe("parseLarkDocUrl", () => {
   it("parses a feishu.cn docx URL", () => {
@@ -87,5 +87,87 @@ describe("isLarkDocUrl", () => {
   it("mirrors parseLarkDocUrl truthiness", () => {
     expect(isLarkDocUrl("https://acme.feishu.cn/docx/doxcnAbCdEfGh1234567890")).toBe(true)
     expect(isLarkDocUrl("https://example.com/blog/post")).toBe(false)
+  })
+})
+
+describe("parseLarkResourceUrl", () => {
+  it("parses the sheet and Bitable paths the doc parser rejects", () => {
+    expect(parseLarkResourceUrl("https://acme.feishu.cn/sheets/shtcnAbCdEfGh1234567890")).toEqual({
+      kind: "sheet",
+      token: "shtcnAbCdEfGh1234567890",
+      host: "acme.feishu.cn",
+    })
+    expect(parseLarkResourceUrl("https://acme.feishu.cn/base/bascnAbCdEfGh1234567890")).toEqual({
+      kind: "bitable",
+      token: "bascnAbCdEfGh1234567890",
+      host: "acme.feishu.cn",
+    })
+  })
+
+  it("parses bare legacy doc tokens so search results resolve without a URL", () => {
+    expect(parseLarkResourceUrl("doccnAbCdEfGh1234567890")).toEqual({
+      kind: "doc",
+      token: "doccnAbCdEfGh1234567890",
+    })
+    expect(parseLarkDocUrl("doccnAbCdEfGh1234567890")).toEqual({
+      kind: "doc",
+      token: "doccnAbCdEfGh1234567890",
+    })
+  })
+
+  it("parses bare sheet and Bitable tokens", () => {
+    expect(parseLarkResourceUrl("shtcnAbCdEfGh1234567890")).toEqual({
+      kind: "sheet",
+      token: "shtcnAbCdEfGh1234567890",
+    })
+    expect(parseLarkResourceUrl("basbcAbCdEfGh1234567890")).toEqual({
+      kind: "bitable",
+      token: "basbcAbCdEfGh1234567890",
+    })
+  })
+
+  it("still parses every doc kind identically to parseLarkDocUrl", () => {
+    for (const url of [
+      "https://acme.feishu.cn/docx/doxcnAbCdEfGh1234567890",
+      "https://acme.feishu.cn/wiki/wikcnAbCdEfGh123456789",
+      "https://acme.larksuite.com/docs/doccnAbCdEfGh1234567890",
+      "doxbcAbCdEfGh1234567890",
+    ]) {
+      expect(parseLarkResourceUrl(url)).toEqual(parseLarkDocUrl(url))
+    }
+  })
+
+  it("flags an unknown host as low confidence for the new kinds too", () => {
+    expect(parseLarkResourceUrl("https://docs.acme.dev/sheets/shtcnAbCdEfGh1234567890")).toEqual({
+      kind: "sheet",
+      token: "shtcnAbCdEfGh1234567890",
+      host: "docs.acme.dev",
+      lowConfidence: true,
+    })
+  })
+
+  it("rejects slides, unknown prefixes and malformed input", () => {
+    expect(parseLarkResourceUrl("https://acme.feishu.cn/slides/slicnAbCdEfGh12345678")).toBeNull()
+    expect(parseLarkResourceUrl("zzzcnAbCdEfGh1234567890")).toBeNull()
+    expect(parseLarkResourceUrl("   ")).toBeNull()
+    expect(parseLarkResourceUrl("ftp://acme.feishu.cn/sheets/shtcnAbCdEfGh1234567890")).toBeNull()
+  })
+})
+
+describe("parseLarkDocUrl narrowing", () => {
+  it("keeps rejecting sheets and Bitable so the twin pipeline is unchanged", () => {
+    expect(parseLarkDocUrl("https://acme.feishu.cn/sheets/shtcnAbCdEfGh1234567890")).toBeNull()
+    expect(parseLarkDocUrl("https://acme.feishu.cn/base/bascnAbCdEfGh1234567890")).toBeNull()
+    expect(parseLarkDocUrl("shtcnAbCdEfGh1234567890")).toBeNull()
+    expect(parseLarkDocUrl("bascnAbCdEfGh1234567890")).toBeNull()
+  })
+})
+
+describe("isLarkResourceUrl", () => {
+  it("mirrors parseLarkResourceUrl truthiness and is wider than isLarkDocUrl", () => {
+    const sheet = "https://acme.feishu.cn/sheets/shtcnAbCdEfGh1234567890"
+    expect(isLarkResourceUrl(sheet)).toBe(true)
+    expect(isLarkDocUrl(sheet)).toBe(false)
+    expect(isLarkResourceUrl("https://example.com/blog/post")).toBe(false)
   })
 })

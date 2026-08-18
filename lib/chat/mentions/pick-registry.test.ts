@@ -21,6 +21,7 @@ function makeCtx(overrides: Partial<MentionPickContext> = {}): MentionPickContex
     toggleEphemeralSkill: jest.fn(),
     addReferencedWorkflowElement: jest.fn(),
     applyPreset: jest.fn().mockResolvedValue(undefined),
+    stageRemoteDoc: jest.fn().mockResolvedValue(undefined),
     session: null,
     clearWorkflowHighlight: jest.fn(),
     strings: { skillEnabled: (name: string) => `enabled:${name}` },

@@ -263,6 +263,19 @@ export async function connectorsStartServer(
   return invoker<string>("connectors_start_server", { port, bindLoopbackOnly })
 }
 
+/**
+ * Start the connectors HTTP/WS server if it is not already up, and return the
+ * bound address either way. Always binds loopback-only.
+ *
+ * Unlike {@link connectorsStartServer} this never errors on "already running" —
+ * it is for callers that need the loopback listener to EXIST (the remote
+ * document providers' OAuth redirect target, ADR-0134) and cannot know whether
+ * a webhook adapter already started one.
+ */
+export async function connectorsEnsureServer(port: number): Promise<string> {
+  return invoker<string>("connectors_ensure_server", { port })
+}
+
 export async function connectorsStopServer(): Promise<void> {
   await invoker("connectors_stop_server")
 }

@@ -1146,6 +1146,7 @@ pub fn run() {
             connectors::commands::connectors_runtime_lease_renew,
             connectors::commands::connectors_runtime_lease_release,
             connectors::commands::connectors_start_server,
+            connectors::commands::connectors_ensure_server,
             connectors::commands::connectors_stop_server,
             connectors::commands::connectors_keyring_set,
             connectors::commands::connectors_keyring_get,

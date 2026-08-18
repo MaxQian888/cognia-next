@@ -80,6 +80,7 @@ pub fn build_unresolved_router() -> Router<ConnectorsState> {
     let base = Router::new()
         .route("/health", get(health_handler))
         .route("/oauth/lark/callback", get(oauth_lark_callback))
+        .route("/oauth/docs/{provider}/callback", get(oauth_docs_callback))
         .route("/webhook/{adapter_type}/{adapter_id}", any(webhook_handler));
     ws_server::register_routes(base).layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
 }
@@ -125,27 +126,87 @@ async fn oauth_lark_callback(
         serde_json::Value::Object(payload),
     );
     let deep_link = build_lark_oauth_deep_link(&params);
-    lark_oauth_callback_page(&deep_link)
+    oauth_callback_page(&deep_link)
+}
+
+/// Remote document provider OAuth relay (ADR-0134).
+///
+/// Google's installed-app clients accept only a loopback `http://127.0.0.1:<port>`
+/// redirect — no custom scheme, no OOB — so the provider registers
+/// `http://127.0.0.1:7842/oauth/docs/google/callback` and this route bounces the
+/// authorization code into the desktop app the same way the Lark relay does.
+/// That is also the reason the document providers are desktop-only: without this
+/// listener there is nowhere for Google to redirect to.
+///
+/// `provider` is validated against a strict slug charset before it reaches the
+/// rendered page — it arrives from the URL path, and the bounce page embeds the
+/// deep link in both an HTML attribute and a JS string literal.
+async fn oauth_docs_callback(
+    Path(provider): Path<String>,
+    RawQuery(raw_query): RawQuery,
+    Extension(EmitterExt(emitter)): Extension<EmitterExt>,
+) -> Response {
+    if !is_docs_provider_slug(&provider) {
+        return error_response(StatusCode::NOT_FOUND, "unknown docs provider");
+    }
+    let params = parse_query(raw_query.as_deref().unwrap_or(""));
+    let mut payload: serde_json::Map<String, serde_json::Value> = OAUTH_FIELDS
+        .iter()
+        .filter_map(|&key| {
+            params
+                .get(key)
+                .map(|value| (key.to_string(), serde_json::Value::String(value.clone())))
+        })
+        .collect();
+    payload.insert(
+        "provider".to_string(),
+        serde_json::Value::String(provider.clone()),
+    );
+    emitter.emit_ephemeral_to_brain(
+        "connectors://docs-oauth/callback",
+        serde_json::Value::Object(payload),
+    );
+    let base = format!("cognia://docs-provider/oauth/{provider}");
+    oauth_callback_page(&build_oauth_deep_link(&base, &params))
+}
+
+/// OAuth query fields we forward. Anything else the provider appends is dropped.
+const OAUTH_FIELDS: [&str; 4] = ["code", "state", "error", "error_description"];
+
+/// Lowercase alphanumerics and dashes, 1..=32 chars. Mirrors the `DocsProvider.id`
+/// contract on the TypeScript side.
+fn is_docs_provider_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 /// Build the `cognia://connector/oauth/lark?…` deep link, forwarding only the
 /// OAuth fields we recognise (success `code`+`state`, or `error` details).
 fn build_lark_oauth_deep_link(params: &HashMap<String, String>) -> String {
-    let pairs: Vec<(&str, &str)> = ["code", "state", "error", "error_description"]
+    build_oauth_deep_link("cognia://connector/oauth/lark", params)
+}
+
+/// Append the recognised OAuth fields to `base` as a query string, or return
+/// `base` unchanged when none are present.
+fn build_oauth_deep_link(base: &str, params: &HashMap<String, String>) -> String {
+    let pairs: Vec<(&str, &str)> = OAUTH_FIELDS
         .iter()
         .filter_map(|&k| params.get(k).map(|v| (k, v.as_str())))
         .collect();
     if pairs.is_empty() {
-        return "cognia://connector/oauth/lark".to_string();
+        return base.to_string();
     }
     let query = serde_urlencoded::to_string(&pairs).unwrap_or_default();
-    format!("cognia://connector/oauth/lark?{query}")
+    format!("{base}?{query}")
 }
 
 /// Render the bounce page. The forwarded fields are percent-encoded (no quotes
 /// or angle brackets), so the only HTML-sensitive char is `&`, escaped for the
 /// attribute contexts; the JS string embeds the raw link safely.
-fn lark_oauth_callback_page(deep_link: &str) -> Response {
+fn oauth_callback_page(deep_link: &str) -> Response {
     let attr = deep_link.replace('&', "&amp;");
     let html = format!(
         "<!doctype html>\n<html><head><meta charset=\"utf-8\">\
@@ -956,6 +1017,97 @@ mod tests {
         let body = to_bytes(resp.into_body(), 65536).await.unwrap();
         let text = std::str::from_utf8(&body).unwrap();
         assert!(text.contains("error=access_denied"));
+    }
+
+    #[tokio::test]
+    async fn oauth_docs_callback_bounces_to_the_provider_scheme_and_names_the_provider() {
+        let state = ConnectorsState::new();
+        let (app, emitter) = test_router_with(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/docs/google/callback?code=abc123&state=google:nonce")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 65536).await.unwrap();
+        let text = std::str::from_utf8(&body).unwrap();
+        assert!(text.contains("cognia://docs-provider/oauth/google?"));
+        assert!(text.contains("code=abc123"));
+        assert_eq!(
+            emitter.events.lock().as_slice(),
+            &[(
+                "connectors://docs-oauth/callback".to_string(),
+                serde_json::json!({
+                    "code": "abc123",
+                    "state": "google:nonce",
+                    "provider": "google",
+                }),
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_docs_callback_forwards_provider_errors() {
+        let state = ConnectorsState::new();
+        let (app, _) = test_router_with(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/docs/google/callback?error=access_denied&error_description=nope")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 65536).await.unwrap();
+        assert!(std::str::from_utf8(&body).unwrap().contains("error=access_denied"));
+    }
+
+    #[tokio::test]
+    async fn oauth_docs_callback_rejects_a_provider_slug_that_could_escape_the_page() {
+        let state = ConnectorsState::new();
+        let (app, emitter) = test_router_with(state);
+        for slug in ["Google", "a%22b", "with.dot", "x".repeat(33).as_str()] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/oauth/docs/{slug}/callback?code=a"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND, "slug {slug} must be rejected");
+        }
+        assert!(emitter.events.lock().is_empty());
+    }
+
+    #[test]
+    fn docs_provider_slug_accepts_only_lowercase_alnum_and_dash() {
+        assert!(is_docs_provider_slug("google"));
+        assert!(is_docs_provider_slug("google-workspace"));
+        assert!(is_docs_provider_slug("m365"));
+        assert!(!is_docs_provider_slug(""));
+        assert!(!is_docs_provider_slug("Google"));
+        assert!(!is_docs_provider_slug("goo gle"));
+        assert!(!is_docs_provider_slug("goo/gle"));
+        assert!(!is_docs_provider_slug(&"x".repeat(33)));
+    }
+
+    #[test]
+    fn oauth_deep_link_omits_the_query_when_no_recognised_field_is_present() {
+        let params: HashMap<String, String> =
+            HashMap::from([("junk".to_string(), "x".to_string())]);
+        assert_eq!(
+            build_oauth_deep_link("cognia://docs-provider/oauth/google", &params),
+            "cognia://docs-provider/oauth/google"
+        );
     }
 
     #[tokio::test]

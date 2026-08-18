@@ -25,6 +25,7 @@ import { HEARTBEAT_INTERVAL_MS } from "@/lib/connectors/health/heartbeat"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { auditKindLabel } from "./audit-kind-label"
+import { DocsProvidersCard } from "../docs-providers/docs-providers-card"
 
 const POLL_INTERVAL_MS = 10_000
 
@@ -205,6 +206,11 @@ export function OverviewTab() {
       </Card>
 
       <TunnelTab />
+
+      {/* Remote document providers (ADR-0134) — the Feishu row reads the same
+          bound Lark accounts this section already manages, so it belongs here
+          rather than in a section of its own. */}
+      <DocsProvidersCard />
 
       {/* Card 2: Adapter health */}
       <Card>

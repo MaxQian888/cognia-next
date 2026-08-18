@@ -15,8 +15,15 @@
 
 export type LarkDocRefKind = "docx" | "wiki" | "doc"
 
-export interface LarkDocRef {
-  kind: LarkDocRefKind
+/**
+ * Every Lark cloud object the app can read today. `LarkDocRefKind` is the
+ * subset the twin ingest pipeline accepts; the remote-document providers
+ * (ADR-0134) additionally read spreadsheets and Bitable apps.
+ */
+export type LarkResourceKind = LarkDocRefKind | "sheet" | "bitable"
+
+export interface LarkResourceRef {
+  kind: LarkResourceKind
   token: string
   /** Original host when parsed from a URL; undefined for bare-token input. */
   host?: string
@@ -24,14 +31,32 @@ export interface LarkDocRef {
   lowConfidence?: boolean
 }
 
+export interface LarkDocRef extends LarkResourceRef {
+  kind: LarkDocRefKind
+}
+
 /** Known first-party Feishu/Lark host suffixes. */
 export const LARK_HOST_SUFFIXES = [".feishu.cn", ".larksuite.com", ".larkoffice.com"] as const
 
-const PATH_KINDS: Record<string, LarkDocRefKind> = {
+const PATH_KINDS: Record<string, LarkResourceKind> = {
   docx: "docx",
   wiki: "wiki",
   docs: "doc",
+  sheets: "sheet",
+  base: "bitable",
 }
+
+/** Kinds the twin ingest pipeline (`parseLarkDocUrl`) accepts. */
+const DOC_KINDS: ReadonlySet<LarkResourceKind> = new Set<LarkResourceKind>(["docx", "wiki", "doc"])
+
+/** Bare-token prefixes, longest-lived first. Lark never reuses a prefix across kinds. */
+const TOKEN_PREFIXES: ReadonlyArray<{ re: RegExp; kind: LarkResourceKind }> = [
+  { re: /^(doxcn|doxbc)/i, kind: "docx" },
+  { re: /^doccn/i, kind: "doc" },
+  { re: /^wikcn/i, kind: "wiki" },
+  { re: /^shtcn/i, kind: "sheet" },
+  { re: /^(bascn|basbc)/i, kind: "bitable" },
+]
 
 /** Lark tokens are URL-safe base64-ish identifiers, typically 20–32 chars. */
 const TOKEN_RE = /^[A-Za-z0-9]{14,64}$/
@@ -56,18 +81,38 @@ function isKnownLarkHost(hostname: string): boolean {
  * the UI never suggests the Lark path for them).
  */
 export function parseLarkDocUrl(input: string): LarkDocRef | null {
+  const ref = parseLarkResourceUrl(input)
+  if (!ref || !DOC_KINDS.has(ref.kind)) return null
+  return ref as LarkDocRef
+}
+
+/**
+ * Parse a Feishu/Lark cloud-object URL or bare token into a `LarkResourceRef`.
+ *
+ * Superset of {@link parseLarkDocUrl}: it additionally recognizes
+ * `/sheets/<token>` (电子表格) and `/base/<token>` (多维表格 / Bitable), which
+ * the twin pipeline deliberately rejects because it has no reader for them.
+ *
+ * Recognized shapes:
+ *   - `https://<tenant>.feishu.cn/{docx,wiki,docs,sheets,base}/<token>`
+ *     (also larksuite.com / larkoffice.com)
+ *   - Unknown host with one of the path patterns above → `lowConfidence: true`
+ *   - Bare tokens: `doxcn…`/`doxbc…` → docx, `wikcn…` → wiki,
+ *     `shtcn…` → sheet, `bascn…`/`basbc…` → bitable
+ *
+ * Returns `null` for anything else (slides have no public read API, so their
+ * paths are rejected here rather than at fetch time — the UI never suggests a
+ * Lark path for them).
+ */
+export function parseLarkResourceUrl(input: string): LarkResourceRef | null {
   const trimmed = input.trim()
   if (!trimmed) return null
 
   // Bare token shapes first — they never parse as URLs.
   if (!trimmed.includes("/") && !trimmed.includes(":")) {
-    if (/^(doxcn|doxbc)/i.test(trimmed) && TOKEN_RE.test(trimmed)) {
-      return { kind: "docx", token: trimmed }
-    }
-    if (/^wikcn/i.test(trimmed) && TOKEN_RE.test(trimmed)) {
-      return { kind: "wiki", token: trimmed }
-    }
-    return null
+    if (!TOKEN_RE.test(trimmed)) return null
+    const hit = TOKEN_PREFIXES.find((candidate) => candidate.re.test(trimmed))
+    return hit ? { kind: hit.kind, token: trimmed } : null
   }
 
   let url: URL
@@ -89,7 +134,7 @@ export function parseLarkDocUrl(input: string): LarkDocRef | null {
     const token = segments[i + 1]
     if (!TOKEN_RE.test(token)) continue
     const known = isKnownLarkHost(url.hostname)
-    const ref: LarkDocRef = { kind, token, host: url.hostname }
+    const ref: LarkResourceRef = { kind, token, host: url.hostname }
     if (!known) ref.lowConfidence = true
     return ref
   }
@@ -99,4 +144,9 @@ export function parseLarkDocUrl(input: string): LarkDocRef | null {
 /** True when `input` is a recognizable Feishu/Lark doc URL or token. */
 export function isLarkDocUrl(input: string): boolean {
   return parseLarkDocUrl(input) !== null
+}
+
+/** True when `input` is a recognizable Feishu/Lark cloud-object URL or token. */
+export function isLarkResourceUrl(input: string): boolean {
+  return parseLarkResourceUrl(input) !== null
 }

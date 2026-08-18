@@ -1,0 +1,55 @@
+{
+  "errors": {
+    "empty": "That document is empty.",
+    "hostUnsupported": "Remote documents are available on the desktop app only.",
+    "invalidRef": "That is not a document link this source can read.",
+    "network": "Could not reach the document service.",
+    "noPermission": "You do not have access to this document.",
+    "notAuthorized": "Authorization expired — reconnect the account in Settings.",
+    "notConfigured": "No account is connected for this document source.",
+    "notFound": "That document no longer exists.",
+    "rateLimited": "The document service is rate limiting — try again shortly.",
+    "unsupportedType": "This document type cannot be read."
+  },
+  "kind": {
+    "bitable": "Base",
+    "doc": "Document",
+    "sheet": "Spreadsheet",
+    "wiki": "Wiki"
+  },
+  "label": "Feishu Docs",
+  "labelGoogle": "Google Workspace",
+  "picker": {
+    "accountLabel": "Account",
+    "attached": "Attached “{title}”",
+    "fetching": "Fetching “{title}”…",
+    "hostUnsupported": "Remote documents are available on the desktop app only.",
+    "linkOnlyHint": "This provider has no search — paste a document link.",
+    "noAccount": "Connect an account in Settings to use this.",
+    "noMatches": "No document matches \"{query}\"",
+    "pasteHint": "Type keywords, or paste a document link.",
+    "searching": "Searching…",
+    "title": "Remote documents",
+    "truncated": "“{title}” was too large and has been truncated."
+  },
+  "settings": {
+    "connect": "Connect",
+    "connectFailed": "Could not start authorization: {reason}",
+    "connectSucceeded": "Google Workspace connected.",
+    "connectedAs": "Connected as {email}",
+    "connecting": "Waiting for authorization…",
+    "description": "Reference Feishu and Google documents with @ in chat.",
+    "desktopOnly": "Desktop app only.",
+    "disconnect": "Disconnect",
+    "googleClientHint": "Create a Desktop app credential in Google Cloud Console.",
+    "googleClientId": "OAuth client ID",
+    "googleClientSecret": "OAuth client secret",
+    "googleScopes": "Read-only access to Drive, Docs and Sheets.",
+    "larkAccountCount": "{count} connected",
+    "larkDescription": "Uses your connected Feishu accounts — no extra setup.",
+    "larkManage": "Manage Feishu accounts",
+    "larkNoAccount": "No Feishu account is connected yet.",
+    "notConnected": "Not connected",
+    "title": "Remote documents"
+  }
+}

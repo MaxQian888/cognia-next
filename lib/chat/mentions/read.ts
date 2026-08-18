@@ -18,6 +18,7 @@ const KINDS: ReadonlySet<string> = new Set([
   "preset",
   "wfNode",
   "wfEdge",
+  "doc",
 ] satisfies ContextRefKind[])
 
 function isContextRef(value: unknown): value is ContextRef {
