@@ -11,6 +11,7 @@
 //   • WASM bundle (Tauri only) — local .wasm/.zip or signed URL with grant sheet
 
 import { useState } from "react"
+import dynamic from "next/dynamic"
 import { useTranslations } from "next-intl"
 import {
   DownloadIcon,
@@ -40,11 +41,15 @@ import { usePluginsStore } from "@/stores/plugins"
 import { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
 import { PluginInstallFromGithubDialog } from "./dialogs/plugin-install-from-github-dialog"
 import { PluginSignedInstallFromUrlDialog } from "./dialogs/plugin-signed-install-from-url-dialog"
-import { PluginVsixInstallDialog } from "./dialogs/plugin-vsix-install-dialog"
 import { PluginWasmFromGitDialog } from "./dialogs/plugin-wasm-from-git-dialog"
 import { useInstallWasmFromLocal } from "./dialogs/install-wasm-plugin-button"
 import { useLoadUnpackedFlow } from "./dialogs/load-unpacked-button"
 import { CliStatusChip } from "./cli-status-chip"
+
+const PluginVsixInstallDialog = dynamic(
+  () => import("./dialogs/plugin-vsix-install-dialog").then((mod) => mod.PluginVsixInstallDialog),
+  { ssr: false }
+)
 
 interface Props {
   /** Opens the update dialog (mounted by the parent panel). */
@@ -229,7 +234,7 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
           onOpenChange={setSignedUrlDialogOpen}
         />
       )}
-      {wasmAvailable && (
+      {wasmAvailable && vsixDialogOpen && (
         <PluginVsixInstallDialog open={vsixDialogOpen} onOpenChange={setVsixDialogOpen} />
       )}
       {wasmAvailable && (

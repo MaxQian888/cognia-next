@@ -1,21 +1,10 @@
-import JSZip from "jszip"
-import {
-  Document,
-  HeadingLevel,
-  Packer,
-  Paragraph,
-  Table,
-  TableCell,
-  TableRow,
-  TextRun,
-  WidthType,
-} from "docx"
 import { createDocument, DOCX_MIME, type DocumentBlock, type DocumentModel } from "./model"
 
 export async function importDocx(
   bytes: Uint8Array,
   filename = "document.docx"
 ): Promise<DocumentModel> {
+  const JSZip = (await import("jszip")).default
   const zip = await JSZip.loadAsync(bytes)
   if (!zip.file("word/document.xml"))
     throw new Error("Invalid DOCX package: word/document.xml is missing.")
@@ -41,26 +30,34 @@ export async function importDocx(
 }
 
 export async function exportDocx(model: DocumentModel): Promise<Uint8Array> {
-  const children = model.blocks.map(renderBlock)
+  const docx = await import("docx")
+  const children = model.blocks.map((block) => renderBlock(block, docx))
   if (model.comments.length) {
     children.push(
-      new Paragraph({ children: [new TextRun({ text: "Review comments", bold: true })] })
+      new docx.Paragraph({
+        children: [new docx.TextRun({ text: "Review comments", bold: true })],
+      })
     )
     for (const comment of model.comments)
       children.push(
-        new Paragraph({
+        new docx.Paragraph({
           text: `[${comment.resolved ? "resolved" : "open"}] ${comment.author}: ${comment.text}`,
         })
       )
   }
-  const document = new Document({ creator: "Cognia", title: model.title, sections: [{ children }] })
-  const blob = await Packer.toBlob(document)
+  const document = new docx.Document({
+    creator: "Cognia",
+    title: model.title,
+    sections: [{ children }],
+  })
+  const blob = await docx.Packer.toBlob(document)
   return new Uint8Array(await blob.arrayBuffer())
 }
 
 export async function validateDocxRoundTrip(
   bytes: Uint8Array
 ): Promise<{ valid: boolean; text: string }> {
+  const JSZip = (await import("jszip")).default
   const zip = await JSZip.loadAsync(bytes)
   const valid = Boolean(zip.file("[Content_Types].xml") && zip.file("word/document.xml"))
   if (!valid) return { valid: false, text: "" }
@@ -70,7 +67,8 @@ export async function validateDocxRoundTrip(
   return { valid: true, text }
 }
 
-function renderBlock(block: DocumentBlock): Paragraph | Table {
+function renderBlock(block: DocumentBlock, docx: typeof import("docx")) {
+  const { HeadingLevel, Paragraph, Table, TableCell, TableRow, WidthType } = docx
   if (block.type === "table")
     return new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },

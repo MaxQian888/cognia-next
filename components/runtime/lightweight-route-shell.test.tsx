@@ -21,6 +21,10 @@ describe("isLightweightRoute", () => {
     expect(isLightweightRoute("/selection-toolbar")).toBe(true)
   })
 
+  it("keeps the tray panel out of the authenticated application runtime", () => {
+    expect(isLightweightRoute("/tray-panel")).toBe(true)
+  })
+
   it("accepts nested and trailing-slash forms without matching look-alike prefixes", () => {
     expect(isLightweightRoute("/status/")).toBe(true)
     expect(isLightweightRoute("/pet-overlay/avatar")).toBe(true)

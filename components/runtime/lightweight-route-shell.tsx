@@ -15,6 +15,7 @@ const LIGHTWEIGHT_ROUTE_PREFIXES = [
   "/pet-popup",
   "/island",
   "/selection-toolbar",
+  "/tray-panel",
 ] as const
 
 export function isLightweightRoute(pathname: string | null | undefined): boolean {
