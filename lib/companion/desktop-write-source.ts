@@ -115,6 +115,7 @@ import type {
 } from "@/types/agent/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { transport } from "@/lib/tauri"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import {
@@ -1116,6 +1117,7 @@ async function connectorSend(payload: Record<string, unknown>): Promise<{ messag
     createdAt: Date.now(),
   }
   await getDb().messages.add(row)
+  markSessionDirty(sessionId)
   return { messageId: id }
 }
 
@@ -1901,9 +1903,8 @@ async function conversationOverridesUpdate(
 ): Promise<{ override: unknown }> {
   const mutation = payload.mutation
   if (mutation !== undefined) {
-    const { applyConversationOverrideMutation, isConversationOverrideMutation } = await import(
-      "@/lib/connectors/inbox-writes/override-mutation"
-    )
+    const { applyConversationOverrideMutation, isConversationOverrideMutation } =
+      await import("@/lib/connectors/inbox-writes/override-mutation")
     if (!isConversationOverrideMutation(mutation)) {
       throw new Error("conversation_overrides_update.mutation is malformed")
     }

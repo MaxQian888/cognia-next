@@ -202,33 +202,56 @@ describe("buildCorpus", () => {
 
   // ---- incremental maintenance ----
 
-  it("addNewest makes a new message findable without a rebuild", () => {
+  it("fold makes a new message findable without a rebuild", () => {
     const corpus = buildCorpus([row("old body", { createdAt: 10 })])
-    corpus.addNewest([row("fresh needle", { messageId: "fresh", createdAt: 50 })])
+    corpus.fold([row("fresh needle", { messageId: "fresh", createdAt: 50 })])
     const hits = corpus.search("needle", 10)
     expect(hits).toHaveLength(1)
     expect(hits[0].row.messageId).toBe("fresh")
     expect(corpus.size).toBe(2)
   })
 
-  it("addNewest keeps the newest-first ordering", () => {
+  it("fold keeps the newest-first ordering", () => {
     const corpus = buildCorpus([row("needle old", { createdAt: 10 })])
-    corpus.addNewest([row("needle new", { createdAt: 50 })])
+    corpus.fold([row("needle new", { createdAt: 50 })])
     expect(corpus.search("needle", 10).map((h) => h.row.createdAt)).toEqual([50, 10])
   })
 
-  it("addNewest re-adding the same messageId does not double-count it", () => {
+  it("fold re-adding the same messageId does not double-count it", () => {
     // The idempotent-write property has to hold in memory too, or a re-projected
     // message would show up twice in the result list.
     const corpus = buildCorpus([row("body", { messageId: "dup", createdAt: 10 })])
-    corpus.addNewest([row("body needle", { messageId: "dup", createdAt: 10 })])
+    corpus.fold([row("body needle", { messageId: "dup", createdAt: 10 })])
     expect(corpus.search("needle", 10)).toHaveLength(1)
     expect(corpus.size).toBe(1)
   })
 
-  it("addNewest tolerates an empty batch", () => {
+  it("fold merges back-dated rows by createdAt instead of prepending them", () => {
+    // An external-agent history import writes years-old transcripts. Prepending
+    // them would leave `oldestResidentAt` naming a recent instant, so the
+    // cursor handed to `scanOlderChatSearchText` would skip every message
+    // between the true oldest row and that instant.
+    const corpus = buildCorpus([
+      row("recent needle", { messageId: "new", createdAt: 900 }),
+      row("older needle", { messageId: "mid", createdAt: 500 }),
+    ])
+    corpus.fold([
+      row("imported needle", { messageId: "imported", createdAt: 10 }),
+      row("imported needle too", { messageId: "imported2", createdAt: 20 }),
+    ])
+
+    expect(corpus.search("needle", 10).map((h) => h.row.messageId)).toEqual([
+      "new",
+      "mid",
+      "imported2",
+      "imported",
+    ])
+    expect(corpus.oldestResidentAt).toBe(10)
+  })
+
+  it("fold tolerates an empty batch", () => {
     const corpus = buildCorpus([row("body")])
-    corpus.addNewest([])
+    corpus.fold([])
     expect(corpus.size).toBe(1)
   })
 

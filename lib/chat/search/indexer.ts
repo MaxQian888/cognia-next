@@ -168,17 +168,23 @@ export async function drainSearchIndex(
 
     const sessionIds = [...dirtySessions]
     dirtySessions.clear()
+    // Accumulate across sessions and fold ONCE. `Corpus.fold` rebuilds every
+    // chunk (it concatenates up to ~12M characters), so folding per session
+    // turned a 500-session history import into 500 full corpus rebuilds.
+    const foldRows: ChatSearchTextRow[] = []
+    const foldRemoved: string[] = []
     for (const sessionId of sessionIds) {
       const { written, removed } = await deps.reproject(sessionId)
-      const corpus = deps.corpus()
-      if (corpus) {
-        if (removed.length > 0) corpus.remove(removed)
-        // `reprojectSession` returns ascending `createdAt`; the corpus wants
-        // newest-first, and getting this backwards would silently invert result
-        // ordering for every freshly-indexed turn.
-        if (written.length > 0) corpus.addNewest([...written].reverse())
-      }
+      foldRows.push(...written)
+      foldRemoved.push(...removed)
       report.sessions++
+    }
+    const corpus = deps.corpus()
+    if (corpus) {
+      if (foldRemoved.length > 0) corpus.remove(foldRemoved)
+      // `reprojectSession` returns ascending `createdAt`; `fold` re-sorts, so
+      // the order handed over here no longer decides result ordering.
+      if (foldRows.length > 0) corpus.fold(foldRows)
     }
 
     const step = await deps.backfillStep()

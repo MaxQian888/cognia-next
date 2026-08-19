@@ -118,6 +118,31 @@ function memberAt(starts: number[], offset: number): number {
   return lo
 }
 
+/**
+ * Newest-first ordering. `messageId` breaks a tie so two rows minted in the
+ * same millisecond order deterministically rather than by insertion accident.
+ */
+function compareNewestFirst(a: ChatSearchTextRow, b: ChatSearchTextRow): number {
+  if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt
+  return a.messageId < b.messageId ? 1 : a.messageId > b.messageId ? -1 : 0
+}
+
+/** Merge two newest-first lists into one, in O(n). */
+function mergeNewestFirst(
+  a: readonly ChatSearchTextRow[],
+  b: readonly ChatSearchTextRow[]
+): ChatSearchTextRow[] {
+  const out: ChatSearchTextRow[] = []
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    out.push(compareNewestFirst(a[i], b[j]) <= 0 ? a[i++] : b[j++])
+  }
+  while (i < a.length) out.push(a[i++])
+  while (j < b.length) out.push(b[j++])
+  return out
+}
+
 class ResidentCorpus {
   private chunks: Chunk[] = []
   private tombstones = new Set<string>()
@@ -237,17 +262,27 @@ class ResidentCorpus {
   }
 
   /**
-   * Fold in messages newer than everything resident.
+   * Fold projections into the corpus, keeping it newest-first.
    *
    * Re-adding a `messageId` replaces it rather than duplicating, mirroring the
    * idempotent Dexie write — a message re-projected by a second WebView must not
    * appear twice in the result list.
+   *
+   * The incoming rows are **merged by `createdAt`**, not prepended. They used to
+   * be prepended on the assumption that anything freshly indexed is newer than
+   * everything resident, which holds for a streaming turn and fails for every
+   * other producer: an external-agent history import (ADR-0062) writes years-old
+   * transcripts, and a connector backfill writes whatever the platform hands it.
+   * A prepended old row breaks the ordering invariant `oldestResidentAt` reads,
+   * so the cursor handed to `scanOlderChatSearchText` would name a *recent*
+   * instant and silently hide every older message from the query.
    */
-  addNewest(rows: readonly ChatSearchTextRow[]): void {
+  fold(rows: readonly ChatSearchTextRow[]): void {
     if (rows.length === 0) return
-    const incoming = new Set(rows.map((r) => r.messageId))
-    const kept = this.liveRows().filter((r) => !incoming.has(r.messageId))
-    this.reset([...rows, ...kept].slice(0, this.residentCap))
+    const incoming = [...rows].sort(compareNewestFirst)
+    const replaced = new Set(incoming.map((r) => r.messageId))
+    const kept = this.liveRows().filter((r) => !replaced.has(r.messageId))
+    this.reset(mergeNewestFirst(incoming, kept).slice(0, this.residentCap))
   }
 
   /** Forget messages that were deleted or truncated away. */

@@ -21,12 +21,16 @@ const clearMessages = jest.fn()
 const recordRecentItem = jest.fn()
 const clearAllRecents = jest.fn()
 const isTauriMock = jest.fn(() => true)
+const trackEvent = jest.fn(async () => true)
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => trackEvent(...(args as [])),
+}))
 jest.mock("next-themes", () => ({ useTheme: () => ({ theme: "dark", setTheme }) }))
 jest.mock("sonner", () => ({
   toast: {
@@ -144,6 +148,11 @@ describe("useGlobalSearchActions", () => {
     act(() => result.current.runItem(it))
     expect(close).toHaveBeenCalled()
     expect(recordRecentItem).toHaveBeenCalledWith(it)
+    // Result kind + action type only — never the row's label or the query.
+    expect(trackEvent).toHaveBeenCalledWith("app.search.activated", {
+      kind: "message",
+      actionType: "open-session",
+    })
     expect(select).toHaveBeenCalledWith("s2")
     expect(jump).toHaveBeenCalledWith("s2", "m1", { align: "center" })
     jump.mockResolvedValueOnce(false)

@@ -1,11 +1,11 @@
 /**
  * Pages (ADR-0129): every destination the navigation rail can reach — the
  * customisable catalog, hidden entries included — plus the two guild views
- * (Direct messages, Canvas). Labels come from the rail's own i18n tree so a
+ * (Chats, Canvas). Labels come from the rail's own i18n tree so a
  * page renamed there is renamed here.
  */
 
-import { MailIcon, PencilRulerIcon } from "lucide-react"
+import { MessagesSquareIcon, PencilRulerIcon } from "lucide-react"
 
 import { getSidebarCatalog, type SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
 import { matchTitles } from "./helpers"
@@ -30,7 +30,7 @@ export function navigationCandidates(ctx: GlobalSearchContext): NavCandidate[] {
       title: ctx.t("desktop.guildRail.directMessages"),
       route: "/",
       keywords: ["dm", "direct", "messages", "chats", "home"],
-      icon: { lucide: MailIcon },
+      icon: { lucide: MessagesSquareIcon },
       action: { type: "switch-guild", kind: "dm" },
     },
     {

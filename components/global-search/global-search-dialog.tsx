@@ -41,6 +41,7 @@ import { invalidateGlobalSearchCaches } from "@/lib/global-search/cache"
 import { SCOPED_GROUP_LIMIT } from "@/lib/global-search/engine"
 import { removeFilterToken } from "@/lib/global-search/query-parser"
 import { recordRecentQuery, type RecentItem } from "@/lib/global-search/recents"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import {
   primaryScopeOf,
   type GlobalSearchGroup,
@@ -110,6 +111,13 @@ export function GlobalSearchDialog({
   const openWith = useCallback(
     (detail: { query?: string; scope?: GlobalSearchScope }, source: string) => {
       log.info("global-search open", { source, seeded: Boolean(detail.query), scope: detail.scope })
+      void trackEvent("app.search.opened", {
+        via: source,
+        scope: detail.scope ?? "all",
+        // The flag only records *that* the opener seeded a query; its text
+        // never leaves the renderer.
+        seeded: Boolean(detail.query),
+      })
       invalidateGlobalSearchCaches()
       setLimit(undefined)
       if (detail.scope) setScope(detail.scope)

@@ -122,6 +122,39 @@ describe("useGlobalSearch", () => {
     expect(result.current.parsed.text).toBe("hello")
   })
 
+  it("re-runs the query only when the context identity actually changes", async () => {
+    // The effect sets state, so anything that hands it a fresh `ctx` on every
+    // render turns it into a self-feeding loop — which is exactly how ⌘K died
+    // with "Maximum update depth exceeded" once `useTrayStateSnapshot` started
+    // returning a fresh literal per render (it feeds `usePluginQuickActions`,
+    // which feeds this context). Assembling the context is
+    // `use-global-search-context`'s job; refusing to spin on a STABLE one is
+    // this hook's half of the contract.
+    runGlobalSearch.mockResolvedValue(outcome({ groups: [group], totalHits: 1 }))
+    const { rerender } = renderHook(
+      ({ c }: { c: typeof ctx }) => useGlobalSearch({ rawQuery: "hello", ctx: c, enabled: true }),
+      { initialProps: { c: ctx } }
+    )
+    await act(async () => {
+      jest.advanceTimersByTime(GLOBAL_SEARCH_DEBOUNCE_MS + 1)
+    })
+    await waitFor(() => expect(runGlobalSearch).toHaveBeenCalledTimes(1))
+
+    rerender({ c: ctx })
+    rerender({ c: ctx })
+    await act(async () => {
+      jest.advanceTimersByTime(GLOBAL_SEARCH_DEBOUNCE_MS + 1)
+    })
+    expect(runGlobalSearch).toHaveBeenCalledTimes(1)
+
+    // A genuinely different context (workspace switch) still re-queries.
+    rerender({ c: { ...ctx, activeProjectId: "p2" } })
+    await act(async () => {
+      jest.advanceTimersByTime(GLOBAL_SEARCH_DEBOUNCE_MS + 1)
+    })
+    await waitFor(() => expect(runGlobalSearch).toHaveBeenCalledTimes(2))
+  })
+
   it("aborts the superseded run and ignores its late result", async () => {
     let resolveFirst!: (o: GlobalSearchOutcome) => void
     const first = new Promise<GlobalSearchOutcome>((resolve) => {

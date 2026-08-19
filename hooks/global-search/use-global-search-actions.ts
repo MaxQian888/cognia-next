@@ -29,6 +29,7 @@ import { clearAllGlobalSearchRecents, recordRecentItem } from "@/lib/global-sear
 import type { GlobalSearchAction, GlobalSearchItem } from "@/lib/global-search/types"
 import { piPackageInstallHref } from "@/lib/pi-packages/deep-link"
 import { getQuickAction, runQuickAction } from "@/lib/plugin/registries/quick-action-registry"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { isTauri } from "@/lib/tauri"
 import { checkForUpdate } from "@/lib/tauri/updater"
 import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
@@ -291,6 +292,11 @@ export function useGlobalSearchActions({
   const runItem = useCallback(
     (item: GlobalSearchItem) => {
       log.info("global-search select", { id: item.id, kind: item.kind })
+      // Result *kinds*, never the row's label or the query behind it.
+      void trackEvent("app.search.activated", {
+        kind: item.kind,
+        actionType: item.action.type,
+      })
       close()
       recordRecentItem(item)
       void runAction(item.action).catch((err) => {

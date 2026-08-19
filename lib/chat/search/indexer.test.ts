@@ -177,6 +177,31 @@ describe("drainSearchIndex", () => {
     expect(corpus.search("needle", 5).map((h) => h.row.messageId)).toEqual(["new", "old"])
   })
 
+  it("folds every dirty session into the corpus in ONE rebuild", async () => {
+    // `Corpus.fold` re-concatenates every chunk, so folding per session turned
+    // a bulk history import into one full rebuild per imported conversation.
+    const corpus = buildCorpus([])
+    const folds = jest.spyOn(corpus, "fold")
+    markSessionDirty("s1")
+    markSessionDirty("s2")
+    await drainSearchIndex(
+      deps({
+        corpus: () => corpus,
+        reproject: async (sessionId) => ({
+          written: [row("needle", { messageId: sessionId, sessionId })],
+          removed: [],
+        }),
+      })
+    )
+    expect(folds).toHaveBeenCalledTimes(1)
+    expect(
+      corpus
+        .search("needle", 5)
+        .map((h) => h.row.messageId)
+        .sort()
+    ).toEqual(["s1", "s2"])
+  })
+
   it("drops re-projection removals from the corpus", async () => {
     const corpus = buildCorpus([row("needle", { messageId: "truncated" })])
     markSessionDirty("s1")

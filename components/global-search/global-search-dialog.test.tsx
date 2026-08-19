@@ -23,12 +23,16 @@ const shortcutHandlers = new Map<string, (event: KeyboardEvent) => void>()
 const platformRef = { current: "tauri" as string }
 const invalidateCaches = jest.fn()
 const recordRecentQuery = jest.fn()
+const trackEvent = jest.fn(async () => true)
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
   useFormatter: () => ({ relativeTime: () => "rel", dateTime: () => "abs" }),
   useNow: () => new Date(1_750_000_000_000),
+}))
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => trackEvent(...(args as [])),
 }))
 jest.mock("@cognia/logging", () => ({
   loggers: { ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
@@ -145,6 +149,12 @@ describe("GlobalSearchDialog", () => {
     const input = await screen.findByTestId("global-search-input")
     expect(input).toHaveValue("in:settings theme")
     expect(invalidateCaches).toHaveBeenCalled()
+    // `seeded` records only that a query was pre-filled — never its text.
+    expect(trackEvent).toHaveBeenCalledWith("app.search.opened", {
+      via: "request",
+      scope: "pages",
+      seeded: true,
+    })
     expect(screen.getByRole("tab", { name: /scopes.pages/ })).toHaveAttribute(
       "aria-selected",
       "true"
@@ -165,6 +175,11 @@ describe("GlobalSearchDialog", () => {
     expect(shortcutHandlers.has("app.commandPalette.toggle")).toBe(true)
     act(() => toggle())
     expect(await screen.findByTestId("global-search-dialog")).toBeInTheDocument()
+    expect(trackEvent).toHaveBeenCalledWith("app.search.opened", {
+      via: "shortcut",
+      scope: "all",
+      seeded: false,
+    })
     act(() => toggle())
     await waitFor(() => expect(screen.queryByTestId("global-search-dialog")).toBeNull())
   })
