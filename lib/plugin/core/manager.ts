@@ -302,6 +302,26 @@ const DEFAULT_MAX_LOAD_CONCURRENCY = 4
 let pluginManagerSequence = 0
 const PLUGIN_HOST_EPOCH = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
+/**
+ * Runtimes whose resources cannot outlive the host realm that created them.
+ *
+ * `frontend` is renderer closures. `native` is a `ctx.webview` / `ctx.window` /
+ * `ctx.worker` handle, which the shell destroys along with the webview that
+ * opened it. Neither has a generation-aware probe, so both are retired on a
+ * host-epoch change instead — the same argument, and the same trade-off, in
+ * both cases.
+ *
+ * `native` used to be excluded from that rule while also being excluded from
+ * the isolated-runtime probe list, which left it with NO recovery path at all:
+ * `missingRuntimeProbe` was unconditionally true for it, so a plugin that once
+ * failed teardown holding a window handle stayed `dirty` across every restart
+ * and refused to activate forever — and the Recover button in the plugin
+ * detail header could not clear it either.
+ */
+function isHostScopedRuntime(runtime: PluginDirtyDiagnostic["runtime"]): boolean {
+  return runtime === "frontend" || runtime === "native"
+}
+
 interface DiscoveredPlugin {
   manifest: PluginManifest
   path: string
@@ -1362,15 +1382,48 @@ export class PluginManager {
   }
 
   async recoverPluginRuntime(pluginId: string): Promise<boolean> {
-    return this.withLifecycleLock(pluginId, async () => {
+    return this.withLifecycleLock(pluginId, () => this.recoverPluginRuntimeInner(pluginId))
+  }
+
+  /**
+   * Retire dirt this host process did not create.
+   *
+   * Called from the activation guards, which already hold the lifecycle lock
+   * (it is a serial queue, not a reentrant one, so they cannot call
+   * `recoverPluginRuntime`). Deliberately narrow: dirt recorded by the CURRENT
+   * epoch describes resources that really may still be live, and only the user
+   * clears that. Dirt carried over from a dead epoch is bookkeeping, and
+   * refusing to activate on it strands the plugin permanently.
+   */
+  private async tryRetireStaleDirtyRuntime(
+    pluginId: string,
+    lifecycle: PluginLifecycleRecord
+  ): Promise<boolean> {
+    const epoch = lifecycle.dirty?.hostEpoch
+    if (!epoch || epoch === PLUGIN_HOST_EPOCH) return false
+    try {
+      return await this.recoverPluginRuntimeInner(pluginId)
+    } catch (error) {
+      loggers.manager.warn(
+        `[manager] stale runtime recovery failed for ${pluginId}:`,
+        String(error)
+      )
+      return false
+    }
+  }
+
+  private async recoverPluginRuntimeInner(pluginId: string): Promise<boolean> {
+    {
       const lifecycle = await this.getPluginLifecycleState(pluginId)
       if (lifecycle.actual !== "dirty") return true
 
-      // A different renderer epoch retires renderer-only closures after the
-      // registries rebuild. Isolated/native runtimes deliberately bypass this
-      // shortcut and require a generation-aware probe below.
+      // A different host epoch retires host-scoped resources after the
+      // registries rebuild. Isolated runtimes (node/python/wasm/vscode) can
+      // genuinely outlive the realm, so they bypass this shortcut and require
+      // the generation-aware probe below.
       if (
-        lifecycle.dirty?.runtime === "frontend" &&
+        lifecycle.dirty &&
+        isHostScopedRuntime(lifecycle.dirty.runtime) &&
         lifecycle.dirty.hostEpoch &&
         lifecycle.dirty.hostEpoch !== PLUGIN_HOST_EPOCH
       ) {
@@ -1424,10 +1477,24 @@ export class PluginManager {
           })
         }
       }
+      // An isolated-runtime record with NO `runtimeGeneration` names nothing
+      // that can be probed — `confirmIsolatedRuntimeAbsent` returns false on
+      // the missing generation before it asks the host anything. Demanding a
+      // probe for it therefore guarantees permanent dirt instead of preventing
+      // a leak: there is no handle to reclaim, and the process that could have
+      // held one is gone (the epoch moved). Records that DO carry a generation
+      // still have to pass the probe.
+      const unprobeableStaleRecord = Boolean(
+        lifecycle.dirty &&
+        !lifecycle.dirty.runtimeGeneration &&
+        lifecycle.dirty.hostEpoch &&
+        lifecycle.dirty.hostEpoch !== PLUGIN_HOST_EPOCH
+      )
       const missingRuntimeProbe = Boolean(
         lifecycle.dirty &&
         (lifecycle.dirty.hostEpoch === PLUGIN_HOST_EPOCH ||
-          lifecycle.dirty.runtime !== "frontend") &&
+          !isHostScopedRuntime(lifecycle.dirty.runtime)) &&
+        !unprobeableStaleRecord &&
         !scope &&
         !loaderDirty &&
         !isolatedRuntimeAbsent &&
@@ -1468,7 +1535,7 @@ export class PluginManager {
       })
       this.releaseActivationLease(pluginId)
       return true
-    })
+    }
   }
 
   private ensureA2UIBridge(): PluginA2UIBridge {
@@ -2856,7 +2923,11 @@ export class PluginManager {
 
     const lifecycle = await this.getPluginLifecycleState(pluginId)
     if (lifecycle.intent === "disabled") throw new PluginIntentDisabledError(pluginId)
-    if (lifecycle.actual === "dirty") throw new PluginDirtyRuntimeError(pluginId)
+    if (
+      lifecycle.actual === "dirty" &&
+      !(await this.tryRetireStaleDirtyRuntime(pluginId, lifecycle))
+    )
+      throw new PluginDirtyRuntimeError(pluginId)
 
     if (this.runtimeServicesEnabled()) {
       const cycle = this.requiredServiceCycle(pluginId)
@@ -3216,7 +3287,14 @@ export class PluginManager {
 
     const lifecycle = await this.getPluginLifecycleState(pluginId)
     if (lifecycle.intent === "disabled") throw new PluginIntentDisabledError(pluginId)
-    if (lifecycle.actual === "dirty") throw new PluginDirtyRuntimeError(pluginId)
+    // Dirt inherited from a dead host epoch describes resources that cannot
+    // exist any more; retiring it here is what keeps one failed teardown from
+    // permanently bricking the plugin on every subsequent launch.
+    if (
+      lifecycle.actual === "dirty" &&
+      !(await this.tryRetireStaleDirtyRuntime(pluginId, lifecycle))
+    )
+      throw new PluginDirtyRuntimeError(pluginId)
 
     if (plugin.status === "enabled") {
       return
@@ -4279,9 +4357,27 @@ export class PluginManager {
           await grantPluginPermission(pluginId, permission, "manifest")
         }
       } catch (error) {
-        this.runtimeCleanupFailures.set(pluginId, {
-          runtime: this.config.nodeHostInvoker ? "node" : "frontend",
-          error,
+        // NOT a runtime-cleanup failure. `runtimeCleanupFailures` means "the
+        // previous generation's runtime effects could not be confirmed gone",
+        // and it feeds `hasUnresolvedActivationResources` — so recording a
+        // failed ledger RPC here classified the next activation failure as
+        // `dirty` rather than `error`, stamped `runtime: "node"` on it (the
+        // headless brain sets `nodeHostInvoker`), and left no
+        // `runtimeGeneration`. `confirmIsolatedRuntimeAbsent` needs a
+        // generation to probe, so that record was unrecoverable by
+        // construction: every first-party plugin declaring a permission
+        // refused to activate on every subsequent launch, and the Recover
+        // button could not clear it either.
+        //
+        // Mirroring owns no runtime resources. It is an idempotent host RPC
+        // that re-runs on the next enable, so a failure is reported and left
+        // behind rather than escalated into runtime dirt.
+        recordPluginPointDiagnostic(pluginId, {
+          code: "plugin.permission.mirror-failed",
+          severity: "warning",
+          pointKind: "runtime",
+          pointId: permission,
+          message: `Declared permission "${permission}" was not mirrored to the host ledger; host-side gates fall back to the renderer guard until the next enable.`,
         })
         recordSilentFailure(
           pluginId,

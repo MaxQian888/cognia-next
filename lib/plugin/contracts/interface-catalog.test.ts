@@ -12,7 +12,7 @@ describe("plugin interface catalog", () => {
   beforeEach(() => clearPluginApiAuditEvents())
 
   it("indexes the canonical ctx method surface", () => {
-    expect(listPluginApiMethodContracts()).toHaveLength(628)
+    expect(listPluginApiMethodContracts()).toHaveLength(646)
     expect(getPluginApiMethodContract("session.listSessions")).toMatchObject({
       name: "listSessions",
       namespace: { authorPath: "ctx.session" },
@@ -27,6 +27,16 @@ describe("plugin interface catalog", () => {
     })
     expect(getPluginApiMethodContract("media.video.export")).toMatchObject({
       requiredPermissions: ["media:video:export"],
+    })
+    // `ctx.logs` splits its own surface: operational log reads and span reads
+    // are separate grants, because spans can carry model input/output.
+    expect(getPluginApiMethodContract("logs.query")).toMatchObject({
+      requiredPermissions: ["logs:read"],
+      namespace: { authorPath: "ctx.logs", dataClassification: "sensitive" },
+    })
+    expect(getPluginApiMethodContract("logs.traces.timeline")).toMatchObject({
+      name: "traces.timeline",
+      requiredPermissions: ["trace:read"],
     })
   })
 

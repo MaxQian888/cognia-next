@@ -2264,6 +2264,8 @@ export interface PluginHostContextAPI {
   subscription: import("@/lib/plugin/api/subscription-api").PluginSubscriptionAPI
   terminal: import("@/lib/plugin/api/terminal-api").PluginTerminalAPI
   perf: import("@/lib/plugin/api/perf-api").PluginPerfAPI
+  /** Read-only logs + agent-trace access (`logs:read` / `trace:read`). */
+  logs: import("@/lib/plugin/api/logs-api").PluginLogsAPI
   connectors: import("@/lib/plugin/api/connectors-api").PluginConnectorsAPI
   integrations: PluginIntegrationsAPI
   share: import("@/lib/plugin/api/share-api").PluginShareAPI

@@ -104,6 +104,8 @@
     "team:write",
     "subscription:read",
     "perf:read",
+    "trace:read",
+    "logs:read",
     "connectors:read",
     "connectors:send",
     "connectors:manage",
@@ -5912,61 +5914,6 @@
       ]
     },
     {
-      "id": "services",
-      "authorPath": "ctx.services",
-      "type": "PluginServicesAPI",
-      "stability": "experimental",
-      "introducedIn": "0.4.0",
-      "runtimes": ["frontend", "hybrid"],
-      "platforms": ["desktop", "web", "mobile"],
-      "transport": "direct",
-      "factory": "context.services",
-      "enforcement": "active",
-      "dataClassification": "internal",
-      "timeoutMs": null,
-      "retry": "never",
-      "errorPolicy": "preserve",
-      "lifecycle": "plugin",
-      "methods": [
-        {
-          "id": "services.getProvider",
-          "name": "getProvider",
-          "requiredPermissions": [],
-          "consentTier": "none",
-          "risk": "low",
-          "idempotent": true,
-          "cancellable": false,
-          "resourceEffect": {
-            "kind": "none"
-          }
-        },
-        {
-          "id": "services.isAvailable",
-          "name": "isAvailable",
-          "requiredPermissions": [],
-          "consentTier": "none",
-          "risk": "low",
-          "idempotent": true,
-          "cancellable": false,
-          "resourceEffect": {
-            "kind": "none"
-          }
-        },
-        {
-          "id": "services.onOptionalServiceChange",
-          "name": "onOptionalServiceChange",
-          "requiredPermissions": [],
-          "consentTier": "none",
-          "risk": "low",
-          "idempotent": false,
-          "cancellable": false,
-          "resourceEffect": {
-            "kind": "host-owned"
-          }
-        }
-      ]
-    },
-    {
       "id": "logger",
       "authorPath": "ctx.logger",
       "type": "PluginLogger",
@@ -6074,6 +6021,193 @@
           "consentTier": "none",
           "risk": "low",
           "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "logs",
+      "authorPath": "ctx.logs",
+      "type": "PluginLogsAPI",
+      "stability": "stable",
+      "introducedIn": "0.1.0",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "transport": "direct",
+      "factory": "context.logs",
+      "enforcement": "shadow",
+      "dataClassification": "sensitive",
+      "timeoutMs": null,
+      "retry": "never",
+      "errorPolicy": "preserve",
+      "lifecycle": "plugin",
+      "methods": [
+        {
+          "id": "logs.export",
+          "name": "export",
+          "requiredPermissions": ["logs:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.modules",
+          "name": "modules",
+          "requiredPermissions": ["logs:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.query",
+          "name": "query",
+          "requiredPermissions": ["logs:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.stats",
+          "name": "stats",
+          "requiredPermissions": ["logs:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.subscribe",
+          "name": "subscribe",
+          "requiredPermissions": ["logs:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "logs.traces.bySession",
+          "name": "traces.bySession",
+          "requiredPermissions": ["trace:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.traces.list",
+          "name": "traces.list",
+          "requiredPermissions": ["trace:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.traces.serialize",
+          "name": "traces.serialize",
+          "requiredPermissions": ["trace:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.traces.spans",
+          "name": "traces.spans",
+          "requiredPermissions": ["trace:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.traces.stats",
+          "name": "traces.stats",
+          "requiredPermissions": ["trace:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.traces.subscribe",
+          "name": "traces.subscribe",
+          "requiredPermissions": ["trace:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "logs.traces.timeline",
+          "name": "traces.timeline",
+          "requiredPermissions": ["trace:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.traces.waterfall",
+          "name": "traces.waterfall",
+          "requiredPermissions": ["trace:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "logs.transports",
+          "name": "transports",
+          "requiredPermissions": ["logs:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
@@ -8021,6 +8155,61 @@
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "services",
+      "authorPath": "ctx.services",
+      "type": "PluginServicesAPI",
+      "stability": "experimental",
+      "introducedIn": "0.4.0",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "transport": "direct",
+      "factory": "context.services",
+      "enforcement": "active",
+      "dataClassification": "internal",
+      "timeoutMs": null,
+      "retry": "never",
+      "errorPolicy": "preserve",
+      "lifecycle": "plugin",
+      "methods": [
+        {
+          "id": "services.getProvider",
+          "name": "getProvider",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "services.isAvailable",
+          "name": "isAvailable",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "services.onOptionalServiceChange",
+          "name": "onOptionalServiceChange",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "host-owned"
           }
         }
       ]

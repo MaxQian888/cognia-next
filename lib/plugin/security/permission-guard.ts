@@ -118,6 +118,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
     "automation:window",
   ],
   companion: ["companion:read", "companion:control", "companion:goal-control"],
+  observability: ["perf:read", "logs:read", "trace:read"],
   templates: [
     "templates:read",
     "templates:contribute",
@@ -216,6 +217,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
     "Create/edit/assign tasks, comment, move cards, and manage non-lead teammates and team config on your agent-team boards (never starts runs)",
   "subscription:read": "Read subscription plan and usage metrics",
   "perf:read": "Read performance dashboard snapshots and the live sample stream",
+  "logs:read": "Read this app's local logs, their statistics, and transport health",
+  "trace:read":
+    "Read agent-trace spans — models, tokens, cost, timing, and (when you have content capture on) redacted prompt and response previews",
   "connectors:read":
     "List connector adapters, bots, and conversation bindings; observe inbound platform events",
   "connectors:send": "Send outbound messages through a connected platform (direct or queued)",

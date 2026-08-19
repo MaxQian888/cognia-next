@@ -89,6 +89,7 @@ description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由�
 | `ctx.subscription` | `subscription-api.ts:61` | subscription/core/transport + Dexie | `subscription:read`（只读） | `listAccounts:64`、`getUsage:76`、`onUsageUpdate:88` |
 | `ctx.terminal` | `terminal-api.ts:175` | terminal dock（spawnFromDock） | `terminal:spawn`/`write`/`kill`/`completion`/`safety`（DANGEROUS） | `spawn:206`、`write:236`、`kill:243`、`classifyCommand:304` |
 | `ctx.perf` | `perf-api.ts:42` | perf 后端 | `perf:read`（只读） | `snapshot:44`、`hotspots:45`、`subscribe:48` |
+| `ctx.logs` | `logs-api.ts` | IndexedDB 日志库 + `agentTraces` Dexie 表 | `logs:read`（日志、统计、传输健康）/ `trace:read`（span）—— 只读 | `query`、`stats`、`subscribe`、`transports`、`traces.list`、`traces.timeline`、`traces.subscribe` |
 | `ctx.connectors` | `connectors-api.ts:248` | ConnectorBus + adapterInstances | `connectors:read`/`send`/`manage`（send、manage 为 DANGEROUS） | send / edit / delete + A2UI builder（`:35`） |
 | `ctx.share` | `share-api.ts:51` | lib/share + shared-links Dexie | `share:read` / `share:create` | `create:53`、`revoke:54`、`getStats:57` |
 | `ctx.backup` | `backup-api.ts:64` | buildExportEnvelope / importEnvelope | `backup:read` / `backup:write`（绝不含 API key） | `create:66`、`restore:75`、`listHistory:82` |
@@ -211,6 +212,7 @@ graph TD
     companion["ctx.companion<br/>companion-api.ts:85"]
     connectors["ctx.connectors<br/>connectors-api.ts:248"]
     perf["ctx.perf<br/>perf-api.ts:42"]
+    logs["ctx.logs<br/>logs-api.ts"]
     share["ctx.share<br/>share-api.ts:51"]
   end
 

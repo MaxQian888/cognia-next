@@ -46,7 +46,7 @@ import {
 import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
 import { __resetPluginActivationProgressStoreForTesting } from "@/stores/plugin-runtime/plugin-activation-progress-store"
 import { PluginActivationConflictError, PluginLifecycleCoordinator } from "./lifecycle-coordinator"
-import { InMemoryPluginLifecycleStateAdapter } from "./lifecycle-state"
+import { InMemoryPluginLifecycleStateAdapter, type PluginDirtyDiagnostic } from "./lifecycle-state"
 import { clearPythonLogs, getPythonLogs } from "@/lib/plugin/python/log-buffer"
 
 const mockTransportCall = jest.fn()
@@ -485,6 +485,33 @@ describe("PluginManager", () => {
         "plugin_permission_grant",
         expect.objectContaining({ permission: "filesystem:write" })
       )
+    })
+
+    it("does not turn a failed ledger mirror into runtime dirt", async () => {
+      // A failed `plugin_permission_grant` used to land in
+      // `runtimeCleanupFailures`, which is the "teardown unconfirmed" map. That
+      // made the next activation failure `dirty` instead of `error`, with
+      // runtime "node" and no `runtimeGeneration` — a record no probe can
+      // clear, so every permission-declaring plugin refused to activate on
+      // every later launch.
+      mockGuard.getTier.mockReturnValue("silent")
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockTransportCall.mockRejectedValue(new Error("service transport not ready"))
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          mirrorDeclaredPermissionsToLedger: (id: string, perms: string[]) => Promise<void>
+        }
+      ).mirrorDeclaredPermissionsToLedger("perm-plugin", ["clipboard:read"])
+
+      expect(
+        (
+          manager as unknown as {
+            hasUnresolvedActivationResources: (id: string) => boolean
+          }
+        ).hasUnresolvedActivationResources("perm-plugin")
+      ).toBe(false)
     })
 
     it("does not mirror to the ledger in web mode (no Tauri invoke)", async () => {
@@ -4161,16 +4188,20 @@ describe("PluginManager", () => {
       expect(restore).toHaveBeenCalledTimes(1)
     })
 
-    it("keeps an isolated runtime dirty when no generation-aware probe is possible", async () => {
+    it("retires a native dirty record left by a previous host epoch", async () => {
+      // A `ctx.webview` / `ctx.window` handle belongs to the realm that opened
+      // it. `native` used to be excluded from BOTH the host-epoch shortcut and
+      // the isolated-runtime probe list, so it had no recovery path at all and
+      // the plugin refused to activate on every subsequent launch.
       mockGetState.mockReturnValue({ plugins: {} })
       const lifecycleState = new InMemoryPluginLifecycleStateAdapter()
-      await lifecycleState.write("orphan-python", 0, {
+      await lifecycleState.write("orphan-native", 0, {
         actual: "dirty",
         dirty: {
-          runtime: "python",
+          runtime: "native",
           reason: "unconfirmed",
           at: 1,
-          message: "previous Python host",
+          message: "webview still open",
           hostEpoch: "previous-host-epoch",
         },
       })
@@ -4179,10 +4210,88 @@ describe("PluginManager", () => {
         lifecycleStateAdapter: lifecycleState,
       })
 
+      await expect(manager.recoverPluginRuntime("orphan-native")).resolves.toBe(true)
+      await expect(lifecycleState.read("orphan-native")).resolves.toMatchObject({
+        actual: "inactive",
+      })
+    })
+
+    it("keeps a native dirty record from THIS host epoch dirty", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      const lifecycleState = new InMemoryPluginLifecycleStateAdapter()
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleStateAdapter: lifecycleState,
+      })
+      const scope = manager.getPluginDisposableScope("live-native")
+      scope.track(() => Promise.reject(new Error("webview still open")), "ctx.webview.create")
+      await scope.dispose()
+      await lifecycleState.write("live-native", 0, {
+        actual: "dirty",
+        dirty: (
+          manager as unknown as {
+            buildDirtyDiagnostic: (id: string, message: string) => PluginDirtyDiagnostic
+          }
+        ).buildDirtyDiagnostic("live-native", "cleanup failed"),
+      })
+
+      await expect(manager.recoverPluginRuntime("live-native")).resolves.toBe(false)
+      await expect(lifecycleState.read("live-native")).resolves.toMatchObject({ actual: "dirty" })
+    })
+
+    it("keeps an isolated runtime dirty when THIS host recorded it without a probe", async () => {
+      // Same epoch = this process may still own the runtime, and with no
+      // generation there is no way to ask. Refusing is the safe direction.
+      mockGetState.mockReturnValue({ plugins: {} })
+      const lifecycleState = new InMemoryPluginLifecycleStateAdapter()
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleStateAdapter: lifecycleState,
+      })
+      await lifecycleState.write("orphan-python", 0, {
+        actual: "dirty",
+        dirty: {
+          ...(
+            manager as unknown as {
+              buildDirtyDiagnostic: (id: string, message: string) => PluginDirtyDiagnostic
+            }
+          ).buildDirtyDiagnostic("orphan-python", "previous Python host"),
+          runtime: "python",
+        },
+      })
+
       await expect(manager.recoverPluginRuntime("orphan-python")).resolves.toBe(false)
       await expect(lifecycleState.read("orphan-python")).resolves.toMatchObject({
         actual: "dirty",
         dirty: { message: "No generation-aware runtime probe is available" },
+      })
+    })
+
+    it("retires an isolated dirty record that a dead host left with no generation", async () => {
+      // The shape a mislabelled failure leaves behind (a permission-mirror RPC
+      // recorded as runtime dirt): runtime "node", no `runtimeGeneration`.
+      // Nothing is probeable and nothing is reclaimable, so demanding a probe
+      // bricked the plugin on every subsequent launch.
+      mockGetState.mockReturnValue({ plugins: {} })
+      const lifecycleState = new InMemoryPluginLifecycleStateAdapter()
+      await lifecycleState.write("orphan-node-nogen", 0, {
+        actual: "dirty",
+        dirty: {
+          runtime: "node",
+          reason: "unconfirmed",
+          at: 1,
+          message: "No generation-aware runtime probe is available",
+          hostEpoch: "previous-host-epoch",
+        },
+      })
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        lifecycleStateAdapter: lifecycleState,
+      })
+
+      await expect(manager.recoverPluginRuntime("orphan-node-nogen")).resolves.toBe(true)
+      await expect(lifecycleState.read("orphan-node-nogen")).resolves.toMatchObject({
+        actual: "inactive",
       })
     })
 

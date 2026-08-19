@@ -91,6 +91,8 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "team:write",
   "subscription:read",
   "perf:read",
+  "trace:read",
+  "logs:read",
   "connectors:read",
   "connectors:send",
   "connectors:manage",
@@ -1153,15 +1155,6 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.lifecycle.onDispose": {
     kind: "host-owned",
   },
-  "ctx.services.getProvider": {
-    kind: "none",
-  },
-  "ctx.services.isAvailable": {
-    kind: "none",
-  },
-  "ctx.services.onOptionalServiceChange": {
-    kind: "host-owned",
-  },
   "ctx.logger.child": {
     kind: "none",
   },
@@ -1184,6 +1177,48 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.logger.withContext": {
+    kind: "none",
+  },
+  "ctx.logs.export": {
+    kind: "none",
+  },
+  "ctx.logs.modules": {
+    kind: "none",
+  },
+  "ctx.logs.query": {
+    kind: "none",
+  },
+  "ctx.logs.stats": {
+    kind: "none",
+  },
+  "ctx.logs.subscribe": {
+    kind: "returned-disposer",
+  },
+  "ctx.logs.traces.bySession": {
+    kind: "none",
+  },
+  "ctx.logs.traces.list": {
+    kind: "none",
+  },
+  "ctx.logs.traces.serialize": {
+    kind: "none",
+  },
+  "ctx.logs.traces.spans": {
+    kind: "none",
+  },
+  "ctx.logs.traces.stats": {
+    kind: "none",
+  },
+  "ctx.logs.traces.subscribe": {
+    kind: "returned-disposer",
+  },
+  "ctx.logs.traces.timeline": {
+    kind: "none",
+  },
+  "ctx.logs.traces.waterfall": {
+    kind: "none",
+  },
+  "ctx.logs.transports": {
     kind: "none",
   },
   "ctx.media.image.load": {
@@ -1602,6 +1637,15 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   },
   "ctx.secrets.store": {
     kind: "none",
+  },
+  "ctx.services.getProvider": {
+    kind: "none",
+  },
+  "ctx.services.isAvailable": {
+    kind: "none",
+  },
+  "ctx.services.onOptionalServiceChange": {
+    kind: "host-owned",
   },
   "ctx.session.addMessage": {
     kind: "none",

@@ -194,6 +194,12 @@ export type {
   PluginRunScriptOptions,
 } from "@/lib/plugin/api/terminal-api"
 export type { PluginPerfAPI } from "@/lib/plugin/api/perf-api"
+export type {
+  PluginLogsAPI,
+  PluginTraceAPI,
+  PluginTraceListOptions,
+  PluginTraceStatsOptions,
+} from "@/lib/plugin/api/logs-api"
 export type { PluginShareAPI } from "@/lib/plugin/api/share-api"
 export type {
   PluginBackupAPI,

@@ -87,6 +87,7 @@ export { createTeamAPI } from "./team-api"
 export { createSubscriptionAPI } from "./subscription-api"
 export { createTerminalAPI, TerminalAccessError } from "./terminal-api"
 export { createPerfAPI } from "./perf-api"
+export { createLogsAPI, resetPluginLogsTransport } from "./logs-api"
 export { createShareAPI } from "./share-api"
 export { createBackupAPI } from "./backup-api"
 export { createAutomationAPI } from "./automation-api"
@@ -172,6 +173,12 @@ export type {
   PluginRunScriptOptions,
 } from "./terminal-api"
 export type { PluginPerfAPI } from "./perf-api"
+export type {
+  PluginLogsAPI,
+  PluginTraceAPI,
+  PluginTraceListOptions,
+  PluginTraceStatsOptions,
+} from "./logs-api"
 export type { PluginShareAPI } from "./share-api"
 export type {
   PluginBackupAPI,

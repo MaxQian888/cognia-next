@@ -40,8 +40,8 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.import` | 5 | None | frontend, hybrid | internal |
 | `ctx.integrations` | 16 | `integrations:execute`, `integrations:manage`, `integrations:read`, `integrations:events` | frontend, hybrid | sensitive |
 | `ctx.lifecycle` | 1 | None | frontend, hybrid | internal |
-| `ctx.services` | 3 | None | frontend, hybrid | internal |
 | `ctx.logger` | 8 | None | frontend, hybrid | internal |
+| `ctx.logs` | 14 | `logs:read`, `trace:read` | frontend, hybrid | sensitive |
 | `ctx.media` | 47 | `media:video:read`, `media:video:write`, `media:video:export`, `ai:chat` | frontend, hybrid | sensitive |
 | `ctx.memory` | 7 | `memory:read`, `memory:write` | frontend, hybrid | sensitive |
 | `ctx.messagePart` | 1 | `extension:ui` | frontend, hybrid | internal |
@@ -57,6 +57,7 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.quickActions` | 2 | None | frontend, hybrid | internal |
 | `ctx.scheduler` | 16 | None | frontend, hybrid | internal |
 | `ctx.secrets` | 6 | `secrets:write`, `secrets:read` | frontend, hybrid | secret |
+| `ctx.services` | 3 | None | frontend, hybrid | internal |
 | `ctx.session` | 15 | `session:write`, `session:delete`, `session:read` | frontend, hybrid | sensitive |
 | `ctx.settings` | 3 | None | frontend, hybrid | internal |
 | `ctx.share` | 6 | `share:create`, `share:read` | frontend, hybrid | internal |
@@ -573,14 +574,6 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | --- | --- | --- | --- |
 | `lifecycle.onDispose` | None | low | No |
 
-## `ctx.services`
-
-| Method | Permissions | Risk | Idempotent |
-| --- | --- | --- | --- |
-| `services.getProvider` | None | low | Yes |
-| `services.isAvailable` | None | low | Yes |
-| `services.onOptionalServiceChange` | None | low | No |
-
 ## `ctx.logger`
 
 | Method | Permissions | Risk | Idempotent |
@@ -593,6 +586,25 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `logger.trace` | None | low | No |
 | `logger.warn` | None | low | No |
 | `logger.withContext` | None | low | No |
+
+## `ctx.logs`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `logs.export` | `logs:read` | medium | Yes |
+| `logs.modules` | `logs:read` | medium | Yes |
+| `logs.query` | `logs:read` | medium | Yes |
+| `logs.stats` | `logs:read` | medium | Yes |
+| `logs.subscribe` | `logs:read` | medium | No |
+| `logs.traces.bySession` | `trace:read` | medium | Yes |
+| `logs.traces.list` | `trace:read` | medium | Yes |
+| `logs.traces.serialize` | `trace:read` | medium | Yes |
+| `logs.traces.spans` | `trace:read` | medium | Yes |
+| `logs.traces.stats` | `trace:read` | medium | Yes |
+| `logs.traces.subscribe` | `trace:read` | medium | No |
+| `logs.traces.timeline` | `trace:read` | medium | Yes |
+| `logs.traces.waterfall` | `trace:read` | medium | Yes |
+| `logs.transports` | `logs:read` | medium | Yes |
 
 ## `ctx.media`
 
@@ -806,6 +818,14 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `secrets.keys` | `secrets:read` | medium | Yes |
 | `secrets.onDidChange` | `secrets:write` | high | No |
 | `secrets.store` | `secrets:write` | high | No |
+
+## `ctx.services`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `services.getProvider` | None | low | Yes |
+| `services.isAvailable` | None | low | Yes |
+| `services.onOptionalServiceChange` | None | low | No |
 
 ## `ctx.session`
 

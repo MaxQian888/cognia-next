@@ -20,6 +20,7 @@ import { isTauri } from "@/lib/platform/detect"
 import type { StoredMessage } from "@cognia/agent-config-types"
 import type { UIMessage } from "@/types"
 import { getDb } from "./schema"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
 
 /**
  * Proxy that lazy-resolves Dexie tables. Plugin code that hooks
@@ -148,6 +149,7 @@ export const messageRepository = {
   async create(sessionId: string, message: UIMessage): Promise<UIMessage> {
     const row = pluginToStored(sessionId, message)
     await getDb().messages.put(row)
+    markSessionDirty(sessionId)
     void emitMessageEvent("added", { sessionId, messageId: message.id })
     return storedToPlugin(row)
   },

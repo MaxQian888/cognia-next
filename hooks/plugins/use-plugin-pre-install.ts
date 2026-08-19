@@ -19,6 +19,7 @@ import {
   type RunMarketplaceInstallOpts,
   type RunMarketplaceInstallResult,
 } from "@/lib/plugin/marketplace/install-flow"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import type {
   PreInstallTarget,
   PreInstallStepId,
@@ -190,7 +191,15 @@ export function usePluginPreInstall(client: MarketplaceClient | null): UsePlugin
             }),
         }
 
-        return await runMarketplaceInstall(opts)
+        const result = await runMarketplaceInstall(opts)
+        // Adoption signal for the marketplace (ADR-0026): outcome + the stage
+        // that produced it. No plugin id — a marketplace id is low-cardinality
+        // for us but identifying for a user with a niche install set.
+        void trackEvent("app.plugin.installed", {
+          outcome: result.status === "installed" ? "succeeded" : result.status,
+          ...(result.status === "installed" ? {} : { stage: result.stage }),
+        })
+        return result
       } finally {
         setBusy(false)
         // Belt and braces — leave no orphaned target if the orchestrator

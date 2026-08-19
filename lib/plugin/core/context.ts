@@ -158,6 +158,7 @@ import { createTeamAPI } from "../api/team-api"
 import { createSubscriptionAPI } from "../api/subscription-api"
 import { createTerminalAPI } from "../api/terminal-api"
 import { createPerfAPI } from "../api/perf-api"
+import { createLogsAPI } from "../api/logs-api"
 import { createConnectorsAPI } from "../api/connectors-api"
 import { createIntegrationsAPI } from "../api/integrations-api"
 import { createShareAPI } from "../api/share-api"
@@ -409,6 +410,7 @@ export function createFullPluginContext(
     subscription: createSubscriptionAPI(pluginId),
     terminal: createTerminalAPI(pluginId),
     perf: createPerfAPI(pluginId),
+    logs: createLogsAPI(pluginId),
     connectors: createConnectorsAPI(pluginId),
     integrations: createIntegrationsAPI(pluginId, (permission) =>
       permissionsAPI.hasPermission(permission as never)

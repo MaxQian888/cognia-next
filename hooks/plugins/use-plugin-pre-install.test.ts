@@ -3,6 +3,11 @@ import { usePluginPreInstall } from "./use-plugin-pre-install"
 import type { RunMarketplaceInstallOpts } from "@/lib/plugin/marketplace/install-flow"
 import type { PluginManifest } from "@/types/plugin"
 
+const trackEvent = jest.fn(async () => true)
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => trackEvent(...(args as [])),
+}))
+
 jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn().mockResolvedValue([]),
   setPluginConfig: jest.fn().mockResolvedValue(undefined),
@@ -57,6 +62,8 @@ describe("usePluginPreInstall", () => {
     })
 
     expect(resolved).toEqual({ status: "installed", pluginId: "demo-plugin" })
+    // Adoption signal, outcome only — no plugin id leaves the process.
+    expect(trackEvent).toHaveBeenCalledWith("app.plugin.installed", { outcome: "succeeded" })
     expect(client.installPlugin).toHaveBeenCalledWith("demo-plugin", "1.0.0")
     expect(result.current.target).toBeNull()
     expect(result.current.busy).toBe(false)
@@ -119,6 +126,10 @@ describe("usePluginPreInstall", () => {
     })
 
     expect(resolved).toEqual({ status: "cancelled", stage: "permission" })
+    expect(trackEvent).toHaveBeenCalledWith("app.plugin.installed", {
+      outcome: "cancelled",
+      stage: "permission",
+    })
     expect(client.installPlugin).not.toHaveBeenCalled()
   })
 

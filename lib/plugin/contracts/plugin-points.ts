@@ -90,6 +90,11 @@ export interface PluginPointDiagnostic {
     | "plugin.point.virtual"
     | "plugin.point.permission_denied"
     | "plugin.silent-failure"
+    // A declared permission could not be mirrored into the host's grant
+    // ledger, so host-side gates fall back to the renderer guard until the
+    // next enable. Distinct from `plugin.silent-failure` because it names the
+    // permission that drifted, which is what makes the drift actionable.
+    | "plugin.permission.mirror-failed"
     // A later plugin's contribution was rejected because an earlier plugin
     // already owns the same tool/command/component key (first-wins policy).
     | "plugin.conflict.rejected"
