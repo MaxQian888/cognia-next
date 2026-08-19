@@ -498,3 +498,272 @@ async fn enrollment_token_is_single_use_and_returns_a_target_bound_certificate()
         .expect("replay response");
     assert_eq!(replay.status(), StatusCode::UNAUTHORIZED);
 }
+
+/// The staging target every operation test below needs registered first.
+fn staging_target() -> Value {
+    json!({
+        "apiVersion": "deploy.cognia.dev/v1alpha1",
+        "kind": "DeploymentTarget",
+        "metadata": { "id": "staging", "label": "Staging" },
+        "spec": {
+            "topology": "kubernetes",
+            "publicUrl": "https://server.example.com",
+            "kubernetes": {
+                "namespace": "cognia-staging",
+                "ingressClassName": "nginx",
+                "storageClassName": "standard-rwo",
+                "runtimeClassName": "gvisor"
+            },
+            "controller": {
+                "url": "https://ops.example.com",
+                "credentialRef": "ops-controller/staging"
+            },
+            "identity": {
+                "provider": "oidc",
+                "issuer": "https://auth.example.com/oidc",
+                "audience": "https://server.example.com/api",
+                "tenantClaim": "organization_id",
+                "scopes": {
+                    "read": "servers:read",
+                    "operate": "servers:operate",
+                    "admin": "servers:admin"
+                }
+            },
+            "objectStore": {
+                "provider": "s3-compatible",
+                "endpoint": "https://s3.example.com",
+                "region": "auto",
+                "bucket": "cognia-backups",
+                "pathStyle": false,
+                "credentialRef": "backups/staging"
+            },
+            "snapshots": { "provider": "kubernetes-csi", "className": "cognia-snapshots" },
+            "tls": { "provider": "ingress", "secretRef": "cognia-server-tls" },
+            "secrets": { "provider": "kubernetes", "rootRef": "cognia/staging" },
+            "images": {
+                "server": format!("server@sha256:{}", "a".repeat(64)),
+                "runner": format!("runner@sha256:{}", "b".repeat(64)),
+                "workspaceRuntime": format!("runtime@sha256:{}", "c".repeat(64))
+            }
+        }
+    })
+}
+
+fn keyed(method: &str, path: &str, token: &str, body: Value, key: &str) -> Request<Body> {
+    let mut request = request(method, path, token, body);
+    request
+        .headers_mut()
+        .insert("idempotency-key", key.parse().expect("header"));
+    request
+}
+
+async fn json_body(response: axum::response::Response) -> Value {
+    let bytes = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+}
+
+async fn app_with_staging() -> axum::Router {
+    let application = app();
+    let registered = application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            "/v1/targets",
+            "tenant-a:servers:operate,servers:read",
+            staging_target(),
+            "register-staging",
+        ))
+        .await
+        .expect("register target");
+    assert_eq!(registered.status(), StatusCode::CREATED);
+    application
+}
+
+#[tokio::test]
+async fn preflight_is_derived_from_the_registered_target() {
+    let application = app_with_staging().await;
+
+    // The revision and topology come from the stored target, so a tab that
+    // never reloaded cannot preflight a configuration that no longer exists.
+    let queued = application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            "/v1/servers/staging/preflight",
+            "tenant-a:servers:operate",
+            json!({}),
+            "preflight-1",
+        ))
+        .await
+        .expect("queue preflight");
+    assert_eq!(queued.status(), StatusCode::ACCEPTED);
+    let operation = json_body(queued).await;
+    assert_eq!(operation["kind"], "preflight");
+    assert_eq!(operation["request"]["targetRevision"], 1);
+    assert_eq!(operation["request"]["topology"], "kubernetes");
+
+    // A client-supplied revision is refused rather than quietly ignored.
+    let rejected = application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            "/v1/servers/staging/preflight",
+            "tenant-a:servers:operate",
+            json!({ "targetRevision": 99 }),
+            "preflight-2",
+        ))
+        .await
+        .expect("reject preflight parameters");
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(json_body(rejected).await["code"], "invalid_preflight_request");
+
+    let missing = application
+        .oneshot(keyed(
+            "POST",
+            "/v1/servers/absent/preflight",
+            "tenant-a:servers:operate",
+            json!({}),
+            "preflight-3",
+        ))
+        .await
+        .expect("preflight an unknown target");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn collection_operations_queue_with_agent_defaults() {
+    let application = app_with_staging().await;
+
+    for (path, kind, key) in [
+        ("collect-status", "collect-status", "collect-status-1"),
+        ("collect-logs", "collect-logs", "collect-logs-1"),
+    ] {
+        // An empty body is the documented shape: the agent fills in its own
+        // defaults (`includeRuntimeUsage: false`, `limit: 200`), so the UI does
+        // not have to know them.
+        let queued = application
+            .clone()
+            .oneshot(keyed(
+                "POST",
+                &format!("/v1/servers/staging/{path}"),
+                "tenant-a:servers:operate",
+                json!({}),
+                key,
+            ))
+            .await
+            .expect("queue collection operation");
+        assert_eq!(queued.status(), StatusCode::ACCEPTED);
+        let operation = json_body(queued).await;
+        assert_eq!(operation["kind"], kind);
+        assert_eq!(operation["state"], "queued");
+    }
+}
+
+#[tokio::test]
+async fn cancel_applies_only_to_a_queued_operation() {
+    let application = app_with_staging().await;
+
+    let queued = application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            "/v1/servers/staging/backups",
+            "tenant-a:servers:operate",
+            json!({}),
+            "backup-to-cancel",
+        ))
+        .await
+        .expect("queue backup");
+    let operation = json_body(queued).await;
+    let operation_id = operation["id"].as_str().expect("operation id").to_owned();
+
+    let cancelled = application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            &format!("/v1/operations/{operation_id}/cancel"),
+            "tenant-a:servers:operate",
+            json!({}),
+            "cancel-1",
+        ))
+        .await
+        .expect("cancel the queued backup");
+    assert_eq!(cancelled.status(), StatusCode::OK);
+    assert_eq!(json_body(cancelled).await["state"], "cancelled");
+
+    // Cancelling twice is a conflict, not a silent success: the second caller
+    // must not be told it stopped work that had already stopped for another
+    // reason.
+    let again = application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            &format!("/v1/operations/{operation_id}/cancel"),
+            "tenant-a:servers:operate",
+            json!({}),
+            "cancel-2",
+        ))
+        .await
+        .expect("cancel twice");
+    assert_eq!(again.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json_body(again).await["code"],
+        "operation_not_cancellable"
+    );
+
+    let unknown = application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            "/v1/operations/00000000-0000-4000-8000-000000000000/cancel",
+            "tenant-a:servers:operate",
+            json!({}),
+            "cancel-3",
+        ))
+        .await
+        .expect("cancel an unknown operation");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    // Another tenant's operation is invisible, not merely unauthorized.
+    let cross_tenant = application
+        .oneshot(keyed(
+            "POST",
+            &format!("/v1/operations/{operation_id}/cancel"),
+            "tenant-b:servers:operate",
+            json!({}),
+            "cancel-4",
+        ))
+        .await
+        .expect("cancel across tenants");
+    assert_eq!(cross_tenant.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn cancel_requires_operate_scope_and_an_idempotency_key() {
+    let application = app_with_staging().await;
+    let id = "00000000-0000-4000-8000-000000000000";
+
+    let (status, body) = send(keyed(
+        "POST",
+        &format!("/v1/operations/{id}/cancel"),
+        "tenant-a:servers:read",
+        json!({}),
+        "cancel-scope",
+    ))
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "insufficient_scope");
+
+    let no_key = application
+        .oneshot(request(
+            "POST",
+            &format!("/v1/operations/{id}/cancel"),
+            "tenant-a:servers:operate",
+            json!({}),
+        ))
+        .await
+        .expect("cancel without a key");
+    assert_eq!(no_key.status(), StatusCode::BAD_REQUEST);
+}

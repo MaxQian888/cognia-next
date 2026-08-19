@@ -1,77 +1,153 @@
 {
   "actions": {
-    "backToServers": "Back to servers",
+    "backToServers": "All servers",
     "backup": "Create backup",
-    "deploy": "Deploy server",
+    "collectLogs": "Collect logs",
+    "collectStatus": "Collect status",
+    "deploy": "Deploy target",
+    "includeRuntimeUsage": "Include runtime resource usage",
+    "more": "More actions",
+    "preflight": "Run preflight",
     "refresh": "Refresh",
     "restore": "Restore",
     "rollback": "Rollback",
-    "rotateKey": "Rotate key"
+    "rotateKey": "Rotate key",
+    "upgrade": "Upgrade release"
+  },
+  "actionsHelp": {
+    "backup": "Ask the agent to take a recovery point using the target's configured snapshot and object-store providers.",
+    "collectLogs": "Pull recent server logs from the host into the controller so they appear on the Logs tab.",
+    "collectStatus": "Ask the agent to report the target's live status. Runtime usage adds per-container resource figures at the cost of a slower probe.",
+    "enroll": "Issue a single-use enrollment token and connect a deploy agent. Until an agent enrolls, operations stay queued with nothing to run them.",
+    "preflight": "Check the host against the registered revision without changing anything.",
+    "rollback": "Return to the release the agent recorded before the current one. Requires an admin lease.",
+    "rollbackUnavailable": "No release has been deployed to this target yet, so there is nothing to roll back to.",
+    "rotateKey": "Switch to a pre-provisioned key version. Requires an admin lease.",
+    "upgrade": "Deploy new immutable image digests at the target's current configuration revision."
   },
   "backups": {
-    "empty": "No recovery points are available yet."
+    "description": "Recovery points the agent has taken for this target, newest first.",
+    "empty": "Take a backup to create the first recovery point.",
+    "emptyTitle": "No recovery points yet",
+    "kind": {
+      "object-store": "Object store",
+      "snapshot": "Volume snapshot"
+    },
+    "verified": "Verified"
   },
   "certified": "Production certified",
   "confirm": {
     "cancel": "Cancel",
     "confirm": "Request admin lease and continue",
-    "description": "This protected operation requires a short-lived, user-bound admin lease and will be recorded in the audit log.",
+    "restore": "Restoring overwrites the live data on {label} with this recovery point. A short-lived, user-bound admin lease is requested and the operation is recorded in the audit log.",
+    "rollback": "This returns {label} to the release the agent recorded before the current one. A short-lived, user-bound admin lease is requested and the operation is recorded in the audit log.",
+    "rotate-key": "This re-keys {label} to the selected pre-provisioned key version. A short-lived, user-bound admin lease is requested and the operation is recorded in the audit log.",
     "title": "Confirm protected server operation"
   },
   "connection": {
     "accessToken": "OIDC access token",
+    "browserTransport": "This browser can only reach a controller that returns CORS headers. Run Cognia as the desktop or mobile app to connect to a self-hosted controller directly.",
+    "browserTransportTitle": "Browser transport",
     "connect": "Connect",
     "connected": "Operations Controller connected",
     "connecting": "Connecting…",
     "controllerPlaceholder": "https://ops.example.com",
     "controllerUrl": "Controller URL",
-    "description": "Connect to the cloud-neutral Operations Controller. Credentials stay in memory and are never persisted by this page.",
+    "controllerUrlHelp": "The controller's public base URL. HTTPS is required outside loopback development.",
+    "description": "Connect to the cloud-neutral Operations Controller that owns your deployment targets.",
     "disconnect": "Disconnect",
     "disconnectFailed": "Could not disconnect from the Operations Controller",
     "disconnected": "Disconnected from the Operations Controller",
-    "eventsConnected": "Live events connected",
-    "eventsReconnecting": "Reconnecting live events…",
+    "eventsConnected": "Live",
+    "eventsLiveHelp": "Operation state changes stream from the controller as they happen.",
+    "eventsPolled": "Polling",
+    "eventsPolledHelp": "This shell cannot hold the controller's event stream open, so operations started here are re-read periodically. Work started on another device appears after a refresh.",
+    "eventsReconnecting": "Reconnecting…",
     "failed": "Could not connect to the Operations Controller",
-    "targetId": "Default target ID",
+    "profileId": "Connection profile",
+    "profileIdHelp": "A local name for this connection. It scopes the stored token and the offline cache on this device and is never sent to the controller.",
+    "storageNotice": "The access token is stored in the OS keyring. Only the controller URL and the profile name are kept in local storage.",
     "title": "Connect Operations Controller",
     "tokenNotice": "Use a short-lived OIDC token with servers:read. Operate and admin permissions are checked again for every mutation.",
-    "unlockAccount": "Unlock the active account before connecting to a server target."
+    "unlockAccount": "Unlock the active account before connecting to a server target.",
+    "urlProblem": {
+      "insecure": "Use https://, or http:// only for a loopback controller.",
+      "invalid": "Enter a full URL, including the scheme."
+    }
   },
   "description": "Deploy, observe, back up, restore, and secure Compose or Kubernetes targets from one cloud-neutral workspace.",
+  "detail": {
+    "loading": "Loading the fleet…",
+    "missingDescription": "This target is not in the connected controller's fleet. It may have been removed, or it belongs to another tenant.",
+    "missingTitle": "Target not found"
+  },
+  "enroll": {
+    "action": "Connect agent",
+    "agentId": "Agent ID",
+    "agentIdHelp": "Identifies this host to the controller. Use a distinct id per machine serving the target.",
+    "connected": "{label} is online — the agent connected and can now run operations.",
+    "copyCommand": "Copy command",
+    "description": "A registered target only becomes executable once a deploy agent enrolls against it and dials the controller.",
+    "done": "Done",
+    "failed": "Could not issue an enrollment token",
+    "issue": "Issue enrollment token",
+    "noTargets": "Deploy a target first — an enrollment token is bound to the target the agent will serve.",
+    "noTargetsTitle": "No targets yet",
+    "steps": {
+      "enroll": "Enroll the agent, then remove the staged token",
+      "stage-token": "Stage the single-use token in an owner-only file",
+      "start": "Start the agent service"
+    },
+    "target": "Target",
+    "title": "Connect a deploy agent",
+    "tokenExpires": "Single use, valid until {time}.",
+    "tokenIssued": "Enrollment token issued",
+    "waiting": "Waiting for the agent's first heartbeat…"
+  },
   "errors": {
     "authenticationRequired": "Your OIDC session is missing or expired. Sign in again and reconnect.",
+    "cancel": "The operation could not be cancelled",
     "capabilities": "Could not load server capabilities",
     "detail": "Could not load server details",
+    "insufficientScope": "This token does not carry the scope this operation requires.",
     "networkUnavailable": "The controller is unavailable. Check its URL, TLS certificate, and network route.",
+    "networkUnavailableBrowser": "The controller did not answer. In a browser it must return CORS headers; the desktop and mobile apps reach it directly.",
+    "notCancellable": "An agent has already claimed this operation, so the controller will not report it as cancelled while it is still running.",
     "operation": "The server operation could not be queued",
     "recovery": "Retry the operation. If it still fails, inspect the controller audit log with an operator identity.",
-    "refresh": "Could not refresh the server fleet"
+    "refresh": "Could not refresh the server fleet",
+    "targetBusy": "Another destructive operation is already running on this target."
   },
   "fields": {
     "certification": "Certification",
     "id": "Target ID",
     "keyVersion": "Pre-provisioned key version",
     "lastSeen": "Last seen",
+    "publicUrl": "Public URL",
     "release": "Release digest",
     "revision": "Configuration revision",
     "secretProviders": "Secret providers",
     "snapshotProviders": "Snapshot providers",
+    "tlsProviders": "TLS providers",
     "topology": "Topology"
   },
   "filters": {
-    "all": "All servers",
-    "description": "Filter the fleet by its latest reported health.",
-    "title": "Filter servers"
+    "all": "All",
+    "title": "Filter by health"
+  },
+  "fleet": {
+    "activeOperations": "{count, plural, one {# operation} other {# operations}}",
+    "emptyDescription": "Deploy a target to describe where Cognia should run, then connect an agent on that host so operations have something to execute them.",
+    "emptyTitle": "No deployment targets yet",
+    "noMatchDescription": "No server currently reports this health state.",
+    "noMatchTitle": "Nothing matches this filter",
+    "summary": "{count, plural, one {# target} other {# targets}}"
   },
   "health": {
     "degraded": "Degraded",
     "healthy": "Healthy",
     "unavailable": "Unavailable",
     "unknown": "Unknown"
-  },
-  "healthSummary": "Health summary for {label}",
-  "instances": {
-    "title": "Server instances"
   },
   "kpi": {
     "certified": "Certified",
@@ -80,8 +156,11 @@
     "total": "Targets"
   },
   "logs": {
-    "empty": "No server logs are available."
+    "description": "Log lines the agent has shipped to the controller.",
+    "empty": "Run “Collect logs” to pull recent lines from the host.",
+    "emptyTitle": "No logs collected yet"
   },
+  "never": "Never",
   "notAvailable": "Not available",
   "notCertified": "Not certified",
   "offline": "Offline cache",
@@ -109,9 +188,27 @@
     "verifying": "Verifying"
   },
   "operations": {
-    "ariaLabel": "Server operation history",
+    "ariaLabel": "Server operations",
+    "cancel": "Cancel operation",
+    "cancelConfirmDescription": "The controller marks this operation cancelled so no agent can claim it. Nothing on the host has changed yet.",
+    "cancelConfirmTitle": "Cancel this queued operation?",
+    "cancelHint": "Still queued — no agent has claimed it yet.",
+    "cancelUnavailable": "An agent has claimed this operation, so it can no longer be cancelled from here.",
+    "cancelled": "Operation cancelled",
+    "copied": "Copied to the clipboard",
+    "copy": "Copy",
+    "copyFailed": "Could not copy to the clipboard",
+    "createdAt": "Queued",
+    "createdBy": "Requested by",
+    "emptyDescription": "Operations appear here as you queue them, and as the controller reports work on this fleet.",
+    "emptyTitle": "No operations yet",
+    "errorDetails": "Error details",
     "queued": "Operation queued",
-    "title": "Operations"
+    "request": "Request",
+    "result": "Result",
+    "target": "Target",
+    "title": "Operations",
+    "updatedAt": "Updated"
   },
   "options": {
     "acme-dns01": "ACME DNS-01",
@@ -133,11 +230,14 @@
     "latestRecoveryPoint": "Latest recovery point",
     "production": "Production readiness"
   },
-  "selectServer": "Select a server target to inspect it.",
+  "preview": {
+    "notice": "Rendered locally for review. The agent renders its own copy from the registered target at deploy time.",
+    "title": "Rendered deployment",
+    "unavailable": "This target cannot be rendered yet"
+  },
   "tabs": {
     "backups": "Backups",
     "deployments": "Deployments",
-    "instances": "Instances",
     "logs": "Logs",
     "overview": "Overview",
     "security": "Security"
@@ -147,20 +247,34 @@
     "compose": "Docker Compose",
     "kubernetes": "Kubernetes"
   },
+  "upgrade": {
+    "description": "Deploy new images at this target's current configuration revision. The target itself is unchanged.",
+    "digestNotice": "Use immutable sha256 digests. A mutable tag deploys but fails production certification.",
+    "runnerImage": "Runner image",
+    "serverImage": "Server image",
+    "submit": "Queue upgrade",
+    "title": "Upgrade release",
+    "workspaceRuntimeImage": "Workspace runtime image"
+  },
   "wizard": {
+    "back": "Back",
     "cancel": "Cancel",
+    "certificationHelp": "This target is valid and will deploy. It would not pass production certification as configured:",
+    "certificationTitle": "Not production certified",
+    "controllerCredentialRef": "Controller credential reference",
     "controllerUrl": "Controller URL",
     "credentialsNotice": "Only credential references are stored. Cloud keys, kubeconfig files, SSH keys, object-store secrets, and enrollment tokens never enter this configuration or the browser cache.",
-    "custom": "Custom",
+    "custom": "Advanced",
     "deploymentRoot": "Deployment root",
-    "description": "Configure a versioned DeploymentTarget. Provider presets are normalized to the same cloud-neutral contract.",
+    "description": "Describe a versioned DeploymentTarget. Provider presets are normalized to the same cloud-neutral contract.",
     "guided": "Guided",
-    "identitySection": "OIDC identity",
-    "imagesSection": "Immutable images",
+    "identityHelp": "The OIDC issuer the deployed server trusts, and the scopes it requires. These are the deployment's own identity settings, not the ones this app connected with.",
+    "imagesHelp": "Pin every image to an immutable sha256 digest. These are the images the first deploy will run.",
     "ingressClass": "Ingress class",
     "invalid": "Review the highlighted deployment settings",
     "label": "Display label",
     "namespace": "Namespace",
+    "next": "Next",
     "objectStoreBucket": "Bucket",
     "objectStoreCredentialRef": "Object-store credential reference",
     "objectStoreEndpoint": "S3-compatible endpoint",
@@ -170,6 +284,7 @@
     "oidcAudience": "OIDC audience",
     "oidcIssuer": "OIDC issuer",
     "placeholders": {
+      "controllerCredentialRef": "ops-controller/staging",
       "controllerUrl": "https://ops.example.com",
       "keyVersion": "key-2026-08",
       "label": "Staging",
@@ -189,27 +304,35 @@
       "tlsRef": "cognia-server-tls",
       "workspaceRuntimeImage": "ghcr.io/owner/cognia-workspace-runtime@sha256:…"
     },
-    "platformSection": "Platform settings",
     "projectName": "Compose project name",
     "providerCredentialsRequired": "Complete the required provider credential references before deploying.",
     "publicUrl": "Public URL",
     "runnerImage": "Runner image digest",
     "runtimeClass": "Runtime class",
+    "scopeAdmin": "Admin scope",
+    "scopeOperate": "Operate scope",
+    "scopeRead": "Read scope",
     "secretProvider": "Secret provider",
     "secretRootRef": "Secret root reference",
     "serverImage": "Server image digest",
     "snapshotProvider": "Snapshot provider",
     "snapshotRef": "Snapshot class or adapter reference",
+    "steps": {
+      "identity": "Identity",
+      "images": "Images",
+      "platform": "Platform",
+      "review": "Review",
+      "storage": "Storage",
+      "target": "Target"
+    },
+    "stepsLabel": "Deployment steps",
     "storageClass": "Storage class",
-    "storageSection": "Backup, snapshots, secrets, and TLS",
     "targetId": "Target ID",
-    "targetSection": "Deployment target",
     "tenantClaim": "Tenant claim",
     "title": "Deploy a server target",
     "tlsProvider": "TLS provider",
     "tlsRef": "TLS secret or credential reference",
     "topology": "Topology",
-    "valid": "Deployment registered and queued",
     "validate": "Register and deploy",
     "validating": "Registering…",
     "workspaceRuntimeImage": "Workspace runtime image digest"

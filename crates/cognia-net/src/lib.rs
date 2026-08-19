@@ -11,6 +11,10 @@
 //! - [`ndjson_stream`] — streaming NDJSON POST that reports each parsed line as
 //!   it arrives. Backs the Ollama `/api/pull` progress command, the one call
 //!   the buffered `proxy_http_request` escape hatch cannot serve.
+//! - [`sse_stream`] — streaming `text/event-stream` GET that reports each frame
+//!   as it arrives. Backs the Ops Controller live-event command (ADR-0059): an
+//!   SSE body never completes, so the buffered `proxy_http_request` escape
+//!   hatch delivers nothing at all rather than merely delivering it late.
 //! - [`outbound_pii`] — fail-closed PII detection for text crossing native
 //!   network boundaries.
 
@@ -20,3 +24,4 @@ pub mod ndjson_stream;
 pub mod outbound_pii;
 pub mod proxy_config;
 pub mod request_cancellation;
+pub mod sse_stream;

@@ -43,7 +43,7 @@ fn streams() -> &'static RequestCancellationRegistry {
 /// `closed` is terminal and always arrives — on a clean end, on a transport
 /// failure, and on cancellation — so the renderer's reconnect loop has exactly
 /// one signal to wait for instead of inferring the end from silence.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum StreamMessage {
     Open,

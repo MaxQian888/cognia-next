@@ -69,6 +69,15 @@ pub trait Store: Send + Sync {
         tenant_id: &str,
         id: Uuid,
     ) -> Result<Option<Operation>, StoreError>;
+    /// Cancel a still-queued operation.
+    ///
+    /// Only `queued` is cancellable, and that is a product rule rather than a
+    /// storage limitation: claiming an operation takes the target lock and
+    /// starts the agent acting on the host, so a controller-side "cancelled"
+    /// for anything past `queued` would report work as stopped while it is
+    /// still running. Returns `InvalidTransition` for an operation an agent
+    /// already claimed.
+    async fn cancel_operation(&self, tenant_id: &str, id: Uuid) -> Result<Operation, StoreError>;
     async fn events_after(
         &self,
         tenant_id: &str,
@@ -355,6 +364,38 @@ impl Store for InMemoryStore {
             .get(&id)
             .filter(|operation| operation.tenant_id == tenant_id)
             .cloned())
+    }
+
+    async fn cancel_operation(&self, tenant_id: &str, id: Uuid) -> Result<Operation, StoreError> {
+        let mut data = self.inner.lock();
+        let operation = data
+            .operations
+            .get_mut(&id)
+            .filter(|operation| operation.tenant_id == tenant_id)
+            .ok_or(StoreError::NotFound)?;
+        if operation.state != OperationState::Queued {
+            return Err(StoreError::InvalidTransition);
+        }
+        let now = Utc::now();
+        operation.state = OperationState::Cancelled;
+        operation.updated_at = now;
+        let operation = operation.clone();
+        // The Postgres store gets this from the `operations_append_event`
+        // trigger; here it has to be written by hand, or the SSE stream would
+        // never tell a subscribed client the operation stopped.
+        let event_id = data.events.len() as i64 + 1;
+        data.events.push(TenantOperationEvent {
+            tenant_id: operation.tenant_id.clone(),
+            event: OperationEvent {
+                id: event_id,
+                operation_id: operation.id,
+                target_id: operation.target_id.clone(),
+                state: operation.state,
+                timestamp: now,
+                message: "operation cancelled".into(),
+            },
+        });
+        Ok(operation)
     }
 
     async fn events_after(
@@ -1146,6 +1187,40 @@ impl Store for PgStore {
             .map_err(database_error)?
             .map(|row| operation_from_row(&row))
             .transpose()
+    }
+
+    async fn cancel_operation(&self, tenant_id: &str, id: Uuid) -> Result<Operation, StoreError> {
+        let client = self.client().await?;
+        // The `state='queued'` predicate is the whole concurrency story: an
+        // agent claim flips the row to `validating` in the same table, so a
+        // cancel racing a claim loses here rather than double-transitioning.
+        // `operations_append_event` writes the SSE event for the state change.
+        let row = client
+            .query_opt(
+                "UPDATE operations SET state='cancelled', updated_at=now()
+                 WHERE tenant_id=$1 AND id=$2 AND state='queued' RETURNING *",
+                &[&tenant_id, &id],
+            )
+            .await
+            .map_err(database_error)?;
+        if let Some(row) = row {
+            return operation_from_row(&row);
+        }
+        // Nothing updated: separate "no such operation" from "an agent already
+        // has it", because only the second one is worth explaining to the user.
+        let exists = client
+            .query_opt(
+                "SELECT 1 FROM operations WHERE tenant_id=$1 AND id=$2",
+                &[&tenant_id, &id],
+            )
+            .await
+            .map_err(database_error)?
+            .is_some();
+        Err(if exists {
+            StoreError::InvalidTransition
+        } else {
+            StoreError::NotFound
+        })
     }
 
     async fn events_after(

@@ -254,7 +254,14 @@ export function DeploymentWizard({
     ],
   ]
 
+  // Every text key, including the select-backed ones: their value types are
+  // string unions, so `DeploymentFormTextKey` includes them and a missing entry
+  // would leave that field's error unroutable.
   const issuePathFor: Record<DeploymentFormTextKey, string> = {
+    topology: "spec.topology",
+    snapshotProvider: "spec.snapshots",
+    secretProvider: "spec.secrets.provider",
+    tlsProvider: "spec.tls",
     id: "metadata.id",
     label: "metadata.label",
     publicUrl: "spec.publicUrl",
@@ -574,8 +581,11 @@ export function DeploymentWizard({
           </TabsContent>
 
           <TabsContent value="custom" className="min-h-0 flex-1 overflow-y-auto p-4">
-            <StructuredConfigEditor
-              value={buildDeploymentTarget(state)}
+            <StructuredConfigEditor<DeploymentTarget>
+              // `buildDeploymentTarget` is deliberately `unknown` — a form that
+              // is still being filled in is not yet a valid target. The editor
+              // validates on apply, which is where the shape is actually proven.
+              value={buildDeploymentTarget(state) as DeploymentTarget}
               validate={parseDeploymentTarget}
               onApply={(target) => setState(deploymentFormFromTarget(target))}
               filename={`${state.id || "deployment-target"}.deployment-target`}

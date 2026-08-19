@@ -70,12 +70,16 @@ pub fn router(state: AppState) -> Router {
             "/v1/servers/{id}/backups",
             get(list_backups).post(create_backup),
         )
+        .route("/v1/servers/{id}/preflight", post(create_preflight))
         .route("/v1/servers/{id}/deploy", post(create_deploy))
         .route("/v1/servers/{id}/restore", post(create_restore))
         .route("/v1/servers/{id}/upgrade", post(create_upgrade))
         .route("/v1/servers/{id}/rollback", post(create_rollback))
         .route("/v1/servers/{id}/rotate-key", post(create_rotate_key))
+        .route("/v1/servers/{id}/collect-status", post(create_collect_status))
+        .route("/v1/servers/{id}/collect-logs", post(create_collect_logs))
         .route("/v1/operations/{id}", get(get_operation))
+        .route("/v1/operations/{id}/cancel", post(cancel_operation))
         .route("/v1/admin-leases", post(create_admin_lease))
         .route(
             "/v1/agents/enrollment-tokens",
@@ -258,6 +262,71 @@ async fn create_backup(
     create_operation(state, headers, id, OperationKind::Backup, body).await
 }
 
+/// Queue a read-only preflight of the registered target.
+///
+/// The parameters are derived from the stored target, never from the caller.
+/// `PreflightParameters` pins a `targetRevision`, and a client-supplied one is
+/// exactly the stale value a tab left open across a re-registration would send
+/// — the agent would then check a configuration that no longer exists and
+/// report it healthy. Same rule, same reason, as rollback refusing a body.
+async fn create_preflight(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    if body
+        .as_ref()
+        .is_some_and(|Json(value)| !value.as_object().is_some_and(serde_json::Map::is_empty))
+    {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_preflight_request",
+            "Preflight is derived from the registered target and accepts no client-supplied parameters",
+            None,
+        );
+    }
+    let claims = match authorize_mutation(&state, &headers, "servers:operate").await {
+        Ok(claims) => claims,
+        Err(response) => return response,
+    };
+    let server = match state.store.get_server(&claims.tenant_id, &id).await {
+        Ok(Some(server)) => server,
+        Ok(None) => {
+            return api_error(
+                StatusCode::NOT_FOUND,
+                "server_not_found",
+                "Server not found",
+                None,
+            )
+        }
+        Err(error) => return store_error(error),
+    };
+    let request = json!({
+        "targetRevision": server.target_revision,
+        "topology": server.summary.topology,
+    });
+    create_operation_with_request(state, headers, id, OperationKind::Preflight, request).await
+}
+
+async fn create_collect_status(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    create_operation(state, headers, id, OperationKind::CollectStatus, body).await
+}
+
+async fn create_collect_logs(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<Value>>,
+) -> Response {
+    create_operation(state, headers, id, OperationKind::CollectLogs, body).await
+}
+
 async fn create_deploy(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -328,6 +397,17 @@ async fn create_operation(
     kind: OperationKind,
     body: Option<Json<Value>>,
 ) -> Response {
+    let request_value = body.map(|Json(value)| value).unwrap_or_else(|| json!({}));
+    create_operation_with_request(state, headers, target_id, kind, request_value).await
+}
+
+async fn create_operation_with_request(
+    state: AppState,
+    headers: HeaderMap,
+    target_id: String,
+    kind: OperationKind,
+    request_value: Value,
+) -> Response {
     let claims = match authorize_mutation(&state, &headers, "servers:operate").await {
         Ok(claims) => claims,
         Err(response) => return response,
@@ -335,7 +415,6 @@ async fn create_operation(
     let idempotency_key = header_value(&headers, "idempotency-key")
         .expect("authorize_mutation checked the header")
         .to_owned();
-    let request_value = body.map(|Json(value)| value).unwrap_or_else(|| json!({}));
     match state
         .store
         .operation_by_idempotency(&claims.tenant_id, &idempotency_key)
@@ -426,6 +505,33 @@ async fn get_operation(
             StatusCode::NOT_FOUND,
             "operation_not_found",
             "Operation not found",
+            None,
+        ),
+        Err(error) => store_error(error),
+    }
+}
+
+/// Cancel a still-queued operation.
+///
+/// `servers:operate` and an idempotency key, like every other mutation. There
+/// is deliberately no force variant: past `queued` an agent holds the target
+/// lock and is already changing the host, and the agent protocol has no abort
+/// message, so a "cancelled" there would be a claim the controller cannot back.
+async fn cancel_operation(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Response {
+    let claims = match authorize_mutation(&state, &headers, "servers:operate").await {
+        Ok(claims) => claims,
+        Err(response) => return response,
+    };
+    match state.store.cancel_operation(&claims.tenant_id, id).await {
+        Ok(operation) => Json(operation).into_response(),
+        Err(StoreError::InvalidTransition) => api_error(
+            StatusCode::CONFLICT,
+            "operation_not_cancellable",
+            "Only a queued operation can be cancelled; this one is already running or finished",
             None,
         ),
         Err(error) => store_error(error),

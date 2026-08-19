@@ -124,6 +124,9 @@ pub use cognia_scheduling::scheduler;
 // they keep their `#[tauri::command]` shells.
 pub use cognia_secrets::secret_store;
 mod selection_toolbar;
+// Live Ops Controller event stream (ADR-0059) — an SSE body never ends, so the
+// buffered `proxy_http_request` bridge cannot serve it.
+mod server_ops;
 mod session_import;
 mod session_import_watch;
 mod settings;
@@ -1139,6 +1142,8 @@ pub fn run() {
             proxy_config::commands::proxy_http_request,
             proxy_config::commands::proxy_http_cancel,
             ollama::ollama_pull_model_stream,
+            server_ops::server_ops_events_open,
+            server_ops::server_ops_events_close,
             connectors::commands::connectors_register_adapter,
             connectors::commands::connectors_unregister_adapter,
             connectors::commands::connectors_health,

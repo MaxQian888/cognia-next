@@ -158,11 +158,15 @@ async function* nativeEventStream(options: {
   controllerUrl: string
   accessToken: () => Promise<string>
   lastEventId?: number
-  signal: AbortSignal
+  signal?: AbortSignal
 }): AsyncGenerator<OperationEvent> {
   const token = await options.accessToken()
   if (!token) throw new OpsError("authentication_required", 401, "Authentication is required")
-  if (options.signal.aborted) return
+  // A caller that supplies no signal wants the stream to run until the
+  // controller ends it; a never-aborting signal expresses that without
+  // scattering optional checks through the loop below.
+  const signal = options.signal ?? new AbortController().signal
+  if (signal.aborted) return
 
   const id = streamId()
   const pending: OperationEvent[] = []
@@ -186,7 +190,7 @@ async function* nativeEventStream(options: {
     notify()
   })
   const onAbort = () => notify()
-  options.signal.addEventListener("abort", onAbort, { once: true })
+  signal.addEventListener("abort", onAbort, { once: true })
 
   try {
     await invoke("server_ops_events_open", {
@@ -198,10 +202,10 @@ async function* nativeEventStream(options: {
 
     for (;;) {
       while (pending.length > 0) {
-        if (options.signal.aborted) return
+        if (signal.aborted) return
         yield pending.shift() as OperationEvent
       }
-      if (options.signal.aborted) return
+      if (signal.aborted) return
       if (finished) {
         const { error } = finished as { error: string | null }
         if (error) throw new OpsError("event_stream_failed", 0, error)
@@ -213,7 +217,7 @@ async function* nativeEventStream(options: {
     }
   } finally {
     unlisten()
-    options.signal.removeEventListener("abort", onAbort)
+    signal.removeEventListener("abort", onAbort)
     // Idempotent on the native side — a stream that already ended reports
     // `false` rather than failing, which is the normal shape of an effect
     // cleanup racing a server-side disconnect.
@@ -223,7 +227,7 @@ async function* nativeEventStream(options: {
 
 export type OpsEventStreamFn = (options: {
   lastEventId?: number
-  signal: AbortSignal
+  signal?: AbortSignal
 }) => AsyncGenerator<OperationEvent>
 
 /**
