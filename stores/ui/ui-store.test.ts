@@ -13,7 +13,6 @@ import {
 const RESET = {
   selectedGuild: { kind: "dm" } as SelectedGuild,
   memberStatus: {},
-  showMemberList: true,
   scratchpadCollapsed: {},
   stopRequestedFor: {},
   pendingSettingsRequest: null,
@@ -77,17 +76,6 @@ describe("useUIStore", () => {
       })
       act(() => result.current.clearMemberStatusFor("ts1"))
       expect(result.current.memberStatus).toEqual({ "ts2::c": "thinking" })
-    })
-  })
-
-  describe("showMemberList", () => {
-    it("defaults to true and toggles", () => {
-      const { result } = renderHook(() => useUIStore())
-      expect(result.current.showMemberList).toBe(true)
-      act(() => result.current.setShowMemberList(false))
-      expect(result.current.showMemberList).toBe(false)
-      act(() => result.current.setShowMemberList(true))
-      expect(result.current.showMemberList).toBe(true)
     })
   })
 
@@ -225,7 +213,6 @@ describe("useUIStore", () => {
       const { result } = renderHook(() => useUIStore())
       act(() => {
         result.current.setSelectedGuild({ kind: "team", teamId: "t1" })
-        result.current.setShowMemberList(false)
         result.current.setScratchpadCollapsed("ts1", true)
         result.current.toggleGuildRail()
         result.current.setStatusBarCollapsed(true)
@@ -240,7 +227,6 @@ describe("useUIStore", () => {
       const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> }
       expect(parsed.state).toEqual({
         selectedGuild: { kind: "team", teamId: "t1" },
-        showMemberList: false,
         scratchpadCollapsed: { ts1: true },
         sidebarCollapsed: false,
         sidebarWidth: 256,

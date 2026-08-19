@@ -239,26 +239,17 @@ jest.mock("@/components/shell/sidebar-guild-sections", () => {
     SidebarGuildSectionRows: ({
       rows,
       openKey,
-      archived,
-      openActions,
       testId,
     }: {
       rows: Array<{ key: string }>
       openKey: string | null
-      archived?: boolean
-      openActions?: React.ReactNode
       testId?: string
     }) =>
       rows.length === 0 ? null : (
-        <div
-          data-testid={testId}
-          data-open={openKey ?? undefined}
-          data-archived={archived || undefined}
-        >
+        <div data-testid={testId} data-open={openKey ?? undefined}>
           {rows.map((row) => (
             <span key={row.key} data-testid={`guild-row-${row.key}`} />
           ))}
-          {openKey ? <div data-testid="sidebar-guild-open-actions">{openActions}</div> : null}
         </div>
       ),
     SidebarCreateTeamRow: () => <div data-testid="sidebar-guild-create-team" />,
@@ -2540,12 +2531,11 @@ describe("title-bar projection", () => {
     expect(outlet).toContainElement(screen.getByTestId("workspace-switcher"))
     expect(screen.getByTestId("workspace-switcher")).toHaveAttribute("data-variant", "wide")
     expect(outlet).not.toHaveTextContent("directMessages")
-    // Nav rows on top, DM open above the list, teams + footer below it.
+    // New conversation heads the rail, then the nav rows. With Chats open and
+    // no teams the accordion has nothing to draw at all — the list is it.
+    expect(rail).toContainElement(screen.getByTestId("sidebar-new-conversation"))
     expect(rail).toContainElement(screen.getByTestId("sidebar-nav"))
-    expect(screen.getByTestId("sidebar-guild-rows-before")).toHaveAttribute("data-open", "dm")
-    expect(screen.getByTestId("sidebar-guild-rows-before")).toContainElement(
-      screen.getByTestId("guild-row-dm")
-    )
+    expect(screen.queryByTestId("sidebar-guild-rows-before")).toBeNull()
     expect(screen.queryByTestId("sidebar-guild-rows-after")).toBeNull()
     expect(rail).toContainElement(screen.getByTestId("sidebar-guild-create-team"))
     expect(rail).toContainElement(screen.getByTestId("sidebar-footer"))
@@ -2622,19 +2612,30 @@ describe("title-bar projection", () => {
     unmount()
   })
 
-  it("puts the list actions on the open section's heading: new stays, the rest fold behind ⋯", async () => {
+  it("heads the rail with new-conversation and puts the rest behind ⋯ on the search row", async () => {
     renderProjected()
     const rail = document.getElementById("conversation-sidebar")!
     // Nothing but the workspace switcher in the bar.
-    expect(screen.getByTestId("start-outlet")).not.toContainElement(
-      screen.getByLabelText("newChat")
-    )
-    // Search owns its row with the filter; new and ⋯ sit on the heading row.
-    expect(rail).toContainElement(screen.getByLabelText("searchAria"))
-    const heading = screen.getByTestId("sidebar-guild-open-actions")
-    expect(heading).toContainElement(screen.getByLabelText("newChat"))
+    const newButton = screen.getByTestId("sidebar-new-conversation")
+    expect(screen.getByTestId("start-outlet")).not.toContainElement(newButton)
+    // New conversation is the rail's first control, above the navigation, and
+    // it names what it creates in the section that is open.
+    expect(rail).toContainElement(newButton)
+    expect(newButton).toHaveTextContent("newChat")
+    const search = screen.getByTestId("channel-list-search")
+    expect(
+      newButton.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      newButton.compareDocumentPosition(screen.getByTestId("sidebar-nav")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    // The search row carries the field, the filter and ⋯ — and nothing else.
     const menu = screen.getByTestId("channel-list-actions-menu")
-    expect(heading).toContainElement(menu)
+    expect(rail).toContainElement(screen.getByLabelText("searchAria"))
+    expect(search.parentElement).toContainElement(menu)
+    expect(search.parentElement).toContainElement(screen.getByTestId("channel-list-filter-trigger"))
+    expect(search.parentElement).not.toContainElement(newButton)
     expect(menu).toHaveAccessibleName("listActions")
     expect(screen.queryByLabelText("viewArchived")).toBeNull()
 
@@ -2643,6 +2644,34 @@ describe("title-bar projection", () => {
     // Archived toggle first, then the display options that were already a menu.
     expect(await screen.findByTestId("channel-list-toggle-view")).toHaveTextContent("viewArchived")
     expect(screen.getByText("displayOptions")).toBeInTheDocument()
+  })
+
+  it("creates in the open team when a team section is the one showing", () => {
+    selectedGuild = { kind: "team", teamId: "t-1" }
+    const teams = [{ id: "t-1", name: "Alpha" }]
+    callQueue.length = 0
+    for (let i = 0; i < 6; i++) callQueue.push(characters, [], teams)
+    const onNewTeamConversation = jest.fn()
+    render(
+      <TitleBarOutletsProvider>
+        <StartOutlet />
+        <TitleBarProjectionScope enabled>
+          <ChannelList
+            sessions={[dmSession]}
+            activeSessionId={null}
+            onSelect={jest.fn()}
+            onNewDirect={jest.fn()}
+            onNewTeamConversation={onNewTeamConversation}
+            onDelete={jest.fn()}
+            onRename={jest.fn()}
+          />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+    const newButton = screen.getByTestId("sidebar-new-conversation")
+    expect(newButton).toHaveTextContent("newConversation")
+    fireEvent.click(newButton)
+    expect(onNewTeamConversation).toHaveBeenCalledWith("t-1")
   })
 
   it("takes the whole row while in use, and offers to take the words global", () => {
@@ -2654,14 +2683,15 @@ describe("title-bar projection", () => {
       const search = screen.getByTestId("channel-list-search")
       const input = screen.getByLabelText("searchAria")
       expect(search).not.toHaveAttribute("data-expanded")
-      expect(screen.getByLabelText("newChat")).toBeInTheDocument()
+      expect(screen.getByTestId("sidebar-new-conversation")).toBeInTheDocument()
 
-      // Focus (what `/` gives it) expands the field; the filter beside it
-      // yields. The list actions live on the heading row now and stay put.
+      // Focus (what `/` gives it) expands the field; the filter and ⋯ beside
+      // it yield. New conversation heads the rail and never moves.
       act(() => input.focus())
       expect(search).toHaveAttribute("data-expanded", "true")
       expect(screen.queryByTestId("channel-list-filter-trigger")).toBeNull()
-      expect(screen.getByLabelText("newChat")).toBeInTheDocument()
+      expect(screen.queryByTestId("channel-list-actions-menu")).toBeNull()
+      expect(screen.getByTestId("sidebar-new-conversation")).toBeInTheDocument()
 
       // The global-search hatch sits inside the field, and carries the query.
       fireEvent.change(input, { target: { value: "budget" } })
@@ -2682,20 +2712,25 @@ describe("title-bar projection", () => {
       fireEvent.keyDown(input, { key: "Escape" })
       act(() => input.blur())
       expect(search).not.toHaveAttribute("data-expanded")
-      expect(screen.getByLabelText("newChat")).toBeInTheDocument()
+      expect(screen.getByTestId("sidebar-new-conversation")).toBeInTheDocument()
     } finally {
       window.removeEventListener("cognia:command-palette:request", onRequest)
     }
   })
 
-  it("says where you are once the archived toggle is behind ⋯", async () => {
+  it("says where you are once the archived toggle is behind ⋯, and takes you back", async () => {
     renderProjected()
-    expect(screen.getByTestId("sidebar-guild-rows-before")).not.toHaveAttribute("data-archived")
+    expect(screen.queryByTestId("channel-list-archived-chip")).toBeNull()
     const user = userEvent.setup()
     await user.click(screen.getByTestId("channel-list-actions-menu"))
     await user.click(await screen.findByTestId("channel-list-toggle-view"))
-    // The open accordion row carries the "· Archived" suffix.
-    expect(screen.getByTestId("sidebar-guild-rows-before")).toHaveAttribute("data-archived", "true")
+    // A chip under the search field names the view and is the way out of it —
+    // neither a heading row nor the toggle itself is on screen to do that.
+    const chip = await screen.findByTestId("channel-list-archived-chip")
+    expect(chip).toHaveTextContent("archivedTitleSuffix")
+    expect(chip).toHaveAccessibleName("viewActive")
+    await user.click(chip)
+    expect(screen.queryByTestId("channel-list-archived-chip")).toBeNull()
   })
 
   it("reports the rail's rendered width for the bar to size its outlet", () => {

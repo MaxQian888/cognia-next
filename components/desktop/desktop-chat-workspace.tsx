@@ -6,8 +6,11 @@
  * editor for the canvas guild, and owns chat-domain modals (character
  * picker, onboarding, tool approval).
  *
- *   ┌ ChannelList │ ChatPane │ MemberList ┐    (DM / team guilds)
- *   └────────────────────────────────────┘
+ *   ┌ ChannelList │ ChatPane │ ContextWorkbench ┐  (DM / team guilds)
+ *   └──────────────────────────────────────────┘
+ *
+ * A team session's roster is not a column of its own any more: it is the
+ * workbench's `team-members` panel (`chat-dock-panels.tsx`).
  *   ┌────────────── CanvasShell ─────────┐    (canvas guild)
  *   └────────────────────────────────────┘
  *
@@ -26,7 +29,6 @@ import { Button } from "@/components/ui/button"
 import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
-import { MemberList } from "@/components/shell/member-list"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { CanvasShell } from "@/components/canvas/canvas-shell"
@@ -39,6 +41,7 @@ import type {
   PendingApproval,
   SendContent,
 } from "@cognia/agent-config-types"
+import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useChatStore } from "@/stores/chat"
@@ -66,6 +69,7 @@ export function DesktopChatWorkspace() {
   const router = useRouter()
   const platform = usePlatform()
   const runtimeT = useTranslations("desktop.chatRuntime")
+  const tMembers = useTranslations("desktop.memberList")
   const runtimeSnapshot = useRuntimeSnapshot()
   const chatAvailability = resolveOperationAvailability({
     snapshot: runtimeSnapshot,
@@ -287,7 +291,6 @@ export function DesktopChatWorkspace() {
     [select, sessions, setSelectedGuild]
   )
 
-  const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const isCanvasGuild = selectedGuild.kind === "canvas"
 
   // Kind lookup for the per-pane dispatchers below: a team session routes to
@@ -494,22 +497,23 @@ export function DesktopChatWorkspace() {
     else handleNewDirect()
   }, [selectedGuild, handleNewTeamConversation, handleNewDirect])
 
-  const handleMemberMention = useCallback((c: Character) => {
-    composerRef.current?.insertMention(c.name)
-  }, [])
+  // The team-members panel lives in the workbench, outside this tree, so it
+  // asks for a mention over the shared seam rather than through a callback
+  // (`lib/chat/composer-mention-request.ts`).
+  useEffect(() => onComposerMentionRequest((name) => composerRef.current?.insertMention(name)), [])
 
   const handleCharacterPick = useCallback(
     async (c: Character) => {
       log.info("character-picker pick", { characterId: c.id })
       const s = await create({
-        title: `Chat with ${c.name}`,
+        title: tMembers("chatTitle", { name: c.name }),
         kind: "direct",
         characterId: c.id,
       })
       select(s.id)
       setSelectedGuild({ kind: "dm" })
     },
-    [create, select, setSelectedGuild]
+    [create, select, setSelectedGuild, tMembers]
   )
 
   // Inline pane gates carry approvals for both kinds; team approvals arrive
@@ -567,7 +571,7 @@ export function DesktopChatWorkspace() {
           {/* Always mounted so the rail can animate its width to 0 when
               collapsed (a smooth transition needs the element to stay in the
               DOM). It self-hides to a 0-width column — no leftover strip — and
-              is restored from the chat-header toggle. State is the single
+              is restored from the title bar's sidebar toggle. State is the single
               `sidebarCollapsed` store field shared with the title/status bars,
               View menu, and ⌘B. */}
           {sidebarSide === "left" ? channelList : null}
@@ -649,13 +653,6 @@ export function DesktopChatWorkspace() {
             </main>
           </ArtifactWorkspaceDock>
 
-          {isTeamSession && (
-            <MemberList
-              teamSessionId={activeSession?.id ?? null}
-              teamId={activeSession?.teamId ?? null}
-              onMention={handleMemberMention}
-            />
-          )}
           {sidebarSide === "right" ? channelList : null}
         </TitleBarProjectionScope>
       )}

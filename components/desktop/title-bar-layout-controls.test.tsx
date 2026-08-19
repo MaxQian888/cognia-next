@@ -36,6 +36,7 @@ jest.mock("@/stores/terminal/terminal-store", () => ({
 
 const mockArtifactDockState = {
   dockCollapsed: true,
+  unreadArtifact: false,
   toggleDock: jest.fn(),
   openBrowser: jest.fn(),
 }
@@ -193,6 +194,7 @@ beforeEach(() => {
   mockTerminalState.panelOpen = false
   mockTerminalState.togglePanel.mockClear()
   mockArtifactDockState.dockCollapsed = true
+  mockArtifactDockState.unreadArtifact = false
   mockArtifactDockState.toggleDock.mockClear()
   mockArtifactDockState.openBrowser.mockClear()
   mockToggleGuildRail.mockClear()
@@ -228,6 +230,28 @@ describe("TitleBarLayoutControls", () => {
     expect(mockUiState.toggleSidebar).toHaveBeenCalled()
     expect(mockTerminalState.togglePanel).toHaveBeenCalled()
     expect(mockArtifactDockState.toggleDock).toHaveBeenCalled()
+  })
+
+  // The chat header's own `ArtifactDockToggle` used to carry this dot; that copy
+  // is gone now that the bar owns the control on every route, so the signal has
+  // to live here or a background artifact arrives silently.
+  it("marks the secondary-sidebar toggle when an artifact arrived while the dock was dismissed", () => {
+    mockArtifactDockState.dockCollapsed = true
+    mockArtifactDockState.unreadArtifact = true
+    render(<TitleBarLayoutControls controls={["rightSidebar"]} />)
+    const toggle = screen.getByTestId("title-bar-toggle-right-sidebar")
+    expect(screen.getByTestId("title-bar-toggle-right-sidebar-unread")).toBeInTheDocument()
+    expect(toggle).toHaveAccessibleName("unreadArtifacts")
+  })
+
+  it("drops the unread marker once the dock is open", () => {
+    mockArtifactDockState.dockCollapsed = false
+    mockArtifactDockState.unreadArtifact = true
+    render(<TitleBarLayoutControls controls={["rightSidebar"]} />)
+    expect(screen.queryByTestId("title-bar-toggle-right-sidebar-unread")).toBeNull()
+    expect(screen.getByTestId("title-bar-toggle-right-sidebar")).toHaveAccessibleName(
+      "toggleRightSidebar"
+    )
   })
 
   it("can render one independently-customizable title-bar control", () => {

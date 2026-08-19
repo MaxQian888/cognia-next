@@ -58,6 +58,7 @@ export const WORKBENCH_PANEL_CATALOG: readonly WorkbenchPanelCatalogItem[] = [
   { id: "resource-chat", activity: "ai", labelKey: "contextWorkbench.resourceChat" },
   { id: "session-sidechat", activity: "ai", labelKey: "contextWorkbench.sessionSidechat" },
   { id: "agent-status", activity: "ai", labelKey: "contextWorkbench.agentStatusPanel.title" },
+  { id: "team-members", activity: "ai", labelKey: "contextWorkbench.teamMembersPanel.title" },
   { id: "project-overview", activity: "workspace", labelKey: "projectOverview.panelTitle" },
   { id: "workspace", activity: "workspace", labelKey: "artifacts.dock.workspaceMode" },
   {

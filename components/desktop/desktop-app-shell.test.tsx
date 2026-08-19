@@ -58,7 +58,9 @@ jest.mock("@/components/desktop/title-bar", () => ({
   TitleBar: () => <div data-testid="title-bar" />,
 }))
 jest.mock("@/components/desktop/status-bar", () => ({
-  StatusBar: () => <div data-testid="status-bar" />,
+  StatusBar: ({ collapsed }: { collapsed?: boolean }) => (
+    <div data-testid="status-bar" data-collapsed={collapsed ? "true" : "false"} />
+  ),
 }))
 jest.mock("@/components/desktop/window-focus-tracker", () => ({
   WindowFocusTracker: () => null,
@@ -76,11 +78,13 @@ jest.mock("@/components/shell/guild-rail", () => ({
   GuildRail: ({
     onCreateTeam,
     onOpenSettings,
+    collapsed,
   }: {
     onCreateTeam: () => void
     onOpenSettings: () => void
+    collapsed?: boolean
   }) => (
-    <div data-testid="guild-rail-stub">
+    <div data-testid="guild-rail-stub" data-collapsed={collapsed ? "true" : "false"}>
       <button data-testid="guild-create-team" onClick={onCreateTeam} />
       <button data-testid="guild-open-settings" onClick={onOpenSettings} />
     </div>
@@ -325,25 +329,31 @@ describe("isShellBypassRoute", () => {
 })
 
 describe("collapse toggles from ui-store", () => {
-  test("hides guild rail when guildRailCollapsed is true", () => {
+  test("collapses — rather than unmounts — the guild rail when guildRailCollapsed is true", () => {
+    // Unmounting dropped 56px out of the window in one frame. The rail stays in
+    // the DOM and animates its own width to zero; a CSS transition needs the
+    // element on both sides of the change.
     uiStateRef.guildRailCollapsed = true
     render(
       <DesktopAppShell>
         <div data-testid="route-content" />
       </DesktopAppShell>
     )
-    expect(screen.queryByTestId("guild-rail-stub")).toBeNull()
+    expect(screen.getByTestId("guild-rail-stub")).toHaveAttribute("data-collapsed", "true")
     expect(screen.getByTestId("route-content")).toBeInTheDocument()
   })
 
-  test("hides the guild rail while the expanded sidebar hosts the navigation, and brings it back", () => {
+  test("collapses the guild rail while the expanded sidebar hosts the navigation, and brings it back", () => {
+    // This flag flips *with* the conversation sidebar's own width animation, so
+    // it is the case that most needs to collapse rather than disappear: a
+    // smooth 260px collapse used to end on an instant 56px jolt the other way.
     act(() => useShellColumnsStore.setState({ sidebarHostsNav: true }))
     const { rerender } = render(
       <DesktopAppShell>
         <div data-testid="route-content" />
       </DesktopAppShell>
     )
-    expect(screen.queryByTestId("guild-rail-stub")).toBeNull()
+    expect(screen.getByTestId("guild-rail-stub")).toHaveAttribute("data-collapsed", "true")
     // Sidebar collapsed / left `/`: the rows are gone, the icon column returns.
     act(() => useShellColumnsStore.setState({ sidebarHostsNav: false }))
     rerender(
@@ -351,17 +361,17 @@ describe("collapse toggles from ui-store", () => {
         <div data-testid="route-content" />
       </DesktopAppShell>
     )
-    expect(screen.getByTestId("guild-rail-stub")).toBeInTheDocument()
+    expect(screen.getByTestId("guild-rail-stub")).toHaveAttribute("data-collapsed", "false")
   })
 
-  test("hides status bar when statusBarCollapsed is true", () => {
+  test("collapses — rather than unmounts — the status bar when statusBarCollapsed is true", () => {
     uiStateRef.statusBarCollapsed = true
     render(
       <DesktopAppShell>
         <div data-testid="route-content" />
       </DesktopAppShell>
     )
-    expect(screen.queryByTestId("status-bar")).toBeNull()
+    expect(screen.getByTestId("status-bar")).toHaveAttribute("data-collapsed", "true")
     expect(screen.getByTestId("route-content")).toBeInTheDocument()
   })
 

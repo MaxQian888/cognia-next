@@ -75,7 +75,7 @@
     "deleteFolder": "Delete folder",
     "deleteFolderConfirmBody": "The folder is removed; its conversations stay and return to the date list. This cannot be undone.",
     "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
-    "directMessages": "Direct Messages",
+    "directMessages": "Chats",
     "displayOptions": "Display options",
     "emptyArchived": "No archived conversations.",
     "emptyDm": "No chats yet. Pick a character to begin.",
@@ -93,7 +93,7 @@
         "agent": "Agent",
         "date": "Date",
         "none": "No grouping",
-        "team": "Direct messages / Team",
+        "team": "Chats / Team",
         "workspace": "Workspace"
       }
     },
@@ -117,7 +117,7 @@
     "resizeHandle": "Resize sidebar",
     "searchAria": "Search conversations",
     "searchMessageContent": "Search message content",
-    "searchPlaceholder": "Search conversations…",
+    "searchPlaceholder": "Search chats…",
     "searchShortcutHint": "Press / to search",
     "searchTruncated": "Some results may be hidden — refine your search.",
     "sectionPinned": "Pinned",
@@ -198,7 +198,7 @@
       "sideRight": "Right",
       "title": "Customize sidebar"
     },
-    "directMessages": "Direct Messages",
+    "directMessages": "Chats",
     "discover": "Discover",
     "eval": "Evaluation",
     "featuresGroup": "Features",
@@ -340,16 +340,24 @@
   },
   "memberList": {
     "charsCount": "{count} chars",
+    "chatTitle": "Chat with {name}",
+    "defaultModel": "Session default model",
     "empty": "No members.",
     "heading": "Members — {count}",
-    "hide": "Hide member list",
     "label": "Team members",
     "mentionTitle": "Mention {name}",
+    "noTeamSession": "Open a team conversation to see its members.",
     "notesPlaceholder": "Notes injected into every member's transcript on each turn…",
+    "openChat": "Open chat with {name}",
     "sharedNotes": "Shared notes",
-    "show": "Show member list",
+    "status": {
+      "errored": "Errored",
+      "idle": "Idle",
+      "thinking": "Thinking"
+    },
     "statusLabel": "Status: {status}",
-    "stopMember": "Stop this member"
+    "stopMember": "Stop this member",
+    "supervisor": "Supervisor"
   },
   "menu": {
     "edit": {
@@ -380,7 +388,7 @@
       "agentTeams": "Agent Teams",
       "canvas": "Canvas",
       "discover": "Discover",
-      "dms": "Direct Messages",
+      "dms": "Chats",
       "inbox": "Inbox",
       "label": "Go",
       "logs": "Logs",
@@ -652,6 +660,7 @@
       "toggleRightSidebar": "Toggle Right Sidebar",
       "toggleSidebar": "Toggle Sidebar",
       "toggleStatusBar": "Toggle Status Bar",
+      "unreadArtifacts": "New artifacts — open panel",
       "zoomIn": "Zoom in",
       "zoomLabel": "Zoom",
       "zoomOut": "Zoom out",

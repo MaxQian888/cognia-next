@@ -3,6 +3,7 @@
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
+import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
@@ -199,7 +200,7 @@ jest.mock("next/navigation", () => ({
 }))
 
 import { StatusBar } from "./status-bar"
-import { STATUS_BAR_ITEMS } from "@/types/shell/bars"
+import { STATUS_BAR_HEIGHT_PX, STATUS_BAR_ITEMS } from "@/types/shell/bars"
 
 beforeEach(() => {
   logInfo.mockReset()
@@ -347,7 +348,45 @@ test("footer is hidden below the mobile breakpoint and shown from md up", () => 
   // The VSCode-style desktop bottom bar must not leak into mobile layout
   // (narrow viewports / phone browsers); it only re-appears from `md` (768px).
   expect(footer.className).toContain("hidden")
-  expect(footer.className).toContain("md:flex")
+  expect(footer.className).toContain("md:block")
+})
+
+// ── collapse ───────────────────────────────────────────────────────────────
+// Hiding the bar used to unmount it, which dropped 24px out of the window in
+// one frame and shoved everything above it down. It now animates its own
+// height on the shell's shared edge-panel clock.
+
+test("collapses to zero height instead of unmounting", () => {
+  render(<StatusBar collapsed />)
+  const footer = screen.getByTestId("status-bar")
+  expect(footer).toHaveStyle({ height: "0px" })
+  expect(footer).toHaveAttribute("aria-hidden", "true")
+  expect(footer.className).toContain("overflow-hidden")
+})
+
+test("expands to the height its own class draws", () => {
+  render(<StatusBar />)
+  const footer = screen.getByTestId("status-bar")
+  // The constant is a layout input (a transition cannot interpolate out of the
+  // `auto` an `h-6` resolves to), so it has to keep agreeing with the class the
+  // inner row carries.
+  expect(footer).toHaveStyle({ height: `${STATUS_BAR_HEIGHT_PX}px` })
+  expect(footer.firstElementChild?.className).toContain("h-6")
+  expect(STATUS_BAR_HEIGHT_PX).toBe(24)
+  expect(footer).not.toHaveAttribute("aria-hidden")
+})
+
+test("animates the collapse on the shared edge-panel clock", () => {
+  const { rerender } = render(<StatusBar />)
+  rerender(<StatusBar collapsed />)
+  const footer = screen.getByTestId("status-bar")
+  expect(footer.className).toContain("transition-[height]")
+  expect(footer.className).toContain(SHELL_DOCK_TIMING_CLASS)
+})
+
+test("leaves the resting bar unclipped so popovers and focus rings survive", () => {
+  render(<StatusBar />)
+  expect(screen.getByTestId("status-bar").className).not.toContain("overflow-hidden")
 })
 
 test("stays within the status-bar chrome control budget", () => {

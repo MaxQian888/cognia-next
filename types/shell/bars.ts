@@ -29,6 +29,17 @@
  * doing nothing.
  */
 
+/**
+ * The status bar's height in px — the `h-6` `status-bar.tsx` draws.
+ *
+ * Unlike the rest of this module this one *is* a layout input: collapsing the
+ * bar animates its height between this number and zero, and a transition
+ * cannot interpolate out of the `auto` an `h-6` class resolves to. The class
+ * still sizes the bar's inner row, so `status-bar.test.tsx` pins the two
+ * together.
+ */
+export const STATUS_BAR_HEIGHT_PX = 24
+
 /** Which of the two window bars an item belongs to. */
 export type BarId = "title" | "status"
 

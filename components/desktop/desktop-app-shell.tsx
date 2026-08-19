@@ -99,11 +99,13 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // or font change would re-render the entire app shell for nothing.
   const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
 
-  // Terminal dock. Both slots stay mounted; each renders only when it owns the
-  // store's current `panelPosition`, so the dock can slide between the bottom
-  // edge and the right column. All of its state lives in `TerminalDockRegion`
-  // rather than here — this shell wraps every desktop route, so a selector added
-  // at this level re-renders the whole app on every dock resize.
+  // Terminal dock. Both slots stay mounted permanently, each collapsed to a
+  // zero-size box unless it owns the store's current `panelPosition` — which is
+  // what lets the dock be handed between the bottom edge and the right column,
+  // and what lets either edge animate its own opening at all. All of its state
+  // lives in `TerminalDockRegion` rather than here — this shell wraps every
+  // desktop route, so a selector added at this level re-renders the whole app on
+  // every dock resize.
 
   // Bridge native-menu `menu://<id>` events into renderer actions. Must run
   // even when the in-app Menubar would render in its hamburger form so the
@@ -180,10 +182,20 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // Rendered on whichever edge `sidebarSide` names — outermost either way, so
   // the rail is pinned to the window edge and never shifts when the (transient,
   // plugin-driven) extension host bar appears beside it.
-  const guildRail =
-    guildRailCollapsed || sidebarHostsNav ? null : (
-      <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
-    )
+  //
+  // Always mounted, and told to collapse rather than being swapped for `null`:
+  // both reasons the column goes away are gestures the user watches, and a CSS
+  // transition needs the element on both sides of the change. `sidebarHostsNav`
+  // matters most — it flips *with* the conversation sidebar's own width
+  // animation, so unmounting here ended a smooth collapse on a 56px jolt in the
+  // opposite direction.
+  const guildRail = (
+    <GuildRail
+      collapsed={guildRailCollapsed || sidebarHostsNav}
+      onCreateTeam={handleCreateTeam}
+      onOpenSettings={() => handleOpenSettings()}
+    />
+  )
 
   return (
     // The provider is what lets the chat workspace's column headers render into
@@ -230,7 +242,9 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           nothing at all. */}
         <FileViewerDialog />
         <ShellLayoutNotice />
-        {!statusBarCollapsed && <StatusBar />}
+        {/* Collapses to zero height on the same clock rather than unmounting —
+          hiding it used to drop 24px out of the window in one frame. */}
+        <StatusBar collapsed={statusBarCollapsed} />
       </div>
     </TitleBarOutletsProvider>
   )

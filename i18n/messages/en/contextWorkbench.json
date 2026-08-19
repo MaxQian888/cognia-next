@@ -339,6 +339,9 @@
     "title": "Source Control",
     "unstaged": "{count, plural, one {# change} other {# changes}}"
   },
+  "teamMembersPanel": {
+    "title": "Team members"
+  },
   "unavailable": {
     "comments": {
       "description": "This resource does not currently provide comment threads. Other workbench activities remain available.",

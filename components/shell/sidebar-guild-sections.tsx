@@ -1,16 +1,22 @@
 "use client"
 
 /**
- * The expanded sidebar's guild accordion: Direct Messages, then one section
- * per team, one of them open. The open section's body is the conversation
- * list itself (`ChannelListBody` — search field, filters, sessions), so this
- * module renders only the header rows and tells the caller where to put the
- * list: `splitGuildSections` returns the headers that go *above* it (ending
- * with the open one) and the ones that go *below* it. Codex-style: the rows
- * that are closed stay a single line each; picking one moves the list under it.
+ * The expanded sidebar's guild accordion: Chats, then one section per team,
+ * one of them open. The open section's body is the conversation list itself
+ * (`ChannelListBody` — search field, filters, sessions), so this module
+ * renders only the header rows and tells the caller where to put the list:
+ * `splitGuildSections` returns the headers that go *above* it (ending with
+ * the open one) and the ones that go *below* it. Codex-style: the rows that
+ * are closed stay a single line each; picking one moves the list under it.
  *
  * Which section is open is `selectedGuild` (`useShellNav`), so the header
  * rows here, the icon column and the chat pane all agree.
+ *
+ * The one row this never draws is an *open* Chats section — see
+ * `splitGuildSections`. The list's own actions are not here either: "new
+ * conversation" heads the whole sidebar and the ⋯ menu sits on the search
+ * row, both in one fixed place rather than travelling with whichever section
+ * happens to be open (`channel-list.tsx`).
  *
  * A closed section hides its conversations, so its row carries what the list
  * would have shown: the number of unread conversations inside it
@@ -20,10 +26,16 @@
  * the way a Discord category or a Slack section does.
  */
 
-import { useCallback, type ReactNode } from "react"
+import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
-import { CheckCheckIcon, ChevronRightIcon, MailIcon, PlusIcon, SettingsIcon } from "lucide-react"
+import {
+  CheckCheckIcon,
+  ChevronRightIcon,
+  MessagesSquareIcon,
+  PlusIcon,
+  SettingsIcon,
+} from "lucide-react"
 import { loggers } from "@cognia/logging"
 import type { Team } from "@cognia/agent-config-types"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
@@ -34,7 +46,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import { markGuildRead, useGuildUnread } from "@/hooks/shell/use-guild-unread"
+import {
+  markGuildRead,
+  useGuildUnread,
+  type GuildUnreadTarget,
+} from "@/hooks/shell/use-guild-unread"
 import { cn } from "@/lib/utils"
 import { SidebarRow } from "./sidebar-nav-section"
 import { useShellNav } from "./use-shell-nav"
@@ -49,12 +65,21 @@ export type GuildSectionRow = { key: "dm" } | { key: string; team: Team }
 export type ActiveGuildSection = { kind: "dm" } | { kind: "team"; teamId: string }
 
 /**
- * Order the accordion — DM first, then teams as listed — and cut it at the
+ * Order the accordion — Chats first, then teams as listed — and cut it at the
  * open section: `before` ends with the open row (the list renders right after
  * it), `after` is everything below the list. A selected team that is no
  * longer in `teams` (deleted while selected) leaves nothing open: every header
  * goes above the list, which then reads as an orphan block until the user
  * picks a section.
+ *
+ * The exception is an open Chats section, whose row is dropped from `before`.
+ * Chats is the sidebar's default, unscoped state — the search field and the
+ * conversation list right below *are* that section, so a row above them
+ * saying so is a line of chrome that carries nothing, and it read as one more
+ * navigation entry under "More…" rather than as a heading. A team is a
+ * *scope* on the same list, and its name is the only thing that explains why
+ * the list is filtered, so an open team keeps its row. Closed, Chats is a
+ * real destination again (it is how you leave a team) and is drawn as usual.
  */
 export function splitGuildSections(
   teams: readonly Team[],
@@ -64,7 +89,9 @@ export function splitGuildSections(
   const openKey = active.kind === "dm" ? "dm" : active.teamId
   const index = rows.findIndex((row) => row.key === openKey)
   if (index === -1) return { before: rows, after: [], openKey: null }
-  return { before: rows.slice(0, index + 1), after: rows.slice(index + 1), openKey }
+  const before = rows.slice(0, index + 1)
+  if (openKey === "dm") before.pop()
+  return { before, after: rows.slice(index + 1), openKey }
 }
 
 /** Compact unread pill for a closed section — same glyph the session rows use. */
@@ -85,22 +112,9 @@ interface RowsProps {
   /** Which row is the open one — the caller's `openKey` from the split. */
   openKey: string | null
   /**
-   * Suffix on the open row when the list is showing archived conversations
-   * (the archived toggle lives behind the list's ⋯ menu; the header says
-   * where you are).
-   */
-  archived?: boolean
-  /**
-   * The open section's own actions (new conversation, list menu), drawn at
-   * the right end of its header row — a section heads its content the way a
-   * Discord category does, with "+" on the heading. Sits *beside* the row
-   * button, not inside it: buttons do not nest.
-   */
-  openActions?: ReactNode
-  /**
    * Start a conversation in a section from its context menu — without having
-   * to open the section first. `teamId` is `null` for Direct Messages. When
-   * absent the menu offers no "new" item (the mobile Sheet has none to give).
+   * to open the section first. `teamId` is `null` for Chats. When absent the
+   * menu offers no "new" item (the mobile Sheet has none to give).
    */
   onNewConversation?: (teamId: string | null) => void
   /**
@@ -119,15 +133,13 @@ interface RowsProps {
  * and once with `after` below it.
  *
  * Disclosure reads from the left — `›` closed, `⌄` open — the way a Finder or
- * Codex tree does, so the right end stays free for the open section's
- * actions; the open row is a heading (bold, no selection tint), because
- * "which section is open" is structure, not a choice among peers.
+ * Codex tree does, so the right end stays free for the unread count; the open
+ * row is a heading (bold, no selection tint), because "which section is open"
+ * is structure, not a choice among peers.
  */
 export function SidebarGuildSectionRows({
   rows,
   openKey,
-  archived,
-  openActions,
   onNewConversation,
   panelId,
   className,
@@ -140,7 +152,8 @@ export function SidebarGuildSectionRows({
   const unread = useGuildUnread()
 
   const markRead = useCallback((row: GuildSectionRow) => {
-    const target = row.key === "dm" ? ({ kind: "dm" } as const) : { kind: "team", teamId: row.key }
+    const target: GuildUnreadTarget =
+      row.key === "dm" ? { kind: "dm" } : { kind: "team", teamId: row.key }
     log.info("guild mark read", target)
     void markGuildRead(target).catch((error: unknown) => {
       log.warn("guild mark read failed", { error: String(error) })
@@ -160,8 +173,11 @@ export function SidebarGuildSectionRows({
     >
       {rows.map((row) => {
         const open = row.key === openKey
-        const isDm = row.key === "dm"
-        const label = isDm ? t("directMessages") : row.team.name
+        // `key` is `string` on the team arm, so it does not narrow the union;
+        // the `team` field is the discriminant.
+        const team = "team" in row ? row.team : null
+        const isDm = !team
+        const label = team ? team.name : t("directMessages")
         const count = isDm ? unread.dm : (unread.teams.get(row.key) ?? 0)
         const newLabel = isDm ? t("newChat") : t("newConversation")
         return (
@@ -188,24 +204,15 @@ export function SidebarGuildSectionRows({
                     />
                   }
                   icon={
-                    isDm ? (
-                      <MailIcon />
+                    team ? (
+                      <AvatarBadge subject={team} size={16} textClassName="text-[9px]" />
                     ) : (
-                      <AvatarBadge subject={row.team} size={16} textClassName="text-[9px]" />
+                      <MessagesSquareIcon />
                     )
                   }
                   label={label}
                   trailing={
-                    open ? (
-                      archived ? (
-                        <span
-                          className="truncate text-xs font-normal text-muted-foreground"
-                          data-testid="channel-list-archived-suffix"
-                        >
-                          · {t("archivedTitleSuffix")}
-                        </span>
-                      ) : undefined
-                    ) : (
+                    open ? undefined : (
                       // Closed: the list is hidden, so the row says what it holds.
                       <GuildUnreadPill count={count} testId={`sidebar-guild-unread-${row.key}`} />
                     )
@@ -213,14 +220,6 @@ export function SidebarGuildSectionRows({
                   testId={isDm ? "sidebar-guild-dm" : `sidebar-guild-team-${row.key}`}
                   className={cn("w-auto flex-1", open && "font-medium text-foreground")}
                 />
-                {open && openActions ? (
-                  <div
-                    className="flex shrink-0 items-center"
-                    data-testid="sidebar-guild-open-actions"
-                  >
-                    {openActions}
-                  </div>
-                ) : null}
               </div>
             </ContextMenuTrigger>
             <ContextMenuContent data-testid={`sidebar-guild-menu-${row.key}`}>

@@ -48,7 +48,7 @@ import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { GuildRail } from "@/components/shell/guild-rail"
-import { MemberList } from "@/components/shell/member-list"
+import { TeamMembersPanel } from "@/components/context-workbench/panels/team-members-panel"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
@@ -90,6 +90,7 @@ import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
 import { useProjectStore } from "@/stores/project/project-store"
 import { loggers } from "@cognia/logging"
 import type { Character, SendContent, Team } from "@cognia/agent-config-types"
+import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { impact, notify } from "@/lib/capacitor/haptics"
 import { PerfCaptureShellStatus } from "@/components/performance/perf-capture-shell-status"
@@ -131,6 +132,18 @@ export function AppShellMobile() {
   const [mounted, setMounted] = useState(false)
 
   const composerRef = useRef<ComposerHandle | null>(null)
+  // The members sheet asks for an `@mention` over the shared seam (it renders
+  // the same host-agnostic panel the desktop workbench does); inserting into
+  // the composer means the sheet has done its job and should get out of the
+  // way (`lib/chat/composer-mention-request.ts`).
+  useEffect(
+    () =>
+      onComposerMentionRequest((name) => {
+        composerRef.current?.insertMention(name)
+        setMemberSheetOpen(false)
+      }),
+    []
+  )
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -621,18 +634,14 @@ export function AppShellMobile() {
             <SheetHeader>
               <SheetTitle>{tShell("memberSheetTitle")}</SheetTitle>
             </SheetHeader>
-            <div className="flex flex-1 overflow-hidden">
-              {/* Same story as the rail above: the default variant is gated on
-                  `lg:` and additionally on the persisted `showMemberList`
-                  toggle, so this sheet opened blank on every phone. */}
-              <MemberList
-                variant="sheet"
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {/* The same panel the desktop workbench shows — one roster, one
+                  set of member actions. Opening a member's own chat navigates
+                  away, so the sheet closes behind it. */}
+              <TeamMembersPanel
                 teamSessionId={activeSession?.id ?? null}
                 teamId={activeSession?.teamId ?? null}
-                onMention={(c) => {
-                  composerRef.current?.insertMention(c.name)
-                  setMemberSheetOpen(false)
-                }}
+                onNavigated={() => setMemberSheetOpen(false)}
               />
             </div>
           </SheetContent>

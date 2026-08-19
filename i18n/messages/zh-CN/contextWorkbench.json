@@ -339,6 +339,9 @@
     "title": "源代码管理",
     "unstaged": "{count, plural, other {# 项变更}}"
   },
+  "teamMembersPanel": {
+    "title": "团队成员"
+  },
   "unavailable": {
     "comments": {
       "description": "此资源暂不提供评论线程，其他工作台功能仍可使用。",

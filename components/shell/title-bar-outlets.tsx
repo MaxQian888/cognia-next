@@ -33,8 +33,10 @@
  * - `useTitleBarProjection(zone)` — what a header calls. Returns the outlet to
  *   `createPortal` into, or `null` (draw inline) when there is no bar, no
  *   provider, or no enabling scope. While it returns an element it counts
- *   itself as projecting, which the bar reads to hide the zone's own default
- *   segments and size the outlet.
+ *   itself as projecting, which the bar reads to size the outlet (and to fold
+ *   the Windows/Linux menubar out of the conversation rail's column). It does
+ *   NOT change which segments the bar draws — those are constant on every
+ *   route, so the top row does not reshape itself as you navigate.
  *
  * Nothing here is persisted or platform-gated; the mobile shell never mounts
  * the provider, so every hook degrades to "draw inline" there.

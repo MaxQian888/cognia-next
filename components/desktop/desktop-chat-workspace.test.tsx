@@ -245,9 +245,14 @@ jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: () => <div data-testid="chat-pane" />,
 }))
 const paneGroupPropsLog: Array<Record<string, unknown>> = []
+const insertMention = jest.fn()
 jest.mock("@/components/chat/chat-pane-group", () => ({
   ChatPaneGroup: (props: Record<string, unknown>) => {
     paneGroupPropsLog.push(props)
+    // The composer handle the workspace threads down; the mention seam writes
+    // through it, so the stub has to fill it the way the real composer does.
+    const ref = props.composerRef as { current: { insertMention: unknown } | null } | undefined
+    if (ref) ref.current = { insertMention }
     return <div data-testid="chat-pane-group" />
   },
 }))
@@ -266,9 +271,6 @@ jest.mock("@/components/desktop/channel-list", () => ({
     return <button data-testid="channel-select-stub" onClick={() => onSelect("s-2")} />
   },
 }))
-jest.mock("@/components/shell/member-list", () => ({
-  MemberList: () => <div data-testid="member-list" />,
-}))
 jest.mock("@/components/artifacts/artifact-workspace-dock", () => ({
   ArtifactWorkspaceDock: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="artifact-workspace-dock">{children}</div>
@@ -281,10 +283,12 @@ jest.mock("@/components/chat/tool-approval-dialog", () => ({
   ToolApprovalDialog: () => null,
 }))
 
+import { requestComposerMention } from "@/lib/chat/composer-mention-request"
 import { DesktopChatWorkspace } from "./desktop-chat-workspace"
 import { useProjectStore } from "@/stores/project/project-store"
 
 beforeEach(() => {
+  insertMention.mockReset()
   logInfo.mockReset()
   logWarn.mockReset()
   select.mockReset()
@@ -577,7 +581,7 @@ test("does not recreate a conversation after the team's last one is deleted", as
   expect(select).not.toHaveBeenCalled()
 })
 
-test("an active team session renders the shared ChatPaneGroup plus the MemberList", async () => {
+test("an active team session renders the shared ChatPaneGroup, and no roster column of its own", async () => {
   sessionsRef.current = [
     {
       id: "t-1",
@@ -598,8 +602,19 @@ test("an active team session renders the shared ChatPaneGroup plus the MemberLis
   // One shared multi-pane surface for team and direct sessions alike…
   expect(screen.getByTestId("chat-pane-group")).toBeInTheDocument()
   expect(screen.queryByTestId("chat-pane")).not.toBeInTheDocument()
-  // …with the team chrome still attached.
-  expect(screen.getByTestId("member-list")).toBeInTheDocument()
+  // …and the roster is the workbench's `team-members` panel now, not a third
+  // column this component mounts beside the chat.
+  expect(screen.queryByTestId("team-members-panel")).toBeNull()
+})
+
+test("hands a mention request from outside its tree to the composer", async () => {
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  act(() => {
+    requestComposerMention("Research Analyst")
+  })
+  expect(insertMention).toHaveBeenCalledWith("Research Analyst")
 })
 
 test("an ordinary Web browser renders the shared chat workspace", async () => {

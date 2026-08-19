@@ -31,6 +31,7 @@ import { SubscriptionInitializer } from "@/components/providers/initializers/sub
 import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
 import { ChatMiddlewareFlagInitializer } from "@/components/providers/initializers/chat-middleware-flag-initializer"
 import { DeveloperModeInitializer } from "@/components/providers/initializers/developer-mode-initializer"
+import { TelemetrySessionInitializer } from "@/components/providers/initializers/telemetry-session-initializer"
 import { ApprovalJournalInitializer } from "@/components/providers/initializers/approval-journal-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
@@ -237,6 +238,11 @@ export default async function RootLayout({
                              * getPluginManager(). */}
                             <PluginRuntimeInitializer />
                             <DeveloperModeInitializer />
+                            {/* Behavior telemetry's app-session floor: one
+                             * `app.launched` per session plus a screen view per
+                             * route. Gated by the same opt-in as every other
+                             * `trackEvent` call site (ADR-0074). */}
+                            <TelemetrySessionInitializer />
                             <ChatMiddlewareFlagInitializer />
                             <ApprovalJournalInitializer />
                             <SubscriptionInitializer />

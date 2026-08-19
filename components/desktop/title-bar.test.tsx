@@ -262,13 +262,51 @@ jest.mock("next/navigation", () => ({
 const toggleTerminalPanel = jest.fn()
 const setTerminalPanelOpen = jest.fn()
 const terminalStateRef = { panelOpen: false }
+// Terminal > New goes through `spawnDefaultTerminal`, which hands
+// `useTerminalStore.getState()` to the spawn orchestrator as its
+// `TerminalStoreLike`. A selector-only mock made that path throw, so the mock
+// also carries the surface the orchestrator touches: registration plus the
+// session mutators it wires live session events to. One shared state object
+// with a `panelOpen` getter, so the members keep stable identities across
+// reads (as the real store's do) while the tests can still flip the panel via
+// `terminalStateRef`.
+const terminalStoreState = {
+  get panelOpen() {
+    return terminalStateRef.panelOpen
+  },
+  setPanelOpen: setTerminalPanelOpen,
+  togglePanel: toggleTerminalPanel,
+  sessions: {} as Record<string, unknown>,
+  setHostState: jest.fn(),
+  markTabActivity: jest.fn(),
+  registerSession: jest.fn(),
+  removeSession: jest.fn(),
+  setSessionStatus: jest.fn(),
+  setSessionExit: jest.fn(),
+  setSessionCwd: jest.fn(),
+  pushPrompt: jest.fn(),
+  closePrompt: jest.fn(),
+  pushCommand: jest.fn(),
+}
 jest.mock("@/stores/terminal/terminal-store", () => ({
-  useTerminalStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      panelOpen: terminalStateRef.panelOpen,
-      setPanelOpen: setTerminalPanelOpen,
-      togglePanel: toggleTerminalPanel,
-    }),
+  useTerminalStore: Object.assign(
+    (selector: (s: unknown) => unknown) => selector(terminalStoreState),
+    { getState: () => terminalStoreState }
+  ),
+}))
+
+// `spawnDefaultTerminal` itself stays real (its shell/profile/cwd precedence is
+// covered by `lib/terminal/spawn-default.test.ts`); only the orchestrator — the
+// seam that talks to the Rust PTY — is stubbed, the same boundary that suite
+// mocks. Without it the menu item would drive the live transport chain against
+// jsdom and resolve to an error outcome.
+const spawnFromDockMock = jest.fn(async (_input: { store: unknown }) => ({
+  kind: "spawned" as const,
+  sessionId: "term-1",
+  shell: "/bin/zsh",
+}))
+jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
+  spawnFromDock: (input: { store: unknown }) => spawnFromDockMock(input),
 }))
 
 // matchMedia mock — test toggles `narrowMatches` at will to switch between
@@ -548,6 +586,10 @@ test("Terminal > New Terminal opens the dock and Toggle flips the panel", async 
   await user.click(screen.getByText("desktop.menu.terminal.label"))
   await user.click(await screen.findByText("desktop.menu.terminal.new"))
   await waitFor(() => expect(setTerminalPanelOpen).toHaveBeenCalledWith(true))
+  // "New" spawns as well as reveals — and hands the orchestrator the live
+  // store, which is what `useTerminalStore.getState()` resolves to.
+  await waitFor(() => expect(spawnFromDockMock).toHaveBeenCalled())
+  expect(spawnFromDockMock.mock.calls.at(-1)![0].store).toBe(terminalStoreState)
 
   await user.click(screen.getByText("desktop.menu.terminal.label"))
   await user.click(await screen.findByText("desktop.menu.terminal.togglePanel"))
@@ -1856,9 +1898,9 @@ describe("column-header projection", () => {
     // the conversation rail's column.
     expect(screen.getByTestId("title-bar-hamburger")).toBeInTheDocument()
     expect(screen.queryByText("desktop.menu.file.label")).toBeNull()
-    // The sidebar's header names the workspace (its switcher), so the centre's
-    // workspace pill steps aside while the start zone is projected.
-    expect(screen.queryByTestId("title-bar-workspace-seg")).toBeNull()
+    // The bar's own segments are constant: projection sizes the outlet and
+    // folds the menubar, it does not delete the workspace pill.
+    expect(screen.getByTestId("title-bar-workspace-seg")).toBeInTheDocument()
   })
 
   test("with the rail hidden (sidebar hosting the navigation) the start outlet spans the sidebar alone", async () => {
@@ -1872,7 +1914,7 @@ describe("column-header projection", () => {
     expect(start).toHaveStyle({ width: "288px" })
   })
 
-  test("with the chat header in the centre, the header leads and the bar's segments follow it", async () => {
+  test("with the chat header in the centre, the header leads and the bar's segments are unchanged", async () => {
     isTauriMock.mockReturnValue(true)
     setPlatform("Win32")
     renderProjecting(["center"])
@@ -1880,19 +1922,20 @@ describe("column-header projection", () => {
     await waitFor(() => expect(center).toContainElement(screen.getByTestId("projected-center")))
     // Nothing is dropped — route history, the workspace pill and the VS Code-
     // style search pill all stay — they follow the header, which keeps the
-    // chat column's leading edge for its sidebar toggle.
+    // chat column's leading edge.
     const nav = screen.getByTestId("title-bar-nav-arrows")
     const search = screen.getByTestId("title-bar-search-pill")
     expect(screen.getByTestId("title-bar-workspace-seg")).toBeInTheDocument()
     expect(center.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(center.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // The pill goes compact beside a title it would otherwise repeat.
-    expect(search).toHaveAttribute("data-compact", "true")
-    // The chat header carries the conversation-list toggle and the artifact
-    // dock ("right sidebar") toggle, so the bar's own copies step aside; the
-    // terminal-panel toggle has no twin in that header and stays.
-    expect(screen.queryByTestId("title-bar-toggle-sidebar")).toBeNull()
-    expect(screen.queryByTestId("title-bar-toggle-right-sidebar")).toBeNull()
+    // The pill keeps its full "app · conversation" shape — the bar's segments
+    // do not change with the outlet, or the top row would be one shape inside a
+    // conversation and another everywhere else.
+    expect(search).not.toHaveAttribute("data-compact")
+    // Every end-zone toggle stays. The projected chat header drops its own
+    // copies of the two the bar owns (`components/chat/chat-header.tsx`).
+    expect(screen.getByTestId("title-bar-toggle-sidebar")).toBeInTheDocument()
+    expect(screen.getByTestId("title-bar-toggle-right-sidebar")).toBeInTheDocument()
     expect(screen.getByTestId("title-bar-toggle-panel")).toBeInTheDocument()
     // Start and end are still idle.
     expect(screen.getByTestId("title-bar-outlet-start")).toHaveAttribute("hidden")

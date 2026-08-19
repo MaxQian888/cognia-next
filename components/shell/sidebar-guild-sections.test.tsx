@@ -71,7 +71,7 @@ jest.mock("@/lib/plugin/context-keys/context-key-store", () => ({
   evaluateContextWhen: () => true,
 }))
 let guildUnread = { dm: 0, teams: new Map<string, number>(), total: 0 }
-const markGuildRead = jest.fn(async () => 1)
+const markGuildRead = jest.fn(async (_target: unknown) => 1)
 jest.mock("@/hooks/shell/use-guild-unread", () => ({
   useGuildUnread: () => guildUnread,
   markGuildRead: (target: unknown) => markGuildRead(target as never),
@@ -112,7 +112,9 @@ describe("splitGuildSections", () => {
   it("puts DM first and cuts the accordion right after the open section", () => {
     const dm = splitGuildSections(teams, { kind: "dm" })
     expect(dm.openKey).toBe("dm")
-    expect(dm.before.map((r) => r.key)).toEqual(["dm"])
+    // Open Chats draws no row at all — the search field and the list below
+    // are the section, so nothing goes above them.
+    expect(dm.before).toEqual([])
     expect(dm.after.map((r) => r.key)).toEqual(["t-1", "t-2"])
 
     const mid = splitGuildSections(teams, { kind: "team", teamId: "t-1" })
@@ -160,36 +162,27 @@ describe("SidebarGuildSectionRows", () => {
     expect(routerPush).toHaveBeenCalledWith("/")
   })
 
-  it("shows the archived suffix on the open row only", () => {
-    const { before } = splitGuildSections(teams, { kind: "team", teamId: "t-1" })
-    render(<SidebarGuildSectionRows rows={before} openKey="t-1" archived />)
-    expect(screen.getAllByTestId("channel-list-archived-suffix")).toHaveLength(1)
-    expect(screen.getByTestId("sidebar-guild-team-t-1")).toHaveTextContent("archivedTitleSuffix")
-    expect(screen.getByTestId("sidebar-guild-dm")).not.toHaveTextContent("archivedTitleSuffix")
+  it("never draws a row for an open Chats section", () => {
+    // The list itself is that section; a heading above it says nothing the
+    // search field and the conversations below do not already say.
+    const { before, after } = splitGuildSections(teams, { kind: "dm" })
+    const { container } = render(<SidebarGuildSectionRows rows={before} openKey="dm" />)
+    expect(container).toBeEmptyDOMElement()
+    // Closed — the way back out of a team — it is a row like any other.
+    render(<SidebarGuildSectionRows rows={after} openKey="t-1" />)
+    expect(screen.queryByTestId("sidebar-guild-dm")).toBeNull()
+    expect(screen.getByTestId("sidebar-guild-team-t-1")).toBeInTheDocument()
   })
 
-  it("draws the open section's actions beside its heading only, and no selection tint", () => {
+  it("marks the open row as a heading: bold, no selection tint, chevron turned", () => {
     const { before } = splitGuildSections(teams, { kind: "team", teamId: "t-1" })
-    render(
-      <SidebarGuildSectionRows
-        rows={before}
-        openKey="t-1"
-        openActions={<button data-testid="open-action">+</button>}
-      />
-    )
-    const actions = screen.getByTestId("sidebar-guild-open-actions")
-    expect(actions).toContainElement(screen.getByTestId("open-action"))
-    // Beside the open row (its listitem), not inside the button, not on DM.
-    const openItem = screen.getByTestId("sidebar-guild-team-t-1").closest('[role="listitem"]')
-    expect(openItem).toContainElement(actions)
-    expect(screen.getByTestId("sidebar-guild-team-t-1")).not.toContainElement(actions)
-    expect(
-      screen.getByTestId("sidebar-guild-dm").closest('[role="listitem"]')
-    ).not.toContainElement(actions)
-    // The open row is a heading: bold, no traveling highlight, chevron turned.
+    render(<SidebarGuildSectionRows rows={before} openKey="t-1" />)
     expect(screen.getByTestId("sidebar-guild-team-t-1")).toHaveClass("font-medium")
     expect(screen.getByTestId("sidebar-guild-team-t-1").querySelector(".rotate-90")).not.toBeNull()
     expect(screen.getByTestId("sidebar-guild-dm").querySelector(".rotate-90")).toBeNull()
+    // The list's actions are not on the heading — they head the sidebar and
+    // sit on the search row (`channel-list.tsx`).
+    expect(screen.queryByTestId("sidebar-guild-open-actions")).toBeNull()
   })
 
   it("carries the unread count on closed rows only, and names the row for truncated labels", () => {

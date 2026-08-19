@@ -55,6 +55,7 @@ import { listSessionStates } from "@/lib/db/session-state"
 import { listTeams } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
 import { avatarColor, type AvatarSubject } from "@/lib/ui/avatar"
+import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { cn } from "@/lib/utils"
 import {
   useUIStore,
@@ -67,6 +68,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_SIDEBAR_SIDE, type SidebarSide } from "@/types/shell/sidebar"
 import { createPortal } from "react-dom"
 import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
+import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import { useSidebarNavHost } from "@/hooks/shell/use-sidebar-nav-host"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
@@ -161,8 +163,8 @@ import {
   ChevronRightIcon,
   FolderIcon,
   FolderPlusIcon,
-  MailIcon,
   MenuIcon,
+  MessagesSquareIcon,
   MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
@@ -177,7 +179,6 @@ import { useTranslations } from "next-intl"
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -327,7 +328,7 @@ export function ChannelList(props: Props) {
   const resetWidth = useCallback(() => setSidebarWidth(SIDEBAR_WIDTH_DEFAULT), [setSidebarWidth])
 
   // Conversation-sidebar collapse. Single source of truth in the ui-store,
-  // shared with the chat-header toggle, the title/status bars, the View menu,
+  // shared with the title bar's sidebar toggle, the status bar, the View menu,
   // and ⌘B, so every surface stays in lockstep. The rail stays mounted and
   // animates its width to 0 — collapsing is smooth and reclaims the WHOLE
   // column (no leftover strip); the list header exposes the quick-collapse
@@ -352,18 +353,11 @@ export function ChannelList(props: Props) {
   useReportShellColumn("sidebar", asideRef)
   // Enable the width transition ONLY for the brief collapse/expand animation —
   // never while the user drag-resizes (resize mutates the same `width`, and a
-  // live transition would make the drag rubber-band). A short timer clears it.
-  const [animatingCollapse, setAnimatingCollapse] = useState(false)
-  const prevCollapsedRef = useRef(sidebarCollapsed)
-  // This must run before paint: a passive effect lets the browser commit the
-  // new width first, so collapse/expand appears to jump for one frame.
-  useLayoutEffect(() => {
-    if (prevCollapsedRef.current === sidebarCollapsed) return
-    prevCollapsedRef.current = sidebarCollapsed
-    setAnimatingCollapse(true)
-    const timer = setTimeout(() => setAnimatingCollapse(false), 220)
-    return () => clearTimeout(timer)
-  }, [sidebarCollapsed])
+  // live transition would make the drag rubber-band). Shared with the nav rail,
+  // the status bar and the terminal dock, which have the same problem for the
+  // same reason — including the part where the flag has to be raised during
+  // render so the class and the new width reach the DOM in one commit.
+  const animatingCollapse = useEdgePanelTransition(sidebarCollapsed, { element: asideRef })
 
   // Stable identity: passed down as `onSelect`, it feeds `handleSessionSelect`
   // (a useCallback that lists it as a dep). An inline function here changed
@@ -430,10 +424,11 @@ export function ChannelList(props: Props) {
         // layer is hidden rather than spilling; leave it un-clipped when idle
         // so the resize handle can protrude past the right edge.
         (sidebarCollapsed || animatingCollapse) && "overflow-hidden",
-        // Same 200ms and the same motion-speed multiplier the artifact dock
-        // uses, so both rails collapse at one pace.
-        animatingCollapse &&
-          "transition-[width] duration-[calc(200ms*var(--motion-duration-scale,1))] ease-in-out"
+        // One clock for every shell edge panel — this rail, the artifact dock
+        // and the terminal dock all collapse at `SHELL_DOCK_TIMING_CLASS`'s
+        // pace. They used to claim parity in a comment while running 200ms
+        // `ease-in-out` against the dock's 280ms `MOBILE_EASE`.
+        animatingCollapse && `transition-[width] ${SHELL_DOCK_TIMING_CLASS}`
       )}
       style={{ width: sidebarCollapsed ? 0 : width }}
       aria-label={t("conversationsTitle")}
@@ -1309,6 +1304,15 @@ function ChannelListBody({
       >
         <Header outlet={headerOutlet} {...headerActionProps} />
         {merged ? (
+          // Outside the scrolling band below: the sidebar's primary action
+          // does not scroll away behind eight pinned features and six teams.
+          <SidebarNewConversationButton
+            guild={chatGuild}
+            onNewDirect={handleNewDirect}
+            onNewTeamConversation={handleNewTeamConversation}
+          />
+        ) : null}
+        {merged ? (
           // Everything above the search field shares one bounded, scrolling
           // band. The nav rows, the plugin view containers and the accordion
           // sections *before* the open one all grow with what the user has —
@@ -1319,14 +1323,10 @@ function ChannelListBody({
             className="flex max-h-[45%] shrink-0 flex-col overflow-x-hidden overflow-y-auto"
             data-testid="sidebar-nav-band"
           >
-            <SidebarNavSection />
+            <SidebarNavSection className="pt-1" />
             <SidebarGuildSectionRows
               rows={guildSections.before}
               openKey={guildSections.openKey}
-              archived={view === "archived"}
-              // The open section's own actions sit on its heading, compact:
-              // new stays a first-class button, the rest fold behind ⋯.
-              openActions={<HeaderActions layout="compact" {...headerActionProps} />}
               onNewConversation={handleGuildNewConversation}
               panelId={GUILD_PANEL_ID}
               className="pt-1"
@@ -1340,9 +1340,17 @@ function ChannelListBody({
           id={merged ? GUILD_PANEL_ID : undefined}
           className={cn(
             "flex items-center gap-1.5",
-            // Under a heading row the field aligns with the rows' boxes (8px
-            // in) and sits closer to it; the Sheet keeps its roomier row.
-            merged ? "px-2 pt-1 pb-2" : "px-3 pt-2.5 pb-2.5"
+            // Under a heading row (an open team) the field aligns with the
+            // rows' boxes (8px in) and sits closer to it. With Chats open
+            // there is no heading and the row above is the last navigation
+            // entry, so it takes the full gap instead — that space is what
+            // separates "where to go" from "which conversation". The Sheet
+            // keeps its own roomier row.
+            merged
+              ? guildSections.before.length > 0
+                ? "px-2 pt-1 pb-2"
+                : "px-2 pt-2 pb-2"
+              : "px-3 pt-2.5 pb-2.5"
           )}
         >
           <ChannelListSearch
@@ -1351,14 +1359,41 @@ function ChannelListBody({
             onExpandedChange={setSearchExpanded}
           />
           {searchExpanded ? null : (
-            <ConversationFilterMenu
-              model={filterController}
-              side="right"
-              triggerClassName="size-9 rounded-lg"
-              testId="channel-list-filter-trigger"
-            />
+            <>
+              <ConversationFilterMenu
+                model={filterController}
+                side="right"
+                triggerClassName="size-9 rounded-lg"
+                testId="channel-list-filter-trigger"
+              />
+              {/* The list's own actions, beside the field they act on and in
+                  the same place whichever section is open — they used to ride
+                  the open accordion row, which moved them every time the user
+                  picked a team and left them nowhere at all once the Chats
+                  heading went away. The mobile Sheet keeps its inline header
+                  row instead (`Header`). */}
+              {merged ? <HeaderActions layout="compact" {...headerActionProps} /> : null}
+            </>
           )}
         </div>
+        {merged && view === "archived" ? (
+          // Where you are, now that neither a heading row nor the archived
+          // toggle is on screen: a chip that says it and takes you back.
+          <div className="px-2 pb-2">
+            <button
+              type="button"
+              onClick={() => setView("active")}
+              aria-label={t("viewActive")}
+              title={t("viewActive")}
+              data-testid="channel-list-archived-chip"
+              className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 pr-1.5 pl-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ArchiveIcon className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{t("archivedTitleSuffix")}</span>
+              <XIcon className="size-3 shrink-0" aria-hidden />
+            </button>
+          </div>
+        ) : null}
         <ConversationFilterChips
           model={filterController}
           shown={filteredCount}
@@ -1663,7 +1698,7 @@ function ConversationListEmptyState({
   const title = archived ? t("conversationsTitle") : team ? t("newConversation") : t("newChat")
   const description = archived ? t("emptyArchived") : team ? t("emptyTeam") : t("emptyDm")
   const actionLabel = team ? t("newConversation") : t("newChat")
-  const Icon = archived ? ArchiveIcon : team ? UsersIcon : MailIcon
+  const Icon = archived ? ArchiveIcon : team ? UsersIcon : MessagesSquareIcon
 
   return (
     <Empty className="min-h-48 gap-4 rounded-none border-0 px-5 py-10">
@@ -1683,6 +1718,47 @@ function ConversationListEmptyState({
         </EmptyContent>
       ) : null}
     </Empty>
+  )
+}
+
+/**
+ * "New conversation" — the sidebar's first control, above the navigation,
+ * where every conventional chat app puts it. It creates in whichever section
+ * is selected (Chats, or the open team), so it is *one* fixed affordance
+ * rather than a "+" that travels with the open accordion row — and the label
+ * names the target, which is what the row it replaced used to say.
+ *
+ * Sized to `SidebarRow` (32px, the same gutter and type) so it lines up with
+ * the nav rows beneath it, but bordered: this one acts rather than navigates.
+ */
+function SidebarNewConversationButton({
+  guild,
+  onNewDirect,
+  onNewTeamConversation,
+}: {
+  guild: { kind: "dm" } | { kind: "team"; teamId: string }
+  onNewDirect: () => void
+  onNewTeamConversation: (teamId: string) => void
+}) {
+  const t = useTranslations("desktop.channelList")
+  const label = guild.kind === "team" ? t("newConversation") : t("newChat")
+  return (
+    <div className="shrink-0 px-2 pt-2 pb-1">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => {
+          if (guild.kind === "team") onNewTeamConversation(guild.teamId)
+          else onNewDirect()
+        }}
+        title={label}
+        data-testid="sidebar-new-conversation"
+        className="h-8 w-full min-w-0 justify-start gap-2.5 rounded-md border-border/60 bg-background/50 px-2 text-[13px] font-normal shadow-none hover:bg-accent hover:text-accent-foreground"
+      >
+        <PlusIcon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate">{label}</span>
+      </Button>
+    </div>
   )
 }
 
@@ -1711,7 +1787,7 @@ function Header({
           }}
         />
       ) : (
-        <MailIcon className="size-4 shrink-0 text-muted-foreground" />
+        <MessagesSquareIcon className="size-4 shrink-0 text-muted-foreground" />
       )}
       <span className="truncate text-sm font-semibold tracking-tight">
         {isTeam ? (team?.name ?? t("teamFallback")) : t("directMessages")}
@@ -1763,12 +1839,12 @@ function Header({
 interface HeaderActionsProps {
   className?: string
   /**
-   * `row` — the inline title row: display-options menu · archived toggle ·
-   * new, three buttons. `compact` — beside the search field once the title
-   * has moved into the title bar: new stays a first-class button and the rest
-   * (archived toggle, then the same display-options menu) fold behind ⋯, so
-   * a 296px rail keeps a full-width search field. Only the archived toggle
-   * gets one click deeper; the display options were already a menu.
+   * `row` — the inline title row (the mobile Sheet): display-options menu ·
+   * archived toggle · new, three buttons. `compact` — the ⋯ button beside the
+   * search field in the merged sidebar, with the archived toggle and the same
+   * display options folded into it. "New" is not here in that mode: it heads
+   * the sidebar (`SidebarNewConversationButton`), so a 296px rail keeps a
+   * full-width search field and one button beside it.
    */
   layout?: "row" | "compact"
   selectedGuild: { kind: "dm" } | { kind: "team"; teamId: string }
@@ -1825,7 +1901,10 @@ function HeaderActions({
         <Button
           size="icon"
           variant="ghost"
-          className="size-7"
+          // Compact sits in the search row next to the filter trigger, so it
+          // takes that row's 36px square; inline it is one of three 28px
+          // buttons on a 40px title row.
+          className={compact ? "size-9 rounded-lg" : "size-7"}
           aria-label={compact ? t("listActions") : t("displayOptions")}
           title={compact ? t("listActions") : t("displayOptions")}
           data-testid="channel-list-actions-menu"
@@ -1993,10 +2072,7 @@ function HeaderActions({
   return (
     <div className={cn("flex shrink-0 items-center gap-0.5", className)}>
       {compact ? (
-        <>
-          {newButton}
-          {menu}
-        </>
+        menu
       ) : (
         <>
           {menu}

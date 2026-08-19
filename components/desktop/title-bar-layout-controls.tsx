@@ -84,12 +84,15 @@ function LayoutToggleButton({
   label,
   testId,
   active,
+  unread,
   onClick,
   children,
 }: {
   label: string
   testId: string
   active: boolean
+  /** Draw the "something arrived while this pane was dismissed" marker. */
+  unread?: boolean
   onClick: () => void
   children: React.ReactNode
 }) {
@@ -103,12 +106,19 @@ function LayoutToggleButton({
       title={label}
       onClick={onClick}
       className={cn(
-        "h-7 w-7 rounded-sm transition-colors hover:text-foreground",
+        "relative h-7 w-7 rounded-sm transition-colors hover:text-foreground",
         "motion-safe:transition-transform motion-safe:active:scale-90",
         active ? "text-foreground" : "text-muted-foreground"
       )}
     >
       {children}
+      {unread ? (
+        <span
+          aria-hidden
+          data-testid={`${testId}-unread`}
+          className="absolute top-1 right-1 size-1.5 rounded-full bg-primary"
+        />
+      ) : null}
     </Button>
   )
 }
@@ -140,6 +150,11 @@ export function TitleBarLayoutControls({
   const [customizeOpen, setCustomizeOpen] = React.useState(false)
   const rightSidebarCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
   const toggleRightSidebar = useArtifactDockLayoutStore((s) => s.toggleDock)
+  // An artifact arrived while the dock was dismissed. The chat header used to
+  // carry this dot on its own `ArtifactDockToggle`; that copy is gone now that
+  // the bar owns the control on every route, so the signal moves here — without
+  // it a background artifact would arrive silently.
+  const unreadArtifact = useArtifactDockLayoutStore((s) => s.unreadArtifact)
   const openBrowser = useArtifactDockLayoutStore((s) => s.openBrowser)
   const panelOpen = useTerminalStore((s) => s.panelOpen)
   const togglePanel = useTerminalStore((s) => s.togglePanel)
@@ -155,6 +170,7 @@ export function TitleBarLayoutControls({
 
   const sidebarOn = !sidebarCollapsed
   const rightSidebarOn = !rightSidebarCollapsed
+  const showArtifactUnread = rightSidebarCollapsed && unreadArtifact
   const guildRailOn = !guildRailCollapsed
   const statusBarOn = !statusBarCollapsed
 
@@ -223,9 +239,10 @@ export function TitleBarLayoutControls({
           )}
           {visibleControls.has("rightSidebar") && (
             <LayoutToggleButton
-              label={t("toggleRightSidebar")}
+              label={showArtifactUnread ? t("unreadArtifacts") : t("toggleRightSidebar")}
               testId="title-bar-toggle-right-sidebar"
               active={rightSidebarOn}
+              unread={showArtifactUnread}
               onClick={toggleRightSidebar}
             >
               <PanelRightIcon className="size-4" aria-hidden />

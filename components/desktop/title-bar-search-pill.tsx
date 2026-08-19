@@ -4,6 +4,12 @@
  * The title bar's command-palette pill: app name + active conversation, a
  * streaming dot while a turn is in flight, and the ⌘K hint.
  *
+ * One shape on every route. It briefly had a narrow icon+shortcut variant for
+ * the case where a projected chat header carried the conversation title beside
+ * it, but that made the top bar redraw itself whenever the chat column came and
+ * went — the shell reading as flickering rather than tidy. The bar's own
+ * segments are constant now; only the outlets' contents vary.
+ *
  * It used to be a private component inside `title-bar.tsx`. It moved out when
  * the bar became customizable — `title-bar-zone.tsx` mounts segments by id, so
  * every segment has to be importable.
@@ -25,7 +31,6 @@ export function TitleBarSearchPill({
   separator,
   placeholder,
   kbdHint,
-  compact = false,
   onClick,
   className,
 }: {
@@ -33,13 +38,6 @@ export function TitleBarSearchPill({
   separator: string
   placeholder: string
   kbdHint: string
-  /**
-   * Icon + shortcut only. The title bar asks for this while the chat header
-   * is projected beside the pill: the "app · conversation" label would then
-   * repeat the conversation title a few pixels to its left. The full label
-   * stays on the button as its accessible name and tooltip.
-   */
-  compact?: boolean
   onClick: () => void
   className?: string
 }) {
@@ -53,12 +51,9 @@ export function TitleBarSearchPill({
       type="button"
       onClick={onClick}
       data-testid="title-bar-search-pill"
-      data-compact={compact || undefined}
-      aria-label={compact ? `${placeholder} — ${title}` : placeholder}
-      title={compact ? title : undefined}
+      aria-label={placeholder}
       className={cn(
-        "group flex h-6 items-center gap-2",
-        compact ? "shrink-0" : "min-w-[180px] max-w-[480px] flex-1",
+        "group flex h-6 min-w-[180px] max-w-[480px] flex-1 items-center gap-2",
         "rounded-md border border-border bg-background/60 px-2 text-xs",
         "text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
         className
@@ -73,15 +68,10 @@ export function TitleBarSearchPill({
       ) : (
         <SearchIcon aria-hidden className="size-3 shrink-0" />
       )}
-      {compact ? null : (
-        <span className="truncate font-medium tracking-tight" data-testid="title-bar-title">
-          {title}
-        </span>
-      )}
-      <span
-        aria-hidden
-        className={cn("hidden text-[10px] opacity-60 sm:inline", !compact && "ml-auto")}
-      >
+      <span className="truncate font-medium tracking-tight" data-testid="title-bar-title">
+        {title}
+      </span>
+      <span aria-hidden className="ml-auto hidden text-[10px] opacity-60 sm:inline">
         {kbdHint}
       </span>
     </button>

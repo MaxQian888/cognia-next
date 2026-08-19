@@ -93,15 +93,6 @@ import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
 const log = loggers.ui
 
-/**
- * End-zone items the projected chat header duplicates
- * (`components/chat/chat-header.tsx`: its own conversation-list toggle and
- * `ArtifactDockToggle`). Filtered out while the centre outlet is live.
- */
-const PROJECTED_CENTER_DUPLICATES: ReadonlySet<string> = new Set([
-  "primarySidebarToggle",
-  "secondarySidebarToggle",
-])
 const NARROW_QUERY = "(max-width: 760px)"
 
 // Override classes applied at the call site of every MenubarContent /
@@ -228,6 +219,19 @@ export function TitleBar() {
   // that stretch of the bar (traffic lights, hamburger, window buttons), so the
   // centre is exactly the chat column. Measured, not derived: both columns
   // animate, and the bar has to track them frame for frame.
+  //
+  // What projection does NOT do any more is change the bar's own segments. The
+  // search pill used to go compact and the two sidebar toggles used to drop out
+  // while the chat header was up, which meant the top row was one shape inside
+  // a conversation and a different one everywhere else — on the team workspace,
+  // on /workflows, on the welcome screen. A shell bar that redraws itself as
+  // you navigate reads as flickering, so the segments are constant now and only
+  // the outlets' contents vary. The chat header drops its own duplicates of the
+  // two toggles instead (`components/chat/chat-header.tsx`).
+  //
+  // `projected.start` still folds the Windows/Linux menubar into the hamburger:
+  // that one is spatial, not cosmetic — the menus would otherwise sit over the
+  // conversation rail's own column.
   const projected = useTitleBarProjectionState()
   const startOutletRef = useTitleBarOutletRef("start")
   const centerOutletRef = useTitleBarOutletRef("center")
@@ -615,9 +619,6 @@ export function TitleBar() {
   // anyway (they close over `router` / `recentSessions`), and the zones were
   // already re-rendering with the bar before they became data-driven.
   const itemCtx: TitleBarItemContext = {
-    // Icon + shortcut only while the chat header shares the zone: the pill's
-    // "app · conversation" label would repeat the title sitting next to it.
-    compactSearch: projected.center,
     appName,
     separator: t("separator"),
     searchPlaceholder: t("searchPlaceholder"),
@@ -1331,31 +1332,18 @@ export function TitleBar() {
           className="flex flex-1 items-center justify-center gap-1 px-2 min-w-0"
         >
           {/* With the chat header projected the zone reads left to right as
-              the chat column does: the header (sidebar toggle, title, chips,
-              actions) at the column's leading edge, then the bar's own
-              segments in their usual order — route history, workspace pill,
-              the VS Code-style search / palette pill (compact, so it does not
-              compete with the title for width), command centre. Nothing is
-              dropped; the header simply goes first. */}
+              the chat column does: the header (title, chips, actions) at the
+              column's leading edge, then the bar's own segments in their usual
+              order — route history, workspace pill, the VS Code-style search /
+              palette pill, command centre. Nothing is dropped; the header
+              simply goes first. */}
           <div
             ref={centerOutletRef}
             data-testid="title-bar-outlet-center"
             hidden={!projected.center}
             className="flex h-full min-w-0 flex-1 items-center"
           />
-          {/* With the sidebar's header in the start zone the workspace is
-              already named there (the switcher, `channel-list.tsx`), so the
-              centre's workspace pill — the same project, one click from the
-              same list — steps aside. It comes back on any route without a
-              projected sidebar. */}
-          <TitleBarZone
-            items={
-              projected.start
-                ? bar.zones.center.filter((item) => item.id !== "workspace")
-                : bar.zones.center
-            }
-            ctx={itemCtx}
-          />
+          <TitleBarZone items={bar.zones.center} ctx={itemCtx} />
           <PluginExtensionSlot
             point="toolbar.center"
             className="ml-2 flex items-center gap-1 empty:hidden"
@@ -1377,19 +1365,7 @@ export function TitleBar() {
             className="flex items-center gap-1 px-1 empty:hidden"
           />
 
-          {/* The projected chat header already carries the conversation-list
-              toggle and the artifact-dock ("right sidebar") toggle at their
-              columns' edges, so the bar's own copies step aside while it is up
-              — one control per action. The terminal-panel toggle has no copy
-              in that header and stays. */}
-          <TitleBarZone
-            items={
-              projected.center
-                ? bar.zones.end.filter((item) => !PROJECTED_CENTER_DUPLICATES.has(item.id))
-                : bar.zones.end
-            }
-            ctx={itemCtx}
-          />
+          <TitleBarZone items={bar.zones.end} ctx={itemCtx} />
 
           {windowChrome ? (
             <div className="flex items-center">

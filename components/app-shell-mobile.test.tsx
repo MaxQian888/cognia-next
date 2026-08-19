@@ -12,6 +12,10 @@ const logWarn = jest.fn()
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, opts?: { default?: string }) => opts?.default ?? key,
+  // The always-mounted global search dialog (ADR-0129) reads the locale and a
+  // stable "now" for recency scoring.
+  useLocale: () => "en",
+  useNow: () => new Date(1700000000000),
 }))
 
 const routerPush = jest.fn()
@@ -304,9 +308,9 @@ jest.mock("@/components/mobile/shell/character-header", () => ({
     fallbackTitle: string
   }) => <div data-testid="mobile-active-title">{subject?.name ?? fallbackTitle}</div>,
 }))
-jest.mock("@/components/shell/member-list", () => ({
-  MemberList: ({ variant }: { variant?: string }) => (
-    <div data-testid="member-list" data-variant={variant ?? "rail"} />
+jest.mock("@/components/context-workbench/panels/team-members-panel", () => ({
+  TeamMembersPanel: ({ teamId }: { teamId?: string | null }) => (
+    <div data-testid="team-members-panel" data-team-id={teamId ?? ""} />
   ),
 }))
 jest.mock("@/components/performance/perf-capture-shell-status", () => ({
@@ -498,10 +502,9 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("mobile-members-trigger")).toBeInTheDocument()
     await user.click(screen.getByTestId("mobile-members-trigger"))
     await waitFor(() => expect(screen.getByTestId("mobile-members-sheet")).toBeInTheDocument())
-    expect(screen.getByTestId("member-list")).toBeInTheDocument()
-    // Sheet variant, else the `lg:` gate + the persisted `showMemberList`
-    // collapse would both render this sheet blank on a phone.
-    expect(screen.getByTestId("member-list")).toHaveAttribute("data-variant", "sheet")
+    // The same workbench panel the desktop shows, bound to this session's team.
+    expect(screen.getByTestId("team-members-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("team-members-panel")).toHaveAttribute("data-team-id", "t-1")
   })
 
   it("does not render the members trigger for direct (non-team) sessions", () => {

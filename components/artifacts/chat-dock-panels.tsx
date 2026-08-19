@@ -34,6 +34,7 @@ import {
   GlobeIcon,
   CornerUpLeftIcon,
   ListChecksIcon,
+  UsersIcon,
 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -62,6 +63,10 @@ import { MemoryWorkbenchPanel } from "@/components/context-workbench/panels/memo
 import { SourceControlWorkbenchPanel } from "@/components/context-workbench/panels/source-control-workbench-panel"
 import { LogsWorkbenchPanel } from "@/components/context-workbench/panels/logs-workbench-panel"
 import { AgentStatusWorkbenchPanel } from "@/components/context-workbench/panels/agent-status-workbench-panel"
+import {
+  TEAM_MEMBERS_PANEL_ID,
+  TeamMembersPanel,
+} from "@/components/context-workbench/panels/team-members-panel"
 import { RunContextPanel } from "@/components/context-workbench/panels/run-context-panel"
 import type {
   ContextPanelDefinition,
@@ -646,6 +651,23 @@ export function useSessionSurfacePanels({
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         renderer: () => <AgentStatusWorkbenchPanel />,
+      },
+      {
+        // Team conversations only — the roster, the shared notes and the
+        // per-member actions that used to be a third column of their own
+        // (`components/shell/member-list.tsx`, removed). A direct chat has no
+        // roster, so the panel does not claim a rail slot there at all.
+        id: TEAM_MEMBERS_PANEL_ID,
+        activity: "ai",
+        labelKey: "contextWorkbench.teamMembersPanel.title",
+        icon: UsersIcon,
+        order: 17,
+        appliesTo: (resource) => resource.kind === "session" && session?.kind === "team",
+        retention: "stateful",
+        scope: "session",
+        renderer: () => (
+          <TeamMembersPanel teamSessionId={activeSessionId} teamId={session?.teamId ?? null} />
+        ),
       },
     ],
     [

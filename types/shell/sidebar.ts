@@ -115,12 +115,17 @@ export type SidebarSide = "left" | "right"
 export const DEFAULT_SIDEBAR_SIDE: SidebarSide = "left"
 
 /**
- * The nav rail's width in px — the `w-14` `guild-rail.tsx` draws. The title
- * bar reads the rail's *measured* width from `useShellColumnsStore` (the rail
- * is hidden while the expanded sidebar hosts the navigation), so this constant
- * is the design number for tests, stories and the customizer's preview, not a
- * layout input. Same reason `WORKBENCH_RAIL_WIDTH_PX` lives in
- * `@/types/shell/workbench-rail`.
+ * The nav rail's width in px — the `w-14` `guild-rail.tsx` draws.
+ *
+ * The title bar still reads the rail's *measured* width from
+ * `useShellColumnsStore` rather than this number: the rail collapses to zero
+ * while the expanded sidebar hosts the navigation, and the bar has to track
+ * that animation frame for frame. But the rail itself now takes this as a
+ * layout input — a CSS transition cannot interpolate out of the `auto` a `w-14`
+ * class resolves to, so the collapsing box needs the number. The class still
+ * sizes the rail's inner column, and `guild-rail.test.tsx` pins the two
+ * together. Same home as `WORKBENCH_RAIL_WIDTH_PX` in
+ * `@/types/shell/workbench-rail`, for the same reason.
  */
 export const GUILD_RAIL_WIDTH_PX = 56
 

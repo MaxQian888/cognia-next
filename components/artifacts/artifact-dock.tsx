@@ -253,7 +253,7 @@ export function ArtifactContextWorkbench({
   const setMobileSnapPoint = useArtifactDockLayoutStore((state) => state.setMobileSnapPoint)
   // Something arrived while the dock was dismissed. With a persistent rail the
   // marker belongs on the rail itself — that is now the thing the user is
-  // looking at — rather than only on the chat header's toggle.
+  // looking at — rather than only on the title bar's dock toggle.
   const unreadArtifact = useArtifactDockLayoutStore((state) => state.unreadArtifact)
   const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
   const scopeKey = `${workbenchInstanceId}::artifact:${artifactId}`

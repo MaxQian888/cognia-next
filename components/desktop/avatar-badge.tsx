@@ -13,13 +13,13 @@ interface AvatarBadgeProps {
   textClassName?: string
   /** Extra classes merged onto the root span. */
   className?: string
-  /** Live status dot rendered in the bottom-right corner (used by member-list). */
+  /** Live status dot rendered in the bottom-right corner (team-members panel). */
   statusDot?: ReactNode
 }
 
 /**
  * Shared avatar primitive used by guild-rail, channel-list, command-palette,
- * member-list, and onboarding-dialog. Renders a colored circle containing
+ * the team-members panel, and onboarding-dialog. Renders a colored circle containing
  * the subject's emoji or initials.
  */
 export function AvatarBadge({

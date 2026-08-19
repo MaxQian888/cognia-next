@@ -5,8 +5,14 @@ const mockSetActiveSession = jest.fn()
 const mockSetSelectedGuild = jest.fn()
 const mockEmitSystemBusEvent = jest.fn()
 
+const mockListScopedSessions = jest.fn()
+
 jest.mock("@/lib/chat/start-session", () => ({
   startNewSession: (...args: unknown[]) => mockStartNewSession(...args),
+}))
+
+jest.mock("@/lib/db/sessions", () => ({
+  listScopedSessions: (...args: unknown[]) => mockListScopedSessions(...args),
 }))
 
 jest.mock("@/stores/chat", () => ({
@@ -30,7 +36,7 @@ jest.mock("@cognia/logging", () => ({
   loggers: { ui: { info: jest.fn() } },
 }))
 
-import { startGuildConversation } from "./start-guild-conversation"
+import { openCharacterChat, startGuildConversation } from "./start-guild-conversation"
 
 describe("startGuildConversation", () => {
   const session = { id: "session-1" } as ChatSession
@@ -40,6 +46,7 @@ describe("startGuildConversation", () => {
     mockSetActiveSession.mockReset()
     mockSetSelectedGuild.mockReset()
     mockEmitSystemBusEvent.mockReset()
+    mockListScopedSessions.mockReset().mockResolvedValue([])
   })
 
   it("starts a team conversation with its caller-localized title", async () => {
@@ -82,6 +89,94 @@ describe("startGuildConversation", () => {
 
     expect(mockSetSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
     expect(mockStartNewSession).toHaveBeenCalledWith(undefined)
+    expect(navigate).not.toHaveBeenCalled()
+  })
+})
+
+describe("openCharacterChat", () => {
+  const character = { id: "char-1", name: "Research Analyst" }
+
+  beforeEach(() => {
+    mockStartNewSession.mockReset().mockResolvedValue({ id: "created-1" } as ChatSession)
+    mockSetActiveSession.mockReset()
+    mockSetSelectedGuild.mockReset()
+    mockEmitSystemBusEvent.mockReset()
+    mockListScopedSessions.mockReset().mockResolvedValue([])
+  })
+
+  it("switches to the newest direct conversation the character already has", async () => {
+    const navigate = jest.fn()
+    mockListScopedSessions.mockResolvedValue([
+      { id: "other", kind: "direct", characterId: "char-2" },
+      // A team conversation the character sits in is not their own chat.
+      { id: "team", kind: "team", characterId: "char-1" },
+      { id: "newest", kind: "direct", characterId: "char-1" },
+      { id: "older", kind: "direct", characterId: "char-1" },
+    ] as ChatSession[])
+
+    await expect(
+      openCharacterChat(character, {
+        newChatTitle: "Chat with Research Analyst",
+        navigate,
+        pathname: "/inbox",
+      })
+    ).resolves.toMatchObject({ id: "newest" })
+
+    expect(mockStartNewSession).not.toHaveBeenCalled()
+    expect(mockSetSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    expect(mockSetActiveSession).toHaveBeenCalledWith("newest")
+    expect(mockEmitSystemBusEvent).toHaveBeenCalledWith("session.switched", {
+      sessionId: "newest",
+    })
+    expect(navigate).toHaveBeenCalledWith("/")
+  })
+
+  it("treats a legacy row with no kind as direct", async () => {
+    mockListScopedSessions.mockResolvedValue([
+      { id: "legacy", characterId: "char-1" },
+    ] as ChatSession[])
+
+    await openCharacterChat(character, { newChatTitle: "Chat" })
+
+    expect(mockSetActiveSession).toHaveBeenCalledWith("legacy")
+    expect(mockStartNewSession).not.toHaveBeenCalled()
+  })
+
+  it("skips embedded sessions — a sidechat is not a conversation you can navigate to", async () => {
+    mockListScopedSessions.mockResolvedValue([
+      { id: "aside", kind: "direct", characterId: "char-1", visibility: "embedded" },
+    ] as ChatSession[])
+
+    await openCharacterChat(character, { newChatTitle: "Chat with Research Analyst" })
+
+    expect(mockSetActiveSession).not.toHaveBeenCalled()
+    expect(mockStartNewSession).toHaveBeenCalledWith({
+      title: "Chat with Research Analyst",
+      kind: "direct",
+      characterId: "char-1",
+    })
+  })
+
+  it("creates one with the caller's localized title when the character has no chat yet", async () => {
+    const navigate = jest.fn()
+
+    await expect(
+      openCharacterChat(character, {
+        newChatTitle: "与 Research Analyst 的对话",
+        navigate,
+        pathname: "/",
+      })
+    ).resolves.toMatchObject({ id: "created-1" })
+
+    expect(mockStartNewSession).toHaveBeenCalledWith({
+      title: "与 Research Analyst 的对话",
+      kind: "direct",
+      characterId: "char-1",
+    })
+    // `startNewSession` activates and announces what it creates; doing it a
+    // second time here would double-fire the bus event.
+    expect(mockSetActiveSession).not.toHaveBeenCalled()
+    expect(mockEmitSystemBusEvent).not.toHaveBeenCalled()
     expect(navigate).not.toHaveBeenCalled()
   })
 })

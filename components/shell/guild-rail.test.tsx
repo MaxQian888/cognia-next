@@ -13,6 +13,8 @@ import {
   SIDEBAR_NAV_META,
 } from "@/types/shell/sidebar"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
+import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
+import { GUILD_RAIL_WIDTH_PX } from "@/types/shell/sidebar"
 
 function withTooltipProvider(node: React.ReactNode) {
   return <TooltipProvider>{node}</TooltipProvider>
@@ -504,6 +506,79 @@ test("the default rail variant keeps the md breakpoint gate", () => {
   expect(aside).toHaveAttribute("data-variant", "rail")
   expect(aside.className).toContain("hidden")
   expect(aside.className).toContain("md:flex")
+})
+
+// ── collapse ───────────────────────────────────────────────────────────────
+// The shell used to render `null` for both reasons this column goes away — the
+// View menu's toggle and the expanded sidebar hosting the navigation — which
+// dropped 56px out of the window in one frame. It now animates its own width.
+
+test("collapses to zero width instead of unmounting", () => {
+  const { container } = render(
+    withTooltipProvider(<GuildRail collapsed onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveStyle({ width: "0px" })
+  expect(aside).toHaveAttribute("data-collapsed", "true")
+  expect(aside.className).toContain("overflow-hidden")
+})
+
+test("expands to the width the shell's own constant names", () => {
+  // The title bar sizes its outlets from the rail's *measured* width, so the
+  // animating box has to be the `<aside>` this reports — see
+  // `stores/ui/shell-columns-store.ts`.
+  const { container } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveStyle({ width: `${GUILD_RAIL_WIDTH_PX}px` })
+  expect(aside).not.toHaveAttribute("data-collapsed")
+  expect(aside.className).not.toContain("overflow-hidden")
+})
+
+test("keeps the icons at full width behind the clip while it animates", () => {
+  const { container, rerender } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  rerender(
+    withTooltipProvider(<GuildRail collapsed onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside.className).toContain("transition-[width]")
+  expect(aside.className).toContain(SHELL_DOCK_TIMING_CLASS)
+  // A fixed-width inner column: the buttons are clipped, never squeezed toward
+  // each other frame by frame.
+  expect(aside.firstElementChild?.className).toContain("w-14")
+})
+
+test.each([
+  ["right" as const, "items-start"],
+  ["left" as const, "items-end"],
+])("anchors the icon column inboard on the %s edge", (sidebarSide, expected) => {
+  // A right-side rail slides right, so its column hugs the inboard (left) edge;
+  // a left-side rail is the mirror. Anchoring the wrong way eats the rail from
+  // the inside instead of sliding it off its own window edge.
+  act(() => {
+    useSettingsStore.setState({
+      settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT }, sidebarSide } as never,
+      save: saveMock as never,
+    })
+  })
+  const { container } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  expect(container.querySelector("aside")!.className).toContain(expected)
+})
+
+test("never collapses the sheet variant, where the rail is the drawer's column", () => {
+  const { container } = render(
+    withTooltipProvider(
+      <GuildRail variant="sheet" collapsed onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+    )
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).not.toHaveAttribute("data-collapsed")
+  expect(aside.style.width).toBe("")
 })
 
 test("the sheet variant renders unconditionally on a phone viewport", () => {

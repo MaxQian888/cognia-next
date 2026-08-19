@@ -128,6 +128,23 @@ jest.mock("@/components/context-workbench/panels/run-context-panel", () => ({
   ),
 }))
 
+jest.mock("@/components/context-workbench/panels/team-members-panel", () => ({
+  TEAM_MEMBERS_PANEL_ID: "team-members",
+  TeamMembersPanel: ({
+    teamSessionId,
+    teamId,
+  }: {
+    teamSessionId: string | null
+    teamId: string | null
+  }) => (
+    <div
+      data-testid="team-members-panel"
+      data-session={teamSessionId ?? "none"}
+      data-team={teamId ?? "none"}
+    />
+  ),
+}))
+
 jest.mock("./artifact-panel-content", () => ({
   ArtifactPanelContent: ({ panelMode }: { panelMode: string }) => (
     <div data-testid="preview" data-mode={panelMode} />
@@ -198,6 +215,8 @@ const session = {
   updatedAt: 1700000001000,
   messages: [],
 } as unknown as Session
+
+const teamSession = { ...session, kind: "team", teamId: "t1" } as unknown as Session
 
 const project = { id: "p1", name: "Repo", roots: [{ path: "/repo" }] } as unknown as Project
 
@@ -517,7 +536,7 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the thirteen session-surface panels, in a stable order", () => {
+  it("offers exactly the fourteen session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
       ["artifacts", "review", 10],
@@ -533,13 +552,35 @@ describe("useSessionSurfacePanels", () => {
       ["memory", "inspect", 55],
       ["logs", "inspect", 60],
       ["agent-status", "ai", 16],
+      ["team-members", "ai", 17],
     ])
   })
 
   it("claims session resources and nothing else", () => {
-    const panels = collect(useSessionSurfacePanels, sessionInput())
+    // Team members is the one conditional entry — see the test below.
+    const panels = collect(useSessionSurfacePanels, sessionInput({ session: teamSession })).filter(
+      (p) => p.id !== "team-members"
+    )
     expect(panels.every((p) => p.appliesTo(SESSION_RESOURCE))).toBe(true)
     expect(panels.some((p) => p.appliesTo(ARTIFACT_RESOURCE))).toBe(false)
+  })
+
+  it("claims a rail slot for the team roster only inside a team conversation", () => {
+    // A direct chat has no roster, so the panel must not take an `ai` slot
+    // there — the icon would open a permanently empty surface.
+    const direct = panelById(collect(useSessionSurfacePanels, sessionInput()), "team-members")
+    expect(direct.appliesTo(SESSION_RESOURCE)).toBe(false)
+    expect(direct.appliesTo(ARTIFACT_RESOURCE)).toBe(false)
+
+    const team = panelById(
+      collect(useSessionSurfacePanels, sessionInput({ session: teamSession })),
+      "team-members"
+    )
+    expect(team.appliesTo(SESSION_RESOURCE)).toBe(true)
+    expect(team.appliesTo(ARTIFACT_RESOURCE)).toBe(false)
+    renderPanel(team, SESSION_RESOURCE)
+    expect(screen.getByTestId("team-members-panel")).toHaveAttribute("data-team", "t1")
+    expect(screen.getByTestId("team-members-panel")).toHaveAttribute("data-session", "s1")
   })
 
   it("keeps sidechat off an embedded resource workbench", () => {

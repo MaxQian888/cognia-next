@@ -3441,3 +3441,172 @@ select {
 [data-rich-controls="always"] [data-message-rich-control] {
   opacity: 1 !important;
 }
+
+/* ---------------------------------------------------------------------------
+   Thinking level ("model strength") motion — the effort chip + selector.
+
+   This is the one composer control whose VALUE is intensity, so it is the one
+   place on that surface where motion carries meaning instead of decorating: the
+   fill accelerates into its new depth, the knob lands with a spring, and
+   Ultracode — a change in KIND, not one more notch — is the only tier that
+   keeps moving after it arrives.
+
+   Everything here is decoration in the a11y sense: no state is readable ONLY
+   from an animation, so the blunt reduce-motion guards near the top of this
+   file (which collapse every animation to a single 1ms iteration) leave the
+   control fully usable. That is why none of these are on the essential-motion
+   exemption list.
+
+   Individual `scale` / `translate` properties are used rather than `transform`
+   on purpose: the elements they run on are centred by Tailwind's
+   `-translate-x-1/2 -translate-y-1/2`, and a keyframe animating `transform`
+   would overwrite that centring mid-flight.
+   --------------------------------------------------------------------------- */
+
+/* Depth arriving: the filled span eases to its new width, the colour follows.
+   `--effort-fill-ease` is deliberately overshoot-free — the KNOB carries the
+   spring, and two springs on one gesture read as wobble. */
+.effort-fill {
+  transition:
+    width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 260ms ease,
+    box-shadow 260ms ease;
+}
+
+/* During a drag the fill must track the pointer exactly — same reasoning as the
+   marker's `transition-[left]` opt-out in `effort-selector.tsx`. */
+.effort-fill--dragging {
+  transition: none;
+}
+
+/* The top tier's fill glows instead of merely being violet. */
+.effort-fill--ultra {
+  box-shadow: 0 0 10px -2px var(--effort-ultra);
+}
+
+/* The knob's landing. Runs on every commit because the element is keyed by
+   tier, so React remounts it and the animation re-fires. */
+@keyframes effort-knob-pop {
+  0% {
+    scale: 0.84;
+  }
+  55% {
+    scale: 1.13;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+.effort-knob-pop {
+  animation: effort-knob-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* The tier name swapping in the header / on the chip: a short rise, so the
+   value reads as replaced rather than re-rendered. */
+@keyframes effort-value-rise {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.effort-value-rise {
+  animation: effort-value-rise 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* One pulse of the chip's brain glyph when the tier changes under it. */
+@keyframes effort-glyph-pulse {
+  0% {
+    scale: 1;
+  }
+  40% {
+    scale: 1.25;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+.effort-glyph-pulse {
+  animation: effort-glyph-pulse 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Ultracode only. The dot lattice marches one cell to the right and loops
+   seamlessly (the gradient's cell is 5px, so a 5px translation is identity). */
+@keyframes effort-ultra-drift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 5px 0;
+  }
+}
+
+.effort-ultra-drift {
+  animation: effort-ultra-drift 2.4s linear infinite;
+}
+
+/* ...and a specular sweep crosses it. Mostly off-track: the highlight occupies
+   the first third of the cycle and the rest is the pause that keeps a permanent
+   animation from becoming a strobe in the corner of the eye. */
+@keyframes effort-ultra-sweep {
+  /* Percentages are of the highlight's OWN width, which is 2/5 of the track:
+     -100% puts its left edge at -40% of the track (fully off the left cap) and
+     250% puts that edge at +100% (fully off the right one). One complete
+     crossing, both caps included.
+
+     The opacity plateau is the part that matters. It used to fade from the
+     moment the highlight entered, so the streak was already half gone by the
+     middle of the bar and invisible past it — the sweep LOOKED like it stopped
+     around the first tick. It now holds full strength across the bar and fades
+     only over the last sixth of the travel. Same reason the timing function is
+     linear: an eased sweep spends its last third crawling, which reads as a
+     stall rather than a scan. */
+  0% {
+    translate: -100% 0;
+    opacity: 0;
+  }
+  6% {
+    opacity: 0.9;
+  }
+  34% {
+    opacity: 0.9;
+  }
+  40% {
+    translate: 250% 0;
+    opacity: 0;
+  }
+  100% {
+    translate: 250% 0;
+    opacity: 0;
+  }
+}
+
+.effort-ultra-sweep {
+  /* 40% of the cycle is the crossing (~1.4s); the rest is the pause that keeps
+     a permanent animation from becoming a strobe in the corner of the eye. */
+  animation: effort-ultra-sweep 3.6s linear infinite;
+}
+
+/* The track's own halo on the top tier — slow enough to read as "running", not
+   as a notification. */
+@keyframes effort-ultra-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--effort-ultra-muted);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--effort-ultra-muted),
+      0 0 14px -3px var(--effort-ultra);
+  }
+}
+
+.effort-ultra-breathe {
+  animation: effort-ultra-breathe 3.6s ease-in-out infinite;
+}

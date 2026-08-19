@@ -21,7 +21,11 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
-import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
+import {
+  SHELL_DOCK_CLEANUP_SLACK_MS,
+  SHELL_DOCK_DURATION_MS,
+  SHELL_DOCK_EASE,
+} from "@/lib/ui/shell-dock-motion"
 import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
 import { cn } from "@/lib/utils"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
@@ -44,18 +48,18 @@ import { ArtifactDock } from "./artifact-dock"
 import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
 
 /**
- * Duration and curve both come from the shared motion tokens, so the dock
- * moves on the same clock as the terminal dock, the mobile sheets and every
- * other surface built from them.
+ * Duration and curve both come from `lib/ui/shell-dock-motion.ts`, the one
+ * clock every shell edge panel opens and collapses on — this dock, the
+ * conversation sidebar and the terminal dock in either slot.
  *
  * The View Transition CSS and divider below carry the same pair as literals —
  * an arbitrary value cannot be interpolated from a constant and still be
  * compiled into CSS. `artifact-workspace-dock.test.tsx` pins all three together.
  */
-export const DOCK_RESIZE_DURATION_MS = MOBILE_DURATION.normal * 1000
-export const DOCK_RESIZE_EASE = `cubic-bezier(${MOBILE_EASE.join(",")})`
+export const DOCK_RESIZE_DURATION_MS = SHELL_DOCK_DURATION_MS
+export const DOCK_RESIZE_EASE = SHELL_DOCK_EASE
 /** Cleanup runs a beat past the animation so a slower preference isn't cut short. */
-const DOCK_RESIZE_CLEANUP_SLACK_MS = 40
+const DOCK_RESIZE_CLEANUP_SLACK_MS = SHELL_DOCK_CLEANUP_SLACK_MS
 /**
  * Below this a release-snap is "already there": the layout callback reports
  * pixel measurements converted to a percent, so a preset the drag landed on

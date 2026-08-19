@@ -29,14 +29,17 @@ import { DEFAULT_WORKBENCH_PANEL_LAYOUT } from "@/types/shell/workbench-panels"
 /**
  * Panel identities declared by the chat dock, scraped from source.
  *
- * The two `id:` constants in that file are re-declared here rather than
- * imported: importing the module would pull the whole panel tree (Monaco, the
- * browser pane, Dexie) into a `node`-environment test.
+ * The `id:` constants in that file are re-declared here rather than imported:
+ * importing the module would pull the whole panel tree (Monaco, the browser
+ * pane, Dexie) into a `node`-environment test. A constant added there and not
+ * here throws rather than silently dropping the panel from the comparison.
  */
 const PANEL_ID_CONSTANTS: Record<string, string> = {
   WORKSPACE_PANEL_ID: "workspace",
   PROJECT_OVERVIEW_PANEL_ID: "project-overview",
   SIDECHAT_PANEL_ID: "session-sidechat",
+  SESSION_ARTIFACT_LIST_PANEL_ID: "artifacts",
+  TEAM_MEMBERS_PANEL_ID: "team-members",
 }
 
 function declaredPanels(): Map<string, string> {

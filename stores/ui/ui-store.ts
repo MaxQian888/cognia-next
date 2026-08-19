@@ -118,13 +118,6 @@ interface UIState {
   clearMemberStatusFor: (teamSessionId: string) => void
 
   /**
-   * User toggle for the team member list. Defaults visible; persisted so the
-   * choice sticks across reloads.
-   */
-  showMemberList: boolean
-  setShowMemberList: (visible: boolean) => void
-
-  /**
    * VSCode-style sidebar collapse. Drives the ChannelList visibility and the
    * status-bar toggle. Persisted across reloads.
    */
@@ -324,9 +317,6 @@ export const useUIStore = create<UIState>()(
           return { memberStatus: next }
         }),
 
-      showMemberList: true,
-      setShowMemberList: (visible) => set({ showMemberList: visible }),
-
       sidebarCollapsed: false,
       toggleSidebar: () =>
         set((s) => {
@@ -507,7 +497,6 @@ export const useUIStore = create<UIState>()(
       // or stop requests (one-shot, transient). `findOpen` is transient too.
       partialize: (s) => ({
         selectedGuild: s.selectedGuild,
-        showMemberList: s.showMemberList,
         scratchpadCollapsed: s.scratchpadCollapsed,
         sidebarCollapsed: s.sidebarCollapsed,
         sidebarWidth: s.sidebarWidth,

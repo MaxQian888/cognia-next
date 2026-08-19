@@ -14,10 +14,12 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
+import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { avatarColor } from "@/lib/ui/avatar"
 import { listTeams } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
 import { useClientLiveQuery } from "@/hooks/data"
+import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import {
   markGuildRead,
@@ -29,7 +31,7 @@ import {
   CheckCheckIcon,
   EllipsisIcon,
   EyeOffIcon,
-  MailIcon,
+  MessagesSquareIcon,
   PencilRulerIcon,
   PinIcon,
   PinOffIcon,
@@ -50,7 +52,7 @@ import { TEAM_SETTINGS_ROUTE } from "./sidebar-guild-sections"
 import { startGuildConversation } from "@/lib/shell/start-guild-conversation"
 import { WorkspaceSwitcher } from "./workspace-switcher"
 import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
-import type { SidebarSide } from "@/types/shell/sidebar"
+import { GUILD_RAIL_WIDTH_PX, type SidebarSide } from "@/types/shell/sidebar"
 
 const log = loggers.ui
 
@@ -80,6 +82,21 @@ interface Props {
    *   "More", the team list and Settings were all mounted and invisible.
    */
   variant?: "rail" | "sheet"
+  /**
+   * Collapse the rail to zero width instead of unmounting it.
+   *
+   * The shell used to render `null` for both of the reasons this column goes
+   * away — the View menu's toggle, and the expanded sidebar taking over the
+   * navigation — which dropped 56px out of the window in a single frame. The
+   * second case is the worse of the two: it fires *with* the sidebar's own
+   * width animation, so a smooth 260px collapse ended on an instant 56px jolt
+   * in the opposite direction. Collapsing on the shared edge-panel clock puts
+   * both columns on one gesture.
+   *
+   * Only meaningful for `variant="rail"`; inside the mobile Sheet the rail is
+   * the drawer's leading column and is never collapsed.
+   */
+  collapsed?: boolean
 }
 
 /**
@@ -107,7 +124,12 @@ interface Props {
  * sideways — tooltips, the "More" popover — has to open *inward*, so the side
  * is threaded down rather than hard-coded.
  */
-export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Props) {
+export function GuildRail({
+  onCreateTeam,
+  onOpenSettings,
+  variant = "rail",
+  collapsed = false,
+}: Props) {
   const t = useTranslations("desktop.guildRail")
   const listT = useTranslations("desktop.channelList")
   const pluginT = useTranslations()
@@ -156,7 +178,15 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
   // width — measured, not assumed, so a hidden rail (below `md`, or while the
   // sidebar hosts the navigation) counts as 0 without a second flag.
   const asideRef = useRef<HTMLElement | null>(null)
+  // Reports the rail's *rendered* width, so the title bar's outlets track the
+  // collapse frame for frame instead of jumping when it finishes. That is why
+  // the width animates on the `<aside>` itself rather than on a wrapper: a
+  // clipping wrapper would leave this measuring a full-width rail nobody can
+  // see. See `stores/ui/shell-columns-store.ts`.
   useReportShellColumn("rail", asideRef)
+  // Never collapse the Sheet's copy — there it is the drawer's leading column.
+  const railCollapsed = variant === "rail" && collapsed
+  const animatingCollapse = useEdgePanelTransition(railCollapsed, { element: asideRef })
 
   // Inside the mobile nav Sheet the rail is not on a window edge at all — it is
   // the drawer's leading column with the channel list to its right, so overlays
@@ -197,213 +227,231 @@ export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Pr
         // disappears entirely. The border is what keeps a 64px navigation rail
         // and a 48px activity rail from reading as one 112px column.
         className={cn(
-          "h-full w-14 shrink-0 flex-col items-center bg-muted/40 py-2",
-          effectiveSide === "right" && "border-l",
-          variant === "sheet" ? "flex" : "hidden md:flex"
+          "h-full shrink-0 flex-col bg-muted/40",
+          // The fixed-width inner column below is what the rail actually draws;
+          // this box only owns the space it takes. Anchor that column to the
+          // *inboard* edge so collapsing slides it off toward its own window
+          // edge rather than eating it from the inside.
+          effectiveSide === "right" ? "items-start" : "items-end",
+          effectiveSide === "right" && !railCollapsed && "border-l",
+          variant === "sheet" ? "flex" : "hidden md:flex",
+          // Clipped while it is shut or moving; left open at rest so a button's
+          // focus ring and its inward tooltip are not shaved off.
+          (railCollapsed || animatingCollapse) && "overflow-hidden",
+          animatingCollapse && `transition-[width] ${SHELL_DOCK_TIMING_CLASS}`
         )}
+        style={variant === "rail" ? { width: railCollapsed ? 0 : GUILD_RAIL_WIDTH_PX } : undefined}
         aria-label={t("label")}
         data-variant={variant}
         data-side={effectiveSide}
+        data-collapsed={railCollapsed || undefined}
         data-bg-target="sidebar"
+        aria-hidden={railCollapsed || undefined}
+        inert={railCollapsed || undefined}
       >
-        <ScrollArea className="w-full flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden">
-          <div className="flex flex-col items-center gap-2 px-2">
-            <PluginExtensionSlot
-              point="sidebar.left.top"
-              className="flex flex-col items-center gap-2 empty:hidden"
-            />
-            <WorkspaceSwitcher />
-            <Separator className="my-1 w-8" aria-label={t("workspacesGroup")} />
-            <GuildContextMenu
-              target={{ kind: "dm" }}
-              unread={unread.dm}
-              onNewConversation={() => startConversation(null)}
-            >
-              <RailButton
-                active={isDmActive}
-                ariaLabel={t("directMessages")}
-                tooltip={t("directMessages")}
-                onClick={switchToDm}
-                badge={unread.dm}
-                badgeLabel={unreadLabel}
-                testId="guild-dm"
-              >
-                <MailIcon className="size-5" />
-              </RailButton>
-            </GuildContextMenu>
-
-            <RailButton
-              active={isCanvasActive}
-              ariaLabel={t("canvas")}
-              tooltip={t("canvas")}
-              onClick={switchToCanvas}
-            >
-              <PencilRulerIcon className="size-5" />
-            </RailButton>
-
-            {railContainers.map((c) => {
-              const title = resolvePluginLabel(
-                pluginT as never,
-                c.pluginId,
-                c.def.titleKey,
-                c.def.title
-              )
-              return (
-                <RailButton
-                  key={c.fullId}
-                  active={isViewContainerActive(c.fullId)}
-                  ariaLabel={title}
-                  tooltip={title}
-                  onClick={() => switchToViewContainer(c.fullId)}
-                  testId={`guild-view-container-${c.fullId}`}
-                >
-                  <ResolvedRailIcon name={c.def.icon} className="size-5" />
-                </RailButton>
-              )
-            })}
-
-            <Separator className="my-1 w-8" aria-label={t("featuresGroup")} />
-
-            {resolved.pinned.map((item) => (
-              <NavRailButton
-                key={item.id}
-                item={item}
-                active={isFeatureActive(item.route)}
-                label={t(item.i18nKey)}
-                moveToMoreLabel={t("customize.moveToMore")}
-                hideLabel={t("customize.hideItem")}
-                customizeLabel={t("customize.title")}
-                onNavigate={() => goToFeature(item.route)}
-                onMoveToMore={() => void unpin(item.id)}
-                onHide={() => void hide(item.id)}
-                onCustomize={() => setCustomizeOpen(true)}
+        {/* Fixed-width column: keeps the icons from being squeezed toward each
+            other as the aside's width animates — they are clipped, not
+            crushed. Mirrors the conversation sidebar's inner layer. */}
+        <div className="flex h-full w-14 flex-col items-center py-2">
+          <ScrollArea className="w-full flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden">
+            <div className="flex flex-col items-center gap-2 px-2">
+              <PluginExtensionSlot
+                point="sidebar.left.top"
+                className="flex flex-col items-center gap-2 empty:hidden"
               />
-            ))}
+              <WorkspaceSwitcher />
+              <Separator className="my-1 w-8" aria-label={t("workspacesGroup")} />
+              <GuildContextMenu
+                target={{ kind: "dm" }}
+                unread={unread.dm}
+                onNewConversation={() => startConversation(null)}
+              >
+                <RailButton
+                  active={isDmActive}
+                  ariaLabel={t("directMessages")}
+                  tooltip={t("directMessages")}
+                  onClick={switchToDm}
+                  badge={unread.dm}
+                  badgeLabel={unreadLabel}
+                  testId="guild-dm"
+                >
+                  <MessagesSquareIcon className="size-5" />
+                </RailButton>
+              </GuildContextMenu>
 
-            {resolved.overflow.length > 0 && (
-              <Popover open={moreOpen} onOpenChange={setMoreOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t("more")}
-                    data-testid="guild-more"
-                    className={cn(
-                      "relative size-10 rounded-2xl transition-all hover:rounded-xl",
-                      overflowActive
-                        ? "rounded-xl text-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
+              <RailButton
+                active={isCanvasActive}
+                ariaLabel={t("canvas")}
+                tooltip={t("canvas")}
+                onClick={switchToCanvas}
+              >
+                <PencilRulerIcon className="size-5" />
+              </RailButton>
+
+              {railContainers.map((c) => {
+                const title = resolvePluginLabel(
+                  pluginT as never,
+                  c.pluginId,
+                  c.def.titleKey,
+                  c.def.title
+                )
+                return (
+                  <RailButton
+                    key={c.fullId}
+                    active={isViewContainerActive(c.fullId)}
+                    ariaLabel={title}
+                    tooltip={title}
+                    onClick={() => switchToViewContainer(c.fullId)}
+                    testId={`guild-view-container-${c.fullId}`}
                   >
-                    {/* Same group as the rail buttons — "More" standing in for
-                        an active overflow route is just another selection. */}
-                    <MotionSelectionIndicator
-                      groupId="guild-rail-selection"
-                      active={overflowActive}
-                      className="absolute inset-0 rounded-xl bg-primary/10"
-                    />
-                    <EllipsisIcon className="relative size-5" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent side={overlaySide} align="start" className="w-56 p-1">
-                  <div className="flex flex-col">
-                    {resolved.overflow.map((item) => (
-                      <div
-                        key={item.id}
-                        className={cn(
-                          "flex items-center rounded hover:bg-accent",
-                          isFeatureActive(item.route) && "bg-primary/10 text-foreground"
-                        )}
-                      >
-                        <Button
-                          variant="ghost"
-                          onClick={() => openOverflowItem(item.route)}
-                          data-testid={`guild-more-item-${item.id}`}
-                          className="h-auto min-w-0 flex-1 justify-start rounded px-2 py-1.5 font-normal"
-                        >
-                          <item.Icon className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate text-left">
-                            {t(item.i18nKey)}
-                          </span>
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={t("customize.pinItem", { item: t(item.i18nKey) })}
-                          data-testid={`guild-more-pin-${item.id}`}
-                          onClick={() => void pin(item.id)}
-                          className="mr-1 size-7 shrink-0"
-                        >
-                          <PinIcon className="size-3.5" />
-                        </Button>
-                      </div>
-                    ))}
-                    <Separator className="my-1" />
+                    <ResolvedRailIcon name={c.def.icon} className="size-5" />
+                  </RailButton>
+                )
+              })}
+
+              <Separator className="my-1 w-8" aria-label={t("featuresGroup")} />
+
+              {resolved.pinned.map((item) => (
+                <NavRailButton
+                  key={item.id}
+                  item={item}
+                  active={isFeatureActive(item.route)}
+                  label={t(item.i18nKey)}
+                  moveToMoreLabel={t("customize.moveToMore")}
+                  hideLabel={t("customize.hideItem")}
+                  customizeLabel={t("customize.title")}
+                  onNavigate={() => goToFeature(item.route)}
+                  onMoveToMore={() => void unpin(item.id)}
+                  onHide={() => void hide(item.id)}
+                  onCustomize={() => setCustomizeOpen(true)}
+                />
+              ))}
+
+              {resolved.overflow.length > 0 && (
+                <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+                  <PopoverTrigger asChild>
                     <Button
                       variant="ghost"
-                      onClick={openCustomize}
-                      data-testid="guild-more-customize"
-                      className="h-auto w-full justify-start rounded px-2 py-1.5 font-normal"
+                      size="icon"
+                      aria-label={t("more")}
+                      data-testid="guild-more"
+                      className={cn(
+                        "relative size-10 rounded-2xl transition-all hover:rounded-xl",
+                        overflowActive
+                          ? "rounded-xl text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
                     >
-                      <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
-                      <span className="flex-1 text-left">{t("customize.title")}</span>
+                      {/* Same group as the rail buttons — "More" standing in for
+                        an active overflow route is just another selection. */}
+                      <MotionSelectionIndicator
+                        groupId="guild-rail-selection"
+                        active={overflowActive}
+                        className="absolute inset-0 rounded-xl bg-primary/10"
+                      />
+                      <EllipsisIcon className="relative size-5" />
                     </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            )}
+                  </PopoverTrigger>
+                  <PopoverContent side={overlaySide} align="start" className="w-56 p-1">
+                    <div className="flex flex-col">
+                      {resolved.overflow.map((item) => (
+                        <div
+                          key={item.id}
+                          className={cn(
+                            "flex items-center rounded hover:bg-accent",
+                            isFeatureActive(item.route) && "bg-primary/10 text-foreground"
+                          )}
+                        >
+                          <Button
+                            variant="ghost"
+                            onClick={() => openOverflowItem(item.route)}
+                            data-testid={`guild-more-item-${item.id}`}
+                            className="h-auto min-w-0 flex-1 justify-start rounded px-2 py-1.5 font-normal"
+                          >
+                            <item.Icon className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1 truncate text-left">
+                              {t(item.i18nKey)}
+                            </span>
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={t("customize.pinItem", { item: t(item.i18nKey) })}
+                            data-testid={`guild-more-pin-${item.id}`}
+                            onClick={() => void pin(item.id)}
+                            className="mr-1 size-7 shrink-0"
+                          >
+                            <PinIcon className="size-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                      <Separator className="my-1" />
+                      <Button
+                        variant="ghost"
+                        onClick={openCustomize}
+                        data-testid="guild-more-customize"
+                        className="h-auto w-full justify-start rounded px-2 py-1.5 font-normal"
+                      >
+                        <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
+                        <span className="flex-1 text-left">{t("customize.title")}</span>
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
 
-            <Separator className="my-1 w-8" />
+              <Separator className="my-1 w-8" />
 
-            <ul className="flex flex-col items-center gap-2">
-              {(teams ?? []).map((team) => (
-                <li key={team.id}>
-                  <GuildContextMenu
-                    target={{ kind: "team", teamId: team.id }}
-                    unread={unread.teams.get(team.id) ?? 0}
-                    onNewConversation={() => startConversation(team.id)}
-                  >
-                    <TeamButton
-                      team={team}
-                      active={isTeamActive(team.id)}
-                      onSelect={() => switchToTeam(team.id)}
+              <ul className="flex flex-col items-center gap-2">
+                {(teams ?? []).map((team) => (
+                  <li key={team.id}>
+                    <GuildContextMenu
+                      target={{ kind: "team", teamId: team.id }}
                       unread={unread.teams.get(team.id) ?? 0}
-                      unreadLabel={unreadLabel}
-                    />
-                  </GuildContextMenu>
+                      onNewConversation={() => startConversation(team.id)}
+                    >
+                      <TeamButton
+                        team={team}
+                        active={isTeamActive(team.id)}
+                        onSelect={() => switchToTeam(team.id)}
+                        unread={unread.teams.get(team.id) ?? 0}
+                        unreadLabel={unreadLabel}
+                      />
+                    </GuildContextMenu>
+                  </li>
+                ))}
+                <li>
+                  <RailButton
+                    ariaLabel={t("createTeam")}
+                    tooltip={t("createTeam")}
+                    onClick={handleCreateTeam}
+                    testId="guild-create-team"
+                  >
+                    <PlusIcon className="size-4" />
+                  </RailButton>
                 </li>
-              ))}
-              <li>
-                <RailButton
-                  ariaLabel={t("createTeam")}
-                  tooltip={t("createTeam")}
-                  onClick={handleCreateTeam}
-                  testId="guild-create-team"
-                >
-                  <PlusIcon className="size-4" />
-                </RailButton>
-              </li>
-            </ul>
-          </div>
-        </ScrollArea>
+              </ul>
+            </div>
+          </ScrollArea>
 
-        <Separator className="my-2 w-8" />
+          <Separator className="my-2 w-8" />
 
-        <RailButton
-          active={pathname === "/settings" || pathname.startsWith("/settings/")}
-          ariaLabel={t("openSettings")}
-          tooltip={t("settings")}
-          onClick={handleOpenSettings}
-          testId="guild-open-settings"
-        >
-          <SettingsIcon className="size-4" />
-        </RailButton>
+          <RailButton
+            active={pathname === "/settings" || pathname.startsWith("/settings/")}
+            ariaLabel={t("openSettings")}
+            tooltip={t("settings")}
+            onClick={handleOpenSettings}
+            testId="guild-open-settings"
+          >
+            <SettingsIcon className="size-4" />
+          </RailButton>
 
-        <PluginExtensionSlot
-          point="sidebar.left.bottom"
-          className="mt-2 flex flex-col items-center gap-2 empty:hidden"
-        />
+          <PluginExtensionSlot
+            point="sidebar.left.bottom"
+            className="mt-2 flex flex-col items-center gap-2 empty:hidden"
+          />
+        </div>
 
         <ShellLayoutDialog open={customizeOpen} onOpenChange={setCustomizeOpen} surface="sidebar" />
       </aside>
