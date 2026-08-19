@@ -285,12 +285,9 @@
     "focusTraceMenu": "Focus on this trace",
     "groupByTrace": "Group by Trace",
     "highSeverityOnly": "Toggle high-severity only",
-    "hintAllShortcuts": "all shortcuts",
-    "hintExpand": "expand",
-    "hintNextPrev": "next/prev",
-    "hintRefresh": "refresh",
     "jumpToLatest": "Jump to latest",
     "keyboardShortcuts": "Keyboard shortcuts",
+    "levelFilterGroup": "Filter by level",
     "listView": "List View",
     "loadingLogs": "Loading logs...",
     "logDetails": "Log details",
@@ -362,8 +359,7 @@
       "refresh": "Refresh",
       "showShortcuts": "Show shortcuts"
     },
-    "shortcutsHint": "Keyboard shortcuts",
-    "showingRange": "Showing {start}-{end} of {total}",
+    "showingRange": "{start}–{end} of {total}",
     "source": "Source",
     "sources": {
       "frontend": "Frontend",
@@ -399,18 +395,24 @@
     "viewDetails": "View Details",
     "viewDetailsMenu": "View details",
     "viewDiagnostics": "View Diagnostics",
+    "viewModeGroup": "Log view",
     "viewNativeDiagnostics": "View Native Diagnostics",
     "warning": "Warning"
   },
   "settings": {
     "advanced": {
       "description": "Configure queueing, diagnostics, and redaction safety",
+      "diagnosticDescription": "How often a transport may report its own failures, so one broken sink cannot flood the log.",
       "diagnosticRateLimit": "Diagnostic Rate Limit (ms)",
       "diagnosticRateLimitDesc": "Throttle repeated transport diagnostics",
+      "diagnosticTitle": "Diagnostic throttling",
       "redactionDepth": "Redaction Depth",
       "redactionDepthDesc": "Maximum object traversal depth during redaction",
+      "redactionDescription": "Scrub sensitive keys and token-like values out of an entry before any transport sees it.",
       "redactionEnabled": "Enable Redaction",
       "redactionEnabledDesc": "Redact sensitive keys and token-like values before transport",
+      "redactionRuleCount": "{keys} sensitive key names and {patterns} value patterns are matched by default.",
+      "redactionTitle": "Redaction",
       "remoteQueueBytes": "Remote Queue Size (MB)",
       "remoteQueueBytesDesc": "Maximum remote retry queue size in megabytes",
       "remoteQueueEntries": "Remote Queue Entries",
@@ -420,6 +422,7 @@
     "behaviorTelemetry": {
       "categories": {
         "agentTeam": "Agent Team execution",
+        "app": "App usage",
         "chat": "Chat lifecycle",
         "connector": "Connector messages",
         "description": "Disable any product area you do not want included.",
@@ -444,41 +447,13 @@
       "exportCsv": "Export CSV",
       "exportJson": "Export JSON",
       "maxStoredEvents": "Maximum local events",
+      "off": "Off",
+      "on": "On",
       "optIn": "Share behavior events",
       "optInDesc": "Off by default. Engineering traces and behavior events use separate switches.",
       "retentionDays": "Local retention (days)",
       "sampleRate": "Sampling rate",
       "title": "Behavior telemetry"
-    },
-    "posthog": {
-      "aiObservability": "AI observability",
-      "aiObservabilityDesc": "Send content-free generation and tool spans using OpenTelemetry.",
-      "byo": {
-        "description": "Send eligible telemetry to a PostHog project you control.",
-        "host": "BYO PostHog host",
-        "scopes": "BYO consent",
-        "scopesDescription": "Each scope is off by default and can be withdrawn independently.",
-        "title": "Bring your own project",
-        "token": "BYO project token",
-        "tokenHint": "Use the public project ingestion token (phc_…), never a Personal API Key. The value is masked in this panel.",
-        "tokenPlaceholder": "phc_••••••••"
-      },
-      "description": "Configure managed and BYO destinations independently. Product events and AI spans use separate consent.",
-      "managed": {
-        "available": "The managed project is available in this build.",
-        "title": "Cognia managed project",
-        "unavailable": "This build does not include a managed PostHog host and project token. BYO remains available."
-      },
-      "privacyDescription": "Allowed: event names, runtime/version, model/provider, usage, latency, cost, tool names, status, and trace/session identifiers. Prompts, responses, tool arguments/results, files, URLs, and exception text are never sent. Autocapture, replay, surveys, feature flags, profiles, and automatic exceptions stay disabled.",
-      "privacyTitle": "Remote privacy allowlist",
-      "productAnalytics": "Product analytics",
-      "productAnalyticsDesc": "Send sampled registered events only when behavior telemetry is also enabled.",
-      "sendTest": "Send test event",
-      "testStatus": {
-        "blocked": "Not sent. Enable behavior telemetry, the System category, and a valid product destination, then save.",
-        "sent": "Test event accepted by at least one enabled telemetry destination."
-      },
-      "title": "PostHog"
     },
     "logLevel": {
       "debug": "Debug",
@@ -491,6 +466,7 @@
       "info": "Info",
       "infoDesc": "General operational information",
       "minLevel": "Minimum Level",
+      "minLevelHint": "Applies to every module without its own override.",
       "title": "Log Level",
       "trace": "Trace",
       "traceDesc": "Most verbose, includes all details",
@@ -533,17 +509,99 @@
       "saved": "Applied",
       "title": "Native (Rust) Levels"
     },
+    "nav": {
+      "badgeTransportsAria": "{enabled} of {total} transports enabled",
+      "groups": {
+        "captureGroup": "Capture",
+        "deliveryGroup": "Delivery",
+        "statusGroup": "Status"
+      },
+      "items": {
+        "filters": {
+          "description": "Sampling, throttling and what gets scrubbed",
+          "label": "Filtering & redaction"
+        },
+        "levels": {
+          "description": "Global threshold and per-module overrides",
+          "label": "Levels"
+        },
+        "overview": {
+          "description": "Pipeline health and log files",
+          "label": "Overview"
+        },
+        "retention": {
+          "description": "How much history this device keeps",
+          "label": "Local retention"
+        },
+        "telemetry": {
+          "description": "Behaviour events and PostHog consent",
+          "label": "Telemetry & analytics"
+        },
+        "transports": {
+          "description": "Where log entries are sent and stored",
+          "label": "Transports"
+        }
+      },
+      "mobileTrigger": "Sections",
+      "title": "Logging settings"
+    },
     "options": {
       "includeSource": "Include Source Location",
       "includeSourceDesc": "Include file name and line number (development only)",
       "includeStackTrace": "Include Stack Traces",
       "includeStackTraceDesc": "Include stack traces for error and fatal logs"
     },
+    "overview": {
+      "dropped": "dropped {count}",
+      "noTransports": "No transports have reported health yet.",
+      "queueDepth": "queue {count}",
+      "readinessDescription": "Whether the native (Rust) logging bridge started, and what it is writing to.",
+      "transportHealthDescription": "Live status reported by each registered transport. Refreshes every few seconds.",
+      "transportHealthTitle": "Transport health"
+    },
     "performanceNote": {
       "description": "Enabling stack traces and source location may impact performance in production. Log sampling is recommended for high-traffic applications.",
       "title": "Performance Note"
     },
-    "reset": "Reset",
+    "posthog": {
+      "aiObservability": "AI observability",
+      "aiObservabilityDesc": "Send content-free generation and tool spans using OpenTelemetry.",
+      "byo": {
+        "description": "Send eligible telemetry to a PostHog project you control.",
+        "host": "BYO PostHog host",
+        "scopes": "BYO consent",
+        "scopesDescription": "Each scope is off by default and can be withdrawn independently.",
+        "title": "Bring your own project",
+        "token": "BYO project token",
+        "tokenHint": "Use the public project ingestion token (phc_…), never a Personal API Key. The value is masked in this panel.",
+        "tokenPlaceholder": "phc_••••••••"
+      },
+      "description": "Configure managed and BYO destinations independently. Product events and AI spans use separate consent.",
+      "incompleteBadge": "Needs host and token",
+      "managed": {
+        "available": "The managed project is available in this build.",
+        "title": "Cognia managed project",
+        "unavailable": "This build does not include a managed PostHog host and project token. BYO remains available."
+      },
+      "privacyDescription": "Allowed: event names, runtime/version, model/provider, usage, latency, cost, tool names, status, and trace/session identifiers. Prompts, responses, tool arguments/results, files, URLs, and exception text are never sent. Autocapture, replay, surveys, feature flags, profiles, and automatic exceptions stay disabled.",
+      "privacyTitle": "Remote privacy allowlist",
+      "productAnalytics": "Product analytics",
+      "productAnalyticsDesc": "Send sampled registered events only when behavior telemetry is also enabled.",
+      "sendTest": "Send test event",
+      "testStatus": {
+        "blocked": "Not sent. Enable behavior telemetry, the System category, and a valid product destination, then save.",
+        "sent": "Test event accepted by at least one enabled telemetry destination."
+      },
+      "title": "PostHog",
+      "unavailableBadge": "Not in this build"
+    },
+    "restoreDefaults": {
+      "button": "Restore defaults",
+      "cancel": "Cancel",
+      "confirm": "Restore defaults",
+      "description": "Loads the shipped defaults into this form — levels, transports, retention and telemetry consent. Nothing is applied until you save.",
+      "title": "Restore the default logging settings?"
+    },
     "retention": {
       "days": "days",
       "description": "Configure how long logs are kept and storage limits.",
@@ -551,11 +609,14 @@
       "maxAgeDaysDesc": "Logs older than this will be automatically cleaned up",
       "maxEntries": "Maximum Entries",
       "maxEntriesDesc": "Older logs will be automatically removed when limit is reached",
+      "summary": "Whichever limit is reached first wins: at most {entries, number} entries, and nothing older than {days, number} days.",
       "title": "Log Retention"
     },
     "sampling": {
       "addRule": "Add Rule",
+      "applyPreset": "Apply recommended preset",
       "description": "Adjust runtime sampling percentages by module prefix.",
+      "empty": "No sampling rules. Every module logs at 100%.",
       "modulePrefix": "Module Prefix",
       "modulePrefixPlaceholder": "mouse",
       "percentage": "Sampling Rate",
@@ -563,17 +624,7 @@
       "ruleDescription": "Applied immediately after saving.",
       "title": "Sampling Rules"
     },
-    "save": "Save",
     "saveError": "Failed to save settings",
-    "saved": "Saved!",
-    "saving": "Saving...",
-    "tabs": {
-      "advanced": "Advanced",
-      "levels": "Levels",
-      "posthog": "PostHog",
-      "retention": "Retention",
-      "transports": "Transports"
-    },
     "transports": {
       "agentTrace": "Agent trace",
       "agentTraceDesc": "Persist one span per chat turn, tool call, and teammate handoff to local Dexie. Powers the /logs Agent Trace tab.",
@@ -585,8 +636,12 @@
       "consoleDetail": "Always mirrors logs to the current runtime console.",
       "description": "Configure where logs are sent and stored.",
       "indexedDB": "IndexedDB Storage",
+      "indexedDBBufferSize": "Buffer Size",
+      "indexedDBBufferSizeDesc": "Entries held in memory before a write to IndexedDB.",
       "indexedDBDesc": "Persist logs locally for viewing in Log Viewer",
       "indexedDBDetail": "Stores log history locally for the integrated viewer.",
+      "indexedDBFlushInterval": "Flush Interval",
+      "indexedDBFlushIntervalDesc": "How long a partial buffer waits before being written anyway.",
       "langfuse": "Langfuse Integration",
       "langfuseDesc": "Send logs to Langfuse for AI observability",
       "langfuseHost": "Host",
@@ -606,11 +661,13 @@
       "remoteDesc": "Ship logs to a remote endpoint with retry batching.",
       "remoteEndpoint": "Endpoint URL",
       "remoteEndpointPlaceholder": "https://example.com/logs",
+      "remoteEndpointRequired": "Without an endpoint this transport stays detached, even while the switch is on.",
       "remoteFlushInterval": "Flush Interval",
       "remoteMaxRetries": "Max Retries",
       "remoteRetryDelay": "Retry Delay",
       "secretConfiguredPlaceholder": "Stored securely — enter a new value to replace",
-      "title": "Log Transports"
+      "title": "Log Transports",
+      "toggleDetails": "Show {transport} configuration"
     },
     "unsavedChanges": "Unsaved changes"
   },
@@ -646,29 +703,8 @@
     "totalTokens": "Total"
   },
   "workspace": {
-    "advanced": {
-      "capabilities": {
-        "description": "Per-platform capture and artifact availability reported by the active runtime.",
-        "status": "Runtime reported",
-        "title": "Capability diagnostics"
-      },
-      "queues": {
-        "description": "Durable upload progress, retries, cancellations, and last flush watermarks.",
-        "status": "Local queues",
-        "title": "Upload queues"
-      },
-      "schema": {
-        "description": "Versioned structured fields, correlation context, redaction version, and spool sequence.",
-        "status": "ObservabilityEventV1",
-        "title": "Event schema"
-      },
-      "symbols": {
-        "description": "Build-ID keyed source maps and native symbol artifacts used during processing.",
-        "status": "Service managed",
-        "title": "Symbol status"
-      }
-    },
     "breadcrumbHome": "Home",
+    "configure": "Configure",
     "consent": {
       "description": "Nothing is uploaded until you review the redacted report and explicitly submit it.",
       "descriptionLabel": "Description for support",
@@ -685,12 +721,6 @@
       "confirm": "Delete report",
       "description": "This removes the local diagnostic artifacts from this device. The action cannot be undone.",
       "title": "Delete this crash report?"
-    },
-    "density": {
-      "comfortable": "Comfortable",
-      "compact": "Compact",
-      "label": "Workspace density",
-      "spacious": "Spacious"
     },
     "detail": {
       "description": "Review redacted local diagnostics and optional attachments.",
@@ -710,84 +740,22 @@
         "desktop": "Desktop",
         "mobile": "Mobile"
       },
-      "stateLabel": "Incident state"
+      "stateLabel": "Incident state",
+      "receiptsOnly": "Receipts only"
     },
-    "health": {
-      "cards": {
-        "capture": {
-          "description": "Structured logs and crash markers are retained locally with bounded storage.",
-          "title": "Local capture"
-        },
-        "privacy": {
-          "description": "Versioned redaction runs before IPC, export, or upload, with a second server scan.",
-          "title": "Privacy gate"
-        },
-        "retention": {
-          "description": "Logs and reports remain on this device until retention or an explicit deletion applies.",
-          "title": "Durable retention"
-        },
-        "submission": {
-          "description": "Crash reports require a previewed consent unless automatic submission is separately enabled.",
-          "title": "Controlled submission"
-        }
-      },
-      "description": "A plain-language view of capture, privacy, retention, and submission readiness.",
-      "localIncidents": "Reports retained on this device",
-      "localIncidentsDescription": "These reports have not been treated as uploaded unless a receipt is present.",
-      "status": {
-        "consent": "Consent required",
-        "local": "Local first",
-        "protected": "Redaction active",
-        "ready": "Ready"
-      },
-      "title": "Diagnostics health"
-    },
-    "incidentCount": "{count, plural, =0 {No local incidents} =1 {1 local incident} other {# local incidents}}",
     "incidents": {
       "emptyDescription": "New crash reports and abnormal exits will be retained here before submission.",
       "emptyTitle": "No matching incidents",
       "error": "Local incident storage could not be read.",
       "loading": "Loading local incidents…"
     },
+    "moreActions": "More actions",
     "navigation": {
-      "collapse": "Collapse diagnostics navigation",
-      "expand": "Expand diagnostics navigation",
-      "label": "Diagnostics workspace views",
-      "resize": "Resize diagnostics navigation"
+      "label": "Log workspace channels"
     },
     "receipts": {
       "emptyDescription": "Accepted or processing submissions will show their stable support code here.",
       "emptyTitle": "No submission receipts"
-    },
-    "recovery": {
-      "checkpoints": {
-        "account": {
-          "description": "Keep account access and reporting available in the minimal shell.",
-          "title": "Account and diagnostics"
-        },
-        "automation": {
-          "description": "Enable automation and schedulers last, after all earlier checks remain healthy.",
-          "title": "Automation"
-        },
-        "data": {
-          "description": "Verify read-only local data, backup, and export before enabling writers.",
-          "title": "Local data"
-        },
-        "plugins": {
-          "description": "Enable plugin groups progressively and return to the minimal shell on failure.",
-          "title": "Plugins"
-        },
-        "sidecars": {
-          "description": "Start child runtimes with bounded retries and a health checkpoint.",
-          "title": "Sidecars and connectors"
-        }
-      },
-      "checkpointsDescription": "Safe mode exits by enabling subsystem groups one at a time and recording each health result.",
-      "checkpointsTitle": "Progressive recovery order",
-      "description": "Two unhealthy starts for the same build within ten minutes activate the diagnostics-first minimal shell.",
-      "normalDescription": "No safe-mode activation is currently reported by this renderer. Recovery counters reset after ten stable minutes.",
-      "normalTitle": "Normal startup mode",
-      "title": "Crash-loop recovery"
     },
     "refresh": "Refresh",
     "reset": "Reset layout",
@@ -803,14 +771,133 @@
       "rejected": "Rejected",
       "uploading": "Uploading"
     },
+    "status": {
+      "transports": "{healthy}/{total} transports",
+      "native": "Native logs: {status}",
+      "incidents": "{count, plural, =0 {No incidents} =1 {1 incident} other {# incidents}}"
+    },
     "title": "Logs and diagnostics",
+    "traces": {
+      "counts": "{matched} / {total}",
+      "detailDescription": "Span waterfall and the selected span's full record.",
+      "detailTitle": "Trace detail",
+      "emptyDescription": "Spans are recorded as agents run. Start a chat, a team run, or a workflow and they will appear here.",
+      "emptyTitle": "No agent traces yet",
+      "errorsOnly": "Errors only",
+      "export": {
+        "label": "Export",
+        "spanCount": "{count, plural, =1 {1 span} other {# spans}}",
+        "copy": {
+          "json": "Copy spans as JSON",
+          "otlp": "Copy as OTLP"
+        },
+        "save": {
+          "json": "Save spans as JSON…",
+          "otlp": "Save as OTLP…"
+        },
+        "redactPreviews": "Strip content previews",
+        "copied": "Trace copied as {format}",
+        "copyFailed": "Could not write to the clipboard",
+        "saved": "Trace exported",
+        "saveFailed": "Export failed: {message}"
+      },
+      "loading": "Loading traces…",
+      "nextPage": "Next",
+      "noMatchDescription": "Widen the time window or clear the filters.",
+      "noMatchTitle": "No traces match",
+      "openDashboard": "Dashboard",
+      "pageOf": "{page} / {total}",
+      "previousPage": "Previous",
+      "searchLabel": "Filter traces by name, id, or surface",
+      "searchPlaceholder": "Filter traces…",
+      "selectPrompt": "Select a trace to see its span waterfall.",
+      "span": {
+        "empty": "Select a span in the waterfall.",
+        "status": {
+          "ok": "OK",
+          "error": "Error",
+          "pending": "In flight",
+          "incomplete": "Incomplete"
+        },
+        "timing": "Timing",
+        "duration": "Duration",
+        "startedAt": "Started",
+        "offset": "Offset in trace",
+        "model": "Model",
+        "provider": "Provider",
+        "requestModel": "Requested",
+        "responseModel": "Responded",
+        "agent": "Agent",
+        "plugin": "Plugin",
+        "finishReasons": "Finish reasons",
+        "usage": "Usage",
+        "inputTokens": "Input tokens",
+        "outputTokens": "Output tokens",
+        "cacheRead": "Cache read",
+        "cacheWrite": "Cache write",
+        "cacheWriteSplit": "({short} 5m · {long} 1h)",
+        "totalTokens": "Total tokens",
+        "cost": "Cost",
+        "handoff": "Hand-off",
+        "handoffFrom": "From",
+        "handoffTo": "To",
+        "handoffReason": "Reason",
+        "error": "Error",
+        "errorType": "Type",
+        "events": "{count, plural, =1 {1 event} other {# events}}",
+        "content": "Content",
+        "contentHint": "Captured only when content capture is on, and only after the redaction gate passes.",
+        "metadata": "Metadata",
+        "identity": "Identity",
+        "traceId": "Trace",
+        "spanId": "Span",
+        "parentSpanId": "Parent",
+        "sessionId": "Session",
+        "runId": "Run",
+        "openInLogs": "Show this trace in logs",
+        "openSession": "Show this session in logs"
+      },
+      "spanCount": "{count, plural, =1 {1 span} other {# spans}}",
+      "timeline": {
+        "regionLabel": "Trace timeline",
+        "loading": "Building the timeline…",
+        "empty": "This trace has no spans to plot.",
+        "emptyWindow": "No spans in the selected window. Double-click the strip to zoom out.",
+        "scaleLabel": "Timeline scale",
+        "scales": {
+          "duration": "Duration",
+          "sequence": "Sequence"
+        },
+        "groupingLabel": "Lane grouping",
+        "groupings": {
+          "operation": "Operation",
+          "surface": "Surface",
+          "model": "Model",
+          "agent": "Agent"
+        },
+        "spans": "{count, plural, =1 {1 span} other {# spans}}",
+        "resetZoom": "Reset zoom",
+        "brushHint": "Drag to zoom into a time range · double-click to reset",
+        "laneErrors": "{count, plural, =1 {1 failed span} other {# failed spans}}",
+        "blockAria": "{label} in {lane}, {duration}",
+        "blockError": "This span failed"
+      },
+      "truncated": "Showing the newest {shown, number} of {total, number} spans in this window.",
+      "waterfallEmpty": "This trace has no persisted spans.",
+      "windowEmpty": "No spans in the selected window.",
+      "windowLabel": "Trace time window",
+      "windowedTo": "windowed to {count} of {total}",
+      "windows": {
+        "today": "Today",
+        "week": "7 days",
+        "month": "30 days",
+        "all": "All time"
+      }
+    },
     "views": {
-      "advanced": "Advanced",
-      "health": "Health",
-      "incidents": "Incidents",
       "logs": "Logs",
-      "receipts": "Receipts",
-      "recovery": "Recovery"
+      "traces": "Traces",
+      "incidents": "Incidents"
     }
   }
 }

@@ -39,7 +39,15 @@ const VALID_DENSITIES: Density[] = ["compact", "comfortable", "spacious"]
 const EMPTY_PRESET_VALUE = "__none__"
 
 export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): LogPanelFilterState {
-  const { defaultAutoRefresh = false, sources } = options
+  const {
+    defaultAutoRefresh = false,
+    sources,
+    density: controlledDensity,
+    onDensityChange,
+  } = options
+  // Controlled only when the host can actually receive the write — a `density`
+  // with no `onDensityChange` would render a control that moves nothing.
+  const densityControlled = controlledDensity !== undefined && onDensityChange !== undefined
 
   // Persisted across sessions (like density) — reopening the panel keeps the
   // user's live-follow preference instead of resetting to off.
@@ -85,7 +93,7 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
   const [focusedIndex, setFocusedIndex] = useState(-1)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(50)
-  const [density, setDensityState] = useState<Density>(() => {
+  const [uncontrolledDensity, setUncontrolledDensity] = useState<Density>(() => {
     if (typeof window === "undefined") return "comfortable"
     try {
       const stored = window.localStorage.getItem(DENSITY_STORAGE_KEY)
@@ -96,14 +104,22 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       return "comfortable"
     }
   })
-  const setDensity = useCallback((next: Density) => {
-    setDensityState(next)
-    try {
-      window.localStorage.setItem(DENSITY_STORAGE_KEY, next)
-    } catch {
-      // ignore storage quota / private-mode errors
-    }
-  }, [])
+  const density = densityControlled ? controlledDensity : uncontrolledDensity
+  const setDensity = useCallback(
+    (next: Density) => {
+      if (densityControlled) {
+        onDensityChange(next)
+        return
+      }
+      setUncontrolledDensity(next)
+      try {
+        window.localStorage.setItem(DENSITY_STORAGE_KEY, next)
+      } catch {
+        // ignore storage quota / private-mode errors
+      }
+    },
+    [densityControlled, onDensityChange]
+  )
 
   const [bookmarkFilterActive, setBookmarkFilterActive] = useState(false)
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)

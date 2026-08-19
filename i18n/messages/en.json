@@ -12398,12 +12398,9 @@
       "focusTraceMenu": "Focus on this trace",
       "groupByTrace": "Group by Trace",
       "highSeverityOnly": "Toggle high-severity only",
-      "hintAllShortcuts": "all shortcuts",
-      "hintExpand": "expand",
-      "hintNextPrev": "next/prev",
-      "hintRefresh": "refresh",
       "jumpToLatest": "Jump to latest",
       "keyboardShortcuts": "Keyboard shortcuts",
+      "levelFilterGroup": "Filter by level",
       "listView": "List View",
       "loadingLogs": "Loading logs...",
       "logDetails": "Log details",
@@ -12475,8 +12472,7 @@
         "refresh": "Refresh",
         "showShortcuts": "Show shortcuts"
       },
-      "shortcutsHint": "Keyboard shortcuts",
-      "showingRange": "Showing {start}-{end} of {total}",
+      "showingRange": "{start}–{end} of {total}",
       "source": "Source",
       "sources": {
         "frontend": "Frontend",
@@ -12512,18 +12508,24 @@
       "viewDetails": "View Details",
       "viewDetailsMenu": "View details",
       "viewDiagnostics": "View Diagnostics",
+      "viewModeGroup": "Log view",
       "viewNativeDiagnostics": "View Native Diagnostics",
       "warning": "Warning"
     },
     "settings": {
       "advanced": {
         "description": "Configure queueing, diagnostics, and redaction safety",
+        "diagnosticDescription": "How often a transport may report its own failures, so one broken sink cannot flood the log.",
         "diagnosticRateLimit": "Diagnostic Rate Limit (ms)",
         "diagnosticRateLimitDesc": "Throttle repeated transport diagnostics",
+        "diagnosticTitle": "Diagnostic throttling",
         "redactionDepth": "Redaction Depth",
         "redactionDepthDesc": "Maximum object traversal depth during redaction",
+        "redactionDescription": "Scrub sensitive keys and token-like values out of an entry before any transport sees it.",
         "redactionEnabled": "Enable Redaction",
         "redactionEnabledDesc": "Redact sensitive keys and token-like values before transport",
+        "redactionRuleCount": "{keys} sensitive key names and {patterns} value patterns are matched by default.",
+        "redactionTitle": "Redaction",
         "remoteQueueBytes": "Remote Queue Size (MB)",
         "remoteQueueBytesDesc": "Maximum remote retry queue size in megabytes",
         "remoteQueueEntries": "Remote Queue Entries",
@@ -12533,6 +12535,7 @@
       "behaviorTelemetry": {
         "categories": {
           "agentTeam": "Agent Team execution",
+          "app": "App usage",
           "chat": "Chat lifecycle",
           "connector": "Connector messages",
           "description": "Disable any product area you do not want included.",
@@ -12557,6 +12560,8 @@
         "exportCsv": "Export CSV",
         "exportJson": "Export JSON",
         "maxStoredEvents": "Maximum local events",
+        "off": "Off",
+        "on": "On",
         "optIn": "Share behavior events",
         "optInDesc": "Off by default. Engineering traces and behavior events use separate switches.",
         "retentionDays": "Local retention (days)",
@@ -12574,6 +12579,7 @@
         "info": "Info",
         "infoDesc": "General operational information",
         "minLevel": "Minimum Level",
+        "minLevelHint": "Applies to every module without its own override.",
         "title": "Log Level",
         "trace": "Trace",
         "traceDesc": "Most verbose, includes all details",
@@ -12616,11 +12622,55 @@
         "saved": "Applied",
         "title": "Native (Rust) Levels"
       },
+      "nav": {
+        "badgeTransportsAria": "{enabled} of {total} transports enabled",
+        "groups": {
+          "captureGroup": "Capture",
+          "deliveryGroup": "Delivery",
+          "statusGroup": "Status"
+        },
+        "items": {
+          "filters": {
+            "description": "Sampling, throttling and what gets scrubbed",
+            "label": "Filtering & redaction"
+          },
+          "levels": {
+            "description": "Global threshold and per-module overrides",
+            "label": "Levels"
+          },
+          "overview": {
+            "description": "Pipeline health and log files",
+            "label": "Overview"
+          },
+          "retention": {
+            "description": "How much history this device keeps",
+            "label": "Local retention"
+          },
+          "telemetry": {
+            "description": "Behaviour events and PostHog consent",
+            "label": "Telemetry & analytics"
+          },
+          "transports": {
+            "description": "Where log entries are sent and stored",
+            "label": "Transports"
+          }
+        },
+        "mobileTrigger": "Sections",
+        "title": "Logging settings"
+      },
       "options": {
         "includeSource": "Include Source Location",
         "includeSourceDesc": "Include file name and line number (development only)",
         "includeStackTrace": "Include Stack Traces",
         "includeStackTraceDesc": "Include stack traces for error and fatal logs"
+      },
+      "overview": {
+        "dropped": "dropped {count}",
+        "noTransports": "No transports have reported health yet.",
+        "queueDepth": "queue {count}",
+        "readinessDescription": "Whether the native (Rust) logging bridge started, and what it is writing to.",
+        "transportHealthDescription": "Live status reported by each registered transport. Refreshes every few seconds.",
+        "transportHealthTitle": "Transport health"
       },
       "performanceNote": {
         "description": "Enabling stack traces and source location may impact performance in production. Log sampling is recommended for high-traffic applications.",
@@ -12640,6 +12690,7 @@
           "tokenPlaceholder": "phc_••••••••"
         },
         "description": "Configure managed and BYO destinations independently. Product events and AI spans use separate consent.",
+        "incompleteBadge": "Needs host and token",
         "managed": {
           "available": "The managed project is available in this build.",
           "title": "Cognia managed project",
@@ -12654,9 +12705,16 @@
           "blocked": "Not sent. Enable behavior telemetry, the System category, and a valid product destination, then save.",
           "sent": "Test event accepted by at least one enabled telemetry destination."
         },
-        "title": "PostHog"
+        "title": "PostHog",
+        "unavailableBadge": "Not in this build"
       },
-      "reset": "Reset",
+      "restoreDefaults": {
+        "button": "Restore defaults",
+        "cancel": "Cancel",
+        "confirm": "Restore defaults",
+        "description": "Loads the shipped defaults into this form — levels, transports, retention and telemetry consent. Nothing is applied until you save.",
+        "title": "Restore the default logging settings?"
+      },
       "retention": {
         "days": "days",
         "description": "Configure how long logs are kept and storage limits.",
@@ -12664,11 +12722,14 @@
         "maxAgeDaysDesc": "Logs older than this will be automatically cleaned up",
         "maxEntries": "Maximum Entries",
         "maxEntriesDesc": "Older logs will be automatically removed when limit is reached",
+        "summary": "Whichever limit is reached first wins: at most {entries, number} entries, and nothing older than {days, number} days.",
         "title": "Log Retention"
       },
       "sampling": {
         "addRule": "Add Rule",
+        "applyPreset": "Apply recommended preset",
         "description": "Adjust runtime sampling percentages by module prefix.",
+        "empty": "No sampling rules. Every module logs at 100%.",
         "modulePrefix": "Module Prefix",
         "modulePrefixPlaceholder": "mouse",
         "percentage": "Sampling Rate",
@@ -12676,17 +12737,7 @@
         "ruleDescription": "Applied immediately after saving.",
         "title": "Sampling Rules"
       },
-      "save": "Save",
       "saveError": "Failed to save settings",
-      "saved": "Saved!",
-      "saving": "Saving...",
-      "tabs": {
-        "advanced": "Advanced",
-        "levels": "Levels",
-        "posthog": "PostHog",
-        "retention": "Retention",
-        "transports": "Transports"
-      },
       "transports": {
         "agentTrace": "Agent trace",
         "agentTraceDesc": "Persist one span per chat turn, tool call, and teammate handoff to local Dexie. Powers the /logs Agent Trace tab.",
@@ -12698,8 +12749,12 @@
         "consoleDetail": "Always mirrors logs to the current runtime console.",
         "description": "Configure where logs are sent and stored.",
         "indexedDB": "IndexedDB Storage",
+        "indexedDBBufferSize": "Buffer Size",
+        "indexedDBBufferSizeDesc": "Entries held in memory before a write to IndexedDB.",
         "indexedDBDesc": "Persist logs locally for viewing in Log Viewer",
         "indexedDBDetail": "Stores log history locally for the integrated viewer.",
+        "indexedDBFlushInterval": "Flush Interval",
+        "indexedDBFlushIntervalDesc": "How long a partial buffer waits before being written anyway.",
         "langfuse": "Langfuse Integration",
         "langfuseDesc": "Send logs to Langfuse for AI observability",
         "langfuseHost": "Host",
@@ -12719,11 +12774,13 @@
         "remoteDesc": "Ship logs to a remote endpoint with retry batching.",
         "remoteEndpoint": "Endpoint URL",
         "remoteEndpointPlaceholder": "https://example.com/logs",
+        "remoteEndpointRequired": "Without an endpoint this transport stays detached, even while the switch is on.",
         "remoteFlushInterval": "Flush Interval",
         "remoteMaxRetries": "Max Retries",
         "remoteRetryDelay": "Retry Delay",
         "secretConfiguredPlaceholder": "Stored securely — enter a new value to replace",
-        "title": "Log Transports"
+        "title": "Log Transports",
+        "toggleDetails": "Show {transport} configuration"
       },
       "unsavedChanges": "Unsaved changes"
     },
@@ -12759,29 +12816,8 @@
       "totalTokens": "Total"
     },
     "workspace": {
-      "advanced": {
-        "capabilities": {
-          "description": "Per-platform capture and artifact availability reported by the active runtime.",
-          "status": "Runtime reported",
-          "title": "Capability diagnostics"
-        },
-        "queues": {
-          "description": "Durable upload progress, retries, cancellations, and last flush watermarks.",
-          "status": "Local queues",
-          "title": "Upload queues"
-        },
-        "schema": {
-          "description": "Versioned structured fields, correlation context, redaction version, and spool sequence.",
-          "status": "ObservabilityEventV1",
-          "title": "Event schema"
-        },
-        "symbols": {
-          "description": "Build-ID keyed source maps and native symbol artifacts used during processing.",
-          "status": "Service managed",
-          "title": "Symbol status"
-        }
-      },
       "breadcrumbHome": "Home",
+      "configure": "Configure",
       "consent": {
         "description": "Nothing is uploaded until you review the redacted report and explicitly submit it.",
         "descriptionLabel": "Description for support",
@@ -12799,12 +12835,6 @@
         "description": "This removes the local diagnostic artifacts from this device. The action cannot be undone.",
         "title": "Delete this crash report?"
       },
-      "density": {
-        "comfortable": "Comfortable",
-        "compact": "Compact",
-        "label": "Workspace density",
-        "spacious": "Spacious"
-      },
       "detail": {
         "description": "Review redacted local diagnostics and optional attachments.",
         "loading": "Loading redacted preview…",
@@ -12817,6 +12847,7 @@
         "title": "Incident detail"
       },
       "filters": {
+        "receiptsOnly": "Receipts only",
         "sourceLabel": "Incident source",
         "sources": {
           "all": "All devices",
@@ -12825,82 +12856,19 @@
         },
         "stateLabel": "Incident state"
       },
-      "health": {
-        "cards": {
-          "capture": {
-            "description": "Structured logs and crash markers are retained locally with bounded storage.",
-            "title": "Local capture"
-          },
-          "privacy": {
-            "description": "Versioned redaction runs before IPC, export, or upload, with a second server scan.",
-            "title": "Privacy gate"
-          },
-          "retention": {
-            "description": "Logs and reports remain on this device until retention or an explicit deletion applies.",
-            "title": "Durable retention"
-          },
-          "submission": {
-            "description": "Crash reports require a previewed consent unless automatic submission is separately enabled.",
-            "title": "Controlled submission"
-          }
-        },
-        "description": "A plain-language view of capture, privacy, retention, and submission readiness.",
-        "localIncidents": "Reports retained on this device",
-        "localIncidentsDescription": "These reports have not been treated as uploaded unless a receipt is present.",
-        "status": {
-          "consent": "Consent required",
-          "local": "Local first",
-          "protected": "Redaction active",
-          "ready": "Ready"
-        },
-        "title": "Diagnostics health"
-      },
-      "incidentCount": "{count, plural, =0 {No local incidents} =1 {1 local incident} other {# local incidents}}",
       "incidents": {
         "emptyDescription": "New crash reports and abnormal exits will be retained here before submission.",
         "emptyTitle": "No matching incidents",
         "error": "Local incident storage could not be read.",
         "loading": "Loading local incidents…"
       },
+      "moreActions": "More actions",
       "navigation": {
-        "collapse": "Collapse diagnostics navigation",
-        "expand": "Expand diagnostics navigation",
-        "label": "Diagnostics workspace views",
-        "resize": "Resize diagnostics navigation"
+        "label": "Log workspace channels"
       },
       "receipts": {
         "emptyDescription": "Accepted or processing submissions will show their stable support code here.",
         "emptyTitle": "No submission receipts"
-      },
-      "recovery": {
-        "checkpoints": {
-          "account": {
-            "description": "Keep account access and reporting available in the minimal shell.",
-            "title": "Account and diagnostics"
-          },
-          "automation": {
-            "description": "Enable automation and schedulers last, after all earlier checks remain healthy.",
-            "title": "Automation"
-          },
-          "data": {
-            "description": "Verify read-only local data, backup, and export before enabling writers.",
-            "title": "Local data"
-          },
-          "plugins": {
-            "description": "Enable plugin groups progressively and return to the minimal shell on failure.",
-            "title": "Plugins"
-          },
-          "sidecars": {
-            "description": "Start child runtimes with bounded retries and a health checkpoint.",
-            "title": "Sidecars and connectors"
-          }
-        },
-        "checkpointsDescription": "Safe mode exits by enabling subsystem groups one at a time and recording each health result.",
-        "checkpointsTitle": "Progressive recovery order",
-        "description": "Two unhealthy starts for the same build within ten minutes activate the diagnostics-first minimal shell.",
-        "normalDescription": "No safe-mode activation is currently reported by this renderer. Recovery counters reset after ten stable minutes.",
-        "normalTitle": "Normal startup mode",
-        "title": "Crash-loop recovery"
       },
       "refresh": "Refresh",
       "reset": "Reset layout",
@@ -12916,14 +12884,133 @@
         "rejected": "Rejected",
         "uploading": "Uploading"
       },
+      "status": {
+        "incidents": "{count, plural, =0 {No incidents} =1 {1 incident} other {# incidents}}",
+        "native": "Native logs: {status}",
+        "transports": "{healthy}/{total} transports"
+      },
       "title": "Logs and diagnostics",
+      "traces": {
+        "counts": "{matched} / {total}",
+        "detailDescription": "Span waterfall and the selected span's full record.",
+        "detailTitle": "Trace detail",
+        "emptyDescription": "Spans are recorded as agents run. Start a chat, a team run, or a workflow and they will appear here.",
+        "emptyTitle": "No agent traces yet",
+        "errorsOnly": "Errors only",
+        "export": {
+          "copied": "Trace copied as {format}",
+          "copy": {
+            "json": "Copy spans as JSON",
+            "otlp": "Copy as OTLP"
+          },
+          "copyFailed": "Could not write to the clipboard",
+          "label": "Export",
+          "redactPreviews": "Strip content previews",
+          "save": {
+            "json": "Save spans as JSON…",
+            "otlp": "Save as OTLP…"
+          },
+          "saveFailed": "Export failed: {message}",
+          "saved": "Trace exported",
+          "spanCount": "{count, plural, =1 {1 span} other {# spans}}"
+        },
+        "loading": "Loading traces…",
+        "nextPage": "Next",
+        "noMatchDescription": "Widen the time window or clear the filters.",
+        "noMatchTitle": "No traces match",
+        "openDashboard": "Dashboard",
+        "pageOf": "{page} / {total}",
+        "previousPage": "Previous",
+        "searchLabel": "Filter traces by name, id, or surface",
+        "searchPlaceholder": "Filter traces…",
+        "selectPrompt": "Select a trace to see its span waterfall.",
+        "span": {
+          "agent": "Agent",
+          "cacheRead": "Cache read",
+          "cacheWrite": "Cache write",
+          "cacheWriteSplit": "({short} 5m · {long} 1h)",
+          "content": "Content",
+          "contentHint": "Captured only when content capture is on, and only after the redaction gate passes.",
+          "cost": "Cost",
+          "duration": "Duration",
+          "empty": "Select a span in the waterfall.",
+          "error": "Error",
+          "errorType": "Type",
+          "events": "{count, plural, =1 {1 event} other {# events}}",
+          "finishReasons": "Finish reasons",
+          "handoff": "Hand-off",
+          "handoffFrom": "From",
+          "handoffReason": "Reason",
+          "handoffTo": "To",
+          "identity": "Identity",
+          "inputTokens": "Input tokens",
+          "metadata": "Metadata",
+          "model": "Model",
+          "offset": "Offset in trace",
+          "openInLogs": "Show this trace in logs",
+          "openSession": "Show this session in logs",
+          "outputTokens": "Output tokens",
+          "parentSpanId": "Parent",
+          "plugin": "Plugin",
+          "provider": "Provider",
+          "requestModel": "Requested",
+          "responseModel": "Responded",
+          "runId": "Run",
+          "sessionId": "Session",
+          "spanId": "Span",
+          "startedAt": "Started",
+          "status": {
+            "error": "Error",
+            "incomplete": "Incomplete",
+            "ok": "OK",
+            "pending": "In flight"
+          },
+          "timing": "Timing",
+          "totalTokens": "Total tokens",
+          "traceId": "Trace",
+          "usage": "Usage"
+        },
+        "spanCount": "{count, plural, =1 {1 span} other {# spans}}",
+        "timeline": {
+          "blockAria": "{label} in {lane}, {duration}",
+          "blockError": "This span failed",
+          "brushHint": "Drag to zoom into a time range · double-click to reset",
+          "empty": "This trace has no spans to plot.",
+          "emptyWindow": "No spans in the selected window. Double-click the strip to zoom out.",
+          "groupingLabel": "Lane grouping",
+          "groupings": {
+            "agent": "Agent",
+            "model": "Model",
+            "operation": "Operation",
+            "surface": "Surface"
+          },
+          "laneErrors": "{count, plural, =1 {1 failed span} other {# failed spans}}",
+          "loading": "Building the timeline…",
+          "regionLabel": "Trace timeline",
+          "resetZoom": "Reset zoom",
+          "scaleLabel": "Timeline scale",
+          "scales": {
+            "duration": "Duration",
+            "sequence": "Sequence"
+          },
+          "spans": "{count, plural, =1 {1 span} other {# spans}}"
+        },
+        "truncated": "Showing the newest {shown, number} of {total, number} spans in this window.",
+        "waterfallEmpty": "This trace has no persisted spans.",
+        "windowEmpty": "No spans in the selected window.",
+        "windowLabel": "Trace time window",
+        "windowedTo": "windowed to {count} of {total}",
+        "windows": {
+          "all": "All time",
+          "month": "30 days",
+          "today": "Today",
+          "week": "7 days"
+        }
+      },
       "views": {
-        "advanced": "Advanced",
-        "health": "Health",
         "incidents": "Incidents",
         "logs": "Logs",
-        "receipts": "Receipts",
-        "recovery": "Recovery"
+        "traces": "Traces"
       }
     }
   },
@@ -32692,27 +32779,41 @@
       "addDomain": "Add domain",
       "build": "Build saved version",
       "cancel": "Cancel",
+      "cancelEdit": "Cancel",
+      "clearOutput": "Clear",
       "confirmDeleteMetadata": "Delete metadata",
       "confirmPurge": "Purge managed resources",
+      "copyUrl": "Copy URL",
       "create": "Create Site",
       "creating": "Creating…",
       "deleteMetadata": "Delete Site metadata",
       "deploy": "Deploy",
+      "editEnvironment": "Edit",
+      "formatManifest": "Format",
       "loadAnalytics": "Load last 24 hours of analytics",
       "loadLogs": "Load last 24 hours of logs",
+      "loadRevision": "Load into editor",
       "newSite": "New Site",
+      "openSite": "Open site",
       "preview": "Start preview",
       "provision": "Provision bindings",
       "purge": "Purge managed resources",
       "reconcile": "Reconcile provider state",
       "redetectWrangler": "Re-detect Wrangler",
+      "refreshOperation": "Re-check",
+      "reloadManifest": "Reload from disk",
       "remove": "Remove",
       "restore": "Restore",
+      "retryBuild": "Retry build",
       "rollback": "Redeploy / Roll back",
+      "runQuery": "Run query",
       "saveAccess": "Apply access policy",
       "saveAuthoring": "Save authoring access",
       "saveEnvironment": "Save environment revision",
+      "saveManifest": "Save manifest",
+      "saveProviderConfig": "Save provider settings",
       "saveToken": "Verify and save token",
+      "scaffoldManifest": "Generate .cognia/hosting.json",
       "stopPreview": "Stop preview",
       "takeDown": "Take down",
       "upload": "Upload version"
@@ -32760,8 +32861,8 @@
       "taken-down": "Taken down"
     },
     "desktopOnly": {
-      "description": "Builds, provider credentials, and previews stay on the selected local desktop host.",
-      "title": "Sites requires Cognia Desktop"
+      "description": "Everything here is readable, but builds, previews, provider calls, and manifest edits need the Cognia desktop app.",
+      "title": "Publishing runs on the desktop host"
     },
     "domains": {
       "description": "Attach and reconcile Cloudflare Worker custom domains.",
@@ -32770,21 +32871,55 @@
     },
     "empty": "Create or select a Site to begin.",
     "environment": {
+      "credential": "Credential",
+      "currentRevision": "Current revision",
       "description": "Plain values are versioned. Secret values go only to this host's OS keyring.",
+      "diff": {
+        "added": "{count} added",
+        "changed": "{count} changed",
+        "none": "No changes",
+        "removed": "{count} removed"
+      },
+      "edit": "Edit variables and secrets",
+      "history": "Revision history",
+      "noRevision": "No environment revision yet.",
+      "noSecretRefs": "No secrets in this revision.",
+      "overwriteWarning": "Saving replaces the whole variable set; anything missing here is removed.",
+      "revision": "Revision",
+      "revisionLabel": "Revision {sequence}",
+      "savedAt": "Saved {when}",
+      "secretRefs": "Secret references",
+      "secretValueHidden": "Values stay in this host's OS keyring and are never shown.",
       "secrets": "Secrets",
       "secretsPlaceholder": "API_TOKEN=secret-value",
       "title": "Environment",
+      "usedByVersion": "Used by version {sequence}",
       "variables": "Variables",
       "variablesPlaceholder": "API_ORIGIN=https://api.example.com"
     },
     "errors": {
       "artifactRequired": "The saved version artifact is unavailable.",
       "environmentRequired": "Save an environment revision first.",
+      "manifestInvalid": "Fix the hosting manifest first.",
+      "manifestMissing": "Create .cognia/hosting.json first.",
       "projectRoot": "The selected project has no workspace root.",
-      "wranglerRequired": "Choose an approved absolute Wrangler binary path."
+      "wranglerRequired": "Choose an approved absolute Wrangler binary path.",
+      "zoneIdRequired": "A Cloudflare zone ID is required for a custom domain."
     },
     "feedback": {
       "success": "Site state updated"
+    },
+    "host": {
+      "banner": "Read-only: this shell cannot run builds, previews, or Cloudflare calls.",
+      "reason": {
+        "lifecycle-locked": "Unavailable while this Site is being deleted",
+        "ok": "",
+        "requires-access": "You are not on this Site's authoring policy",
+        "requires-deployer": "Requires deployer access to this Site",
+        "requires-desktop": "Available in the Cognia desktop app",
+        "requires-editor": "Requires editor access to this Site",
+        "requires-owner": "Only the Site owner can do this"
+      }
     },
     "lifecycle": {
       "active": "Active",
@@ -32792,10 +32927,56 @@
       "deleting": "Deleting",
       "taken-down": "Taken down"
     },
+    "manifest": {
+      "confidence": {
+        "detected": "Framework defaults",
+        "template": "Template — review the build command and output directory before saving"
+      },
+      "description": ".cognia/hosting.json defines the build argv, the preview command, the Worker entry, and the Cloudflare bindings.",
+      "detected": "Detected {kind} · {packageManager}",
+      "editorLabel": "Hosting manifest source",
+      "extraFiles": "Saving also writes {count, plural, one {# companion file} other {# companion files}}.",
+      "invalid": "This manifest does not parse: {error}",
+      "kind": {
+        "astro": "Astro",
+        "next": "Next.js",
+        "node": "Node project",
+        "remix": "Remix",
+        "static": "Static site",
+        "sveltekit": "SvelteKit",
+        "unknown": "Unrecognized project",
+        "vite": "Vite"
+      },
+      "loading": "Reading the manifest…",
+      "missing": {
+        "description": "Build, preview, and binding provisioning all read this file. Generate a starting point from the source tree, review it, then save.",
+        "title": "No hosting manifest yet"
+      },
+      "title": "Hosting manifest",
+      "unsupported": "The manifest lives in the Site's source tree, which only the desktop app can read."
+    },
     "observability": {
       "description": "Query Cloudflare Worker logs and request analytics without copying them into another runtime.",
       "empty": "No query has run yet.",
-      "title": "Provider observability"
+      "errorsOnly": "Errors only",
+      "hostname": "Hostname: {hostname}",
+      "noHostname": "No custom domain or production URL yet, so analytics stay Worker-scoped.",
+      "result": "Query result",
+      "segments": {
+        "analytics": "Request analytics",
+        "logs": "Worker logs",
+        "operations": "Operation journal"
+      },
+      "title": "Provider observability",
+      "workerScoped": "No zone ID set, so analytics stay Worker-scoped."
+    },
+    "operationEvent": {
+      "cancelled": "Cancelled",
+      "claimed": "Claimed",
+      "failed": "Failed",
+      "queued": "Queued",
+      "succeeded": "Succeeded",
+      "waiting-reconcile": "Waiting for reconciliation"
     },
     "operationStatus": {
       "cancelled": "Cancelled",
@@ -32819,20 +33000,107 @@
       "upload": "Upload"
     },
     "operations": {
+      "attempts": "{count, plural, one {# attempt} other {# attempts}}",
       "description": "Durable lifecycle events used for crash recovery and provider reconciliation.",
       "empty": "No lifecycle operations yet.",
+      "error": "Error",
       "eventCount": "{count, plural, one {# event} other {# events}}",
+      "noEvents": "No events recorded for this operation.",
+      "providerRequestId": "Provider request ID",
+      "reconcileResult": "{resolved} resolved · {remaining} still waiting",
+      "timeline": "Event timeline",
       "title": "Operation journal"
     },
+    "overview": {
+      "currentVersion": "Version {sequence}",
+      "deployedAt": "Deployed {when}",
+      "failureFrom": {
+        "deployment": "Deployment",
+        "operation": "Operation",
+        "version": "Version {label}"
+      },
+      "needsAttention": "{count, plural, one {# unresolved failure} other {# unresolved failures}}",
+      "noProductionUrl": "Appears here once a version is deployed.",
+      "noVersion": "No version deployed",
+      "owner": "Owner",
+      "productionUrl": "Production URL",
+      "role": {
+        "deployer": "Deployer",
+        "editor": "Editor",
+        "owner": "Owner",
+        "viewer": "Viewer"
+      },
+      "sourcePath": "Source",
+      "yourRole": "Your role"
+    },
     "provider": {
+      "accessTeamName": "Cloudflare Access team",
+      "accessTeamNameHint": "The team domain that enforces the visitor policy.",
       "account": "Account",
       "description": "The API token is verified before it is stored in the local OS keyring.",
+      "identityLocked": "The account and Worker name identify every resource already recorded, so they cannot be changed here.",
       "title": "Cloudflare provider",
       "token": "Cloudflare API token",
-      "worker": "Worker"
+      "worker": "Worker",
+      "zoneId": "Cloudflare zone ID",
+      "zoneIdHint": "Required to attach a custom domain and to get zone-scoped analytics.",
+      "zoneIdRequired": "Set the zone ID before attaching a custom domain."
     },
     "publish": {
       "noVersions": "Build a version first to upload and deploy."
+    },
+    "rail": {
+      "clear": "Clear search",
+      "group": "Sites",
+      "hint": {
+        "failed": "Build failed",
+        "live": "Live · {when}",
+        "never": "Not published"
+      },
+      "more": "Site actions",
+      "noMatches": "No Site matches this search.",
+      "running": "Running",
+      "search": "Search Sites"
+    },
+    "resources": {
+      "dependencies": "{count, plural, one {# dependency} other {# dependencies}}",
+      "description": "Everything Cognia knows about at Cloudflare, and whether a purge would delete it.",
+      "empty": "No provider resources recorded yet.",
+      "kind": {
+        "access-application": "Access applications",
+        "access-policy": "Access policies",
+        "custom-domain": "Custom domains",
+        "d1-database": "D1 databases",
+        "r2-bucket": "R2 buckets",
+        "secret": "Secrets",
+        "worker": "Worker",
+        "worker-version": "Worker versions"
+      },
+      "legend": "Purge deletes managed resources only.",
+      "noDependencies": "No dependencies",
+      "ownership": {
+        "adopted": "Adopted",
+        "managed": "Managed",
+        "shared": "Shared"
+      },
+      "ownershipHint": {
+        "adopted": "Adopted · preserved",
+        "managed": "Managed · purge deletes it",
+        "shared": "Shared · preserved"
+      },
+      "providerId": "Provider ID",
+      "retention": {
+        "purgeable": "{count} deleted",
+        "retained": "{count} preserved",
+        "title": "What a purge would do"
+      },
+      "status": {
+        "active": "Active",
+        "deleted": "Deleted",
+        "deleting": "Deleting",
+        "orphaned": "Orphaned"
+      },
+      "title": "Provider resources"
     },
     "sidebarEmpty": "No Sites yet. Create one to get started.",
     "stepState": {
@@ -32854,6 +33122,10 @@
         "description": "Save the variables and secrets the build needs.",
         "title": "Environment"
       },
+      "manifest": {
+        "description": "Describe how this Site builds, previews, and binds resources.",
+        "title": "Hosting manifest"
+      },
       "preview": {
         "description": "Run the build locally before publishing.",
         "title": "Preview"
@@ -32864,8 +33136,44 @@
       }
     },
     "subtitle": "Build, preview, and publish from Cognia",
+    "summary": {
+      "live": "{count} live",
+      "sites": "{count, plural, one {# Site} other {# Sites}}"
+    },
+    "tabs": {
+      "domains": "Domains & access",
+      "environment": "Environment",
+      "operations": "Operations",
+      "publish": "Publish flow",
+      "resources": "Resources",
+      "versions": "Versions"
+    },
     "title": "Sites",
     "versions": {
+      "artifact": "{size} · {count, plural, one {# file} other {# files}}",
+      "bindings": "Bindings",
+      "deploymentFailure": "Deployment failure",
+      "description": "Every immutable version, including builds that failed.",
+      "dirty": "Uncommitted",
+      "empty": "No versions yet. Build one from the publish flow.",
+      "failure": "Build failure",
+      "filter": {
+        "all": "All",
+        "building": "Building",
+        "failed": "Failed",
+        "ready": "Ready"
+      },
+      "live": "Live",
+      "noArtifact": "No artifact",
+      "noBindings": "No bindings",
+      "notUploaded": "Not uploaded",
+      "status": {
+        "building": "Building",
+        "failed": "Failed",
+        "ready": "Ready"
+      },
+      "title": "Versions",
+      "uploaded": "Uploaded",
       "version": "Version {sequence}"
     },
     "wrangler": {

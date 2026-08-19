@@ -103,4 +103,17 @@ export interface LogPanelFilterState {
 export interface UseLogPanelFiltersOptions {
   defaultAutoRefresh?: boolean
   sources?: ("frontend" | "tauri" | "mcp" | "plugin")[]
+  /**
+   * Row density, controlled by the host.
+   *
+   * Left undefined, the hook owns density itself and persists it under
+   * `cognia-log-density`. Supplied, the host is the single source of truth and
+   * the hook stops writing that key — which is what stops a page that has its
+   * own density preference (the `/logs` workspace store) from shadowing the
+   * panel with a second, silently diverging value.
+   */
+  density?: Density
+  /** Required for `density` to be honoured; without it there is nothing to
+   * write back to and the control would render inert. */
+  onDensityChange?: (density: Density) => void
 }

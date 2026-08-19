@@ -94,12 +94,16 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/logs")
 })
 
+/** Seed both the router snapshot and the live URL, the way a real load does. */
+function seedUrl(query: string): void {
+  mockSearchParams.mockReturnValue(new URLSearchParams(query))
+  window.history.replaceState({}, "", query ? `/logs?${query}` : "/logs")
+}
+
 describe("useLogPanelUrlSync — hydration from URL", () => {
   it("applies parsed search params on mount", () => {
-    mockSearchParams.mockReturnValue(
-      new URLSearchParams(
-        "q=login&re=1&level=error&module=auth&src=tauri&session=s1&t=1h&trace=t-1&dx=remote&bm=1&hsev=1&view=dashboard&page=3&size=100&detail=1&density=compact"
-      )
+    seedUrl(
+      "q=login&re=1&level=error&module=auth&src=tauri&session=s1&t=1h&trace=t-1&dx=remote&bm=1&hsev=1&view=dashboard&page=3&size=100&detail=1&density=compact"
     )
     const filters = makeFilters()
     renderHook(() => useLogPanelUrlSync(filters))
@@ -124,7 +128,7 @@ describe("useLogPanelUrlSync — hydration from URL", () => {
   it("parses from/to into a customTimeRange when both are valid", () => {
     const fromMs = Date.UTC(2026, 0, 1)
     const toMs = Date.UTC(2026, 0, 2)
-    mockSearchParams.mockReturnValue(new URLSearchParams(`from=${fromMs}&to=${toMs}`))
+    seedUrl(`from=${fromMs}&to=${toMs}`)
     const filters = makeFilters()
     renderHook(() => useLogPanelUrlSync(filters))
     expect(filters.setCustomTimeRange).toHaveBeenCalledWith({
@@ -134,9 +138,7 @@ describe("useLogPanelUrlSync — hydration from URL", () => {
   })
 
   it("silently ignores malformed values without throwing", () => {
-    mockSearchParams.mockReturnValue(
-      new URLSearchParams("level=garbage&view=garbage&t=garbage&src=garbage&page=NaN&size=abc")
-    )
+    seedUrl("level=garbage&view=garbage&t=garbage&src=garbage&page=NaN&size=abc")
     const filters = makeFilters()
     expect(() => renderHook(() => useLogPanelUrlSync(filters))).not.toThrow()
     expect(filters.setLevelFilter).not.toHaveBeenCalled()
@@ -150,14 +152,24 @@ describe("useLogPanelUrlSync — hydration from URL", () => {
   it("ignores from/to when reversed or non-numeric", () => {
     const fromMs = Date.UTC(2026, 0, 2)
     const toMs = Date.UTC(2026, 0, 1)
-    mockSearchParams.mockReturnValue(new URLSearchParams(`from=${fromMs}&to=${toMs}`))
+    seedUrl(`from=${fromMs}&to=${toMs}`)
     const filters = makeFilters()
     renderHook(() => useLogPanelUrlSync(filters))
     expect(filters.setCustomTimeRange).not.toHaveBeenCalled()
   })
 
+  it("prefers the live URL over a stale router snapshot", () => {
+    // A host that seeds the panel with `history.replaceState` and remounts it
+    // (the /logs Traces → Logs jump) beats `useSearchParams()` to the punch.
+    mockSearchParams.mockReturnValue(new URLSearchParams())
+    window.history.replaceState({}, "", "/logs?trace=t-9")
+    const filters = makeFilters()
+    renderHook(() => useLogPanelUrlSync(filters))
+    expect(filters.setTraceFocusId).toHaveBeenCalledWith("t-9")
+  })
+
   it("does not re-apply hydration when filters object changes after mount", () => {
-    mockSearchParams.mockReturnValue(new URLSearchParams("q=initial"))
+    seedUrl("q=initial")
     const filters = makeFilters()
     const { rerender } = renderHook(({ f }) => useLogPanelUrlSync(f), {
       initialProps: { f: filters },
@@ -221,6 +233,32 @@ describe("useLogPanelUrlSync — writes to URL on state change", () => {
     const filters = makeFilters()
     renderHook(() => useLogPanelUrlSync(filters))
     expect(window.location.search).toBe("")
+  })
+
+  it("preserves host-owned params it does not own", () => {
+    // `/logs` keeps its channel + selected trace in the query string; a filter
+    // change used to wipe them because the write pass rebuilt from empty.
+    window.history.replaceState({}, "", "/logs?channel=traces&traceId=abc")
+    mockSearchParams.mockReturnValue(new URLSearchParams("channel=traces&traceId=abc"))
+    const filters = makeFilters({ searchQuery: "boom", levelFilter: "error" })
+    renderHook(() => useLogPanelUrlSync(filters))
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get("channel")).toBe("traces")
+    expect(params.get("traceId")).toBe("abc")
+    expect(params.get("q")).toBe("boom")
+    expect(params.get("level")).toBe("error")
+  })
+
+  it("clears its own stale params instead of accumulating them", () => {
+    window.history.replaceState({}, "", "/logs?channel=traces&q=old&level=warn&view=dashboard")
+    mockSearchParams.mockReturnValue(new URLSearchParams("channel=traces"))
+    const filters = makeFilters({ searchQuery: "new" })
+    renderHook(() => useLogPanelUrlSync(filters))
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get("q")).toBe("new")
+    expect(params.get("level")).toBeNull()
+    expect(params.get("view")).toBeNull()
+    expect(params.get("channel")).toBe("traces")
   })
 
   it("does not duplicate writes when nothing changed", () => {

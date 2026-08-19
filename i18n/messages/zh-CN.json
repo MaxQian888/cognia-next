@@ -12398,12 +12398,9 @@
       "focusTraceMenu": "聚焦此追踪",
       "groupByTrace": "按追踪分组",
       "highSeverityOnly": "仅显示高严重级别",
-      "hintAllShortcuts": "全部快捷键",
-      "hintExpand": "展开",
-      "hintNextPrev": "上/下一条",
-      "hintRefresh": "刷新",
       "jumpToLatest": "跳到最新",
       "keyboardShortcuts": "键盘快捷键",
+      "levelFilterGroup": "按级别筛选",
       "listView": "列表视图",
       "loadingLogs": "加载日志中...",
       "logDetails": "日志详情",
@@ -12475,8 +12472,7 @@
         "refresh": "刷新",
         "showShortcuts": "显示快捷键"
       },
-      "shortcutsHint": "键盘快捷键",
-      "showingRange": "显示 {start}-{end} / 共 {total} 项",
+      "showingRange": "{start}–{end} / 共 {total}",
       "source": "来源",
       "sources": {
         "frontend": "前端",
@@ -12512,18 +12508,24 @@
       "viewDetails": "查看详情",
       "viewDetailsMenu": "查看详情",
       "viewDiagnostics": "查看诊断",
+      "viewModeGroup": "日志视图",
       "viewNativeDiagnostics": "查看原生诊断",
       "warning": "警告"
     },
     "settings": {
       "advanced": {
         "description": "配置队列、诊断与日志脱敏安全策略",
+        "diagnosticDescription": "限制传输通道上报自身故障的频率，避免一个坏掉的输出端淹没日志。",
         "diagnosticRateLimit": "诊断限流（毫秒）",
         "diagnosticRateLimitDesc": "限制重复传输诊断的触发频率",
+        "diagnosticTitle": "诊断限流",
         "redactionDepth": "脱敏深度",
         "redactionDepthDesc": "脱敏时遍历对象的最大深度",
+        "redactionDescription": "在任何传输通道看到日志之前，先抹掉敏感字段名和疑似令牌的取值。",
         "redactionEnabled": "启用脱敏",
         "redactionEnabledDesc": "在发送前脱敏敏感键名和类似令牌的值",
+        "redactionRuleCount": "默认匹配 {keys} 个敏感字段名与 {patterns} 条取值规则。",
+        "redactionTitle": "敏感信息脱敏",
         "remoteQueueBytes": "远程队列大小（MB）",
         "remoteQueueBytesDesc": "远程重试队列允许占用的最大空间（MB）",
         "remoteQueueEntries": "远程队列条目数",
@@ -12533,6 +12535,7 @@
       "behaviorTelemetry": {
         "categories": {
           "agentTeam": "Agent Team 执行",
+          "app": "应用使用",
           "chat": "聊天生命周期",
           "connector": "连接器消息",
           "description": "可以关闭不希望采集的产品领域。",
@@ -12557,6 +12560,8 @@
         "exportCsv": "导出 CSV",
         "exportJson": "导出 JSON",
         "maxStoredEvents": "本地事件数量上限",
+        "off": "已关闭",
+        "on": "已开启",
         "optIn": "共享行为事件",
         "optInDesc": "默认关闭。工程链路追踪与行为事件使用相互独立的开关。",
         "retentionDays": "本地保留天数",
@@ -12574,6 +12579,7 @@
         "info": "信息",
         "infoDesc": "一般操作信息",
         "minLevel": "最低级别",
+        "minLevelHint": "对所有未单独设置覆盖的模块生效。",
         "title": "日志级别",
         "trace": "追踪",
         "traceDesc": "最详细，包含所有细节",
@@ -12616,11 +12622,55 @@
         "saved": "已应用",
         "title": "原生（Rust）级别"
       },
+      "nav": {
+        "badgeTransportsAria": "已启用 {enabled} / {total} 个传输通道",
+        "groups": {
+          "captureGroup": "采集",
+          "deliveryGroup": "输出",
+          "statusGroup": "状态"
+        },
+        "items": {
+          "filters": {
+            "description": "采样、限流与敏感信息抹除",
+            "label": "过滤与脱敏"
+          },
+          "levels": {
+            "description": "全局阈值与按模块覆盖",
+            "label": "日志级别"
+          },
+          "overview": {
+            "description": "链路健康状况与日志文件",
+            "label": "概览"
+          },
+          "retention": {
+            "description": "本机保留多少历史日志",
+            "label": "本地留存"
+          },
+          "telemetry": {
+            "description": "行为事件与 PostHog 授权",
+            "label": "遥测与分析"
+          },
+          "transports": {
+            "description": "日志发送与存储到哪里",
+            "label": "传输通道"
+          }
+        },
+        "mobileTrigger": "分组",
+        "title": "日志设置"
+      },
       "options": {
         "includeSource": "包含源位置",
         "includeSourceDesc": "包含文件名和行号（仅限开发环境）",
         "includeStackTrace": "包含堆栈跟踪",
         "includeStackTraceDesc": "为错误和致命日志包含堆栈跟踪"
+      },
+      "overview": {
+        "dropped": "丢弃 {count}",
+        "noTransports": "暂无传输通道上报健康状态。",
+        "queueDepth": "队列 {count}",
+        "readinessDescription": "原生（Rust）日志桥是否已启动，以及当前正在写入哪些目标。",
+        "transportHealthDescription": "各已注册传输通道上报的实时状态，每隔数秒刷新一次。",
+        "transportHealthTitle": "传输通道健康"
       },
       "performanceNote": {
         "description": "启用堆栈跟踪和源位置可能会影响生产环境的性能。建议在高流量应用中使用日志采样。",
@@ -12640,6 +12690,7 @@
           "tokenPlaceholder": "phc_••••••••"
         },
         "description": "独立配置托管项目和 BYO 目的地；产品事件与 AI span 分别授权。",
+        "incompleteBadge": "需填写 Host 与 Token",
         "managed": {
           "available": "当前构建已提供托管项目配置。",
           "title": "Cognia 托管项目",
@@ -12654,9 +12705,16 @@
           "blocked": "未发送。请开启行为遥测、系统分类和有效的产品目的地并保存。",
           "sent": "至少一个已启用的遥测目的地已接受测试事件。"
         },
-        "title": "PostHog"
+        "title": "PostHog",
+        "unavailableBadge": "此构建不包含"
       },
-      "reset": "重置",
+      "restoreDefaults": {
+        "button": "恢复默认",
+        "cancel": "取消",
+        "confirm": "恢复默认",
+        "description": "把出厂默认值载入当前表单——包括级别、传输通道、留存与遥测授权。在你点击保存之前不会真正生效。",
+        "title": "恢复默认日志设置？"
+      },
       "retention": {
         "days": "天",
         "description": "配置日志保留时长和存储限制。",
@@ -12664,11 +12722,14 @@
         "maxAgeDaysDesc": "超过此天数的日志将被自动清理",
         "maxEntries": "最大条目数",
         "maxEntriesDesc": "达到限制时将自动删除较旧的日志",
+        "summary": "两条上限先到者生效：最多保留 {entries, number} 条，且不保留超过 {days, number} 天的日志。",
         "title": "日志保留"
       },
       "sampling": {
         "addRule": "新增规则",
+        "applyPreset": "应用推荐预设",
         "description": "按模块前缀调整运行时采样百分比。",
+        "empty": "尚未配置采样规则，所有模块均按 100% 记录。",
         "modulePrefix": "模块前缀",
         "modulePrefixPlaceholder": "mouse",
         "percentage": "采样率",
@@ -12676,17 +12737,7 @@
         "ruleDescription": "保存后立即生效。",
         "title": "采样规则"
       },
-      "save": "保存",
       "saveError": "保存设置失败",
-      "saved": "已保存！",
-      "saving": "保存中...",
-      "tabs": {
-        "advanced": "高级",
-        "levels": "级别",
-        "posthog": "PostHog",
-        "retention": "保留",
-        "transports": "传输"
-      },
       "transports": {
         "agentTrace": "Agent 追踪",
         "agentTraceDesc": "每个聊天回合、工具调用、队友派发记一条 span，写入本地 Dexie。驱动 /logs 的 Agent 追踪标签页。",
@@ -12698,8 +12749,12 @@
         "consoleDetail": "始终把日志同步输出到当前运行时控制台。",
         "description": "配置日志的发送和存储位置。",
         "indexedDB": "IndexedDB 存储",
+        "indexedDBBufferSize": "缓冲条数",
+        "indexedDBBufferSizeDesc": "写入 IndexedDB 之前在内存中攒多少条日志。",
         "indexedDBDesc": "本地持久化日志以便在日志查看器中查看",
         "indexedDBDetail": "把日志历史保存在本地，供内置日志面板读取。",
+        "indexedDBFlushInterval": "刷写间隔",
+        "indexedDBFlushIntervalDesc": "未攒满的缓冲最多等待多久也会被写出。",
         "langfuse": "Langfuse 集成",
         "langfuseDesc": "将日志发送到 Langfuse 进行 AI 可观测性分析",
         "langfuseHost": "Host",
@@ -12719,11 +12774,13 @@
         "remoteDesc": "通过批量和重试队列把日志发送到远程端点。",
         "remoteEndpoint": "端点 URL",
         "remoteEndpointPlaceholder": "https://example.com/logs",
+        "remoteEndpointRequired": "未填写端点时，即使开关为开，该传输通道也不会被挂载。",
         "remoteFlushInterval": "刷新间隔",
         "remoteMaxRetries": "最大重试次数",
         "remoteRetryDelay": "重试延迟",
         "secretConfiguredPlaceholder": "已安全保存——输入新值可替换",
-        "title": "日志传输"
+        "title": "日志传输",
+        "toggleDetails": "展开 {transport} 的配置"
       },
       "unsavedChanges": "有未保存的修改"
     },
@@ -12759,29 +12816,8 @@
       "totalTokens": "总计"
     },
     "workspace": {
-      "advanced": {
-        "capabilities": {
-          "description": "由当前运行时报告各平台的采集能力与制品可用性。",
-          "status": "运行时已报告",
-          "title": "能力诊断"
-        },
-        "queues": {
-          "description": "查看持久上传进度、重试、取消和最后刷新水位。",
-          "status": "本地队列",
-          "title": "上传队列"
-        },
-        "schema": {
-          "description": "查看版本化结构字段、关联上下文、脱敏版本与 spool 序号。",
-          "status": "ObservabilityEventV1",
-          "title": "事件 Schema"
-        },
-        "symbols": {
-          "description": "处理阶段使用按 buildId 索引的 source map 与原生符号制品。",
-          "status": "服务管理",
-          "title": "符号状态"
-        }
-      },
       "breadcrumbHome": "主页",
+      "configure": "配置",
       "consent": {
         "description": "在你检查脱敏报告并明确提交前，不会上传任何内容。",
         "descriptionLabel": "提供给支持人员的说明",
@@ -12799,12 +12835,6 @@
         "description": "这会从本设备移除本地诊断制品，操作无法撤销。",
         "title": "删除此崩溃报告？"
       },
-      "density": {
-        "comfortable": "舒适",
-        "compact": "紧凑",
-        "label": "工作区密度",
-        "spacious": "宽松"
-      },
       "detail": {
         "description": "检查已脱敏的本地诊断与可选附件。",
         "loading": "正在加载脱敏预览…",
@@ -12817,6 +12847,7 @@
         "title": "事故详情"
       },
       "filters": {
+        "receiptsOnly": "仅回执",
         "sourceLabel": "事故来源",
         "sources": {
           "all": "所有设备",
@@ -12825,82 +12856,19 @@
         },
         "stateLabel": "事故状态"
       },
-      "health": {
-        "cards": {
-          "capture": {
-            "description": "结构化日志与崩溃标记使用有界存储保留在本地。",
-            "title": "本地采集"
-          },
-          "privacy": {
-            "description": "IPC、导出或上传前执行版本化脱敏，服务端还会二次扫描。",
-            "title": "隐私网关"
-          },
-          "retention": {
-            "description": "日志与报告留在本设备，直到达到保留策略或用户明确删除。",
-            "title": "持久保留"
-          },
-          "submission": {
-            "description": "除非单独开启自动提交，否则崩溃报告必须先预览并获得同意。",
-            "title": "受控提交"
-          }
-        },
-        "description": "以易懂方式展示采集、隐私、保留与提交就绪状态。",
-        "localIncidents": "本设备保留的报告",
-        "localIncidentsDescription": "除非存在回执，否则这些报告不会被视为已上传。",
-        "status": {
-          "consent": "需要同意",
-          "local": "本地优先",
-          "protected": "脱敏已启用",
-          "ready": "就绪"
-        },
-        "title": "诊断健康"
-      },
-      "incidentCount": "{count, plural, =0 {无本地事故} other {# 个本地事故}}",
       "incidents": {
         "emptyDescription": "新的崩溃报告和异常退出会先在本地保留，再进入提交流程。",
         "emptyTitle": "没有匹配的事故",
         "error": "无法读取本地事故存储。",
         "loading": "正在加载本地事故…"
       },
+      "moreActions": "更多操作",
       "navigation": {
-        "collapse": "折叠诊断导航",
-        "expand": "展开诊断导航",
-        "label": "诊断工作区视图",
-        "resize": "调整诊断导航宽度"
+        "label": "日志工作区通道"
       },
       "receipts": {
         "emptyDescription": "已接收或处理中的提交会在这里显示稳定的支持码。",
         "emptyTitle": "暂无提交回执"
-      },
-      "recovery": {
-        "checkpoints": {
-          "account": {
-            "description": "在最小壳层中保留账户访问与报告能力。",
-            "title": "账户与诊断"
-          },
-          "automation": {
-            "description": "在前序检查持续健康后，最后启用自动化与调度器。",
-            "title": "自动化"
-          },
-          "data": {
-            "description": "启用写入前先验证只读本地数据、备份与导出。",
-            "title": "本地数据"
-          },
-          "plugins": {
-            "description": "逐组启用插件，失败时返回最小壳层。",
-            "title": "插件"
-          },
-          "sidecars": {
-            "description": "以有界重试启动子运行时并执行健康检查点。",
-            "title": "Sidecar 与连接器"
-          }
-        },
-        "checkpointsDescription": "安全模式按组逐步启用子系统，并记录每次健康结果。",
-        "checkpointsTitle": "渐进恢复顺序",
-        "description": "同一构建在十分钟内出现两次不健康启动后，下次启动进入诊断优先的最小壳层。",
-        "normalDescription": "当前 renderer 未报告安全模式激活；稳定运行十分钟后恢复计数会重置。",
-        "normalTitle": "正常启动模式",
-        "title": "崩溃循环恢复"
       },
       "refresh": "刷新",
       "reset": "重置布局",
@@ -12916,14 +12884,133 @@
         "rejected": "已拒绝",
         "uploading": "上传中"
       },
+      "status": {
+        "incidents": "{count, plural, =0 {无事故} other {# 个事故}}",
+        "native": "原生日志：{status}",
+        "transports": "{healthy}/{total} 传输正常"
+      },
       "title": "日志与诊断",
+      "traces": {
+        "counts": "{matched} / {total}",
+        "detailDescription": "span 瀑布图与所选 span 的完整记录。",
+        "detailTitle": "追踪详情",
+        "emptyDescription": "Agent 运行时会记录 span。发起一次对话、团队运行或工作流后即可在此看到。",
+        "emptyTitle": "暂无 Agent 追踪",
+        "errorsOnly": "仅错误",
+        "export": {
+          "copied": "追踪已按 {format} 复制",
+          "copy": {
+            "json": "复制 span JSON",
+            "otlp": "复制为 OTLP"
+          },
+          "copyFailed": "无法写入剪贴板",
+          "label": "导出",
+          "redactPreviews": "剔除内容预览",
+          "save": {
+            "json": "保存 span JSON…",
+            "otlp": "保存为 OTLP…"
+          },
+          "saveFailed": "导出失败：{message}",
+          "saved": "追踪已导出",
+          "spanCount": "{count, plural, other {# 个 span}}"
+        },
+        "loading": "正在加载追踪…",
+        "nextPage": "下一页",
+        "noMatchDescription": "放宽时间窗口或清除筛选条件。",
+        "noMatchTitle": "没有匹配的追踪",
+        "openDashboard": "观测台",
+        "pageOf": "{page} / {total}",
+        "previousPage": "上一页",
+        "searchLabel": "按名称、ID 或来源面筛选追踪",
+        "searchPlaceholder": "筛选追踪…",
+        "selectPrompt": "选择一条追踪以查看它的 span 瀑布图。",
+        "span": {
+          "agent": "Agent",
+          "cacheRead": "缓存读取",
+          "cacheWrite": "缓存写入",
+          "cacheWriteSplit": "（{short} 5 分钟 · {long} 1 小时）",
+          "content": "内容",
+          "contentHint": "仅在开启内容采集且通过脱敏门后才会记录。",
+          "cost": "成本",
+          "duration": "耗时",
+          "empty": "在瀑布图中选择一个 span。",
+          "error": "错误",
+          "errorType": "类型",
+          "events": "{count, plural, other {# 个事件}}",
+          "finishReasons": "结束原因",
+          "handoff": "交接",
+          "handoffFrom": "来自",
+          "handoffReason": "原因",
+          "handoffTo": "交给",
+          "identity": "标识",
+          "inputTokens": "输入 token",
+          "metadata": "元数据",
+          "model": "模型",
+          "offset": "相对追踪起点",
+          "openInLogs": "在日志中查看这条追踪",
+          "openSession": "在日志中查看该会话",
+          "outputTokens": "输出 token",
+          "parentSpanId": "父 Span",
+          "plugin": "插件",
+          "provider": "提供方",
+          "requestModel": "请求模型",
+          "responseModel": "响应模型",
+          "runId": "运行",
+          "sessionId": "会话",
+          "spanId": "Span",
+          "startedAt": "开始于",
+          "status": {
+            "error": "错误",
+            "incomplete": "未完成",
+            "ok": "正常",
+            "pending": "进行中"
+          },
+          "timing": "时间",
+          "totalTokens": "token 合计",
+          "traceId": "追踪",
+          "usage": "用量"
+        },
+        "spanCount": "{count, plural, other {# 个 span}}",
+        "timeline": {
+          "blockAria": "{lane} 中的 {label}，耗时 {duration}",
+          "blockError": "该 span 失败",
+          "brushHint": "拖拽可放大某段时间 · 双击复位",
+          "empty": "这条追踪没有可绘制的 span。",
+          "emptyWindow": "所选窗口内没有 span。双击色带可缩回全程。",
+          "groupingLabel": "泳道分组",
+          "groupings": {
+            "agent": "按 Agent",
+            "model": "按模型",
+            "operation": "按操作",
+            "surface": "按来源面"
+          },
+          "laneErrors": "{count, plural, other {# 个失败 span}}",
+          "loading": "正在构建时间线…",
+          "regionLabel": "追踪时间线",
+          "resetZoom": "重置缩放",
+          "scaleLabel": "时间线刻度",
+          "scales": {
+            "duration": "按时长",
+            "sequence": "按次序"
+          },
+          "spans": "{count, plural, other {# 个 span}}"
+        },
+        "truncated": "此窗口共 {total, number} 个 span，当前展示最新的 {shown, number} 个。",
+        "waterfallEmpty": "这条追踪没有已持久化的 span。",
+        "windowEmpty": "所选窗口内没有 span。",
+        "windowLabel": "追踪时间窗口",
+        "windowedTo": "窗口内 {count} / {total}",
+        "windows": {
+          "all": "全部",
+          "month": "30 天",
+          "today": "今天",
+          "week": "7 天"
+        }
+      },
       "views": {
-        "advanced": "高级",
-        "health": "健康",
         "incidents": "事故",
         "logs": "日志",
-        "receipts": "回执",
-        "recovery": "恢复"
+        "traces": "追踪"
       }
     }
   },
@@ -32692,27 +32779,41 @@
       "addDomain": "添加域名",
       "build": "构建保存版本",
       "cancel": "取消",
+      "cancelEdit": "取消",
+      "clearOutput": "清空",
       "confirmDeleteMetadata": "删除元数据",
       "confirmPurge": "清除托管资源",
+      "copyUrl": "复制链接",
       "create": "创建站点",
       "creating": "创建中…",
       "deleteMetadata": "删除站点元数据",
       "deploy": "部署",
+      "editEnvironment": "编辑",
+      "formatManifest": "格式化",
       "loadAnalytics": "加载最近 24 小时分析",
       "loadLogs": "加载最近 24 小时日志",
+      "loadRevision": "载入编辑器",
       "newSite": "新建站点",
+      "openSite": "打开站点",
       "preview": "启动预览",
       "provision": "配置资源绑定",
       "purge": "清除托管资源",
       "reconcile": "对账服务商状态",
       "redetectWrangler": "重新检测 Wrangler",
+      "refreshOperation": "重新检查",
+      "reloadManifest": "从磁盘重新读取",
       "remove": "移除",
       "restore": "恢复",
+      "retryBuild": "重新构建",
       "rollback": "重新部署 / 回滚",
+      "runQuery": "执行查询",
       "saveAccess": "应用访问策略",
       "saveAuthoring": "保存创作权限",
       "saveEnvironment": "保存环境修订",
+      "saveManifest": "保存清单",
+      "saveProviderConfig": "保存服务商设置",
       "saveToken": "验证并保存令牌",
+      "scaffoldManifest": "生成 .cognia/hosting.json",
       "stopPreview": "停止预览",
       "takeDown": "下线",
       "upload": "上传版本"
@@ -32760,8 +32861,8 @@
       "taken-down": "已下线"
     },
     "desktopOnly": {
-      "description": "构建、服务商凭据与预览仅保留在所选的本地桌面主机上。",
-      "title": "站点功能需要 Cognia 桌面端"
+      "description": "这里的内容都可以查看，但构建、预览、服务商调用与清单编辑需要 Cognia 桌面端。",
+      "title": "发布动作在桌面宿主上执行"
     },
     "domains": {
       "description": "挂载并对账 Cloudflare Worker 自定义域名。",
@@ -32770,21 +32871,55 @@
     },
     "empty": "创建或选择一个站点以开始。",
     "environment": {
+      "credential": "凭据",
+      "currentRevision": "当前修订",
       "description": "普通变量会随版本记录；密钥值只会进入当前主机的系统密钥环。",
+      "diff": {
+        "added": "新增 {count} 项",
+        "changed": "修改 {count} 项",
+        "none": "没有变化",
+        "removed": "移除 {count} 项"
+      },
+      "edit": "编辑变量与密钥",
+      "history": "修订历史",
+      "noRevision": "还没有环境修订。",
+      "noSecretRefs": "该修订没有密钥。",
+      "overwriteWarning": "保存会整体替换变量集合，这里没有的变量将被移除。",
+      "revision": "修订",
+      "revisionLabel": "修订 {sequence}",
+      "savedAt": "{when}保存",
+      "secretRefs": "密钥引用",
+      "secretValueHidden": "密钥值只保存在本机系统密钥环中，不会显示。",
       "secrets": "密钥",
       "secretsPlaceholder": "API_TOKEN=secret-value",
       "title": "环境变量",
+      "usedByVersion": "被版本 {sequence} 使用",
       "variables": "普通变量",
       "variablesPlaceholder": "API_ORIGIN=https://api.example.com"
     },
     "errors": {
       "artifactRequired": "保存版本的构建产物不可用。",
       "environmentRequired": "请先保存一个环境修订。",
+      "manifestInvalid": "请先修正托管清单。",
+      "manifestMissing": "请先创建 .cognia/hosting.json。",
       "projectRoot": "所选项目没有工作区根目录。",
-      "wranglerRequired": "请选择已批准的 Wrangler 二进制文件绝对路径。"
+      "wranglerRequired": "请选择已批准的 Wrangler 二进制文件绝对路径。",
+      "zoneIdRequired": "自定义域名需要 Cloudflare Zone ID。"
     },
     "feedback": {
       "success": "站点状态已更新"
+    },
+    "host": {
+      "banner": "只读：当前环境无法执行构建、预览与 Cloudflare 调用。",
+      "reason": {
+        "lifecycle-locked": "站点正在删除中，暂不可用",
+        "ok": "",
+        "requires-access": "你不在该站点的创作权限名单内",
+        "requires-deployer": "需要该站点的部署者权限",
+        "requires-desktop": "需要在 Cognia 桌面端中操作",
+        "requires-editor": "需要该站点的编辑者权限",
+        "requires-owner": "只有站点所有者可以执行"
+      }
     },
     "lifecycle": {
       "active": "运行中",
@@ -32792,10 +32927,56 @@
       "deleting": "删除中",
       "taken-down": "已下线"
     },
+    "manifest": {
+      "confidence": {
+        "detected": "按框架默认值生成",
+        "template": "模板 — 保存前请确认构建命令与产物目录"
+      },
+      "description": ".cognia/hosting.json 定义构建命令、预览命令、Worker 入口与 Cloudflare 资源绑定。",
+      "detected": "识别为 {kind} · {packageManager}",
+      "editorLabel": "托管清单源文件",
+      "extraFiles": "保存时会一并写入 {count} 个附带文件。",
+      "invalid": "清单无法解析：{error}",
+      "kind": {
+        "astro": "Astro",
+        "next": "Next.js",
+        "node": "Node 项目",
+        "remix": "Remix",
+        "static": "静态站点",
+        "sveltekit": "SvelteKit",
+        "unknown": "无法识别的项目",
+        "vite": "Vite"
+      },
+      "loading": "正在读取清单…",
+      "missing": {
+        "description": "构建、预览与资源绑定都要读这个文件。可以从源码目录生成一份起始配置，确认后再保存。",
+        "title": "还没有托管清单"
+      },
+      "title": "托管清单",
+      "unsupported": "清单位于站点源码目录中，只有桌面端能读取。"
+    },
     "observability": {
       "description": "直接查询 Cloudflare Worker 日志与请求分析，不复制到另一套运行时。",
       "empty": "尚未执行查询。",
-      "title": "服务商可观测性"
+      "errorsOnly": "仅错误",
+      "hostname": "主机名：{hostname}",
+      "noHostname": "还没有自定义域名或生产地址，分析数据只能按 Worker 统计。",
+      "result": "查询结果",
+      "segments": {
+        "analytics": "请求分析",
+        "logs": "Worker 日志",
+        "operations": "操作日志"
+      },
+      "title": "服务商可观测性",
+      "workerScoped": "未设置 Zone ID，分析数据只能按 Worker 统计。"
+    },
+    "operationEvent": {
+      "cancelled": "已取消",
+      "claimed": "已认领",
+      "failed": "失败",
+      "queued": "已排队",
+      "succeeded": "成功",
+      "waiting-reconcile": "等待校准"
     },
     "operationStatus": {
       "cancelled": "已取消",
@@ -32819,20 +33000,107 @@
       "upload": "上传"
     },
     "operations": {
+      "attempts": "尝试 {count} 次",
       "description": "用于崩溃恢复与云端状态校准的持久化生命周期事件。",
       "empty": "暂无生命周期操作。",
+      "error": "错误",
       "eventCount": "{count} 个事件",
+      "noEvents": "该操作还没有事件记录。",
+      "providerRequestId": "服务商请求 ID",
+      "reconcileResult": "已校准 {resolved} 项 · 仍在等待 {remaining} 项",
+      "timeline": "事件时间线",
       "title": "操作日志"
     },
+    "overview": {
+      "currentVersion": "版本 {sequence}",
+      "deployedAt": "{when}上线",
+      "failureFrom": {
+        "deployment": "部署",
+        "operation": "操作",
+        "version": "版本 {label}"
+      },
+      "needsAttention": "{count} 项未处理的失败",
+      "noProductionUrl": "部署一个版本后会在这里显示。",
+      "noVersion": "尚未部署任何版本",
+      "owner": "所有者",
+      "productionUrl": "生产地址",
+      "role": {
+        "deployer": "部署者",
+        "editor": "编辑者",
+        "owner": "所有者",
+        "viewer": "访客"
+      },
+      "sourcePath": "源码",
+      "yourRole": "你的角色"
+    },
     "provider": {
+      "accessTeamName": "Cloudflare Access 团队",
+      "accessTeamNameHint": "执行访客策略的团队域名。",
       "account": "账户",
       "description": "API 令牌会先验证，再写入本地操作系统密钥环。",
+      "identityLocked": "账户与 Worker 名称是已记录资源的身份标识，创建后不可在此修改。",
       "title": "Cloudflare 服务商",
       "token": "Cloudflare API 令牌",
-      "worker": "Worker"
+      "worker": "Worker",
+      "zoneId": "Cloudflare Zone ID",
+      "zoneIdHint": "挂载自定义域名和获取按域名统计的分析数据都需要它。",
+      "zoneIdRequired": "挂载自定义域名前请先填写 Zone ID。"
     },
     "publish": {
       "noVersions": "请先构建一个版本以上传并部署。"
+    },
+    "rail": {
+      "clear": "清除搜索",
+      "group": "站点",
+      "hint": {
+        "failed": "构建失败",
+        "live": "运行中 · {when}",
+        "never": "尚未发布"
+      },
+      "more": "站点操作",
+      "noMatches": "没有匹配的站点。",
+      "running": "进行中",
+      "search": "搜索站点"
+    },
+    "resources": {
+      "dependencies": "{count} 项依赖",
+      "description": "Cognia 在 Cloudflare 上记录的全部资源，以及清除操作是否会删除它们。",
+      "empty": "还没有记录任何服务商资源。",
+      "kind": {
+        "access-application": "Access 应用",
+        "access-policy": "Access 策略",
+        "custom-domain": "自定义域名",
+        "d1-database": "D1 数据库",
+        "r2-bucket": "R2 存储桶",
+        "secret": "密钥",
+        "worker": "Worker",
+        "worker-version": "Worker 版本"
+      },
+      "legend": "清除只会删除「受管」资源。",
+      "noDependencies": "无依赖",
+      "ownership": {
+        "adopted": "接管",
+        "managed": "受管",
+        "shared": "共享"
+      },
+      "ownershipHint": {
+        "adopted": "接管 · 保留",
+        "managed": "受管 · 清除时删除",
+        "shared": "共享 · 保留"
+      },
+      "providerId": "服务商 ID",
+      "retention": {
+        "purgeable": "删除 {count} 项",
+        "retained": "保留 {count} 项",
+        "title": "清除操作的影响"
+      },
+      "status": {
+        "active": "活跃",
+        "deleted": "已删除",
+        "deleting": "删除中",
+        "orphaned": "已孤立"
+      },
+      "title": "服务商资源"
     },
     "sidebarEmpty": "还没有站点，创建一个开始吧。",
     "stepState": {
@@ -32854,6 +33122,10 @@
         "description": "保存构建所需的变量与密钥。",
         "title": "环境变量"
       },
+      "manifest": {
+        "description": "描述该站点如何构建、预览与绑定资源。",
+        "title": "托管清单"
+      },
       "preview": {
         "description": "发布前在本地运行构建产物。",
         "title": "预览"
@@ -32864,8 +33136,44 @@
       }
     },
     "subtitle": "在 Cognia 中构建、预览与发布",
+    "summary": {
+      "live": "{count} 个运行中",
+      "sites": "{count} 个站点"
+    },
+    "tabs": {
+      "domains": "域名与访问",
+      "environment": "环境",
+      "operations": "操作日志",
+      "publish": "发布流程",
+      "resources": "资源",
+      "versions": "版本"
+    },
     "title": "站点",
     "versions": {
+      "artifact": "{size} · {count} 个文件",
+      "bindings": "资源绑定",
+      "deploymentFailure": "部署失败原因",
+      "description": "全部不可变版本，包含构建失败的版本。",
+      "dirty": "有未提交改动",
+      "empty": "还没有版本，先从发布流程构建一个。",
+      "failure": "构建失败原因",
+      "filter": {
+        "all": "全部",
+        "building": "构建中",
+        "failed": "失败",
+        "ready": "就绪"
+      },
+      "live": "运行中",
+      "noArtifact": "无构建产物",
+      "noBindings": "无绑定",
+      "notUploaded": "未上传",
+      "status": {
+        "building": "构建中",
+        "failed": "失败",
+        "ready": "就绪"
+      },
+      "title": "版本",
+      "uploaded": "已上传",
       "version": "版本 {sequence}"
     },
     "wrangler": {

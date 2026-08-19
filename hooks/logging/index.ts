@@ -29,6 +29,12 @@ export {
 } from "./use-log-panel-filters"
 export { useCrashLogs, type UseCrashLogsResult } from "./use-crash-logs"
 export {
+  useTraceList,
+  TRACE_PAGE_SIZE,
+  type UseTraceListOptions,
+  type UseTraceListResult,
+} from "./use-trace-list"
+export {
   useThemeColors,
   DEFAULT_THEME_COLORS,
   THEME_KEYS,

@@ -79,6 +79,43 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     ])
   })
 
+  it("sends PostHog product analytics through the native leg on desktop", async () => {
+    mockIsTauri.mockReturnValue(true)
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        posthogConfig: {
+          managed: { productAnalytics: false, aiObservability: false },
+          byo: {
+            productAnalytics: true,
+            aiObservability: false,
+            host: "https://posthog.example",
+            projectToken: "phc_project",
+          },
+        },
+      })
+    )
+    localStorage.setItem(
+      "cognia-behavior-telemetry-enabled",
+      JSON.stringify({ enabled: true, destinations: { local: false, remote: false } })
+    )
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+
+    const { trackEvent } = await import("@/lib/telemetry/events/track-event")
+    await trackEvent("telemetry.posthog.test", { source: "settings" })
+
+    expect(mockPostTauriTelemetryJson).toHaveBeenCalledTimes(1)
+    const [endpoint, body, credential] = mockPostTauriTelemetryJson.mock.calls[0]
+    // The renderer CSP blocks a direct connection, so this must not be a
+    // browser fetch — it has to cross into Rust.
+    expect(endpoint).toBe("https://posthog.example/batch/")
+    expect(credential).toEqual({ kind: "none" })
+    const payload = JSON.parse(body as string)
+    expect(payload.api_key).toBe("phc_project")
+    expect(payload.batch[0].event).toBe("telemetry.posthog.test")
+  })
+
   it("registers the default transports on first run", async () => {
     const mod = await import("./bootstrap")
     const state = mod.bootstrapLogger()
@@ -309,5 +346,142 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     const mod = await import("./bootstrap")
     const state = mod.bootstrapLogger()
     expect(state.config.perModuleLevels).toEqual({ network: "debug" })
+  })
+})
+
+/**
+ * The core carries its own copy of four settings that the transport/retention
+ * records also express, and acts on one of them on every registry call. These
+ * pin the two views together — the reason the "Console Output" switch used to
+ * do nothing.
+ */
+describe("core config mirrors the transport + retention records", () => {
+  it("keeps the console transport removed once the setting turns it off", async () => {
+    const { applyLoggingSettings, getLoggingBootstrapState, listRegisteredTransports } =
+      await import("./bootstrap")
+    const { getTransportHealthSnapshot } = await import("@cognia/logging")
+
+    const state = getLoggingBootstrapState()
+    expect(listRegisteredTransports()).toContain("console")
+
+    applyLoggingSettings({
+      transports: { ...state.transports, console: false },
+      persist: false,
+    })
+
+    // `applyTransportSettings` removes console first and then calls
+    // `addTransport` for six more sinks; each of those runs
+    // `ensureInitialized()` → `syncBuiltinTransports()`, which re-added the
+    // console transport from the core's own `enableConsole` flag.
+    expect(listRegisteredTransports()).not.toContain("console")
+
+    // The settings panel polls health every few seconds, which is another
+    // `ensureInitialized()` — and was enough on its own to bring it back.
+    getTransportHealthSnapshot()
+    expect(listRegisteredTransports()).not.toContain("console")
+  })
+
+  it("restores the console transport when the setting turns it back on", async () => {
+    const { applyLoggingSettings, getLoggingBootstrapState, listRegisteredTransports } =
+      await import("./bootstrap")
+
+    const state = getLoggingBootstrapState()
+    applyLoggingSettings({ transports: { ...state.transports, console: false }, persist: false })
+    expect(listRegisteredTransports()).not.toContain("console")
+
+    applyLoggingSettings({ transports: { ...state.transports, console: true }, persist: false })
+    expect(listRegisteredTransports()).toContain("console")
+  })
+
+  it("derives all four legacy mirror fields from the records that own them", async () => {
+    const { applyLoggingSettings, getLoggingBootstrapState } = await import("./bootstrap")
+
+    const state = getLoggingBootstrapState()
+    const next = applyLoggingSettings({
+      transports: { ...state.transports, console: false, indexedDB: false, remote: true },
+      retention: { ...state.retention, maxEntries: 4242 },
+      persist: false,
+    })
+
+    expect(next.config.enableConsole).toBe(false)
+    expect(next.config.enableStorage).toBe(false)
+    expect(next.config.enableRemote).toBe(true)
+    expect(next.config.maxStorageEntries).toBe(4242)
+  })
+})
+
+describe("IndexedDB write batching", () => {
+  /** Wrap the real transport so both the create and the update path are visible. */
+  function captureIndexedDbOptions() {
+    const created: unknown[] = []
+    const updated: unknown[] = []
+    jest.doMock("./transports", () => {
+      const actual = jest.requireActual("./transports")
+      return {
+        ...actual,
+        createIndexedDBTransport: (options: unknown) => {
+          created.push(options)
+          const transport = actual.createIndexedDBTransport(options)
+          const original = transport.updateOptions.bind(transport)
+          transport.updateOptions = (next: unknown) => {
+            updated.push(next)
+            original(next)
+          }
+          return transport
+        },
+      }
+    })
+    return { created, updated }
+  }
+
+  it("builds the transport from the persisted buffer size and flush interval", async () => {
+    // Both fields were sanitized on read and written on save, but never
+    // reached the only transport that consumes them, so batching always ran
+    // at the transport's own defaults.
+    localStorage.setItem(
+      "cognia-logging-config",
+      JSON.stringify({ bufferSize: 7, flushInterval: 12_345 })
+    )
+    const { created } = captureIndexedDbOptions()
+
+    const { getLoggingBootstrapState } = await import("./bootstrap")
+    getLoggingBootstrapState()
+
+    expect(created.at(-1)).toMatchObject({ bufferSize: 7, flushInterval: 12_345 })
+  })
+
+  it("pushes a later change onto the transport already running", async () => {
+    const { updated } = captureIndexedDbOptions()
+
+    const { applyLoggingSettings, getLoggingBootstrapState } = await import("./bootstrap")
+    const state = getLoggingBootstrapState()
+
+    applyLoggingSettings({
+      config: { ...state.config, bufferSize: 9, flushInterval: 4_000 },
+      transports: { ...state.transports, indexedDB: true },
+      persist: false,
+    })
+
+    expect(updated.at(-1)).toMatchObject({ bufferSize: 9, flushInterval: 4_000 })
+  })
+
+  it("still carries the retention bounds alongside them", async () => {
+    const { updated } = captureIndexedDbOptions()
+
+    const { applyLoggingSettings, getLoggingBootstrapState } = await import("./bootstrap")
+    const state = getLoggingBootstrapState()
+
+    applyLoggingSettings({
+      config: { ...state.config, bufferSize: 9 },
+      retention: { maxEntries: 2_000, maxAgeDays: 3 },
+      transports: { ...state.transports, indexedDB: true },
+      persist: false,
+    })
+
+    expect(updated.at(-1)).toMatchObject({
+      bufferSize: 9,
+      maxEntries: 2_000,
+      retentionDays: 3,
+    })
   })
 })

@@ -97,7 +97,7 @@ export const OBSERVABILITY_SPOOL_MAX_BYTES = 250 * 1024 * 1024
 // transport which guards POST against unreachable endpoints. Their
 // `enabled` flag stays true so the panel surfaces a `Degraded` health
 // badge until the user fills in the config in Settings → Observability.
-const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
+export const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
   console: true,
   indexedDB: true,
   native: true,
@@ -147,10 +147,57 @@ const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
   },
 }
 
-const DEFAULT_RETENTION_SETTINGS: LoggingRetentionSettings = {
+export const DEFAULT_RETENTION_SETTINGS: LoggingRetentionSettings = {
   maxEntries: 10_000,
   maxAgeDays: 7,
 }
+
+/**
+ * Accepted range for each retention bound, exported so the settings panel's
+ * sliders cannot offer a value this module would clamp away behind the user's
+ * back.
+ */
+export const RETENTION_BOUNDS = {
+  maxEntries: { min: 1_000, max: 100_000 },
+  maxAgeDays: { min: 1, max: 30 },
+} as const
+
+/**
+ * Accepted range for every numeric field of the unified config, shared between
+ * `sanitizeConfig()` below and the settings panel's sliders. Duplicating them
+ * had let the panel offer narrower ranges than the sanitizer accepts — a
+ * ceiling of 20 000 queued entries against a real limit of 100 000, and 50 MB
+ * against 100 MB — so a value set anywhere else silently snapped down the
+ * first time the user touched the control.
+ */
+export const CONFIG_BOUNDS = {
+  bufferSize: { min: 1, max: 1_000 },
+  flushInterval: { min: 250, max: 60_000 },
+  remoteQueueMaxEntries: { min: 100, max: 100_000 },
+  remoteQueueMaxBytes: { min: 1024 * 1024, max: 100 * 1024 * 1024 },
+  diagnosticRateLimitMs: { min: 250, max: 60_000 },
+  redactionMaxDepth: { min: 1, max: 16 },
+} as const
+
+/**
+ * A suggested sampling preset for the high-frequency modules — **not** a
+ * default. `readSamplingSettings()` returns `{}` when nothing is stored and
+ * `applySamplingSettings()` then configures nothing, so an unconfigured
+ * install samples everything at 100%.
+ *
+ * It lives here rather than in the settings panel because the panel used to
+ * own an identical list and *rendered it as the current state*: five rules
+ * shown as active while the runtime had none. The panel now offers this as an
+ * explicit "apply the recommended preset" action, which is the only thing that
+ * ever writes it.
+ */
+export const RECOMMENDED_SAMPLING_RATES: Readonly<Record<string, number>> = Object.freeze({
+  mouse: 0.01,
+  keyboard: 0.1,
+  scroll: 0.05,
+  animation: 0.01,
+  error: 1,
+})
 
 const VALID_LOG_LEVELS: ReadonlySet<LogLevel> = new Set([
   "trace",
@@ -425,9 +472,28 @@ function sanitizeOtlpHeaders(raw: unknown): Record<string, string> {
   return out
 }
 
+/**
+ * Retention was the one persisted record read without validation — a corrupted
+ * or hand-edited value went straight into `IndexedDBTransport`'s cleanup pass,
+ * where a negative or NaN bound silently disables pruning. Clamped to the same
+ * range the settings panel offers.
+ */
 function readRetentionSettings(): LoggingRetentionSettings {
-  const raw = readStorageJSON<LoggingRetentionSettings>(LOGGING_RETENTION_STORAGE_KEY)
-  return { ...DEFAULT_RETENTION_SETTINGS, ...(raw || {}) }
+  const raw = readStorageJSON<LoggingRetentionSettings>(LOGGING_RETENTION_STORAGE_KEY) || {}
+  return {
+    maxEntries: clampNumber(
+      raw.maxEntries,
+      RETENTION_BOUNDS.maxEntries.min,
+      RETENTION_BOUNDS.maxEntries.max,
+      DEFAULT_RETENTION_SETTINGS.maxEntries
+    ),
+    maxAgeDays: clampNumber(
+      raw.maxAgeDays,
+      RETENTION_BOUNDS.maxAgeDays.min,
+      RETENTION_BOUNDS.maxAgeDays.max,
+      DEFAULT_RETENTION_SETTINGS.maxAgeDays
+    ),
+  }
 }
 
 function readSamplingSettings(): Record<string, number> {
@@ -525,29 +591,34 @@ function sanitizeConfig(raw: Partial<UnifiedLoggerConfig> | null): Partial<Unifi
     sanitized.perModuleLevels = sanitizePerModuleLevels(raw.perModuleLevels)
   }
 
-  sanitized.bufferSize = clampNumber(raw.bufferSize, 1, 1000, DEFAULT_UNIFIED_CONFIG.bufferSize)
+  sanitized.bufferSize = clampNumber(
+    raw.bufferSize,
+    CONFIG_BOUNDS.bufferSize.min,
+    CONFIG_BOUNDS.bufferSize.max,
+    DEFAULT_UNIFIED_CONFIG.bufferSize
+  )
   sanitized.flushInterval = clampNumber(
     raw.flushInterval,
-    250,
-    60_000,
+    CONFIG_BOUNDS.flushInterval.min,
+    CONFIG_BOUNDS.flushInterval.max,
     DEFAULT_UNIFIED_CONFIG.flushInterval
   )
   sanitized.remoteQueueMaxEntries = clampNumber(
     raw.remoteQueueMaxEntries,
-    100,
-    100_000,
+    CONFIG_BOUNDS.remoteQueueMaxEntries.min,
+    CONFIG_BOUNDS.remoteQueueMaxEntries.max,
     DEFAULT_UNIFIED_CONFIG.remoteQueueMaxEntries
   )
   sanitized.remoteQueueMaxBytes = clampNumber(
     raw.remoteQueueMaxBytes,
-    1024 * 1024,
-    100 * 1024 * 1024,
+    CONFIG_BOUNDS.remoteQueueMaxBytes.min,
+    CONFIG_BOUNDS.remoteQueueMaxBytes.max,
     DEFAULT_UNIFIED_CONFIG.remoteQueueMaxBytes
   )
   sanitized.diagnosticRateLimitMs = clampNumber(
     raw.diagnosticRateLimitMs,
-    250,
-    60_000,
+    CONFIG_BOUNDS.diagnosticRateLimitMs.min,
+    CONFIG_BOUNDS.diagnosticRateLimitMs.max,
     DEFAULT_UNIFIED_CONFIG.diagnosticRateLimitMs
   )
 
@@ -571,8 +642,8 @@ function sanitizeConfig(raw: Partial<UnifiedLoggerConfig> | null): Partial<Unifi
       ),
       maxDepth: clampNumber(
         raw.redaction.maxDepth,
-        1,
-        16,
+        CONFIG_BOUNDS.redactionMaxDepth.min,
+        CONFIG_BOUNDS.redactionMaxDepth.max,
         DEFAULT_UNIFIED_CONFIG.redaction.maxDepth
       ),
     }
@@ -642,21 +713,23 @@ function applyTransportSettings(
   }
 
   if (transports.indexedDB) {
+    // `bufferSize` / `flushInterval` are the write-batching knobs of this
+    // transport, and the only consumer of those two config fields. They were
+    // sanitized on read and persisted on save but never passed here, so both
+    // silently ran at the transport's own defaults.
+    const indexedDbOptions = {
+      maxEntries: retention.maxEntries,
+      retentionDays: retention.maxAgeDays,
+      bufferSize: config.bufferSize,
+      flushInterval: config.flushInterval,
+    }
     const existing = getTransport<IndexedDBTransport>("indexeddb")
     if (existing && typeof existing.updateOptions === "function") {
-      existing.updateOptions({
-        maxEntries: retention.maxEntries,
-        retentionDays: retention.maxAgeDays,
-      })
+      existing.updateOptions(indexedDbOptions)
       addTransport(existing)
     } else {
       removeTransport("indexeddb")
-      addTransport(
-        createIndexedDBTransport({
-          maxEntries: retention.maxEntries,
-          retentionDays: retention.maxAgeDays,
-        })
-      )
+      addTransport(createIndexedDBTransport(indexedDbOptions))
     }
   } else {
     removeTransport("indexeddb")
@@ -865,6 +938,11 @@ function applyTransportSettings(
       resource: {
         serviceName: "cognia-ai",
         environment: transports.agentTraceOtlpConfig.environment || undefined,
+        // PostHog resolves the person of an `$ai_generation` from this span
+        // attribute. Without it the renderer's half of a turn lands on a
+        // different (anonymous) person than the sidecar's half, which already
+        // stamps the same id through `enrichSpan`.
+        spanAttributes: { "posthog.distinct_id": installationId },
       },
       captureContent: false,
       maxPreviewBytes: 0,
@@ -952,6 +1030,12 @@ function applyTransportSettings(
       installationId,
       appVersion: process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0",
       runtime,
+      // The desktop CSP (`connect-src` in tauri.conf.json) does not allow the
+      // renderer to reach PostHog directly, so the capture batch goes out over
+      // the same Rust leg as every other outbound request.
+      postJson: isTauri()
+        ? (url, body) => postTauriTelemetryJson(url, body, { kind: "none" })
+        : undefined,
       managed: {
         enabled: managed?.productAnalytics === true,
         host: managed?.host ?? "",
@@ -1127,9 +1211,21 @@ export function applyLoggingSettings(params: {
     ...(params.retention || {}),
   }
 
-  if (params.config) {
-    updateLoggerConfig(params.config)
-  }
+  // The core keeps its own copy of four settings that the transport/retention
+  // records also express, and `syncBuiltinTransports()` acts on one of them
+  // (`enableConsole`) on *every* `ensureInitialized()` — which every registry
+  // call runs. Leaving them unsynced meant turning "Console Output" off did
+  // nothing durable: `applyTransportSettings` removed the console transport,
+  // and the next `addTransport` for another sink put it straight back. Derive
+  // all four from the records that own them so the two views cannot disagree.
+  // (`logger-provider.tsx` already sent both halves for exactly this reason.)
+  updateLoggerConfig({
+    ...(params.config || {}),
+    enableConsole: nextTransports.console,
+    enableStorage: nextTransports.indexedDB,
+    enableRemote: nextTransports.remote,
+    maxStorageEntries: nextRetention.maxEntries,
+  })
 
   const nextConfig = getLoggerConfig()
   applyTransportSettings(nextTransports, nextRetention, nextConfig)

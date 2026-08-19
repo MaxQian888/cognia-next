@@ -54,21 +54,44 @@ export interface LoggerRedactionConfig {
 export interface UnifiedLoggerConfig {
   /** Minimum log level to output */
   minLevel: LogLevel
-  /** Enable console output */
+  /**
+   * Whether the built-in console transport is attached. Read by
+   * `syncBuiltinTransports()` on every `ensureInitialized()`, which is why the
+   * app keeps it in step with its own `transports.console` setting — see
+   * `applyLoggingSettings` in `lib/logging/bootstrap.ts`. A stale value here
+   * re-attaches a transport the user turned off.
+   */
   enableConsole: boolean
-  /** Enable localStorage/IndexedDB storage */
+  /**
+   * INERT — nothing reads this. It is a mirror of the app's
+   * `transports.indexedDB` setting, kept truthful by `applyLoggingSettings`
+   * (and pinned there by a test) so that whoever wires it up later finds a
+   * value that means what it says. The IndexedDB transport is attached or
+   * removed from the transport record, not from here.
+   */
   enableStorage: boolean
-  /** Enable remote log shipping */
+  /**
+   * INERT — nothing reads this. Mirror of the app's `transports.remote`
+   * setting; attachment is gated on `remoteEndpoint` plus that setting.
+   */
   enableRemote: boolean
-  /** Remote endpoint URL */
+  /** Remote endpoint URL. Read: a blank value detaches the remote transport. */
   remoteEndpoint?: string
-  /** Maximum entries to store locally */
+  /**
+   * INERT — nothing reads this. Mirror of the app's `retention.maxEntries`,
+   * which is what the IndexedDB transport is actually built with.
+   */
   maxStorageEntries: number
   /** Include stack traces for errors */
   includeStackTrace: boolean
   /** Include source location (dev only) */
   includeSource: boolean
-  /** Sampling configuration by module */
+  /**
+   * INERT — nothing reads this. Runtime sampling lives in its own module
+   * (`configureSampling`, fed from the `cognia-logging-sampling` storage key),
+   * and the settings panel writes there. Left on the type because it is part
+   * of a persisted shape, but setting it has no effect.
+   */
   sampling?: Record<string, number>
   /**
    * Per-module minimum-level overrides. Keys are `:`-separated module prefixes

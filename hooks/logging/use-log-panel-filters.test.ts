@@ -149,6 +149,30 @@ describe("useLogPanelFilters", () => {
     expect(localStorage.getItem("cognia-log-density")).toBe("spacious")
   })
 
+  it("defers to a host-controlled density and stops writing localStorage", () => {
+    // The `/logs` workspace keeps its own density preference; without this the
+    // page rendered two density controls whose values drifted apart.
+    localStorage.setItem("cognia-log-density", "compact")
+    const onDensityChange = jest.fn()
+    const { result } = renderHook(() =>
+      useLogPanelFilters({ density: "spacious", onDensityChange })
+    )
+    expect(result.current.density).toBe("spacious")
+
+    act(() => result.current.setDensity("comfortable"))
+    expect(onDensityChange).toHaveBeenCalledWith("comfortable")
+    // the host owns it, so nothing was written behind its back
+    expect(localStorage.getItem("cognia-log-density")).toBe("compact")
+  })
+
+  it("stays uncontrolled when a density arrives without a way to write it back", () => {
+    const { result } = renderHook(() => useLogPanelFilters({ density: "spacious" }))
+    expect(result.current.density).toBe("comfortable")
+    act(() => result.current.setDensity("compact"))
+    expect(result.current.density).toBe("compact")
+    expect(localStorage.getItem("cognia-log-density")).toBe("compact")
+  })
+
   it("ignores stored density values that are not in the valid set", () => {
     localStorage.setItem("cognia-log-density", "wat")
     const { result } = renderHook(() => useLogPanelFilters())
