@@ -169,6 +169,34 @@ describe("useTrayStateSnapshot", () => {
     }
   })
 
+  it("keeps the same snapshot identity across a re-render with unchanged inputs", async () => {
+    // Load-bearing, not cosmetic. `usePluginQuickActions` memoises on this
+    // object, `useGlobalSearchContext` memoises on that, and `useGlobalSearch`
+    // keys its query effect on the resulting context — so a fresh literal per
+    // render re-ran an effect that sets state, and ⌘K search died with
+    // "Maximum update depth exceeded" the moment a query was typed.
+    const { result, rerender } = renderHook(() => useTrayStateSnapshot())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const first = result.current
+    rerender()
+    rerender()
+    expect(result.current).toBe(first)
+  })
+
+  it("returns a new snapshot identity once something observable changes", async () => {
+    const { result, rerender } = renderHook(() => useTrayStateSnapshot())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const first = result.current
+    chatState = { status: "streaming", activeSessionId: "s1" }
+    rerender()
+    expect(result.current).not.toBe(first)
+    expect(result.current.chat).toEqual({ streaming: true, hasActiveSession: true })
+  })
+
   it("marks automation running when an automation event arrives, then clears the kill switch", async () => {
     const { result } = renderHook(() => useTrayStateSnapshot())
     // Wait for the listen() promises to register the handlers.

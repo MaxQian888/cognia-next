@@ -77,13 +77,16 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     [activeSessionId],
     null
   )
-  const goal = {
-    active: openGoal?.status === "active",
-    paused: openGoal?.status === "paused",
-    // Redacted objective only — the tray is an OS surface (screenshot-able),
-    // so the raw objective never leaks here.
-    title: openGoal?.safeObjective,
-  }
+  const goal = useMemo(
+    () => ({
+      active: openGoal?.status === "active",
+      paused: openGoal?.status === "paused",
+      // Redacted objective only — the tray is an OS surface (screenshot-able),
+      // so the raw objective never leaks here.
+      title: openGoal?.safeObjective,
+    }),
+    [openGoal?.status, openGoal?.safeObjective]
+  )
 
   // Desktop-pet quick-glance stats, gated on `PetSettings.enabled` the same
   // way the widget itself is. `computePetView` lazily decays needs — same
@@ -172,16 +175,28 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     [usageData, display.usageAccountKey]
   )
 
-  return {
-    goal,
-    automation,
-    chat: {
-      streaming: status === "streaming",
-      hasActiveSession: !!activeSessionId,
-    },
-    platform: { os: detectOs() },
-    app: { autostart, version: APP_VERSION },
-    pet,
-    usage,
-  }
+  // Memoised, because the snapshot's IDENTITY is load-bearing downstream.
+  //
+  // `usePluginQuickActions` memoises on it, `useGlobalSearchContext` memoises
+  // on that, and `useGlobalSearch` keys its query effect on the resulting
+  // context. Returning a fresh literal every render therefore invalidated that
+  // whole chain on every render, and since the effect sets state, each run
+  // scheduled the next one: ⌘K search died with "Maximum update depth
+  // exceeded" as soon as a query was typed. The tray's own sync hook was
+  // pushing a redundant DTO to Rust on every render for the same reason.
+  return useMemo(
+    () => ({
+      goal,
+      automation,
+      chat: {
+        streaming: status === "streaming",
+        hasActiveSession: !!activeSessionId,
+      },
+      platform: { os: detectOs() },
+      app: { autostart, version: APP_VERSION },
+      pet,
+      usage,
+    }),
+    [goal, automation, status, activeSessionId, autostart, pet, usage]
+  )
 }

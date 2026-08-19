@@ -187,7 +187,7 @@ export function InlineError({ message, onRetry, onOpenSettings, onDismiss }: Inl
     <div
       role="alert"
       data-testid="inline-error"
-      className="mx-4 mt-2 overflow-hidden rounded-xl border border-destructive/30 bg-destructive/[0.06] shadow-sm"
+      className="overflow-hidden rounded-xl border border-destructive/30 bg-destructive/[0.06] shadow-sm"
     >
       <div className="flex gap-3 p-3">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-destructive/15 text-destructive">
