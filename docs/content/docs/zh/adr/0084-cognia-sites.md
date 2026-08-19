@@ -59,4 +59,6 @@ Takedown 与 deletion 是两个动作。Takedown 移除生产流量但保留版�
 
 该设计使用若干小型 Sites 表和 operation reconciler，而不是一个可变 metadata 对象；在启用生产部署前还必须提供原生 confinement 和 target-local credential seam。这些额外状态是实现不可变版本、崩溃恢复、多窗口安全、可审计删除与真实所有权边界的必要成本。
 
-Desktop 是创作和部署主机。Mobile 只有在显式增加 sync table、delta reader、tombstone 与 handler 后才可接收只读 projection；普通 Web 不宣称能访问本地 Sites metadata。
+Desktop 是创作和部署主机。Mobile 只有在显式增加 sync table、delta reader、tombstone 与 handler 后才可接收只读 projection；普通 Web 不宣称能访问**其它主机**的本地 Sites metadata。
+
+Sites 控制台本身在所有 shell 中都渲染，读取该 shell 自己拥有的本地数据库——在浏览器中就是该浏览器 profile 自己的 IndexedDB，与桌面端是两个不同的数据库，不存在跨主机 projection。被拦截的是**特权动作**本身，逐控件拦截并给出原因：构建需要操作系统沙箱，预览需要 PTY，服务商调用需要系统密钥环和不被 CORS 拦截的 fetch，托管清单需要文件系统访问。拦截整个界面而不是拦截动作，效果比不拦更差——面板会整页留白，读起来就是「完全没有功能」——而且还掩盖了三个在非桌面端会给出**错误结果而非报错**的路径：密钥环会静默回落成内存存储、服务商 fetch 会被 CORS 拦截、`readTextFile` 会把 dev server 的 404 正文当成文件内容。
