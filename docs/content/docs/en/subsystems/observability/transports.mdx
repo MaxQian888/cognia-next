@@ -1,6 +1,6 @@
 ---
 title: Transports
-description: The nine logging sinks in lib/logging/transports — the Transport interface, console, IndexedDB (batched + LRU + BroadcastChannel), remote (fetch + durable IndexedDB retry queue + Sentry/Loggly shims), native (Tauri invoke), OpenTelemetry span-events, OTLP/HTTP span export, Langfuse, and the agent-trace Dexie sink — plus the three-state health model.
+description: The nine logging transports, behavior-event exporters, generic OTLP and independent PostHog product/AI destinations, plus the three-state health model.
 ---
 
 # Transports
@@ -10,21 +10,22 @@ description: The nine logging sinks in lib/logging/transports — the Transport 
 <TLDR>
   A transport is anything implementing `Transport` (`types/logging/transport.ts:33`): a `name` and a
   `log(entry)` method, optionally `flush/close/getHealth/getPendingCount`. The pipeline fans every
-  redacted entry to all registered transports. Nine exist: **console** (sync, colored), **indexeddb**
+  redacted entry to all registered transports. Nine implementations exist: **console**, **indexeddb**
   (batched, retention + LRU eviction, cross-tab `BroadcastChannel`), **remote** (`fetch` POST + a
   *durable* IndexedDB retry queue + Sentry/Loggly wire shims), **native** (Tauri `invoke` to the Rust
-  logger), **opentelemetry** (attaches span events to the active OTel span), **otlp-http** (exports
-  agent-trace spans to `/v1/traces`), **langfuse** (groups entries into traces), and **agent-trace**
-  (persists embedded spans to Dexie). Health is exactly `healthy | degraded | offline` — there is no
+  logger), **observability-spool**, **breadcrumb**, **otlp-http** (exports agent-trace spans),
+  **langfuse**, and **agent-trace** (persists embedded spans to Dexie). Product events have a
+  separate structured-envelope exporter fan-out for OTLP Logs and managed/BYO PostHog. Health is
+  exactly `healthy | degraded | offline` — there is no
   `unhealthy` state.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Transports" value="9" hint="console · indexeddb · remote · native · otel · otlp-http · langfuse · agent-trace · (retry-queue store)" />
+  <Stat label="Transports" value="9" hint="console · indexeddb · remote · spool · native · breadcrumb · otlp-http · langfuse · agent-trace" />
   <Stat label="Health states" value="3" hint="healthy · degraded · offline (transport.ts:8)" />
   <Stat label="Durable queues" value="2" hint="remote retry-batches + indexeddb buffer" />
   <Stat label="minLevel-gated" value="2" hint="native + langfuse default to warn" />
-  <Stat label="Span sinks" value="3" hint="otlp-http · agent-trace · (otel span events)" />
+  <Stat label="Span sinks" value="dynamic" hint="generic OTLP · managed/BYO PostHog · local agent-trace" />
 </StatGrid>
 
 ## The Transport Interface
@@ -61,7 +62,8 @@ flowchart LR
   D --> I["indexeddb<br/>→ /logs panel"]
   D --> R["remote<br/>→ HTTP endpoint"]
   D --> N["native<br/>→ Rust logger"]
-  D --> O["opentelemetry<br/>→ active span"]
+  D --> S["observability-spool<br/>→ local recovery"]
+  D --> B["breadcrumb<br/>→ native crash context"]
   D --> H["otlp-http<br/>→ /v1/traces"]
   D --> L["langfuse<br/>→ Langfuse traces"]
   D --> A["agent-trace<br/>→ Dexie agentTraces"]
@@ -69,7 +71,7 @@ flowchart LR
   Q -. "on reconnect" .-> R
 
   classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
-  class C,I,R,N,O,H,L,A,Q box
+  class C,I,R,N,S,B,H,L,A,Q box
 ```
 
 ## console
@@ -155,13 +157,11 @@ const forwarded = await forwardPlatformLoggingEntries(
 Initial health is `isTauri() ? "healthy" : "offline"`. A failed forward re-buffers and reports
 `"degraded"`. The Rust side of this is [Rust dispatch & OS bridges](./rust-logging).
 
-## opentelemetry
+## observability spool and breadcrumb
 
-`otel-transport.ts` — attaches each log as a **span event** on the currently-active OpenTelemetry
-span. It lazy-loads `@opentelemetry/api` as an optional dependency and silently no-ops when it's
-absent. `name = "opentelemetry"`, `minLevelForSpanEvents` default `"info"`. For `error`/`fatal` it
-calls `span.recordException` + `span.setStatus({ code: ERROR })`. Helpers `getOtelContext()` and
-`withOtelSpan(name, fn)` (tracer `"cognia-logger"`) let other code participate in the active trace.
+`ObservabilitySpoolTransport` writes versioned, bounded local recovery envelopes. The desktop-only
+`BreadcrumbTransport` forwards redacted crash context to Rust. These are the two implementations
+omitted by the former transport list; the deleted `otel-transport.ts` is not a current transport.
 
 ## otlp-http
 
@@ -174,6 +174,16 @@ HTTP-aware — 4xx (except 408/429) is non-retryable; 5xx/timeout retried with
 `lastError`, else `healthy` (never `offline`). Content capture is PII-gated via `hasNoLeakingPii`.
 `grafanaCloudHeaders` builds `Authorization: Basic …` for Grafana Cloud / Tempo / Honeycomb / Datadog
 OTLP.
+
+### PostHog destinations
+
+The same OTLP transport class can be registered as `agent-trace-posthog-managed` and
+`agent-trace-posthog-byo`. These instances always disable content capture, use the exact
+`/i/v0/ai/otel` endpoint, and obtain their public project token through the typed Rust credential
+seam on Tauri. The sidecar independently creates one `BatchSpanProcessor` per generic OTLP or
+PostHog destination under a single `NodeSDK`. Product analytics does not enter the logging pipeline:
+`track-event.ts` fans a structured event envelope to OTLP Logs and lazily loaded named PostHog
+instances after behavior consent, category, sampling, scalar, and PII gates.
 
 ## langfuse
 
@@ -210,7 +220,8 @@ previews are truncated to `maxPreviewBytes` and gated through `hasNoLeakingPii`.
 | indexeddb | IDB `cognia-logs` + BroadcastChannel | yes (50) | none |
 | remote | `fetch` POST + durable retry queue | yes (50) | `offline` / `degraded`(queue>0 \|\| retry>0) / `healthy` |
 | native | Tauri `invoke(platform_logging_forward)` | yes (10) | `offline`(non-Tauri) / `degraded`(fail) / `healthy`; minLevel warn |
-| opentelemetry | active OTel span events | no | none |
+| observability-spool | bounded local recovery spool | yes | diagnostics via the logger core |
+| breadcrumb | Rust crash-context ring | no | desktop best-effort |
 | otlp-http | OTLP `/v1/traces` | yes (32) | `degraded`(no endpoint \|\| lastError) / `healthy` |
 | langfuse | Langfuse SDK | yes (10) | none; minLevel warn |
 | agent-trace | Dexie `agentTraces` | yes (32) | `degraded`(lastError) / `healthy` |

@@ -1,6 +1,6 @@
 ---
 title: Transports
-description: lib/logging/transports 中的九个日志 sink —— Transport 接口、console、IndexedDB（批处理 + LRU + BroadcastChannel）、remote（fetch + 持久 IndexedDB 重试队列 + Sentry/Loggly shim）、native（Tauri invoke）、OpenTelemetry span-events、OTLP/HTTP span 导出、Langfuse，以及 agent-trace 的 Dexie sink —— 外加三态健康模型。
+description: 九个日志 transport、行为事件 exporter、通用 OTLP 与相互独立的 PostHog 产品/AI 目的地，以及三态健康模型。
 ---
 
 # Transports
@@ -13,18 +13,18 @@ description: lib/logging/transports 中的九个日志 sink —— Transport 接
   脱敏后的条目 fan-out 给所有已注册的 transport。共存在九个：**console**（同步、彩色）、**indexeddb**
   （批处理、保留 + LRU 驱逐、跨标签页 `BroadcastChannel`）、**remote**（`fetch` POST + 一条
   *持久*的 IndexedDB 重试队列 + Sentry/Loggly 线格式 shim）、**native**（Tauri `invoke` 到 Rust
-  logger）、**opentelemetry**（把 span 事件附加到当前活跃的 OTel span）、**otlp-http**（把
-  agent-trace span 导出到 `/v1/traces`）、**langfuse**（把条目分组进 trace），以及 **agent-trace**
-  （把内嵌的 span 持久化到 Dexie）。健康精确为 `healthy | degraded | offline` —— 不存在
+  logger）、**observability-spool**、**breadcrumb**、**otlp-http**、**langfuse**，以及
+  **agent-trace**。产品事件使用独立的结构化 envelope fan-out 到 OTLP Logs 与 managed/BYO
+  PostHog。健康精确为 `healthy | degraded | offline` —— 不存在
   `unhealthy` 状态。
 </TLDR>
 
 <StatGrid>
-  <Stat label="Transports" value="9" hint="console · indexeddb · remote · native · otel · otlp-http · langfuse · agent-trace ·（retry-queue store）" />
+  <Stat label="Transports" value="9" hint="console · indexeddb · remote · spool · native · breadcrumb · otlp-http · langfuse · agent-trace" />
   <Stat label="健康状态" value="3" hint="healthy · degraded · offline（transport.ts:8）" />
   <Stat label="持久队列" value="2" hint="remote retry-batches + indexeddb buffer" />
   <Stat label="minLevel 门控" value="2" hint="native + langfuse 默认 warn" />
-  <Stat label="Span sink" value="3" hint="otlp-http · agent-trace ·（otel span events）" />
+  <Stat label="Span sink" value="动态" hint="通用 OTLP · managed/BYO PostHog · 本地 agent-trace" />
 </StatGrid>
 
 ## Transport 接口
@@ -61,7 +61,8 @@ flowchart LR
   D --> I["indexeddb<br/>→ /logs panel"]
   D --> R["remote<br/>→ HTTP endpoint"]
   D --> N["native<br/>→ Rust logger"]
-  D --> O["opentelemetry<br/>→ active span"]
+  D --> S["observability-spool<br/>→ local recovery"]
+  D --> B["breadcrumb<br/>→ native crash context"]
   D --> H["otlp-http<br/>→ /v1/traces"]
   D --> L["langfuse<br/>→ Langfuse traces"]
   D --> A["agent-trace<br/>→ Dexie agentTraces"]
@@ -69,7 +70,7 @@ flowchart LR
   Q -. "on reconnect" .-> R
 
   classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
-  class C,I,R,N,O,H,L,A,Q box
+  class C,I,R,N,S,B,H,L,A,Q box
 ```
 
 ## console
@@ -155,12 +156,11 @@ const forwarded = await forwardPlatformLoggingEntries(
 初始健康为 `isTauri() ? "healthy" : "offline"`。一次失败的转发会重新缓冲并报告
 `"degraded"`。它的 Rust 一侧是 [Rust 分发与 OS 桥接](./rust-logging)。
 
-## opentelemetry
+## observability spool 与 breadcrumb
 
-`otel-transport.ts` —— 把每条日志作为一个 **span 事件**附加到当前活跃的 OpenTelemetry
-span 上。它把 `@opentelemetry/api` 作为可选依赖懒加载，缺失时静默地空操作。`name = "opentelemetry"`，`minLevelForSpanEvents` 默认 `"info"`。对 `error`/`fatal`，它
-调用 `span.recordException` + `span.setStatus({ code: ERROR })`。辅助函数 `getOtelContext()` 和
-`withOtelSpan(name, fn)`（tracer `"cognia-logger"`）让其他代码参与活跃的 trace。
+`ObservabilitySpoolTransport` 写入有版本、容量受限的本地恢复 envelope。仅桌面的
+`BreadcrumbTransport` 把已脱敏的崩溃上下文转发给 Rust。旧文档遗漏了这两个实现；已删除的
+`otel-transport.ts` 不再是现有 transport。
 
 ## otlp-http
 
@@ -172,6 +172,15 @@ HTTP 感知的 —— 4xx（除 408/429）不可重试；5xx/超时以
 `lastError` 时健康为 `degraded`，否则为 `healthy`（绝不为 `offline`）。内容捕获经 `hasNoLeakingPii` 做 PII 门控。
 `grafanaCloudHeaders` 为 Grafana Cloud / Tempo / Honeycomb / Datadog
 OTLP 构建 `Authorization: Basic …`。
+
+### PostHog 目的地
+
+同一个 OTLP transport 类可注册为 `agent-trace-posthog-managed` 与
+`agent-trace-posthog-byo`。这些实例始终禁用内容采集，固定使用 `/i/v0/ai/otel`，并在 Tauri
+中通过 Rust 类型化凭据 seam 注入公开项目 token。Sidecar 在单一 `NodeSDK` 下，为每个通用
+OTLP 或 PostHog 目的地创建独立 `BatchSpanProcessor`。产品分析不进入日志管道：
+`track-event.ts` 只有在通过行为授权、分类、采样、标量和 PII 闸门后，才把结构化事件 envelope
+fan-out 到 OTLP Logs 与按需加载的具名 PostHog 实例。
 
 ## langfuse
 
@@ -207,7 +216,8 @@ warn→`WARNING`，error/fatal→`ERROR`。
 | indexeddb | IDB `cognia-logs` + BroadcastChannel | 是（50） | 无 |
 | remote | `fetch` POST + 持久重试队列 | 是（50） | `offline` / `degraded`(queue>0 \|\| retry>0) / `healthy` |
 | native | Tauri `invoke(platform_logging_forward)` | 是（10） | `offline`(非 Tauri) / `degraded`(失败) / `healthy`；minLevel warn |
-| opentelemetry | 活跃 OTel span 事件 | 否 | 无 |
+| observability-spool | 有界本地恢复 spool | 是 | 通过 logger core 诊断 |
+| breadcrumb | Rust 崩溃上下文环 | 否 | 桌面 best-effort |
 | otlp-http | OTLP `/v1/traces` | 是（32） | `degraded`(无端点 \|\| lastError) / `healthy` |
 | langfuse | Langfuse SDK | 是（10） | 无；minLevel warn |
 | agent-trace | Dexie `agentTraces` | 是（32） | `degraded`(lastError) / `healthy` |

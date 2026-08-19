@@ -127,6 +127,7 @@ export interface TelemetryEventCatalog {
     durationMs?: number
   }
   "telemetry.preference.changed": { enabled: boolean }
+  "telemetry.posthog.test": { source: "settings" }
   /** ADR-0090 Phase 6: an authoritative resolver decision drove an execution. */
   "agent.execution.resolved": {
     surface: string
@@ -196,6 +197,7 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "agent.teammate.completed": { category: "agentTeam" },
   "agent.teammate.failed": { category: "agentTeam" },
   "telemetry.preference.changed": { category: "system" },
+  "telemetry.posthog.test": { category: "system" },
   "agent.execution.resolved": { category: "system" },
   "agent.execution.shadow": { category: "system" },
   "support.session.opened": { category: "system" },

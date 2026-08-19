@@ -450,6 +450,36 @@
       "sampleRate": "采样率",
       "title": "行为遥测"
     },
+    "posthog": {
+      "aiObservability": "AI 可观测性",
+      "aiObservabilityDesc": "通过 OpenTelemetry 发送不含内容的生成与工具调用 span。",
+      "byo": {
+        "description": "将符合条件的遥测发送到你自行管理的 PostHog 项目。",
+        "host": "BYO PostHog 地址",
+        "scopes": "BYO 授权",
+        "scopesDescription": "每个范围默认关闭，且可独立撤回授权。",
+        "title": "接入自己的项目",
+        "token": "BYO 项目 Token",
+        "tokenHint": "请使用公开的项目采集 Token（phc_…），不要使用 Personal API Key。该值在此面板中始终掩码显示。",
+        "tokenPlaceholder": "phc_••••••••"
+      },
+      "description": "独立配置托管项目和 BYO 目的地；产品事件与 AI span 分别授权。",
+      "managed": {
+        "available": "当前构建已提供托管项目配置。",
+        "title": "Cognia 托管项目",
+        "unavailable": "当前构建未提供托管 PostHog 地址与项目 Token；BYO 仍可使用。"
+      },
+      "privacyDescription": "允许发送：事件名、运行时/版本、模型/提供商、用量、延迟、成本、工具名、状态以及 trace/session 标识。绝不发送 prompt、回复、工具参数/结果、文件、URL 或异常正文。自动采集、会话回放、问卷、功能开关、用户画像和自动异常采集始终关闭。",
+      "privacyTitle": "远程隐私白名单",
+      "productAnalytics": "产品分析",
+      "productAnalyticsDesc": "仅在行为遥测也已开启时发送经过采样的注册事件。",
+      "sendTest": "发送测试事件",
+      "testStatus": {
+        "blocked": "未发送。请开启行为遥测、系统分类和有效的产品目的地并保存。",
+        "sent": "至少一个已启用的遥测目的地已接受测试事件。"
+      },
+      "title": "PostHog"
+    },
     "logLevel": {
       "debug": "调试",
       "debugDesc": "开发调试信息",
@@ -540,6 +570,7 @@
     "tabs": {
       "advanced": "高级",
       "levels": "级别",
+      "posthog": "PostHog",
       "retention": "保留",
       "transports": "传输"
     },

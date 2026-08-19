@@ -105,15 +105,27 @@ pub enum TelemetryCredential {
     None,
     GrafanaCloud { instance_id: String },
     Langfuse { public_key: String },
+    Posthog { project_token: String },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PostHogDestinationConfig {
+    id: String,
+    host: String,
+    project_token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SidecarTelemetryConfig {
+    otlp_enabled: bool,
     endpoint: String,
     headers: HashMap<String, String>,
     service_name: String,
     environment: String,
     credential: TelemetryCredential,
+    posthog_destinations: Vec<PostHogDestinationConfig>,
+    installation_id: String,
 }
 
 static SIDECAR_CONFIG: Lazy<RwLock<Option<SidecarTelemetryConfig>>> =
@@ -176,6 +188,7 @@ fn build_headers(
         TelemetryCredential::Langfuse { .. } => {
             crate::secret_store::get(TELEMETRY_SECRET_NAMESPACE, LANGFUSE_SECRET_KEY)?
         }
+        TelemetryCredential::Posthog { .. } => None,
     };
     build_headers_with_secret(headers, credential, secret.as_deref())
 }
@@ -221,6 +234,16 @@ fn build_headers_with_secret(
             let encoded = BASE64.encode(format!("{}:{secret}", public_key.trim()));
             out.insert("authorization".to_string(), format!("Basic {encoded}"));
         }
+        TelemetryCredential::Posthog { project_token } => {
+            let project_token = project_token.trim();
+            if !project_token.starts_with("phc_") || project_token.len() > 512 {
+                return Err("PostHog project token is invalid".to_string());
+            }
+            out.insert(
+                "authorization".to_string(),
+                format!("Bearer {project_token}"),
+            );
+        }
     }
     Ok(out)
 }
@@ -254,6 +277,11 @@ pub async fn telemetry_otlp_export(
     serde_json::from_str::<serde_json::Value>(&body)
         .map_err(|error| format!("telemetry payload must be valid JSON: {error}"))?;
     let endpoint = validate_endpoint(&endpoint)?;
+    if matches!(&credential, TelemetryCredential::Posthog { .. })
+        && endpoint.path().trim_end_matches('/') != "/i/v0/ai/otel"
+    {
+        return Err("PostHog telemetry must use the /i/v0/ai/otel endpoint".to_string());
+    }
     let headers = build_headers(headers, credential)?;
     let builder = reqwest::Client::builder().timeout(EXPORT_TIMEOUT);
     let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, endpoint.as_str())
@@ -425,22 +453,45 @@ pub async fn telemetry_configure_sidecar(
     service_name: String,
     environment: String,
     credential: TelemetryCredential,
+    posthog_destinations: Option<Vec<PostHogDestinationConfig>>,
+    installation_id: Option<String>,
 ) -> Result<bool, String> {
-    let next = if enabled {
-        validate_endpoint(&endpoint)?;
-        // Validate both non-sensitive headers and the referenced keyring
-        // credential before replacing the active sidecar configuration.
-        let resolved_headers = build_headers(headers.clone(), credential.clone())?;
-        #[cfg(feature = "otel-export")]
-        configure_exporter(&endpoint, resolved_headers)?;
-        #[cfg(not(feature = "otel-export"))]
-        let _ = resolved_headers;
+    let posthog_destinations = posthog_destinations.unwrap_or_default();
+    for destination in &posthog_destinations {
+        validate_endpoint(&destination.host)?;
+        if destination.id != "managed" && destination.id != "byo" {
+            return Err("PostHog destination id must be managed or byo".to_string());
+        }
+        if !destination.project_token.trim().starts_with("phc_")
+            || destination.project_token.len() > 512
+        {
+            return Err("PostHog project token is invalid".to_string());
+        }
+    }
+    let any_enabled = enabled || !posthog_destinations.is_empty();
+    let next = if any_enabled {
+        if enabled {
+            validate_endpoint(&endpoint)?;
+            // Validate both non-sensitive headers and the referenced keyring
+            // credential before replacing the active sidecar configuration.
+            let resolved_headers = build_headers(headers.clone(), credential.clone())?;
+            #[cfg(feature = "otel-export")]
+            configure_exporter(&endpoint, resolved_headers)?;
+            #[cfg(not(feature = "otel-export"))]
+            let _ = resolved_headers;
+        } else {
+            #[cfg(feature = "otel-export")]
+            disable_exporter()?;
+        }
         Some(SidecarTelemetryConfig {
+            otlp_enabled: enabled,
             endpoint,
             headers,
             service_name,
             environment,
             credential,
+            posthog_destinations,
+            installation_id: installation_id.unwrap_or_default(),
         })
     } else {
         #[cfg(feature = "otel-export")]
@@ -463,14 +514,16 @@ pub fn sidecar_env() -> Result<HashMap<String, String>, String> {
     let Some(config) = config else {
         return Ok(HashMap::new());
     };
-    let headers = build_headers(config.headers, config.credential)?;
-    let mut env = HashMap::from([
-        (
+    let mut env = HashMap::from([("OTEL_SERVICE_NAME".to_string(), config.service_name)]);
+    let headers = if config.otlp_enabled {
+        env.insert(
             "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT".to_string(),
             config.endpoint,
-        ),
-        ("OTEL_SERVICE_NAME".to_string(), config.service_name),
-    ]);
+        );
+        build_headers(config.headers, config.credential)?
+    } else {
+        HashMap::new()
+    };
     if !config.environment.trim().is_empty() {
         env.insert(
             "OTEL_RESOURCE_ATTRIBUTES".to_string(),
@@ -481,6 +534,17 @@ pub fn sidecar_env() -> Result<HashMap<String, String>, String> {
         let encoded = serde_json::to_string(&headers)
             .map_err(|error| format!("telemetry headers serialization failed: {error}"))?;
         env.insert("COGNIA_OTEL_EXPORTER_HEADERS_JSON".to_string(), encoded);
+    }
+    if !config.posthog_destinations.is_empty() {
+        let encoded = serde_json::to_string(&config.posthog_destinations)
+            .map_err(|error| format!("PostHog configuration serialization failed: {error}"))?;
+        env.insert("COGNIA_POSTHOG_DESTINATIONS_JSON".to_string(), encoded);
+    }
+    if !config.installation_id.trim().is_empty() {
+        env.insert(
+            "COGNIA_OBSERVABILITY_INSTALLATION_ID".to_string(),
+            config.installation_id,
+        );
     }
     Ok(env)
 }
@@ -574,6 +638,30 @@ mod tests {
     }
 
     #[test]
+    fn posthog_authorization_uses_the_public_project_token() {
+        let headers = build_headers_with_secret(
+            HashMap::new(),
+            TelemetryCredential::Posthog {
+                project_token: "phc_project".to_string(),
+            },
+            None,
+        )
+        .expect("headers");
+        assert_eq!(
+            headers.get("authorization"),
+            Some(&"Bearer phc_project".to_string())
+        );
+        assert!(build_headers_with_secret(
+            HashMap::new(),
+            TelemetryCredential::Posthog {
+                project_token: "phx_personal".to_string(),
+            },
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn disabled_sidecar_config_has_no_environment() {
         *SIDECAR_CONFIG.write().expect("config") = None;
         assert!(sidecar_env().expect("environment").is_empty());
@@ -592,6 +680,8 @@ mod tests {
 
     #[tokio::test]
     async fn native_export_reaches_a_local_collector_with_trace_context() {
+        crate::proxy_config::apply_current(crate::proxy_config::ProxyConfig::default())
+            .expect("initialize proxy policy");
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
         let address = listener.local_addr().expect("address");
         let collector = tokio::spawn(async move {

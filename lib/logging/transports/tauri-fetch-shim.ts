@@ -4,6 +4,13 @@ export type TauriTelemetryCredential =
   | { kind: "none" }
   | { kind: "grafanaCloud"; instanceId: string }
   | { kind: "langfuse"; publicKey: string }
+  | { kind: "posthog"; projectToken: string }
+
+export interface TauriPostHogDestination {
+  id: "managed" | "byo"
+  host: string
+  projectToken: string
+}
 
 export interface TauriOtlpFetchOptions {
   credential: TauriTelemetryCredential
@@ -17,6 +24,8 @@ export interface TauriSidecarTelemetryOptions {
   serviceName: string
   environment: string
   credential: TauriTelemetryCredential
+  posthogDestinations?: TauriPostHogDestination[]
+  installationId?: string
 }
 
 interface TelemetryExportResult {

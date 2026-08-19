@@ -25,6 +25,7 @@ it("registers every supported behavior event name", () => {
     "support.feedback.draft.exported",
     "support.feedback.draft.opened",
     "support.session.opened",
+    "telemetry.posthog.test",
     "telemetry.preference.changed",
     "voice.connection.ready",
     "voice.error",

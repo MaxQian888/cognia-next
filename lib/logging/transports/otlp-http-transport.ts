@@ -25,6 +25,8 @@ import { type OtlpResourceMetadata, spansToOtlp } from "@cognia/agent-trace/span
 const consoleApi = globalThis.console
 
 export interface OtlpHttpTransportOptions {
+  /** Registry name when multiple independent OTLP destinations are active. */
+  transportName?: string
   /** Full OTLP traces endpoint. e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces`
    * or `http://localhost:4318/v1/traces`. Empty string disables the
    * transport (`getHealth().status === "degraded"`). */
@@ -66,9 +68,12 @@ const DEFAULT_OPTIONS = {
 } as const
 
 export class OtlpHttpTransport implements Transport {
-  name = "agent-trace-otlp"
+  readonly name: string
   private options: Required<
-    Omit<OtlpHttpTransportOptions, "fetchImpl" | "sleepImpl" | "headers" | "resource">
+    Omit<
+      OtlpHttpTransportOptions,
+      "fetchImpl" | "sleepImpl" | "headers" | "resource" | "transportName"
+    >
   > & {
     headers: Record<string, string>
     resource: OtlpResourceMetadata
@@ -84,6 +89,7 @@ export class OtlpHttpTransport implements Transport {
   private retryCount = 0
 
   constructor(options: OtlpHttpTransportOptions) {
+    this.name = options.transportName ?? "agent-trace-otlp"
     this.options = {
       endpoint: options.endpoint ?? "",
       headers: { ...(options.headers ?? {}) },
@@ -147,6 +153,12 @@ export class OtlpHttpTransport implements Transport {
 
   getPendingCount(): number {
     return this.buffer.length
+  }
+
+  /** Consent withdrawal path: drop buffered spans without invoking the exporter. */
+  discardPending(): void {
+    this.droppedEntries += this.buffer.length
+    this.buffer = []
   }
 
   getHealth(): TransportHealthSnapshot {
@@ -232,6 +244,13 @@ export class OtlpHttpTransport implements Transport {
 
   private sanitizeSpan(span: AgentTraceSpan): AgentTraceSpan {
     const out: AgentTraceSpan = { ...span }
+    delete out.errorMessage
+    delete out.metadata
+    delete out.events
+    delete out.agentName
+    if (out.handoff) {
+      out.handoff = { fromAgent: out.handoff.fromAgent, toAgent: out.handoff.toAgent }
+    }
     if (!this.options.captureContent) {
       delete out.inputPreview
       delete out.outputPreview

@@ -69,3 +69,6 @@ minimumReleaseAgeExclude:
   - ai@7.0.48
   - get-tsconfig@4.14.1
   - tsx@4.23.3
+  - "@posthog/core@1.48.3"
+  - "@posthog/types@1.405.0"
+  - posthog-js@1.418.1

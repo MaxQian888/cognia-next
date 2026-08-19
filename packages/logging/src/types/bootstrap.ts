@@ -76,6 +76,21 @@ export interface AgentTraceOtlpSettings {
   }
 }
 
+export interface PostHogTelemetryScopeSettings {
+  productAnalytics: boolean
+  aiObservability: boolean
+}
+
+export interface PostHogTelemetrySettings {
+  managed: PostHogTelemetryScopeSettings
+  byo: PostHogTelemetryScopeSettings & {
+    /** PostHog ingestion host, for example https://us.i.posthog.com. */
+    host: string
+    /** Public project ingestion token. Personal API keys are never accepted. */
+    projectToken: string
+  }
+}
+
 export interface LoggingTransportSettings {
   console: boolean
   indexedDB: boolean
@@ -89,6 +104,7 @@ export interface LoggingTransportSettings {
   langfuseConfig: LangfuseTransportDetailSettings
   agentTraceConfig: AgentTraceTransportDetailSettings
   agentTraceOtlpConfig: AgentTraceOtlpSettings
+  posthogConfig: PostHogTelemetrySettings
 }
 
 export interface LoggingRetentionSettings {

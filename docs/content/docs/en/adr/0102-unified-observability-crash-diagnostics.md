@@ -95,6 +95,13 @@ remote processing must never remove local reports or make V1 spools unreadable.
 
 ## Implementation record
 
+The 2026-08-19 PostHog integration follows this ADR's local-first and
+destination-specific consent rules. It does not change crash upload consent or
+the diagnostic service. Product events and AI spans fan out only to explicitly
+enabled managed/BYO destinations. The PostHog export boundary applies the same
+content-free allowlist as generic remote OTLP, including removal of exception
+message and stack text.
+
 The source-accurate contracts, state machines, rollout gates, limits, and
 verification matrix live in
 [`docs/plans/2026-08-01-unified-observability-crash-diagnostics.md`](../../../../plans/2026-08-01-unified-observability-crash-diagnostics.md).

@@ -49,6 +49,24 @@ describe("createTauriOtlpFetch", () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
+  it("passes only the PostHog public project token through the typed credential seam", async () => {
+    invokeMock.mockResolvedValue({ status: 202, accepted: true })
+    const fetchImpl = createTauriOtlpFetch({
+      credential: { kind: "posthog", projectToken: "phc_project" },
+    })
+    await fetchImpl("https://us.i.posthog.com/i/v0/ai/otel", {
+      method: "POST",
+      body: '{"resourceSpans":[]}',
+    })
+    expect(invokeMock).toHaveBeenCalledWith(
+      "telemetry_otlp_export",
+      expect.objectContaining({
+        credential: { kind: "posthog", projectToken: "phc_project" },
+        headers: {},
+      })
+    )
+  })
+
   it("maps rejected exports to an HTTP-shaped response", async () => {
     invokeMock.mockResolvedValue({ status: 503, accepted: false })
     const response = await createTauriOtlpFetch({ credential: { kind: "none" } })(

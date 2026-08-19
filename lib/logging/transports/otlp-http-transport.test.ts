@@ -131,6 +131,21 @@ describe("OtlpHttpTransport buffering & flush", () => {
     expect(fetchMock).toHaveBeenCalled()
     expect(t.getPendingCount()).toBe(0)
   })
+
+  it("can discard a pending batch without sending after consent withdrawal", async () => {
+    const fetchMock = jest.fn(async () => makeOkResponse())
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 10,
+      flushInterval: 0,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "pending" })))
+    t.discardPending()
+    await t.close()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(t.getHealth().droppedEntries).toBe(1)
+  })
 })
 
 describe("OtlpHttpTransport retry & failure handling", () => {
@@ -227,7 +242,7 @@ describe("OtlpHttpTransport retry & failure handling", () => {
 })
 
 describe("OtlpHttpTransport content gate", () => {
-  it("strips inputPreview/outputPreview when captureContent is off", async () => {
+  it("strips content and exception messages when captureContent is off", async () => {
     let captured: unknown = null
     const fetchMock = jest.fn(async (_url, init) => {
       captured = JSON.parse(init!.body as string)
@@ -240,7 +255,19 @@ describe("OtlpHttpTransport content gate", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
     t.log(
-      makeEntry(makeSpan({ id: "a", inputPreview: "secret prompt", outputPreview: "secret reply" }))
+      makeEntry(
+        makeSpan({
+          id: "a",
+          inputPreview: "secret prompt",
+          outputPreview: "secret reply",
+          errorMessage: "private exception body",
+          agentName: "private agent description",
+          metadata: { filePath: "/private/file.txt", arbitrary: "private metadata" },
+          events: [
+            { at: 1_700_000_000_100, name: "exception", attributes: { message: "private event" } },
+          ],
+        })
+      )
     )
     await new Promise((r) => setTimeout(r, 5))
     const body = captured as {
@@ -251,6 +278,9 @@ describe("OtlpHttpTransport content gate", () => {
     const attrs = body.resourceSpans[0].scopeSpans[0].spans[0].attributes
     expect(attrs.find((a) => a.key === "gen_ai.input.messages")).toBeUndefined()
     expect(attrs.find((a) => a.key === "gen_ai.output.messages")).toBeUndefined()
+    expect(JSON.stringify(body)).not.toContain("private exception body")
+    expect(JSON.stringify(body)).not.toContain("private metadata")
+    expect(JSON.stringify(body)).not.toContain("private event")
     await t.close()
   })
 

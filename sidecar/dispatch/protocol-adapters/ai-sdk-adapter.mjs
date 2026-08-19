@@ -405,8 +405,13 @@ export function makeAiSdkAdapter(protocol) {
       })
       if (telemetryOptions) {
         // `experimental_telemetry` graduated to `telemetry` in AI SDK 7.
-        const { traceparent: _traceparent, ...publicTelemetry } = telemetryOptions
+        const {
+          traceparent: _traceparent,
+          runtimeContext: telemetryRuntimeContext,
+          ...publicTelemetry
+        } = telemetryOptions
         streamArgs.telemetry = publicTelemetry
+        streamArgs.runtimeContext = telemetryRuntimeContext
       }
       // Enable reasoning per provider (thinking budget / reasoning effort),
       // deep-merged onto any providerOptions the modelParams already carried

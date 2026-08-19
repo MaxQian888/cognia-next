@@ -12626,6 +12626,36 @@
         "description": "Enabling stack traces and source location may impact performance in production. Log sampling is recommended for high-traffic applications.",
         "title": "Performance Note"
       },
+      "posthog": {
+        "aiObservability": "AI observability",
+        "aiObservabilityDesc": "Send content-free generation and tool spans using OpenTelemetry.",
+        "byo": {
+          "description": "Send eligible telemetry to a PostHog project you control.",
+          "host": "BYO PostHog host",
+          "scopes": "BYO consent",
+          "scopesDescription": "Each scope is off by default and can be withdrawn independently.",
+          "title": "Bring your own project",
+          "token": "BYO project token",
+          "tokenHint": "Use the public project ingestion token (phc_…), never a Personal API Key. The value is masked in this panel.",
+          "tokenPlaceholder": "phc_••••••••"
+        },
+        "description": "Configure managed and BYO destinations independently. Product events and AI spans use separate consent.",
+        "managed": {
+          "available": "The managed project is available in this build.",
+          "title": "Cognia managed project",
+          "unavailable": "This build does not include a managed PostHog host and project token. BYO remains available."
+        },
+        "privacyDescription": "Allowed: event names, runtime/version, model/provider, usage, latency, cost, tool names, status, and trace/session identifiers. Prompts, responses, tool arguments/results, files, URLs, and exception text are never sent. Autocapture, replay, surveys, feature flags, profiles, and automatic exceptions stay disabled.",
+        "privacyTitle": "Remote privacy allowlist",
+        "productAnalytics": "Product analytics",
+        "productAnalyticsDesc": "Send sampled registered events only when behavior telemetry is also enabled.",
+        "sendTest": "Send test event",
+        "testStatus": {
+          "blocked": "Not sent. Enable behavior telemetry, the System category, and a valid product destination, then save.",
+          "sent": "Test event accepted by at least one enabled telemetry destination."
+        },
+        "title": "PostHog"
+      },
       "reset": "Reset",
       "retention": {
         "days": "days",
@@ -12653,6 +12683,7 @@
       "tabs": {
         "advanced": "Advanced",
         "levels": "Levels",
+        "posthog": "PostHog",
         "retention": "Retention",
         "transports": "Transports"
       },

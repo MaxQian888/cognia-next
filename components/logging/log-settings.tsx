@@ -54,8 +54,6 @@ import {
   type UnifiedLoggerConfig,
 } from "@/lib/logging"
 import { clearTelemetrySecret, persistTelemetrySecret } from "@/lib/logging/telemetry-secrets"
-import { configureTauriSidecarTelemetry } from "@/lib/logging/transports/tauri-fetch-shim"
-import { isTauri } from "@/lib/platform/detect"
 import {
   BEHAVIOR_TELEMETRY_CATEGORIES,
   DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
@@ -71,6 +69,26 @@ export interface LogSettingsProps {
 }
 
 const LOG_LEVELS: LogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal"]
+
+const DEFAULT_POSTHOG_CONFIG: LoggingTransportSettings["posthogConfig"] = {
+  managed: { productAnalytics: false, aiObservability: false },
+  byo: {
+    productAnalytics: false,
+    aiObservability: false,
+    host: "",
+    projectToken: "",
+  },
+}
+
+function isValidPostHogProject(host: string, projectToken: string): boolean {
+  if (!projectToken.trim().startsWith("phc_")) return false
+  try {
+    const url = new URL(host)
+    return url.protocol === "https:" || url.protocol === "http:"
+  } catch {
+    return false
+  }
+}
 
 /** Convert an HTTP headers map to a single-line text form that fits a
  * single-row Input. Mirror parser below tolerates trailing commas and
@@ -113,6 +131,73 @@ const DEFAULT_SAMPLING_RULES = [
 interface SamplingRule {
   modulePrefix: string
   percentage: number
+}
+
+interface PostHogScopeControlsProps {
+  title: string
+  description: string
+  disabled: boolean
+  productChecked: boolean
+  aiChecked: boolean
+  productTestId: string
+  aiTestId: string
+  productLabel: string
+  productDescription: string
+  aiLabel: string
+  aiDescription: string
+  onProductChange: (checked: boolean) => void
+  onAiChange: (checked: boolean) => void
+}
+
+function PostHogScopeControls({
+  title,
+  description,
+  disabled,
+  productChecked,
+  aiChecked,
+  productTestId,
+  aiTestId,
+  productLabel,
+  productDescription,
+  aiLabel,
+  aiDescription,
+  onProductChange,
+  onAiChange,
+}: PostHogScopeControlsProps) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-medium">{title}</h4>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+          <div>
+            <Label>{productLabel}</Label>
+            <p className="text-xs text-muted-foreground">{productDescription}</p>
+          </div>
+          <Switch
+            data-testid={productTestId}
+            checked={productChecked}
+            disabled={disabled}
+            onCheckedChange={onProductChange}
+          />
+        </div>
+        <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+          <div>
+            <Label>{aiLabel}</Label>
+            <p className="text-xs text-muted-foreground">{aiDescription}</p>
+          </div>
+          <Switch
+            data-testid={aiTestId}
+            checked={aiChecked}
+            disabled={disabled}
+            onCheckedChange={onAiChange}
+          />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function loadSamplingRules(): SamplingRule[] {
@@ -199,11 +284,13 @@ export function LogSettings({ className }: LogSettingsProps) {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [langfuseSecretDraft, setLangfuseSecretDraft] = useState("")
   const [grafanaTokenDraft, setGrafanaTokenDraft] = useState("")
+  const [posthogTestStatus, setPosthogTestStatus] = useState<"idle" | "sent" | "blocked">("idle")
   const [behaviorTelemetry, setBehaviorTelemetry] = useState(() => getBehaviorTelemetrySettings())
 
   // Transport settings (stored separately)
   const [transports, setTransports] = useState<LoggingTransportSettings>(() => ({
     ...bootstrapState.transports,
+    posthogConfig: bootstrapState.transports.posthogConfig ?? DEFAULT_POSTHOG_CONFIG,
     remoteConfig: {
       ...bootstrapState.transports.remoteConfig,
       endpoint:
@@ -285,6 +372,25 @@ export function LogSettings({ className }: LogSettingsProps) {
       },
     }))
     setHasChanges(true)
+  }
+
+  const handlePostHogChange = (
+    scope: "managed" | "byo",
+    key: "productAnalytics" | "aiObservability" | "host" | "projectToken",
+    value: boolean | string
+  ) => {
+    setTransports((prev) => ({
+      ...prev,
+      posthogConfig: {
+        ...(prev.posthogConfig ?? DEFAULT_POSTHOG_CONFIG),
+        [scope]: {
+          ...(prev.posthogConfig ?? DEFAULT_POSTHOG_CONFIG)[scope],
+          [key]: value,
+        },
+      },
+    }))
+    setHasChanges(true)
+    setPosthogTestStatus("idle")
   }
 
   const handleRetentionChange = (key: keyof typeof retention, value: number) => {
@@ -379,20 +485,6 @@ export function LogSettings({ className }: LogSettingsProps) {
       const nextConfig = {
         ...config,
         remoteEndpoint: securedTransports.remoteConfig.endpoint,
-      }
-      if (isTauri()) {
-        const otlp = securedTransports.agentTraceOtlpConfig
-        await configureTauriSidecarTelemetry({
-          enabled: securedTransports.agentTraceOtlp,
-          endpoint: otlp.endpoint || "http://localhost",
-          headers: otlp.headers,
-          serviceName: "cognia-sidecar",
-          environment: otlp.environment,
-          credential:
-            otlp.preset === "grafana-cloud"
-              ? { kind: "grafanaCloud", instanceId: otlp.grafanaCloud.instanceId }
-              : { kind: "none" },
-        })
       }
       const next = applyLoggingSettings({
         config: nextConfig,
@@ -501,6 +593,15 @@ export function LogSettings({ className }: LogSettingsProps) {
         serviceName: "cognia-ai",
         environment: "",
         grafanaCloud: { instanceId: "", apiTokenConfigured: false },
+      },
+      posthogConfig: {
+        managed: { productAnalytics: false, aiObservability: false },
+        byo: {
+          productAnalytics: false,
+          aiObservability: false,
+          host: "",
+          projectToken: "",
+        },
       },
     })
     setTransportExpanded({
@@ -645,10 +746,22 @@ export function LogSettings({ className }: LogSettingsProps) {
   const tabLabels = {
     levels: t("settings.tabs.levels"),
     transports: t("settings.tabs.transports"),
+    posthog: t("settings.tabs.posthog"),
     advanced: t("settings.tabs.advanced"),
     retention: t("settings.tabs.retention"),
   }
   const unsavedLabel = t("settings.unsavedChanges")
+  const managedPostHogAvailable = isValidPostHogProject(
+    process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "",
+    process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN ?? ""
+  )
+  const byoPostHogAvailable = isValidPostHogProject(
+    transports.posthogConfig.byo.host,
+    transports.posthogConfig.byo.projectToken
+  )
+  const hasPostHogProductDestination =
+    (managedPostHogAvailable && transports.posthogConfig.managed.productAnalytics) ||
+    (byoPostHogAvailable && transports.posthogConfig.byo.productAnalytics)
 
   return (
     <div className={cn("relative space-y-4 sm:space-y-6 pb-20", className)}>
@@ -672,6 +785,9 @@ export function LogSettings({ className }: LogSettingsProps) {
           </TabsTrigger>
           <TabsTrigger value="transports" className="text-xs sm:text-sm">
             {tabLabels.transports}
+          </TabsTrigger>
+          <TabsTrigger value="posthog" className="text-xs sm:text-sm">
+            {tabLabels.posthog}
           </TabsTrigger>
           <TabsTrigger value="advanced" className="text-xs sm:text-sm">
             {tabLabels.advanced}
@@ -1557,6 +1673,125 @@ export function LogSettings({ className }: LogSettingsProps) {
                   </Collapsible>
                 )
               })}
+            </div>
+          </section>
+        </TabsContent>
+
+        <TabsContent
+          value="posthog"
+          forceMount
+          className="mt-0 space-y-4 data-[state=inactive]:hidden"
+        >
+          <section className="border-y bg-background">
+            <header className="border-b px-4 py-3">
+              <h3 className="text-base font-medium">{t("settings.posthog.title")}</h3>
+              <p className="text-sm text-muted-foreground">{t("settings.posthog.description")}</p>
+            </header>
+            <div className="flex flex-col gap-5 p-4">
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertTitle>{t("settings.posthog.privacyTitle")}</AlertTitle>
+                <AlertDescription>{t("settings.posthog.privacyDescription")}</AlertDescription>
+              </Alert>
+
+              <PostHogScopeControls
+                title={t("settings.posthog.managed.title")}
+                description={
+                  managedPostHogAvailable
+                    ? t("settings.posthog.managed.available")
+                    : t("settings.posthog.managed.unavailable")
+                }
+                disabled={!managedPostHogAvailable}
+                productChecked={transports.posthogConfig.managed.productAnalytics}
+                aiChecked={transports.posthogConfig.managed.aiObservability}
+                productTestId="posthog-managed-product-switch"
+                aiTestId="posthog-managed-ai-switch"
+                productLabel={t("settings.posthog.productAnalytics")}
+                productDescription={t("settings.posthog.productAnalyticsDesc")}
+                aiLabel={t("settings.posthog.aiObservability")}
+                aiDescription={t("settings.posthog.aiObservabilityDesc")}
+                onProductChange={(checked) =>
+                  handlePostHogChange("managed", "productAnalytics", checked)
+                }
+                onAiChange={(checked) => handlePostHogChange("managed", "aiObservability", checked)}
+              />
+
+              <Separator />
+
+              <div className="space-y-4">
+                <div>
+                  <h4 className="text-sm font-medium">{t("settings.posthog.byo.title")}</h4>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.posthog.byo.description")}
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="posthog-byo-host">{t("settings.posthog.byo.host")}</Label>
+                    <Input
+                      id="posthog-byo-host"
+                      value={transports.posthogConfig.byo.host}
+                      onChange={(event) => handlePostHogChange("byo", "host", event.target.value)}
+                      placeholder="https://us.i.posthog.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="posthog-byo-token">{t("settings.posthog.byo.token")}</Label>
+                    <Input
+                      id="posthog-byo-token"
+                      type="password"
+                      autoComplete="off"
+                      value={transports.posthogConfig.byo.projectToken}
+                      onChange={(event) =>
+                        handlePostHogChange("byo", "projectToken", event.target.value)
+                      }
+                      placeholder={t("settings.posthog.byo.tokenPlaceholder")}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {t("settings.posthog.byo.tokenHint")}
+                    </p>
+                  </div>
+                </div>
+                <PostHogScopeControls
+                  title={t("settings.posthog.byo.scopes")}
+                  description={t("settings.posthog.byo.scopesDescription")}
+                  disabled={!byoPostHogAvailable}
+                  productChecked={transports.posthogConfig.byo.productAnalytics}
+                  aiChecked={transports.posthogConfig.byo.aiObservability}
+                  productTestId="posthog-byo-product-switch"
+                  aiTestId="posthog-byo-ai-switch"
+                  productLabel={t("settings.posthog.productAnalytics")}
+                  productDescription={t("settings.posthog.productAnalyticsDesc")}
+                  aiLabel={t("settings.posthog.aiObservability")}
+                  aiDescription={t("settings.posthog.aiObservabilityDesc")}
+                  onProductChange={(checked) =>
+                    handlePostHogChange("byo", "productAnalytics", checked)
+                  }
+                  onAiChange={(checked) => handlePostHogChange("byo", "aiObservability", checked)}
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={async () => {
+                    if (hasChanges || !hasPostHogProductDestination) {
+                      setPosthogTestStatus("blocked")
+                      return
+                    }
+                    const sent = await trackEvent("telemetry.posthog.test", { source: "settings" })
+                    setPosthogTestStatus(sent ? "sent" : "blocked")
+                  }}
+                >
+                  {t("settings.posthog.sendTest")}
+                </Button>
+                {posthogTestStatus !== "idle" && (
+                  <span className="text-xs text-muted-foreground" role="status">
+                    {t(`settings.posthog.testStatus.${posthogTestStatus}`)}
+                  </span>
+                )}
+              </div>
             </div>
           </section>
         </TabsContent>

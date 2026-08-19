@@ -24,6 +24,7 @@ import type {
   NativeTransportDetailSettings,
   AgentTraceTransportDetailSettings,
   AgentTraceOtlpSettings,
+  PostHogTelemetrySettings,
   LoggingTransportSettings,
   LoggingRetentionSettings,
   LoggingBootstrapState,
@@ -57,9 +58,15 @@ import {
   getTelemetrySecretForWeb,
   persistLegacyTelemetrySecrets,
 } from "./telemetry-secrets"
-import { configureBehaviorEventExporter } from "@/lib/telemetry/events/track-event"
+import {
+  configureBehaviorEventExporters,
+  createOtlpBehaviorEventExporter,
+  type BehaviorEventExporter,
+} from "@/lib/telemetry/events/track-event"
+import { buildPostHogProductExporters } from "@/lib/telemetry/posthog-product"
 import {
   createObservabilityRuntimeScope,
+  resolveObservabilityInstallationId,
   resolveObservabilityRuntime,
 } from "./observability-runtime"
 
@@ -69,6 +76,7 @@ export type {
   NativeTransportDetailSettings,
   AgentTraceTransportDetailSettings,
   AgentTraceOtlpSettings,
+  PostHogTelemetrySettings,
   LoggingTransportSettings,
   LoggingRetentionSettings,
   LoggingBootstrapState,
@@ -128,6 +136,15 @@ const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
     environment: "",
     grafanaCloud: { instanceId: "", apiTokenConfigured: false },
   },
+  posthogConfig: {
+    managed: { productAnalytics: false, aiObservability: false },
+    byo: {
+      productAnalytics: false,
+      aiObservability: false,
+      host: "",
+      projectToken: "",
+    },
+  },
 }
 
 const DEFAULT_RETENTION_SETTINGS: LoggingRetentionSettings = {
@@ -174,6 +191,10 @@ function readTransportSettings(): LoggingTransportSettings {
       langfuseConfig: { ...DEFAULT_TRANSPORT_SETTINGS.langfuseConfig },
       agentTraceConfig: { ...DEFAULT_TRANSPORT_SETTINGS.agentTraceConfig },
       agentTraceOtlpConfig: { ...DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig },
+      posthogConfig: {
+        managed: { ...DEFAULT_TRANSPORT_SETTINGS.posthogConfig.managed },
+        byo: { ...DEFAULT_TRANSPORT_SETTINGS.posthogConfig.byo },
+      },
     }
   }
 
@@ -209,6 +230,7 @@ function readTransportSettings(): LoggingTransportSettings {
     raw.agentTraceOtlpConfig && typeof raw.agentTraceOtlpConfig === "object"
       ? (raw.agentTraceOtlpConfig as Partial<AgentTraceOtlpSettings>)
       : {}
+  const posthogConfig = sanitizePostHogConfig(raw.posthogConfig)
 
   return {
     console: typeof raw.console === "boolean" ? raw.console : DEFAULT_TRANSPORT_SETTINGS.console,
@@ -329,6 +351,34 @@ function readTransportSettings(): LoggingTransportSettings {
           ? agentTraceOtlpConfig.environment
           : DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig.environment,
       grafanaCloud: sanitizeGrafanaCloud(agentTraceOtlpConfig.grafanaCloud),
+    },
+    posthogConfig,
+  }
+}
+
+function sanitizePostHogConfig(value: unknown): PostHogTelemetrySettings {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  const managed =
+    source.managed && typeof source.managed === "object" && !Array.isArray(source.managed)
+      ? (source.managed as Record<string, unknown>)
+      : {}
+  const byo =
+    source.byo && typeof source.byo === "object" && !Array.isArray(source.byo)
+      ? (source.byo as Record<string, unknown>)
+      : {}
+  return {
+    managed: {
+      productAnalytics: managed.productAnalytics === true,
+      aiObservability: managed.aiObservability === true,
+    },
+    byo: {
+      productAnalytics: byo.productAnalytics === true,
+      aiObservability: byo.aiObservability === true,
+      host: typeof byo.host === "string" ? byo.host.trim() : "",
+      projectToken: typeof byo.projectToken === "string" ? byo.projectToken.trim() : "",
     },
   }
 }
@@ -575,6 +625,16 @@ function applyTransportSettings(
   retention: LoggingRetentionSettings,
   config: UnifiedLoggerConfig
 ): void {
+  const runtime = resolveObservabilityRuntime({
+    isTauri: isTauri(),
+    platformHint: process.env.NEXT_PUBLIC_PLATFORM,
+    userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
+  })
+  const installationId = resolveObservabilityInstallationId(
+    typeof localStorage === "undefined" ? undefined : localStorage
+  )
+  const posthogDestinations = resolvePostHogDestinations(transports.posthogConfig)
+
   if (transports.console) {
     addTransport(createConsoleTransport())
   } else {
@@ -609,11 +669,6 @@ function applyTransportSettings(
     if (existing) {
       addTransport(existing)
     } else {
-      const runtime = resolveObservabilityRuntime({
-        isTauri: isTauri(),
-        platformHint: process.env.NEXT_PUBLIC_PLATFORM,
-        userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
-      })
       const spool = new ObservabilitySpool(new IndexedDBObservabilitySpoolStore(), {
         maxEvents: OBSERVABILITY_SPOOL_MAX_EVENTS,
         maxBytes: OBSERVABILITY_SPOOL_MAX_BYTES,
@@ -777,8 +832,9 @@ function applyTransportSettings(
         serviceName: transports.agentTraceOtlpConfig.serviceName,
         environment: transports.agentTraceOtlpConfig.environment || undefined,
       },
-      captureContent: transports.agentTraceConfig.captureContent,
-      maxPreviewBytes: transports.agentTraceConfig.maxPreviewBytes,
+      // Remote OTLP is metadata-only even when local agent-trace previews are enabled.
+      captureContent: false,
+      maxPreviewBytes: 0,
       fetchImpl,
     } as const
     if (otlpExisting && typeof otlpExisting.updateOptions === "function") {
@@ -791,36 +847,77 @@ function applyTransportSettings(
     // Make sure the emitter writer is wired even when the Dexie sink is off
     // — otherwise spans never reach any transport.
     setAgentTraceWriter(dispatchSpanToTransports)
-    if (isTauri()) {
-      void configureTauriSidecarTelemetry({
-        enabled: true,
-        endpoint: transports.agentTraceOtlpConfig.endpoint,
-        headers: otlpHeaders,
-        serviceName: "cognia-sidecar",
-        environment: transports.agentTraceOtlpConfig.environment,
-        credential:
-          transports.agentTraceOtlpConfig.preset === "grafana-cloud"
-            ? grafanaCredential
-            : { kind: "none" },
-      }).catch(() => {})
-    }
   } else {
     removeTransport("agent-trace-otlp")
-    if (isTauri()) {
-      void configureTauriSidecarTelemetry({
-        enabled: false,
-        endpoint: "http://localhost",
-        headers: {},
-        serviceName: "cognia-sidecar",
-        environment: "",
-        credential: { kind: "none" },
-      }).catch(() => {})
+  }
+
+  for (const destination of posthogDestinations.filter((item) => item.aiObservability)) {
+    const transportName = `agent-trace-posthog-${destination.id}`
+    const existing = getTransport<OtlpHttpTransport>(transportName)
+    const fetchImpl = isTauri()
+      ? createTauriOtlpFetch({
+          credential: { kind: "posthog", projectToken: destination.projectToken },
+        })
+      : createWebPostHogFetch(destination.projectToken)
+    const options = {
+      transportName,
+      endpoint: postHogAiEndpoint(destination.host),
+      resource: {
+        serviceName: "cognia-ai",
+        environment: transports.agentTraceOtlpConfig.environment || undefined,
+      },
+      captureContent: false,
+      maxPreviewBytes: 0,
+      fetchImpl,
+    } as const
+    if (existing) {
+      existing.updateOptions(options)
+      addTransport(existing)
+    } else {
+      addTransport(createOtlpHttpTransport(options))
     }
+  }
+  for (const id of ["managed", "byo"] as const) {
+    if (!posthogDestinations.some((item) => item.id === id && item.aiObservability)) {
+      const transportName = `agent-trace-posthog-${id}`
+      getTransport<OtlpHttpTransport>(transportName)?.discardPending()
+      removeTransport(transportName)
+    }
+  }
+
+  const hasPostHogAi = posthogDestinations.some((item) => item.aiObservability)
+  setAgentTraceWriter(
+    transports.agentTrace || transports.agentTraceOtlp || hasPostHogAi
+      ? dispatchSpanToTransports
+      : null
+  )
+  if (isTauri()) {
+    void configureTauriSidecarTelemetry({
+      enabled: transports.agentTraceOtlp,
+      endpoint: transports.agentTraceOtlp
+        ? transports.agentTraceOtlpConfig.endpoint
+        : "http://localhost",
+      headers: transports.agentTraceOtlp ? { ...transports.agentTraceOtlpConfig.headers } : {},
+      serviceName: "cognia-sidecar",
+      environment: transports.agentTraceOtlp ? transports.agentTraceOtlpConfig.environment : "",
+      credential:
+        transports.agentTraceOtlp && transports.agentTraceOtlpConfig.preset === "grafana-cloud"
+          ? {
+              kind: "grafanaCloud",
+              instanceId: transports.agentTraceOtlpConfig.grafanaCloud.instanceId,
+            }
+          : { kind: "none" },
+      posthogDestinations: posthogDestinations
+        .filter((item) => item.aiObservability)
+        .map(({ id, host, projectToken }) => ({ id, host, projectToken })),
+      installationId,
+    }).catch(() => {})
   }
 
   // Behavior telemetry has its own opt-in and remains independent of the
   // engineering trace transport toggle. It may reuse the configured OTLP
   // destination, but disabling traces must not disable behavior export.
+  const behaviorExporters: BehaviorEventExporter[] = []
   const behaviorEndpoint = otlpLogsEndpoint(transports.agentTraceOtlpConfig.endpoint)
   if (behaviorEndpoint) {
     const behaviorHeaders = { ...transports.agentTraceOtlpConfig.headers }
@@ -837,16 +934,95 @@ function applyTransportSettings(
       : transports.agentTraceOtlpConfig.preset === "grafana-cloud"
         ? createWebGrafanaFetch(transports.agentTraceOtlpConfig.grafanaCloud.instanceId)
         : globalThis.fetch.bind(globalThis)
-    configureBehaviorEventExporter(async (body) => {
-      const response = await behaviorFetch(behaviorEndpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...behaviorHeaders },
-        body,
+    behaviorExporters.push(
+      createOtlpBehaviorEventExporter(async (body) => {
+        const response = await behaviorFetch(behaviorEndpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...behaviorHeaders },
+          body,
+        })
+        if (!response.ok) throw new Error(`OTLP logs export failed with ${response.status}`)
       })
-      if (!response.ok) throw new Error(`OTLP logs export failed with ${response.status}`)
+    )
+  }
+  const managed = posthogDestinations.find((item) => item.id === "managed")
+  const byo = posthogDestinations.find((item) => item.id === "byo")
+  behaviorExporters.push(
+    ...buildPostHogProductExporters({
+      installationId,
+      appVersion: process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0",
+      runtime,
+      managed: {
+        enabled: managed?.productAnalytics === true,
+        host: managed?.host ?? "",
+        projectToken: managed?.projectToken ?? "",
+      },
+      byo: {
+        enabled: byo?.productAnalytics === true,
+        host: byo?.host ?? "",
+        projectToken: byo?.projectToken ?? "",
+      },
     })
-  } else {
-    configureBehaviorEventExporter(null)
+  )
+  configureBehaviorEventExporters(behaviorExporters)
+}
+
+interface ResolvedPostHogDestination {
+  id: "managed" | "byo"
+  host: string
+  projectToken: string
+  productAnalytics: boolean
+  aiObservability: boolean
+}
+
+export function resolvePostHogDestinations(
+  config: PostHogTelemetrySettings
+): ResolvedPostHogDestination[] {
+  const destinations: ResolvedPostHogDestination[] = []
+  const managedHost = process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() ?? ""
+  const managedToken = process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN?.trim() ?? ""
+  const normalizedManagedHost = normalizeHttpOrigin(managedHost)
+  if (normalizedManagedHost && managedToken.startsWith("phc_")) {
+    destinations.push({
+      id: "managed",
+      host: normalizedManagedHost,
+      projectToken: managedToken,
+      ...config.managed,
+    })
+  }
+  const byoHost = config.byo.host.trim()
+  const byoToken = config.byo.projectToken.trim()
+  const normalizedByoHost = normalizeHttpOrigin(byoHost)
+  if (normalizedByoHost && byoToken.startsWith("phc_")) {
+    destinations.push({
+      id: "byo",
+      host: normalizedByoHost,
+      projectToken: byoToken,
+      productAnalytics: config.byo.productAnalytics,
+      aiObservability: config.byo.aiObservability,
+    })
+  }
+  return destinations
+}
+
+function normalizeHttpOrigin(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+export function postHogAiEndpoint(host: string): string {
+  return `${new URL(host).origin}/i/v0/ai/otel`
+}
+
+function createWebPostHogFetch(projectToken: string): typeof fetch {
+  return async (input, init) => {
+    const headers = new Headers(init?.headers)
+    headers.set("Authorization", `Bearer ${projectToken}`)
+    return globalThis.fetch(input, { ...init, headers })
   }
 }
 

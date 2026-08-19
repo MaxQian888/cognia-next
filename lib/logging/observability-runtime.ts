@@ -49,6 +49,13 @@ function installationId(storage: StorageLike | undefined, randomId: () => string
   }
 }
 
+export function resolveObservabilityInstallationId(
+  storage?: StorageLike,
+  randomId: () => string = randomInstallationId
+): string {
+  return installationId(storage, randomId)
+}
+
 export function resolveObservabilityRuntime(
   options: ResolveObservabilityRuntimeOptions
 ): ObservabilityRuntime {
@@ -67,7 +74,7 @@ export function createObservabilityRuntimeScope(
   return {
     tenantId:
       environment.tenantId || process.env.NEXT_PUBLIC_DIAGNOSTIC_TENANT_ID || "cognia-community",
-    installationId: installationId(options.storage, options.randomId ?? randomInstallationId),
+    installationId: resolveObservabilityInstallationId(options.storage, options.randomId),
     runtime: options.runtime,
     processId: options.processId,
     module: options.module ?? "app",

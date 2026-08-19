@@ -1,10 +1,13 @@
 import { randomBytes } from "node:crypto"
 
-import { ROOT_CONTEXT, SpanStatusCode, context, propagation, trace } from "@opentelemetry/api"
+import { ROOT_CONTEXT, context, propagation, trace } from "@opentelemetry/api"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { NodeSDK } from "@opentelemetry/sdk-node"
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
+import { PostHogTraceExporter } from "@posthog/ai/otel"
 
 let sdk = null
+let installationId = ""
 /**
  * AI SDK 7 moved OpenTelemetry span collection out of the `ai` package: it no
  * longer emits spans just because a call passes telemetry options. The
@@ -41,7 +44,16 @@ function registerAiSdkTelemetry() {
   aiTelemetryRegistered = true
   Promise.all([import("ai"), import("@ai-sdk/otel")])
     .then(([{ registerTelemetry }, { OpenTelemetry }]) => {
-      registerTelemetry(new OpenTelemetry({ tracer: trace.getTracer("cognia.sidecar.ai-sdk") }))
+      registerTelemetry(
+        new OpenTelemetry({
+          tracer: trace.getTracer("cognia.sidecar.ai-sdk"),
+          enrichSpan: ({ runtimeContext }) => ({
+            "gen_ai.conversation.id": runtimeContext?.cogniaSessionId,
+            "cognia.trace_id": runtimeContext?.cogniaTraceId,
+            "posthog.distinct_id": installationId || undefined,
+          }),
+        })
+      )
     })
     .catch(() => {
       // Not the sidecar process (or the packages are absent) — allow a later
@@ -52,22 +64,194 @@ function registerAiSdkTelemetry() {
 
 export function initializeTelemetry(env = process.env) {
   const endpoint = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-  if (!endpoint || sdk) return false
+  const posthogDestinations = parsePostHogDestinations(env.COGNIA_POSTHOG_DESTINATIONS_JSON)
+  if ((!endpoint && posthogDestinations.length === 0) || sdk) return false
+  installationId = String(env.COGNIA_OBSERVABILITY_INSTALLATION_ID ?? "").trim()
+  const spanProcessors = []
+  if (endpoint) {
+    spanProcessors.push(
+      new BatchSpanProcessor(
+        new PrivacyFilteringSpanExporter(
+          new OTLPTraceExporter({
+            url: endpoint,
+            headers: parseHeaders(
+              env.OTEL_EXPORTER_OTLP_HEADERS,
+              env.COGNIA_OTEL_EXPORTER_HEADERS_JSON
+            ),
+          })
+        ),
+        { maxExportBatchSize: 16 }
+      )
+    )
+  }
+  for (const destination of posthogDestinations) {
+    spanProcessors.push(
+      new BatchSpanProcessor(
+        new PrivacyFilteringSpanExporter(
+          new PostHogTraceExporter({
+            projectToken: destination.projectToken,
+            host: destination.host,
+          })
+        ),
+        { maxExportBatchSize: 16 }
+      )
+    )
+  }
   sdk = new NodeSDK({
     serviceName: env.OTEL_SERVICE_NAME || "cognia-sidecar",
-    traceExporter: new OTLPTraceExporter({
-      url: endpoint,
-      headers: parseHeaders(env.OTEL_EXPORTER_OTLP_HEADERS, env.COGNIA_OTEL_EXPORTER_HEADERS_JSON),
-    }),
+    spanProcessors,
   })
   sdk.start()
   registerAiSdkTelemetry()
   return true
 }
 
+const PRIVATE_ATTRIBUTE_KEYS = new Set([
+  "gen_ai.system_instructions",
+  "gen_ai.input.messages",
+  "gen_ai.output.messages",
+  "gen_ai.tool.definitions",
+  "gen_ai.tool.call.arguments",
+  "gen_ai.tool.call.result",
+  "ai.prompt",
+  "ai.response",
+  "exception.message",
+  "exception.stacktrace",
+])
+
+const ALLOWED_ATTRIBUTE_KEYS = new Set([
+  "gen_ai.operation.name",
+  "gen_ai.provider.name",
+  "gen_ai.conversation.id",
+  "gen_ai.request.model",
+  "gen_ai.response.model",
+  "gen_ai.tool.name",
+  "gen_ai.tool.call.id",
+  "openinference.span.kind",
+  "posthog.distinct_id",
+  "error.type",
+  "http.response.status_code",
+  "server.address",
+])
+
+function isAllowedAttributeKey(key) {
+  return (
+    ALLOWED_ATTRIBUTE_KEYS.has(key) ||
+    /^gen_ai\.usage\./.test(key) ||
+    /^cognia\.(?:trace_id|cost\.|surface$|span\.status$|usage\.|(?:run|turn|attempt|project|plugin)\.id$)/.test(
+      key
+    )
+  )
+}
+
+function boundedAttributeValue(value) {
+  if (typeof value === "string") return value.slice(0, 512)
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "boolean") return value
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 16)
+      .map(boundedAttributeValue)
+      .filter((item) => item !== undefined)
+  }
+  return undefined
+}
+
+function sanitizeAttributes(attributes = {}) {
+  return Object.fromEntries(
+    Object.entries(attributes)
+      .slice(0, 32)
+      .flatMap(([key, value]) => {
+        if (PRIVATE_ATTRIBUTE_KEYS.has(key)) return []
+        if (
+          /(?:^|\.)(?:prompt|completion|content|system_prompt|schema|arguments?|results?|inputs?|outputs?|exception|stack|message|body|file|path|url|referrer)(?:$|\.)/i.test(
+            key
+          ) ||
+          !isAllowedAttributeKey(key)
+        ) {
+          return []
+        }
+        const bounded = boundedAttributeValue(value)
+        return bounded === undefined ? [] : [[key, bounded]]
+      })
+  )
+}
+
+function sanitizeReadableSpan(span) {
+  const overrides = {
+    attributes: sanitizeAttributes(span.attributes),
+    status: span.status ? { code: span.status.code } : span.status,
+    links: [],
+    events: (span.events ?? [])
+      .filter((event) => !/(?:exception|error|message|prompt|content)/i.test(event.name))
+      .slice(0, 8)
+      .map((event) => ({
+        ...event,
+        attributes: sanitizeAttributes(event.attributes),
+      })),
+  }
+  return new Proxy(span, {
+    get(target, property, receiver) {
+      if (Object.hasOwn(overrides, property)) return overrides[property]
+      const value = Reflect.get(target, property, receiver)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+}
+
+class PrivacyFilteringSpanExporter {
+  constructor(delegate) {
+    this.delegate = delegate
+  }
+
+  export(spans, resultCallback) {
+    this.delegate.export(spans.map(sanitizeReadableSpan), resultCallback)
+  }
+
+  shutdown() {
+    return this.delegate.shutdown()
+  }
+
+  forceFlush() {
+    return typeof this.delegate.forceFlush === "function"
+      ? this.delegate.forceFlush()
+      : Promise.resolve()
+  }
+}
+
+function parsePostHogDestinations(value) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== "object") return []
+      const host = typeof item.host === "string" ? item.host.trim().replace(/\/$/, "") : ""
+      const projectToken = typeof item.projectToken === "string" ? item.projectToken.trim() : ""
+      try {
+        const url = new URL(host)
+        if (
+          !projectToken.startsWith("phc_") ||
+          !["http:", "https:"].includes(url.protocol) ||
+          url.username ||
+          url.password
+        ) {
+          return []
+        }
+      } catch {
+        return []
+      }
+      return [{ id: String(item.id ?? "posthog"), host, projectToken }]
+    })
+  } catch {
+    return []
+  }
+}
+
 export async function shutdownTelemetry() {
   const current = sdk
   sdk = null
+  installationId = ""
   if (current) await current.shutdown()
 }
 
@@ -112,7 +296,7 @@ export function aiSdkTelemetry({ sessionId, traceId, provider, traceparent }) {
     // per-call options; the custom tracer now lives on the `OpenTelemetry`
     // instance built at registration.
     functionId: `cognia.sidecar.${provider || "unknown"}`,
-    metadata: { sessionId, traceId },
+    runtimeContext: { cogniaSessionId: sessionId, cogniaTraceId: traceId },
     // Privacy contract, unchanged: prompts and completions never enter a span.
     recordInputs: false,
     recordOutputs: false,
@@ -168,28 +352,15 @@ function emitLocalSpan(emit, span) {
  */
 export function traceAsyncIterable(name, traceparent, attributes, iterable, options = {}) {
   const localEmit = options.emit
-  if (!sdk && typeof localEmit !== "function") return iterable
-
-  const span = sdk
-    ? trace
-        .getTracer("cognia.sidecar.anthropic")
-        .startSpan(name, { attributes }, parentContext(traceparent))
-    : null
+  // AI SDK spans are exported by the sidecar. Manually wrapped Anthropic spans
+  // are repatriated and owned by the renderer so they are never exported twice.
+  if (typeof localEmit !== "function") return iterable
   const startTime = Date.now()
   const spanId = randomSpanId()
   let ended = false
   const finish = (error) => {
     if (ended) return
     ended = true
-    if (span) {
-      if (error) {
-        span.recordException(error)
-        span.setStatus({ code: SpanStatusCode.ERROR, message: String(error?.message ?? error) })
-      } else {
-        span.setStatus({ code: SpanStatusCode.OK })
-      }
-      span.end()
-    }
     const endTime = Date.now()
     emitLocalSpan(localEmit, {
       sessionId: options.sessionId,
@@ -231,4 +402,9 @@ export function traceAsyncIterable(name, traceparent, attributes, iterable, opti
   })
 }
 
-export const __TESTING__ = { parseHeaders, randomSpanId }
+export const __TESTING__ = {
+  parseHeaders,
+  parsePostHogDestinations,
+  randomSpanId,
+  sanitizeReadableSpan,
+}

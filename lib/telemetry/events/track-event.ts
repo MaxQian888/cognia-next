@@ -8,12 +8,52 @@ import {
 } from "./catalog"
 
 type EventAttributes = Record<string, string | number | boolean>
-type EventExporter = (body: string) => Promise<void>
+type LegacyEventExporter = (body: string) => Promise<void>
 
-let exporter: EventExporter | null = null
+export interface BehaviorEventEnvelope {
+  name: TelemetryEventName
+  category: (typeof TELEMETRY_EVENT_CATALOG)[TelemetryEventName]["category"]
+  at: number
+  attributes: EventAttributes
+}
 
-export function configureBehaviorEventExporter(next: EventExporter | null): void {
-  exporter = next
+export interface BehaviorEventExporter {
+  id: string
+  export: (event: BehaviorEventEnvelope) => Promise<void>
+  /** The legacy generic OTLP sink remains gated by `destinations.remote`. */
+  requiresRemoteConsent?: boolean
+  /** Withdraw consent immediately and discard any destination-owned queue. */
+  close?: () => void | Promise<void>
+}
+
+let exporters: BehaviorEventExporter[] = []
+
+export function configureBehaviorEventExporter(next: LegacyEventExporter | null): void {
+  for (const exporter of exporters) void exporter.close?.()
+  exporters = next
+    ? [
+        {
+          id: "otlp",
+          requiresRemoteConsent: true,
+          export: (event) => next(toOtlpLogBody(event.name, event.attributes, event.at)),
+        },
+      ]
+    : []
+}
+
+export function configureBehaviorEventExporters(next: BehaviorEventExporter[]): void {
+  for (const exporter of exporters) void exporter.close?.()
+  exporters = [...next]
+}
+
+export function createOtlpBehaviorEventExporter(
+  exportBody: LegacyEventExporter
+): BehaviorEventExporter {
+  return {
+    id: "otlp",
+    requiresRemoteConsent: true,
+    export: (event) => exportBody(toOtlpLogBody(event.name, event.attributes, event.at)),
+  }
 }
 
 function normalizeEventAttributes(value: unknown): EventAttributes | null {
@@ -95,6 +135,12 @@ export async function trackEvent<Name extends TelemetryEventName>(
   if (!hasNoLeakingPii(JSON.stringify({ name, attributes: normalized }))) return false
 
   const at = Date.now()
+  const envelope: BehaviorEventEnvelope = {
+    name,
+    category: definition.category,
+    at,
+    attributes: normalized,
+  }
   const sessionId = "sessionId" in normalized ? String(normalized.sessionId) : undefined
   const writes: Promise<unknown>[] = []
   if (settings.destinations.local) {
@@ -105,8 +151,9 @@ export async function trackEvent<Name extends TelemetryEventName>(
       )
     )
   }
-  if (settings.destinations.remote && exporter) {
-    writes.push(exporter(toOtlpLogBody(name, normalized, at)))
+  for (const eventExporter of exporters) {
+    if (eventExporter.requiresRemoteConsent && !settings.destinations.remote) continue
+    writes.push(eventExporter.export(envelope))
   }
   const results = await Promise.allSettled(writes)
   return results.some((result) => result.status === "fulfilled")

@@ -36,8 +36,13 @@ import "./fetch-interceptor.mjs"
 import { initializeTelemetry, shutdownTelemetry } from "./telemetry.mjs"
 
 initializeTelemetry()
+let telemetryShutdown = null
+function shutdownHostTelemetry() {
+  telemetryShutdown ??= shutdownTelemetry()
+  return telemetryShutdown
+}
 process.once("beforeExit", () => {
-  void shutdownTelemetry()
+  void shutdownHostTelemetry()
   // Warm subprocesses are real processes with no parent watching them once we
   // go away — dropping the pool without closing would leave them running.
   resetWarmPool()
@@ -886,6 +891,7 @@ export async function smoke() {
   }
   console.error("[sidecar smoke] done")
   void s
+  await shutdownHostTelemetry()
   process.exit(0)
 }
 
@@ -1012,7 +1018,7 @@ function startReadLoop() {
         log("warn", `unknown command type: ${msg.type}`)
     }
   })
-  rl.on("close", () => {
+  rl.on("close", async () => {
     // Parent closed our stdin — shut down all sessions gracefully.
     // Fail in-flight host RPCs first: their replies can never arrive now, and
     // a tool awaiting one would otherwise hang until its own timeout.
@@ -1020,6 +1026,7 @@ function startReadLoop() {
     for (const id of Array.from(sessions.keys())) {
       handleClose({ sessionId: id })
     }
+    await shutdownHostTelemetry()
     process.exit(0)
   })
 

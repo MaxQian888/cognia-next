@@ -53,6 +53,33 @@ sidecar work. The optional Rust feature adds a heavier dependency graph only to
 builds that select it. Behavior analytics cannot silently activate merely
 because an endpoint is configured.
 
+## 2026-08-19 amendment — PostHog destinations
+
+PostHog is an additional destination, not a replacement for generic OTLP,
+Langfuse, local agent-trace storage, or native telemetry. Managed and
+bring-your-own projects each expose separate product-analytics and AI-observability
+consent switches; all four default off. Product events still pass the behavior
+telemetry master switch, category filter, sampling, scalar validation, and PII
+gate. AI observability has independent consent.
+
+Product analytics uses lazily loaded named `posthog-js@1.418.1` instances with
+memory-only persistence and manual capture. Autocapture, page lifecycle capture,
+session replay, surveys, feature flags, person profiles, and automatic exception
+capture are disabled. AI telemetry uses AI SDK 7 `OpenTelemetry` from
+`@ai-sdk/otel` and provider-independent `PostHogTraceExporter` from
+`@posthog/ai@8.8.0`. One sidecar `NodeSDK` owns a processor per enabled generic
+OTLP or PostHog destination; PostHog always uses `/i/v0/ai/otel` and is never
+used to derive logs or metrics endpoints.
+
+The remote allowlist contains identifiers, runtime/version, provider/model,
+usage, latency, cost, tool names, and success/failure state. Prompts,
+completions, system instructions, tool schemas/arguments/results, file content,
+URLs, and exception message/stack/body are stripped again immediately before
+export. The random installation ID is the only PostHog `distinct_id`; account,
+email, and hardware identifiers are prohibited. PostHog project tokens are
+public ingestion tokens; Personal API Keys are rejected by policy and tokens are
+masked in UI, logs, and diagnostics.
+
 ## Alternatives rejected
 
 - Adding `https:` or runtime hosts to CSP: too broad and cannot express a

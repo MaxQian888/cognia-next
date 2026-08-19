@@ -42,6 +42,24 @@ collector。另一个 OpenTelemetry 开关只包装了并不存在的全局 prov
 renderer、原生层与 sidecar。较重的 Rust 依赖只影响显式选择该 feature 的构建。仅仅配置
 endpoint 不会暗中启用行为分析。
 
+## 2026-08-19 修订——PostHog 目的地
+
+PostHog 是新增目的地，不替换通用 OTLP、Langfuse、本地 agent-trace 存储或原生遥测。
+托管项目和自带项目（BYO）分别提供产品分析与 AI 可观测性授权，四个开关全部默认关闭。
+产品事件仍须经过行为遥测总开关、分类、采样、标量校验和 PII 闸门；AI 可观测性使用独立授权。
+
+产品分析使用按需加载的具名 `posthog-js@1.418.1` 实例，仅内存持久化和手工 capture；
+autocapture、页面生命周期采集、会话回放、问卷、功能开关、用户画像和自动异常采集全部关闭。
+AI 遥测使用 AI SDK 7 的 `@ai-sdk/otel` `OpenTelemetry`，以及
+`@posthog/ai@8.8.0` 的 provider-independent `PostHogTraceExporter`。Sidecar 只创建一个
+`NodeSDK`，按已启用的通用 OTLP 或 PostHog 目的地组合 processor；PostHog 固定使用
+`/i/v0/ai/otel`，绝不据此派生 logs 或 metrics endpoint。
+
+远程白名单只允许标识符、运行时/版本、provider/model、用量、延迟、成本、工具名和成功/失败状态。
+prompt、completion、system instruction、工具 schema/参数/结果、文件内容、URL 与异常正文/堆栈
+会在导出前再次删除。随机 installation ID 是唯一的 PostHog `distinct_id`，禁止账号、邮箱和硬件标识。
+PostHog project token 仅限公开 ingestion token；策略明确拒绝 Personal API Key，并在 UI、日志和诊断中掩码。
+
 ## 未采用的方案
 
 - 给 CSP 添加 `https:` 或运行时 host：范围过宽，也无法安全表达用户自定义 endpoint。

@@ -21,6 +21,18 @@ test("parses OTLP headers without putting them on argv", () => {
   })
 })
 
+test("rejects Personal API Keys and non-HTTP PostHog destinations", () => {
+  assert.deepEqual(
+    __TESTING__.parsePostHogDestinations(
+      JSON.stringify([
+        { id: "byo", host: "https://posthog.example", projectToken: "phx_personal" },
+        { id: "byo", host: "file:///tmp/posthog", projectToken: "phc_project" },
+      ])
+    ),
+    []
+  )
+})
+
 test("extracts a valid W3C traceparent and makes it current", () => {
   propagation.setGlobalPropagator({
     inject() {},
@@ -69,7 +81,11 @@ test("AI SDK telemetry is enabled only after configuration and never records con
   assert.equal(options.recordInputs, false)
   assert.equal(options.recordOutputs, false)
   assert.equal(options.functionId, "cognia.sidecar.openai")
-  assert.deepEqual(options.metadata, { sessionId: "session-1", traceId: "a".repeat(32) })
+  assert.equal(options.metadata, undefined)
+  assert.deepEqual(options.runtimeContext, {
+    cogniaSessionId: "session-1",
+    cogniaTraceId: "a".repeat(32),
+  })
 
   // A second init must not register the integration again — `registerTelemetry`
   // appends to a process-global list, so a duplicate would double every span.
@@ -78,6 +94,55 @@ test("AI SDK telemetry is enabled only after configuration and never records con
     false
   )
   await shutdownTelemetry()
+})
+
+test("PostHog-only configuration initializes telemetry without a generic OTLP endpoint", async () => {
+  assert.equal(
+    initializeTelemetry({
+      COGNIA_POSTHOG_DESTINATIONS_JSON: JSON.stringify([
+        {
+          id: "managed",
+          host: "https://us.i.posthog.com",
+          projectToken: "phc_test",
+        },
+      ]),
+      COGNIA_OBSERVABILITY_INSTALLATION_ID: "installation-1",
+    }),
+    true
+  )
+  const options = aiSdkTelemetry({ sessionId: "session-2", provider: "anthropic" })
+  assert.equal(options.recordInputs, false)
+  assert.equal(options.recordOutputs, false)
+  await shutdownTelemetry()
+})
+
+test("remote span filtering removes content, tool arguments, files, URLs, and exception text", () => {
+  const sanitized = __TESTING__.sanitizeReadableSpan({
+    spanContext() {
+      return { traceId: "a".repeat(32), spanId: "b".repeat(16), traceFlags: 1 }
+    },
+    attributes: {
+      "gen_ai.request.model": "gpt-5",
+      "gen_ai.input.messages": "private prompt",
+      "tool.arguments": "private tool args",
+      "cognia.file.path": "/private/file.txt",
+      "http.url": "https://private.example/path",
+      "exception.message": "private exception",
+    },
+    status: { code: 2, message: "private failure" },
+    events: [
+      {
+        name: "generation.status",
+        attributes: { "exception.stacktrace": "private stack", "cognia.span.status": "failed" },
+      },
+    ],
+  })
+  const payload = JSON.stringify(sanitized)
+  assert.equal(payload.includes("private"), false)
+  assert.equal(sanitized.attributes["gen_ai.request.model"], "gpt-5")
+  assert.equal(sanitized.events[0].attributes["cognia.span.status"], "failed")
+  assert.deepEqual(sanitized.status, { code: 2 })
+  assert.equal(sanitized.spanContext().traceId, "a".repeat(32))
 })
 
 // ---- local span repatriation ---------------------------------------------

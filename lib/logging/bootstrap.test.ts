@@ -46,7 +46,8 @@ jest.mock("@/lib/native/native-logging", () => ({
 
 describe("bootstrapLogger persistence + transport attach/detach", () => {
   it("derives the OTLP Logs endpoint from trace and collector base URLs", async () => {
-    const { otlpLogsEndpoint } = await import("./bootstrap")
+    const { otlpLogsEndpoint, postHogAiEndpoint, resolvePostHogDestinations } =
+      await import("./bootstrap")
     expect(otlpLogsEndpoint("http://localhost:4318/v1/traces")).toBe(
       "http://localhost:4318/v1/logs"
     )
@@ -54,6 +55,28 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
       "https://collector.example/otlp/v1/logs"
     )
     expect(otlpLogsEndpoint(" ")).toBe("")
+    expect(postHogAiEndpoint("https://eu.i.posthog.com/custom")).toBe(
+      "https://eu.i.posthog.com/i/v0/ai/otel"
+    )
+    expect(
+      resolvePostHogDestinations({
+        managed: { productAnalytics: false, aiObservability: false },
+        byo: {
+          productAnalytics: true,
+          aiObservability: true,
+          host: "https://posthog.example/private/path",
+          projectToken: "phc_project",
+        },
+      })
+    ).toEqual([
+      {
+        id: "byo",
+        host: "https://posthog.example",
+        projectToken: "phc_project",
+        productAnalytics: true,
+        aiObservability: true,
+      },
+    ])
   })
 
   it("registers the default transports on first run", async () => {
@@ -66,6 +89,15 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     // short-circuit silently until credentials/endpoints are filled in.
     expect(state.transports.remote).toBe(true)
     expect(state.transports.langfuse).toBe(true)
+    expect(state.transports.posthogConfig).toEqual({
+      managed: { productAnalytics: false, aiObservability: false },
+      byo: {
+        productAnalytics: false,
+        aiObservability: false,
+        host: "",
+        projectToken: "",
+      },
+    })
     const names = mod.listRegisteredTransports()
     expect(names).toEqual(expect.arrayContaining(["console", "indexeddb", "observability-spool"]))
     // Remote stays detached without a configured endpoint, even when its

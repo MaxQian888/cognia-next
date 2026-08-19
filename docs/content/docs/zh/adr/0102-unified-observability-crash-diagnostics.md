@@ -69,5 +69,9 @@ Capacitor 之间关联，同时不会暗中上传常规活动。崩溃恢复从�
 
 ## 实施记录
 
+2026-08-19 的 PostHog 接入遵循本 ADR 的本地优先与按目的地授权规则，不改变崩溃上传授权或诊断服务。
+产品事件和 AI span 仅双发到用户明确启用的托管/BYO 目的地。PostHog 导出边界与通用远程 OTLP
+使用同一套无内容白名单，包括删除异常 message 和 stack 文本。
+
 完整契约、状态机、发布闸门、容量限制与验证矩阵见
 [`docs/plans/2026-08-01-unified-observability-crash-diagnostics.md`](../../../../plans/2026-08-01-unified-observability-crash-diagnostics.md)。

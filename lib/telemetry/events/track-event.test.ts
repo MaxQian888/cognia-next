@@ -10,13 +10,49 @@ import {
   DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
   saveBehaviorTelemetrySettings,
 } from "./settings"
-import { __TESTING__, configureBehaviorEventExporter, trackEvent } from "./track-event"
+import {
+  __TESTING__,
+  configureBehaviorEventExporter,
+  configureBehaviorEventExporters,
+  trackEvent,
+} from "./track-event"
 
 beforeEach(() => {
   localStorage.clear()
   jest.clearAllMocks()
   jest.mocked(hasNoLeakingPii).mockReturnValue(true)
   configureBehaviorEventExporter(null)
+})
+
+it("fans one sanitized envelope out to independently configured remote destinations", async () => {
+  localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, "true")
+  const managed = jest.fn().mockResolvedValue(undefined)
+  const byo = jest.fn().mockResolvedValue(undefined)
+  configureBehaviorEventExporters([
+    { id: "posthog-managed", export: managed },
+    { id: "posthog-byo", export: byo },
+  ])
+
+  await expect(
+    trackEvent("chat.message.sent", {
+      sessionId: "session-1",
+      provider: "anthropic",
+      surface: "chat",
+    })
+  ).resolves.toBe(true)
+
+  const expected = expect.objectContaining({
+    name: "chat.message.sent",
+    category: "chat",
+    at: expect.any(Number),
+    attributes: {
+      sessionId: "session-1",
+      provider: "anthropic",
+      surface: "chat",
+    },
+  })
+  expect(managed).toHaveBeenCalledWith(expected)
+  expect(byo).toHaveBeenCalledWith(expected)
 })
 
 it("is a real default-off switch", async () => {

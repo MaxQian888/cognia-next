@@ -173,6 +173,63 @@ describe("LogSettings — render", () => {
   })
 })
 
+describe("LogSettings — PostHog", () => {
+  it("keeps product and AI consent independent for managed and BYO projects", () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: "PostHog" }))
+
+    expect(screen.getByTestId("posthog-managed-product-switch")).toBeDisabled()
+    expect(screen.getByTestId("posthog-managed-ai-switch")).toBeDisabled()
+    expect(screen.getByLabelText("BYO PostHog host")).toBeInTheDocument()
+    expect(screen.getByLabelText("BYO project token")).toHaveAttribute("type", "password")
+    expect(screen.getByTestId("posthog-byo-product-switch")).not.toBeChecked()
+    expect(screen.getByTestId("posthog-byo-ai-switch")).not.toBeChecked()
+  })
+
+  it("does not report a local-only test event as a PostHog send", async () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: "PostHog" }))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send test event" }))
+    })
+
+    expect(mockTrackEvent).not.toHaveBeenCalled()
+    expect(screen.getByText(/^Not sent\./)).toBeInTheDocument()
+  })
+
+  it("persists BYO product and AI scopes independently", async () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: "PostHog" }))
+    fireEvent.change(screen.getByLabelText("BYO PostHog host"), {
+      target: { value: "https://eu.i.posthog.com" },
+    })
+    fireEvent.change(screen.getByLabelText("BYO project token"), {
+      target: { value: "phc_project" },
+    })
+    fireEvent.click(screen.getByTestId("posthog-byo-product-switch"))
+    expect(screen.getByTestId("posthog-byo-ai-switch")).not.toBeChecked()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    })
+    expect(mockApplyLoggingSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transports: expect.objectContaining({
+          posthogConfig: expect.objectContaining({
+            byo: {
+              productAnalytics: true,
+              aiObservability: false,
+              host: "https://eu.i.posthog.com",
+              projectToken: "phc_project",
+            },
+          }),
+        }),
+      })
+    )
+  })
+})
+
 describe("LogSettings — behavior telemetry", () => {
   it("persists independent destinations and category consent", async () => {
     render(<LogSettings />)
