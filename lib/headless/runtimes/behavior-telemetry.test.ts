@@ -11,7 +11,7 @@ const mockUnsubscribe = jest.fn()
 const mockSubscribe = jest.fn<{ unsubscribe: typeof mockUnsubscribe }, [unknown]>(() => ({
   unsubscribe: mockUnsubscribe,
 }))
-const mockConfigureExporter = jest.fn()
+const mockConfigureExporters = jest.fn()
 const mockLiveQuery = jest.fn((query: () => Promise<unknown>) => ({
   query,
   subscribe: (observer: unknown) => mockSubscribe(observer),
@@ -26,7 +26,14 @@ jest.mock("@/lib/telemetry/events/settings", () => ({
   DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS: {
     enabled: false,
     destinations: { local: true, remote: false },
-    categories: { chat: true, workflow: true, connector: true, agentTeam: true, system: true },
+    categories: {
+      chat: true,
+      workflow: true,
+      connector: true,
+      agentTeam: true,
+      app: true,
+      system: true,
+    },
     sampleRate: 1,
     retentionDays: 30,
     maxStoredEvents: 10_000,
@@ -34,8 +41,31 @@ jest.mock("@/lib/telemetry/events/settings", () => ({
   configureBehaviorTelemetrySettings: jest.fn(),
 }))
 jest.mock("@/lib/telemetry/events/track-event", () => ({
-  configureBehaviorEventExporter: (...args: unknown[]) => mockConfigureExporter(...args),
+  configureBehaviorEventExporters: (...args: unknown[]) => mockConfigureExporters(...args),
+  createOtlpBehaviorEventExporter: (exportBody: (body: string) => Promise<void>) => ({
+    id: "otlp",
+    requiresRemoteConsent: true,
+    export: exportBody,
+  }),
 }))
+
+interface StubExporter {
+  id: string
+  requiresRemoteConsent?: boolean
+  export: (body: string) => Promise<void>
+}
+
+/** The OTLP body sender behind the last installed exporter set. */
+function otlpSender(): ((body: string) => Promise<void>) | undefined {
+  const installed = mockConfigureExporters.mock.calls.at(-1)?.[0] as StubExporter[] | undefined
+  return installed?.find((exporter) => exporter.id === "otlp")?.export
+}
+
+/** Ids of the last installed exporter set, in install order. */
+function installedIds(): string[] {
+  const installed = mockConfigureExporters.mock.calls.at(-1)?.[0] as StubExporter[] | undefined
+  return (installed ?? []).map((exporter) => exporter.id)
+}
 
 const mockGetSettings = jest.mocked(getSettings)
 const mockConfigure = jest.mocked(configureBehaviorTelemetrySettings)
@@ -52,6 +82,11 @@ describe("behavior telemetry headless runtime", () => {
     delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
     delete process.env.OTEL_EXPORTER_OTLP_LOGS_HEADERS
     delete process.env.OTEL_EXPORTER_OTLP_HEADERS
+    delete process.env.COGNIA_POSTHOG_HOST
+    delete process.env.COGNIA_POSTHOG_PROJECT_TOKEN
+    delete process.env.NEXT_PUBLIC_POSTHOG_HOST
+    delete process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
+    delete process.env.COGNIA_OBSERVABILITY_INSTALLATION_ID
   })
 
   it("registers and installs the structured account policy", async () => {
@@ -106,9 +141,7 @@ describe("behavior telemetry headless runtime", () => {
     const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
 
     const stop = await runtime!.start({} as never)
-    const exporter = mockConfigureExporter.mock.calls.find(
-      ([candidate]) => typeof candidate === "function"
-    )?.[0] as ((body: string) => Promise<void>) | undefined
+    const exporter = otlpSender()
     expect(exporter).toBeDefined()
     await exporter!("{}")
 
@@ -125,7 +158,7 @@ describe("behavior telemetry headless runtime", () => {
       })
     )
     await stop!()
-    expect(mockConfigureExporter).toHaveBeenLastCalledWith(null)
+    expect(mockConfigureExporters).toHaveBeenLastCalledWith([])
     fetchSpy.mockRestore()
   })
 
@@ -139,9 +172,7 @@ describe("behavior telemetry headless runtime", () => {
     const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
 
     await runtime!.start({} as never)
-    const exporter = mockConfigureExporter.mock.calls.find(
-      ([candidate]) => typeof candidate === "function"
-    )?.[0] as (body: string) => Promise<void>
+    const exporter = otlpSender()!
     await exporter("payload")
 
     expect(fetchSpy).toHaveBeenCalledWith("https://collector.example/base/v1/logs", {
@@ -166,9 +197,7 @@ describe("behavior telemetry headless runtime", () => {
     const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
 
     await runtime!.start({} as never)
-    const exporter = mockConfigureExporter.mock.calls.find(
-      ([candidate]) => typeof candidate === "function"
-    )?.[0] as (body: string) => Promise<void>
+    const exporter = otlpSender()!
 
     await expect(exporter("payload")).rejects.toThrow("OTLP logs export failed with 503")
     fetchSpy.mockRestore()
@@ -223,5 +252,102 @@ describe("behavior telemetry headless runtime", () => {
       "warn",
       "behavior telemetry settings refresh failed: refresh denied again"
     )
+  })
+
+  describe("headless PostHog destination", () => {
+    it("installs a PostHog exporter alongside OTLP when host, token and installation id are set", async () => {
+      process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "https://collector.example/v1/logs"
+      process.env.COGNIA_POSTHOG_HOST = "https://posthog.example"
+      process.env.COGNIA_POSTHOG_PROJECT_TOKEN = "phc_headless"
+      process.env.COGNIA_OBSERVABILITY_INSTALLATION_ID = "install-1"
+      mockGetSettings.mockResolvedValue({} as never)
+      mockGetPersisted.mockResolvedValue(undefined)
+      const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
+
+      await runtime!.start({ log: jest.fn() } as never)
+
+      expect(installedIds()).toEqual(["otlp", "posthog-byo"])
+    })
+
+    it("accepts the renderer's managed project variables as a fallback", async () => {
+      process.env.NEXT_PUBLIC_POSTHOG_HOST = "https://us.i.posthog.com"
+      process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN = "phc_managed"
+      process.env.COGNIA_OBSERVABILITY_INSTALLATION_ID = "install-1"
+      mockGetSettings.mockResolvedValue({} as never)
+      mockGetPersisted.mockResolvedValue(undefined)
+      const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
+
+      await runtime!.start({ log: jest.fn() } as never)
+
+      expect(installedIds()).toEqual(["posthog-byo"])
+    })
+
+    it("gates the brain's PostHog destination on the account-wide remote consent", async () => {
+      process.env.COGNIA_POSTHOG_HOST = "https://posthog.example"
+      process.env.COGNIA_POSTHOG_PROJECT_TOKEN = "phc_headless"
+      process.env.COGNIA_OBSERVABILITY_INSTALLATION_ID = "install-1"
+      mockGetSettings.mockResolvedValue({} as never)
+      mockGetPersisted.mockResolvedValue(undefined)
+      const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
+
+      await runtime!.start({ log: jest.fn() } as never)
+
+      const installed = mockConfigureExporters.mock.calls.at(-1)?.[0] as StubExporter[]
+      // There is no per-destination switch off-desktop, so an env var must never
+      // be treated as the account holder's permission to send events off-device.
+      expect(installed[0].requiresRemoteConsent).toBe(true)
+    })
+
+    it("refuses a PostHog destination with no stable installation id, and says why once", async () => {
+      process.env.COGNIA_POSTHOG_HOST = "https://posthog.example"
+      process.env.COGNIA_POSTHOG_PROJECT_TOKEN = "phc_headless"
+      const policy = {
+        ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+        enabled: true,
+        destinations: { local: false, remote: true },
+      }
+      mockGetSettings.mockResolvedValue({ behaviorTelemetry: policy } as never)
+      mockGetPersisted.mockResolvedValue({ behaviorTelemetry: policy } as never)
+      const log = jest.fn()
+      const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
+
+      await runtime!.start({ log } as never)
+      const query = mockLiveQuery.mock.calls.at(-1)?.[0] as () => Promise<unknown>
+      await query()
+
+      // A per-process id would make PostHog count one install as a new person on
+      // every restart, so the destination stays off rather than sending garbage.
+      expect(installedIds()).toEqual([])
+      const warnings = log.mock.calls.filter(([, message]) =>
+        String(message).includes("COGNIA_OBSERVABILITY_INSTALLATION_ID")
+      )
+      expect(warnings).toHaveLength(1)
+    })
+
+    it("stays quiet about PostHog when the account never asked for remote export", async () => {
+      process.env.COGNIA_POSTHOG_HOST = "https://posthog.example"
+      process.env.COGNIA_POSTHOG_PROJECT_TOKEN = "phc_headless"
+      mockGetSettings.mockResolvedValue({} as never)
+      mockGetPersisted.mockResolvedValue(undefined)
+      const log = jest.fn()
+      const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
+
+      await runtime!.start({ log } as never)
+
+      expect(log).not.toHaveBeenCalled()
+    })
+
+    it("rejects a Personal API Key the same way as an absent configuration", async () => {
+      process.env.COGNIA_POSTHOG_HOST = "https://posthog.example"
+      process.env.COGNIA_POSTHOG_PROJECT_TOKEN = "phx_personal_api_key"
+      process.env.COGNIA_OBSERVABILITY_INSTALLATION_ID = "install-1"
+      mockGetSettings.mockResolvedValue({} as never)
+      mockGetPersisted.mockResolvedValue(undefined)
+      const runtime = listHeadlessRuntimes().find(({ name }) => name === "behavior-telemetry")
+
+      await runtime!.start({ log: jest.fn() } as never)
+
+      expect(installedIds()).toEqual([])
+    })
   })
 })

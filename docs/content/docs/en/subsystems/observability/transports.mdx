@@ -179,11 +179,19 @@ OTLP.
 
 The same OTLP transport class can be registered as `agent-trace-posthog-managed` and
 `agent-trace-posthog-byo`. These instances always disable content capture, use the exact
-`/i/v0/ai/otel` endpoint, and obtain their public project token through the typed Rust credential
-seam on Tauri. The sidecar independently creates one `BatchSpanProcessor` per generic OTLP or
-PostHog destination under a single `NodeSDK`. Product analytics does not enter the logging pipeline:
-`track-event.ts` fans a structured event envelope to OTLP Logs and lazily loaded named PostHog
-instances after behavior consent, category, sampling, scalar, and PII gates.
+`/i/v0/ai/otel` endpoint, obtain their public project token through the typed Rust credential
+seam on Tauri, and stamp `posthog.distinct_id` on every span so renderer spans resolve to the same
+person the sidecar's `enrichSpan` attributes its spans to. The sidecar independently creates one
+`BatchSpanProcessor` per generic OTLP or PostHog destination under a single `NodeSDK`.
+
+Product analytics does not enter the logging pipeline: `track-event.ts` fans a structured event
+envelope to OTLP Logs and to `posthog-product.ts` after behavior consent, category, sampling,
+scalar, and PII gates. `posthog-product.ts` speaks PostHog's batch capture API directly —
+`POST {host}/batch/` with `{ api_key, sent_at, batch }` — rather than embedding `posthog-js`,
+because a browser SDK would open its own connection from the renderer and the desktop
+`connect-src` policy allows none. The batch leaves through `telemetry_otlp_export` on Tauri and
+`fetch` elsewhere, buffering until 20 events are queued or 2s pass; a destination whose config is
+unchanged keeps its live exporter across settings saves, so a re-apply never drops a pending batch.
 
 ## langfuse
 
@@ -208,7 +216,7 @@ warn→`WARNING`, error/fatal→`ERROR`.
 (`data.kind === AGENT_TRACE_SPAN_KIND`), sanitizes previews, buffers (32), and writes the embedded
 `AgentTraceSpan` rows to the Dexie `agentTraces` table via `bulkInsertSpans`, with retention pruning
 (`pruneOlderThan`, default 7 days). Health is binary: `degraded` if `lastError`, else `healthy`.
-This is the write side of the [tracing dashboard](./tracing-dashboard) and the agent-trace tab of the
+This is the write side of the [tracing dashboard](./tracing-dashboard) and the Traces channel of the
 log panel. Privacy: `captureContent: false` by default strips `inputPreview`/`outputPreview`; when on,
 previews are truncated to `maxPreviewBytes` and gated through `hasNoLeakingPii`.
 

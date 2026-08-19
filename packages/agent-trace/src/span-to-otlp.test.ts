@@ -374,4 +374,28 @@ describe("spansToOtlp", () => {
     expect(scope.spans).toHaveLength(2)
     expect(scope.scope.name).toBe("cognia.agent-trace")
   })
+
+  it("stamps destination-scoped attributes on every span", () => {
+    const out = spansToOtlp([makeSpan(), makeSpan({ spanId: "bbbb222233334444" })], {
+      serviceName: "cognia-ai",
+      spanAttributes: { "posthog.distinct_id": "installation-1" },
+    })
+    for (const span of out.resourceSpans[0].scopeSpans[0].spans) {
+      expect(span.attributes).toContainEqual({
+        key: "posthog.distinct_id",
+        value: { stringValue: "installation-1" },
+      })
+    }
+  })
+
+  it("never lets a destination attribute shadow one the span already carries", () => {
+    const out = spansToOtlp([makeSpan({ surface: "workflow" })], {
+      serviceName: "cognia-ai",
+      spanAttributes: { "cognia.surface": "overridden" },
+    })
+    const surfaces = out.resourceSpans[0].scopeSpans[0].spans[0].attributes.filter(
+      (attribute) => attribute.key === "cognia.surface"
+    )
+    expect(surfaces).toEqual([{ key: "cognia.surface", value: { stringValue: "overridden" } }])
+  })
 })

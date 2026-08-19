@@ -25,6 +25,15 @@ export interface OtlpResourceMetadata {
   environment?: string
   /** Optional `service.version`. */
   serviceVersion?: string
+  /**
+   * Destination-specific string attributes stamped on **every span** in the
+   * batch. Resource attributes would be the natural home, but the backends
+   * that need this read span attributes: PostHog resolves the person of an
+   * `$ai_generation` from `posthog.distinct_id` on the span, exactly the way
+   * the sidecar's `enrichSpan` sets it. Existing span attributes win, so a
+   * span that already carries the key keeps its own value.
+   */
+  spanAttributes?: Record<string, string>
 }
 
 const DEFAULT_RESOURCE: OtlpResourceMetadata = {
@@ -130,7 +139,7 @@ export function spanToOtlp(
         scopeSpans: [
           {
             scope: { name: INSTRUMENTATION_SCOPE.name, version: INSTRUMENTATION_SCOPE.version },
-            spans: [buildOtlpSpan(span)],
+            spans: [buildOtlpSpan(span, resource.spanAttributes)],
           },
         ],
       },
@@ -152,7 +161,7 @@ export function spansToOtlp(
         scopeSpans: [
           {
             scope: { name: INSTRUMENTATION_SCOPE.name, version: INSTRUMENTATION_SCOPE.version },
-            spans: spans.map(buildOtlpSpan),
+            spans: spans.map((item) => buildOtlpSpan(item, resource.spanAttributes)),
           },
         ],
       },
@@ -176,9 +185,9 @@ function buildResourceAttributes(resource: OtlpResourceMetadata): OtlpAttribute[
   return attrs
 }
 
-function buildOtlpSpan(span: AgentTraceSpan): OtlpSpan {
+function buildOtlpSpan(span: AgentTraceSpan, extraAttributes?: Record<string, string>): OtlpSpan {
   const startNs = msToNanoString(span.startTime)
-  const attrs = buildSpanAttributes(span)
+  const attrs = buildSpanAttributes(span, extraAttributes)
   const isError = Boolean(span.errorType || span.errorMessage)
   const out: OtlpSpan = {
     traceId: hexToBase64(span.traceId, 16),
@@ -242,11 +251,23 @@ function buildSpanName(span: AgentTraceSpan): string {
   return span.operationName
 }
 
-function buildSpanAttributes(span: AgentTraceSpan): OtlpAttribute[] {
+function buildSpanAttributes(
+  span: AgentTraceSpan,
+  extraAttributes?: Record<string, string>
+): OtlpAttribute[] {
   const attrs: OtlpAttribute[] = []
+  const seen = new Set<string>()
   const push = (key: string, value: OtlpAttributeValue | null | undefined): void => {
     if (value === null || value === undefined) return
+    if (seen.has(key)) return
+    seen.add(key)
     attrs.push({ key, value })
+  }
+
+  // Destination-scoped attributes go on first so a span that already carries
+  // one of these keys is never overwritten by the per-destination default.
+  for (const [key, value] of Object.entries(extraAttributes ?? {})) {
+    push(key, strAttr(value))
   }
 
   push("gen_ai.operation.name", strAttr(span.operationName))

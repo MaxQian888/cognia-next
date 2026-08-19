@@ -95,6 +95,7 @@ export const DEFAULTS: AppSettings = {
       workflow: true,
       connector: true,
       agentTeam: true,
+      app: true,
       system: true,
     },
     sampleRate: 1,

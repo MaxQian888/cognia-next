@@ -15,7 +15,7 @@ description: The lib/agent-trace span pipeline — the OTel-GenAI-aligned AgentT
   **agent-trace** transport persists it to the Dexie `agentTraces` table, and the **otlp-http**
   transport exports it to `/v1/traces`. Spans are OTel-GenAI shaped (`gen_ai.*` semconv). Producers:
   every chat turn (`invoke_agent`), each tool call (`execute_tool` child), team hand-offs, plugin
-  hooks, and workflow LLM nodes. Consumers: the [log panel](./log-panel)'s agent-trace tab and the
+  hooks, and workflow LLM nodes. Consumers: the [log panel](./log-panel)'s Traces channel and the
   [tracing dashboard](./tracing-dashboard).
 </TLDR>
 
@@ -101,7 +101,7 @@ flowchart TB
   Entry --> OTLP["otlp-http transport"]
   AT -->|"bulkInsertSpans"| Dexie[("Dexie agentTraces")]
   OTLP -->|"spansToOtlp"| Wire["/v1/traces<br/>Grafana/Tempo/Honeycomb"]
-  Dexie --> Panel["/logs agent-trace tab"]
+  Dexie --> Panel["/logs Traces channel"]
   Dexie --> Dash["/observability dashboard"]
 
   classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0

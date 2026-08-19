@@ -3421,6 +3421,8 @@ export interface AppSettings {
       workflow: boolean
       connector: boolean
       agentTeam: boolean
+      /** Shell usage: launches, screen views, commands, palette, plugin installs. */
+      app: boolean
       system: boolean
     }
     sampleRate: number

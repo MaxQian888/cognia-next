@@ -1,6 +1,6 @@
 ---
 title: Log Panel
-description: The /logs viewer in components/logging + hooks/logging — the multi-source composition root, the two-pointer log merge, @tanstack/react-virtual list, the density-timeline brush, the trace view, the Recharts stats dashboard, the agent-trace tree, the filter state machine, URL sync, transport-health, and the four-tab settings.
+description: The /logs workspace in components/logging + hooks/logging — the three-channel shell (logs / traces / incidents), the multi-source composition root, the two-pointer log merge, @tanstack/react-virtual list, the density-timeline brush, the trace view, the Recharts stats dashboard, the agent-trace waterfall and span detail, the filter state machine, URL sync, and transport-health.
 ---
 
 # Log Panel
@@ -8,7 +8,9 @@ description: The /logs viewer in components/logging + hooks/logging — the mult
 <Status variant="stable" />
 
 <TLDR>
-  `/logs` (`app/logs/page.tsx`) renders `<LogPanel>` (`components/logging/log-panel.tsx:140`), the
+  `/logs` (`app/logs/page.tsx`) renders `DiagnosticsWorkspace`, a three-channel shell (**logs /
+  traces / incidents**) that opens on logs. The logs channel is `<LogPanel>`
+  (`components/logging/log-panel.tsx:140`), the
   composition root that aggregates five record sources (frontend / tauri / mcp / plugin / internal)
   plus agent-trace spans. It wires `useLogStream` (IndexedDB), `useLogPanelFilters` (the big state
   machine), `useLogPanelUrlSync`, `useTransportHealth`, and `useAgentTraceAsLogs`, linearly merges the
@@ -24,7 +26,7 @@ description: The /logs viewer in components/logging + hooks/logging — the mult
   <Stat label="Record sources" value="5" hint="frontend · tauri · mcp · plugin · internal" />
   <Stat label="Virtualization" value="@tanstack/react-virtual" hint="NOT react-window (log-virtualized-list.tsx:10)" />
   <Stat label="Filter dimensions" value="13" hint="level · module · source · session · time · trace · severity · bookmarks · density · …" />
-  <Stat label="Settings tabs" value="4" hint="levels · transports · advanced · retention" />
+  <Stat label="/logs channels" value="3" hint="logs · traces · incidents" />
   <Stat label="Live update" value="BroadcastChannel" hint="cognia-logs-updates, not a server" />
 </StatGrid>
 
@@ -32,8 +34,11 @@ description: The /logs viewer in components/logging + hooks/logging — the mult
 
 ```mermaid
 flowchart TB
-  Page["app/logs/page.tsx<br/>page chrome + count pill"]
-  Page --> Panel["LogPanel (log-panel.tsx:140)"]
+  Page["app/logs/page.tsx<br/>→ DiagnosticsWorkspace"]
+  Page --> Ch{"channel"}
+  Ch -->|"logs"| Panel["LogPanel (log-panel.tsx:140)"]
+  Ch -->|"traces"| TW["TraceWorkspace<br/>list → waterfall → span"]
+  Ch -->|"incidents"| IW["IncidentWorkspace"]
   Panel --> H1["useLogStream → IndexedDB"]
   Panel --> H2["useAgentTraceAsLogs → Dexie spans"]
   Panel --> H3["useLogPanelFilters → state machine"]
@@ -50,13 +55,63 @@ flowchart TB
   VL --> Detail["LogDetailPanel<br/>(split / sheet)"]
 
   classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
-  class Page,Panel,Merge,Filter,Page2,VL,DB,TV,Detail box
+  class Page,Ch,Panel,TW,IW,Merge,Filter,Page2,VL,DB,TV,Detail box
 ```
 
-The `LogsPage` (`app/logs/page.tsx:39`) renders `<LogPanel showStats showTimeline
-includeAgentTrace={false} … headerSlot={<LogsPageHeader/>}>`. The header reads the panel API via
-`useLogPanelHeader()` (a React context the panel publishes) so the breadcrumb count pill and preset
-dropdown live in the page chrome while the state lives in the panel.
+`app/logs/page.tsx` renders `DiagnosticsWorkspace`
+(`components/logging/diagnostics-workspace.tsx`), a three-channel shell — **Logs / Traces /
+Incidents** — that opens on Logs. The channel lives in
+`stores/logging/log-workspace-store.ts` (persisted, `version: 2`) and mirrors to `?channel=`.
+
+The Logs channel mounts `<LogPanel showStats showTimeline includeAgentTrace>`. `includeAgentTrace`
+used to be `false` here, which switched off the span merge, the toolbar's trace-view button and the
+`AgentTraceStatsBar` in one go; it is on now, so `agent.trace` rows appear in the stream and the
+module chip scopes to them.
+
+The panel still publishes its header API through `useLogPanelHeader()` (a React context) for hosts
+that pass a `headerSlot`; the `/logs` shell owns its own header instead, so the count pill and
+preset dropdown come from the panel's own toolbar.
+
+Because the shell keeps `channel` and `traceId` in the query string alongside the panel's own
+params, `useLogPanelUrlSync` rebuilds only the keys it owns (`OWNED_PARAMS`) and carries everything
+else through — rebuilding from an empty `URLSearchParams` dropped the host's params on the first
+keystroke.
+
+### The Traces channel
+
+`components/logging/trace-workspace.tsx` composes machinery that already existed but had no home:
+
+| Column | Source |
+| --- | --- |
+| trace list | `useTraceList` → `queryByWindow` + `rollupTraces`, filtered and paged in memory |
+| timeline + waterfall | `TraceTimeline` over `buildTraceTimeline`, above `useTraceDetail` → `buildWaterfall` / `flattenWaterfall` rendered with the observability dashboard's `WaterfallRow` (now optionally selectable) |
+| span detail | `TraceSpanDetail` — timing, model, token/cache/cost, finish reasons, hand-off, events, error, PII-gated previews, metadata, ids |
+
+#### The timeline strip
+
+`lib/observability/trace-timeline.ts` projects a trace's spans onto a handful of horizontal lanes.
+The waterfall answers "what called what"; the timeline answers "what was it doing, and when" — a
+chat turn with twenty tool calls is twenty rows to scroll in one and a single glance in the other.
+
+| Control | Behaviour |
+| --- | --- |
+| **Scale** | `duration` (real elapsed time) or `sequence` (one equal slot per span). Sequence is what survives a trace with one 40s model call and thirty sub-millisecond tool calls. |
+| **Grouping** | lanes by `operation`, `surface`, `model`, or `agent`. Operation lanes follow flow order (`invoke_agent → chat → execute_tool → retrieval → embeddings → invoke_workflow`); every other grouping sorts busiest-first. |
+| **Zoom** | drag across the strip to pick a window. Geometry is emitted as percentages against an explicit window, so zooming re-derives nothing — and the waterfall below filters to the same window rather than just rescaling beside it. Double-click resets. |
+| **Selection** | clicking a block selects that span; the waterfall and the detail pane follow, and vice versa. |
+| **Search** | the list's query dims non-matching blocks instead of removing them, so a filtered trace keeps its shape. |
+
+Mid-span `events[]` are projected onto the same axis as ticks, nesting depth shades each block, and
+a zero-duration span still gets a hittable minimum width.
+
+One window control (`today / 7d / 30d / all`, `lib/observability/trace-window.ts`) drives both the
+list and `AgentTraceStatsBar`, so the headline numbers and the rows below them always describe the
+same set. Filtering happens over the whole window rather than the visible page, which is why the
+list reads a window instead of paging with `queryRecentTraces`.
+
+A span's **Show this trace in logs** action switches to the Logs channel with `?trace=<id>` and
+remounts the panel so its mount-time URL hydration picks the focus up. `/observability` stays the
+aggregate view of the same spans; the two link across to each other.
 
 ## The Multi-Source Merge
 
@@ -182,4 +237,4 @@ the View menu, and the global <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>L</Kbd>.
 | Add a filter dimension | `hooks/logging/use-log-panel-filters.ts` + surface in `log-panel-toolbar.tsx` + mirror in `use-log-panel-url-sync.ts` |
 | Add a dashboard chart | `components/logging/log-stats-dashboard.tsx` |
 | Change row density / height | `DENSITY_ROW_HEIGHTS` in `log-virtualized-list.tsx` |
-| Add a settings field | `components/logging/log-settings.tsx` (+ `bootstrap.ts` for the new transport option) |
+| Add a settings field | the matching panel under `components/settings/logs/panels/` (+ `hooks/logging/use-log-settings-draft.ts` for the draft field, + `bootstrap.ts` for a new transport option) |

@@ -12,8 +12,8 @@ import {
 } from "./settings"
 import {
   __TESTING__,
-  configureBehaviorEventExporter,
   configureBehaviorEventExporters,
+  createOtlpBehaviorEventExporter,
   trackEvent,
 } from "./track-event"
 
@@ -21,7 +21,7 @@ beforeEach(() => {
   localStorage.clear()
   jest.clearAllMocks()
   jest.mocked(hasNoLeakingPii).mockReturnValue(true)
-  configureBehaviorEventExporter(null)
+  configureBehaviorEventExporters([])
 })
 
 it("fans one sanitized envelope out to independently configured remote destinations", async () => {
@@ -78,7 +78,7 @@ it("stores opted-in events that do not have a session", async () => {
 it("stores locally and exports an OTLP LogRecord after opt-in", async () => {
   localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, "true")
   const exportBody = jest.fn().mockResolvedValue(undefined)
-  configureBehaviorEventExporter(exportBody)
+  configureBehaviorEventExporters([createOtlpBehaviorEventExporter(exportBody)])
 
   expect(
     await trackEvent("chat.message.sent", {
@@ -98,7 +98,7 @@ it("keeps the remote sink independent when Dexie fails", async () => {
   localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, "true")
   jest.mocked(appendBehaviorEvent).mockRejectedValueOnce(new Error("dexie unavailable"))
   const exportBody = jest.fn().mockResolvedValue(undefined)
-  configureBehaviorEventExporter(exportBody)
+  configureBehaviorEventExporters([createOtlpBehaviorEventExporter(exportBody)])
 
   await expect(
     trackEvent("workflow.run.started", { runId: "run-1", trigger: "trigger.schedule" })
@@ -108,7 +108,11 @@ it("keeps the remote sink independent when Dexie fails", async () => {
 
 it("keeps the local sink independent when remote export fails", async () => {
   localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, "true")
-  configureBehaviorEventExporter(jest.fn().mockRejectedValue(new Error("collector unavailable")))
+  configureBehaviorEventExporters([
+    createOtlpBehaviorEventExporter(
+      jest.fn().mockRejectedValue(new Error("collector unavailable"))
+    ),
+  ])
   await expect(
     trackEvent("workflow.run.started", { runId: "run-2", trigger: "trigger.manual" })
   ).resolves.toBe(true)
@@ -122,7 +126,7 @@ it("routes eligible events only to the independently enabled destinations", asyn
     destinations: { local: false, remote: true },
   })
   const exportBody = jest.fn().mockResolvedValue(undefined)
-  configureBehaviorEventExporter(exportBody)
+  configureBehaviorEventExporters([createOtlpBehaviorEventExporter(exportBody)])
 
   await expect(
     trackEvent("connector.message.received", { adapterId: "a1", platform: "lark" })
@@ -137,7 +141,9 @@ it("honors category consent and sampling before touching either destination", as
     enabled: true,
     categories: { ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS.categories, connector: false },
   })
-  configureBehaviorEventExporter(jest.fn().mockResolvedValue(undefined))
+  configureBehaviorEventExporters([
+    createOtlpBehaviorEventExporter(jest.fn().mockResolvedValue(undefined)),
+  ])
 
   await expect(
     trackEvent("connector.message.received", { adapterId: "a1", platform: "lark" })
@@ -202,7 +208,11 @@ it("returns false when no destination accepts the event", async () => {
     destinations: { local: true, remote: true },
   })
   jest.mocked(appendBehaviorEvent).mockRejectedValueOnce(new Error("dexie unavailable"))
-  configureBehaviorEventExporter(jest.fn().mockRejectedValue(new Error("collector unavailable")))
+  configureBehaviorEventExporters([
+    createOtlpBehaviorEventExporter(
+      jest.fn().mockRejectedValue(new Error("collector unavailable"))
+    ),
+  ])
   await expect(
     trackEvent("workflow.run.started", { runId: "run-rejected", trigger: "manual" })
   ).resolves.toBe(false)
@@ -220,7 +230,7 @@ it("rejects attributes that fail the shared PII gate", async () => {
 it("rejects malformed runtime attributes before persistence or export", async () => {
   localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, "true")
   const exportBody = jest.fn().mockResolvedValue(undefined)
-  configureBehaviorEventExporter(exportBody)
+  configureBehaviorEventExporters([createOtlpBehaviorEventExporter(exportBody)])
 
   await expect(
     trackEvent("workflow.run.completed", {
@@ -278,4 +288,20 @@ it("serializes boolean, numeric, and string attributes", () => {
       { key: "count", value: { doubleValue: 2 } },
     ])
   )
+})
+
+it("closes only the exporters that a reconfigure actually removes", () => {
+  const closeRetained = jest.fn()
+  const closeRemoved = jest.fn()
+  const retained = { id: "posthog-managed", export: jest.fn(), close: closeRetained }
+  const removed = { id: "posthog-byo", export: jest.fn(), close: closeRemoved }
+
+  configureBehaviorEventExporters([retained, removed])
+  configureBehaviorEventExporters([retained])
+
+  expect(closeRemoved).toHaveBeenCalledTimes(1)
+  expect(closeRetained).not.toHaveBeenCalled()
+
+  configureBehaviorEventExporters([])
+  expect(closeRetained).toHaveBeenCalledTimes(1)
 })

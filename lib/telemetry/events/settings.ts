@@ -5,6 +5,14 @@ export const BEHAVIOR_TELEMETRY_CATEGORIES = [
   "workflow",
   "connector",
   "agentTeam",
+  /**
+   * Shell-level product usage that belongs to no single AI domain: launches,
+   * screen views, command-palette / slash-command use, plugin installs. Kept
+   * out of `system` because that bucket means "telemetry's own plumbing" and a
+   * user turning it off should not also lose the ability to opt out of usage
+   * analytics — or vice versa.
+   */
+  "app",
   "system",
 ] as const
 
@@ -31,6 +39,7 @@ export const DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS: BehaviorTelemetrySettings = {
     workflow: true,
     connector: true,
     agentTeam: true,
+    app: true,
     system: true,
   },
   sampleRate: 1,

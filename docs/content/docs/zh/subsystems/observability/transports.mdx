@@ -176,11 +176,18 @@ OTLP 构建 `Authorization: Basic …`。
 ### PostHog 目的地
 
 同一个 OTLP transport 类可注册为 `agent-trace-posthog-managed` 与
-`agent-trace-posthog-byo`。这些实例始终禁用内容采集，固定使用 `/i/v0/ai/otel`，并在 Tauri
-中通过 Rust 类型化凭据 seam 注入公开项目 token。Sidecar 在单一 `NodeSDK` 下，为每个通用
-OTLP 或 PostHog 目的地创建独立 `BatchSpanProcessor`。产品分析不进入日志管道：
-`track-event.ts` 只有在通过行为授权、分类、采样、标量和 PII 闸门后，才把结构化事件 envelope
-fan-out 到 OTLP Logs 与按需加载的具名 PostHog 实例。
+`agent-trace-posthog-byo`。这些实例始终禁用内容采集，固定使用 `/i/v0/ai/otel`，在 Tauri
+中通过 Rust 类型化凭据 seam 注入公开项目 token，并为每个 span 打上 `posthog.distinct_id`，
+使渲染端 span 与 sidecar `enrichSpan` 标注的 span 归属同一个 person。Sidecar 在单一
+`NodeSDK` 下，为每个通用 OTLP 或 PostHog 目的地创建独立 `BatchSpanProcessor`。
+
+产品分析不进入日志管道：`track-event.ts` 只有在通过行为授权、分类、采样、标量和 PII 闸门后，
+才把结构化事件 envelope fan-out 到 OTLP Logs 与 `posthog-product.ts`。`posthog-product.ts`
+直接使用 PostHog 批量采集 API —— `POST {host}/batch/`，body 为 `{ api_key, sent_at, batch }` ——
+而不内嵌 `posthog-js`：浏览器 SDK 会从渲染进程自行发起连接，而桌面端 `connect-src` 策略
+不允许任何此类连接。批量请求在 Tauri 上经 `telemetry_otlp_export` 发出，其他壳走 `fetch`；
+累积 20 条或 2 秒后发送。配置未变化的目的地在设置保存时复用同一个 exporter，因此重新应用
+设置不会丢掉待发批次。
 
 ## langfuse
 
@@ -205,7 +212,7 @@ warn→`WARNING`，error/fatal→`ERROR`。
 （`data.kind === AGENT_TRACE_SPAN_KIND`），清洗预览，缓冲（32），并经 `bulkInsertSpans` 把内嵌的
 `AgentTraceSpan` 行写入 Dexie 的 `agentTraces` 表，带保留裁剪
 （`pruneOlderThan`，默认 7 天）。健康是二态的：若有 `lastError` 则 `degraded`，否则 `healthy`。
-这是 [追踪仪表盘](./tracing-dashboard) 和日志面板 agent-trace 标签页的写入侧。隐私：`captureContent: false` 默认会剥离 `inputPreview`/`outputPreview`；开启时，
+这是 [追踪仪表盘](./tracing-dashboard) 和日志面板追踪通道的写入侧。隐私：`captureContent: false` 默认会剥离 `inputPreview`/`outputPreview`；开启时，
 预览被截断到 `maxPreviewBytes` 并经 `hasNoLeakingPii` 门控。
 
 ## 健康模型 —— 一览

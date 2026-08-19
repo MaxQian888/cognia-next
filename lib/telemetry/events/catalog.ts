@@ -126,6 +126,49 @@ export interface TelemetryEventCatalog {
     errorType: string
     durationMs?: number
   }
+  // --- Shell / app usage ---------------------------------------------------
+  // The product-analytics floor. Without a launch and a screen event there is
+  // no active-user count, no retention curve and no version-adoption view —
+  // every other event in this catalog describes *what* a session did without
+  // anything describing *that* it happened.
+  /** The app finished booting. Emitted once per app session, per shell. */
+  "app.launched": {
+    /** `tauri` | `browser` | `capacitor-ios` | `capacitor-android`. */
+    runtime: string
+    appVersion: string
+    /** Active UI locale, e.g. `en` / `zh-CN`. */
+    locale: string
+    /** True when this install had never recorded a launch before. */
+    firstLaunch: boolean
+  }
+  /**
+   * A top-level route became visible. Carries the route path only — the app is
+   * a fully static export with no dynamic segments, so a path is a route
+   * pattern and never an id. Anything unexpected reports `other`.
+   */
+  "app.screen.viewed": { route: string }
+  /** A slash command ran from the composer. `command` is a registered name, never user text. */
+  "app.command.executed": {
+    command: string
+    kind: "action" | "template"
+    outcome: "succeeded" | "failed"
+  }
+  /** The unified ⌘K palette opened (ADR-0129). */
+  "app.search.opened": {
+    /** `shortcut` for the keybinding, `request` for a programmatic entry point. */
+    via: string
+    scope: string
+    /** True when the opener seeded a query. Its text is never collected. */
+    seeded: boolean
+  }
+  /** A palette result was chosen. Identifies the *kind* of result, never its label. */
+  "app.search.activated": { kind: string; actionType: string }
+  /** A marketplace plugin install finished (ADR-0026). */
+  "app.plugin.installed": {
+    outcome: "succeeded" | "cancelled" | "failed"
+    /** Which stage produced the outcome, e.g. `install` / `config` / `permissions`. */
+    stage?: string
+  }
   "telemetry.preference.changed": { enabled: boolean }
   "telemetry.posthog.test": { source: "settings" }
   /** ADR-0090 Phase 6: an authoritative resolver decision drove an execution. */
@@ -196,6 +239,12 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "agent.teammate.started": { category: "agentTeam" },
   "agent.teammate.completed": { category: "agentTeam" },
   "agent.teammate.failed": { category: "agentTeam" },
+  "app.launched": { category: "app" },
+  "app.screen.viewed": { category: "app" },
+  "app.command.executed": { category: "app" },
+  "app.search.opened": { category: "app" },
+  "app.search.activated": { category: "app" },
+  "app.plugin.installed": { category: "app" },
   "telemetry.preference.changed": { category: "system" },
   "telemetry.posthog.test": { category: "system" },
   "agent.execution.resolved": { category: "system" },

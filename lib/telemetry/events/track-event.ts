@@ -8,7 +8,8 @@ import {
 } from "./catalog"
 
 type EventAttributes = Record<string, string | number | boolean>
-type LegacyEventExporter = (body: string) => Promise<void>
+/** Posts one serialized OTLP `resourceLogs` payload; rejects when refused. */
+type OtlpBodySender = (body: string) => Promise<void>
 
 export interface BehaviorEventEnvelope {
   name: TelemetryEventName
@@ -20,7 +21,11 @@ export interface BehaviorEventEnvelope {
 export interface BehaviorEventExporter {
   id: string
   export: (event: BehaviorEventEnvelope) => Promise<void>
-  /** The legacy generic OTLP sink remains gated by `destinations.remote`. */
+  /**
+   * Require the account's remote-destination consent on top of the master
+   * switch. Set by the generic OTLP sink, and by any destination whose host
+   * offers no per-destination toggle of its own (the headless brain).
+   */
   requiresRemoteConsent?: boolean
   /** Withdraw consent immediately and discard any destination-owned queue. */
   close?: () => void | Promise<void>
@@ -28,27 +33,23 @@ export interface BehaviorEventExporter {
 
 let exporters: BehaviorEventExporter[] = []
 
-export function configureBehaviorEventExporter(next: LegacyEventExporter | null): void {
-  for (const exporter of exporters) void exporter.close?.()
-  exporters = next
-    ? [
-        {
-          id: "otlp",
-          requiresRemoteConsent: true,
-          export: (event) => next(toOtlpLogBody(event.name, event.attributes, event.at)),
-        },
-      ]
-    : []
-}
-
+/**
+ * Swap the active exporter set.
+ *
+ * Only exporters that are actually going away are closed: `applyTransportSettings()`
+ * re-runs on every settings save and reuses live destinations, so closing the
+ * whole previous list would discard a pending batch (or, worse, withdraw consent
+ * on a destination the user just kept enabled).
+ */
 export function configureBehaviorEventExporters(next: BehaviorEventExporter[]): void {
-  for (const exporter of exporters) void exporter.close?.()
+  const retained = new Set(next)
+  for (const exporter of exporters) {
+    if (!retained.has(exporter)) void exporter.close?.()
+  }
   exporters = [...next]
 }
 
-export function createOtlpBehaviorEventExporter(
-  exportBody: LegacyEventExporter
-): BehaviorEventExporter {
+export function createOtlpBehaviorEventExporter(exportBody: OtlpBodySender): BehaviorEventExporter {
   return {
     id: "otlp",
     requiresRemoteConsent: true,

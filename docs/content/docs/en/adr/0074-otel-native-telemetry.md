@@ -62,10 +62,28 @@ consent switches; all four default off. Product events still pass the behavior
 telemetry master switch, category filter, sampling, scalar validation, and PII
 gate. AI observability has independent consent.
 
-Product analytics uses lazily loaded named `posthog-js@1.418.1` instances with
-memory-only persistence and manual capture. Autocapture, page lifecycle capture,
-session replay, surveys, feature flags, person profiles, and automatic exception
-capture are disabled. AI telemetry uses AI SDK 7 `OpenTelemetry` from
+Product analytics posts directly to PostHog's batch capture API
+(`POST {host}/batch/`) instead of embedding a browser SDK. The events are manual
+captures — no autocapture, page lifecycle capture, session replay, surveys,
+feature flags, person profiles, or automatic exception capture — so the SDK adds
+nothing this integration uses, and it would open its own connection from the
+renderer, which the desktop CSP blocks. The batch therefore leaves over the same
+Rust leg as every other outbound request on Tauri (`telemetry_otlp_export` with
+no credential; the project token travels in the body as `api_key`) and over
+`fetch` on web and mobile. Events buffer until 20 are queued or 2s pass.
+
+The headless brain (`cognia-agent serve`) installs the same exporter from
+`COGNIA_POSTHOG_HOST` / `COGNIA_POSTHOG_PROJECT_TOKEN` (falling back to the
+`NEXT_PUBLIC_POSTHOG_*` pair), alongside its OTLP logs sink. It has no
+per-destination consent UI, so its PostHog destination is gated on the
+account-wide remote-destination consent instead: an operator's environment
+variable configures a destination, it does not grant permission to use one. Its
+distinct id must be pinned through `COGNIA_OBSERVABILITY_INSTALLATION_ID` —
+the brain's `localStorage` is an in-memory shim, so a generated id would be new
+per process and report one install as a fresh person on every restart. Without
+it the destination stays off and the brain logs why.
+
+AI telemetry uses AI SDK 7 `OpenTelemetry` from
 `@ai-sdk/otel` and provider-independent `PostHogTraceExporter` from
 `@posthog/ai@8.8.0`. One sidecar `NodeSDK` owns a processor per enabled generic
 OTLP or PostHog destination; PostHog always uses `/i/v0/ai/otel` and is never
@@ -75,8 +93,10 @@ The remote allowlist contains identifiers, runtime/version, provider/model,
 usage, latency, cost, tool names, and success/failure state. Prompts,
 completions, system instructions, tool schemas/arguments/results, file content,
 URLs, and exception message/stack/body are stripped again immediately before
-export. The random installation ID is the only PostHog `distinct_id`; account,
-email, and hardware identifiers are prohibited. PostHog project tokens are
+export. The random installation ID is the only PostHog `distinct_id` — carried
+as the `distinct_id` field on product events and as the `posthog.distinct_id`
+span attribute on AI spans from both the renderer and the sidecar, so one turn
+resolves to one person; account, email, and hardware identifiers are prohibited. PostHog project tokens are
 public ingestion tokens; Personal API Keys are rejected by policy and tokens are
 masked in UI, logs, and diagnostics.
 

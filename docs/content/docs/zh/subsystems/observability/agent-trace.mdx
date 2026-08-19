@@ -15,7 +15,7 @@ description: lib/agent-trace span 流水线 —— 对齐 OTel-GenAI 的 AgentTr
   扇出到各传输 —— **agent-trace** 传输把它持久化到 Dexie 的 `agentTraces` 表，而 **otlp-http**
   传输则把它导出到 `/v1/traces`。Span 形如 OTel-GenAI（`gen_ai.*` semconv）。生产方：
   每个聊天回合（`invoke_agent`）、每次工具调用（`execute_tool` 子 span）、团队交接、插件
-  钩子，以及工作流 LLM 节点。消费方：[日志面板](./log-panel)的 agent-trace 标签页与
+  钩子，以及工作流 LLM 节点。消费方：[日志面板](./log-panel)的追踪通道与
   [追踪仪表盘](./tracing-dashboard)。
 </TLDR>
 
@@ -101,7 +101,7 @@ flowchart TB
   Entry --> OTLP["otlp-http transport"]
   AT -->|"bulkInsertSpans"| Dexie[("Dexie agentTraces")]
   OTLP -->|"spansToOtlp"| Wire["/v1/traces<br/>Grafana/Tempo/Honeycomb"]
-  Dexie --> Panel["/logs agent-trace tab"]
+  Dexie --> Panel["/logs 追踪通道"]
   Dexie --> Dash["/observability dashboard"]
 
   classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0

@@ -90,7 +90,7 @@ agent-trace OTLP 转换或 sidecar AI SDK 7 OTel processor 发往独立的 `/i/v
 - envelope、PII 和 fan-out：`lib/telemetry/events/track-event.ts`。
 - PostHog SDK 隐私配置与撤回清理：`lib/telemetry/posthog-product.ts`。
 - 目的地解析及 runtime 安装：`lib/logging/bootstrap.ts`。
-- Settings UI：`components/logging/log-settings.tsx`。
+- Settings UI：`components/settings/logs/panels/telemetry-panel.tsx`（草稿状态在 `hooks/logging/use-log-settings-draft.ts`）。
 - 本地存储/导出：`lib/db/behavior-events.ts`。
 - 契约测试：上述模块的 co-located tests，以及 `sidecar/telemetry.test.mjs` 和
   `src-tauri/src/telemetry.rs` 单元测试。
