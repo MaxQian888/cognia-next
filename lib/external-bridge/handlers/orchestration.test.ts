@@ -535,6 +535,53 @@ describe("plan_list / plan_run", () => {
     expect(approvePlan).not.toHaveBeenCalled()
   })
 
+  it("routes plan operations from the generic host bridge envelope", async () => {
+    listAllPlans.mockResolvedValue([plan()])
+    getPlan.mockResolvedValue(plan())
+    runPlan.mockResolvedValue({ status: "completed" })
+    const { runOrchestrationExec } = await import("./orchestration")
+
+    await expect(runOrchestrationExec("planList", { arguments: [{}] })).resolves.toMatchObject({
+      ok: true,
+      plans: [expect.objectContaining({ id: "p1" })],
+    })
+    await expect(
+      runOrchestrationExec("planRun", { arguments: [{ planId: "p1" }] })
+    ).resolves.toEqual({
+      ok: true,
+      planId: "p1",
+      status: "completed",
+    })
+  })
+
+  it("blocks a plan carrying PII before approval or execution", async () => {
+    getPlan.mockResolvedValue(
+      plan({
+        steps: [
+          {
+            id: "s1",
+            kind: "mcp_tool_call",
+            order: 0,
+            dependencies: [],
+            title: "Call a tool",
+            params: { input: { recipient: "alice@example.com" } },
+          },
+        ],
+      })
+    )
+    hasNoLeakingPiiDeepMock.mockReturnValue(false)
+    const { planRunCore } = await import("./orchestration")
+
+    await expect(planRunCore({ planId: "p1", approve: true })).resolves.toEqual({
+      ok: false,
+      planId: "p1",
+      status: "approved",
+      error: "plan_run blocked: plan contains PII at step:s1:params",
+    })
+    expect(approvePlan).not.toHaveBeenCalled()
+    expect(runPlan).not.toHaveBeenCalled()
+  })
+
   // An external agent must not silently answer a gate a human was asked to
   // answer; it has to opt in explicitly.
   it("refuses a pending plan unless approve is set, then approves and runs", async () => {

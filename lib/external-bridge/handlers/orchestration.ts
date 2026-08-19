@@ -388,9 +388,10 @@ export async function planRun(input: PlanRunInput): Promise<PlanRunOutput> {
 export async function planRunCore(input: PlanRunInput): Promise<PlanRunOutput> {
   if (!input.planId) return { ok: false, error: "plan_run requires a planId" }
   try {
-    const [{ getPlanRuntime }, { resolvePlanStrategy }] = await Promise.all([
+    const [{ getPlanRuntime }, { resolvePlanStrategy }, { findPlanPiiLeak }] = await Promise.all([
       import("@/lib/agent/plan/runtime"),
       import("@/lib/agent/plan/strategy"),
+      import("@/lib/agent/plan/pii-gate"),
     ])
     const runtime = getPlanRuntime()
     const plan = await runtime.getPlan(input.planId)
@@ -399,6 +400,15 @@ export async function planRunCore(input: PlanRunInput): Promise<PlanRunOutput> {
       return {
         ok: false,
         error: "this plan runs as visible turns in its chat session; it cannot be run headlessly",
+      }
+    }
+    const piiLeak = findPlanPiiLeak(plan)
+    if (piiLeak) {
+      return {
+        ok: false,
+        planId: plan.id,
+        status: plan.status,
+        error: `plan_run blocked: plan contains PII at ${piiLeak}`,
       }
     }
     if (plan.status === "awaiting_approval" || plan.status === "draft") {
@@ -484,6 +494,8 @@ const hostOperationLoaders: Record<string, () => Promise<HostOperation>> = {
   agentDispatch: async () => agentDispatchCore as HostOperation,
   teamRun: async () => teamRunCore as HostOperation,
   teamList: async () => teamListCore as HostOperation,
+  planList: async () => planListCore as HostOperation,
+  planRun: async () => planRunCore as HostOperation,
   pluginToolInvoke: async () => pluginToolInvokeCore as HostOperation,
   spawnTask: async () => (await import("./spawn-task")).spawnTaskCore as HostOperation,
   scheduleTask: async () => (await import("./scheduling")).scheduleTaskCore as HostOperation,

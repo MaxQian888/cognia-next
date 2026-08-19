@@ -12,6 +12,8 @@ export const runtimeQuery = (...args: unknown[]) => hostCall("runtimeQuery", ...
 export const agentDispatch = (...args: unknown[]) => hostCall("agentDispatch", ...args)
 export const teamRun = (...args: unknown[]) => hostCall("teamRun", ...args)
 export const teamList = (...args: unknown[]) => hostCall("teamList", ...args)
+export const planList = (...args: unknown[]) => hostCall("planList", ...args)
+export const planRun = (...args: unknown[]) => hostCall("planRun", ...args)
 export const pluginToolInvoke = (...args: unknown[]) => hostCall("pluginToolInvoke", ...args)
 
 export const connectorsListAdapters = (...args: unknown[]) =>
