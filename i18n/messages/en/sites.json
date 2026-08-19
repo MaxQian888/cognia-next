@@ -17,27 +17,41 @@
     "addDomain": "Add domain",
     "build": "Build saved version",
     "cancel": "Cancel",
+    "cancelEdit": "Cancel",
+    "clearOutput": "Clear",
     "confirmDeleteMetadata": "Delete metadata",
     "confirmPurge": "Purge managed resources",
+    "copyUrl": "Copy URL",
     "create": "Create Site",
     "creating": "Creating…",
     "deleteMetadata": "Delete Site metadata",
     "deploy": "Deploy",
+    "editEnvironment": "Edit",
+    "formatManifest": "Format",
     "loadAnalytics": "Load last 24 hours of analytics",
     "loadLogs": "Load last 24 hours of logs",
+    "loadRevision": "Load into editor",
     "newSite": "New Site",
+    "openSite": "Open site",
     "preview": "Start preview",
     "provision": "Provision bindings",
     "purge": "Purge managed resources",
     "reconcile": "Reconcile provider state",
     "redetectWrangler": "Re-detect Wrangler",
+    "refreshOperation": "Re-check",
+    "reloadManifest": "Reload from disk",
     "remove": "Remove",
     "restore": "Restore",
+    "retryBuild": "Retry build",
     "rollback": "Redeploy / Roll back",
+    "runQuery": "Run query",
     "saveAccess": "Apply access policy",
     "saveAuthoring": "Save authoring access",
     "saveEnvironment": "Save environment revision",
+    "saveManifest": "Save manifest",
+    "saveProviderConfig": "Save provider settings",
     "saveToken": "Verify and save token",
+    "scaffoldManifest": "Generate .cognia/hosting.json",
     "stopPreview": "Stop preview",
     "takeDown": "Take down",
     "upload": "Upload version"
@@ -85,8 +99,8 @@
     "taken-down": "Taken down"
   },
   "desktopOnly": {
-    "description": "Builds, provider credentials, and previews stay on the selected local desktop host.",
-    "title": "Sites requires Cognia Desktop"
+    "description": "Everything here is readable, but builds, previews, provider calls, and manifest edits need the Cognia desktop app.",
+    "title": "Publishing runs on the desktop host"
   },
   "domains": {
     "description": "Attach and reconcile Cloudflare Worker custom domains.",
@@ -95,21 +109,55 @@
   },
   "empty": "Create or select a Site to begin.",
   "environment": {
+    "credential": "Credential",
+    "currentRevision": "Current revision",
     "description": "Plain values are versioned. Secret values go only to this host's OS keyring.",
+    "diff": {
+      "added": "{count} added",
+      "changed": "{count} changed",
+      "none": "No changes",
+      "removed": "{count} removed"
+    },
+    "edit": "Edit variables and secrets",
+    "history": "Revision history",
+    "noRevision": "No environment revision yet.",
+    "noSecretRefs": "No secrets in this revision.",
+    "overwriteWarning": "Saving replaces the whole variable set; anything missing here is removed.",
+    "revision": "Revision",
+    "revisionLabel": "Revision {sequence}",
+    "savedAt": "Saved {when}",
+    "secretRefs": "Secret references",
+    "secretValueHidden": "Values stay in this host's OS keyring and are never shown.",
     "secrets": "Secrets",
     "secretsPlaceholder": "API_TOKEN=secret-value",
     "title": "Environment",
+    "usedByVersion": "Used by version {sequence}",
     "variables": "Variables",
     "variablesPlaceholder": "API_ORIGIN=https://api.example.com"
   },
   "errors": {
     "artifactRequired": "The saved version artifact is unavailable.",
     "environmentRequired": "Save an environment revision first.",
+    "manifestInvalid": "Fix the hosting manifest first.",
+    "manifestMissing": "Create .cognia/hosting.json first.",
     "projectRoot": "The selected project has no workspace root.",
-    "wranglerRequired": "Choose an approved absolute Wrangler binary path."
+    "wranglerRequired": "Choose an approved absolute Wrangler binary path.",
+    "zoneIdRequired": "A Cloudflare zone ID is required for a custom domain."
   },
   "feedback": {
     "success": "Site state updated"
+  },
+  "host": {
+    "banner": "Read-only: this shell cannot run builds, previews, or Cloudflare calls.",
+    "reason": {
+      "lifecycle-locked": "Unavailable while this Site is being deleted",
+      "ok": "",
+      "requires-access": "You are not on this Site's authoring policy",
+      "requires-deployer": "Requires deployer access to this Site",
+      "requires-desktop": "Available in the Cognia desktop app",
+      "requires-editor": "Requires editor access to this Site",
+      "requires-owner": "Only the Site owner can do this"
+    }
   },
   "lifecycle": {
     "active": "Active",
@@ -117,10 +165,56 @@
     "deleting": "Deleting",
     "taken-down": "Taken down"
   },
+  "manifest": {
+    "confidence": {
+      "detected": "Framework defaults",
+      "template": "Template — review the build command and output directory before saving"
+    },
+    "description": ".cognia/hosting.json defines the build argv, the preview command, the Worker entry, and the Cloudflare bindings.",
+    "detected": "Detected {kind} · {packageManager}",
+    "editorLabel": "Hosting manifest source",
+    "extraFiles": "Saving also writes {count, plural, one {# companion file} other {# companion files}}.",
+    "invalid": "This manifest does not parse: {error}",
+    "kind": {
+      "astro": "Astro",
+      "next": "Next.js",
+      "node": "Node project",
+      "remix": "Remix",
+      "static": "Static site",
+      "sveltekit": "SvelteKit",
+      "unknown": "Unrecognized project",
+      "vite": "Vite"
+    },
+    "loading": "Reading the manifest…",
+    "missing": {
+      "description": "Build, preview, and binding provisioning all read this file. Generate a starting point from the source tree, review it, then save.",
+      "title": "No hosting manifest yet"
+    },
+    "title": "Hosting manifest",
+    "unsupported": "The manifest lives in the Site's source tree, which only the desktop app can read."
+  },
   "observability": {
     "description": "Query Cloudflare Worker logs and request analytics without copying them into another runtime.",
     "empty": "No query has run yet.",
-    "title": "Provider observability"
+    "errorsOnly": "Errors only",
+    "hostname": "Hostname: {hostname}",
+    "noHostname": "No custom domain or production URL yet, so analytics stay Worker-scoped.",
+    "result": "Query result",
+    "segments": {
+      "analytics": "Request analytics",
+      "logs": "Worker logs",
+      "operations": "Operation journal"
+    },
+    "title": "Provider observability",
+    "workerScoped": "No zone ID set, so analytics stay Worker-scoped."
+  },
+  "operationEvent": {
+    "cancelled": "Cancelled",
+    "claimed": "Claimed",
+    "failed": "Failed",
+    "queued": "Queued",
+    "succeeded": "Succeeded",
+    "waiting-reconcile": "Waiting for reconciliation"
   },
   "operationStatus": {
     "cancelled": "Cancelled",
@@ -144,20 +238,107 @@
     "upload": "Upload"
   },
   "operations": {
+    "attempts": "{count, plural, one {# attempt} other {# attempts}}",
     "description": "Durable lifecycle events used for crash recovery and provider reconciliation.",
     "empty": "No lifecycle operations yet.",
+    "error": "Error",
     "eventCount": "{count, plural, one {# event} other {# events}}",
+    "noEvents": "No events recorded for this operation.",
+    "providerRequestId": "Provider request ID",
+    "reconcileResult": "{resolved} resolved · {remaining} still waiting",
+    "timeline": "Event timeline",
     "title": "Operation journal"
   },
+  "overview": {
+    "currentVersion": "Version {sequence}",
+    "deployedAt": "Deployed {when}",
+    "failureFrom": {
+      "deployment": "Deployment",
+      "operation": "Operation",
+      "version": "Version {label}"
+    },
+    "needsAttention": "{count, plural, one {# unresolved failure} other {# unresolved failures}}",
+    "noProductionUrl": "Appears here once a version is deployed.",
+    "noVersion": "No version deployed",
+    "owner": "Owner",
+    "productionUrl": "Production URL",
+    "role": {
+      "deployer": "Deployer",
+      "editor": "Editor",
+      "owner": "Owner",
+      "viewer": "Viewer"
+    },
+    "sourcePath": "Source",
+    "yourRole": "Your role"
+  },
   "provider": {
+    "accessTeamName": "Cloudflare Access team",
+    "accessTeamNameHint": "The team domain that enforces the visitor policy.",
     "account": "Account",
     "description": "The API token is verified before it is stored in the local OS keyring.",
+    "identityLocked": "The account and Worker name identify every resource already recorded, so they cannot be changed here.",
     "title": "Cloudflare provider",
     "token": "Cloudflare API token",
-    "worker": "Worker"
+    "worker": "Worker",
+    "zoneId": "Cloudflare zone ID",
+    "zoneIdHint": "Required to attach a custom domain and to get zone-scoped analytics.",
+    "zoneIdRequired": "Set the zone ID before attaching a custom domain."
   },
   "publish": {
     "noVersions": "Build a version first to upload and deploy."
+  },
+  "rail": {
+    "clear": "Clear search",
+    "group": "Sites",
+    "hint": {
+      "failed": "Build failed",
+      "live": "Live · {when}",
+      "never": "Not published"
+    },
+    "more": "Site actions",
+    "noMatches": "No Site matches this search.",
+    "running": "Running",
+    "search": "Search Sites"
+  },
+  "resources": {
+    "dependencies": "{count, plural, one {# dependency} other {# dependencies}}",
+    "description": "Everything Cognia knows about at Cloudflare, and whether a purge would delete it.",
+    "empty": "No provider resources recorded yet.",
+    "kind": {
+      "access-application": "Access applications",
+      "access-policy": "Access policies",
+      "custom-domain": "Custom domains",
+      "d1-database": "D1 databases",
+      "r2-bucket": "R2 buckets",
+      "secret": "Secrets",
+      "worker": "Worker",
+      "worker-version": "Worker versions"
+    },
+    "legend": "Purge deletes managed resources only.",
+    "noDependencies": "No dependencies",
+    "ownership": {
+      "adopted": "Adopted",
+      "managed": "Managed",
+      "shared": "Shared"
+    },
+    "ownershipHint": {
+      "adopted": "Adopted · preserved",
+      "managed": "Managed · purge deletes it",
+      "shared": "Shared · preserved"
+    },
+    "providerId": "Provider ID",
+    "retention": {
+      "purgeable": "{count} deleted",
+      "retained": "{count} preserved",
+      "title": "What a purge would do"
+    },
+    "status": {
+      "active": "Active",
+      "deleted": "Deleted",
+      "deleting": "Deleting",
+      "orphaned": "Orphaned"
+    },
+    "title": "Provider resources"
   },
   "sidebarEmpty": "No Sites yet. Create one to get started.",
   "stepState": {
@@ -179,6 +360,10 @@
       "description": "Save the variables and secrets the build needs.",
       "title": "Environment"
     },
+    "manifest": {
+      "description": "Describe how this Site builds, previews, and binds resources.",
+      "title": "Hosting manifest"
+    },
     "preview": {
       "description": "Run the build locally before publishing.",
       "title": "Preview"
@@ -189,8 +374,44 @@
     }
   },
   "subtitle": "Build, preview, and publish from Cognia",
+  "summary": {
+    "live": "{count} live",
+    "sites": "{count, plural, one {# Site} other {# Sites}}"
+  },
+  "tabs": {
+    "domains": "Domains & access",
+    "environment": "Environment",
+    "operations": "Operations",
+    "publish": "Publish flow",
+    "resources": "Resources",
+    "versions": "Versions"
+  },
   "title": "Sites",
   "versions": {
+    "artifact": "{size} · {count, plural, one {# file} other {# files}}",
+    "bindings": "Bindings",
+    "deploymentFailure": "Deployment failure",
+    "description": "Every immutable version, including builds that failed.",
+    "dirty": "Uncommitted",
+    "empty": "No versions yet. Build one from the publish flow.",
+    "failure": "Build failure",
+    "filter": {
+      "all": "All",
+      "building": "Building",
+      "failed": "Failed",
+      "ready": "Ready"
+    },
+    "live": "Live",
+    "noArtifact": "No artifact",
+    "noBindings": "No bindings",
+    "notUploaded": "Not uploaded",
+    "status": {
+      "building": "Building",
+      "failed": "Failed",
+      "ready": "Ready"
+    },
+    "title": "Versions",
+    "uploaded": "Uploaded",
     "version": "Version {sequence}"
   },
   "wrangler": {

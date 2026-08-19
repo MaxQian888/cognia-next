@@ -11,12 +11,14 @@
  * publish flow with no polling. The pure step derivations are exported for unit
  * testing without React or Dexie.
  */
-import { useLiveQuery } from "dexie-react-hooks"
+import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
 
 import {
+  listActiveSiteDeployments,
   listSiteDeployments,
   listSiteEnvironmentRevisions,
   listSiteOperationEvents,
+  listSiteOperationSignals,
   listSiteOperations,
   listSiteProjects,
   listSiteResources,
@@ -33,19 +35,27 @@ import type {
   SiteVersionRow,
 } from "@/types/sites"
 
-export type SiteStepKey = "connect" | "environment" | "build" | "preview" | "publish"
+export type SiteStepKey = "connect" | "manifest" | "environment" | "build" | "preview" | "publish"
 export type SiteStepState = "idle" | "running" | "done" | "failed"
 
 /** Fixed progressive order the publish flow renders. */
 export const SITE_STEP_ORDER: readonly SiteStepKey[] = [
   "connect",
+  "manifest",
   "environment",
   "build",
   "preview",
   "publish",
 ]
 
-/** Which publish step a durable operation belongs to (null = advanced/lifecycle). */
+/**
+ * Which publish step a durable operation belongs to (null = advanced/lifecycle).
+ *
+ * `manifest` is absent on purpose: writing `.cognia/hosting.json` is a local
+ * file edit, not a leased provider operation, so its step state comes from the
+ * file itself ({@link StepDerivationInput.manifestReady}) rather than from a
+ * row in `siteOperations`.
+ */
 const STEP_OF_OPERATION: Record<SiteOperationType, SiteStepKey | null> = {
   environment: "environment",
   provision: "build",
@@ -62,6 +72,12 @@ const STEP_OF_OPERATION: Record<SiteOperationType, SiteStepKey | null> = {
 
 export interface SiteLiveData {
   sites: SiteProjectRow[]
+  /**
+   * Cross-Site signals for the rail. The per-Site tables below only cover the
+   * selection, so without these every row but one would be a bare name.
+   */
+  activeDeployments: SiteDeploymentRow[]
+  operationSignals: SiteOperationRow[]
   /** Resolved selection: the pinned id, else the first site, else null. */
   selectedId: string | null
   versions: SiteVersionRow[]
@@ -74,7 +90,11 @@ export interface SiteLiveData {
   loading: boolean
 }
 
+type SiteSnapshot = Omit<SiteLiveData, "loading">
+
 const EMPTY_TABLES = {
+  activeDeployments: [] as SiteDeploymentRow[],
+  operationSignals: [] as SiteOperationRow[],
   versions: [] as SiteVersionRow[],
   deployments: [] as SiteDeploymentRow[],
   environments: [] as SiteEnvironmentRevisionRow[],
@@ -84,6 +104,8 @@ const EMPTY_TABLES = {
 }
 
 /** Newest durable operation belonging to a given step, if any. */
+const EMPTY_SNAPSHOT: SiteSnapshot = { sites: [], selectedId: null, ...EMPTY_TABLES }
+
 function newestOperationForStep(
   operations: SiteOperationRow[],
   step: SiteStepKey
@@ -111,6 +133,8 @@ function operationSignals(operation: SiteOperationRow | undefined): {
 export interface StepDerivationInput {
   /** Provider token verified this session, or a provisioned resource proves it. */
   connectDone: boolean
+  /** `.cognia/hosting.json` exists and parses. Build, preview, and provision all read it. */
+  manifestReady: boolean
   environments: SiteEnvironmentRevisionRow[]
   versions: SiteVersionRow[]
   deployments: SiteDeploymentRow[]
@@ -127,6 +151,7 @@ export interface StepDerivationInput {
 export function deriveStepStates(input: StepDerivationInput): Record<SiteStepKey, SiteStepState> {
   const done: Record<SiteStepKey, boolean> = {
     connect: input.connectDone,
+    manifest: input.manifestReady,
     environment: input.environments.length > 0,
     build: input.versions.some((version) => version.status === "ready"),
     preview: input.previewActive,
@@ -171,26 +196,51 @@ export function stepOfOperation(operation: SiteOperationRow | undefined): SiteSt
  * @param siteId the pinned selection, or null to auto-select the first site.
  */
 export function useSiteLiveData(siteId: string | null): SiteLiveData {
-  const snapshot = useLiveQuery(async () => {
-    const sites = await listSiteProjects()
-    const selectedId = siteId ?? sites[0]?.id ?? null
-    if (!selectedId) return { sites, selectedId: null, ...EMPTY_TABLES }
-    const [versions, deployments, environments, resources, operations] = await Promise.all([
-      listSiteVersions(selectedId),
-      listSiteDeployments(selectedId),
-      listSiteEnvironmentRevisions(selectedId),
-      listSiteResources(selectedId),
-      listSiteOperations(selectedId),
-    ])
-    const events = (
-      await Promise.all(operations.map((operation) => listSiteOperationEvents(operation.id)))
-    ).flat()
-    return { sites, selectedId, versions, deployments, environments, resources, operations, events }
-  }, [siteId])
+  // `useClientLiveQuery` short-circuits on the server so the console can be
+  // rendered by every shell without reaching for IndexedDB during prerender.
+  const snapshot = useClientLiveQuery<SiteSnapshot>(
+    async () => {
+      const [sites, activeDeployments, operationSignals] = await Promise.all([
+        listSiteProjects(),
+        listActiveSiteDeployments(),
+        listSiteOperationSignals(),
+      ])
+      const selectedId = siteId ?? sites[0]?.id ?? null
+      if (!selectedId) {
+        return { ...EMPTY_TABLES, sites, selectedId: null, activeDeployments, operationSignals }
+      }
+      const [versions, deployments, environments, resources, operations] = await Promise.all([
+        listSiteVersions(selectedId),
+        listSiteDeployments(selectedId),
+        listSiteEnvironmentRevisions(selectedId),
+        listSiteResources(selectedId),
+        listSiteOperations(selectedId),
+      ])
+      const events = (
+        await Promise.all(operations.map((operation) => listSiteOperationEvents(operation.id)))
+      ).flat()
+      return {
+        sites,
+        selectedId,
+        activeDeployments,
+        operationSignals,
+        versions,
+        deployments,
+        environments,
+        resources,
+        operations,
+        events,
+      }
+    },
+    [siteId],
+    EMPTY_SNAPSHOT
+  )
 
   return {
     sites: snapshot?.sites ?? [],
     selectedId: snapshot?.selectedId ?? null,
+    activeDeployments: snapshot?.activeDeployments ?? EMPTY_TABLES.activeDeployments,
+    operationSignals: snapshot?.operationSignals ?? EMPTY_TABLES.operationSignals,
     versions: snapshot?.versions ?? EMPTY_TABLES.versions,
     deployments: snapshot?.deployments ?? EMPTY_TABLES.deployments,
     environments: snapshot?.environments ?? EMPTY_TABLES.environments,

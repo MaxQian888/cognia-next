@@ -159,6 +159,9 @@ export function SitePublishView({
   const connectDone = tokenSaved || resources.some((row) => row.status === "active")
   const stepStates = deriveStepStates({
     connectDone,
+    // Superseded by the manifest step in the console rebuild; this view keeps
+    // its five-step shape until it is removed.
+    manifestReady: true,
     environments,
     versions,
     deployments,

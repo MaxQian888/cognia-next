@@ -574,6 +574,18 @@ export async function listSiteOperations(siteId: string): Promise<SiteOperationR
   return getDb().siteOperations.where("siteId").equals(siteId).sortBy("createdAt")
 }
 
+/**
+ * Operations across all Sites that the console's rail needs a signal for:
+ * still moving, or stopped in a state the user must resolve. One index-backed
+ * lookup on `status` feeds both the "running" and the "failed" rail hints.
+ */
+export async function listSiteOperationSignals(): Promise<SiteOperationRow[]> {
+  return getDb()
+    .siteOperations.where("status")
+    .anyOf(["queued", "running", "failed", "waiting-reconcile"])
+    .toArray()
+}
+
 export async function resolveSiteOperationFromReconcile(input: {
   operationId: string
   providerRequestId?: string
@@ -717,6 +729,17 @@ export async function listSiteDeployments(siteId: string): Promise<SiteDeploymen
   return getDb().siteDeployments.where("siteId").equals(siteId).reverse().sortBy("updatedAt")
 }
 
+/**
+ * Every currently-serving deployment across all Sites.
+ *
+ * The console's Site rail needs one signal per row — is it live, and at which
+ * version — but the per-Site tables are only loaded for the selected Site.
+ * Index-backed on `status`, so this stays one lookup regardless of history.
+ */
+export async function listActiveSiteDeployments(): Promise<SiteDeploymentRow[]> {
+  return getDb().siteDeployments.where("status").equals("active").toArray()
+}
+
 export async function getSiteDeployment(id: string): Promise<SiteDeploymentRow | undefined> {
   return getDb().siteDeployments.get(id)
 }
@@ -854,6 +877,57 @@ export async function updateSiteAuthoringPolicy(
       ownerAccountId,
       editorAccountIds: normalize(authoringPolicy.editorAccountIds),
       deployerAccountIds: normalize(authoringPolicy.deployerAccountIds),
+    },
+    updatedAt: now,
+  }
+  await db.siteProjects.put(updated)
+  return updated
+}
+
+/**
+ * Edit the provider fields that were unreachable after creation.
+ *
+ * Deliberately narrow: `zoneId` and `accessTeamName` only. `accountId` and
+ * `workerName` identify every row already recorded in `siteResources`, so
+ * rewriting them would silently orphan the Worker, its versions, its domains,
+ * and its Access application while Cognia went on reporting them as managed.
+ * Those two stay set-at-creation.
+ *
+ * `zoneId` matters because `addDomain` and zone-scoped analytics both require
+ * it and nothing could supply it before — the custom-domain button threw for
+ * every Site created in the app.
+ *
+ * Owner-only, matching `canAuthorSite(..., "manage")`.
+ */
+export async function updateSiteProviderConfig(
+  id: string,
+  actorAccountId: string,
+  patch: { zoneId?: string; accessTeamName?: string },
+  now = Date.now()
+): Promise<SiteProjectRow> {
+  const db = getDb()
+  const site = await db.siteProjects.get(id)
+  if (!site || site.lifecycle === "deleted" || site.lifecycle === "deleting") {
+    throw new Error("active site project not found")
+  }
+  if (site.authoringPolicy.ownerAccountId !== actorAccountId) {
+    throw new Error("only the Site owner can change provider configuration")
+  }
+  // A blank value clears the field rather than storing an empty string, so
+  // `zoneId ?? undefined` checks downstream keep working.
+  const optional = (
+    key: "zoneId" | "accessTeamName"
+  ): Record<string, string> | Record<string, never> => {
+    const next = Object.hasOwn(patch, key) ? patch[key]?.trim() : site.providerConfig[key]
+    return next ? { [key]: next } : {}
+  }
+  const updated: SiteProjectRow = {
+    ...site,
+    providerConfig: {
+      accountId: site.providerConfig.accountId,
+      workerName: site.providerConfig.workerName,
+      ...optional("zoneId"),
+      ...optional("accessTeamName"),
     },
     updatedAt: now,
   }

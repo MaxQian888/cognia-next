@@ -20,6 +20,7 @@ import { packageSiteArtifact, type SiteArtifactFile } from "./artifact-package"
 import { assertSiteAuthoringCapability } from "./authoring-policy"
 import { runConfinedSiteBuild, type ConfinedSiteBuildResult } from "./confined-build"
 import { parseSiteHostingManifest } from "./manifest"
+import { resolveSiteManifestPath, resolveSiteSourceDir } from "./manifest-file"
 import type { SiteVersionRow } from "@/types/sites"
 import type { GitCommit, GitStatus } from "@/types/git"
 
@@ -177,11 +178,9 @@ export async function buildAndSaveSiteVersion(
   const environment = await deps.getEnvironment(input.environmentRevisionId)
   if (!environment || environment.siteId !== site.id)
     throw new Error("Site environment revision not found")
-  const sourceDir = site.sourceSubpath
-    ? await deps.join(site.sourceRoot, ...site.sourceSubpath.split("/"))
-    : site.sourceRoot
+  const sourceDir = await resolveSiteSourceDir(site, deps.join)
   const manifest = parseSiteHostingManifest(
-    await deps.readText(await deps.join(sourceDir, ".cognia", "hosting.json"))
+    await deps.readText(await resolveSiteManifestPath(site, deps.join))
   )
   const git = await deps.gitSnapshot(site.sourceRoot)
   const dirty = [...git.status.staged, ...git.status.changes, ...git.status.merge].length > 0

@@ -58,3 +58,39 @@ it("exposes the state on the row for styling and assertions", () => {
   const { container } = renderStep({ state: "running", stateLabel: "Running" })
   expect(container.querySelector('[data-state="running"]')).not.toBeNull()
 })
+
+it("shows a blocking problem as an alert", () => {
+  render(
+    <SitePublishStep
+      index={3}
+      title="Build"
+      state="failed"
+      stateLabel="Needs attention"
+      error="install failed: ENOTFOUND registry.npmjs.org"
+    />
+  )
+  expect(screen.getByRole("alert")).toHaveTextContent("ENOTFOUND")
+})
+
+it("shows a non-blocking hint alongside a normal state", () => {
+  render(
+    <SitePublishStep
+      index={3}
+      title="Build"
+      state="idle"
+      stateLabel="Not started"
+      hint="Available in the Cognia desktop app"
+    />
+  )
+  expect(screen.getByText("Available in the Cognia desktop app")).toBeInTheDocument()
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+})
+
+it("keeps the running spinner visible under reduced motion", () => {
+  const { container } = render(
+    <SitePublishStep index={1} title="Connect" state="running" stateLabel="In progress" />
+  )
+  const spinner = container.querySelector("svg")
+  expect(spinner).toHaveClass("animate-spin")
+  expect(spinner?.className.toString()).not.toContain("motion-safe:animate-spin")
+})

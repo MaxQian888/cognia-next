@@ -10,6 +10,8 @@ import type {
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/db/sites", () => ({
   listSiteProjects: jest.fn(async () => []),
+  listActiveSiteDeployments: jest.fn(async () => []),
+  listSiteOperationSignals: jest.fn(async () => []),
   listSiteVersions: jest.fn(async () => []),
   listSiteDeployments: jest.fn(async () => []),
   listSiteEnvironmentRevisions: jest.fn(async () => []),
@@ -21,6 +23,7 @@ jest.mock("@/lib/db/sites", () => ({
 import { useLiveQuery } from "dexie-react-hooks"
 import * as db from "@/lib/db/sites"
 import {
+  SITE_STEP_ORDER,
   deriveStepStates,
   latestEventMessage,
   pickRunningOperation,
@@ -54,6 +57,7 @@ const ONE_ENVIRONMENT = [{ id: "env-1" } as SiteEnvironmentRevisionRow]
 function stepInput(overrides: Partial<StepDerivationInput> = {}): StepDerivationInput {
   return {
     connectDone: false,
+    manifestReady: false,
     environments: [],
     versions: [],
     deployments: [],
@@ -72,6 +76,7 @@ describe("deriveStepStates", () => {
     const states = deriveStepStates(
       stepInput({
         connectDone: true,
+        manifestReady: true,
         environments: ONE_ENVIRONMENT,
         versions: [READY_VERSION],
         deployments: [ACTIVE_DEPLOYMENT],
@@ -80,6 +85,7 @@ describe("deriveStepStates", () => {
     )
     expect(states).toEqual({
       connect: "done",
+      manifest: "done",
       environment: "done",
       build: "done",
       preview: "done",
@@ -87,9 +93,33 @@ describe("deriveStepStates", () => {
     })
   })
 
+  it("drives the manifest step from the file, not from an operation", () => {
+    expect(deriveStepStates(stepInput({ manifestReady: true })).manifest).toBe("done")
+    expect(deriveStepStates(stepInput({ manifestReady: false })).manifest).toBe("idle")
+    // No `SiteOperationType` maps to the manifest step, so an in-flight
+    // operation must never make it look busy.
+    expect(
+      deriveStepStates(
+        stepInput({ manifestReady: true, operations: [operation({ type: "build" })] })
+      ).manifest
+    ).toBe("done")
+  })
+
+  it("orders the manifest between connecting and the environment", () => {
+    expect([...SITE_STEP_ORDER]).toEqual([
+      "connect",
+      "manifest",
+      "environment",
+      "build",
+      "preview",
+      "publish",
+    ])
+  })
+
   it("is all idle with no signals", () => {
     expect(deriveStepStates(stepInput())).toEqual({
       connect: "idle",
+      manifest: "idle",
       environment: "idle",
       build: "idle",
       preview: "idle",
@@ -211,6 +241,8 @@ describe("useSiteLiveData", () => {
     useLiveQueryMock.mockReturnValue({
       sites: [{ id: "site-1" }],
       selectedId: "site-1",
+      activeDeployments: [ACTIVE_DEPLOYMENT],
+      operationSignals: [],
       versions: [READY_VERSION],
       deployments: [ACTIVE_DEPLOYMENT],
       environments: ONE_ENVIRONMENT,
@@ -224,6 +256,7 @@ describe("useSiteLiveData", () => {
     expect(result.current.selectedId).toBe("site-1")
     expect(result.current.versions).toHaveLength(1)
     expect(result.current.operations[0].id).toBe("op-1")
+    expect(result.current.activeDeployments).toHaveLength(1)
   })
 
   it("composes sites + per-site tables in its live query for a selected site", async () => {
@@ -244,6 +277,43 @@ describe("useSiteLiveData", () => {
     expect(snapshot.sites).toHaveLength(1)
     expect(snapshot.selectedId).toBe("site-1")
     expect(snapshot.events).toHaveLength(1)
+  })
+
+  it("loads the cross-Site rail signals alongside the selection", async () => {
+    // Without these the rail can only label the selected row; every other Site
+    // would show a bare name with no idea whether it is live, busy, or broken.
+    ;(db.listSiteProjects as jest.Mock).mockResolvedValue([{ id: "site-1" }, { id: "site-2" }])
+    ;(db.listActiveSiteDeployments as jest.Mock).mockResolvedValue([
+      { id: "dep", siteId: "site-2" },
+    ])
+    ;(db.listSiteOperationSignals as jest.Mock).mockResolvedValue([
+      { id: "op", siteId: "site-2", status: "running" },
+    ])
+    let captured: (() => Promise<Record<string, unknown>>) | undefined
+    useLiveQueryMock.mockImplementation((fn: () => Promise<Record<string, unknown>>) => {
+      captured = fn
+      return undefined
+    })
+    renderHook(() => useSiteLiveData("site-1"))
+    const snapshot = await captured!()
+    expect(snapshot.activeDeployments).toHaveLength(1)
+    expect(snapshot.operationSignals).toHaveLength(1)
+  })
+
+  it("still loads the rail signals when there is no Site to select", async () => {
+    ;(db.listSiteProjects as jest.Mock).mockResolvedValue([])
+    ;(db.listActiveSiteDeployments as jest.Mock).mockResolvedValue([])
+    ;(db.listSiteOperationSignals as jest.Mock).mockResolvedValue([])
+    let captured: (() => Promise<Record<string, unknown>>) | undefined
+    useLiveQueryMock.mockImplementation((fn: () => Promise<Record<string, unknown>>) => {
+      captured = fn
+      return undefined
+    })
+    renderHook(() => useSiteLiveData(null))
+    const snapshot = await captured!()
+    expect(snapshot.selectedId).toBeNull()
+    expect(db.listActiveSiteDeployments).toHaveBeenCalled()
+    expect(db.listSiteOperationSignals).toHaveBeenCalled()
   })
 
   it("auto-selects the first site and loads its data when none is pinned", async () => {

@@ -247,7 +247,19 @@ describe("OpsClient", () => {
     })
 
     await client.validateTarget({ metadata: { id: "target" } }, "validate-1")
-    await client.upgrade("target/a", { release: "digest" }, "upgrade-1")
+    await client.upgrade(
+      "target/a",
+      {
+        targetRevision: 3,
+        release: {
+          serverImage: "server@sha256:aa",
+          runnerImage: "runner@sha256:bb",
+          workspaceRuntimeImage: "runtime@sha256:cc",
+          configRevision: "3",
+        },
+      },
+      "upgrade-1"
+    )
     await client.createAdminLease("target/a", "restore", "lease-1")
     await client.restore("target/a", "rp-1", "lease-token", "restore-1")
     await client.rotateKey("target/a", "key-v2", "lease-token", "rotate-1")
@@ -261,7 +273,15 @@ describe("OpsClient", () => {
       { path: "/v1/targets/validate", body: { metadata: { id: "target" } }, lease: null },
       {
         path: "/v1/servers/target%2Fa/upgrade",
-        body: { release: "digest" },
+        body: {
+          targetRevision: 3,
+          release: {
+            serverImage: "server@sha256:aa",
+            runnerImage: "runner@sha256:bb",
+            workspaceRuntimeImage: "runtime@sha256:cc",
+            configRevision: "3",
+          },
+        },
         lease: null,
       },
       {
@@ -280,6 +300,101 @@ describe("OpsClient", () => {
         lease: "lease-token",
       },
     ])
+  })
+
+  it("queues the operation kinds the controller derives server-side", async () => {
+    const fetchImpl = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockImplementation(async () => jsonResponse({ id: "op" }, 202))
+    const client = new OpsClient({
+      baseUrl: "https://ops.example.com",
+      accessToken: () => Promise.resolve("access-token"),
+      fetchImpl,
+    })
+
+    // Preflight sends nothing: the controller refuses a client-supplied
+    // revision, so a body here would be a 400 rather than a hint.
+    await client.preflight("production", "preflight-1")
+    await client.collectStatus("production", "status-1")
+    await client.collectStatus("production", "status-2", { includeRuntimeUsage: true })
+    await client.collectLogs("production", "logs-1")
+    await client.collectLogs("production", "logs-2", { afterEventId: 7, limit: 5000 })
+
+    expect(
+      fetchImpl.mock.calls.map(([input, init]) => [
+        new URL(input as string).pathname,
+        JSON.parse(String(init?.body)),
+      ])
+    ).toEqual([
+      ["/v1/servers/production/preflight", {}],
+      ["/v1/servers/production/collect-status", {}],
+      ["/v1/servers/production/collect-status", { includeRuntimeUsage: true }],
+      ["/v1/servers/production/collect-logs", {}],
+      // The agent's own ceiling is 1000 lines; a larger ask is clamped rather
+      // than rejected at the controller.
+      ["/v1/servers/production/collect-logs", { afterEventId: 7, limit: 1000 }],
+    ])
+  })
+
+  it("issues enrollment tokens with a clamped lifetime and cancels operations", async () => {
+    const fetchImpl = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockImplementation(async () => jsonResponse({ token: "enroll", expiresAt: "2026-08-01" }))
+    const client = new OpsClient({
+      baseUrl: "https://ops.example.com",
+      accessToken: () => Promise.resolve("access-token"),
+      fetchImpl,
+    })
+
+    await expect(client.createEnrollmentToken("staging", "enroll-1")).resolves.toEqual({
+      token: "enroll",
+      expiresAt: "2026-08-01",
+    })
+    await client.createEnrollmentToken("staging", "enroll-2", 5)
+    await client.createEnrollmentToken("staging", "enroll-3", 99999)
+    await client.cancelOperation("op/1", "cancel-1")
+
+    expect(
+      fetchImpl.mock.calls.map(([input, init]) => [
+        new URL(input as string).pathname,
+        JSON.parse(String(init?.body)),
+      ])
+    ).toEqual([
+      ["/v1/agents/enrollment-tokens", { targetId: "staging", ttlSeconds: 900 }],
+      // The controller clamps to 60..3600 too; clamping here keeps the UI from
+      // showing a countdown the controller will not honour.
+      ["/v1/agents/enrollment-tokens", { targetId: "staging", ttlSeconds: 60 }],
+      ["/v1/agents/enrollment-tokens", { targetId: "staging", ttlSeconds: 3600 }],
+      ["/v1/operations/op%2F1/cancel", {}],
+    ])
+  })
+
+  it("delegates event streaming to an injected transport", async () => {
+    // Desktop cannot open the SSE stream from the renderer at all, so the
+    // client must hand the whole job to the native transport rather than
+    // falling back to its own reader.
+    const fetchImpl = jest.fn<Promise<Response>, Parameters<typeof fetch>>()
+    const client = new OpsClient({
+      baseUrl: "https://ops.example.com",
+      accessToken: () => Promise.resolve("access-token"),
+      fetchImpl,
+      eventStream: async function* (options) {
+        expect(options.lastEventId).toBe(9)
+        yield {
+          id: 10,
+          operationId: "op-1",
+          targetId: "t",
+          state: "succeeded" as const,
+          timestamp: "",
+          message: "",
+        }
+      },
+    })
+
+    const seen = []
+    for await (const event of client.streamEvents({ lastEventId: 9 })) seen.push(event)
+    expect(seen).toHaveLength(1)
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it("parses operation events and resumes with Last-Event-ID", async () => {

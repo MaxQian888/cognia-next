@@ -1,8 +1,9 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { CheckCircle2Icon, CircleAlertIcon, Loader2Icon } from "lucide-react"
+import { CheckCircle2Icon, CircleAlertIcon } from "lucide-react"
 
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { SiteStepState } from "@/hooks/sites/use-site-live-data"
 
@@ -16,16 +17,24 @@ export interface SitePublishStepProps {
   stateLabel: string
   /** Live sub-status line shown only while running (from the op event stream). */
   subStatus?: string
+  /** Blocking problem for this step — a failure message or an unmet precondition. */
+  error?: string
+  /** Non-blocking note, e.g. why the step's controls are disabled on this host. */
+  hint?: string
   /** The step's action controls. */
   children?: ReactNode
 }
 
 /**
  * One row of the progressive publish flow. Purely presentational: the parent
- * derives `state` from live Dexie data and localizes every string. The running
- * spinner is gated behind `motion-safe:` so reduced-motion users get a static
- * indicator, and the sub-status line is an `aria-live` region so screen readers
- * hear each operation event as it lands.
+ * derives `state` from live Dexie data and localizes every string.
+ *
+ * The running indicator is the shared `Spinner`. It previously hand-rolled
+ * `motion-safe:animate-spin`, which froze the glyph for reduced-motion users —
+ * but the reduced-motion tier in `app/globals.css` deliberately exempts
+ * `.animate-spin`, because removing distraction must not remove status. The
+ * sub-status line is an `aria-live` region so screen readers hear each
+ * operation event as it lands.
  */
 export function SitePublishStep({
   index,
@@ -34,6 +43,8 @@ export function SitePublishStep({
   state,
   stateLabel,
   subStatus,
+  error,
+  hint,
   children,
 }: SitePublishStepProps) {
   return (
@@ -49,7 +60,7 @@ export function SitePublishStep({
         )}
       >
         {state === "running" ? (
-          <Loader2Icon className="size-4 text-primary motion-safe:animate-spin" />
+          <Spinner className="size-4 text-primary" />
         ) : state === "done" ? (
           <CheckCircle2Icon className="size-4" />
         ) : state === "failed" ? (
@@ -68,6 +79,15 @@ export function SitePublishStep({
             {subStatus}
           </p>
         ) : null}
+        {error ? (
+          <p
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs text-destructive"
+          >
+            {error}
+          </p>
+        ) : null}
+        {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
         {children ? <div className="pt-1">{children}</div> : null}
       </div>
     </div>

@@ -33,7 +33,14 @@ export const SURFACE_CONTRACTS = [
     offline: "local",
   },
   { id: "pair", route: "/pair", standalone: "full", companion: "full", offline: "local" },
-  { id: "a2ui", route: "/a2ui", standalone: "full", companion: "remote", offline: "cached-read" },
+  {
+    id: "a2ui",
+    route: "/a2ui",
+    navigation: true,
+    standalone: "full",
+    companion: "remote",
+    offline: "cached-read",
+  },
   {
     id: "canvas-join",
     route: "/canvas/join",
@@ -76,7 +83,14 @@ export const SURFACE_CONTRACTS = [
     companion: "full",
     offline: "cached-read",
   },
-  { id: "sites", route: "/sites", standalone: "full", companion: "remote", offline: "cached-read" },
+  {
+    id: "sites",
+    route: "/sites",
+    navigation: true,
+    standalone: "full",
+    companion: "remote",
+    offline: "cached-read",
+  },
   { id: "fleet", route: "/fleet", standalone: "hidden", companion: "remote", offline: "blocked" },
   {
     id: "workflows",

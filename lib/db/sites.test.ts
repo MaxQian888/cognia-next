@@ -20,6 +20,7 @@ import {
   failSiteOperation,
   setSiteLifecycle,
   siteResourceCanBePurged,
+  updateSiteProviderConfig,
 } from "./sites"
 import { createDbTestFixture } from "./test-fixture"
 
@@ -484,5 +485,69 @@ describe("provider resource ownership and deletion", () => {
     await expect(setSiteLifecycle("site_1", "taken-down", 220)).resolves.toMatchObject({
       lifecycle: "taken-down",
     })
+  })
+})
+
+describe("provider configuration", () => {
+  it("sets the zone id that add-domain and zone-scoped analytics require", async () => {
+    await makeSite()
+
+    const updated = await updateSiteProviderConfig("site_1", "owner_1", { zoneId: " zone_1 " }, 200)
+
+    expect(updated.providerConfig).toEqual({
+      accountId: "account_1",
+      workerName: "cognia-docs",
+      zoneId: "zone_1",
+    })
+    expect(updated.updatedAt).toBe(200)
+  })
+
+  it("keeps untouched optional fields and clears the ones set to blank", async () => {
+    await makeSite()
+    await updateSiteProviderConfig("site_1", "owner_1", {
+      zoneId: "zone_1",
+      accessTeamName: "acme",
+    })
+
+    const kept = await updateSiteProviderConfig("site_1", "owner_1", { accessTeamName: "beta" })
+    expect(kept.providerConfig.zoneId).toBe("zone_1")
+    expect(kept.providerConfig.accessTeamName).toBe("beta")
+
+    const cleared = await updateSiteProviderConfig("site_1", "owner_1", { zoneId: "   " })
+    expect(cleared.providerConfig).not.toHaveProperty("zoneId")
+    expect(cleared.providerConfig.accessTeamName).toBe("beta")
+  })
+
+  it("never lets the provider identity drift away from the recorded resources", async () => {
+    await makeSite()
+
+    const updated = await updateSiteProviderConfig("site_1", "owner_1", {
+      zoneId: "zone_1",
+      // @ts-expect-error accountId and workerName are intentionally not patchable:
+      // they identify every row already recorded in `siteResources`.
+      accountId: "someone-elses-account",
+      workerName: "someone-elses-worker",
+    })
+
+    expect(updated.providerConfig.accountId).toBe("account_1")
+    expect(updated.providerConfig.workerName).toBe("cognia-docs")
+  })
+
+  it("refuses a non-owner and a site that is gone", async () => {
+    await makeSite()
+
+    await expect(
+      updateSiteProviderConfig("site_1", "editor_1", { zoneId: "zone_1" })
+    ).rejects.toThrow(/only the Site owner/)
+
+    await expect(
+      updateSiteProviderConfig("missing", "owner_1", { zoneId: "zone_1" })
+    ).rejects.toThrow(/active site project not found/)
+
+    await setSiteLifecycle("site_1", "taken-down")
+    await setSiteLifecycle("site_1", "deleting")
+    await expect(
+      updateSiteProviderConfig("site_1", "owner_1", { zoneId: "zone_1" })
+    ).rejects.toThrow(/active site project not found/)
   })
 })

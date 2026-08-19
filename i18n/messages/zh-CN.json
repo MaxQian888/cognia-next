@@ -23012,68 +23012,148 @@
   },
   "servers": {
     "actions": {
-      "backToServers": "返回服务器",
+      "backToServers": "全部服务器",
       "backup": "创建备份",
-      "deploy": "部署服务器",
+      "collectLogs": "采集日志",
+      "collectStatus": "采集状态",
+      "deploy": "部署目标",
+      "includeRuntimeUsage": "包含运行时资源占用",
+      "more": "更多操作",
+      "preflight": "运行部署前检查",
       "refresh": "刷新",
       "restore": "恢复",
       "rollback": "回滚",
-      "rotateKey": "轮换密钥"
+      "rotateKey": "轮换密钥",
+      "upgrade": "升级版本"
+    },
+    "actionsHelp": {
+      "backup": "让 Agent 使用该目标已配置的快照与对象存储提供方创建一个恢复点。",
+      "collectLogs": "从主机拉取最近的服务器日志到控制器，随后会出现在「日志」标签页。",
+      "collectStatus": "让 Agent 上报该目标的实时状态。勾选运行时占用会额外采集每个容器的资源数据，探测耗时更长。",
+      "enroll": "签发一次性接入令牌并连接部署 Agent。在 Agent 接入之前，所有操作都会一直排队、无人执行。",
+      "preflight": "对照已登记的配置修订版本检查主机，不做任何变更。",
+      "rollback": "回到 Agent 记录的上一个发布版本，需要管理员租约。",
+      "rollbackUnavailable": "该目标尚未部署过任何版本，没有可回滚的对象。",
+      "rotateKey": "切换到已预配的密钥版本，需要管理员租约。",
+      "upgrade": "在目标当前配置修订版本上部署新的不可变镜像摘要。"
     },
     "backups": {
-      "empty": "暂无可用恢复点。"
+      "description": "Agent 为该目标创建的恢复点，最新在前。",
+      "empty": "创建一次备份即可生成第一个恢复点。",
+      "emptyTitle": "暂无恢复点",
+      "kind": {
+        "object-store": "对象存储",
+        "snapshot": "卷快照"
+      },
+      "verified": "已校验"
     },
     "certified": "已通过生产认证",
     "confirm": {
       "cancel": "取消",
       "confirm": "申请管理员租约并继续",
-      "description": "此受保护操作需要短期、用户绑定的管理员租约，并会写入审计日志。",
+      "restore": "恢复会用该恢复点覆盖 {label} 上的实时数据。系统会申请一个短期、绑定用户的管理员租约，并写入审计日志。",
+      "rollback": "这会让 {label} 回到 Agent 记录的上一个发布版本。系统会申请一个短期、绑定用户的管理员租约，并写入审计日志。",
+      "rotate-key": "这会把 {label} 重新加密到所选的预配密钥版本。系统会申请一个短期、绑定用户的管理员租约，并写入审计日志。",
       "title": "确认受保护的服务器操作"
     },
     "connection": {
       "accessToken": "OIDC 访问令牌",
+      "browserTransport": "浏览器只能访问会返回 CORS 头的控制器。要直连自建控制器，请使用桌面版或移动版 Cognia。",
+      "browserTransportTitle": "浏览器传输方式",
       "connect": "连接",
       "connected": "已连接运维控制器",
       "connecting": "正在连接…",
       "controllerPlaceholder": "https://ops.example.com",
       "controllerUrl": "控制器地址",
-      "description": "连接云中立运维控制器。凭据仅保留在内存中，此页面不会持久化凭据。",
+      "controllerUrlHelp": "控制器的公网基础地址。除本地回环开发外必须使用 HTTPS。",
+      "description": "连接管理你的部署目标的云中立运维控制器。",
       "disconnect": "断开连接",
       "disconnectFailed": "无法断开与运维控制器的连接",
       "disconnected": "已断开与运维控制器的连接",
-      "eventsConnected": "实时事件已连接",
-      "eventsReconnecting": "正在重新连接实时事件…",
+      "eventsConnected": "实时",
+      "eventsLiveHelp": "操作状态变化会从控制器实时推送过来。",
+      "eventsPolled": "轮询",
+      "eventsPolledHelp": "当前壳无法保持控制器的事件流，因此只能定期重新读取本机发起的操作。其他设备上发起的工作需要刷新后才会出现。",
+      "eventsReconnecting": "正在重连…",
       "failed": "无法连接运维控制器",
-      "targetId": "默认目标 ID",
+      "profileId": "连接配置名称",
+      "profileIdHelp": "本连接在本机的名称。它用于隔离已保存的令牌和离线缓存，不会发送给控制器。",
+      "storageNotice": "访问令牌保存在系统钥匙串中；本地仅保存控制器地址与配置名称。",
       "title": "连接运维控制器",
       "tokenNotice": "请使用包含 servers:read 的短期 OIDC 令牌。每次变更操作仍会重新校验 operate 与 admin 权限。",
-      "unlockAccount": "连接服务器目标前，请先解锁当前账号。"
+      "unlockAccount": "连接服务器目标前，请先解锁当前账号。",
+      "urlProblem": {
+        "insecure": "请使用 https://；只有本地回环地址才允许 http://。",
+        "invalid": "请输入包含协议头的完整地址。"
+      }
     },
     "description": "在一个云中立工作区中部署、观测、备份、恢复并保护 Compose 或 Kubernetes 目标。",
+    "detail": {
+      "loading": "正在加载机群…",
+      "missingDescription": "当前控制器的机群里没有这个目标。它可能已被移除，或者属于其他租户。",
+      "missingTitle": "未找到目标"
+    },
+    "enroll": {
+      "action": "连接 Agent",
+      "agentId": "Agent ID",
+      "agentIdHelp": "用于向控制器标识这台主机。为该目标服务的每台机器请使用不同的 ID。",
+      "connected": "{label} 已上线 —— Agent 接入成功，现在可以执行操作了。",
+      "copyCommand": "复制命令",
+      "description": "已登记的目标只有在部署 Agent 完成接入并连上控制器之后，才真正可执行。",
+      "done": "完成",
+      "failed": "无法签发接入令牌",
+      "issue": "签发接入令牌",
+      "noTargets": "请先部署一个目标 —— 接入令牌需要绑定到 Agent 将要服务的目标上。",
+      "noTargetsTitle": "还没有目标",
+      "steps": {
+        "enroll": "完成 Agent 接入，然后删除暂存的令牌",
+        "stage-token": "把一次性令牌写入仅属主可读的文件",
+        "start": "启动 Agent 服务"
+      },
+      "target": "目标",
+      "title": "连接部署 Agent",
+      "tokenExpires": "一次性使用，有效期至 {time}。",
+      "tokenIssued": "接入令牌已签发",
+      "waiting": "正在等待 Agent 的首次心跳…"
+    },
     "errors": {
       "authenticationRequired": "OIDC 会话缺失或已过期，请重新登录后连接。",
+      "cancel": "无法取消该操作",
       "capabilities": "无法加载服务器能力",
       "detail": "无法加载服务器详情",
+      "insufficientScope": "当前令牌不包含该操作所需的权限范围。",
       "networkUnavailable": "运维控制器不可用，请检查地址、TLS 证书和网络路由。",
+      "networkUnavailableBrowser": "控制器没有响应。在浏览器中它必须返回 CORS 头；桌面版和移动版可以直连。",
+      "notCancellable": "已有 Agent 领取该操作，控制器不会在它仍在执行时把它标记为已取消。",
       "operation": "无法将服务器操作加入队列",
       "recovery": "请重试操作；若仍然失败，请使用运维身份检查控制器审计日志。",
-      "refresh": "无法刷新服务器列表"
+      "refresh": "无法刷新服务器列表",
+      "targetBusy": "该目标上已有另一个破坏性操作正在执行。"
     },
     "fields": {
       "certification": "认证状态",
       "id": "目标 ID",
       "keyVersion": "已预配的密钥版本",
       "lastSeen": "最后在线",
+      "publicUrl": "公网地址",
       "release": "发布镜像摘要",
       "revision": "配置修订版本",
       "secretProviders": "密钥提供方",
       "snapshotProviders": "快照提供方",
+      "tlsProviders": "TLS 提供方",
       "topology": "部署拓扑"
     },
     "filters": {
-      "all": "全部服务器",
-      "description": "按最近一次上报的健康状态筛选服务器。",
-      "title": "筛选服务器"
+      "all": "全部",
+      "title": "按健康状态筛选"
+    },
+    "fleet": {
+      "activeOperations": "{count} 个操作进行中",
+      "emptyDescription": "先部署一个目标来描述 Cognia 运行在哪里，然后在那台主机上连接 Agent，操作才有执行者。",
+      "emptyTitle": "还没有部署目标",
+      "noMatchDescription": "当前没有服务器上报这个健康状态。",
+      "noMatchTitle": "没有符合筛选条件的服务器",
+      "summary": "{count} 个目标"
     },
     "health": {
       "degraded": "性能下降",
@@ -23081,26 +23161,25 @@
       "unavailable": "不可用",
       "unknown": "未知"
     },
-    "healthSummary": "{label} 的健康摘要",
-    "instances": {
-      "title": "服务器实例"
-    },
     "kpi": {
       "certified": "已认证",
       "healthy": "健康",
-      "operations": "活动操作",
+      "operations": "进行中的操作",
       "total": "部署目标"
     },
     "logs": {
-      "empty": "暂无服务器日志。"
+      "description": "Agent 已上报到控制器的日志行。",
+      "empty": "点击「采集日志」从主机拉取最近的日志。",
+      "emptyTitle": "尚未采集日志"
     },
+    "never": "从未",
     "notAvailable": "不可用",
     "notCertified": "未通过认证",
     "offline": "离线缓存",
     "operationKinds": {
       "backup": "备份",
-      "collect-logs": "收集日志",
-      "collect-status": "收集状态",
+      "collect-logs": "采集日志",
+      "collect-status": "采集状态",
       "deploy": "部署",
       "preflight": "部署前检查",
       "restore": "恢复",
@@ -23110,20 +23189,38 @@
     },
     "operationStates": {
       "cancelled": "已取消",
-      "executing": "正在执行",
+      "executing": "执行中",
       "failed": "失败",
-      "preparing": "正在准备",
-      "queued": "已排队",
+      "preparing": "准备中",
+      "queued": "排队中",
       "rollback_failed": "回滚失败",
       "rolled_back": "已回滚",
       "succeeded": "成功",
-      "validating": "正在校验",
-      "verifying": "正在验证"
+      "validating": "校验中",
+      "verifying": "验证中"
     },
     "operations": {
-      "ariaLabel": "服务器操作历史",
+      "ariaLabel": "服务器操作",
+      "cancel": "取消操作",
+      "cancelConfirmDescription": "控制器会把该操作标记为已取消，任何 Agent 都不会再领取它。主机上目前还没有发生任何变更。",
+      "cancelConfirmTitle": "取消这个排队中的操作？",
+      "cancelHint": "仍在排队 —— 还没有 Agent 领取。",
+      "cancelUnavailable": "已有 Agent 领取该操作，无法再从这里取消。",
+      "cancelled": "操作已取消",
+      "copied": "已复制到剪贴板",
+      "copy": "复制",
+      "copyFailed": "无法复制到剪贴板",
+      "createdAt": "入队时间",
+      "createdBy": "发起人",
+      "emptyDescription": "你发起的操作，以及控制器上报的该机群的工作，都会出现在这里。",
+      "emptyTitle": "暂无操作",
+      "errorDetails": "错误详情",
       "queued": "操作已加入队列",
-      "title": "操作"
+      "request": "请求参数",
+      "result": "执行结果",
+      "target": "目标",
+      "title": "操作",
+      "updatedAt": "更新时间"
     },
     "options": {
       "acme-dns01": "ACME DNS-01",
@@ -23136,20 +23233,23 @@
       "ingress": "Ingress TLS",
       "kubernetes": "Kubernetes",
       "kubernetes-csi": "Kubernetes CSI",
-      "none": "无",
+      "none": "不使用",
       "vault": "Vault"
     },
     "overview": {
       "health": "当前健康状态",
       "issues": "认证问题",
       "latestRecoveryPoint": "最新恢复点",
-      "production": "生产就绪状态"
+      "production": "生产就绪度"
     },
-    "selectServer": "请选择一个服务器目标查看详情。",
+    "preview": {
+      "notice": "仅在本地渲染用于核对。部署时 Agent 会依据已登记的目标自行渲染同一份产物。",
+      "title": "部署产物预览",
+      "unavailable": "该目标暂时无法渲染"
+    },
     "tabs": {
       "backups": "备份",
-      "deployments": "部署",
-      "instances": "实例",
+      "deployments": "发布",
       "logs": "日志",
       "overview": "概览",
       "security": "安全"
@@ -23159,32 +23259,47 @@
       "compose": "Docker Compose",
       "kubernetes": "Kubernetes"
     },
+    "upgrade": {
+      "description": "在该目标当前的配置修订版本上部署新镜像，目标本身不变。",
+      "digestNotice": "请使用不可变的 sha256 摘要。可变 tag 也能部署，但无法通过生产认证。",
+      "runnerImage": "Runner 镜像",
+      "serverImage": "Server 镜像",
+      "submit": "加入升级队列",
+      "title": "升级版本",
+      "workspaceRuntimeImage": "工作区运行时镜像"
+    },
     "wizard": {
+      "back": "上一步",
       "cancel": "取消",
+      "certificationHelp": "该目标配置有效、可以部署，但按当前配置无法通过生产认证：",
+      "certificationTitle": "未达到生产认证要求",
+      "controllerCredentialRef": "控制器凭据引用",
       "controllerUrl": "控制器地址",
-      "credentialsNotice": "配置仅保存凭据引用。云平台密钥、kubeconfig、SSH 密钥、对象存储密钥和 enrollment token 都不会进入此配置或浏览器缓存。",
-      "custom": "自定义",
+      "credentialsNotice": "这里只保存凭据引用。云密钥、kubeconfig、SSH 私钥、对象存储密钥和接入令牌都不会写入该配置，也不会进入浏览器缓存。",
+      "custom": "高级",
       "deploymentRoot": "部署根目录",
-      "description": "配置版本化 DeploymentTarget。所有云厂商预设最终都会转换为同一云中立协议。",
-      "guided": "引导配置",
-      "identitySection": "OIDC 身份认证",
-      "imagesSection": "不可变镜像",
-      "ingressClass": "IngressClass",
-      "invalid": "请检查标记出的部署设置",
+      "description": "描述一份带版本的 DeploymentTarget。各提供方预设都会归一到同一套云中立契约。",
+      "guided": "分步填写",
+      "identityHelp": "被部署的服务器所信任的 OIDC 签发方及其所需的权限范围。这是该部署自身的身份配置，不是本应用连接控制器时用的那一套。",
+      "imagesHelp": "每个镜像都请固定到不可变的 sha256 摘要。首次部署将运行这些镜像。",
+      "ingressClass": "Ingress class",
+      "invalid": "请检查标记出来的部署设置",
       "label": "显示名称",
       "namespace": "命名空间",
+      "next": "下一步",
       "objectStoreBucket": "存储桶",
       "objectStoreCredentialRef": "对象存储凭据引用",
-      "objectStoreEndpoint": "S3-compatible 地址",
-      "objectStorePathStyle": "使用路径式对象存储 URL",
-      "objectStorePathStyleHelp": "为要求在 URL 路径中包含存储桶名称的 S3 兼容服务启用。",
+      "objectStoreEndpoint": "S3 兼容端点",
+      "objectStorePathStyle": "使用 path-style 对象存储地址",
+      "objectStorePathStyleHelp": "如果 S3 兼容服务要求把桶名放在 URL 路径中，请开启。",
       "objectStoreRegion": "对象存储区域",
       "oidcAudience": "OIDC audience",
       "oidcIssuer": "OIDC issuer",
       "placeholders": {
+        "controllerCredentialRef": "ops-controller/staging",
         "controllerUrl": "https://ops.example.com",
         "keyVersion": "key-2026-08",
-        "label": "预发布环境",
+        "label": "预发环境",
         "objectStoreBucket": "cognia-backups",
         "objectStoreCredentialRef": "backups/staging",
         "objectStoreEndpoint": "https://s3.example.com",
@@ -23201,30 +23316,38 @@
         "tlsRef": "cognia-server-tls",
         "workspaceRuntimeImage": "ghcr.io/owner/cognia-workspace-runtime@sha256:…"
       },
-      "platformSection": "平台设置",
-      "projectName": "Compose 项目名称",
-      "providerCredentialsRequired": "部署前请补全必需的提供商凭据引用。",
+      "projectName": "Compose 项目名",
+      "providerCredentialsRequired": "部署前请先补齐必需的提供方凭据引用。",
       "publicUrl": "公网地址",
       "runnerImage": "Runner 镜像摘要",
-      "runtimeClass": "RuntimeClass",
+      "runtimeClass": "Runtime class",
+      "scopeAdmin": "admin 权限范围",
+      "scopeOperate": "operate 权限范围",
+      "scopeRead": "read 权限范围",
       "secretProvider": "密钥提供方",
       "secretRootRef": "密钥根引用",
-      "serverImage": "服务器镜像摘要",
+      "serverImage": "Server 镜像摘要",
       "snapshotProvider": "快照提供方",
       "snapshotRef": "快照类或适配器引用",
-      "storageClass": "StorageClass",
-      "storageSection": "备份、快照、密钥与 TLS",
+      "steps": {
+        "identity": "身份",
+        "images": "镜像",
+        "platform": "平台",
+        "review": "复核",
+        "storage": "存储",
+        "target": "目标"
+      },
+      "stepsLabel": "部署步骤",
+      "storageClass": "Storage class",
       "targetId": "目标 ID",
-      "targetSection": "部署目标",
       "tenantClaim": "租户 claim",
-      "title": "部署服务器目标",
+      "title": "部署一个服务器目标",
       "tlsProvider": "TLS 提供方",
-      "tlsRef": "TLS Secret 或凭据引用",
+      "tlsRef": "TLS 密文或凭据引用",
       "topology": "部署拓扑",
-      "valid": "部署目标已登记并进入队列",
       "validate": "登记并部署",
       "validating": "正在登记…",
-      "workspaceRuntimeImage": "Workspace Runtime 镜像摘要"
+      "workspaceRuntimeImage": "工作区运行时镜像摘要"
     }
   },
   "sessionImport": {

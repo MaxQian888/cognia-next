@@ -159,7 +159,6 @@
     "components/settings/subscription/import-export-buttons.tsx",
     "components/settings/subscription/preset-picker.tsx",
     "components/settings/subscription/provider-tab-opencode.tsx",
-    "components/sites/site-publish-step.tsx",
     "components/skills/skill-discovery.tsx",
     "components/twin/add-source/source-inputs.tsx",
     "components/twin/add-source/staged-source-review.tsx",

@@ -69,6 +69,16 @@ export interface Operation {
   updatedAt: string
 }
 
+/**
+ * A single-use agent enrollment grant, as returned by the controller. The
+ * target it is bound to is not echoed back — the caller named it in the
+ * request, and the controller stores the binding server-side.
+ */
+export interface EnrollmentToken {
+  token: string
+  expiresAt: string
+}
+
 export interface OperationEvent {
   id: number
   operationId: string
@@ -91,11 +101,37 @@ export class OpsError extends Error {
   }
 }
 
+/**
+ * The subset of `fetch` the controller client uses. Declared rather than
+ * reusing `typeof fetch` so the platform transports in `./transport` — which
+ * take narrower init objects — stay assignable under `strictFunctionTypes`.
+ */
+export type OpsFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+/**
+ * Reads `/v1/events` as an async stream of operation events.
+ *
+ * Injectable because no single implementation works on every shell: the desktop
+ * one crosses a native command (the WebView cannot reach an arbitrary
+ * controller host at all), while the web one reads the `fetch` body directly.
+ * See `./transport`.
+ */
+export type OpsEventStream = (options: {
+  lastEventId?: number
+  signal?: AbortSignal
+}) => AsyncGenerator<OperationEvent>
+
 export interface OpsClientOptions {
   baseUrl: string
   accessToken: () => Promise<string>
-  fetchImpl?: typeof fetch
+  fetchImpl?: OpsFetch
   sleep?: (milliseconds: number) => Promise<void>
+  /**
+   * Overrides the built-in `fetch`-body SSE reader. Omit on the web, where
+   * reading the response body directly is exactly right; supply the native
+   * stream on desktop, where a renderer `fetch` never reaches the controller.
+   */
+  eventStream?: OpsEventStream
 }
 
 const GET_RETRY_DELAYS = [0, 250, 750] as const
@@ -103,13 +139,15 @@ const MUTATION_RETRY_DELAYS = [0, 250] as const
 
 export class OpsClient {
   private readonly baseUrl: URL
-  private readonly fetchImpl: typeof fetch
+  private readonly fetchImpl: OpsFetch
   private readonly accessToken: () => Promise<string>
   private readonly sleep: (milliseconds: number) => Promise<void>
+  private readonly eventStream: OpsEventStream | null
 
   constructor(options: OpsClientOptions) {
     this.baseUrl = normalizeControllerUrl(options.baseUrl)
     this.fetchImpl = options.fetchImpl ?? fetch
+    this.eventStream = options.eventStream ?? null
     this.accessToken = options.accessToken
     this.sleep =
       options.sleep ??
@@ -171,8 +209,92 @@ export class OpsClient {
     return this.mutation(`/v1/servers/${encodeURIComponent(id)}/deploy`, idempotencyKey, parameters)
   }
 
-  async upgrade(id: string, body: unknown, idempotencyKey: string): Promise<Operation> {
-    return this.mutation(`/v1/servers/${encodeURIComponent(id)}/upgrade`, idempotencyKey, body)
+  async upgrade(
+    id: string,
+    parameters: {
+      targetRevision: number
+      release: {
+        serverImage: string
+        runnerImage: string
+        workspaceRuntimeImage: string
+        configRevision: string
+      }
+    },
+    idempotencyKey: string
+  ): Promise<Operation> {
+    return this.mutation(
+      `/v1/servers/${encodeURIComponent(id)}/upgrade`,
+      idempotencyKey,
+      parameters
+    )
+  }
+
+  /**
+   * Queue a read-only preflight of the target's current revision.
+   *
+   * Takes no parameters on purpose: the controller derives the revision and
+   * topology from the registered target and rejects a client-supplied body, so
+   * a tab left open across a re-registration cannot check a configuration that
+   * no longer exists.
+   */
+  async preflight(id: string, idempotencyKey: string): Promise<Operation> {
+    return this.mutation(`/v1/servers/${encodeURIComponent(id)}/preflight`, idempotencyKey, {})
+  }
+
+  /**
+   * Ask the agent to report the target's live status. `includeRuntimeUsage`
+   * adds per-container resource figures, which cost a slower probe on the host.
+   */
+  async collectStatus(
+    id: string,
+    idempotencyKey: string,
+    options: { includeRuntimeUsage?: boolean } = {}
+  ): Promise<Operation> {
+    return this.mutation(
+      `/v1/servers/${encodeURIComponent(id)}/collect-status`,
+      idempotencyKey,
+      options.includeRuntimeUsage === undefined
+        ? {}
+        : { includeRuntimeUsage: options.includeRuntimeUsage }
+    )
+  }
+
+  /**
+   * Pull fresh log lines from the target. The agent's result is materialized
+   * into the controller's log store, so the Logs tab reflects it on the next
+   * refresh rather than through a second channel.
+   */
+  async collectLogs(
+    id: string,
+    idempotencyKey: string,
+    options: { afterEventId?: number; limit?: number } = {}
+  ): Promise<Operation> {
+    const body =
+      options.afterEventId === undefined && options.limit === undefined
+        ? {}
+        : {
+            afterEventId: options.afterEventId ?? null,
+            limit: Math.min(Math.max(options.limit ?? 200, 1), 1000),
+          }
+    return this.mutation(`/v1/servers/${encodeURIComponent(id)}/collect-logs`, idempotencyKey, body)
+  }
+
+  /**
+   * Issue a single-use agent enrollment token for `targetId`.
+   *
+   * This is the step that makes a registered target executable: until an agent
+   * enrolls against it and dials the controller, every operation queued for
+   * that target sits at `queued` with nothing to claim it.
+   */
+  async createEnrollmentToken(
+    targetId: string,
+    idempotencyKey: string,
+    ttlSeconds = 900
+  ): Promise<EnrollmentToken> {
+    return this.mutation("/v1/agents/enrollment-tokens", idempotencyKey, {
+      targetId,
+      ttlSeconds: Math.min(Math.max(Math.trunc(ttlSeconds), 60), 3600),
+    })
   }
 
   async createAdminLease(
@@ -228,12 +350,35 @@ export class OpsClient {
     return this.request(`/v1/operations/${encodeURIComponent(id)}`)
   }
 
+  /**
+   * Cancel a still-queued operation.
+   *
+   * Rejected with `operation_not_cancellable` once an agent has claimed it: past
+   * that point the agent holds the target lock and is already changing the host,
+   * and the agent protocol has no abort message, so the controller will not
+   * report work as stopped that is still running.
+   */
+  async cancelOperation(id: string, idempotencyKey: string): Promise<Operation> {
+    return this.mutation(`/v1/operations/${encodeURIComponent(id)}/cancel`, idempotencyKey, {})
+  }
+
+  /**
+   * Follow `/v1/events`.
+   *
+   * Delegates to the injected transport when there is one — on desktop the
+   * WebView cannot open this stream at all, so it lives behind a native
+   * command. The inline reader below is the web path.
+   */
   async *streamEvents(
     options: {
       lastEventId?: number
       signal?: AbortSignal
     } = {}
   ): AsyncGenerator<OperationEvent> {
+    if (this.eventStream) {
+      yield* this.eventStream(options)
+      return
+    }
     const token = await this.accessToken()
     const headers = new Headers({ Accept: "text/event-stream", Authorization: `Bearer ${token}` })
     if (options.lastEventId !== undefined) headers.set("Last-Event-ID", String(options.lastEventId))
