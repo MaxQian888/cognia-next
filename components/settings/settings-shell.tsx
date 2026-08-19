@@ -118,7 +118,7 @@ const TerminalSection = dynamic(
   () => import("./terminal/terminal-section").then((m) => m.TerminalSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
-const LogsSection = dynamic(() => import("./sections/logs-section").then((m) => m.LogsSection), {
+const LogsSection = dynamic(() => import("./logs/logs-section").then((m) => m.LogsSection), {
   ssr: false,
   loading: () => <SectionLoading />,
 })
@@ -320,6 +320,7 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "agent-modes",
   "agent-runtime",
   "memory",
+  "logs",
 ])
 
 function isSection(value: string | null): value is SettingsSectionId {
