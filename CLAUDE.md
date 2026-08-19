@@ -19,6 +19,13 @@ These are project-level hard rules. They override any default behavior to the co
 5. **Language convention.** Internal narration (status updates, tool-call rationale, end-of-turn summaries, code comments) is written in **English**. Questions to the user — clarifications, `AskUserQuestion` prompts, confirmation requests — are written in **Chinese**.
 6. **Record a changeset for every user-facing change.** After implementing a feature, fix, or behavior/breaking change that a user would notice, run `pnpm changeset` — select the **`cognia-next`** package, pick the semver bump (`patch` fix, `minor` feature, `major` breaking), and write a one-line summary. This creates a `.changeset/*.md` file you commit alongside the code. Skip it only for internal-only work (tests, refactors, docs, chore, CI). See **Versioning & Release** below for the full model.
 7. **Label intentional dormancy on all three axes.** Intentional dormancy must be documented at the type AND labeled inert in the UI AND pinned by a test. Any two of three is a latent bug.
+8. **The working tree is shared — only ever touch your own changes.** Several Claude/agent sessions edit this checkout at the same time. Every git command you run must name explicit paths that _this_ task modified.
+   - **Commit**: `git commit --only <your paths>` (or `git add <your paths> && git commit`). Never `git add .`, `git add -A`, `git add -u`, `git commit -a`, and never stage a whole directory to "pick up" a file you did not write.
+   - **Never run tree-wide state commands**: `git stash` (any form, including `-u`/`pop`/`apply`/`drop`), `git checkout -- .`, `git checkout <ref> -- .`, `git restore .`, `git reset --hard`, `git clean`, `git rebase`, `git merge`, `git revert`, branch switches. These silently destroy other sessions' uncommitted work — the stash stack is shared, and `--hard`/`checkout .` erases edits that were never committed anywhere and cannot be recovered.
+   - **Need a clean tree?** Don't make one. Read a pristine version with `git show HEAD:<path>`, diff a single file with `git diff -- <path>`, and if you truly need isolation, create a separate worktree (`git worktree add`) instead of resetting this one.
+   - **Before committing**, re-check `git diff --cached --name-only` and drop anything you did not author this session. A file you merely _saw_ fail is not yours to fix or revert.
+   - **If a gate fails on someone else's file**, report it as pre-existing and move on. Do not "fix" or revert in-flight work belonging to another session.
+   - **`--no-verify` stays banned** (see Commit Hooks); a failed hook means fix your own files and make a new commit.
 
 ## Development Commands
 
