@@ -58,6 +58,41 @@ describe("WaterfallRow", () => {
     expect(meta).toHaveTextContent("+50ms")
   })
 
+  it("stays inert without onSelect", () => {
+    render(<WaterfallRow node={node()} totalMs={100} color="#fff" />)
+    const row = screen.getByTestId("waterfall-row-s1")
+    expect(row).not.toHaveAttribute("aria-current")
+    expect(row.querySelector('[role="button"]')).toBeNull()
+  })
+
+  it("selects the span on click and on keyboard activation", () => {
+    const onSelect = jest.fn()
+    render(<WaterfallRow node={node()} totalMs={100} color="#fff" selected onSelect={onSelect} />)
+    const row = screen.getByTestId("waterfall-row-s1")
+    expect(row).toHaveAttribute("aria-current", "true")
+    const button = row.querySelector('[role="button"]') as HTMLElement
+    fireEvent.click(button)
+    fireEvent.keyDown(button, { key: "Enter" })
+    fireEvent.keyDown(button, { key: " " })
+    expect(onSelect).toHaveBeenCalledTimes(3)
+    expect(onSelect).toHaveBeenCalledWith("s1")
+  })
+
+  it("does not select the span when the events toggle is clicked", () => {
+    const onSelect = jest.fn()
+    render(
+      <WaterfallRow
+        node={node({ span: { ...node().span, events: [{ name: "tool_call", at: 5 }] } })}
+        totalMs={100}
+        color="#fff"
+        onSelect={onSelect}
+      />
+    )
+    fireEvent.click(screen.getByTestId("waterfall-toggle-s1"))
+    expect(screen.getByTestId("waterfall-meta-s1")).toBeInTheDocument()
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
   it("renders no toggle when there are no events", () => {
     render(
       <WaterfallRow node={node({ span: makeSpan({ spanId: "s3" }) })} totalMs={100} color="#abc" />

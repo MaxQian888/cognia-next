@@ -105,16 +105,41 @@ export async function countTraces(): Promise<number> {
 
 /** Read spans whose `startTime` falls in `[since, until]`, oldest-first. Used
  * by the observability dashboard's windowed reads. `until` defaults to "now
- * and later" (no upper bound). Backed by the v150 global time index. */
+ * and later" (no upper bound). Backed by the v150 global time index.
+ *
+ * `limit` caps the read to the NEWEST N spans in the window — an "all time"
+ * window on a heavy install is otherwise an unbounded materialization. It is
+ * opt-in: existing callers that need the whole window (the dashboard's
+ * percentiles, the retention sweep) simply omit it. Pair it with
+ * {@link countByWindow} so the UI can say what it dropped rather than silently
+ * showing a partial answer. */
 export async function queryByWindow(opts: {
   since: number
   until?: number
+  limit?: number
 }): Promise<AgentTraceSpan[]> {
+  const { since, until, limit } = opts
+  const index = getDb().agentTraces.where("startTime")
+  const collection =
+    until === undefined ? index.aboveOrEqual(since) : index.between(since, until, true, true)
+  if (typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) {
+    return collection.toArray()
+  }
+  // Walk the time index backwards so the cap keeps the newest spans, then
+  // restore the oldest-first contract every caller relies on.
+  const newest = await collection.reverse().limit(Math.floor(limit)).toArray()
+  newest.reverse()
+  return newest
+}
+
+/** How many spans the window holds, without materializing them. Lets a capped
+ * {@link queryByWindow} report the size of what it left behind. */
+export async function countByWindow(opts: { since: number; until?: number }): Promise<number> {
   const { since, until } = opts
   const index = getDb().agentTraces.where("startTime")
   return until === undefined
-    ? index.aboveOrEqual(since).toArray()
-    : index.between(since, until, true, true).toArray()
+    ? index.aboveOrEqual(since).count()
+    : index.between(since, until, true, true).count()
 }
 
 /** Read all spans for one trace, ordered chronologically (oldest-first) so
@@ -192,7 +217,15 @@ export async function aggregateStatsBySession(
   return aggregateStats(filtered)
 }
 
-function aggregateStats(spans: AgentTraceSpan[]): AgentTraceStatsSummary {
+/**
+ * Pure stats fold over spans the caller already holds.
+ *
+ * Exported because the `/logs` Traces channel reads one window and needs BOTH
+ * the trace rollup and these headline numbers from it. Calling
+ * `aggregateStatsAll` there would re-read the identical rows from IndexedDB a
+ * second time on every tick — the same scan, twice, for one screen.
+ */
+export function aggregateStats(spans: AgentTraceSpan[]): AgentTraceStatsSummary {
   const base = aggregate(spans)
   let totalInputTokens = 0
   let totalOutputTokens = 0

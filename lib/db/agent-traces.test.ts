@@ -14,6 +14,7 @@ import {
   pruneOlderThan,
   queryBySession,
   queryByTrace,
+  countByWindow,
   queryByWindow,
   queryRecent,
   queryRecentTraces,
@@ -173,6 +174,46 @@ describe("queryByWindow", () => {
 
   it("returns [] when the window excludes everything", async () => {
     expect(await queryByWindow({ since: 5000 })).toEqual([])
+  })
+
+  it("keeps the NEWEST spans when a limit caps the read, still oldest-first", async () => {
+    const rows = await queryByWindow({ since: 0, limit: 2 })
+    expect(rows.map((r) => r.id)).toEqual(["b", "c"])
+  })
+
+  it("ignores a non-positive or non-finite limit", async () => {
+    expect((await queryByWindow({ since: 0, limit: 0 })).map((r) => r.id)).toEqual(["a", "b", "c"])
+    expect((await queryByWindow({ since: 0, limit: Number.NaN })).map((r) => r.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ])
+  })
+
+  it("applies the limit inside an explicit until bound", async () => {
+    const rows = await queryByWindow({ since: 0, until: 500, limit: 1 })
+    expect(rows.map((r) => r.id)).toEqual(["b"])
+  })
+})
+
+describe("countByWindow", () => {
+  beforeEach(async () => {
+    await bulkInsertSpans([
+      span({ id: "a", startTime: 100 }),
+      span({ id: "b", startTime: 500 }),
+      span({ id: "c", startTime: 900 }),
+    ])
+  })
+
+  it("counts the window without materializing it", async () => {
+    expect(await countByWindow({ since: 0 })).toBe(3)
+    expect(await countByWindow({ since: 200, until: 900 })).toBe(2)
+    expect(await countByWindow({ since: 5000 })).toBe(0)
+  })
+
+  it("reports the size a capped read left behind", async () => {
+    const read = await queryByWindow({ since: 0, limit: 1 })
+    expect(await countByWindow({ since: 0 })).toBeGreaterThan(read.length)
   })
 })
 

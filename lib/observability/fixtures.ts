@@ -36,6 +36,14 @@ export function makeSpan(partial: Partial<AgentTraceSpan> = {}): AgentTraceSpan 
     finishReasons: partial.finishReasons,
     errorType: partial.errorType,
     errorMessage: partial.errorMessage,
+    // v172 lifecycle/identity fields. Optional on the type (pre-v172 rows
+    // lack them), so they pass through only when a test asks for them.
+    spanKind: partial.spanKind,
+    status: partial.status,
+    runId: partial.runId,
+    turnId: partial.turnId,
+    attemptId: partial.attemptId,
+    projectId: partial.projectId,
     sessionId: partial.sessionId ?? "session-1",
     surface: partial.surface ?? "chat",
     pluginId: partial.pluginId,

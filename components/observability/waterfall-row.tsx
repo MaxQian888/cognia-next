@@ -4,6 +4,11 @@
  * One span row in the trace waterfall: an indented label + a proportional
  * timing bar positioned by the span's offset/width within the trace, with an
  * expandable list of the span's mid-span events.
+ *
+ * Selection (`selected` + `onSelect`) is optional. The observability drawer
+ * renders the row as a read-only strip; the `/logs` Traces channel pairs the
+ * waterfall with a span-detail pane and needs the row to be pickable. Without
+ * `onSelect` the row stays exactly as inert as it was.
  */
 
 import { useState } from "react"
@@ -19,9 +24,13 @@ export interface WaterfallRowProps {
   totalMs: number
   /** Resolved bar color (already error-aware). */
   color: string
+  /** Renders the row as the active span. Requires `onSelect` to be meaningful. */
+  selected?: boolean
+  /** Makes the row pickable; omit for a read-only waterfall. */
+  onSelect?: (spanId: string) => void
 }
 
-export function WaterfallRow({ node, totalMs, color }: WaterfallRowProps) {
+export function WaterfallRow({ node, totalMs, color, selected, onSelect }: WaterfallRowProps) {
   const t = useTranslations("observability.waterfall")
   const [open, setOpen] = useState(false)
   const events = node.span.events ?? []
@@ -34,19 +43,47 @@ export function WaterfallRow({ node, totalMs, color }: WaterfallRowProps) {
   const usage = node.span.usage
   const tokenLabel = usage ? formatTokens(usage.inputTokens + usage.outputTokens) : null
 
+  const selectable = typeof onSelect === "function"
+
   return (
     <li
       data-testid={`waterfall-row-${node.span.spanId}`}
-      className="border-b border-border/40 last:border-0"
+      className={cn("border-b border-border/40 last:border-0", selected && "bg-accent/40")}
+      // `aria-current`, not `aria-selected`: the row is a listitem, and
+      // aria-selected is not supported on that role.
+      aria-current={selectable && selected ? "true" : undefined}
     >
-      <div className="flex items-center gap-2 py-1 text-xs">
+      <div
+        className={cn(
+          "flex items-center gap-2 py-1 text-xs",
+          selectable &&
+            "cursor-pointer rounded-sm focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2"
+        )}
+        role={selectable ? "button" : undefined}
+        tabIndex={selectable ? 0 : undefined}
+        onClick={selectable ? () => onSelect(node.span.spanId) : undefined}
+        onKeyDown={
+          selectable
+            ? (event) => {
+                if (event.key !== "Enter" && event.key !== " ") return
+                event.preventDefault()
+                onSelect(node.span.spanId)
+              }
+            : undefined
+        }
+      >
         <div className="flex min-w-0 items-center gap-1" style={{ paddingLeft: node.depth * 14 }}>
           {hasEvents ? (
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
-              onClick={() => setOpen((o) => !o)}
+              onClick={(event) => {
+                // The row itself may be selectable; expanding events must not
+                // also change the selected span.
+                event.stopPropagation()
+                setOpen((o) => !o)
+              }}
               aria-expanded={open}
               aria-label={t("toggleEvents")}
               data-testid={`waterfall-toggle-${node.span.spanId}`}
