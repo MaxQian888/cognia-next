@@ -16,8 +16,12 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { cn } from "@/lib/utils"
 import { aggregateStatsAll, type AgentTraceStatsSummary } from "@/lib/db/agent-traces"
+import { agentTraceWindowSince } from "@/lib/observability/trace-window"
+import type { AgentTraceStatsWindow } from "@/lib/observability/trace-window"
 
-export type AgentTraceStatsWindow = "today" | "week" | "month" | "all"
+// Re-exported so the many existing `AgentTraceStatsWindow` imports keep working
+// now that the mapping itself moved to `lib/observability/trace-window.ts`.
+export type { AgentTraceStatsWindow }
 
 interface AgentTraceStatsBarProps {
   window?: AgentTraceStatsWindow
@@ -26,7 +30,7 @@ interface AgentTraceStatsBarProps {
 
 /** Live-query wrapper. Picks up new spans without polling. */
 export function AgentTraceStatsBar({ window = "today", className }: AgentTraceStatsBarProps) {
-  const since = useMemo(() => windowToSince(window), [window])
+  const since = useMemo(() => agentTraceWindowSince(window), [window])
   const summary = useLiveQuery(
     () => aggregateStatsAll(since !== undefined ? { since } : undefined),
     [since],
@@ -137,23 +141,6 @@ export function AgentTraceStatsBarView({
       )}
     </section>
   )
-}
-
-function windowToSince(window: AgentTraceStatsWindow): number | undefined {
-  const now = Date.now()
-  switch (window) {
-    case "today": {
-      const d = new Date(now)
-      d.setHours(0, 0, 0, 0)
-      return d.getTime()
-    }
-    case "week":
-      return now - 7 * 24 * 60 * 60 * 1000
-    case "month":
-      return now - 30 * 24 * 60 * 60 * 1000
-    case "all":
-      return undefined
-  }
 }
 
 function formatUsd(value: number): string {

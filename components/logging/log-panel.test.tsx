@@ -10,14 +10,17 @@ jest.mock("./log-panel-toolbar", () => ({
   LogPanelToolbar: ({
     clearLogs,
     onExport,
+    statsSlot,
   }: {
     clearLogs?: () => void
     onExport?: (format: string) => void
+    statsSlot?: React.ReactNode
   }) => (
     <div data-testid="stub-toolbar">
       <button data-testid="stub-toolbar-clear" onClick={() => clearLogs?.()} />
       <button data-testid="stub-toolbar-export-ndjson" onClick={() => onExport?.("ndjson")} />
       <button data-testid="stub-toolbar-export-csv" onClick={() => onExport?.("csv")} />
+      {statsSlot}
     </div>
   ),
 }))
@@ -283,7 +286,10 @@ describe("LogPanel — composition", () => {
   it("renders toolbar, stats bar, timeline, and virtualized list by default", () => {
     render(<LogPanel />)
     expect(screen.getByTestId("stub-toolbar")).toBeInTheDocument()
-    expect(screen.getByTestId("stub-stats-bar")).toBeInTheDocument()
+    // the stats bar is passed into the toolbar's filter row, not stacked under it
+    expect(screen.getByTestId("stub-toolbar")).toContainElement(
+      screen.getByTestId("stub-stats-bar")
+    )
     expect(screen.getByTestId("stub-timeline")).toBeInTheDocument()
     expect(screen.getByTestId("stub-virtualized-list")).toBeInTheDocument()
   })

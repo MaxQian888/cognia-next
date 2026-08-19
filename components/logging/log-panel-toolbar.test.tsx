@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -103,25 +103,38 @@ function renderToolbar(overrides: Partial<LogPanelToolbarProps> = {}) {
 
 describe("LogPanelToolbar — primary bar", () => {
   it("renders three view-mode buttons when includeAgentTrace=true", () => {
-    const { container } = renderToolbar()
-    const viewButtons = container.querySelector(".flex.items-center.border.rounded-md")?.children
-    expect(viewButtons?.length).toBe(3)
+    renderToolbar()
+    expect(
+      within(screen.getByRole("group", { name: "Log view" })).getAllByRole("button")
+    ).toHaveLength(3)
   })
 
   it("hides the trace view button when includeAgentTrace=false", () => {
-    const { container } = renderToolbar({ includeAgentTrace: false })
-    const viewButtons = container.querySelector(".flex.items-center.border.rounded-md")?.children
-    expect(viewButtons?.length).toBe(2)
+    renderToolbar({ includeAgentTrace: false })
+    expect(
+      within(screen.getByRole("group", { name: "Log view" })).getAllByRole("button")
+    ).toHaveLength(2)
+  })
+
+  it("names each view-mode button and marks the active one pressed", () => {
+    // These carried a Tooltip and nothing else, so their accessible name was
+    // an SVG. Names and `aria-pressed` are the point of the segment.
+    renderToolbar({ viewMode: "dashboard" })
+    expect(screen.getByRole("button", { name: "List View" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    )
+    expect(screen.getByRole("button", { name: "Dashboard View" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
   })
 
   it("fires setViewMode when each view button is clicked", () => {
     const { props } = renderToolbar()
-    const [list, dash, trace] = Array.from(
-      document.querySelectorAll(".flex.items-center.border.rounded-md > button")
-    )
-    fireEvent.click(list)
-    fireEvent.click(dash)
-    fireEvent.click(trace)
+    fireEvent.click(screen.getByTestId("log-panel-view-list"))
+    fireEvent.click(screen.getByTestId("log-panel-view-dashboard"))
+    fireEvent.click(screen.getByTestId("log-panel-view-trace"))
     expect(props.setViewMode).toHaveBeenCalledWith("list")
     expect(props.setViewMode).toHaveBeenCalledWith("dashboard")
     expect(props.setViewMode).toHaveBeenCalledWith("trace")
@@ -134,9 +147,11 @@ describe("LogPanelToolbar — primary bar", () => {
     expect(props.setSearchQuery).toHaveBeenCalledWith("auth")
   })
 
-  it("toggles regex on click and swaps the placeholder", () => {
+  it("toggles regex from inside the search field and swaps the placeholder", () => {
     const { props, rerender } = renderToolbar()
-    const regexBtn = document.querySelector(".lucide-regex")?.closest("button") as HTMLButtonElement
+    const regexBtn = screen.getByTestId("log-panel-regex-toggle")
+    // it lives in the field it modifies, not two slots down the toolbar
+    expect(regexBtn.closest("[data-slot='input-group']")).not.toBeNull()
     fireEvent.click(regexBtn)
     expect(props.setUseRegex).toHaveBeenCalledWith(true)
     rerender(
@@ -158,10 +173,29 @@ describe("LogPanelToolbar — primary bar", () => {
     expect(screen.getByLabelText("Hide more filters")).toBeInTheDocument()
   })
 
-  it("clicking the shortcuts-hint button calls setShowShortcutsDialog(true)", () => {
+  it("has one shortcuts entry point, in the More menu", async () => {
+    const user = userEvent.setup()
     const { props } = renderToolbar()
-    fireEvent.click(screen.getByTestId("log-toolbar-shortcut-hint"))
+    // the standalone toolbar button opened the same dialog as the menu item
+    expect(screen.queryByTestId("log-toolbar-shortcut-hint")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("log-panel-more-actions"))
+    await user.click(await screen.findByText("Keyboard shortcuts"))
     expect(props.setShowShortcutsDialog).toHaveBeenCalledWith(true)
+  })
+
+  it("exposes auto-refresh as a menu item, not only as a shift-click", async () => {
+    const user = userEvent.setup()
+    const { props } = renderToolbar({ autoRefresh: false })
+    await user.click(screen.getByTestId("log-panel-more-actions"))
+    await user.click(await screen.findByTestId("log-panel-auto-refresh-toggle"))
+    expect(props.setAutoRefresh).toHaveBeenCalledWith(true)
+  })
+
+  it("renders the stats slot inside the level-filter row instead of a row of its own", () => {
+    renderToolbar({ statsSlot: <div data-testid="stub-stats" /> })
+    const stats = screen.getByTestId("stub-stats")
+    const levelRow = screen.getByRole("group", { name: "Filter by level" }).parentElement
+    expect(levelRow).toContainElement(stats)
   })
 
   it("normal click on Refresh fires refresh(); Shift+Click toggles autoRefresh", () => {

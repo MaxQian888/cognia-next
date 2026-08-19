@@ -4,12 +4,28 @@
  * LogPanelToolbar
  *
  * Extracted from log-panel.tsx — 3-layer toolbar:
- *   Layer 1: Primary bar (view mode, search, regex, filters toggle, refresh, more)
- *   Layer 2: Level tabs (All, Error, Warn, Info, Debug, Trace, Bookmarked)
+ *   Layer 1: Primary bar (view mode, search + regex, filters toggle, refresh, more)
+ *   Layer 2: Level tabs (All, Error, Warn, Info, Debug, Trace, Bookmarked) + `statsSlot`
  *   Layer 3: Advanced filters — collapsible (module, source, session, time, presets, focus chips)
+ *
+ * Layer 1 used to be eight controls wide, five of them unlabelled icon
+ * buttons, two of which had no accessible name at all (the view-mode toggles
+ * carried a Tooltip but no `aria-label`, so their only name was an SVG). Three
+ * things changed:
+ *
+ *   - the regex toggle moved inside the search field, where what it modifies
+ *     is visible;
+ *   - the keyboard-shortcuts button was deleted — it opened the same dialog as
+ *     the More menu's "Keyboard shortcuts" item, which is still there;
+ *   - auto-refresh got a real menu item. It was reachable only by shift-click
+ *     or right-click on the refresh button, i.e. only if you had read the
+ *     tooltip. The accelerators still work.
+ *
+ * Layer 2 absorbed the stats/pagination bar (`statsSlot`), which had been a
+ * fourth full-width band restating the same per-level counts as the tabs.
  */
 
-import { Fragment, memo, useCallback, useMemo, useRef, useState } from "react"
+import { Fragment, memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { format } from "date-fns"
@@ -48,7 +64,12 @@ import {
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -168,10 +189,30 @@ export interface LogPanelToolbarProps {
   // Row density controls
   density: Density
   setDensity: (v: Density) => void
+
+  /**
+   * The stats / pagination line, rendered at the end of the level-filter row
+   * rather than as a band of its own. Both rows were full-width and the counts
+   * on this one duplicated the badges on the level tabs, so they are one row
+   * now. `null` when the host hides stats.
+   */
+  statsSlot?: ReactNode
 }
 
 // Levels to show as tabs (fatal is merged into error)
 const TAB_LEVELS: Array<LogLevel> = ["error", "warn", "info", "debug", "trace"]
+
+/** The view-mode segment, as data — three near-identical Tooltip/Button pairs
+ * before, which is how two of them ended up without an `aria-label`. */
+const VIEW_MODES: ReadonlyArray<{
+  value: ViewMode
+  icon: typeof List
+  labelKey: "panel.listView" | "panel.dashboardView" | "panel.traceView"
+}> = [
+  { value: "list", icon: List, labelKey: "panel.listView" },
+  { value: "dashboard", icon: BarChart3, labelKey: "panel.dashboardView" },
+  { value: "trace", icon: Activity, labelKey: "panel.traceView" },
+]
 
 function LogPanelToolbarImpl({
   viewMode,
@@ -235,6 +276,7 @@ function LogPanelToolbarImpl({
   hideToolbarPresets = false,
   density,
   setDensity,
+  statsSlot = null,
 }: LogPanelToolbarProps) {
   const t = useTranslations("logging")
   const [showSearchHistory, setShowSearchHistory] = useState(false)
@@ -288,49 +330,36 @@ function LogPanelToolbarImpl({
     <div data-testid="log-panel-toolbar" className="border-b bg-muted/30">
       {/* ── Layer 1: Primary bar ── */}
       <div className="flex items-center gap-2 p-2 sm:p-3">
-        {/* View mode toggle */}
-        <div className="flex items-center border rounded-md shrink-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={viewMode === "list" ? "default" : "ghost"}
-                size="sm"
-                className="h-8 px-2"
-                onClick={() => setViewMode("list")}
-              >
-                <List className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("panel.listView")}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={viewMode === "dashboard" ? "default" : "ghost"}
-                size="sm"
-                className="h-8 px-2"
-                onClick={() => setViewMode("dashboard")}
-              >
-                <BarChart3 className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("panel.dashboardView")}</TooltipContent>
-          </Tooltip>
-          {includeAgentTrace && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={viewMode === "trace" ? "default" : "ghost"}
-                  size="sm"
-                  className="h-8 px-2"
-                  onClick={() => setViewMode("trace")}
-                >
-                  <Activity className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("panel.traceView")}</TooltipContent>
-            </Tooltip>
-          )}
+        {/* View mode toggle — a radio group in behaviour, so it says so:
+            `aria-pressed` carries the selection and `aria-label` carries the
+            name the tooltip used to be the only source of. */}
+        <div
+          className="flex shrink-0 items-center rounded-md border"
+          role="group"
+          aria-label={t("panel.viewModeGroup")}
+        >
+          {VIEW_MODES.filter((mode) => mode.value !== "trace" || includeAgentTrace).map((mode) => {
+            const Icon = mode.icon
+            const label = t(mode.labelKey)
+            return (
+              <Tooltip key={mode.value}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={viewMode === mode.value ? "default" : "ghost"}
+                    size="sm"
+                    className="h-8 px-2"
+                    aria-label={label}
+                    aria-pressed={viewMode === mode.value}
+                    data-testid={`log-panel-view-${mode.value}`}
+                    onClick={() => setViewMode(mode.value)}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{label}</TooltipContent>
+              </Tooltip>
+            )
+          })}
         </div>
 
         {/* Search with accessible combobox-based history */}
@@ -338,6 +367,7 @@ function LogPanelToolbarImpl({
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
           useRegex={useRegex}
+          setUseRegex={setUseRegex}
           searchHistory={searchHistory}
           addSearchHistory={addSearchHistory}
           removeSearchHistoryItem={removeSearchHistoryItem}
@@ -348,21 +378,6 @@ function LogPanelToolbarImpl({
           searchPlaceholder={t("panel.searchPlaceholder")}
         />
 
-        {/* Regex toggle */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={useRegex ? "default" : "outline"}
-              size="sm"
-              className="h-8 px-2 shrink-0"
-              onClick={() => setUseRegex(!useRegex)}
-            >
-              <Regex className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("panel.toggleRegex")}</TooltipContent>
-        </Tooltip>
-
         {/* Advanced filters toggle */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -370,6 +385,8 @@ function LogPanelToolbarImpl({
               variant={showAdvancedFilters ? "default" : "outline"}
               size="sm"
               className="relative h-8 px-2 shrink-0"
+              aria-pressed={showAdvancedFilters}
+              data-testid="log-panel-advanced-filters-toggle"
               onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
               aria-label={
                 showAdvancedFilters ? t("panel.moreFilters.hide") : t("panel.moreFilters.show")
@@ -386,35 +403,6 @@ function LogPanelToolbarImpl({
           </TooltipContent>
         </Tooltip>
 
-        {/* Keyboard shortcuts hint — visible in toolbar (was only in More menu) */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 px-2 shrink-0 hidden sm:inline-flex"
-              onClick={() => setShowShortcutsDialog(true)}
-              data-testid="log-toolbar-shortcut-hint"
-              aria-label={t("panel.shortcutsHint")}
-            >
-              <Keyboard className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <div className="text-xs space-y-0.5">
-              <div>
-                <kbd className="font-mono">j/k</kbd> {t("panel.hintNextPrev")} ·{" "}
-                {/* i18n-exempt: key name, not UI prose */}
-                <kbd className="font-mono">Enter</kbd> {t("panel.hintExpand")}
-              </div>
-              <div>
-                <kbd className="font-mono">r</kbd> {t("panel.hintRefresh")} ·{" "}
-                <kbd className="font-mono">?</kbd> {t("panel.hintAllShortcuts")}
-              </div>
-            </div>
-          </TooltipContent>
-        </Tooltip>
-
         {/* Refresh button */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -422,6 +410,8 @@ function LogPanelToolbarImpl({
               variant={autoRefresh ? "default" : "outline"}
               size="sm"
               className="h-8 px-2 shrink-0"
+              aria-label={autoRefresh ? t("panel.disableAutoRefresh") : t("panel.refresh")}
+              data-testid="log-panel-refresh"
               onClick={(e) => {
                 if (e.shiftKey) {
                   setAutoRefresh(!autoRefresh)
@@ -449,7 +439,13 @@ function LogPanelToolbarImpl({
         {/* More actions dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8 px-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-2 shrink-0"
+              aria-label={t("panel.moreActions")}
+              data-testid="log-panel-more-actions"
+            >
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -490,6 +486,17 @@ function LogPanelToolbarImpl({
               <DropdownMenuItem onClick={() => setShowDetailPanel(!showDetailPanel)}>
                 <PanelRightClose className="h-4 w-4 mr-2" />
                 {showDetailPanel ? t("panel.closeDetails") : t("panel.openDetailsPanel")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                data-testid="log-panel-auto-refresh-toggle"
+                onClick={() => setAutoRefresh(!autoRefresh)}
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                <span className="flex-1">{t("panel.autoRefresh")}</span>
+                {autoRefresh && <Check className="h-3.5 w-3.5" />}
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
@@ -706,82 +713,98 @@ function LogPanelToolbarImpl({
         </div>
       )}
 
-      {/* ── Layer 2: Level tabs ── */}
-      <div className="flex items-center gap-1 px-2 pb-2 overflow-x-auto">
-        {/* All tab */}
-        <Button
-          variant={levelFilter === "all" && !bookmarkFilterActive ? "default" : "ghost"}
-          size="sm"
-          className="h-7 px-2 shrink-0 gap-1 text-xs"
-          onClick={() => {
-            setLevelFilter("all")
-            setHighSeverityOnly(false)
-            setBookmarkFilterActive(false)
-          }}
+      {/* ── Layer 2: Level filters + stats/pagination ──
+          One row, two halves. The level filters scroll horizontally when they
+          run out of room rather than pushing the stats off-screen; below `md`
+          the whole thing wraps and the stats take the second line. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-2">
+        <div
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="group"
+          aria-label={t("panel.levelFilterGroup")}
         >
-          {t("panel.allLevelsTab")}
-          {stats.total > 0 && (
-            <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-              {stats.total}
-            </Badge>
-          )}
-        </Button>
-
-        {/* Per-level tabs */}
-        {TAB_LEVELS.map((level) => {
-          const count = level === "error" ? errorFatalCount : stats.byLevel[level] || 0
-          const isActive = levelFilter === level && !bookmarkFilterActive
-          return (
-            <Button
-              key={level}
-              variant={isActive ? "default" : "ghost"}
-              size="sm"
-              className="h-7 px-2 shrink-0 gap-1 text-xs capitalize"
-              aria-pressed={level === "error" ? highSeverityOnly : undefined}
-              onClick={() => {
-                setLevelFilter(level)
-                if (level === "error") {
-                  setHighSeverityOnly(true)
-                } else {
-                  setHighSeverityOnly(false)
-                }
-                setBookmarkFilterActive(false)
-              }}
-            >
-              {t(`levels.${level}`)}
-              {count > 0 && (
-                <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                  {count}
-                </Badge>
-              )}
-            </Button>
-          )
-        })}
-
-        <div className="mx-1 h-5 w-px bg-border shrink-0" />
-
-        {/* Bookmark tab */}
-        <Button
-          variant={bookmarkFilterActive ? "default" : "ghost"}
-          size="sm"
-          className="h-7 px-2 shrink-0 gap-1 text-xs"
-          onClick={() => {
-            if (bookmarkFilterActive) {
-              setBookmarkFilterActive(false)
-            } else {
-              setBookmarkFilterActive(true)
+          {/* All tab */}
+          <Button
+            variant={levelFilter === "all" && !bookmarkFilterActive ? "default" : "ghost"}
+            size="sm"
+            className="h-7 px-2 shrink-0 gap-1 text-xs"
+            onClick={() => {
               setLevelFilter("all")
-            }
-          }}
-        >
-          <BookmarkCheck className="h-3 w-3" />
-          {t("panel.bookmarked")}
-          {bookmarkedCount > 0 && (
-            <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-              {bookmarkedCount}
-            </Badge>
-          )}
-        </Button>
+              setHighSeverityOnly(false)
+              setBookmarkFilterActive(false)
+            }}
+          >
+            {t("panel.allLevelsTab")}
+            {stats.total > 0 && (
+              <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                {stats.total}
+              </Badge>
+            )}
+          </Button>
+
+          {/* Per-level tabs */}
+          {TAB_LEVELS.map((level) => {
+            const count = level === "error" ? errorFatalCount : stats.byLevel[level] || 0
+            const isActive = levelFilter === level && !bookmarkFilterActive
+            return (
+              <Button
+                key={level}
+                variant={isActive ? "default" : "ghost"}
+                size="sm"
+                className="h-7 px-2 shrink-0 gap-1 text-xs capitalize"
+                aria-pressed={level === "error" ? highSeverityOnly : undefined}
+                onClick={() => {
+                  setLevelFilter(level)
+                  if (level === "error") {
+                    setHighSeverityOnly(true)
+                  } else {
+                    setHighSeverityOnly(false)
+                  }
+                  setBookmarkFilterActive(false)
+                }}
+              >
+                {t(`levels.${level}`)}
+                {count > 0 && (
+                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                    {count}
+                  </Badge>
+                )}
+              </Button>
+            )
+          })}
+
+          <div className="mx-1 h-5 w-px bg-border shrink-0" />
+
+          {/* Bookmark tab */}
+          <Button
+            variant={bookmarkFilterActive ? "default" : "ghost"}
+            size="sm"
+            className="h-7 px-2 shrink-0 gap-1 text-xs"
+            onClick={() => {
+              if (bookmarkFilterActive) {
+                setBookmarkFilterActive(false)
+              } else {
+                setBookmarkFilterActive(true)
+                setLevelFilter("all")
+              }
+            }}
+          >
+            <BookmarkCheck className="h-3 w-3" />
+            {t("panel.bookmarked")}
+            {bookmarkedCount > 0 && (
+              <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                {bookmarkedCount}
+              </Badge>
+            )}
+          </Button>
+        </div>
+
+        {/* `shrink` (not `shrink-0`): the stats block wraps internally, and it
+            can only do that if it is allowed to narrow. The level filters have
+            a `0%` basis, so they yield space first and scroll instead. */}
+        {statsSlot ? (
+          <div className="ml-auto flex min-w-0 shrink items-center">{statsSlot}</div>
+        ) : null}
       </div>
 
       {/* ── Layer 3: Advanced filters (collapsible) ── */}
@@ -1071,6 +1094,7 @@ interface SearchWithHistoryProps {
   searchQuery: string
   setSearchQuery: (value: string) => void
   useRegex: boolean
+  setUseRegex: (value: boolean) => void
   searchHistory: string[]
   addSearchHistory: (value: string) => void
   removeSearchHistoryItem: (value: string) => void
@@ -1085,6 +1109,7 @@ function SearchWithHistory({
   searchQuery,
   setSearchQuery,
   useRegex,
+  setUseRegex,
   searchHistory,
   addSearchHistory,
   removeSearchHistoryItem,
@@ -1142,6 +1167,25 @@ function SearchWithHistory({
           }}
           className={useRegex && searchQuery ? "font-mono text-xs" : ""}
         />
+        {/* Regex was a standalone button two slots to the right of the field it
+            modified. Inside the field, its pressed state reads as a property of
+            the query — which is what it is. */}
+        <InputGroupAddon align="inline-end">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <InputGroupButton
+                variant={useRegex ? "default" : "ghost"}
+                aria-label={t("panel.toggleRegex")}
+                aria-pressed={useRegex}
+                data-testid="log-panel-regex-toggle"
+                onClick={() => setUseRegex(!useRegex)}
+              >
+                <Regex className="h-3.5 w-3.5" />
+              </InputGroupButton>
+            </TooltipTrigger>
+            <TooltipContent>{t("panel.toggleRegex")}</TooltipContent>
+          </Tooltip>
+        </InputGroupAddon>
       </InputGroup>
 
       {showSearchHistory && historyItems.length > 0 && (

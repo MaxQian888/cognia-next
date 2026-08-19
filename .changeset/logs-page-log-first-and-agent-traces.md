@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Rebuild the /logs page around logs and add a full agent-trace surface. The page opened on a "Health" view built from four hard-coded status cards, with the log viewer demoted to the second of six rail items and its agent-trace support switched off; "Recovery" and "Advanced" were likewise static copy with no data behind them. It is now three channels — Logs / Traces / Incidents — opening on Logs, with the three static views removed and their real status (transport health, native-log readiness, retained incidents) shown live in the header. The new Traces channel is a trace list, a span waterfall, and a full span detail pane (timing, model, tokens, cache split, cost, finish reasons, hand-off, events, errors, content previews, ids), sharing one time window with the cost/token stats bar and linking both ways with the observability dashboard. The Logs channel now merges agent-trace spans into the stream again, restoring the trace view and stats bar; "Receipts" became a filter on Incidents; and channel plus selected trace are deep-linkable.

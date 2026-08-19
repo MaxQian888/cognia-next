@@ -43,8 +43,6 @@ const meta = {
   parameters: { layout: "fullscreen" },
   args: {
     filteredCount: 1240,
-    totalCount: 4096,
-    stats: { byLevel: { trace: 80, debug: 420, info: 600, warn: 110, error: 30, fatal: 0 } },
     logRate: 42,
     autoRefresh: true,
     healthByTransport: {
@@ -79,7 +77,6 @@ export const Populated: Story = {}
 export const SinglePageWithDrops: Story = {
   args: {
     filteredCount: 12,
-    totalCount: 12,
     currentPage: 1,
     totalPages: 1,
     healthByTransport: {
@@ -98,9 +95,7 @@ export const SinglePageWithDrops: Story = {
 export const NoLogs: Story = {
   args: {
     filteredCount: 0,
-    totalCount: 0,
     logRate: 0,
-    stats: { byLevel: { trace: 0, debug: 0, info: 0, warn: 0, error: 0, fatal: 0 } },
     currentPage: 1,
     totalPages: 1,
   },

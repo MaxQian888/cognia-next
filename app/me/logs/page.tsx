@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl"
 
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
-import { LogsSection } from "@/components/settings/sections/logs-section"
+import { LogsSection } from "@/components/settings/logs/logs-section"
 
 export default function MobileLogsPage() {
   const t = useTranslations("mobile.me")

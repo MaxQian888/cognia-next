@@ -16,6 +16,17 @@ import { cn } from "@/lib/utils"
 
 export type FeaturePageHeaderVariant = "management" | "compact"
 
+/**
+ * Where `navigation` renders.
+ *
+ * `"secondary"` (the default, and what every existing page uses) gives
+ * navigation its own row under the identity row. `"inline"` folds it into the
+ * identity row instead, which is the right call when the nav is a short tab
+ * set and the page cannot afford a second band of chrome — the header then
+ * collapses to a single row unless `controls` are also supplied.
+ */
+export type FeatureHeaderNavigationPlacement = "secondary" | "inline"
+
 export interface FeatureHeaderAction {
   id: string
   label: string
@@ -37,6 +48,8 @@ export interface FeaturePageHeaderProps {
   status?: React.ReactNode
   summary?: React.ReactNode
   navigation?: React.ReactNode
+  /** Defaults to `"secondary"`. See {@link FeatureHeaderNavigationPlacement}. */
+  navigationPlacement?: FeatureHeaderNavigationPlacement
   controls?: React.ReactNode
   primaryAction?: FeatureHeaderAction
   secondaryActions?: readonly FeatureHeaderAction[]
@@ -141,6 +154,7 @@ export function FeaturePageHeader({
   status,
   summary,
   navigation,
+  navigationPlacement = "secondary",
   controls,
   primaryAction,
   secondaryActions = [],
@@ -150,7 +164,9 @@ export function FeaturePageHeader({
   className,
   testId,
 }: FeaturePageHeaderProps) {
-  const hasSecondary = Boolean(navigation || controls)
+  const inlineNavigation = navigationPlacement === "inline" ? navigation : null
+  const secondaryNavigation = navigationPlacement === "inline" ? null : navigation
+  const hasSecondary = Boolean(secondaryNavigation || controls)
   const showOverflow = overflowActions.length > 0 && Boolean(overflowLabel)
   const isCompact = variant === "compact"
 
@@ -160,6 +176,7 @@ export function FeaturePageHeader({
       data-testid={testId}
       data-variant={variant}
       data-has-secondary={String(hasSecondary)}
+      data-navigation-placement={navigationPlacement}
       className={cn(
         "@container/feature-header relative z-10 shrink-0 overflow-hidden border-b border-border/70 bg-background/88 text-foreground backdrop-blur-xl supports-[backdrop-filter]:bg-background/76",
         "before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/35 before:to-transparent",
@@ -211,6 +228,15 @@ export function FeaturePageHeader({
           ) : null}
         </div>
 
+        {inlineNavigation ? (
+          <div
+            className="min-w-0 shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            data-slot="feature-header-inline-navigation"
+          >
+            {inlineNavigation}
+          </div>
+        ) : null}
+
         {summary ? (
           <div className="hidden shrink-0 items-center gap-1.5 text-xs text-muted-foreground @3xl/feature-header:flex">
             {summary}
@@ -251,8 +277,8 @@ export function FeaturePageHeader({
 
       {hasSecondary ? (
         <div className="relative flex min-h-10 min-w-0 items-center gap-2 border-t border-border/55 bg-muted/16 px-3 py-1.5 @md/feature-header:px-4">
-          {navigation ? <div className="shrink-0">{navigation}</div> : null}
-          {navigation && controls ? (
+          {secondaryNavigation ? <div className="shrink-0">{secondaryNavigation}</div> : null}
+          {secondaryNavigation && controls ? (
             <span className="h-4 w-px shrink-0 bg-border/80" aria-hidden="true" />
           ) : null}
           {controls ? (

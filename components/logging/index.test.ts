@@ -11,7 +11,6 @@ import "@testing-library/jest-dom"
 // each named export contributes to coverage of `components/logging/index.ts`.
 import {
   LogPanel,
-  LogSettings,
   LogStatsDashboard,
   LogTimeline,
   LogDetailPanel,
@@ -32,7 +31,6 @@ describe("components/logging barrel", () => {
   it("re-exports every documented component as a function/forwardRef", () => {
     const components = {
       LogPanel,
-      LogSettings,
       LogStatsDashboard,
       LogTimeline,
       LogDetailPanel,

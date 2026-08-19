@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Plus, Trash2, Server } from "lucide-react"
+import { SettingsBlock, SettingsField } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -20,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { isTauri } from "@/lib/tauri"
 import {
   getTracingLevels,
@@ -97,46 +97,59 @@ export function NativeLogLevels() {
   const sortedRules = [...rules].sort((a, b) => a.target.localeCompare(b.target))
 
   return (
-    <section className="border-y bg-background">
-      <header className="border-b px-4 py-3">
-        <h3 className="flex items-center gap-2 text-base font-medium">
-          <Server className="h-4 w-4" />
-          {t("settings.nativeLevels.title")}
-        </h3>
-        <p className="text-sm text-muted-foreground">{t("settings.nativeLevels.description")}</p>
-      </header>
-      <div className="flex flex-col gap-3 p-4">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-          <Label className="sm:w-32 text-sm">{t("settings.nativeLevels.defaultLabel")}</Label>
-          <Select value={defaultLevel} onValueChange={setDefaultLevel}>
-            <SelectTrigger className="w-full sm:w-[130px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {NATIVE_LEVELS.map((level) => (
-                  <SelectItem key={level} value={level}>
-                    <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+    <SettingsBlock
+      icon={<Server />}
+      title={t("settings.nativeLevels.title")}
+      description={t("settings.nativeLevels.description")}
+      testid="native-log-levels"
+      action={
+        <div className="flex items-center gap-2">
+          {status === "saved" ? (
+            <span className="text-xs text-muted-foreground">
+              {t("settings.nativeLevels.saved")}
+            </span>
+          ) : null}
+          {status === "error" ? (
+            <span className="text-xs text-destructive">{t("settings.nativeLevels.error")}</span>
+          ) : null}
+          <Button size="sm" variant="outline" onClick={apply} disabled={status === "saving"}>
+            {t("settings.nativeLevels.apply")}
+          </Button>
         </div>
+      }
+    >
+      <SettingsField
+        htmlFor="native-log-default-level"
+        label={t("settings.nativeLevels.defaultLabel")}
+      >
+        <Select value={defaultLevel} onValueChange={setDefaultLevel}>
+          <SelectTrigger id="native-log-default-level" className="w-[130px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {NATIVE_LEVELS.map((level) => (
+                <SelectItem key={level} value={level}>
+                  <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </SettingsField>
 
-        <Separator />
-
-        {sortedRules.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("settings.nativeLevels.empty")}</p>
-        ) : (
-          sortedRules.map((rule) => (
-            <div key={rule.target} className="flex items-center gap-2">
-              <span className="flex-1 min-w-0 truncate text-sm font-mono">{rule.target}</span>
+      {sortedRules.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("settings.nativeLevels.empty")}</p>
+      ) : (
+        <ul className="divide-y divide-border/60 rounded-lg border">
+          {sortedRules.map((rule) => (
+            <li key={rule.target} className="flex items-center gap-2 px-3 py-2">
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">{rule.target}</span>
               <Select
                 value={rule.level}
                 onValueChange={(value) => setRuleLevel(rule.target, value)}
               >
-                <SelectTrigger className="w-[130px]">
+                <SelectTrigger className="h-8 w-[130px]" aria-label={rule.target}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -152,67 +165,60 @@ export function NativeLogLevels() {
               <Button
                 variant="ghost"
                 size="icon"
+                className="size-8 shrink-0"
                 aria-label={t("settings.nativeLevels.removeAria", { module: rule.target })}
                 onClick={() => removeRule(rule.target)}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
-            </div>
-          ))
-        )}
+            </li>
+          ))}
+        </ul>
+      )}
 
-        <Separator />
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-1">
-            <Label className="text-xs">{t("settings.nativeLevels.moduleLabel")}</Label>
-            <Input
-              // i18n-exempt: tracing target module example
-              placeholder="network:lark"
-              value={newRule.target}
-              onChange={(e) => setNewRule((prev) => ({ ...prev, target: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("settings.nativeLevels.levelLabel")}</Label>
-            <Select
-              value={newRule.level}
-              onValueChange={(value) => setNewRule((prev) => ({ ...prev, level: value }))}
+      <div className="flex flex-col gap-2 rounded-lg border border-dashed p-3 @md/settings-stack:flex-row @md/settings-stack:items-end">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Label htmlFor="native-log-new-target" className="text-xs">
+            {t("settings.nativeLevels.moduleLabel")}
+          </Label>
+          <Input
+            id="native-log-new-target"
+            // i18n-exempt: tracing target module example
+            placeholder="network:lark"
+            value={newRule.target}
+            onChange={(e) => setNewRule((prev) => ({ ...prev, target: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="native-log-new-level" className="text-xs">
+            {t("settings.nativeLevels.levelLabel")}
+          </Label>
+          <Select
+            value={newRule.level}
+            onValueChange={(value) => setNewRule((prev) => ({ ...prev, level: value }))}
+          >
+            <SelectTrigger
+              id="native-log-new-level"
+              className="w-full @md/settings-stack:w-[130px]"
             >
-              <SelectTrigger className="w-full sm:w-[130px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {NATIVE_LEVELS.map((level) => (
-                    <SelectItem key={level} value={level}>
-                      <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          <Button variant="outline" onClick={addRule} className="sm:self-end">
-            <Plus className="h-4 w-4 mr-1" />
-            {t("settings.nativeLevels.add")}
-          </Button>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {NATIVE_LEVELS.map((level) => (
+                  <SelectItem key={level} value={level}>
+                    <span className="capitalize">{t(`settings.logLevel.${level}`)}</span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
-
-        <div className="flex items-center justify-end gap-2">
-          {status === "saved" ? (
-            <span className="text-xs text-muted-foreground">
-              {t("settings.nativeLevels.saved")}
-            </span>
-          ) : null}
-          {status === "error" ? (
-            <span className="text-xs text-destructive">{t("settings.nativeLevels.error")}</span>
-          ) : null}
-          <Button size="sm" onClick={apply} disabled={status === "saving"}>
-            {t("settings.nativeLevels.apply")}
-          </Button>
-        </div>
+        <Button variant="outline" onClick={addRule} disabled={!newRule.target.trim()}>
+          <Plus className="h-4 w-4 mr-1" />
+          {t("settings.nativeLevels.add")}
+        </Button>
       </div>
-    </section>
+    </SettingsBlock>
   )
 }

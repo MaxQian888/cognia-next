@@ -145,3 +145,55 @@ test("keeps overflow actions keyboard accessible", () => {
   fireEvent.keyDown(screen.getByRole("button", { name: "Export logs" }), { key: "Enter" })
   expect(onExport).toHaveBeenCalledTimes(1)
 })
+
+test("renders navigation in its own row by default", () => {
+  renderHeader(
+    <FeaturePageHeader
+      testId="secondary-nav-header"
+      title="Logs"
+      navigation={<nav aria-label="Channels">Logs</nav>}
+    />
+  )
+
+  const header = screen.getByTestId("secondary-nav-header")
+  expect(header).toHaveAttribute("data-navigation-placement", "secondary")
+  expect(header).toHaveAttribute("data-has-secondary", "true")
+  expect(screen.getByRole("navigation", { name: "Channels" })).toBeInTheDocument()
+})
+
+test("folds navigation into the identity row when placement is inline", () => {
+  // A short tab set does not earn a band of its own; `inline` is what lets a
+  // page collapse to a single header row.
+  renderHeader(
+    <FeaturePageHeader
+      testId="inline-nav-header"
+      title="Logs"
+      navigation={<nav aria-label="Channels">Logs</nav>}
+      navigationPlacement="inline"
+    />
+  )
+
+  const header = screen.getByTestId("inline-nav-header")
+  expect(header).toHaveAttribute("data-navigation-placement", "inline")
+  expect(header).toHaveAttribute("data-has-secondary", "false")
+  const nav = screen.getByRole("navigation", { name: "Channels" })
+  expect(nav.closest("[data-slot='feature-header-inline-navigation']")).not.toBeNull()
+})
+
+test("still renders the secondary row for controls when navigation is inline", () => {
+  renderHeader(
+    <FeaturePageHeader
+      testId="inline-nav-controls-header"
+      title="Logs"
+      navigation={<nav aria-label="Channels">Logs</nav>}
+      navigationPlacement="inline"
+      controls={<input aria-label="Search logs" />}
+    />
+  )
+
+  expect(screen.getByTestId("inline-nav-controls-header")).toHaveAttribute(
+    "data-has-secondary",
+    "true"
+  )
+  expect(screen.getByLabelText("Search logs")).toBeInTheDocument()
+})

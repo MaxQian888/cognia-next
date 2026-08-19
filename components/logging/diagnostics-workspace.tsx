@@ -1,29 +1,55 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+/**
+ * `/logs` — the local inspection workspace ADR-0102 consolidates under one
+ * route.
+ *
+ * It used to open on `health`: four hard-coded status cards ("Local capture /
+ * ready", "Privacy gate / protected") with no data source behind them, sitting
+ * above `recovery` and `advanced`, which were also pure copy. The log panel —
+ * the thing the route is named after — was the second of six rail items, and
+ * it was mounted with `includeAgentTrace={false}`, which switched off the span
+ * merge, the trace view button and the agent-trace stats bar all at once.
+ *
+ * There are now three channels and the page opens on logs:
+ *
+ *   logs       the full `LogPanel`, agent-trace enabled
+ *   traces     `TraceWorkspace` — trace list → waterfall → span detail
+ *   incidents  `IncidentWorkspace` — crash reports, receipts as a filter
+ *
+ * The status the deleted `health` view gestured at is now a single live chip
+ * in the header (see `WorkspaceHealthPill`) reading from `useTransportHealth`,
+ * with the settings that control it one click away. The configuration itself
+ * stays in Settings → Logs, which already renders the same signals against
+ * real data.
+ *
+ * The header is one row. It used to be two: an identity row and a row holding
+ * nothing but three channel tabs and a density select that wrote a store field
+ * no stylesheet read — `data-density` only has a reader on `:root`. The tabs
+ * moved up (`navigationPlacement="inline"`), and the density control is gone
+ * from here because the log panel already owns a working one; the workspace
+ * store now feeds that control instead of shadowing it, so the attribute on
+ * this element finally matches what the list renders.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
-  ActivityIcon,
   AlertTriangleIcon,
-  CheckCircle2Icon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CircleDotIcon,
-  HeartPulseIcon,
-  ListRestartIcon,
-  Loader2Icon,
-  ReceiptTextIcon,
-  RefreshCwIcon,
   RotateCcwIcon,
   ScrollTextIcon,
   Settings2Icon,
-  ShieldCheckIcon,
-  Trash2Icon,
+  WaypointsIcon,
 } from "lucide-react"
 
+import type { FeatureHeaderAction } from "@/components/feature-shell/feature-page-header"
+
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { IncidentDetail, IncidentWorkspace } from "@/components/logging/incident-workspace"
 import { LogPanel } from "@/components/logging/log-panel"
+import { TraceWorkspace } from "@/components/logging/trace-workspace"
 import { Badge } from "@/components/ui/badge"
 import {
   AlertDialog,
@@ -36,17 +62,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -55,16 +70,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import {
   Sheet,
   SheetContent,
@@ -72,108 +77,146 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDiagnosticIncidents } from "@/hooks/logging/use-diagnostic-incidents"
 import type { DiagnosticIncidentSummary } from "@/hooks/logging/use-diagnostic-incidents"
+import { useTransportHealth } from "@/hooks/logging"
 import { useEdgeResize, useIsNarrow } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
+import type { AgentTraceStatsWindow } from "@/lib/observability/trace-window"
 import {
+  LOG_WORKSPACE_VIEWS,
+  resolveLogWorkspaceView,
   useLogWorkspaceStore,
-  type IncidentStateFilter,
-  type LogWorkspaceDensity,
-  type LogWorkspaceSource,
   type LogWorkspaceView,
 } from "@/stores/logging/log-workspace-store"
 
-const NAVIGATION: Array<{
-  id: LogWorkspaceView
-  icon: typeof HeartPulseIcon
-}> = [
-  { id: "health", icon: HeartPulseIcon },
-  { id: "logs", icon: ScrollTextIcon },
-  { id: "incidents", icon: AlertTriangleIcon },
-  { id: "receipts", icon: ReceiptTextIcon },
-  { id: "recovery", icon: ListRestartIcon },
-  { id: "advanced", icon: Settings2Icon },
-]
-
-const INCIDENT_STATES: IncidentStateFilter[] = [
-  "all",
-  "detected",
-  "awaitingConsent",
-  "queued",
-  "uploading",
-  "processing",
-  "accepted",
-  "rejected",
-  "cancelled",
-  "deleted",
-]
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+const CHANNEL_ICONS: Record<LogWorkspaceView, typeof ScrollTextIcon> = {
+  logs: ScrollTextIcon,
+  traces: WaypointsIcon,
+  incidents: AlertTriangleIcon,
 }
 
-function displayPreview(preview: unknown): string {
-  if (typeof preview === "string") return preview
-  if (preview === null || preview === undefined) return ""
-  return JSON.stringify(preview, null, 2)
+/** Query keys this page owns. `useLogPanelUrlSync` preserves anything it does
+ * not own, which is what makes a deep link into a channel survive the log
+ * panel's own URL writes. */
+const CHANNEL_PARAM = "channel"
+const TRACE_PARAM = "traceId"
+
+/** Replace the page's own params without touching the panel's. Uses
+ * `history.replaceState` rather than `router.replace` for the same reason the
+ * log panel does: the static export must not re-evaluate the route. */
+function writePageParams(next: Record<string, string | null>): void {
+  if (typeof window === "undefined") return
+  const params = new URLSearchParams(window.location.search)
+  for (const [key, value] of Object.entries(next)) {
+    if (value === null) params.delete(key)
+    else params.set(key, value)
+  }
+  const query = params.toString()
+  try {
+    window.history.replaceState(
+      {},
+      "",
+      query ? `${window.location.pathname}?${query}` : window.location.pathname
+    )
+  } catch {
+    // history may be unavailable in sandboxed contexts; state still drives the UI.
+  }
 }
 
 export function DiagnosticsWorkspace() {
   const t = useTranslations("logging.workspace")
+  const searchParams = useSearchParams()
+
   const activeView = useLogWorkspaceStore((state) => state.activeView)
   const setActiveView = useLogWorkspaceStore((state) => state.setActiveView)
   const density = useLogWorkspaceStore((state) => state.density)
   const setDensity = useLogWorkspaceStore((state) => state.setDensity)
-  const navigationWidth = useLogWorkspaceStore((state) => state.navigationWidth)
-  const setNavigationWidth = useLogWorkspaceStore((state) => state.setNavigationWidth)
-  const navigationCollapsed = useLogWorkspaceStore((state) => state.navigationCollapsed)
-  const setNavigationCollapsed = useLogWorkspaceStore((state) => state.setNavigationCollapsed)
   const detailWidth = useLogWorkspaceStore((state) => state.detailWidth)
   const setDetailWidth = useLogWorkspaceStore((state) => state.setDetailWidth)
   const activeSource = useLogWorkspaceStore((state) => state.activeSource)
   const setActiveSource = useLogWorkspaceStore((state) => state.setActiveSource)
   const incidentStateFilter = useLogWorkspaceStore((state) => state.incidentStateFilter)
   const setIncidentStateFilter = useLogWorkspaceStore((state) => state.setIncidentStateFilter)
+  const receiptsOnly = useLogWorkspaceStore((state) => state.receiptsOnly)
+  const setReceiptsOnly = useLogWorkspaceStore((state) => state.setReceiptsOnly)
+  const traceWindow = useLogWorkspaceStore((state) => state.traceWindow)
+  const setTraceWindow = useLogWorkspaceStore((state) => state.setTraceWindow)
+  const traceErrorsOnly = useLogWorkspaceStore((state) => state.traceErrorsOnly)
+  const setTraceErrorsOnly = useLogWorkspaceStore((state) => state.setTraceErrorsOnly)
   const resetWorkspace = useLogWorkspaceStore((state) => state.resetWorkspace)
+
   const incidents = useDiagnosticIncidents()
+  const { nativeLogging, healthByTransport } = useTransportHealth({
+    autoRefresh: true,
+    refreshInterval: 5000,
+  })
   const narrow = useIsNarrow()
+
   const [selectedID, setSelectedID] = useState<string | null>(null)
   const [preview, setPreview] = useState<unknown>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DiagnosticIncidentSummary | null>(null)
+  // Seeded during render from `?traceId=`; an effect would be a set-state-in-effect.
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(
+    () => searchParams?.get(TRACE_PARAM) ?? null
+  )
+  /** Remount key for the log panel — a cross-channel jump has to re-run the
+   * panel's mount-time URL hydration, which is the only way its filter state
+   * can be seeded from outside. */
+  const [logPanelKey, setLogPanelKey] = useState(0)
 
-  const navigationResize = useEdgeResize({
-    width: navigationWidth,
-    min: 184,
-    max: 360,
-    onChange: setNavigationWidth,
-    onReset: () => setNavigationWidth(248),
-  })
-  const detailResize = useEdgeResize({
-    width: detailWidth,
-    min: 280,
-    max: 640,
-    edge: "left",
-    onChange: setDetailWidth,
-    onReset: () => setDetailWidth(384),
-  })
+  // A `?channel=` deep link wins over the persisted channel, once, at mount.
+  // This writes the zustand store rather than local state, so it is a plain
+  // side effect and not a set-state-in-effect.
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (hydratedRef.current) return
+    hydratedRef.current = true
+    const channel = searchParams?.get(CHANNEL_PARAM)
+    if (channel) setActiveView(resolveLogWorkspaceView(channel))
+  }, [searchParams, setActiveView])
+
+  const selectChannel = useCallback(
+    (view: LogWorkspaceView) => {
+      setActiveView(view)
+      writePageParams({ [CHANNEL_PARAM]: view === "logs" ? null : view })
+    },
+    [setActiveView]
+  )
+
+  const selectTrace = useCallback((traceId: string | null) => {
+    setSelectedTraceId(traceId)
+    writePageParams({ [TRACE_PARAM]: traceId })
+  }, [])
+
+  /** Traces → Logs. Writes the panel's own `trace` / `session` params and
+   * remounts it so its mount-time hydration picks them up. */
+  const openInLogs = useCallback(
+    (params: { trace?: string; session?: string }) => {
+      setActiveView("logs")
+      writePageParams({
+        [CHANNEL_PARAM]: null,
+        [TRACE_PARAM]: null,
+        trace: params.trace ?? null,
+        session: params.session ?? null,
+      })
+      setLogPanelKey((key) => key + 1)
+    },
+    [setActiveView]
+  )
 
   const filteredIncidents = useMemo(
     () =>
       incidents.incidents.filter(
         (incident) =>
           (activeSource === "all" || incident.runtime === activeSource) &&
-          (incidentStateFilter === "all" || incident.state === incidentStateFilter)
+          (incidentStateFilter === "all" || incident.state === incidentStateFilter) &&
+          (!receiptsOnly || Boolean(incident.receiptCode))
       ),
-    [activeSource, incidentStateFilter, incidents.incidents]
-  )
-  const receiptIncidents = useMemo(
-    () => filteredIncidents.filter((incident) => Boolean(incident.receiptCode)),
-    [filteredIncidents]
+    [activeSource, incidentStateFilter, receiptsOnly, incidents.incidents]
   )
   const selectedIncident = useMemo(
     () =>
@@ -182,6 +225,15 @@ export function DiagnosticsWorkspace() {
       null,
     [filteredIncidents, selectedID]
   )
+
+  const detailResize = useEdgeResize({
+    width: detailWidth,
+    min: 280,
+    max: 640,
+    edge: "left",
+    onChange: setDetailWidth,
+    onReset: () => setDetailWidth(384),
+  })
 
   const selectIncident = useCallback(
     async (incident: DiagnosticIncidentSummary) => {
@@ -206,21 +258,43 @@ export function DiagnosticsWorkspace() {
     setDeleteTarget(null)
   }, [deleteTarget, incidents, selectedID])
 
-  const openDetail = selectedID !== null && selectedIncident !== null
-  const list = activeView === "receipts" ? receiptIncidents : filteredIncidents
+  const unhealthyTransports = useMemo(
+    () => Object.values(healthByTransport).filter((health) => health.status !== "healthy").length,
+    [healthByTransport]
+  )
+  const transportCount = Object.keys(healthByTransport).length
+
+  /** "Reset layout" is a rare, whole-page action that used to sit in the
+   * header as a labelled button competing with Configure. It lives in the
+   * overflow menu now — the row it vacated is what let the channel tabs move
+   * up into the identity row. */
+  const overflowActions = useMemo<FeatureHeaderAction[]>(
+    () => [
+      {
+        id: "reset-workspace",
+        label: t("reset"),
+        icon: RotateCcwIcon,
+        onSelect: resetWorkspace,
+        testId: "logs-reset-workspace",
+      },
+    ],
+    [resetWorkspace, t]
+  )
 
   return (
     <div
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
       data-testid="diagnostics-workspace"
       data-density={density}
+      data-channel={activeView}
     >
       <FeaturePageHeader
+        variant="compact"
         testId="logs-page-header"
         icon={<ScrollTextIcon />}
         title={t("title")}
         breadcrumb={
-          <Breadcrumb>
+          <Breadcrumb className="hidden @3xl/feature-header:block">
             <BreadcrumbList>
               <BreadcrumbItem>
                 <BreadcrumbLink asChild>
@@ -234,124 +308,112 @@ export function DiagnosticsWorkspace() {
             </BreadcrumbList>
           </Breadcrumb>
         }
-        status={
-          <Badge variant="secondary" className="font-mono text-xs tabular-nums">
-            {t("incidentCount", { count: incidents.incidents.length })}
-          </Badge>
-        }
-        controls={
-          <Select
-            value={density}
-            onValueChange={(value) => setDensity(value as LogWorkspaceDensity)}
+        navigationPlacement="inline"
+        navigation={
+          <Tabs
+            value={activeView}
+            onValueChange={(value) => selectChannel(value as LogWorkspaceView)}
           >
-            <SelectTrigger className="h-8 w-[140px]" aria-label={t("density.label")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="compact">{t("density.compact")}</SelectItem>
-                <SelectItem value="comfortable">{t("density.comfortable")}</SelectItem>
-                <SelectItem value="spacious">{t("density.spacious")}</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+            <TabsList aria-label={t("navigation.label")} className="h-8">
+              {LOG_WORKSPACE_VIEWS.map((view) => {
+                const Icon = CHANNEL_ICONS[view]
+                // The incident count used to sit in the header status strip,
+                // one row above the tab it describes. It belongs on the tab:
+                // the number and the thing it counts are now the same target.
+                const count = view === "incidents" ? incidents.incidents.length : 0
+                return (
+                  <TabsTrigger
+                    key={view}
+                    value={view}
+                    aria-label={t(`views.${view}`)}
+                    data-testid={`logs-channel-${view}`}
+                    className="gap-1.5"
+                  >
+                    <Icon className="size-4" aria-hidden />
+                    <span className="hidden @xl/feature-header:inline">{t(`views.${view}`)}</span>
+                    {count > 0 ? (
+                      <Badge
+                        variant="secondary"
+                        className="h-4 min-w-4 justify-center px-1 font-mono text-[10px] tabular-nums"
+                        data-testid="logs-channel-incidents-count"
+                      >
+                        {count}
+                      </Badge>
+                    ) : null}
+                  </TabsTrigger>
+                )
+              })}
+            </TabsList>
+          </Tabs>
+        }
+        status={
+          <WorkspaceHealthPill
+            transportCount={transportCount}
+            unhealthyTransports={unhealthyTransports}
+            nativeStatus={nativeLogging.status}
+            incidentCount={incidents.incidents.length}
+          />
         }
         actions={
-          <Button variant="outline" size="sm" className="h-8" onClick={resetWorkspace}>
-            <RotateCcwIcon className="size-4" />
-            <span className="hidden sm:inline">{t("reset")}</span>
+          <Button asChild variant="ghost" size="sm" className="h-8">
+            <Link href="/settings?section=logs">
+              <Settings2Icon className="size-4" />
+              <span className="hidden @2xl/feature-header:inline">{t("configure")}</span>
+            </Link>
           </Button>
         }
+        overflowLabel={t("moreActions")}
+        overflowActions={overflowActions}
       />
 
-      <MobileNavigation activeView={activeView} onSelect={setActiveView} />
-
-      <div className="flex min-h-0 flex-1 overflow-hidden border-t">
-        <aside
-          className={cn(
-            "relative hidden shrink-0 border-r bg-muted/20 md:flex md:flex-col",
-            navigationCollapsed && "w-14"
-          )}
-          style={navigationCollapsed ? undefined : { width: navigationWidth }}
-          data-testid="workspace-navigation"
-        >
-          <WorkspaceNavigation
-            activeView={activeView}
-            collapsed={navigationCollapsed}
-            onSelect={setActiveView}
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-t">
+        {activeView === "logs" ? (
+          <LogPanel
+            key={logPanelKey}
+            showStats
+            showTimeline
+            includeAgentTrace
+            defaultAutoRefresh={false}
+            refreshInterval={2000}
+            density={density}
+            onDensityChange={setDensity}
           />
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="m-2 mt-auto self-end"
-            onClick={() => setNavigationCollapsed(!navigationCollapsed)}
-            aria-label={navigationCollapsed ? t("navigation.expand") : t("navigation.collapse")}
-          >
-            {navigationCollapsed ? (
-              <ChevronRightIcon className="size-4" />
-            ) : (
-              <ChevronLeftIcon className="size-4" />
-            )}
-          </Button>
-          {!navigationCollapsed && (
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t("navigation.resize")}
-              tabIndex={0}
-              className={cn(
-                "absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none xl:block",
-                navigationResize.dragging && "bg-primary/10"
-              )}
-              onPointerDown={navigationResize.onPointerDown}
-              onPointerMove={navigationResize.onPointerMove}
-              onPointerUp={navigationResize.onPointerUp}
-              onKeyDown={navigationResize.onKeyDown}
-              onDoubleClick={navigationResize.onDoubleClick}
-            />
-          )}
-        </aside>
-
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {activeView === "logs" ? (
-            <LogPanel
-              showStats
-              showTimeline
-              includeAgentTrace={false}
-              defaultAutoRefresh={false}
-              refreshInterval={2000}
-            />
-          ) : activeView === "health" ? (
-            <HealthView incidentCount={incidents.incidents.length} loading={incidents.loading} />
-          ) : activeView === "recovery" ? (
-            <RecoveryView />
-          ) : activeView === "advanced" ? (
-            <AdvancedView />
-          ) : (
-            <IncidentWorkspace
-              incidents={list}
-              loading={incidents.loading}
-              error={incidents.error}
-              selected={selectedIncident}
-              preview={preview}
-              previewLoading={previewLoading}
-              activeSource={activeSource}
-              incidentStateFilter={incidentStateFilter}
-              onSourceChange={setActiveSource}
-              onStateChange={setIncidentStateFilter}
-              onRefresh={() => void incidents.refresh()}
-              onSelect={(incident) => void selectIncident(incident)}
-              onDelete={setDeleteTarget}
-              detailWidth={detailWidth}
-              detailResize={detailResize}
-              receiptsOnly={activeView === "receipts"}
-            />
-          )}
-        </main>
-      </div>
+        ) : activeView === "traces" ? (
+          <TraceWorkspace
+            window={traceWindow}
+            onWindowChange={(next: AgentTraceStatsWindow) => setTraceWindow(next)}
+            errorsOnly={traceErrorsOnly}
+            onErrorsOnlyChange={setTraceErrorsOnly}
+            selectedTraceId={selectedTraceId}
+            onSelectTrace={selectTrace}
+            onOpenInLogs={(trace) => openInLogs({ trace })}
+            onOpenSession={(session) => openInLogs({ session })}
+          />
+        ) : (
+          <IncidentWorkspace
+            incidents={filteredIncidents}
+            loading={incidents.loading}
+            error={incidents.error}
+            selected={selectedIncident}
+            preview={preview}
+            previewLoading={previewLoading}
+            activeSource={activeSource}
+            incidentStateFilter={incidentStateFilter}
+            onSourceChange={setActiveSource}
+            onStateChange={setIncidentStateFilter}
+            onRefresh={() => void incidents.refresh()}
+            onSelect={(incident) => void selectIncident(incident)}
+            onDelete={setDeleteTarget}
+            detailWidth={detailWidth}
+            detailResize={detailResize}
+            receiptsOnly={receiptsOnly}
+            onReceiptsOnlyChange={setReceiptsOnly}
+          />
+        )}
+      </main>
 
       <Sheet
-        open={openDetail && (activeView === "incidents" || activeView === "receipts")}
+        open={selectedID !== null && selectedIncident !== null && activeView === "incidents"}
         onOpenChange={(open) => {
           if (!open) setSelectedID(null)
         }}
@@ -401,441 +463,79 @@ export function DiagnosticsWorkspace() {
   )
 }
 
-function MobileNavigation({
-  activeView,
-  onSelect,
+/**
+ * The live replacement for the deleted `health` view, and the whole of it.
+ *
+ * This was three badges — transports, native-log readiness, retained
+ * incidents — sitting side by side in the header while the log panel rendered
+ * the same transport health again as clickable tiles two rows below, and the
+ * incident count again as the channel the user was looking at. Three facts,
+ * six renderings.
+ *
+ * Now it is one chip carrying the aggregate, with the breakdown on hover and
+ * in its accessible name. The incident count moved onto the Incidents tab; the
+ * per-transport detail stays on the log panel's tiles, which can actually be
+ * clicked through to a filtered view. Tone follows the worst of the two
+ * signals, so a degraded native pipeline still turns the chip amber even when
+ * every transport is healthy.
+ */
+function WorkspaceHealthPill({
+  transportCount,
+  unhealthyTransports,
+  nativeStatus,
+  incidentCount,
 }: {
-  activeView: LogWorkspaceView
-  onSelect: (view: LogWorkspaceView) => void
+  transportCount: number
+  unhealthyTransports: number
+  nativeStatus: string
+  incidentCount: number
 }) {
-  const t = useTranslations("logging.workspace")
-  return (
-    <div
-      className="flex gap-1 overflow-x-auto border-t px-2 py-2 md:hidden"
-      aria-label={t("navigation.label")}
-    >
-      {NAVIGATION.map(({ id, icon: Icon }) => (
-        <Button
-          key={id}
-          variant={activeView === id ? "secondary" : "ghost"}
-          size="sm"
-          className="shrink-0"
-          onClick={() => onSelect(id)}
-        >
-          <Icon className="size-4" />
-          {t(`views.${id}`)}
-        </Button>
-      ))}
-    </div>
-  )
-}
+  const t = useTranslations("logging.workspace.status")
 
-function WorkspaceNavigation({
-  activeView,
-  collapsed,
-  onSelect,
-}: {
-  activeView: LogWorkspaceView
-  collapsed: boolean
-  onSelect: (view: LogWorkspaceView) => void
-}) {
-  const t = useTranslations("logging.workspace")
-  return (
-    <nav className="space-y-1 p-2" aria-label={t("navigation.label")}>
-      {NAVIGATION.map(({ id, icon: Icon }) => (
-        <Button
-          key={id}
-          variant={activeView === id ? "secondary" : "ghost"}
-          className={cn("w-full", collapsed ? "justify-center px-0" : "justify-start")}
-          onClick={() => onSelect(id)}
-          aria-label={collapsed ? t(`views.${id}`) : undefined}
-        >
-          <Icon className="size-4 shrink-0" />
-          {!collapsed && <span>{t(`views.${id}`)}</span>}
-        </Button>
-      ))}
-    </nav>
-  )
-}
+  // Before the first health poll resolves there is nothing to aggregate, and a
+  // "0/0" chip reads as a failure rather than as "not measured yet".
+  if (transportCount === 0) return null
 
-function HealthView({ incidentCount, loading }: { incidentCount: number; loading: boolean }) {
-  const t = useTranslations("logging.workspace")
-  const cards = [
-    { id: "capture", icon: ActivityIcon, status: "ready" },
-    { id: "privacy", icon: ShieldCheckIcon, status: "protected" },
-    { id: "retention", icon: ScrollTextIcon, status: "local" },
-    { id: "submission", icon: CheckCircle2Icon, status: "consent" },
-  ] as const
-  return (
-    <ScrollArea className="flex-1">
-      <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
-        <div>
-          <h2 className="text-lg font-semibold">{t("health.title")}</h2>
-          <p className="text-sm text-muted-foreground">{t("health.description")}</p>
-        </div>
-        <ItemGroup className="grid gap-3 sm:grid-cols-2">
-          {cards.map(({ id, icon: Icon, status }) => (
-            <Item key={id} role="listitem" className="min-w-0 items-start border-y px-0">
-              <ItemMedia variant="icon">
-                <Icon className="size-5 text-primary" />
-              </ItemMedia>
-              <ItemContent className="min-w-0">
-                <div className="flex w-full flex-wrap items-center justify-between gap-2">
-                  <ItemTitle className="min-w-0">{t(`health.cards.${id}.title`)}</ItemTitle>
-                  <Badge variant="outline">{t(`health.status.${status}`)}</Badge>
-                </div>
-                <ItemDescription className="line-clamp-none">
-                  {t(`health.cards.${id}.description`)}
-                </ItemDescription>
-              </ItemContent>
-            </Item>
-          ))}
-        </ItemGroup>
-        <Item className="border-y px-0">
-          <ItemContent>
-            <ItemTitle>{t("health.localIncidents")}</ItemTitle>
-            <ItemDescription>{t("health.localIncidentsDescription")}</ItemDescription>
-          </ItemContent>
-          <ItemMedia>
-            {loading ? (
-              <Loader2Icon className="size-5 animate-spin" />
-            ) : (
-              <CircleDotIcon className="size-5" />
-            )}
-            <span className="text-2xl font-semibold tabular-nums">{incidentCount}</span>
-          </ItemMedia>
-        </Item>
-      </div>
-    </ScrollArea>
-  )
-}
+  const healthyTransports = transportCount - unhealthyTransports
+  const nativeNeedsAttention = nativeStatus === "degraded" || nativeStatus === "error"
+  const healthy = unhealthyTransports === 0 && !nativeNeedsAttention
 
-function RecoveryView() {
-  const t = useTranslations("logging.workspace")
-  const checkpoints = ["account", "data", "plugins", "sidecars", "automation"] as const
-  return (
-    <ScrollArea className="flex-1">
-      <div className="mx-auto w-full max-w-4xl space-y-5 p-4 md:p-6">
-        <div>
-          <h2 className="text-lg font-semibold">{t("recovery.title")}</h2>
-          <p className="text-sm text-muted-foreground">{t("recovery.description")}</p>
-        </div>
-        <Item className="border-y px-0">
-          <ItemContent>
-            <ItemTitle>{t("recovery.normalTitle")}</ItemTitle>
-            <ItemDescription>{t("recovery.normalDescription")}</ItemDescription>
-          </ItemContent>
-        </Item>
-        <section className="flex flex-col gap-3 border-y py-4">
-          <div>
-            <h3 className="font-medium">{t("recovery.checkpointsTitle")}</h3>
-            <p className="text-sm text-muted-foreground">{t("recovery.checkpointsDescription")}</p>
-          </div>
-          <ItemGroup>
-            {checkpoints.map((checkpoint, index) => (
-              <Item key={checkpoint} role="listitem" size="sm" className="border-y px-0">
-                <ItemMedia>
-                  <Badge variant="secondary" className="size-6 justify-center rounded-full p-0">
-                    {index + 1}
-                  </Badge>
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{t(`recovery.checkpoints.${checkpoint}.title`)}</ItemTitle>
-                  <ItemDescription className="text-xs">
-                    {t(`recovery.checkpoints.${checkpoint}.description`)}
-                  </ItemDescription>
-                </ItemContent>
-              </Item>
-            ))}
-          </ItemGroup>
-        </section>
-      </div>
-    </ScrollArea>
-  )
-}
+  const transportsLabel = t("transports", { healthy: healthyTransports, total: transportCount })
+  const nativeLabel = t("native", { status: nativeStatus })
+  const incidentsLabel = t("incidents", { count: incidentCount })
 
-function AdvancedView() {
-  const t = useTranslations("logging.workspace")
   return (
-    <ScrollArea className="flex-1">
-      <div className="mx-auto grid w-full max-w-5xl gap-4 p-4 md:grid-cols-2 md:p-6">
-        {(["capabilities", "queues", "symbols", "schema"] as const).map((section) => (
-          <Item key={section} className="border-y px-0">
-            <ItemContent>
-              <ItemTitle>{t(`advanced.${section}.title`)}</ItemTitle>
-              <ItemDescription>{t(`advanced.${section}.description`)}</ItemDescription>
-            </ItemContent>
-            <Badge variant="outline">{t(`advanced.${section}.status`)}</Badge>
-          </Item>
-        ))}
-      </div>
-    </ScrollArea>
-  )
-}
-
-function IncidentWorkspace({
-  incidents,
-  loading,
-  error,
-  selected,
-  preview,
-  previewLoading,
-  activeSource,
-  incidentStateFilter,
-  onSourceChange,
-  onStateChange,
-  onRefresh,
-  onSelect,
-  onDelete,
-  detailWidth,
-  detailResize,
-  receiptsOnly,
-}: {
-  incidents: DiagnosticIncidentSummary[]
-  loading: boolean
-  error: Error | null
-  selected: DiagnosticIncidentSummary | null
-  preview: unknown
-  previewLoading: boolean
-  activeSource: LogWorkspaceSource
-  incidentStateFilter: IncidentStateFilter
-  onSourceChange: (source: LogWorkspaceSource) => void
-  onStateChange: (state: IncidentStateFilter) => void
-  onRefresh: () => void
-  onSelect: (incident: DiagnosticIncidentSummary) => void
-  onDelete: (incident: DiagnosticIncidentSummary) => void
-  detailWidth: number
-  detailResize: ReturnType<typeof useEdgeResize>
-  receiptsOnly: boolean
-}) {
-  const t = useTranslations("logging.workspace")
-  return (
-    <div className="flex min-h-0 flex-1 overflow-hidden">
-      <section className="flex min-w-0 flex-1 flex-col">
-        <div className="flex flex-wrap items-center gap-2 border-b p-3">
-          <Select
-            value={activeSource}
-            onValueChange={(value) => onSourceChange(value as LogWorkspaceSource)}
-          >
-            <SelectTrigger
-              className="h-8 w-full sm:w-[150px]"
-              aria-label={t("filters.sourceLabel")}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">{t("filters.sources.all")}</SelectItem>
-                <SelectItem value="desktop">{t("filters.sources.desktop")}</SelectItem>
-                <SelectItem value="mobile">{t("filters.sources.mobile")}</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          {!receiptsOnly && (
-            <Select
-              value={incidentStateFilter}
-              onValueChange={(value) => onStateChange(value as IncidentStateFilter)}
-            >
-              <SelectTrigger
-                className="h-8 w-full sm:w-[170px]"
-                aria-label={t("filters.stateLabel")}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {INCIDENT_STATES.map((state) => (
-                    <SelectItem key={state} value={state}>
-                      {t(`states.${state}`)}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge
+          asChild
+          variant="outline"
+          data-testid="logs-status-strip"
+          data-health={healthy ? "healthy" : "attention"}
+          className={cn(
+            "gap-1.5 font-mono text-[11px] tabular-nums",
+            !healthy && "border-warning/50 text-warning"
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 w-full sm:ml-auto sm:w-auto"
-            onClick={onRefresh}
-            disabled={loading}
-          >
-            <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
-            {t("refresh")}
-          </Button>
-        </div>
-        <ScrollArea className="flex-1">
-          <div className="w-full min-w-0 space-y-2 p-3" data-testid="incident-list">
-            {error ? (
-              <Alert variant="destructive">
-                <AlertDescription>{t("incidents.error")}</AlertDescription>
-              </Alert>
-            ) : loading && incidents.length === 0 ? (
-              <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
-                <Loader2Icon className="size-4 animate-spin" />
-                {t("incidents.loading")}
-              </div>
-            ) : incidents.length === 0 ? (
-              <Empty className="w-full min-w-0 border-y py-8">
-                <EmptyHeader className="w-full min-w-0">
-                  <EmptyTitle className="text-base">
-                    {t(receiptsOnly ? "receipts.emptyTitle" : "incidents.emptyTitle")}
-                  </EmptyTitle>
-                  <EmptyDescription>
-                    {t(receiptsOnly ? "receipts.emptyDescription" : "incidents.emptyDescription")}
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : (
-              incidents.map((incident) => (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  key={`${incident.runtime}:${incident.id}`}
-                  className={cn(
-                    "h-auto w-full justify-start rounded-none border-y p-3 text-left whitespace-normal",
-                    selected?.id === incident.id && "border-primary/50 bg-muted"
-                  )}
-                  onClick={() => onSelect(incident)}
-                  data-testid="incident-row"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate font-mono text-sm">{incident.id}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {new Date(incident.capturedAt).toLocaleString()} · {incident.source}
-                      </div>
-                    </div>
-                    <Badge variant={incident.state === "rejected" ? "destructive" : "secondary"}>
-                      {t(`states.${incident.state}`)}
-                    </Badge>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>{t(`filters.sources.${incident.runtime}`)}</span>
-                    <span>{formatBytes(incident.sizeBytes)}</span>
-                    {incident.receiptCode && (
-                      <span className="font-mono">{incident.receiptCode}</span>
-                    )}
-                  </div>
-                </Button>
-              ))
-            )}
-          </div>
-        </ScrollArea>
-      </section>
-
-      {selected && (
-        <aside
-          className="relative hidden shrink-0 border-l xl:block"
-          style={{ width: detailWidth }}
-          data-testid="incident-detail-pane"
         >
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t("detail.resize")}
-            tabIndex={0}
-            className={cn(
-              "absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none",
-              detailResize.dragging && "bg-primary/10"
-            )}
-            onPointerDown={detailResize.onPointerDown}
-            onPointerMove={detailResize.onPointerMove}
-            onPointerUp={detailResize.onPointerUp}
-            onKeyDown={detailResize.onKeyDown}
-            onDoubleClick={detailResize.onDoubleClick}
-          />
-          <IncidentDetail
-            key={selected.id}
-            incident={selected}
-            preview={preview}
-            previewLoading={previewLoading}
-            onDelete={() => onDelete(selected)}
-          />
-        </aside>
-      )}
-    </div>
+          <button
+            type="button"
+            aria-label={`${transportsLabel} · ${nativeLabel} · ${incidentsLabel}`}
+          >
+            <span
+              aria-hidden
+              className={cn("size-1.5 rounded-full", healthy ? "bg-success" : "bg-warning")}
+            />
+            {`${healthyTransports}/${transportCount}`}
+          </button>
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent className="space-y-0.5">
+        <div>{transportsLabel}</div>
+        <div>{nativeLabel}</div>
+        <div>{incidentsLabel}</div>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
-function IncidentDetail({
-  incident,
-  preview,
-  previewLoading,
-  onDelete,
-}: {
-  incident: DiagnosticIncidentSummary
-  preview: unknown
-  previewLoading: boolean
-  onDelete: () => void
-}) {
-  const t = useTranslations("logging.workspace")
-  const [includeMinidump, setIncludeMinidump] = useState(false)
-  const [includeScreenshot, setIncludeScreenshot] = useState(false)
-  return (
-    <ScrollArea className="h-full">
-      <div className="space-y-4 p-4">
-        <div>
-          <h3 className="font-semibold">{t("detail.title")}</h3>
-          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{incident.id}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-md border p-2">
-            <div className="text-muted-foreground">{t("detail.runtime")}</div>
-            <div className="mt-1 font-medium">{t(`filters.sources.${incident.runtime}`)}</div>
-          </div>
-          <div className="rounded-md border p-2">
-            <div className="text-muted-foreground">{t("detail.state")}</div>
-            <div className="mt-1 font-medium">{t(`states.${incident.state}`)}</div>
-          </div>
-        </div>
-        <Separator />
-        <div>
-          <div className="text-sm font-medium">{t("detail.previewTitle")}</div>
-          <p className="text-xs text-muted-foreground">{t("detail.previewDescription")}</p>
-          <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
-            {previewLoading
-              ? t("detail.loading")
-              : displayPreview(preview) || t("detail.noPreview")}
-          </pre>
-        </div>
-        <div className="space-y-3">
-          <div className="text-sm font-medium">{t("consent.title")}</div>
-          <p className="text-xs text-muted-foreground">{t("consent.description")}</p>
-          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-            <Checkbox
-              checked={includeMinidump}
-              onCheckedChange={(checked) => setIncludeMinidump(checked === true)}
-            />
-            <span>
-              <span className="font-medium">{t("consent.minidump")}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {t("consent.minidumpDescription")}
-              </span>
-            </span>
-          </label>
-          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-            <Checkbox
-              checked={includeScreenshot}
-              onCheckedChange={(checked) => setIncludeScreenshot(checked === true)}
-            />
-            <span>
-              <span className="font-medium">{t("consent.screenshot")}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {t("consent.screenshotDescription")}
-              </span>
-            </span>
-          </label>
-          <Textarea
-            placeholder={t("consent.descriptionPlaceholder")}
-            aria-label={t("consent.descriptionLabel")}
-          />
-        </div>
-        <Button variant="destructive" className="w-full" onClick={onDelete}>
-          <Trash2Icon className="size-4" />
-          {t("delete.action")}
-        </Button>
-      </div>
-    </ScrollArea>
-  )
-}
+export default DiagnosticsWorkspace

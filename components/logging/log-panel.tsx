@@ -39,6 +39,7 @@ import {
 } from "@/hooks/logging"
 import {
   useLogPanelFilters,
+  type Density,
   type LogPanelFilterState,
   type PanelSource,
 } from "@/hooks/logging/use-log-panel-filters"
@@ -133,6 +134,14 @@ export interface LogPanelProps {
    * page can own preset selection from `headerSlot`. Defaults to `false`.
    */
   hideToolbarPresets?: boolean
+  /**
+   * Row density, controlled by the host. Pass both to make the host the single
+   * source of truth; omit both and the panel keeps its own localStorage-backed
+   * preference. Passing only one leaves the panel uncontrolled — a control that
+   * cannot write back is worse than no control at all.
+   */
+  density?: Density
+  onDensityChange?: (density: Density) => void
 }
 
 function getLogSource(log: StructuredLogEntry): PanelSource {
@@ -160,9 +169,16 @@ export function LogPanel({
   includeAgentTrace = true,
   headerSlot,
   hideToolbarPresets = false,
+  density,
+  onDensityChange,
 }: LogPanelProps) {
   const t = useTranslations("logging")
-  const filters = useLogPanelFilters({ defaultAutoRefresh, sources })
+  const filters = useLogPanelFilters({
+    defaultAutoRefresh,
+    sources,
+    density,
+    onDensityChange,
+  })
   useLogPanelUrlSync(filters)
   // Destructure the identity-stable setters once. Handlers below depend on
   // these instead of the whole `filters` object — otherwise ANY of its ~30
@@ -980,6 +996,25 @@ export function LogPanel({
           hideToolbarPresets={hideToolbarPresets}
           density={filters.density}
           setDensity={filters.setDensity}
+          statsSlot={
+            showStats ? (
+              <LogPanelStatsBar
+                filteredCount={filteredLogs.length}
+                logRate={logRate}
+                autoRefresh={filters.autoRefresh}
+                healthByTransport={healthByTransport}
+                nativeLogging={nativeLogging}
+                onTransportClick={filters.setSelectedTransportHealthName}
+                onNativeLoggingClick={() => filters.setSelectedNativeLogging(true)}
+                currentPage={safeCurrentPage}
+                totalPages={totalPages}
+                pageSize={pageSize}
+                pageSizeOptions={LOG_PAGE_SIZE_OPTIONS}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+              />
+            ) : null
+          }
         />
 
         <AlertDialog open={confirmClearOpen} onOpenChange={setConfirmClearOpen}>
@@ -997,27 +1032,10 @@ export function LogPanel({
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Stats bar */}
-        {showStats && (
-          <LogPanelStatsBar
-            filteredCount={filteredLogs.length}
-            totalCount={stats.total}
-            stats={stats}
-            logRate={logRate}
-            autoRefresh={filters.autoRefresh}
-            healthByTransport={healthByTransport}
-            nativeLogging={nativeLogging}
-            onTransportClick={filters.setSelectedTransportHealthName}
-            onNativeLoggingClick={() => filters.setSelectedNativeLogging(true)}
-            currentPage={safeCurrentPage}
-            totalPages={totalPages}
-            pageSize={pageSize}
-            pageSizeOptions={LOG_PAGE_SIZE_OPTIONS}
-            onPageChange={handlePageChange}
-            onPageSizeChange={handlePageSizeChange}
-          />
-        )}
-
+        {/* The stats/pagination line is no longer a row of its own — it is
+            passed into the toolbar and rendered at the end of the level-filter
+            row. Those two lines carried the same counts twice (the level tabs
+            already badge them) and cost the list ~30px for the privilege. */}
         {/* Agent-trace stats — rendered whenever the user has scoped the
             panel to the `agent.trace` module, so the cost / token / cache /
             error headline numbers sit right above the trace list. */}

@@ -12,20 +12,8 @@ import {
   NativeLoggingDetail,
   type LogPanelStatsBarProps,
 } from "./log-panel-stats-bar"
-import type { LogLevel, TransportHealthSnapshot } from "@cognia/logging"
+import type { TransportHealthSnapshot } from "@cognia/logging"
 import type { UseTransportHealthResult } from "@/hooks/logging"
-
-function zeroByLevel(overrides: Partial<Record<LogLevel, number>> = {}) {
-  return {
-    trace: 0,
-    debug: 0,
-    info: 0,
-    warn: 0,
-    error: 0,
-    fatal: 0,
-    ...overrides,
-  }
-}
 
 function makeNativeLogging(
   overrides: Partial<UseTransportHealthResult["nativeLogging"]> = {}
@@ -60,8 +48,6 @@ function makeHealth(overrides: Partial<TransportHealthSnapshot> = {}): Transport
 function defaultProps(overrides: Partial<LogPanelStatsBarProps> = {}): LogPanelStatsBarProps {
   return {
     filteredCount: 100,
-    totalCount: 200,
-    stats: { byLevel: zeroByLevel({ info: 60, error: 5 }) },
     logRate: 30,
     autoRefresh: true,
     healthByTransport: {},
@@ -87,18 +73,19 @@ function renderBar(overrides: Partial<LogPanelStatsBarProps> = {}) {
 }
 
 describe("LogPanelStatsBar", () => {
-  it("renders the showing-range, per-level counts, and live-rate pulse", () => {
+  it("renders the showing-range and live-rate pulse", () => {
     renderBar()
     expect(screen.getByText(/100/)).toBeInTheDocument()
-    expect(screen.getByText("60")).toBeInTheDocument()
-    expect(screen.getByText("5")).toBeInTheDocument()
     expect(screen.getByText(/logs\/min/)).toBeInTheDocument()
     expect(screen.getByText(/30/)).toBeInTheDocument()
   })
 
-  it("omits the slash-total span when filteredCount equals totalCount", () => {
-    renderBar({ filteredCount: 100, totalCount: 100 })
-    expect(screen.queryByText("/ 100")).not.toBeInTheDocument()
+  it("leaves per-level counts to the level tabs rather than restating them", () => {
+    // `stats.byLevel` is no longer a prop: the level-filter row this bar now
+    // shares already badges every level, and the bar sat directly beneath it.
+    renderBar()
+    expect(screen.queryByText(/^Info:/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument()
   })
 
   it("omits the log-rate pulse when logRate is 0", () => {

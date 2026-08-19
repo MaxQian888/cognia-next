@@ -5,6 +5,19 @@
  *
  * Extracted from log-panel.tsx — stats summary, transport health, native logging panels.
  * Pagination is merged into this single compact bar (replaces log-panel-pagination.tsx).
+ *
+ * It is no longer a row. `LogPanelToolbar` renders it as the trailing half of
+ * the level-filter row, so what used to be two full-width bands of chrome is
+ * one. Two things went with the band:
+ *
+ *   - the per-level counts, which restated the badges already sitting on the
+ *     level tabs three centimetres to the left;
+ *   - the ` / {totalCount}` suffix, which restated the count on the "All" tab.
+ *
+ * What is left is the only information the level tabs cannot carry: which
+ * slice of the filtered set is on screen, how to page through it, the ingest
+ * rate, and the transport tiles — the one health rendering on this page you
+ * can actually click through to a filtered view.
  */
 
 import { useEffect, useId, useMemo, useState } from "react"
@@ -21,8 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { LEVEL_THEME } from "@cognia/logging/level-theme"
-import type { LogLevel, TransportHealthSnapshot } from "@cognia/logging"
+import type { TransportHealthSnapshot } from "@cognia/logging"
 import type { UseTransportHealthResult } from "@/hooks/logging"
 
 const TRANSPORT_TILE_VISIBLE_LIMIT = 3
@@ -97,8 +109,6 @@ function formatRelativeTime(isoDate: string | undefined, now: number): string {
 
 export interface LogPanelStatsBarProps {
   filteredCount: number
-  totalCount: number
-  stats: { byLevel: Record<LogLevel, number> }
   logRate: number
   autoRefresh: boolean
   healthByTransport: Record<string, TransportHealthSnapshot>
@@ -116,8 +126,6 @@ export interface LogPanelStatsBarProps {
 
 export function LogPanelStatsBar({
   filteredCount,
-  totalCount,
-  stats,
   logRate,
   autoRefresh,
   healthByTransport,
@@ -140,20 +148,45 @@ export function LogPanelStatsBar({
   return (
     <div
       data-testid="log-panel-stats-bar"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 border-b bg-muted/20 text-xs"
+      className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs"
     >
-      {/* Left: showing range + page size select */}
-      <span className="text-muted-foreground shrink-0">
+      {/* Ingest rate — hidden on narrow shells, where the range and the pager
+          are the two things worth the width. */}
+      {logRate > 0 && (
+        <span className="hidden items-center gap-1 text-muted-foreground lg:flex">
+          {autoRefresh && (
+            <span
+              className={cn(
+                "inline-flex h-2 w-2 rounded-full motion-safe:animate-pulse",
+                pulseColor
+              )}
+              title={t("panel.logRatePulse")}
+              aria-label={t("panel.logRatePulse")}
+            />
+          )}
+          <Activity className="h-3 w-3" />~{logRate} {t("panel.logsPerMin")}
+        </span>
+      )}
+
+      {/* Transport health tiles (with overflow chip) */}
+      <TransportHealthTileGroup
+        healthByTransport={healthByTransport}
+        nativeLogging={nativeLogging}
+        onTransportClick={onTransportClick}
+        onNativeLoggingClick={onNativeLoggingClick}
+      />
+
+      {/* Which slice of the filtered set is on screen. The total is on the
+          "All" level tab, so this says where you are, not how much there is. */}
+      <span className="shrink-0 tabular-nums text-muted-foreground">
         {t("panel.showingRange", { start, end, total: filteredCount })}
-        {filteredCount !== totalCount && (
-          <span className="text-muted-foreground/70"> / {totalCount}</span>
-        )}
       </span>
+
       <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
-        <SelectTrigger aria-label={t("panel.pageSize")} className="h-6 w-[72px] text-xs">
+        <SelectTrigger aria-label={t("panel.pageSize")} className="h-6 w-[68px] text-xs">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent align="start">
+        <SelectContent align="end">
           <SelectGroup>
             {pageSizeOptions.map((opt) => (
               <SelectItem key={opt} value={String(opt)} className="text-xs">
@@ -164,76 +197,34 @@ export function LogPanelStatsBar({
         </SelectContent>
       </Select>
 
-      {/* Separator */}
-      <span className="text-muted-foreground/40 select-none">|</span>
-
-      {/* Center: level counts (non-zero) */}
-      {Object.entries(stats.byLevel).map(([level, count]) => {
-        if (count === 0) return null
-        const theme = LEVEL_THEME[level as LogLevel]
-        return (
-          <span key={level} className={cn("flex items-center gap-0.5 shrink-0", theme.iconColor)}>
-            {t(`levels.${level}`)}: <span className="font-medium">{count}</span>
+      {/* Pagination prev / page indicator / next */}
+      {totalPages > 1 && (
+        <span className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={t("panel.previousPage")}
+            disabled={currentPage <= 1}
+            onClick={() => onPageChange(currentPage - 1)}
+            className="h-5 w-5"
+          >
+            <ChevronLeft className="size-3" />
+          </Button>
+          <span className="tabular-nums text-muted-foreground">
+            {currentPage} / {totalPages}
           </span>
-        )
-      })}
-
-      {/* Right side pushed with ml-auto */}
-      <span className="ml-auto flex items-center gap-x-2 gap-y-1 flex-wrap justify-end">
-        {/* Log rate + pulse */}
-        {logRate > 0 && (
-          <span className="flex items-center gap-1 text-muted-foreground">
-            {autoRefresh && (
-              <span
-                className={cn(
-                  "inline-flex h-2 w-2 rounded-full motion-safe:animate-pulse",
-                  pulseColor
-                )}
-                title={t("panel.logRatePulse")}
-                aria-label={t("panel.logRatePulse")}
-              />
-            )}
-            <Activity className="h-3 w-3" />~{logRate} {t("panel.logsPerMin")}
-          </span>
-        )}
-
-        {/* Transport health tiles (with overflow chip) */}
-        <TransportHealthTileGroup
-          healthByTransport={healthByTransport}
-          nativeLogging={nativeLogging}
-          onTransportClick={onTransportClick}
-          onNativeLoggingClick={onNativeLoggingClick}
-        />
-
-        {/* Pagination prev / page indicator / next */}
-        {totalPages > 1 && (
-          <>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("panel.previousPage")}
-              disabled={currentPage <= 1}
-              onClick={() => onPageChange(currentPage - 1)}
-              className="h-5 w-5"
-            >
-              <ChevronLeft className="size-3" />
-            </Button>
-            <span className="tabular-nums text-muted-foreground">
-              {currentPage} / {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("panel.nextPage")}
-              disabled={currentPage >= totalPages}
-              onClick={() => onPageChange(currentPage + 1)}
-              className="h-5 w-5"
-            >
-              <ChevronRight className="size-3" />
-            </Button>
-          </>
-        )}
-      </span>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={t("panel.nextPage")}
+            disabled={currentPage >= totalPages}
+            onClick={() => onPageChange(currentPage + 1)}
+            className="h-5 w-5"
+          >
+            <ChevronRight className="size-3" />
+          </Button>
+        </span>
+      )}
     </div>
   )
 }
