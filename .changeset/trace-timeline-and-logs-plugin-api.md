@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Add a trace timeline to the /logs Traces channel and open logs and agent traces to plugins. The timeline is a lane strip above the span waterfall: lanes group by operation, surface, model, or agent; the axis switches between real elapsed time and one equal slot per span (the mode that stays readable when one 40s model call sits beside thirty sub-millisecond tool calls); dragging picks a window that narrows the waterfall below it as well as the strip; mid-span events appear as ticks, nesting depth shades each block, clicking a block selects that span both ways, and the list's search dims non-matching blocks rather than removing them. Plugins gain `ctx.logs`, a read-only surface over the structured log stream (query, stats, modules, export, live subscribe, transport health) and over agent traces (trace list, spans, waterfall, timeline, cost/token stats, live span subscribe), split across two grants — `logs:read` for operational logs and `trace:read` for spans, which can carry redacted model input and output. Nothing destructive is exposed: a plugin can read the audit trail but never clear it.
