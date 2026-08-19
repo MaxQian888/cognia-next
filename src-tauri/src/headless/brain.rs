@@ -164,6 +164,21 @@ pub struct BrainSupervisor {
     shutdown_rx: watch::Receiver<bool>,
 }
 
+#[derive(Debug, Default)]
+struct ReadyWatchdog {
+    fired: bool,
+}
+
+impl ReadyWatchdog {
+    fn is_armed(&self, was_ready: bool) -> bool {
+        !was_ready && !self.fired
+    }
+
+    fn mark_fired(&mut self) {
+        self.fired = true;
+    }
+}
+
 impl BrainSupervisor {
     pub fn new(config: BrainConfig, state: SharedState) -> Arc<Self> {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -308,6 +323,7 @@ impl BrainSupervisor {
         let mut was_ready = *ready_rx.borrow();
         let ready_deadline = tokio::time::sleep(self.config.ready_timeout);
         tokio::pin!(ready_deadline);
+        let mut ready_watchdog = ReadyWatchdog::default();
         let mut refresh_ticker = tokio::time::interval(TOKEN_REFRESH_INTERVAL);
         refresh_ticker.tick().await; // consume the immediate tick
 
@@ -336,7 +352,8 @@ impl BrainSupervisor {
                     }
                 }
 
-                _ = &mut ready_deadline, if !was_ready => {
+                _ = &mut ready_deadline, if ready_watchdog.is_armed(was_ready) => {
+                    ready_watchdog.mark_fired();
                     log::error!(
                         "brain did not complete the bridge hello within {}s; killing",
                         self.config.ready_timeout.as_secs()
@@ -410,6 +427,16 @@ mod tests {
             node_extra_ca_certs: Some(PathBuf::from("/data/cognia/companion/tls.pem")),
             ready_timeout,
         }
+    }
+
+    #[test]
+    fn ready_watchdog_disarms_after_its_first_timeout() {
+        let mut watchdog = ReadyWatchdog::default();
+
+        assert!(watchdog.is_armed(false));
+        watchdog.mark_fired();
+        assert!(!watchdog.is_armed(false));
+        assert!(!watchdog.is_armed(true));
     }
 
     #[test]

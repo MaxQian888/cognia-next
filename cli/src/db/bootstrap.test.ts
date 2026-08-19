@@ -290,6 +290,54 @@ describe("ensureCliDb", () => {
     }
   })
 
+  it("does not list a dynamic table until its snapshot file has been written", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-manifest-race-"))
+    const lateTable = new FakeTable("plugin:rows")
+    let addedLateTable = false
+    const goals = new FakeTable("goals", [{ id: "g1" }])
+    const originalToArray = goals.toArray.bind(goals)
+    const db: DbLike = { verno: 83, tables: [goals], name: "CogniaDB" }
+    goals.toArray = async () => {
+      if (!addedLateTable) {
+        db.tables.push(lateTable)
+        addedLateTable = true
+      }
+      return originalToArray()
+    }
+
+    try {
+      const handle = await ensureCliDb({
+        home,
+        getDatabase: () => db,
+        installGlobals: async () => {},
+        whenReady: async () => {},
+        schedule: () => () => {},
+      })
+      const tableDir = path.join(home, "db.json.tables")
+      const manifestFile = path.join(tableDir, "manifest.json")
+      const lateTableFile = path.join(tableDir, "CogniaDB--plugin%3Arows.json")
+
+      await handle.flush()
+
+      expect(JSON.parse(fs.readFileSync(manifestFile, "utf8")).dbs.CogniaDB.tables).toEqual([
+        "goals",
+      ])
+      expect(fs.existsSync(lateTableFile)).toBe(false)
+
+      handle.scheduleTableFlush("CogniaDB", "plugin:rows")
+      await handle.flush()
+
+      expect(JSON.parse(fs.readFileSync(manifestFile, "utf8")).dbs.CogniaDB.tables).toEqual([
+        "goals",
+        "plugin:rows",
+      ])
+      expect(fs.readFileSync(lateTableFile, "utf8")).toBe("[]")
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("prepares a dynamic schema before validating a production table snapshot", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-dynamic-schema-"))
     const tableDir = path.join(home, "db.json.tables")

@@ -651,8 +651,7 @@ mod tests {
         let path = spec.path.expect("pi path");
         assert!(path.ends_with("settings.json"));
         assert!(
-            path.to_string_lossy().contains(".pi")
-                || std::env::var("PI_CODING_AGENT_DIR").is_ok()
+            path.to_string_lossy().contains(".pi") || std::env::var("PI_CODING_AGENT_DIR").is_ok()
         );
     }
 

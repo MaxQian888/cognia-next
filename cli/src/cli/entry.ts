@@ -12,6 +12,7 @@
  */
 
 import { selectRole } from "./role"
+import { runProcessEntrypoint } from "./entry-runtime"
 
 async function boot(): Promise<number> {
   const role = selectRole(process.env)
@@ -44,11 +45,4 @@ async function boot(): Promise<number> {
   return main(process.argv.slice(2))
 }
 
-boot()
-  .then((code) => {
-    process.exitCode = code
-  })
-  .catch((err) => {
-    process.stderr.write(`cognia-agent: fatal: ${err?.message ?? err}\n`)
-    process.exitCode = 1
-  })
+void runProcessEntrypoint(boot)

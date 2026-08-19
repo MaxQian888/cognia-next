@@ -324,7 +324,13 @@ async function flushDirtyTables(
   for (const source of sources) {
     dbs[source.name] = {
       version: source.db.verno,
-      tables: includedTableNames(source),
+      // Dynamic plugin schemas can be registered while a long flush is still
+      // writing its original dirty-key snapshot. Only publish tables whose
+      // files are already durable; a later table mutation/flush adds the new
+      // table after its own file has been written.
+      tables: includedTableNames(source).filter((tableName) =>
+        fs.existsSync(path.join(tableDirectory, tableFileName(source.name, tableName)))
+      ),
     }
   }
   writeSnapshotAtomically(
