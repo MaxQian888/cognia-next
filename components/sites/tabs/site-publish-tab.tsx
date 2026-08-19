@@ -44,7 +44,14 @@ import { splitValues } from "../split-values"
 export interface SiteBuildInputs {
   runtime: string
   packageManager: string
+  /** Hosts the dependency install may reach. */
   installNetworkHosts: string[]
+  /**
+   * Hosts the build command itself may reach. Empty means no network, which is
+   * the fail-closed default ADR-0084 requires — a build that fetches at build
+   * time has to say so explicitly.
+   */
+  buildNetworkHosts: string[]
 }
 
 export interface SitePublishTabProps {
@@ -103,6 +110,7 @@ export function SitePublishTab({
   const [runtime, setRuntime] = useState("node@24")
   const [packageManager, setPackageManager] = useState("pnpm@10")
   const [installHosts, setInstallHosts] = useState("registry.npmjs.org")
+  const [buildHosts, setBuildHosts] = useState("")
 
   const runningOperation = pickRunningOperation(operations)
   const runningStep = stepOfOperation(runningOperation)
@@ -223,6 +231,15 @@ export function SitePublishTab({
             onChange={(event) => setInstallHosts(event.target.value)}
           />
         </div>
+        <div className="mt-2">
+          <Input
+            value={buildHosts}
+            aria-label={t("build.buildNetworkHosts")}
+            placeholder={t("build.buildNetworkHosts")}
+            onChange={(event) => setBuildHosts(event.target.value)}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">{t("build.buildNetworkHostsHint")}</p>
+        </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
@@ -245,6 +262,7 @@ export function SitePublishTab({
                 runtime,
                 packageManager,
                 installNetworkHosts: splitValues(installHosts),
+                buildNetworkHosts: splitValues(buildHosts),
               })
             }
             data-testid="site-build"

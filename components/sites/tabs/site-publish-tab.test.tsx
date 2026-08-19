@@ -148,7 +148,19 @@ it("builds with the runtime, package manager, and approved install hosts", async
     runtime: "node@24",
     packageManager: "pnpm@10",
     installNetworkHosts: ["registry.npmjs.org", "example.com"],
+    buildNetworkHosts: [],
   })
+})
+
+it("keeps the build phase off the network unless hosts are named", async () => {
+  const user = userEvent.setup()
+  const handlers = renderTab()
+  await user.type(screen.getByLabelText("build.buildNetworkHosts"), "api.example.com")
+  await user.click(screen.getByTestId("site-build"))
+
+  expect(handlers.onBuild).toHaveBeenCalledWith(
+    expect.objectContaining({ buildNetworkHosts: ["api.example.com"] })
+  )
 })
 
 it("swaps start for stop and embeds the preview once one is running", async () => {

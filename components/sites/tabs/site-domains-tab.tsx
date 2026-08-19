@@ -12,13 +12,26 @@
  */
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { GlobeIcon, InfoIcon, PlusIcon, ShieldIcon, TrashIcon } from "lucide-react"
+import {
+  ExternalLinkIcon,
+  GlobeIcon,
+  InfoIcon,
+  PlusIcon,
+  ShieldIcon,
+  TrashIcon,
+} from "lucide-react"
 
+import { ExternalLink } from "@/components/shared/external-link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  siteAccessLoginUrl,
+  siteAccessTeamMissing,
+  siteIsAccessProtected,
+} from "@/lib/sites/console-model"
 import { cn } from "@/lib/utils"
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
 import type { SiteProjectRow, SiteResourceRow, SiteVisitorPolicy } from "@/types/sites"
@@ -72,6 +85,9 @@ export function SiteDomainsTab({
   const [accessHostname, setAccessHostname] = useState("")
 
   const zoneMissing = !site.providerConfig.zoneId?.trim()
+  const accessLoginUrl = siteAccessLoginUrl(site.providerConfig)
+  const accessTeamMissing = siteAccessTeamMissing(site.visitorPolicy, site.providerConfig)
+  const accessProtected = siteIsAccessProtected(site.visitorPolicy)
   const domains = resources.filter(
     (row) => row.kind === "custom-domain" && row.status !== "deleted"
   )
@@ -118,7 +134,14 @@ export function SiteDomainsTab({
               value={accessTeamName}
               onChange={(event) => setAccessTeamName(event.target.value)}
             />
-            <p className="mt-1 text-xs text-muted-foreground">{t("provider.accessTeamNameHint")}</p>
+            <p
+              className={cn(
+                "mt-1 text-xs",
+                accessTeamMissing ? "text-warning" : "text-muted-foreground"
+              )}
+            >
+              {t("provider.accessTeamNameHint")}
+            </p>
           </div>
           <div className="md:col-span-2">
             <Button
@@ -259,6 +282,29 @@ export function SiteDomainsTab({
               {t(`access.modes.${accessMode}`)}
             </Badge>
           )}
+
+          {accessProtected ? (
+            <div
+              className="flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5 text-xs"
+              data-testid="site-access-login"
+            >
+              <ShieldIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="text-muted-foreground">{t("access.loginLabel")}</span>
+              {accessLoginUrl ? (
+                <ExternalLink
+                  href={accessLoginUrl}
+                  className="inline-flex min-w-0 items-center gap-1 truncate font-mono underline-offset-4 hover:text-primary hover:underline"
+                >
+                  {accessLoginUrl}
+                  <ExternalLinkIcon aria-hidden className="size-3 shrink-0" />
+                </ExternalLink>
+              ) : (
+                <span className="text-warning" data-testid="site-access-team-missing">
+                  {t("access.loginUnknown")}
+                </span>
+              )}
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-0 flex-1">

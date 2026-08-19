@@ -188,3 +188,48 @@ describe("SiteOperationJournal", () => {
     expect(onRefresh).toHaveBeenCalledWith("op1")
   })
 })
+
+describe("abandoning a wedged operation", () => {
+  it("offers the action only while the operation can still change", async () => {
+    const user = userEvent.setup()
+    const onCancel = jest.fn()
+    render(
+      <SiteOperationJournal
+        operations={[operation({ id: "stuck", status: "waiting-reconcile" })]}
+        events={[]}
+        onCancel={onCancel}
+      />
+    )
+    await user.click(screen.getByTestId("site-operation-stuck"))
+    await user.click(screen.getByTestId("site-operation-cancel-stuck"))
+    expect(onCancel).toHaveBeenCalledWith("stuck")
+  })
+
+  it.each(["succeeded", "failed", "cancelled"] as const)(
+    "hides it for a %s operation, which can no longer change",
+    async (status) => {
+      const user = userEvent.setup()
+      render(
+        <SiteOperationJournal
+          operations={[operation({ id: "done", status })]}
+          events={[]}
+          onCancel={jest.fn()}
+        />
+      )
+      await user.click(screen.getByTestId("site-operation-done"))
+      expect(screen.queryByTestId("site-operation-cancel-done")).not.toBeInTheDocument()
+    }
+  )
+
+  it("shows nothing when the caller offers no cancel", async () => {
+    const user = userEvent.setup()
+    render(
+      <SiteOperationJournal
+        operations={[operation({ id: "stuck", status: "queued" })]}
+        events={[]}
+      />
+    )
+    await user.click(screen.getByTestId("site-operation-stuck"))
+    expect(screen.queryByTestId("site-operation-cancel-stuck")).not.toBeInTheDocument()
+  })
+})

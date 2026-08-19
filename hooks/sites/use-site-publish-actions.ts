@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { createDir } from "@/lib/file/file-operations"
-import { getSiteArtifact, getSiteOperation } from "@/lib/db/sites"
+import { cancelSiteOperation, getSiteArtifact, getSiteOperation } from "@/lib/db/sites"
 import { materializeSiteArtifact } from "@/lib/sites/artifact-package"
 import { buildAndSaveSiteVersion } from "@/lib/sites/build-version"
 import { startSitePreview, stopSitePreview } from "@/lib/sites/preview"
@@ -37,6 +37,8 @@ export interface SiteBuildInputs {
   runtime: string
   packageManager: string
   installNetworkHosts: string[]
+  /** Empty means the build runs with no network, the fail-closed default. */
+  buildNetworkHosts: string[]
 }
 
 export interface UseSitePublishActionsInput {
@@ -74,6 +76,7 @@ export interface SitePublishActions {
   restore: () => void
   reconcile: (onResult: (value: unknown) => void) => void
   refreshOperation: (operationId: string) => void
+  cancelOperation: (operationId: string) => void
 }
 
 export function useSitePublishActions({
@@ -203,6 +206,7 @@ export function useSitePublishActions({
           runtime: inputs.runtime,
           packageManager: inputs.packageManager,
           installNetworkHosts: inputs.installNetworkHosts,
+          buildNetworkHosts: inputs.buildNetworkHosts,
           actorAccountId,
         })
       })
@@ -324,6 +328,13 @@ export function useSitePublishActions({
     [run, service, requireSite]
   )
 
+  const cancelOperation = useCallback(
+    (operationId: string) => {
+      void run(`cancel:${operationId}`, () => cancelSiteOperation({ operationId }))
+    },
+    [run]
+  )
+
   return {
     stepStates,
     readyVersions,
@@ -345,5 +356,6 @@ export function useSitePublishActions({
     restore,
     reconcile,
     refreshOperation,
+    cancelOperation,
   }
 }

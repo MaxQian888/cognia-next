@@ -14,7 +14,7 @@
  * until the sync table, delta reader, and tombstones exist, and nothing here
  * pretends otherwise.
  */
-import { useCallback, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CloudIcon, GlobeIcon, PlusIcon, RefreshCwIcon } from "lucide-react"
 
@@ -33,20 +33,16 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSiteActionGate } from "@/hooks/sites/use-site-action-gate"
+import { useSiteArtifactSummaries } from "@/hooks/sites/use-site-artifact-summaries"
 import { useSiteActions } from "@/hooks/sites/use-site-actions"
 import { useSiteHostingManifest } from "@/hooks/sites/use-site-hosting-manifest"
 import { useSiteLiveData } from "@/hooks/sites/use-site-live-data"
 import { useSitePreviewSession } from "@/hooks/sites/use-site-preview-session"
 import { usePlatform } from "@/hooks/use-platform"
-import {
-  deleteSiteProjectMetadata,
-  getSiteArtifact,
-  updateSiteProviderConfig,
-} from "@/lib/db/sites"
+import { deleteSiteProjectMetadata, updateSiteProviderConfig } from "@/lib/db/sites"
 import { purgeRetentionReport } from "@/lib/sites/console-model"
 import { useAccountStore } from "@/stores/account/account-store"
 import { useProjectStore } from "@/stores/project/project-store"
-import type { SiteArtifactRow, SiteVersionRow } from "@/types/sites"
 import { NewSiteDialog } from "./new-site-dialog"
 import { SiteListRail } from "./site-list-rail"
 import { SiteOverviewHeader } from "./site-overview-header"
@@ -76,9 +72,6 @@ export function SitesConsole() {
   const [tab, setTab] = useState<TabKey>("publish")
   const [confirmation, setConfirmation] = useState<Confirmation>(null)
   const [observabilityResult, setObservabilityResult] = useState<unknown>(undefined)
-  const [artifacts, setArtifacts] = useState<
-    Map<string, Pick<SiteArtifactRow, "size" | "fileCount">>
-  >(new Map())
 
   const live = useSiteLiveData(pinnedId)
   const site = live.sites.find((row) => row.id === live.selectedId) ?? null
@@ -86,6 +79,9 @@ export function SitesConsole() {
   const gate = useSiteActionGate(site, actorAccountId)
   const manifest = useSiteHostingManifest(site)
   const preview = useSitePreviewSession(site?.id ?? null)
+  // Only paid for while the versions tab is showing: each read pulls the whole
+  // archive out of Dexie to recover two numbers.
+  const artifacts = useSiteArtifactSummaries(live.versions, tab === "versions")
 
   const publish = useSitePublishActions({
     site,
@@ -97,26 +93,6 @@ export function SitesConsole() {
     service,
     loadProjects,
   })
-
-  // Artifact size/file counts are looked up lazily: the rows carry only a
-  // digest, and the bytes are far too large to hold in the live query.
-  const ensureArtifacts = useCallback(
-    async (versions: readonly SiteVersionRow[]) => {
-      const missing = versions
-        .map((version) => version.artifactDigest)
-        .filter((digest): digest is string => Boolean(digest) && !artifacts.has(digest as string))
-      if (missing.length === 0) return
-      const loaded = await Promise.all(missing.map((digest) => getSiteArtifact(digest)))
-      setArtifacts((previous) => {
-        const next = new Map(previous)
-        for (const row of loaded) {
-          if (row) next.set(row.digest, { size: row.size, fileCount: row.fileCount })
-        }
-        return next
-      })
-    },
-    [artifacts]
-  )
 
   const retention = useMemo(() => purgeRetentionReport(live.resources), [live.resources])
 
@@ -299,11 +275,7 @@ export function SitesConsole() {
               </div>
             </TabsContent>
 
-            <TabsContent
-              value="versions"
-              className="min-h-0 flex-1 overflow-y-auto"
-              onFocus={() => void ensureArtifacts(live.versions)}
-            >
+            <TabsContent value="versions" className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto max-w-5xl p-4">
                 <SiteVersionsTab
                   versions={live.versions}
@@ -374,6 +346,7 @@ export function SitesConsole() {
                   onQuery={runObservability}
                   onClearResult={() => setObservabilityResult(undefined)}
                   onRefreshOperation={publish.refreshOperation}
+                  onCancelOperation={publish.cancelOperation}
                 />
               </div>
             </TabsContent>

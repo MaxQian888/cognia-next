@@ -60,6 +60,7 @@ export interface SiteOperationsTabProps {
   onQuery: (query: SiteObservabilityQuery) => void
   onClearResult: () => void
   onRefreshOperation: (operationId: string) => void
+  onCancelOperation: (operationId: string) => void
 }
 
 export function SiteOperationsTab({
@@ -74,6 +75,7 @@ export function SiteOperationsTab({
   onQuery,
   onClearResult,
   onRefreshOperation,
+  onCancelOperation,
 }: SiteOperationsTabProps) {
   const t = useTranslations("sites")
   const [segment, setSegment] = useState<Segment>("operations")
@@ -159,6 +161,7 @@ export function SiteOperationsTab({
           operations={operations}
           events={events}
           onRefresh={onRefreshOperation}
+          onCancel={onCancelOperation}
           refreshDisabled={busy || !gate.allowed}
           refreshTitle={gate.title}
         />

@@ -59,6 +59,7 @@ const publishActions = {
   restore: jest.fn(),
   reconcile: jest.fn(),
   refreshOperation: jest.fn(),
+  cancelOperation: jest.fn(),
 }
 jest.mock("@/hooks/sites/use-site-publish-actions", () => ({
   useSitePublishActions: () => publishActions,

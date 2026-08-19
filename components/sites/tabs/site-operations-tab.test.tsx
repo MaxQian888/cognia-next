@@ -66,6 +66,7 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteOperationsTab>
   const onQuery = jest.fn()
   const onClearResult = jest.fn()
   const onRefreshOperation = jest.fn()
+  const onCancelOperation = jest.fn()
   render(
     <SiteOperationsTab
       site={site()}
@@ -79,10 +80,11 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteOperationsTab>
       onQuery={onQuery}
       onClearResult={onClearResult}
       onRefreshOperation={onRefreshOperation}
+      onCancelOperation={onCancelOperation}
       {...props}
     />
   )
-  return { onQuery, onClearResult, onRefreshOperation }
+  return { onQuery, onClearResult, onRefreshOperation, onCancelOperation }
 }
 
 it("opens on the operation journal", () => {
@@ -203,4 +205,14 @@ it("shows a deployment host when no custom domain exists", async () => {
   expect(screen.getByTestId("site-operations-tab")).toHaveTextContent(
     'observability.hostname:{"hostname":"docs.workers.dev"}'
   )
+})
+
+it("passes the abandon action through to the journal", async () => {
+  const user = userEvent.setup()
+  const { onCancelOperation } = renderTab({
+    operations: [{ ...operation, status: "waiting-reconcile" }],
+  })
+  await user.click(screen.getByTestId("site-operation-op1"))
+  await user.click(screen.getByTestId("site-operation-cancel-op1"))
+  expect(onCancelOperation).toHaveBeenCalledWith("op1")
 })

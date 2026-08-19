@@ -2,6 +2,8 @@
   "access": {
     "description": "Authoring permissions stay in Cognia. Visitor policy is reconciled with Cloudflare Access.",
     "hostname": "Protected hostname",
+    "loginLabel": "Visitors sign in at",
+    "loginUnknown": "Set the Access team to show the sign-in origin",
     "mode": "Visitor access mode",
     "modes": {
       "domains": "Email domains",
@@ -18,6 +20,7 @@
     "build": "Build saved version",
     "cancel": "Cancel",
     "cancelEdit": "Cancel",
+    "cancelOperation": "Abandon",
     "clearOutput": "Clear",
     "confirmDeleteMetadata": "Delete metadata",
     "confirmPurge": "Purge managed resources",
@@ -65,6 +68,8 @@
     "editors": "Editor account IDs"
   },
   "build": {
+    "buildNetworkHosts": "Approved build hosts (optional)",
+    "buildNetworkHostsHint": "Leave empty to run the build with no network at all — the safe default.",
     "description": "Cognia reads .cognia/hosting.json and runs its argv commands inside the OS sandbox.",
     "networkHosts": "Approved install hosts",
     "packageManager": "Package manager snapshot",
@@ -239,6 +244,7 @@
   },
   "operations": {
     "attempts": "{count, plural, one {# attempt} other {# attempts}}",
+    "cancelHint": "Mark this attempt abandoned. It stops showing as in flight; a retry with identical input still needs reconciliation.",
     "description": "Durable lifecycle events used for crash recovery and provider reconciliation.",
     "empty": "No lifecycle operations yet.",
     "error": "Error",

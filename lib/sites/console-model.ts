@@ -27,6 +27,7 @@ import type {
   SiteResourceRow,
   SiteVersionRow,
   SiteVersionStatus,
+  SiteVisitorPolicy,
 } from "@/types/sites"
 
 /** Render order for the resource tab. Cloudflare's dependency order, roughly. */
@@ -385,6 +386,44 @@ export function siteAnalyticsIsZoneScoped(
   providerConfig: Pick<CloudflareSiteProviderConfig, "zoneId">
 ): boolean {
   return Boolean(providerConfig.zoneId?.trim())
+}
+
+/* ----------------------------------------------------------- visitor access */
+
+/** True when the visitor policy puts the Site behind Cloudflare Access. */
+export function siteIsAccessProtected(policy: SiteVisitorPolicy): boolean {
+  return policy.mode !== "public"
+}
+
+/**
+ * Where visitors of a protected Site actually authenticate.
+ *
+ * Cloudflare Access applications are account-scoped, so the provider API never
+ * needs the team name — which is why `accessTeamName` sat in the type with zero
+ * readers. It is still the one thing the owner cannot derive: the login origin
+ * their visitors are redirected to, and the console that configures the identity
+ * providers behind it.
+ */
+export function siteAccessLoginUrl(
+  providerConfig: Pick<CloudflareSiteProviderConfig, "accessTeamName">
+): string | undefined {
+  const team = providerConfig.accessTeamName?.trim()
+  if (!team) return undefined
+  // Accept either the bare team name or the full team domain.
+  const host = team.includes(".") ? team : `${team}.cloudflareaccess.com`
+  return `https://${host.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`
+}
+
+/**
+ * The Site enforces a visitor policy but nothing records where that enforcement
+ * happens — the console asks for the team name instead of leaving the owner to
+ * discover it in the Cloudflare dashboard.
+ */
+export function siteAccessTeamMissing(
+  policy: SiteVisitorPolicy,
+  providerConfig: Pick<CloudflareSiteProviderConfig, "accessTeamName">
+): boolean {
+  return siteIsAccessProtected(policy) && !providerConfig.accessTeamName?.trim()
 }
 
 /* ------------------------------------------------------------- environment */

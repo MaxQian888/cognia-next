@@ -14,6 +14,9 @@ import {
   pickActiveDeployment,
   purgeRetentionReport,
   resolveSiteRailHint,
+  siteAccessLoginUrl,
+  siteAccessTeamMissing,
+  siteIsAccessProtected,
   siteAnalyticsIsZoneScoped,
   siteObservabilityHostname,
   siteProductionUrl,
@@ -428,5 +431,34 @@ describe("resolveSiteRailHint", () => {
       [operation({ id: "op", siteId: "site_2", status: "running" })]
     )
     expect(hint).toEqual({ kind: "never", tone: "neutral", live: false })
+  })
+})
+
+describe("visitor access", () => {
+  it("treats everything except public as behind Access", () => {
+    expect(siteIsAccessProtected({ mode: "private" })).toBe(true)
+    expect(siteIsAccessProtected({ mode: "identities", emails: [] })).toBe(true)
+    expect(siteIsAccessProtected({ mode: "public" })).toBe(false)
+  })
+
+  it("builds the sign-in origin from a bare team name or a full domain", () => {
+    expect(siteAccessLoginUrl({ accessTeamName: "acme" })).toBe("https://acme.cloudflareaccess.com")
+    expect(siteAccessLoginUrl({ accessTeamName: "acme.cloudflareaccess.com" })).toBe(
+      "https://acme.cloudflareaccess.com"
+    )
+    expect(siteAccessLoginUrl({ accessTeamName: "https://acme.example.com/" })).toBe(
+      "https://acme.example.com"
+    )
+  })
+
+  it("has no origin to offer without a team name", () => {
+    expect(siteAccessLoginUrl({})).toBeUndefined()
+    expect(siteAccessLoginUrl({ accessTeamName: "  " })).toBeUndefined()
+  })
+
+  it("only asks for the team name when the Site is actually protected", () => {
+    expect(siteAccessTeamMissing({ mode: "private" }, {})).toBe(true)
+    expect(siteAccessTeamMissing({ mode: "public" }, {})).toBe(false)
+    expect(siteAccessTeamMissing({ mode: "private" }, { accessTeamName: "acme" })).toBe(false)
   })
 })

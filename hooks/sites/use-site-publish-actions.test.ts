@@ -32,10 +32,12 @@ jest.mock("@/lib/sites/artifact-package", () => ({
 }))
 jest.mock("@/lib/file/file-operations", () => ({ createDir: jest.fn(async () => undefined) }))
 jest.mock("@/lib/db/sites", () => ({
+  cancelSiteOperation: jest.fn(async () => ({ id: "op1", status: "cancelled" })),
   getSiteArtifact: jest.fn(async () => ({ bytes: new Uint8Array([1]) })),
   getSiteOperation: jest.fn(async () => ({ id: "op1" })),
 }))
 
+import { cancelSiteOperation } from "@/lib/db/sites"
 import { buildAndSaveSiteVersion } from "@/lib/sites/build-version"
 import { startSitePreview, stopSitePreview } from "@/lib/sites/preview"
 import { ensureWranglerApproved } from "@/lib/sites/wrangler-detect"
@@ -252,6 +254,7 @@ it("builds against the newest environment revision", async () => {
       runtime: "node@24",
       packageManager: "pnpm@10",
       installNetworkHosts: ["registry.npmjs.org"],
+      buildNetworkHosts: [],
     })
   })
   expect(buildAndSaveSiteVersion).toHaveBeenCalledWith({
@@ -260,6 +263,7 @@ it("builds against the newest environment revision", async () => {
     runtime: "node@24",
     packageManager: "pnpm@10",
     installNetworkHosts: ["registry.npmjs.org"],
+    buildNetworkHosts: [],
     actorAccountId: "owner",
   })
 })
@@ -267,7 +271,12 @@ it("builds against the newest environment revision", async () => {
 it("refuses to build or preview without an environment revision", async () => {
   const { result } = setup({ live: liveData({ environments: [] }) })
   await act(async () => {
-    result.current.build({ runtime: "r", packageManager: "p", installNetworkHosts: [] })
+    result.current.build({
+      runtime: "r",
+      packageManager: "p",
+      installNetworkHosts: [],
+      buildNetworkHosts: [],
+    })
     result.current.startPreview()
   })
   expect(buildAndSaveSiteVersion).not.toHaveBeenCalled()
@@ -354,4 +363,12 @@ it("exposes only the versions that are ready to publish", async () => {
   })
   await waitFor(() => expect(result.current.wrangler).not.toBeNull())
   expect(result.current.readyVersions.map((version) => version.id)).toEqual(["v1"])
+})
+
+it("abandons a wedged operation", async () => {
+  const { result } = setup()
+  await act(async () => {
+    result.current.cancelOperation("op1")
+  })
+  expect(cancelSiteOperation).toHaveBeenCalledWith({ operationId: "op1" })
 })

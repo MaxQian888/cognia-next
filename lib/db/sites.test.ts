@@ -1,5 +1,7 @@
 import {
+  cancelSiteOperation,
   claimNextSiteOperation,
+  claimSiteOperation,
   createSiteDeployment,
   completeSiteOperation,
   completeSiteVersion,
@@ -549,5 +551,59 @@ describe("provider configuration", () => {
     await expect(
       updateSiteProviderConfig("site_1", "owner_1", { zoneId: "zone_1" })
     ).rejects.toThrow(/active site project not found/)
+  })
+})
+
+describe("abandoning an operation", () => {
+  async function queuedOperation() {
+    await makeSite()
+    return queueSiteOperation({
+      id: "op_1",
+      siteId: "site_1",
+      type: "deploy",
+      executionTargetKey: "local",
+      idempotencyKey: "deploy:site_1:v1",
+      inputDigest: "digest",
+      now: 100,
+    })
+  }
+
+  it("moves a queued operation to the only terminal state nothing else writes", async () => {
+    await queuedOperation()
+
+    const cancelled = await cancelSiteOperation({
+      operationId: "op_1",
+      message: "gave up",
+      now: 200,
+    })
+
+    expect(cancelled.status).toBe("cancelled")
+    expect(cancelled.errorMessage).toBe("gave up")
+    expect(cancelled.completedAt).toBe(200)
+    expect(cancelled.leaseOwner).toBeUndefined()
+    const events = await listSiteOperationEvents("op_1")
+    expect(events.at(-1)).toMatchObject({ type: "cancelled", message: "gave up" })
+  })
+
+  it("releases a lease the dead claimant still held", async () => {
+    await queuedOperation()
+    await claimSiteOperation({ operationId: "op_1", leaseOwner: "gone", leaseMs: 1000, now: 110 })
+
+    const cancelled = await cancelSiteOperation({ operationId: "op_1", now: 200 })
+    expect(cancelled.leaseOwner).toBeUndefined()
+    expect(cancelled.leaseExpiresAt).toBeUndefined()
+  })
+
+  it("refuses to reopen an operation that already finished", async () => {
+    await queuedOperation()
+    await claimSiteOperation({ operationId: "op_1", leaseOwner: "me", leaseMs: 1000, now: 110 })
+    await completeSiteOperation({ operationId: "op_1", leaseOwner: "me", now: 120 })
+
+    await expect(cancelSiteOperation({ operationId: "op_1" })).rejects.toThrow(/terminal state/)
+  })
+
+  it("refuses an unknown operation", async () => {
+    await makeSite()
+    await expect(cancelSiteOperation({ operationId: "missing" })).rejects.toThrow(/not found/)
   })
 })

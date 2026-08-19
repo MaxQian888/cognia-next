@@ -6875,6 +6875,9 @@
       "title": "源代码管理",
       "unstaged": "{count, plural, other {# 项变更}}"
     },
+    "teamMembersPanel": {
+      "title": "团队成员"
+    },
     "unavailable": {
       "comments": {
         "description": "此资源暂不提供评论线程，其他工作台功能仍可使用。",
@@ -6932,7 +6935,7 @@
       "label": "会话类型",
       "options": {
         "all": "全部类型",
-        "dm": "私聊",
+        "dm": "对话",
         "team": "团队"
       }
     },
@@ -7346,10 +7349,10 @@
       "deleteFolder": "删除文件夹",
       "deleteFolderConfirmBody": "仅删除文件夹；其中的会话会保留并回到日期列表。此操作不可撤销。",
       "deleteFolderConfirmTitle": "删除文件夹「{name}」？",
-      "directMessages": "私信",
+      "directMessages": "对话",
       "displayOptions": "显示选项",
       "emptyArchived": "没有已归档的会话。",
-      "emptyDm": "还没有聊天，挑选一个角色开始。",
+      "emptyDm": "还没有对话，挑选一个角色开始。",
       "emptyFiltered": "没有会话符合当前的 {count} 项筛选条件。",
       "emptyFolder": "空文件夹——把会话移动到这里。",
       "emptySearch": "没有与「{query}」匹配的会话。",
@@ -7364,7 +7367,7 @@
           "agent": "角色",
           "date": "日期",
           "none": "不分组",
-          "team": "私信 / 团队",
+          "team": "对话 / 团队",
           "workspace": "工作区"
         }
       },
@@ -7379,16 +7382,16 @@
       },
       "moveFolderDown": "下移文件夹",
       "moveFolderUp": "上移文件夹",
-      "newChat": "新建聊天",
+      "newChat": "新建对话",
       "newConversation": "新建会话",
       "newFolder": "新建文件夹",
       "newFolderName": "新建文件夹",
       "openSessions": "打开会话列表",
       "renameFolder": "重命名文件夹",
       "resizeHandle": "调整侧边栏宽度",
-      "searchAria": "搜索会话",
+      "searchAria": "搜索对话",
       "searchMessageContent": "搜索消息正文",
-      "searchPlaceholder": "搜索会话…",
+      "searchPlaceholder": "搜索对话…",
       "searchShortcutHint": "按 / 开始搜索",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
       "sectionPinned": "置顶",
@@ -7469,7 +7472,7 @@
         "sideRight": "右侧",
         "title": "自定义侧边栏"
       },
-      "directMessages": "私信",
+      "directMessages": "对话",
       "discover": "发现",
       "eval": "评估",
       "featuresGroup": "功能",
@@ -7611,16 +7614,24 @@
     },
     "memberList": {
       "charsCount": "{count} 字符",
+      "chatTitle": "与 {name} 的对话",
+      "defaultModel": "会话默认模型",
       "empty": "暂无成员。",
       "heading": "成员 — {count}",
-      "hide": "隐藏成员列表",
       "label": "团队成员",
       "mentionTitle": "@提及 {name}",
+      "noTeamSession": "打开一个团队会话即可查看其成员。",
       "notesPlaceholder": "笔记会在每轮对话中注入到所有成员的对话上下文中…",
+      "openChat": "打开与 {name} 的对话",
       "sharedNotes": "共享笔记",
-      "show": "显示成员列表",
+      "status": {
+        "errored": "出错",
+        "idle": "空闲",
+        "thinking": "思考中"
+      },
       "statusLabel": "状态：{status}",
-      "stopMember": "停止该成员"
+      "stopMember": "停止该成员",
+      "supervisor": "主管"
     },
     "menu": {
       "edit": {
@@ -7651,7 +7662,7 @@
         "agentTeams": "智能体团队",
         "canvas": "Canvas",
         "discover": "发现",
-        "dms": "直接消息",
+        "dms": "对话",
         "inbox": "收件箱",
         "label": "前往",
         "logs": "日志",
@@ -7923,6 +7934,7 @@
         "toggleRightSidebar": "切换右侧栏",
         "toggleSidebar": "切换侧栏",
         "toggleStatusBar": "切换状态栏",
+        "unreadArtifacts": "有新产物 · 展开面板",
         "zoomIn": "放大",
         "zoomLabel": "缩放",
         "zoomOut": "缩小",
@@ -14343,7 +14355,7 @@
         "agent": "角色",
         "date": "日期",
         "none": "不分组",
-        "team": "私信 / 团队",
+        "team": "对话 / 团队",
         "workspace": "工作区"
       },
       "sidebarPreview": "消息预览",
@@ -16769,6 +16781,13 @@
       "description": "我们会找你已安装的 agent 命令行工具，以及值得带过来的配置。任何数据都不会离开你的电脑。",
       "empty": "没有找到 agent 运行时",
       "emptyDescription": "没关系 —— 你可以在下一步改用 Cognia 订阅登录。",
+      "historyCta": "全部导入",
+      "historyFound": "在这台设备上找到 {count} 个历史对话",
+      "historyImported": "已导入 {count} 个对话",
+      "historyImporting": "导入中… {percent}%",
+      "historyPartial": "部分来源无法读取，已跳过。",
+      "historyScanning": "正在查找历史对话…",
+      "historyTitle": "导入你的历史对话",
       "migrateCta": "导入",
       "migrateDescription": "从 {vendor} 导入命令、设置和历史会话。",
       "migrateDone": "已导入",
@@ -23299,13 +23318,16 @@
       "copyFailed": "无法复制到剪贴板",
       "createdAt": "入队时间",
       "createdBy": "发起人",
-      "emptyDescription": "你发起的操作，以及控制器上报的该机群的工作，都会出现在这里。",
+      "emptyDescription": "针对该机群发起的操作都会出现在这里，包括从其他设备发起的工作。",
       "emptyTitle": "暂无操作",
       "errorDetails": "错误详情",
       "queued": "操作已加入队列",
       "request": "请求参数",
       "result": "执行结果",
       "target": "目标",
+      "timeline": "状态时间线",
+      "timelineEmpty": "控制器尚未记录该操作的任何状态变化。",
+      "timelineFailed": "无法加载状态变化记录。",
       "title": "操作",
       "updatedAt": "更新时间"
     },
@@ -27899,7 +27921,7 @@
             "agent": "角色",
             "date": "日期",
             "none": "不分组",
-            "team": "私信 / 团队",
+            "team": "对话 / 团队",
             "workspace": "工作区"
           }
         },
@@ -32764,6 +32786,8 @@
     "access": {
       "description": "创作权限保留在 Cognia；访客策略会与 Cloudflare Access 对账。",
       "hostname": "受保护的主机名",
+      "loginLabel": "访客登录入口",
+      "loginUnknown": "填写 Access 团队后才能显示登录地址",
       "mode": "访客访问模式",
       "modes": {
         "domains": "邮箱域名",
@@ -32780,6 +32804,7 @@
       "build": "构建保存版本",
       "cancel": "取消",
       "cancelEdit": "取消",
+      "cancelOperation": "放弃",
       "clearOutput": "清空",
       "confirmDeleteMetadata": "删除元数据",
       "confirmPurge": "清除托管资源",
@@ -32827,6 +32852,8 @@
       "editors": "编辑者账户 ID"
     },
     "build": {
+      "buildNetworkHosts": "构建阶段已批准的网络主机（可选）",
+      "buildNetworkHostsHint": "留空表示构建过程完全断网，这是默认且更安全的选项。",
       "description": "Cognia 读取 .cognia/hosting.json，并在操作系统沙箱中执行其中的 argv 命令。",
       "networkHosts": "已批准的安装网络主机",
       "packageManager": "包管理器快照",
@@ -33001,6 +33028,7 @@
     },
     "operations": {
       "attempts": "尝试 {count} 次",
+      "cancelHint": "把这次尝试标记为已放弃。它不再显示为进行中；用完全相同的输入重试仍然需要先校准。",
       "description": "用于崩溃恢复与云端状态校准的持久化生命周期事件。",
       "empty": "暂无生命周期操作。",
       "error": "错误",

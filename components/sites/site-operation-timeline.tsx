@@ -11,7 +11,7 @@
  * why. This shows the whole row and expands into the event stream.
  */
 import { useTranslations, useFormatter, useNow } from "next-intl"
-import { ChevronDownIcon, CopyIcon, RefreshCwIcon } from "lucide-react"
+import { ChevronDownIcon, CopyIcon, RefreshCwIcon, XCircleIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,9 @@ import {
   SITE_TONE_TEXT,
   SiteStatusPill,
 } from "./site-status"
+
+/** Statuses that can no longer change, so cancelling them is meaningless. */
+const TERMINAL_STATUSES = new Set<SiteOperationRow["status"]>(["succeeded", "failed", "cancelled"])
 
 export interface SiteOperationTimelineProps {
   events: readonly SiteOperationEventRow[]
@@ -93,6 +96,8 @@ export interface SiteOperationJournalProps {
   events: readonly SiteOperationEventRow[]
   /** Re-read one operation on demand — useful for a stuck `waiting-reconcile`. */
   onRefresh?: (operationId: string) => void
+  /** Abandon an operation that will never finish. Only offered while non-terminal. */
+  onCancel?: (operationId: string) => void
   refreshDisabled?: boolean
   refreshTitle?: string
 }
@@ -101,6 +106,7 @@ export function SiteOperationJournal({
   operations,
   events,
   onRefresh,
+  onCancel,
   refreshDisabled,
   refreshTitle,
 }: SiteOperationJournalProps) {
@@ -184,20 +190,35 @@ export function SiteOperationJournal({
                     <CopyIcon aria-hidden className={cn("size-3", copied && "text-success")} />
                   </Button>
                 ) : null}
-                {onRefresh ? (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="outline"
-                    className="ml-auto"
-                    disabled={refreshDisabled}
-                    title={refreshTitle}
-                    onClick={() => onRefresh(operation.id)}
-                  >
-                    <RefreshCwIcon aria-hidden className="size-3" />
-                    {t("actions.refreshOperation")}
-                  </Button>
-                ) : null}
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {onRefresh ? (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={refreshDisabled}
+                      title={refreshTitle}
+                      onClick={() => onRefresh(operation.id)}
+                    >
+                      <RefreshCwIcon aria-hidden className="size-3" />
+                      {t("actions.refreshOperation")}
+                    </Button>
+                  ) : null}
+                  {onCancel && !TERMINAL_STATUSES.has(operation.status) ? (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                      title={t("operations.cancelHint")}
+                      onClick={() => onCancel(operation.id)}
+                      data-testid={`site-operation-cancel-${operation.id}`}
+                    >
+                      <XCircleIcon aria-hidden className="size-3" />
+                      {t("actions.cancelOperation")}
+                    </Button>
+                  ) : null}
+                </span>
               </div>
               <SiteOperationTimeline events={operationEvents} />
             </CollapsibleContent>

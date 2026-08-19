@@ -6875,6 +6875,9 @@
       "title": "Source Control",
       "unstaged": "{count, plural, one {# change} other {# changes}}"
     },
+    "teamMembersPanel": {
+      "title": "Team members"
+    },
     "unavailable": {
       "comments": {
         "description": "This resource does not currently provide comment threads. Other workbench activities remain available.",
@@ -6932,7 +6935,7 @@
       "label": "Conversation type",
       "options": {
         "all": "All types",
-        "dm": "Direct messages",
+        "dm": "Chats",
         "team": "Team"
       }
     },
@@ -7346,7 +7349,7 @@
       "deleteFolder": "Delete folder",
       "deleteFolderConfirmBody": "The folder is removed; its conversations stay and return to the date list. This cannot be undone.",
       "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
-      "directMessages": "Direct Messages",
+      "directMessages": "Chats",
       "displayOptions": "Display options",
       "emptyArchived": "No archived conversations.",
       "emptyDm": "No chats yet. Pick a character to begin.",
@@ -7364,7 +7367,7 @@
           "agent": "Agent",
           "date": "Date",
           "none": "No grouping",
-          "team": "Direct messages / Team",
+          "team": "Chats / Team",
           "workspace": "Workspace"
         }
       },
@@ -7388,7 +7391,7 @@
       "resizeHandle": "Resize sidebar",
       "searchAria": "Search conversations",
       "searchMessageContent": "Search message content",
-      "searchPlaceholder": "Search conversations…",
+      "searchPlaceholder": "Search chats…",
       "searchShortcutHint": "Press / to search",
       "searchTruncated": "Some results may be hidden — refine your search.",
       "sectionPinned": "Pinned",
@@ -7469,7 +7472,7 @@
         "sideRight": "Right",
         "title": "Customize sidebar"
       },
-      "directMessages": "Direct Messages",
+      "directMessages": "Chats",
       "discover": "Discover",
       "eval": "Evaluation",
       "featuresGroup": "Features",
@@ -7611,16 +7614,24 @@
     },
     "memberList": {
       "charsCount": "{count} chars",
+      "chatTitle": "Chat with {name}",
+      "defaultModel": "Session default model",
       "empty": "No members.",
       "heading": "Members — {count}",
-      "hide": "Hide member list",
       "label": "Team members",
       "mentionTitle": "Mention {name}",
+      "noTeamSession": "Open a team conversation to see its members.",
       "notesPlaceholder": "Notes injected into every member's transcript on each turn…",
+      "openChat": "Open chat with {name}",
       "sharedNotes": "Shared notes",
-      "show": "Show member list",
+      "status": {
+        "errored": "Errored",
+        "idle": "Idle",
+        "thinking": "Thinking"
+      },
       "statusLabel": "Status: {status}",
-      "stopMember": "Stop this member"
+      "stopMember": "Stop this member",
+      "supervisor": "Supervisor"
     },
     "menu": {
       "edit": {
@@ -7651,7 +7662,7 @@
         "agentTeams": "Agent Teams",
         "canvas": "Canvas",
         "discover": "Discover",
-        "dms": "Direct Messages",
+        "dms": "Chats",
         "inbox": "Inbox",
         "label": "Go",
         "logs": "Logs",
@@ -7923,6 +7934,7 @@
         "toggleRightSidebar": "Toggle Right Sidebar",
         "toggleSidebar": "Toggle Sidebar",
         "toggleStatusBar": "Toggle Status Bar",
+        "unreadArtifacts": "New artifacts — open panel",
         "zoomIn": "Zoom in",
         "zoomLabel": "Zoom",
         "zoomOut": "Zoom out",
@@ -14343,7 +14355,7 @@
         "agent": "Agent",
         "date": "Date",
         "none": "No grouping",
-        "team": "Direct messages / Team",
+        "team": "Chats / Team",
         "workspace": "Workspace"
       },
       "sidebarPreview": "Message preview",
@@ -16769,6 +16781,13 @@
       "description": "We look for agent CLIs you have installed, and for settings worth bringing over. Nothing leaves your computer.",
       "empty": "No agent runtimes found",
       "emptyDescription": "That's fine — you can sign in with a Cognia subscription on the next step instead.",
+      "historyCta": "Import all",
+      "historyFound": "{count, plural, one {# past conversation found on this machine} other {# past conversations found on this machine}}",
+      "historyImported": "{count, plural, one {# conversation imported} other {# conversations imported}}",
+      "historyImporting": "Importing… {percent}%",
+      "historyPartial": "Some sources could not be read and were skipped.",
+      "historyScanning": "Looking for past conversations…",
+      "historyTitle": "Bring over your conversations",
       "migrateCta": "Import",
       "migrateDescription": "Import commands, settings and past sessions from {vendor}.",
       "migrateDone": "Imported",
@@ -23299,13 +23318,16 @@
       "copyFailed": "Could not copy to the clipboard",
       "createdAt": "Queued",
       "createdBy": "Requested by",
-      "emptyDescription": "Operations appear here as you queue them, and as the controller reports work on this fleet.",
+      "emptyDescription": "Operations queued against this fleet appear here, including work started from another device.",
       "emptyTitle": "No operations yet",
       "errorDetails": "Error details",
       "queued": "Operation queued",
       "request": "Request",
       "result": "Result",
       "target": "Target",
+      "timeline": "Timeline",
+      "timelineEmpty": "The controller has not recorded a state change for this operation yet.",
+      "timelineFailed": "The state-change trail could not be loaded.",
       "title": "Operations",
       "updatedAt": "Updated"
     },
@@ -27899,7 +27921,7 @@
             "agent": "Agent",
             "date": "Date",
             "none": "No grouping",
-            "team": "Direct messages / Team",
+            "team": "Chats / Team",
             "workspace": "Workspace"
           }
         },
@@ -32764,6 +32786,8 @@
     "access": {
       "description": "Authoring permissions stay in Cognia. Visitor policy is reconciled with Cloudflare Access.",
       "hostname": "Protected hostname",
+      "loginLabel": "Visitors sign in at",
+      "loginUnknown": "Set the Access team to show the sign-in origin",
       "mode": "Visitor access mode",
       "modes": {
         "domains": "Email domains",
@@ -32780,6 +32804,7 @@
       "build": "Build saved version",
       "cancel": "Cancel",
       "cancelEdit": "Cancel",
+      "cancelOperation": "Abandon",
       "clearOutput": "Clear",
       "confirmDeleteMetadata": "Delete metadata",
       "confirmPurge": "Purge managed resources",
@@ -32827,6 +32852,8 @@
       "editors": "Editor account IDs"
     },
     "build": {
+      "buildNetworkHosts": "Approved build hosts (optional)",
+      "buildNetworkHostsHint": "Leave empty to run the build with no network at all — the safe default.",
       "description": "Cognia reads .cognia/hosting.json and runs its argv commands inside the OS sandbox.",
       "networkHosts": "Approved install hosts",
       "packageManager": "Package manager snapshot",
@@ -33001,6 +33028,7 @@
     },
     "operations": {
       "attempts": "{count, plural, one {# attempt} other {# attempts}}",
+      "cancelHint": "Mark this attempt abandoned. It stops showing as in flight; a retry with identical input still needs reconciliation.",
       "description": "Durable lifecycle events used for crash recovery and provider reconciliation.",
       "empty": "No lifecycle operations yet.",
       "error": "Error",

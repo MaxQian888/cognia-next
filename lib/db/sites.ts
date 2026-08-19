@@ -586,6 +586,59 @@ export async function listSiteOperationSignals(): Promise<SiteOperationRow[]> {
     .toArray()
 }
 
+/**
+ * Abandon an operation that will never finish on its own.
+ *
+ * A `queued` operation whose claimant died, or a `waiting-reconcile` one whose
+ * provider outcome reconciliation cannot determine, otherwise stays non-terminal
+ * forever: the Site rail keeps pulsing "running" and the journal keeps showing
+ * work in flight. `cancelled` is the terminal state for "the user gave up on
+ * this attempt", and it is the only writer of that status.
+ *
+ * Deliberately does NOT require the lease owner — the whole point is that the
+ * holder is gone — and deliberately does NOT release the idempotency key. A
+ * retry with byte-identical input still has to go through reconciliation; what
+ * cancelling buys is an honest status, not a forged clean slate.
+ */
+export async function cancelSiteOperation(input: {
+  operationId: string
+  message?: string
+  now?: number
+}): Promise<SiteOperationRow> {
+  const db = getDb()
+  return db.transaction(
+    "rw",
+    db.siteOperations,
+    db.siteOperationEvents,
+    async (): Promise<SiteOperationRow> => {
+      const operation = await db.siteOperations.get(input.operationId)
+      if (!operation) throw new Error("site operation not found")
+      if (
+        operation.status === "succeeded" ||
+        operation.status === "failed" ||
+        operation.status === "cancelled"
+      ) {
+        throw new Error("site operation has already reached a terminal state")
+      }
+      const now = input.now ?? Date.now()
+      const cancelled: SiteOperationRow = {
+        ...operation,
+        status: "cancelled",
+        errorMessage: input.message ?? operation.errorMessage,
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined,
+        updatedAt: now,
+        completedAt: now,
+      }
+      await db.siteOperations.put(cancelled)
+      await appendOperationEvent(cancelled.id, "cancelled", now, {
+        ...(input.message ? { message: input.message } : {}),
+      })
+      return cancelled
+    }
+  )
+}
+
 export async function resolveSiteOperationFromReconcile(input: {
   operationId: string
   providerRequestId?: string

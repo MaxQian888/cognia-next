@@ -180,3 +180,41 @@ it("gates every mutation with its reason", () => {
   expect(screen.getByTestId("site-save-provider-config")).toBeDisabled()
   expect(screen.getByTestId("site-apply-access")).toHaveAttribute("title", "Owner only")
 })
+
+describe("Access sign-in origin", () => {
+  it("links to the team domain for a protected Site", () => {
+    renderTab({
+      site: site({
+        providerConfig: { accountId: "a", workerName: "w", accessTeamName: "acme" },
+      }),
+    })
+    const link = screen.getByRole("link", { name: /cloudflareaccess\.com/ })
+    expect(link).toHaveAttribute("href", "https://acme.cloudflareaccess.com")
+  })
+
+  it("accepts a full team domain as well as a bare name", () => {
+    renderTab({
+      site: site({
+        providerConfig: {
+          accountId: "a",
+          workerName: "w",
+          accessTeamName: "acme.cloudflareaccess.com",
+        },
+      }),
+    })
+    expect(screen.getByRole("link", { name: /acme/ })).toHaveAttribute(
+      "href",
+      "https://acme.cloudflareaccess.com"
+    )
+  })
+
+  it("asks for the team name when a protected Site has none", () => {
+    renderTab()
+    expect(screen.getByTestId("site-access-team-missing")).toBeInTheDocument()
+  })
+
+  it("says nothing for a public Site, which has no sign-in step", () => {
+    renderTab({ site: site({ visitorPolicy: { mode: "public" } }) })
+    expect(screen.queryByTestId("site-access-login")).not.toBeInTheDocument()
+  })
+})
