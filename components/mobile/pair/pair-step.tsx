@@ -37,6 +37,12 @@ import { DiscoverHelp } from "./discover-help"
 export interface PairStepProps {
   prefilledPairPayload?: string
   autoScan?: boolean
+  /**
+   * Redeem `prefilledPairPayload` on mount without waiting for Submit. Set only
+   * for an invitation the user arrived with (desktop "pair in browser" link,
+   * `cognia://` deep link) — never for clipboard or typed input.
+   */
+  autoSubmit?: boolean
   webMode?: boolean
   persistPairing?: (config: CompanionConfig) => Promise<void>
   onPaired: (config: CompanionConfig) => void
@@ -71,6 +77,7 @@ function displayPairHost(baseUrl: string): string {
 export function PairStep({
   prefilledPairPayload = "",
   autoScan = false,
+  autoSubmit = false,
   webMode = false,
   persistPairing = saveCompanionConfig,
   onPaired,
@@ -175,6 +182,45 @@ export function PairStep({
       void onScanQr()
     }
   }, [autoScan, onScanQr])
+
+  // Arrived carrying a complete invitation → redeem it. Guarded by a ref
+  // rather than the phase so a failed attempt lands on the manual form with
+  // the error instead of retrying a one-shot invitation the Host already
+  // burned.
+  const autoSubmitFiredRef = useRef(false)
+  useEffect(() => {
+    if (!autoSubmit || autoSubmitFiredRef.current || !prefilledPairPayload) return
+    autoSubmitFiredRef.current = true
+    void completePairing(prefilledPairPayload)
+  }, [autoSubmit, completePairing, prefilledPairPayload])
+
+  // Clipboard sniff (web only): the headless `cognia-server pair` command
+  // prints the invitation to a terminal, so the overwhelmingly common arrival
+  // state is "it is already on the clipboard". Fill the field, never submit —
+  // the clipboard is ambient, not an intent. Silent on refusal: Firefox and
+  // Safari gate `readText()` behind a user gesture, and the paste button is
+  // still right there.
+  const clipboardSniffedRef = useRef(false)
+  useEffect(() => {
+    if (!webMode || clipboardSniffedRef.current || prefilledPairPayload) return
+    clipboardSniffedRef.current = true
+    let cancelled = false
+    void (async () => {
+      let clipboard: string | null = null
+      try {
+        clipboard = (await readClipboardText()) ?? null
+      } catch {
+        return
+      }
+      if (cancelled || !clipboard) return
+      const candidate = clipboard.trim()
+      if (decodePairPayload(candidate).kind !== "ok") return
+      setPayload((current) => (current ? current : candidate))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [webMode, prefilledPairPayload])
 
   const onPair = useCallback(async () => {
     await completePairing(payload)

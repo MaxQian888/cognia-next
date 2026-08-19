@@ -1,11 +1,10 @@
 "use client"
 
-import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 
 import { usePlatform } from "@/hooks/use-platform"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
-import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { hasStoredWebPairing, hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import {
@@ -38,12 +37,6 @@ import {
 
 const log = loggers.shell
 
-// The pair flow owns navigation on these routes — never redirect from them.
-// `/onboarding` replaced the standalone `/welcome` mode chooser (ADR-0122):
-// the standalone-vs-paired fork is now the first-run flow's welcome step,
-// so the boot provider must recognise it as an onboarding surface or it
-// would redirect the user straight back out of the flow.
-const ONBOARDING_PREFIXES = ["/onboarding", "/pair", "/oauth"]
 const RECOVERY_BACKOFF_MS = [250, 1_000, 4_000, 16_000, 30_000] as const
 
 /**
@@ -53,8 +46,12 @@ const RECOVERY_BACKOFF_MS = [250, 1_000, 4_000, 16_000, 30_000] as const
  * `hasWebCompanionTarget()` is true (build-time server URL or an existing
  * pairing). This is the browser sibling of `CompanionBootProvider` minus
  * everything Capacitor: no native plugins, no push, no deeplinks, no status
- * bar — just config hydration, the unpaired→/pair redirect, and the sync
+ * bar — just config hydration, an honest runtime snapshot, and the sync
  * installers (which are webview-agnostic).
+ *
+ * It never navigates. An unusable or absent pairing is published as a
+ * `requires-pairing` snapshot and `SurfaceAvailabilityBoundary` offers `/pair`
+ * on the surfaces that need a Host.
  *
  * No-op on Tauri (the desktop IS the server) and on Capacitor (the mobile
  * provider owns boot there). Also a no-op on web-standalone — a browser with
@@ -62,14 +59,7 @@ const RECOVERY_BACKOFF_MS = [250, 1_000, 4_000, 16_000, 30_000] as const
  */
 export function WebCompanionBootProvider({ children }: { children: React.ReactNode }) {
   const platform = usePlatform()
-  const router = useRouter()
-  const pathname = usePathname()
-  const pathnameRef = useRef(pathname)
   const [configRevision, setConfigRevision] = useState(0)
-
-  useEffect(() => {
-    pathnameRef.current = pathname
-  }, [pathname])
 
   useEffect(() => {
     const unregisterOwner = registerWebHostBindingOwner()
@@ -85,16 +75,28 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
     if (platform !== "web") return
 
     const companionConfigured = hasWebCompanionTarget()
-    const vaultState = getActiveBrowserVault() ? "unlocked" : "locked"
+    // A build-time `NEXT_PUBLIC_COGNIA_SERVER_URL` makes this browser a thin
+    // client, but it is NOT a credential: without a stored pairing there is
+    // nothing to connect with. Tracked separately so the opening snapshot can
+    // say "offline, needs pairing" instead of spinning on "connecting" — the
+    // state that used to read as paired everywhere the snapshot is consumed.
+    const storedPairing = hasStoredWebPairing()
+    const vaultUnlocked = Boolean(getActiveBrowserVault())
     if (!companionConfigured) {
       setRuntimeSnapshot({
         target: { id: "web-standalone", kind: "standalone", platform: "web" },
-        vaultState,
+        vaultState: vaultUnlocked ? "unlocked" : "locked",
         connectionState: "online",
       })
       return
     }
 
+    // `unavailable` is the credential axis, not the Vault axis: it is what
+    // `resolveSurfaceAvailability` reads as `requires-pairing`, and therefore
+    // the only state that offers `/pair` as the recovery. An unlocked Vault
+    // with no pairing used to report `unlocked` + `offline`, which resolved to
+    // a bare "you are offline" screen with no way to pair from it.
+    const unpairedVaultState = vaultUnlocked ? "unavailable" : "locked"
     setRuntimeSnapshot({
       target: {
         id: "web-companion",
@@ -102,8 +104,8 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
         platform: "web",
         hostKind: "cloud",
       },
-      vaultState,
-      connectionState: "connecting",
+      vaultState: storedPairing ? (vaultUnlocked ? "unlocked" : "locked") : unpairedVaultState,
+      connectionState: storedPairing ? "connecting" : "offline",
     })
 
     let cancelled = false
@@ -131,15 +133,17 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       if (!config) {
         notifyWebHostBindingsFailed(new Error("The selected Web Host credential is unavailable."))
         updateRuntimeSnapshot({
-          vaultState: getActiveBrowserVault() ? "unlocked" : "unavailable",
+          vaultState: getActiveBrowserVault() ? "unavailable" : "locked",
           connectionState: "offline",
           host: undefined,
         })
-        const onOnboarding = ONBOARDING_PREFIXES.some((p) => pathnameRef.current.startsWith(p))
-        if (!onOnboarding) {
-          log.info("web companion: server configured but unpaired — redirecting to /pair")
-          router.replace("/pair")
-        }
+        // Deliberately no navigation. `SurfaceAvailabilityBoundary` resolves
+        // this snapshot to `requires-pairing` and offers `/pair` on the
+        // surfaces that actually need a Host, which leaves the rest of the app
+        // (settings, account, the pair flow itself) reachable. Redirecting from
+        // here fought that boundary and hijacked whatever route the user asked
+        // for — including the ones that would have let them fix the pairing.
+        log.info("web companion: no usable Host credential — surfaces will prompt to pair")
         return
       }
 
@@ -357,7 +361,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       unregisterSubscriptionStopper()
       disposeSubscriptions()
     }
-  }, [platform, router, configRevision])
+  }, [platform, configRevision])
 
   return <>{children}</>
 }

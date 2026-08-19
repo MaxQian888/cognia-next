@@ -1090,6 +1090,8 @@ pub fn run() {
             companion_api::commands::companion_server_start,
             companion_api::commands::companion_server_stop,
             companion_api::commands::companion_server_status,
+            companion_api::commands::companion_browser_access_get,
+            companion_api::commands::companion_browser_access_set,
             companion_api::commands::companion_create_owner_invitation,
             companion_api::commands::companion_create_worker_enrollment,
             companion_api::commands::companion_list_workers,

@@ -291,6 +291,43 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-existing")
   })
 
+  it("redeems an invitation carried in the URL fragment, even when already paired", async () => {
+    // A desktop "pair in browser" link is a deliberate act with a live,
+    // five-minute invitation attached. Landing on "you are already paired"
+    // would strand it.
+    window.history.replaceState({}, "", `/pair#payload=${encodeURIComponent(PAIR_PAYLOAD)}`)
+    hydrateImpl = async () => ({
+      targetId: "host-existing",
+      accountId: "local_acct_a",
+      baseUrl: "https://existing.local:7890",
+      deviceId: "dev-existing",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+      deviceKeyThumbprint: "device-thumbprint",
+      serverVersion: "9.9.9",
+    })
+    mockRegisterPairPayload.mockResolvedValue({
+      kind: "ok",
+      config: {
+        targetId: "host-1",
+        accountId: "local_acct_a",
+        baseUrl: "https://desktop.example:27890",
+        deviceId: "dev-new",
+        devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+        deviceKeyThumbprint: "thumb",
+        serverVersion: "0.1.0",
+      },
+    })
+
+    render(<PairOnboardingClient />)
+
+    await waitFor(() => expect(mockRegisterPairPayload).toHaveBeenCalledWith(PAIR_PAYLOAD))
+    await waitFor(() =>
+      expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "paired")
+    )
+    // The one-shot invitation is spent — it must not survive in the address bar.
+    expect(window.location.hash).toBe("")
+  })
+
   it("add mode skips the existing-pair shortcut and preserves the current Host until submit", async () => {
     window.history.replaceState({}, "", "/pair?mode=add")
     hydrateImpl = async () => ({
@@ -571,6 +608,7 @@ describe("readPairParams / resolveParamSelection", () => {
         switchTo: "deviceAA-1234",
         baseUrl: "https://x",
         fingerprint: "F",
+        payload: null,
       }
     )
     expect(readPairParams("")).toEqual({
@@ -580,7 +618,34 @@ describe("readPairParams / resolveParamSelection", () => {
       switchTo: null,
       baseUrl: null,
       fingerprint: null,
+      payload: null,
     })
+  })
+
+  it("reads a cgnp3 invitation from the fragment and marks it auto-submittable", () => {
+    const payload = encodePairPayload({
+      baseUrl: "https://desktop.example:27890",
+      mode: "owner-invitation",
+      invitation: "owner-invitation",
+      hostId: "host-1",
+      tenantId: "local_acct_a",
+      expiresAt: Date.now() + 60_000,
+      serverVersion: "0.1.0",
+      fingerprint: "",
+    })
+    const params = readPairParams("", `#payload=${encodeURIComponent(payload)}`)
+    expect(params.payload).toBe(payload)
+    expect(resolveParamSelection(params, RECENTS)).toEqual({
+      pairPayload: payload,
+      autoScan: false,
+      autoSubmit: true,
+    })
+  })
+
+  it("ignores a malformed invitation in the URL so the manual form still loads", () => {
+    const params = readPairParams("?payload=not-a-cgnp3-payload", "")
+    expect(params.payload).toBeNull()
+    expect(resolveParamSelection(params, RECENTS)).toBeNull()
   })
 
   it("validates add/recover modes and recovery details", () => {
@@ -599,7 +664,7 @@ describe("readPairParams / resolveParamSelection", () => {
 
   it("does not turn an explicit baseUrl into a pairing credential", () => {
     const sel = resolveParamSelection(
-      { switchTo: null, baseUrl: "https://192.168.1.7:7890", fingerprint: "FP-X" },
+      { switchTo: null, baseUrl: "https://192.168.1.7:7890", fingerprint: "FP-X", payload: null },
       RECENTS
     )
     expect(sel).toBeNull()
@@ -607,7 +672,7 @@ describe("readPairParams / resolveParamSelection", () => {
 
   it("does not restore an invitation through the recent-server label", () => {
     const sel = resolveParamSelection(
-      { switchTo: "deviceAA-full-uuid", baseUrl: null, fingerprint: null },
+      { switchTo: "deviceAA-full-uuid", baseUrl: null, fingerprint: null, payload: null },
       RECENTS
     )
     expect(sel).toBeNull()
@@ -626,7 +691,7 @@ describe("readPairParams / resolveParamSelection", () => {
       },
     ]
     const sel = resolveParamSelection(
-      { switchTo: "deviceAA-full-uuid", baseUrl: null, fingerprint: null },
+      { switchTo: "deviceAA-full-uuid", baseUrl: null, fingerprint: null, payload: null },
       recents
     )
     expect(sel).toBeNull()
@@ -634,10 +699,10 @@ describe("readPairParams / resolveParamSelection", () => {
 
   it("returns null for a switchTo with no recent record and for empty params", () => {
     expect(
-      resolveParamSelection({ switchTo: "unknown-device", baseUrl: null, fingerprint: null }, [])
+      resolveParamSelection({ switchTo: "unknown-device", baseUrl: null, fingerprint: null, payload: null }, [])
     ).toBeNull()
     expect(
-      resolveParamSelection({ switchTo: null, baseUrl: null, fingerprint: null }, RECENTS)
+      resolveParamSelection({ switchTo: null, baseUrl: null, fingerprint: null, payload: null }, RECENTS)
     ).toBeNull()
   })
 })

@@ -143,25 +143,68 @@ afterEach(() => {
 })
 
 describe("WebCompanionBootProvider", () => {
-  it("redirects an unpaired browser with a configured server to /pair", async () => {
+  it("an unpaired browser with a configured server reports requires-pairing without navigating", async () => {
     render(
       <WebCompanionBootProvider>
         <div>child</div>
       </WebCompanionBootProvider>
     )
-    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/pair"))
+    await waitFor(() => expect(hydrateMock).toHaveBeenCalled())
+    // `vaultState: "unavailable"` is what `resolveSurfaceAvailability` maps to
+    // `requires-pairing`, which is how the surfaces that need a Host offer
+    // `/pair`. The provider itself must not hijack the route to get there.
+    await waitFor(() => expect(getRuntimeSnapshot().vaultState).toBe("unavailable"))
+    expect(getRuntimeSnapshot().connectionState).toBe("offline")
+    expect(replaceMock).not.toHaveBeenCalled()
     expect(runSyncDownMock).not.toHaveBeenCalled()
   })
 
-  it("does not redirect away from onboarding routes", async () => {
-    pathnameValue = "/pair"
+  it("does not claim to be connecting when only a build-time server URL exists", async () => {
+    // No stored pairing: a baked server URL is a destination, not a credential.
     render(
       <WebCompanionBootProvider>
         <div />
       </WebCompanionBootProvider>
     )
-    await waitFor(() => expect(hydrateMock).toHaveBeenCalled())
-    expect(replaceMock).not.toHaveBeenCalled()
+    expect(getRuntimeSnapshot().target).toMatchObject({ kind: "companion" })
+    expect(getRuntimeSnapshot().connectionState).toBe("offline")
+  })
+
+  it("opens on connecting when a pairing is stored in the credential book", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.hosts.v2",
+      JSON.stringify({
+        version: 2,
+        active: {},
+        hosts: {
+          "acct-web:companion-cloud": {
+            hostId: "companion-cloud",
+            accountNamespace: "acct-web",
+            endpoints: { baseUrl: "https://cloud.example.com:7890" },
+            deviceId: "dev-1",
+            deviceKeyThumbprint: "thumbprint",
+            serverVersion: "1.0.0",
+          },
+        },
+      })
+    )
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    expect(getRuntimeSnapshot().connectionState).toBe("connecting")
+  })
+
+  it("stays standalone with no server URL and no stored pairing", async () => {
+    delete process.env[ENV_KEY]
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    expect(getRuntimeSnapshot().target).toMatchObject({ kind: "standalone" })
+    expect(hydrateMock).not.toHaveBeenCalled()
   })
 
   it("paired: runs sync-down and installs the sync listeners", async () => {

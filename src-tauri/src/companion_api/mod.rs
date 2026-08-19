@@ -26,6 +26,7 @@ pub mod admin_lease;
 pub mod api;
 pub mod audit;
 pub mod bridge_transport;
+pub mod browser_access;
 pub mod browser_gateway;
 pub mod command_manifest;
 pub mod data_plane;
@@ -331,6 +332,10 @@ pub struct CompanionServerState {
 struct CompanionServerInner {
     handle: Option<ServerHandle>,
     bound_port: Option<u16>,
+    /// Plaintext loopback listener for browser clients (`browser_access`).
+    /// `None` whenever browser access is off — the default.
+    browser_handle: Option<ServerHandle>,
+    browser_port: Option<u16>,
     /// Mirror of the `bind_loopback_only` flag passed to the most recent
     /// `start` so the settings UI can read back the bind mode without a
     /// separate state lookup. `None` means the server is stopped.
@@ -376,6 +381,8 @@ impl CompanionServerState {
             inner: Mutex::new(CompanionServerInner {
                 handle: None,
                 bound_port: None,
+                browser_handle: None,
+                browser_port: None,
                 bind_mode: None,
             }),
             data_dir,
@@ -403,6 +410,11 @@ impl CompanionServerState {
         self.inner.lock().bound_port
     }
 
+    /// The plaintext loopback port browsers reach this Host on, if bound.
+    pub fn browser_port(&self) -> Option<u16> {
+        self.inner.lock().browser_port
+    }
+
     pub fn host_id(&self) -> Option<String> {
         self.host_id.read().clone()
     }
@@ -424,17 +436,36 @@ impl CompanionServerState {
                 }
             }
         }
-        let handle = server::spawn_server(port, bind_loopback_only, tls, state).await?;
+        let browser_config = browser_access::load(self.data_dir());
+        let origin_policy = web_origin::WebOriginPolicy::from_env_and_config(&browser_config);
+        let handle = server::spawn_server(port, bind_loopback_only, tls, state.clone()).await?;
         let bound_port = handle.bound_port;
         let mode = if bind_loopback_only {
             BindMode::Loopback
         } else {
             BindMode::Lan
         };
+        // Opt-in plaintext loopback plane for browsers (see `browser_access`).
+        // A bind failure here must not take the HTTPS listener down with it:
+        // the port may simply be taken, and every already-paired mobile client
+        // depends on the server that just came up.
+        let browser_handle = if browser_config.listener_enabled() {
+            match server::spawn_browser_listener(browser_config.port, state, origin_policy).await {
+                Ok(handle) => Some(handle),
+                Err(error) => {
+                    log::warn!("companion browser listener could not start: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         {
             let mut inner = self.inner.lock();
             inner.handle = Some(handle);
             inner.bound_port = Some(bound_port);
+            inner.browser_port = browser_handle.as_ref().map(|h| h.bound_port);
+            inner.browser_handle = browser_handle;
             inner.bind_mode = Some(mode);
         }
         // Publish the live bind port so `/healthz` can advertise it
@@ -450,7 +481,11 @@ impl CompanionServerState {
         if let Some(handle) = inner.handle.take() {
             let _ = handle.shutdown.send(());
         }
+        if let Some(handle) = inner.browser_handle.take() {
+            let _ = handle.shutdown.send(());
+        }
         inner.bound_port = None;
+        inner.browser_port = None;
         inner.bind_mode = None;
         // Mirror the bind state in the process-global so /healthz responses
         // reflect "server stopped" rather than a stale port.

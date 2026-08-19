@@ -277,6 +277,79 @@ pub async fn spawn_server(
     })
 }
 
+/// Spawn the **plaintext, loopback-only** browser listener.
+///
+/// A browser cannot pin the self-signed certificate the HTTPS listener
+/// presents, so `https://127.0.0.1:27890` is unreachable from a tab without a
+/// manual certificate interstitial. `http://127.0.0.1` needs no certificate at
+/// all — it is "potentially trustworthy" per Secure Contexts, so it is exempt
+/// from mixed-content blocking — which makes it the one address a browser can
+/// reach this Host on unaided. See `browser_access` for why this is opt-in.
+///
+/// Hard-bound to `127.0.0.1`, never `0.0.0.0`: the whole justification for
+/// dropping TLS is that the bytes cannot leave the machine. The `bind_loopback_only`
+/// switch that governs the HTTPS listener deliberately has no counterpart here.
+///
+/// Requests carry the same authority as on the HTTPS plane — a DPoP-bound
+/// device access token — and the same `WebOriginPolicy` gates the Origin.
+pub async fn spawn_browser_listener(
+    port: u16,
+    state: SharedState,
+    origin_policy: super::web_origin::WebOriginPolicy,
+) -> Result<ServerHandle, CompanionServerError> {
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let std_listener = std::net::TcpListener::bind(addr)
+        .map_err(|source| CompanionServerError::Bind { addr, source })?;
+    std_listener
+        .set_nonblocking(true)
+        .map_err(|source| CompanionServerError::Bind { addr, source })?;
+    let bound_port = std_listener
+        .local_addr()
+        .map_err(|source| CompanionServerError::Bind { addr, source })?
+        .port();
+
+    let app = build_router_with_origin_policy(state, origin_policy);
+    let server_handle = axum_server::Handle::new();
+    let (tx, mut rx) = watch::channel(());
+    let (terminated_tx, terminated_rx) = watch::channel(false);
+
+    let shutdown_target = server_handle.clone();
+    tokio::spawn(async move {
+        if rx.changed().await.is_ok() {
+            shutdown_target.graceful_shutdown(Some(MAX_DRAIN_DURATION));
+        }
+    });
+
+    let serve_handle = server_handle.clone();
+    tokio::spawn(async move {
+        // axum-server 0.8 made `from_tcp` fallible; unwrap the `Result` before
+        // chaining, exactly as the TLS listener above does.
+        let server = match axum_server::from_tcp(std_listener) {
+            Ok(server) => server,
+            Err(e) => {
+                log::warn!("companion browser listener failed to build acceptor: {e}");
+                let _ = terminated_tx.send(true);
+                return;
+            }
+        };
+        let result = server
+            .handle(serve_handle)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await;
+        if let Err(e) = result {
+            log::warn!("companion browser listener exited with error: {e}");
+        }
+        let _ = terminated_tx.send(true);
+    });
+
+    log::info!("companion browser listener bound on http://127.0.0.1:{bound_port}");
+    Ok(ServerHandle {
+        bound_port,
+        shutdown: tx,
+        terminated: terminated_rx,
+    })
+}
+
 /// Build the axum `Router` for the companion API.
 ///
 /// Extracted so tests can call it without binding a TCP port via
@@ -300,10 +373,28 @@ pub async fn spawn_server(
 ///   GET  /ws/events
 /// ```
 pub fn build_router(state: SharedState) -> Router {
-    build_router_for_mode(state, super::deployment::deployment_mode())
+    build_router_with_origin_policy(state, super::web_origin::WebOriginPolicy::from_env())
 }
 
-fn build_router_for_mode(state: SharedState, _mode: super::deployment::DeploymentMode) -> Router {
+/// Same router, with an explicitly supplied browser-origin policy.
+///
+/// The desktop app cannot use [`build_router`]'s env-only policy: a
+/// GUI-launched process inherits no shell environment, so its allowlist lives
+/// in the saved browser-access config instead
+/// (`browser_access::BrowserAccessConfig`). Headless deployments keep the env
+/// path.
+pub fn build_router_with_origin_policy(
+    state: SharedState,
+    policy: super::web_origin::WebOriginPolicy,
+) -> Router {
+    build_router_for_mode(state, super::deployment::deployment_mode(), policy)
+}
+
+fn build_router_for_mode(
+    state: SharedState,
+    _mode: super::deployment::DeploymentMode,
+    origin_policy: super::web_origin::WebOriginPolicy,
+) -> Router {
     // Unmetered public routes — no rate limit, no JWT. Used for service
     // discovery only; do not add anything sensitive here.
     let unmetered_public_routes = Router::new()
@@ -521,10 +612,7 @@ fn build_router_for_mode(state: SharedState, _mode: super::deployment::Deploymen
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .layer(from_fn(reject_mutations_while_draining));
     if crate::headless::headless_services().is_none() {
-        return router.layer(from_fn_with_state(
-            super::web_origin::WebOriginPolicy::from_env(),
-            super::web_origin::enforce,
-        ));
+        return router.layer(from_fn_with_state(origin_policy, super::web_origin::enforce));
     }
     // Raw broker content deliberately sits outside the default JSON/webhook
     // body limit. It has its own 64 MiB cap and requires the same loopback-only
@@ -545,10 +633,9 @@ fn build_router_for_mode(state: SharedState, _mode: super::deployment::Deploymen
         ))
         .layer(from_fn(reject_mutations_while_draining))
         .with_state(state);
-    router.merge(content_router).layer(from_fn_with_state(
-        super::web_origin::WebOriginPolicy::from_env(),
-        super::web_origin::enforce,
-    ))
+    router
+        .merge(content_router)
+        .layer(from_fn_with_state(origin_policy, super::web_origin::enforce))
 }
 
 async fn reject_mutations_while_draining(request: Request, next: Next) -> Response {
@@ -749,6 +836,7 @@ mod tests {
         let router = build_router_for_mode(
             test_state(),
             crate::companion_api::deployment::DeploymentMode::MultiTenant,
+            super::super::web_origin::WebOriginPolicy::default(),
         );
         let mut request = axum::http::Request::builder()
             .method("POST")
@@ -773,6 +861,7 @@ mod tests {
         let response = build_router_for_mode(
             test_state(),
             crate::companion_api::deployment::DeploymentMode::SingleUser,
+            super::super::web_origin::WebOriginPolicy::default(),
         )
         .oneshot(
             axum::http::Request::builder()

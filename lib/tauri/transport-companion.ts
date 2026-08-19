@@ -74,6 +74,17 @@ export async function issueCompanionSocketTicket(
 export async function hydrateCompanionConfig(): Promise<CompanionConfig | null> {
   const stored = await companionStorage().load()
   cachedConfig = stored ? await attachWebRuntimeTarget(stored, true) : null
+  // `pickTransport()` decides at module load, before the Vault is unlocked and
+  // before any runtime target is active, so a browser that IS paired can boot
+  // holding the honest-but-useless `WebStubTransport`. Once a pairing has
+  // actually resolved, upgrade — otherwise every consumer of the hydrated
+  // config dispatches into the stub and the session looks unpaired.
+  //
+  // Deliberately one-way: downgrading to the stub belongs to the explicit
+  // owners (`clearCompanionConfig`, `reloadCompanionConfigForActiveTarget`,
+  // `suspendCompanionTransport`). Mid-session callers re-hydrate for their own
+  // reasons and must not tear down a live transport on a transient null.
+  if (cachedConfig) await ensureWebCompanionTransport()
   return cachedConfig
 }
 
@@ -205,6 +216,22 @@ async function activateWebCompanionTransport(): Promise<void> {
   if (!isPlainBrowser()) return
   const { setTransport } = await import("./transport-instance")
   setTransport(new CompanionTransport())
+}
+
+/**
+ * Install the companion transport only if the stub is still in place.
+ *
+ * The unconditional {@link activateWebCompanionTransport} is right after a
+ * pair or a target switch — the identity underneath changed, so a clean
+ * instance is wanted. Boot-time hydration is the opposite case: it can run
+ * mid-session (fleet, remote sessions, the signaling controller all re-hydrate),
+ * and rebuilding a live transport there would drop its open subscriptions.
+ */
+async function ensureWebCompanionTransport(): Promise<void> {
+  if (!isPlainBrowser()) return
+  const instance = await import("./transport-instance")
+  if (instance.transport instanceof CompanionTransport) return
+  instance.setTransport(new CompanionTransport())
 }
 
 function notifyCompanionConfigChanged(): void {

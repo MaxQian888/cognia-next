@@ -43,6 +43,7 @@ import {
   recentServersToDiscovered,
   type RecentServer,
 } from "@/lib/connectivity/recent-servers"
+import { readPairLinkPayload, stripPairLinkPayload } from "@/lib/qr/pair-link"
 
 import { DiscoverStep } from "./pair/discover-step"
 import { PairStep } from "./pair/pair-step"
@@ -62,6 +63,13 @@ type Phase = PhaseLoading | PhaseUnpaired | PhasePaired
 export interface Selection {
   pairPayload: string
   autoScan: boolean
+  /**
+   * Redeem the payload without a second click. Only ever set for an invitation
+   * the user *arrived with* — a desktop "pair in browser" link or a `cognia://`
+   * deep link — where asking them to press Submit on a code they never typed is
+   * pure friction. Clipboard and manual entry always stay confirm-first.
+   */
+  autoSubmit?: boolean
 }
 
 const EMPTY_SELECTION: Selection = {
@@ -73,7 +81,11 @@ const EMPTY_SELECTION: Selection = {
 const WEB_STEPS: readonly PairStepName[] = ["pair", "paired"] as const
 
 /**
- * Query params other surfaces navigate here with:
+ * Params other surfaces navigate here with:
+ *   - `#payload=<cgnp3|…>`       — a complete one-shot invitation handed over
+ *     by the desktop Host's "pair in browser" action, or by a `cognia://`
+ *     deep link (which writes the equivalent `?payload=`). Redeemed on
+ *     arrival; see {@link resolveParamSelection}.
  *   - `?baseUrl=…&fingerprint=…` — the connection-state scan sheet's
  *     "tap a discovered server" path: pre-fill and lock the pair form.
  *   - `?switchTo=<deviceId>`     — the paired-servers sheet's switch path:
@@ -88,9 +100,11 @@ export interface PairPageParams {
   switchTo: string | null
   baseUrl: string | null
   fingerprint: string | null
+  /** Complete `cgnp3|…` invitation carried by the fragment or query. */
+  payload: string | null
 }
 
-export function readPairParams(search?: string): PairPageParams {
+export function readPairParams(search?: string, hash?: string): PairPageParams {
   if (typeof window === "undefined" && search === undefined) {
     return {
       mode: "default",
@@ -99,9 +113,12 @@ export function readPairParams(search?: string): PairPageParams {
       switchTo: null,
       baseUrl: null,
       fingerprint: null,
+      payload: null,
     }
   }
-  const p = new URLSearchParams(search ?? window.location.search)
+  const rawSearch = search ?? window.location.search
+  const rawHash = hash ?? (typeof window === "undefined" ? "" : window.location.hash)
+  const p = new URLSearchParams(rawSearch)
   const rawMode = p.get("mode")
   const rawState = p.get("state")
   return {
@@ -114,22 +131,25 @@ export function readPairParams(search?: string): PairPageParams {
     switchTo: p.get("switchTo"),
     baseUrl: p.get("baseUrl"),
     fingerprint: p.get("fingerprint"),
+    payload: readPairLinkPayload(rawSearch, rawHash),
   }
 }
 
 /**
- * Turn the incoming query params into a pair-step selection, or `null` when
- * the params don't identify a target server (plain `/pair` visit, or a
- * `switchTo` for a device we have no recent-server record of).
+ * Turn the incoming params into a pair-step selection, or `null` for a plain
+ * `/pair` visit.
+ *
+ * Only a complete invitation qualifies. `baseUrl` / `switchTo` deliberately do
+ * not: Owner invitations are one-shot and are never stored in recent-server
+ * records, so a server address alone cannot pre-fill anything redeemable —
+ * re-pairing always needs a fresh cgnp3 payload from the Host.
  */
 export function resolveParamSelection(
-  _params: PairPageParams,
+  params: PairPageParams,
   _recents: RecentServer[]
 ): Selection | null {
-  // Owner invitations are one-shot and never stored in recent-server
-  // records or query parameters. Re-pairing always requires a fresh cgnp3
-  // payload from the host.
-  return null
+  if (!params.payload) return null
+  return { pairPayload: params.payload, autoScan: false, autoSubmit: true }
 }
 
 /** Reveal the manual-entry escape on the loading screen after this long. */
@@ -174,6 +194,15 @@ export function PairOnboardingClient() {
   )
   const [pairParams] = useState<PairPageParams>(() => readPairParams())
   const switchToParam = pairParams.switchTo
+
+  // Spend the link the moment it is read into state. A one-shot invitation is
+  // consumed by the first registration, so leaving it in the address bar turns
+  // a refresh into "invitation already used" and parks a live secret in the
+  // user's history until it expires.
+  useEffect(() => {
+    if (!pairParams.payload || typeof window === "undefined") return
+    stripPairLinkPayload(window)
+  }, [pairParams.payload])
 
   useEffect(() => {
     if (pairParams.mode !== "recover") return
@@ -225,14 +254,12 @@ export function PairOnboardingClient() {
             deviceId: cfg.deviceId,
             serverVersion: cfg.serverVersion,
           })
-          // Already paired to the requested target (or no target at all) →
-          // the usual paired step. A switch/prefill request for a DIFFERENT
-          // server drops onto the pair step with that server pre-filled so
-          // the user re-validates against it without re-typing.
+          // An invitation in the URL outranks an existing pairing: the user
+          // followed a link a Host minted seconds ago, so showing them the
+          // "you are already paired" card would strand a live invitation they
+          // deliberately came here to redeem (re-pair, or add a second Host).
           const alreadyOnTarget =
-            switchToParam !== null
-              ? cfg.deviceId === switchToParam
-              : true
+            paramSelection === null && (switchToParam !== null ? cfg.deviceId === switchToParam : true)
           if (alreadyOnTarget) {
             setStep("paired")
           } else if (paramSelection) {
@@ -481,6 +508,7 @@ export function PairOnboardingClient() {
               key={selection.pairPayload}
               prefilledPairPayload={selection.pairPayload}
               autoScan={selection.autoScan}
+              autoSubmit={selection.autoSubmit}
               webMode={isWebHost}
               persistPairing={persistPairing}
               onPaired={onPaired}

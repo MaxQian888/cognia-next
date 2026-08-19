@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tauri::{Manager, State};
 
 use super::{
-    desktop_messages_bridge, desktop_writes_bridge,
+    browser_access, desktop_messages_bridge, desktop_writes_bridge,
     event_bus::{register_tauri_event, EventBus},
     mdns::AutoStartConfig,
     secret, security_store,
@@ -854,6 +854,80 @@ pub struct OwnerInvitationIssue {
     pub app_version: String,
     pub host_id: String,
     pub tenant_id: String,
+}
+
+/// Renderer-facing view of the browser-access configuration.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserAccessSummary {
+    /// Whether the user has switched browser access on.
+    pub enabled: bool,
+    /// Exact browser origins allowed to reach this Host.
+    pub allowed_origins: Vec<String>,
+    /// Configured loopback port for the plaintext listener.
+    pub port: u16,
+    /// The port the listener is actually bound to right now. `None` when the
+    /// server is stopped or the listener could not bind — which is how the UI
+    /// distinguishes "configured" from "working".
+    pub bound_port: Option<u16>,
+    /// Origins offered as a starting point. Never applied implicitly.
+    pub suggested_origins: Vec<String>,
+    /// Base URL a browser should use, once the listener is live.
+    pub browser_base_url: Option<String>,
+    /// Origin a "pair in browser" link should open.
+    pub primary_origin: Option<String>,
+}
+
+fn browser_access_summary(
+    state: &State<'_, CompanionServerState>,
+    config: browser_access::BrowserAccessConfig,
+) -> BrowserAccessSummary {
+    let bound_port = state.browser_port();
+    BrowserAccessSummary {
+        browser_base_url: bound_port.map(|port| format!("http://127.0.0.1:{port}")),
+        primary_origin: config.primary_origin().map(str::to_string),
+        enabled: config.enabled,
+        allowed_origins: config.allowed_origins.clone(),
+        port: config.port,
+        bound_port,
+        suggested_origins: browser_access::SUGGESTED_ORIGINS
+            .iter()
+            .map(|origin| (*origin).to_string())
+            .collect(),
+    }
+}
+
+/// Read the browser-access configuration and its live binding.
+#[tauri::command]
+pub fn companion_browser_access_get(
+    state: State<'_, CompanionServerState>,
+) -> BrowserAccessSummary {
+    let config = browser_access::load(state.data_dir());
+    browser_access_summary(&state, config)
+}
+
+/// Persist the browser-access configuration.
+///
+/// Takes effect on the next server start: the plaintext listener is bound
+/// alongside the HTTPS one, and rebinding it under a live server would drop
+/// in-flight browser connections mid-request. The renderer restarts the server
+/// to apply, which is the same round-trip the bind-mode switch already makes.
+#[tauri::command]
+pub fn companion_browser_access_set(
+    state: State<'_, CompanionServerState>,
+    enabled: bool,
+    allowed_origins: Vec<String>,
+    port: Option<u16>,
+) -> Result<BrowserAccessSummary, String> {
+    let saved = browser_access::save(
+        state.data_dir(),
+        browser_access::BrowserAccessConfig {
+            enabled,
+            allowed_origins,
+            port: port.unwrap_or(browser_access::DEFAULT_BROWSER_PORT),
+        },
+    )?;
+    Ok(browser_access_summary(&state, saved))
 }
 
 /// One-time least-privilege worker enrollment and connection metadata.
@@ -1756,7 +1830,10 @@ mod tests {
         data.insert("text".into(), serde_json::json!("the secret is 42"));
         let body = push_body_for_channel(CONNECTOR_MESSAGE_ADDED_CHANNEL, &data);
         assert_eq!(body, "New message from Ada on Telegram");
-        assert!(!body.contains("42"), "message text must never ride the push");
+        assert!(
+            !body.contains("42"),
+            "message text must never ride the push"
+        );
 
         // Missing display name / platform degrade, never panic.
         assert_eq!(

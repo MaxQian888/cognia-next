@@ -167,10 +167,15 @@ it("does not expose the camera action in web mode", () => {
 })
 
 it("helps a web user issue, paste, inspect, and clear a headless invitation", async () => {
-  mockReadClipboardText.mockResolvedValue(payload)
+  // Empty at mount so the arrival clipboard sniff no-ops and the explicit
+  // paste button is the only reader under test here.
+  mockReadClipboardText.mockResolvedValue(null)
   const user = userEvent.setup()
 
   render(<PairStep webMode onPaired={jest.fn()} />)
+  await waitFor(() => expect(mockReadClipboardText).toHaveBeenCalled())
+  mockReadClipboardText.mockClear()
+  mockReadClipboardText.mockResolvedValue(payload)
 
   expect(screen.getByTestId("pair-headless-command")).toHaveTextContent(
     "pnpm --silent dev:headless pair --device-name browser"
@@ -202,4 +207,76 @@ it("helps a web user issue, paste, inspect, and clear a headless invitation", as
   await user.click(screen.getByTestId("pair-clear-payload"))
   expect(screen.getByTestId("pair-payload")).toHaveValue("")
   expect(screen.queryByTestId("pair-invitation-summary")).not.toBeInTheDocument()
+})
+
+it("fills the payload from the clipboard on arrival without submitting it", async () => {
+  // The headless `cognia-server pair` command prints the invitation to a
+  // terminal, so it is almost always already on the clipboard when the user
+  // lands here. Filling is a convenience; submitting would act on ambient
+  // content the user never pointed at this form.
+  mockReadClipboardText.mockResolvedValue(`  ${payload}\n`)
+  render(<PairStep webMode onPaired={jest.fn()} />)
+  await waitFor(() => expect(screen.getByTestId("pair-payload")).toHaveValue(payload))
+  expect(screen.getByTestId("pair-invitation-summary")).toBeInTheDocument()
+  expect(register).not.toHaveBeenCalled()
+})
+
+it("ignores unrelated clipboard content and a refused clipboard", async () => {
+  mockReadClipboardText.mockResolvedValue("https://example.com/some-link")
+  const { unmount } = render(<PairStep webMode onPaired={jest.fn()} />)
+  await waitFor(() => expect(mockReadClipboardText).toHaveBeenCalled())
+  expect(screen.getByTestId("pair-payload")).toHaveValue("")
+  expect(screen.queryByTestId("pair-error")).not.toBeInTheDocument()
+  unmount()
+
+  // Firefox/Safari reject `readText()` without a user gesture — stay silent.
+  mockReadClipboardText.mockRejectedValue(new Error("NotAllowedError"))
+  render(<PairStep webMode onPaired={jest.fn()} />)
+  await waitFor(() => expect(mockReadClipboardText).toHaveBeenCalledTimes(2))
+  expect(screen.getByTestId("pair-payload")).toHaveValue("")
+  expect(screen.queryByTestId("pair-error")).not.toBeInTheDocument()
+})
+
+it("does not sniff the clipboard on native, or when a payload arrived with the user", async () => {
+  render(<PairStep onPaired={jest.fn()} />)
+  await Promise.resolve()
+  expect(mockReadClipboardText).not.toHaveBeenCalled()
+
+  render(<PairStep webMode prefilledPairPayload={payload} onPaired={jest.fn()} />)
+  await Promise.resolve()
+  expect(mockReadClipboardText).not.toHaveBeenCalled()
+})
+
+it("auto-submits an invitation the user arrived with", async () => {
+  register.mockResolvedValue({ kind: "ok", config } as Awaited<ReturnType<typeof registerPairPayload>>)
+  const onPaired = jest.fn()
+  render(
+    <PairStep webMode autoSubmit prefilledPairPayload={payload} onPaired={onPaired} />
+  )
+  await waitFor(() => expect(onPaired).toHaveBeenCalledWith(config))
+  expect(register).toHaveBeenCalledTimes(1)
+  expect(register).toHaveBeenCalledWith(payload)
+})
+
+it("surfaces an auto-submit failure on the manual form and does not retry", async () => {
+  // A one-shot invitation is burned by the attempt; retrying would only
+  // produce a second, more confusing rejection.
+  register.mockResolvedValue({ kind: "registration_error", message: "invitation already used" })
+  const onPaired = jest.fn()
+  const { rerender } = render(
+    <PairStep webMode autoSubmit prefilledPairPayload={payload} onPaired={onPaired} />
+  )
+  await waitFor(() => expect(screen.getByTestId("pair-error")).toHaveTextContent(
+    "invitation already used"
+  ))
+  rerender(<PairStep webMode autoSubmit prefilledPairPayload={payload} onPaired={onPaired} />)
+  expect(register).toHaveBeenCalledTimes(1)
+  expect(onPaired).not.toHaveBeenCalled()
+  expect(screen.getByTestId("pair-payload")).toHaveValue(payload)
+})
+
+it("does not auto-submit a payload the user merely pre-filled", async () => {
+  render(<PairStep webMode prefilledPairPayload={payload} onPaired={jest.fn()} />)
+  await Promise.resolve()
+  expect(register).not.toHaveBeenCalled()
 })

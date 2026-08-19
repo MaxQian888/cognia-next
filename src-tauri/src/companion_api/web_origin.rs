@@ -29,6 +29,28 @@ impl WebOriginPolicy {
         )
     }
 
+    /// Union of the environment policy and the desktop's saved browser-access
+    /// origins.
+    ///
+    /// The env vars are how a headless deployment (compose, k8s, `dev:headless`)
+    /// is configured; the saved config is how the *desktop app* is, because a
+    /// GUI-launched app inherits no shell environment and therefore could never
+    /// be configured by env alone. Both feed one allowlist so a Host answers the
+    /// same set of origins regardless of which surface named them.
+    pub fn from_env_and_config(config: &super::browser_access::BrowserAccessConfig) -> Self {
+        let mut policy = Self::from_env();
+        for origin in &config.allowed_origins {
+            policy.allowed_origins.insert(origin.clone());
+        }
+        // Loopback is a private-network destination as far as Chrome's PNA
+        // check is concerned, so an explicitly configured browser origin has to
+        // carry the opt-in with it or the preflight it triggers would 403.
+        if config.listener_enabled() {
+            policy.allow_private_network = true;
+        }
+        policy
+    }
+
     fn from_values(origins: Option<&str>, allow_private_network: Option<&str>) -> Self {
         let allowed_origins = origins
             .into_iter()
@@ -302,6 +324,48 @@ mod tests {
                 "{insecure} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn config_origins_join_the_env_allowlist_and_carry_pna() {
+        use super::super::browser_access::BrowserAccessConfig;
+        std::env::set_var(ALLOWED_ORIGINS_ENV, "https://web.example");
+        let policy = WebOriginPolicy::from_env_and_config(
+            &BrowserAccessConfig {
+                enabled: true,
+                allowed_origins: vec!["http://localhost:3000".into()],
+                port: 27891,
+            }
+            .sanitized()
+            .unwrap(),
+        );
+        std::env::remove_var(ALLOWED_ORIGINS_ENV);
+        assert_eq!(
+            policy.evaluate(&headers(Some("http://localhost:3000"), "127.0.0.1:27891")),
+            OriginDecision::AllowedCrossOrigin("http://localhost:3000".into())
+        );
+        assert_eq!(
+            policy.evaluate(&headers(Some("https://web.example"), "127.0.0.1:27891")),
+            OriginDecision::AllowedCrossOrigin("https://web.example".into())
+        );
+        assert!(policy.allow_private_network);
+    }
+
+    #[test]
+    fn a_disabled_browser_access_config_grants_nothing() {
+        use super::super::browser_access::BrowserAccessConfig;
+        let policy = WebOriginPolicy::from_env_and_config(
+            &BrowserAccessConfig {
+                enabled: false,
+                allowed_origins: vec!["http://localhost:3000".into()],
+                port: 27891,
+            }
+            .sanitized()
+            .unwrap(),
+        );
+        // The origin is remembered for the next enable, so it is still allowed
+        // on the HTTPS plane — but nothing turns PNA on behind the user's back.
+        assert!(!policy.allow_private_network);
     }
 
     #[test]
