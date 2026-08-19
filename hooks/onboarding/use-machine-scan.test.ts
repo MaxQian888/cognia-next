@@ -5,7 +5,7 @@ const probeVendors = jest.fn()
 jest.mock("@/lib/agent-migration/probe", () => ({ probeVendors: () => probeVendors() }))
 
 jest.mock("@/lib/ai/agent/external/presets", () => ({
-  EXTERNAL_AGENT_PRESETS: { "claude-code": { name: "Claude Code" } },
+  EXTERNAL_AGENT_PRESETS: { "claude-code": { name: "Claude Code" }, pi: { name: "Pi" } },
 }))
 
 let ocrSettings: unknown = { defaultProviderId: "auto" }
@@ -39,6 +39,19 @@ describe("useMachineScan", () => {
     expect(result.current.result.runtimes).toEqual([
       { id: "claude-code", label: "Claude Code", authenticated: true },
     ])
+  })
+
+  it("maps every migration vendor to its runtime preset", async () => {
+    // `pi` was added to MIGRATION_VENDORS without a VENDOR_RUNTIME row, so an
+    // installed Pi resolved to an undefined preset id: the runtime row rendered
+    // with no id and `hasModelAccess` could not see it, meaning an
+    // already-authenticated Pi was still asked for Cognia credentials.
+    probeVendors.mockResolvedValue([
+      { vendor: "pi", installed: true, configPath: "/home/.pi/agent/settings.json" },
+    ])
+    const { result } = renderHook(() => useMachineScan("tauri"))
+    await waitFor(() => expect(result.current.phase).toBe("found"))
+    expect(result.current.result.runtimes).toEqual([{ id: "pi", label: "Pi", authenticated: true }])
   })
 
   it("treats a config-less install as present but not signed in", async () => {

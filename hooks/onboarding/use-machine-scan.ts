@@ -34,6 +34,11 @@ const VENDOR_RUNTIME: Record<MigrationVendor, string> = {
   "claude-code": "claude-code",
   codex: "codex",
   opencode: "opencode-server",
+  // Added with the vendor itself. Its absence was not merely cosmetic: an
+  // installed Pi resolved to `VENDOR_RUNTIME[p.vendor] === undefined`, so the
+  // runtime row rendered with an undefined id and `hasModelAccess` could not
+  // see it — an already-authenticated Pi still got asked for credentials.
+  pi: "pi",
 }
 
 export interface MachineScan {

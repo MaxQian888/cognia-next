@@ -22,13 +22,18 @@ import { queuePendingChatPrompt } from "@/lib/chat/pending-prompt"
 import { resolveOnboardingShell } from "@/lib/onboarding/shell"
 import { setMobileRuntimeMode, type MobileRuntimeMode } from "@/lib/runtime/standalone-mode"
 import { useClientLiveQuery } from "@/hooks/data"
+import { useHistoryImport } from "@/hooks/onboarding/use-history-import"
 import { useMachineScan } from "@/hooks/onboarding/use-machine-scan"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
+import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { MIGRATION_ARTIFACTS, type MigrationVendor } from "@/lib/agent-migration/types"
 import type { StarterCard } from "@/lib/onboarding/starter-cards"
 
 const log = loggers.ui.child("onboarding-flow")
+
+/** Everything the vendor migration brings over EXCEPT the conversations. */
+const MIGRATION_CONFIG_ARTIFACTS = MIGRATION_ARTIFACTS.filter((a) => a !== "sessions")
 
 /** Where a completed or abandoned flow lands. */
 const APP_ROUTE = "/"
@@ -62,6 +67,8 @@ export function OnboardingFlow() {
     [settings?.mobileRuntimeMode]
   )
   const scan = useMachineScan(shell)
+  const history = useHistoryImport({ shell })
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const { paired: companionPaired, loading: companionLoading } = useCompanionConfig()
   const pairingGateClosed = shell === "mobile-paired" && (companionLoading || !companionPaired)
 
@@ -164,12 +171,24 @@ export function OnboardingFlow() {
 
   const handleImport = useCallback(async (vendor: MigrationVendor) => {
     log.info("onboarding migration start", { vendor })
-    const preview = await buildMigrationPreview(vendor, MIGRATION_ARTIFACTS)
-    const artifacts = MIGRATION_ARTIFACTS.filter((a) => preview.artifacts[a]?.status === "ready")
+    // Conversations are NOT part of this pass: the step's history block owns
+    // them, and it covers every ADR-0062 source rather than only the four
+    // vendors the config migration has rows for. Leaving `sessions` in here
+    // too would import the same transcripts twice over — idempotent, but it
+    // would also double the wait behind a button that says "settings".
+    const wanted = MIGRATION_CONFIG_ARTIFACTS
+    const preview = await buildMigrationPreview(vendor, wanted)
+    const artifacts = wanted.filter((a) => preview.artifacts[a]?.status === "ready")
     if (artifacts.length === 0) return
     await applyMigration({ vendor, artifacts, strategy: "skip", preview })
     log.info("onboarding migration done", { vendor, artifacts })
   }, [])
+
+  const handleImportHistory = useCallback(async () => {
+    log.info("onboarding history import start", { total: history.total })
+    await history.importAll(activeProjectId ?? undefined)
+    log.info("onboarding history import done")
+  }, [history, activeProjectId])
 
   const handlePickCard = useCallback(
     async (card: StarterCard) => {
@@ -245,6 +264,8 @@ export function OnboardingFlow() {
         <ScanStep
           shell={shell}
           scan={scan}
+          history={history}
+          onImportHistory={handleImportHistory}
           onImport={async (vendor) => {
             setBusy(true)
             try {

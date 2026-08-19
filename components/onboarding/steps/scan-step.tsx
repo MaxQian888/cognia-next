@@ -4,6 +4,7 @@ import {
   CheckCircle2Icon,
   DownloadIcon,
   Loader2Icon,
+  MessagesSquareIcon,
   RefreshCwIcon,
   SearchXIcon,
 } from "lucide-react"
@@ -13,14 +14,19 @@ import type { OnboardingShell } from "@cognia/agent-config-types"
 
 import { Button } from "@/components/ui/button"
 import { StepHeading } from "../step-shell"
+import type { HistoryImport } from "@/hooks/onboarding/use-history-import"
 import type { MachineScan } from "@/hooks/onboarding/use-machine-scan"
 import type { MigrationVendor } from "@/lib/agent-migration/types"
 
 interface ScanStepProps {
   shell: OnboardingShell
   scan: MachineScan
+  /** Conversations found on this machine, across every session source. */
+  history: HistoryImport
   /** Runs the ADR-0107 preview → apply for one vendor, inline. */
   onImport: (vendor: MigrationVendor) => Promise<void>
+  /** Brings every discovered conversation across. */
+  onImportHistory: () => Promise<void>
   /** Paired phones hand off to the existing pairing route. */
   onOpenPairing?: () => void
 }
@@ -38,7 +44,14 @@ interface ScanStepProps {
  * On a paired phone the same step exists but its body is pairing: there is no
  * local runtime to find, because the compute lives on the desktop.
  */
-export function ScanStep({ shell, scan, onImport, onOpenPairing }: ScanStepProps) {
+export function ScanStep({
+  shell,
+  scan,
+  history,
+  onImport,
+  onImportHistory,
+  onOpenPairing,
+}: ScanStepProps) {
   const t = useTranslations("onboarding")
   const [importing, setImporting] = useState<MigrationVendor | null>(null)
   const [done, setDone] = useState<MigrationVendor[]>([])
@@ -183,6 +196,103 @@ export function ScanStep({ shell, scan, onImport, onOpenPairing }: ScanStepProps
           )}
         </div>
       )}
+
+      <ChatHistoryBlock history={history} onImport={onImportHistory} />
+    </div>
+  )
+}
+
+/**
+ * "We found N past conversations — want them?"
+ *
+ * Separate from the migration list above because it is keyed on a different
+ * question. That list asks "whose *config* is installed here"; this one asks
+ * "whose *transcripts* are on this disk", which is answered by the ADR-0062
+ * source registry and therefore covers every agent Cognia can read — including
+ * the three (Gemini CLI, Continue, Aider) that the config migration has no
+ * vendor row for.
+ */
+function ChatHistoryBlock({
+  history,
+  onImport,
+}: {
+  history: HistoryImport
+  onImport: () => Promise<void>
+}) {
+  const t = useTranslations("onboarding")
+  const [busy, setBusy] = useState(false)
+
+  // Nothing to say while the walk is still running on a step that already has
+  // a spinner of its own, and nothing to say when the disk is clean.
+  if (history.phase === "idle" || history.phase === "empty") return null
+  if (history.phase === "scanning") {
+    return (
+      <div
+        className="flex items-center gap-2 text-sm text-muted-foreground"
+        data-testid="onboarding-history-scanning"
+      >
+        <Loader2Icon className="size-4 animate-spin" aria-hidden />
+        {t("scan.historyScanning")}
+      </div>
+    )
+  }
+
+  const running = busy || history.phase === "importing"
+  const done = history.phase === "done"
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="onboarding-history">
+      <p className="text-sm font-medium">{t("scan.historyTitle")}</p>
+      <div className="flex items-start gap-3 rounded-lg border bg-background px-4 py-3">
+        <MessagesSquareIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm">
+            {done
+              ? t("scan.historyImported", { count: history.imported })
+              : t("scan.historyFound", { count: history.total })}
+          </p>
+          {!done && history.sources.length > 0 && (
+            <p className="mt-1 truncate text-xs text-muted-foreground">
+              {history.sources.map((s) => `${s.label} (${s.sessions})`).join(" · ")}
+            </p>
+          )}
+          {history.partial && !done && (
+            <p className="mt-1 text-xs text-muted-foreground">{t("scan.historyPartial")}</p>
+          )}
+        </div>
+        {done ? (
+          <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+            <CheckCircle2Icon className="size-3.5" aria-hidden />
+            {t("scan.migrateDone")}
+          </span>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            disabled={running}
+            onClick={() => {
+              setBusy(true)
+              // `Promise.resolve` rather than `onImport().finally`: the local
+              // busy flag must survive a handler that returns void.
+              void Promise.resolve(onImport()).finally(() => setBusy(false))
+            }}
+            data-testid="onboarding-history-cta"
+          >
+            {running ? (
+              <>
+                <Loader2Icon className="size-3.5 animate-spin" />
+                {t("scan.historyImporting", { percent: Math.round(history.progress * 100) })}
+              </>
+            ) : (
+              <>
+                <DownloadIcon className="size-3.5" />
+                {t("scan.historyCta")}
+              </>
+            )}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
