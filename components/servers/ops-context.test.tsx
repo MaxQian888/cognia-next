@@ -72,6 +72,8 @@ const client = {
   rotateKey: jest.fn(),
   upgrade: jest.fn(),
   cancelOperation: jest.fn(),
+  listOperations: jest.fn(),
+  listOperationEvents: jest.fn(),
   createEnrollmentToken: jest.fn(),
   validateTarget: jest.fn(),
   registerTarget: jest.fn(),
@@ -128,6 +130,7 @@ function Probe() {
       <span data-testid="offline">{String(ops.offline)}</span>
       <span data-testid="servers">{ops.servers.map((server) => server.id).join(",")}</span>
       <span data-testid="operations">{ops.operations.map((item) => item.id).join(",")}</span>
+      <span data-testid="states">{ops.operations.map((item) => item.state).join(",")}</span>
       <span data-testid="revision">{ops.servers[0]?.targetRevision ?? ""}</span>
       <button onClick={() => void ops.backup("staging")}>backup</button>
       <button onClick={() => void ops.preflight("staging")}>preflight</button>
@@ -144,6 +147,7 @@ function Probe() {
       >
         upgrade
       </button>
+      <button onClick={() => void ops.refresh()}>refresh</button>
       <button onClick={() => void ops.disconnect()}>disconnect</button>
     </div>
   )
@@ -170,6 +174,8 @@ beforeEach(() => {
   })
   client.listServers.mockResolvedValue([summary])
   client.getServer.mockResolvedValue(detail)
+  client.listOperations.mockResolvedValue([])
+  client.listOperationEvents.mockResolvedValue([])
   client.createBackup.mockResolvedValue(operation)
   client.preflight.mockResolvedValue({ ...operation, id: "op-preflight", kind: "preflight" })
   client.collectStatus.mockResolvedValue({ ...operation, id: "op-status" })
@@ -269,6 +275,62 @@ it("polls instead of pretending to be live on a buffered transport", async () =>
   await renderConnected()
   await waitFor(() => expect(pollOperationUpdatesMock).toHaveBeenCalled())
   expect(followOperationStreamMock).not.toHaveBeenCalled()
+})
+
+it("hydrates the operation history from the controller, newest first", async () => {
+  // Before `GET /v1/operations` existed, a reload emptied the rail and work
+  // started on another device was invisible.
+  client.listOperations.mockResolvedValue([
+    { ...operation, id: "op-old", createdAt: "2026-08-19T09:00:00.000Z" },
+    { ...operation, id: "op-new", createdAt: "2026-08-19T11:00:00.000Z" },
+  ])
+  await renderConnected()
+
+  await waitFor(() => expect(screen.getByTestId("operations")).toHaveTextContent("op-new,op-old"))
+})
+
+it("keeps a live operation the history page has not caught up with", async () => {
+  const user = userEvent.setup()
+  client.listOperations.mockResolvedValue([])
+  await renderConnected()
+
+  await user.click(screen.getByRole("button", { name: "backup" }))
+  await waitFor(() => expect(screen.getByTestId("operations")).toHaveTextContent("op-1"))
+
+  // A refresh whose history page predates the queue must not drop it.
+  client.listOperations.mockResolvedValue([
+    { ...operation, id: "op-old", createdAt: "2026-08-19T09:00:00.000Z" },
+  ])
+  await user.click(screen.getByRole("button", { name: "refresh" }))
+  await waitFor(() => expect(screen.getByTestId("operations")).toHaveTextContent("op-old"))
+  expect(screen.getByTestId("operations")).toHaveTextContent("op-1")
+})
+
+it("prefers the live copy of an operation over the history page's", async () => {
+  const user = userEvent.setup()
+  client.listOperations.mockResolvedValue([])
+  await renderConnected()
+
+  await user.click(screen.getByRole("button", { name: "backup" }))
+  await waitFor(() => expect(screen.getByTestId("states")).toHaveTextContent("queued"))
+
+  // The stream reports a transition the moment it happens; a page fetched a
+  // second earlier can only be staler.
+  const before = client.listOperations.mock.calls.length
+  client.listOperations.mockResolvedValue([{ ...operation, state: "succeeded" }])
+  await user.click(screen.getByRole("button", { name: "refresh" }))
+  await waitFor(() => expect(client.listOperations.mock.calls.length).toBeGreaterThan(before))
+  expect(screen.getByTestId("states")).toHaveTextContent("queued")
+})
+
+it("still loads the fleet when the history page fails", async () => {
+  // History is context, not the point of the screen — losing it must not make
+  // the fleet look unreachable.
+  client.listOperations.mockRejectedValue(new Error("gone"))
+  await renderConnected()
+
+  await waitFor(() => expect(screen.getByTestId("servers")).toHaveTextContent("staging"))
+  expect(screen.getByTestId("offline")).toHaveTextContent("false")
 })
 
 it("records each queued operation, newest first", async () => {

@@ -1,9 +1,9 @@
 /** @jest-environment jsdom */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import type { Operation } from "@/lib/server-ops/client"
+import type { Operation, OperationEvent } from "@/lib/server-ops/client"
 import { isCancellableOperation, OperationInspector } from "./operation-inspector"
 
 const operation = (overrides: Partial<Operation> = {}): Operation => ({
@@ -20,12 +20,32 @@ const operation = (overrides: Partial<Operation> = {}): Operation => ({
   ...overrides,
 })
 
-function renderInspector(value: Operation | null) {
+function renderInspector(
+  value: Operation | null,
+  loadEvents?: ((operationId: string) => Promise<OperationEvent[]>) | null
+) {
   const onCancel = jest.fn()
   const onOpenChange = jest.fn()
-  render(<OperationInspector operation={value} onOpenChange={onOpenChange} onCancel={onCancel} />)
+  render(
+    <OperationInspector
+      operation={value}
+      loadEvents={loadEvents}
+      onOpenChange={onOpenChange}
+      onCancel={onCancel}
+    />
+  )
   return { onCancel, onOpenChange }
 }
+
+const event = (overrides: Partial<OperationEvent> = {}): OperationEvent => ({
+  id: 1,
+  operationId: "3f1d2c00-0000-4000-8000-000000000001",
+  targetId: "staging",
+  state: "queued",
+  timestamp: "2026-08-19T10:00:00.000Z",
+  message: "operation queued",
+  ...overrides,
+})
 
 describe("isCancellableOperation", () => {
   it("is true only before an agent claims the operation", () => {
@@ -90,4 +110,45 @@ it("disables cancelling for a claimed operation and says why", () => {
 it("renders nothing when no operation is selected", () => {
   renderInspector(null)
   expect(screen.queryByText("Request")).not.toBeInTheDocument()
+})
+
+describe("timeline", () => {
+  it("renders the controller's state-change trail in order", async () => {
+    const loadEvents = jest
+      .fn()
+      .mockResolvedValue([
+        event({ id: 1, state: "queued", message: "operation queued" }),
+        event({ id: 2, state: "executing", message: "operation executing" }),
+      ])
+    renderInspector(operation({ state: "executing" }), loadEvents)
+
+    await waitFor(() => expect(loadEvents).toHaveBeenCalledWith(operation().id))
+    expect(await screen.findByText("operation queued")).toBeInTheDocument()
+    expect(screen.getByText("operation executing")).toBeInTheDocument()
+  })
+
+  it("says the trail is empty rather than implying nothing happened", async () => {
+    // An operation opened from history has no stream events to accumulate, so
+    // a blank section would read as "nothing happened".
+    renderInspector(operation(), jest.fn().mockResolvedValue([]))
+    expect(
+      await screen.findByText(
+        "The controller has not recorded a state change for this operation yet."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("reports a failed trail load inline instead of as a toast", async () => {
+    renderInspector(operation(), jest.fn().mockRejectedValue(new Error("gone")))
+    expect(
+      await screen.findByText("The state-change trail could not be loaded.")
+    ).toBeInTheDocument()
+  })
+
+  it("shows the empty note when disconnected rather than calling nothing", () => {
+    renderInspector(operation(), null)
+    expect(
+      screen.getByText("The controller has not recorded a state change for this operation yet.")
+    ).toBeInTheDocument()
+  })
 })

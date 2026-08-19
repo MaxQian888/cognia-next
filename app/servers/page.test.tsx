@@ -87,6 +87,7 @@ const base = (): ServerOpsValue =>
     createEnrollmentToken: jest.fn(),
     listBackups: null,
     listLogs: null,
+    listOperationEvents: jest.fn().mockResolvedValue([]),
   }) as unknown as ServerOpsValue
 
 beforeEach(() => {

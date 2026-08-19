@@ -78,8 +78,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/servers/{id}/rotate-key", post(create_rotate_key))
         .route("/v1/servers/{id}/collect-status", post(create_collect_status))
         .route("/v1/servers/{id}/collect-logs", post(create_collect_logs))
+        .route("/v1/operations", get(list_operations))
         .route("/v1/operations/{id}", get(get_operation))
         .route("/v1/operations/{id}/cancel", post(cancel_operation))
+        .route("/v1/operations/{id}/events", get(list_operation_events))
         .route("/v1/admin-leases", post(create_admin_lease))
         .route(
             "/v1/agents/enrollment-tokens",
@@ -486,6 +488,72 @@ async fn create_operation_with_request(
     };
     match state.store.create_operation(input).await {
         Ok(operation) => (StatusCode::ACCEPTED, Json(operation)).into_response(),
+        Err(error) => store_error(error),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationQuery {
+    target_id: Option<String>,
+    limit: Option<usize>,
+}
+
+/// Recent operations, newest first, optionally narrowed to one target.
+///
+/// Read scope, not operate: this is history, and an operator who can see the
+/// fleet can see what has been done to it. The 500 ceiling matches the client's
+/// rail, which paginates by refetching rather than by cursor.
+async fn list_operations(
+    State(state): State<AppState>,
+    Query(query): Query<OperationQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let claims = match authorize(&state, &headers, "servers:read").await {
+        Ok(claims) => claims,
+        Err(response) => return response,
+    };
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    match state
+        .store
+        .list_operations(&claims.tenant_id, query.target_id.as_deref(), limit)
+        .await
+    {
+        Ok(items) => Json(json!({ "items": items })).into_response(),
+        Err(error) => store_error(error),
+    }
+}
+
+/// The state-change trail of one operation, oldest first.
+///
+/// The same rows the SSE stream replays, addressed by operation instead of by
+/// cursor — a client that opens an operation it did not queue has no other way
+/// to learn how it got where it is.
+async fn list_operation_events(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Response {
+    let claims = match authorize(&state, &headers, "servers:read").await {
+        Ok(claims) => claims,
+        Err(response) => return response,
+    };
+    // A tenant that cannot see the operation must not learn it exists from an
+    // empty event list, so existence is checked first.
+    match state.store.get_operation(&claims.tenant_id, id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return api_error(
+                StatusCode::NOT_FOUND,
+                "operation_not_found",
+                "Operation not found",
+                None,
+            )
+        }
+        Err(error) => return store_error(error),
+    }
+    match state.store.list_operation_events(&claims.tenant_id, id).await {
+        Ok(items) => Json(json!({ "items": items })).into_response(),
         Err(error) => store_error(error),
     }
 }

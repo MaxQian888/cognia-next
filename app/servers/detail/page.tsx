@@ -223,6 +223,7 @@ function ServerDetailRoute() {
       />
       <OperationInspector
         operation={inspected}
+        loadEvents={ops.listOperationEvents}
         onOpenChange={(open) => !open && setInspected(null)}
         onCancel={(id) => {
           void ops.cancelOperation(id)

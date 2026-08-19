@@ -86,6 +86,7 @@ const base = (): ServerOpsValue =>
     createEnrollmentToken: jest.fn(),
     listBackups: jest.fn().mockResolvedValue([{ id: "rp-1" }]),
     listLogs: jest.fn().mockResolvedValue([{ id: 1 }]),
+    listOperationEvents: jest.fn().mockResolvedValue([]),
   }) as unknown as ServerOpsValue
 
 function renderPage() {

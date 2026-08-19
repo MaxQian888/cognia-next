@@ -103,6 +103,8 @@ export interface ServerOpsValue {
   createEnrollmentToken: (targetId: string) => Promise<EnrollmentToken | null>
   listBackups: OpsClient["listBackups"] | null
   listLogs: OpsClient["listLogs"] | null
+  /** One operation's state-change trail, for the inspector's timeline. */
+  listOperationEvents: OpsClient["listOperationEvents"] | null
 }
 
 const ServerOpsContext = createContext<ServerOpsValue | null>(null)
@@ -229,6 +231,21 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [accountId, connected, connection])
 
+  /**
+   * Fold a page of controller history into the list, newest first.
+   *
+   * The live copy of an operation wins on conflict: the stream reports a
+   * transition the moment it happens, while a page fetched a second earlier can
+   * only be staler.
+   */
+  const mergeOperations = useCallback((incoming: readonly Operation[]) => {
+    setOperations((current) => {
+      const known = new Set(current.map((item) => item.id))
+      const merged = [...current, ...incoming.filter((item) => !known.has(item.id))]
+      return merged.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    })
+  }, [])
+
   const refresh = useCallback(async () => {
     if (!client || !accountId || !connection) return
     setLoading(true)
@@ -238,6 +255,12 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
       // endpoint, and serially this grew linearly with fleet size.
       const details = await Promise.all(summaries.map((summary) => client.getServer(summary.id)))
       setServers(details)
+      // History comes from the controller, so a reload — or another operator's
+      // work — is visible rather than lost with the tab that queued it. Merged
+      // rather than replaced so an operation queued a moment ago, which the
+      // controller may not have returned in this page, is not dropped.
+      const history = await client.listOperations({ limit: 100 }).catch(() => null)
+      if (history) mergeOperations(history)
       saveCachedServerList(localStorage, accountId, connection.profileId, summaries)
       setOffline(false)
     } catch (error) {
@@ -248,7 +271,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [accountId, client, connection, t])
+  }, [accountId, client, connection, mergeOperations, t])
 
   useEffect(() => {
     if (!client) return
@@ -519,6 +542,7 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
       },
       listBackups: client ? client.listBackups.bind(client) : null,
       listLogs: client ? client.listLogs.bind(client) : null,
+      listOperationEvents: client ? client.listOperationEvents.bind(client) : null,
     }
   }, [
     accountId,

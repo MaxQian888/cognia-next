@@ -767,3 +767,172 @@ async fn cancel_requires_operate_scope_and_an_idempotency_key() {
         .expect("cancel without a key");
     assert_eq!(no_key.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn operation_history_survives_the_session_that_queued_it() {
+    let application = app_with_staging().await;
+
+    for (path, key) in [
+        ("backups", "history-backup"),
+        ("preflight", "history-preflight"),
+    ] {
+        let queued = application
+            .clone()
+            .oneshot(keyed(
+                "POST",
+                &format!("/v1/servers/staging/{path}"),
+                "tenant-a:servers:operate",
+                json!({}),
+                key,
+            ))
+            .await
+            .expect("queue operation");
+        assert_eq!(queued.status(), StatusCode::ACCEPTED);
+    }
+
+    // Read scope is enough: this is history, and whoever can see the fleet can
+    // see what has been done to it.
+    let listed = application
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/v1/operations",
+            "tenant-a:servers:read",
+            json!({}),
+        ))
+        .await
+        .expect("list operations");
+    assert_eq!(listed.status(), StatusCode::OK);
+    let body = json_body(listed).await;
+    let kinds: Vec<&str> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|item| item["kind"].as_str().expect("kind"))
+        .collect();
+    assert_eq!(kinds.len(), 2);
+    assert!(kinds.contains(&"backup") && kinds.contains(&"preflight"));
+
+    // Narrowing to a target the tenant has nothing on returns an empty list,
+    // not every operation.
+    let narrowed = application
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/v1/operations?targetId=absent",
+            "tenant-a:servers:read",
+            json!({}),
+        ))
+        .await
+        .expect("list narrowed operations");
+    assert_eq!(json_body(narrowed).await["items"].as_array().unwrap().len(), 0);
+
+    let limited = application
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/v1/operations?limit=1",
+            "tenant-a:servers:read",
+            json!({}),
+        ))
+        .await
+        .expect("list limited operations");
+    assert_eq!(json_body(limited).await["items"].as_array().unwrap().len(), 1);
+
+    // Another tenant's history is invisible.
+    let cross_tenant = application
+        .oneshot(request(
+            "GET",
+            "/v1/operations",
+            "tenant-b:servers:read",
+            json!({}),
+        ))
+        .await
+        .expect("list across tenants");
+    assert_eq!(
+        json_body(cross_tenant).await["items"].as_array().unwrap().len(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn operation_events_are_addressable_by_operation() {
+    let application = app_with_staging().await;
+
+    let queued = application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            "/v1/servers/staging/backups",
+            "tenant-a:servers:operate",
+            json!({}),
+            "events-backup",
+        ))
+        .await
+        .expect("queue backup");
+    let operation_id = json_body(queued).await["id"]
+        .as_str()
+        .expect("operation id")
+        .to_owned();
+
+    let events = application
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/v1/operations/{operation_id}/events"),
+            "tenant-a:servers:read",
+            json!({}),
+        ))
+        .await
+        .expect("list operation events");
+    assert_eq!(events.status(), StatusCode::OK);
+    let body = json_body(events).await;
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["state"], "queued");
+    assert_eq!(items[0]["operationId"], operation_id);
+
+    // Cancelling appends to the same trail rather than replacing it.
+    application
+        .clone()
+        .oneshot(keyed(
+            "POST",
+            &format!("/v1/operations/{operation_id}/cancel"),
+            "tenant-a:servers:operate",
+            json!({}),
+            "events-cancel",
+        ))
+        .await
+        .expect("cancel");
+    let after = application
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/v1/operations/{operation_id}/events"),
+            "tenant-a:servers:read",
+            json!({}),
+        ))
+        .await
+        .expect("list operation events again");
+    let body = json_body(after).await;
+    let states: Vec<&str> = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["state"].as_str().unwrap())
+        .collect();
+    assert_eq!(states, vec!["queued", "cancelled"]);
+
+    // An operation another tenant cannot see must 404 rather than answering
+    // with an empty trail, which would confirm the id exists.
+    let cross_tenant = application
+        .oneshot(request(
+            "GET",
+            &format!("/v1/operations/{operation_id}/events"),
+            "tenant-b:servers:read",
+            json!({}),
+        ))
+        .await
+        .expect("events across tenants");
+    assert_eq!(cross_tenant.status(), StatusCode::NOT_FOUND);
+}

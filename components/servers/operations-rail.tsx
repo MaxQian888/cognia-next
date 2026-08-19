@@ -4,10 +4,9 @@
  * The right rail of the Servers workspace: every operation this session knows
  * about, newest first.
  *
- * Session-scoped by necessity, not by choice — the controller has no endpoint
- * that lists operations, so an operation becomes visible either because this
- * client queued it or because it arrived on the live event stream. The empty
- * state says so rather than implying the fleet is idle.
+ * Backed by the controller's own history (`GET /v1/operations`), so a reload —
+ * or another operator's work — is visible here rather than lost with the tab
+ * that queued it. Live events fold into the same list as they arrive.
  */
 
 import { useTranslations } from "next-intl"

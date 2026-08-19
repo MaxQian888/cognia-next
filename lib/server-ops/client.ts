@@ -346,8 +346,37 @@ export class OpsClient {
     )
   }
 
+  /**
+   * Recent operations, newest first.
+   *
+   * The reason the rail is no longer session-scoped: before this endpoint, an
+   * operation was only ever known from the response that queued it or from the
+   * live event stream, so a reload emptied the history and work started on
+   * another device was invisible.
+   */
+  async listOperations(options: { targetId?: string; limit?: number } = {}): Promise<Operation[]> {
+    const query = new URLSearchParams()
+    if (options.targetId) query.set("targetId", options.targetId)
+    if (options.limit !== undefined) {
+      query.set("limit", String(Math.min(Math.max(Math.trunc(options.limit), 1), 500)))
+    }
+    const suffix = query.toString()
+    const response = await this.request<{ items: Operation[] }>(
+      suffix ? `/v1/operations?${suffix}` : "/v1/operations"
+    )
+    return response.items
+  }
+
   async getOperation(id: string): Promise<Operation> {
     return this.request(`/v1/operations/${encodeURIComponent(id)}`)
+  }
+
+  /** One operation's state-change trail, oldest first. */
+  async listOperationEvents(id: string): Promise<OperationEvent[]> {
+    const response = await this.request<{ items: OperationEvent[] }>(
+      `/v1/operations/${encodeURIComponent(id)}/events`
+    )
+    return response.items
   }
 
   /**

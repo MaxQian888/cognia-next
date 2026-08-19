@@ -78,6 +78,23 @@ pub trait Store: Send + Sync {
     /// still running. Returns `InvalidTransition` for an operation an agent
     /// already claimed.
     async fn cancel_operation(&self, tenant_id: &str, id: Uuid) -> Result<Operation, StoreError>;
+    /// Recent operations for the tenant, newest first.
+    ///
+    /// Without this the only way a client learns an operation exists is the
+    /// response that queued it or the live event stream — so a reload emptied
+    /// the history, and work started on another device was invisible.
+    async fn list_operations(
+        &self,
+        tenant_id: &str,
+        target_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Operation>, StoreError>;
+    /// The full state-change trail of one operation, oldest first.
+    async fn list_operation_events(
+        &self,
+        tenant_id: &str,
+        operation_id: Uuid,
+    ) -> Result<Vec<OperationEvent>, StoreError>;
     async fn events_after(
         &self,
         tenant_id: &str,
@@ -396,6 +413,49 @@ impl Store for InMemoryStore {
             },
         });
         Ok(operation)
+    }
+
+    async fn list_operations(
+        &self,
+        tenant_id: &str,
+        target_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Operation>, StoreError> {
+        let data = self.inner.lock();
+        let mut operations: Vec<Operation> = data
+            .operations
+            .values()
+            .filter(|operation| {
+                operation.tenant_id == tenant_id
+                    && target_id.is_none_or(|id| operation.target_id == id)
+            })
+            .cloned()
+            .collect();
+        // Newest first, then by id so a batch created in the same millisecond
+        // still comes back in a stable order rather than HashMap order.
+        operations.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        operations.truncate(limit);
+        Ok(operations)
+    }
+
+    async fn list_operation_events(
+        &self,
+        tenant_id: &str,
+        operation_id: Uuid,
+    ) -> Result<Vec<OperationEvent>, StoreError> {
+        Ok(self
+            .inner
+            .lock()
+            .events
+            .iter()
+            .filter(|item| item.tenant_id == tenant_id && item.event.operation_id == operation_id)
+            .map(|item| item.event.clone())
+            .collect())
     }
 
     async fn events_after(
@@ -1221,6 +1281,45 @@ impl Store for PgStore {
         } else {
             StoreError::NotFound
         })
+    }
+
+    async fn list_operations(
+        &self,
+        tenant_id: &str,
+        target_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Operation>, StoreError> {
+        let client = self.client().await?;
+        // `$2::text IS NULL` keeps one prepared statement for both the whole
+        // fleet and a single target.
+        let rows = client
+            .query(
+                "SELECT * FROM operations
+                 WHERE tenant_id=$1 AND ($2::text IS NULL OR target_id=$2)
+                 ORDER BY created_at DESC, id DESC LIMIT $3",
+                &[&tenant_id, &target_id, &(limit as i64)],
+            )
+            .await
+            .map_err(database_error)?;
+        rows.iter().map(operation_from_row).collect()
+    }
+
+    async fn list_operation_events(
+        &self,
+        tenant_id: &str,
+        operation_id: Uuid,
+    ) -> Result<Vec<OperationEvent>, StoreError> {
+        let client = self.client().await?;
+        let rows = client
+            .query(
+                "SELECT id, operation_id, target_id, state, created_at, message
+                 FROM operation_events WHERE tenant_id=$1 AND operation_id=$2
+                 ORDER BY id LIMIT 1000",
+                &[&tenant_id, &operation_id],
+            )
+            .await
+            .map_err(database_error)?;
+        rows.iter().map(event_from_row).collect()
     }
 
     async fn events_after(

@@ -369,6 +369,38 @@ describe("OpsClient", () => {
     ])
   })
 
+  it("reads operation history and one operation's trail", async () => {
+    const fetchImpl = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockImplementation(async () => jsonResponse({ items: [] }))
+    const client = new OpsClient({
+      baseUrl: "https://ops.example.com",
+      accessToken: () => Promise.resolve("access-token"),
+      fetchImpl,
+    })
+
+    await client.listOperations()
+    await client.listOperations({ targetId: "tenant/a", limit: 10 })
+    await client.listOperations({ limit: 9000 })
+    await client.listOperationEvents("op/1")
+
+    expect(
+      fetchImpl.mock.calls.map(([input]) => {
+        const url = new URL(input as string)
+        return url.pathname + url.search
+      })
+    ).toEqual([
+      // No query at all rather than an empty `?`, so the controller's defaults
+      // apply verbatim.
+      "/v1/operations",
+      "/v1/operations?targetId=tenant%2Fa&limit=10",
+      // The controller clamps to 500 too; clamping here keeps the request
+      // honest about what it will get back.
+      "/v1/operations?limit=500",
+      "/v1/operations/op%2F1/events",
+    ])
+  })
+
   it("delegates event streaming to an injected transport", async () => {
     // Desktop cannot open the SSE stream from the renderer at all, so the
     // client must hand the whole job to the native transport rather than

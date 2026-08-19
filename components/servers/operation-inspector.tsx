@@ -9,7 +9,7 @@
  * fetched and then dropped on the floor. This is where they land.
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { BanIcon, CopyIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -34,8 +34,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import type { Operation } from "@/lib/server-ops/client"
-import { OperationStateBadge, useAbsoluteTime } from "./server-visuals"
+import type { Operation, OperationEvent } from "@/lib/server-ops/client"
+import { cn } from "@/lib/utils"
+import { isRunningOperationState, OperationStateBadge, useAbsoluteTime } from "./server-visuals"
 
 /** Only a still-queued operation can be cancelled — see `cancelOperation`. */
 export function isCancellableOperation(operation: Operation): boolean {
@@ -80,14 +81,101 @@ function PayloadBlock({ label, value }: { label: string; value: unknown }) {
   )
 }
 
+/**
+ * The operation's state-change trail.
+ *
+ * Loaded from the controller rather than accumulated from the live stream: an
+ * operation opened from history — queued before this tab existed, or by another
+ * operator — has no stream events to accumulate, and "no timeline" would read
+ * as "nothing happened" rather than "this client wasn't listening".
+ */
+function OperationTimeline({
+  operation,
+  loadEvents,
+}: {
+  operation: Operation
+  loadEvents: ((operationId: string) => Promise<OperationEvent[]>) | null
+}) {
+  const t = useTranslations("servers")
+  const absolute = useAbsoluteTime()
+  const [state, setState] = useState<{
+    operationId: string
+    events: readonly OperationEvent[]
+  } | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (!loadEvents) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const events = await loadEvents(operation.id)
+        if (!cancelled) setState({ operationId: operation.id, events })
+      } catch {
+        // A missing trail is not worth a toast — the operation itself is on
+        // screen, and this section says so inline.
+        if (!cancelled) setFailed(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // `operation.updatedAt` re-reads the trail as the live stream advances the
+    // operation, so an open inspector fills in rather than freezing.
+  }, [loadEvents, operation.id, operation.updatedAt])
+
+  const events = state?.operationId === operation.id ? state.events : []
+
+  return (
+    <section className="space-y-2">
+      <h3 className="text-xs font-medium text-muted-foreground">{t("operations.timeline")}</h3>
+      {events.length === 0 ? (
+        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+          {failed ? t("operations.timelineFailed") : t("operations.timelineEmpty")}
+        </p>
+      ) : (
+        <ol className="space-y-0">
+          {events.map((event, index) => (
+            <li key={event.id} className="flex gap-3">
+              <span className="flex flex-col items-center" aria-hidden="true">
+                <span
+                  className={cn(
+                    "mt-1.5 size-2 shrink-0 rounded-full",
+                    isRunningOperationState(event.state) ? "bg-primary" : "bg-muted-foreground/40"
+                  )}
+                />
+                {index < events.length - 1 && <span className="w-px flex-1 bg-border" />}
+              </span>
+              <span className="min-w-0 flex-1 pb-4">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">{t(`operationStates.${event.state}`)}</span>
+                  <span className="text-xs text-muted-foreground">{absolute(event.timestamp)}</span>
+                </span>
+                {event.message && (
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {event.message}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
 export function OperationInspector({
   operation,
   onOpenChange,
   onCancel,
+  loadEvents,
 }: {
   operation: Operation | null
   onOpenChange: (open: boolean) => void
   onCancel: (operationId: string) => void
+  /** Null while disconnected; the timeline then explains itself instead. */
+  loadEvents?: ((operationId: string) => Promise<OperationEvent[]>) | null
 }) {
   const t = useTranslations("servers")
   const absolute = useAbsoluteTime()
@@ -132,6 +220,8 @@ export function OperationInspector({
                       </div>
                     ))}
                   </dl>
+
+                  <OperationTimeline operation={operation} loadEvents={loadEvents ?? null} />
 
                   <PayloadBlock label={t("operations.request")} value={operation.request} />
                   {operation.result !== null && operation.result !== undefined && (
