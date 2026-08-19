@@ -18,6 +18,25 @@
 // sandbox indicator, plugin slots — render inline, because collapsing them
 // there hid state the user is expected to read at a glance (which mode, is the
 // sandbox on) behind a button with no affordance for what it contains.
+//
+// Two rules keep that inline roster from turning back into the wall of text it
+// was (nine labelled chips, the last of which painted over its neighbour on an
+// 832px reading column):
+//
+//  1. **Labels are earned by not being default.** A control sitting on its
+//     shipped value is a glyph with a tooltip; the moment it holds something
+//     the user chose, it spells that choice out. The runtime chip and the
+//     system-prompt preset chip both work this way, so a stock session reads
+//     `model · thinking · permission ┆ Standard ▾ 🤖 ✨` instead of repeating
+//     "Claude SDK" and "No preset" under every turn.
+//  2. **Everything shrinks.** Every chip is `min-w-0 shrink` (the shadcn button
+//     base is `shrink-0`), so a long provider model id ellipsizes inside its
+//     own box. Without it the group shrank, its `shrink-0` children did not,
+//     and they overflowed the group's box to paint on top of the next control.
+//
+// Grouping is carried by ONE hairline: per-turn answers (model, thinking,
+// permission) on the left of it, session shape (mode, runtime, preset) on the
+// right, ambient status pinned to the far end.
 
 import { useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
@@ -190,15 +209,18 @@ function GenericBottomToolbar({
     </>
   )
 
-  // The permanent execution row answers the two highest-frequency questions:
-  // which model, and which Agent runtime. Permission remains adjacent because
-  // it changes what that runtime may do.
+  // The per-turn answers: which model, how deeply it thinks, what it may do
+  // without asking. These three change between one send and the next, so they
+  // are the only group that is always labelled in full.
   //
-  // Every control on the row wears the same quiet chip (`TOOLBAR_CHIP`): no
-  // fill, no border, hover-only affordance. Grouping is carried by thin
-  // dividers, not by boxing some controls and not others.
-  const modelAndPermission = (
-    <div className="flex min-w-0 flex-nowrap items-center gap-0.5">
+  // Every control wears the same quiet chip (`TOOLBAR_CHIP`): no fill, no
+  // border, hover-only affordance, and shrinkable so a long model id
+  // ellipsizes instead of spilling over its neighbour.
+  const runConfigGroup = (
+    <div
+      className="flex min-w-0 flex-nowrap items-center gap-0.5"
+      data-testid="composer-execution-controls"
+    >
       <ModelPicker
         session={session}
         disabled={isStreaming}
@@ -208,30 +230,29 @@ function GenericBottomToolbar({
           it — the pair reads as one answer to "how deeply will this run". It
           self-hides on a surface with no depth control, which is why it can
           live on the permanent row rather than behind the overflow. */}
+      {/* The two short labels hold their ground: "Auto" abbreviated to "A…"
+          teaches nothing, and the model id beside them is the only string on
+          this side long enough to be worth ellipsizing. Below the compact
+          threshold the whole row re-packs instead of shaving letters. */}
       <EffortChip
         session={session}
         disabled={isStreaming}
-        className={cn(TOOLBAR_CHIP, "max-w-[7.5rem]")}
+        className={cn(TOOLBAR_CHIP, "max-w-[7.5rem] shrink-0")}
       />
       <PermissionModeIndicator
         onCycle={(next) => setPermissionMode(next)}
         disabled={isStreaming}
-        className={TOOLBAR_CHIP}
+        className={cn(TOOLBAR_CHIP, "shrink-0")}
       />
-      {/* The system-prompt preset shapes the session the way the model and
-          permission do, so it sits with them (moved down from the chat header,
-          which is title-bar chrome now). Self-hides without presets, which is
-          why it lives inside this group rather than behind its own divider. */}
-      {session && !compact ? (
-        <ComposerPresetChip session={session} disabled={isStreaming} className={TOOLBAR_CHIP} />
-      ) : null}
     </div>
   )
-  // Narrow packings put the preset in the overflow instead of the first row.
-  const presetControl =
-    session && compact ? (
-      <ComposerPresetChip session={session} disabled={isStreaming} className={TOOLBAR_CHIP} />
-    ) : null
+  // The system-prompt preset shapes the session the way the mode and runtime
+  // beside it do, so it joins them on the right of the hairline (it moved down
+  // from the chat header, which is title-bar chrome now). Self-hides without
+  // presets; wears the glyph until one is actually active.
+  const presetControl = session ? (
+    <ComposerPresetChip session={session} disabled={isStreaming} className={TOOLBAR_CHIP} />
+  ) : null
   // Ambient session status that used to crowd the header: what this session
   // has cost, and the one credential state that would stop the next send.
   const sessionStatus = session ? (
@@ -243,14 +264,22 @@ function GenericBottomToolbar({
       <ComposerCredentialBadge onOpenSettings={onOpenProviderSettings} />
     </>
   ) : null
-  const executionGroup = (
+  // Session shape — how the agent is composed, where it executes, and which
+  // system prompt it carries. Set once per conversation rather than per turn,
+  // so this side of the hairline is where the "label only when non-default"
+  // rule does its work: on a stock session it is one labelled chip and two
+  // glyphs.
+  const shapeGroup = (
     <div
-      className="flex min-w-0 flex-nowrap items-center gap-0.5"
-      data-testid="composer-execution-controls"
+      // Yields width three times as fast as the per-turn group beside it: when
+      // the pane narrows, "Standard" giving up letters costs less than the
+      // model id and the permission mode doing the same.
+      className="flex min-w-0 shrink-[3] flex-nowrap items-center gap-0.5"
+      data-testid="composer-shape-controls"
     >
-      {modelAndPermission}
-      <ToolbarDivider />
+      {modeControl}
       {runtimeControl}
+      {presetControl}
     </div>
   )
 
@@ -287,7 +316,9 @@ function GenericBottomToolbar({
         className="flex min-w-0 flex-1 items-center justify-end gap-1 text-[11px] text-muted-foreground"
         data-testid="composer-toolbar-embedded"
       >
-        {executionGroup}
+        {runConfigGroup}
+        <ToolbarDivider />
+        {runtimeControl}
         {sessionStatus}
         {contextIndicator}
         {overflow}
@@ -305,7 +336,7 @@ function GenericBottomToolbar({
       >
         <div className="flex min-w-0 items-center gap-1">
           {leading}
-          {modelAndPermission}
+          {runConfigGroup}
         </div>
         <div className="flex items-center justify-end gap-x-1">
           {runtimeControl}
@@ -317,10 +348,11 @@ function GenericBottomToolbar({
     )
   }
 
-  // Wide (web / desktop): one row, status cluster pinned right via the context
-  // indicator's `ml-auto`. Nothing is collapsed here — the row has the space,
-  // and a "⋯" that hides the active Agent mode costs a click to answer a
-  // question the user asks on every turn.
+  // Wide (web / desktop): one row, three zones — per-turn config, one hairline,
+  // session shape, then the ambient status cluster pinned right by `ml-auto`.
+  // Nothing is collapsed here — the row has the space once the default-valued
+  // chips are glyphs, and a "⋯" that hides the active Agent mode costs a click
+  // to answer a question the user asks on every turn.
   return (
     <div
       ref={rootRef}
@@ -328,16 +360,15 @@ function GenericBottomToolbar({
       data-testid="composer-footer"
     >
       {leading}
-      {executionGroup}
-      {modeControl ? (
-        <>
-          <ToolbarDivider />
-          {modeControl}
-        </>
-      ) : null}
+      {runConfigGroup}
+      <ToolbarDivider />
+      {shapeGroup}
       <div className="flex shrink-0 items-center gap-1 empty:hidden">{pluginSlots}</div>
+      {/* Read-only ambient state, held apart from the controls by the auto
+          margin rather than by another rule — the gap IS the grouping, and one
+          hairline per row is the whole divider budget. */}
       <div
-        className="ml-auto flex shrink-0 items-center gap-0.5 pl-2"
+        className="ml-auto flex shrink-0 items-center gap-0.5 pl-3"
         data-testid="composer-status-cluster"
       >
         {sessionStatus}
@@ -348,21 +379,35 @@ function GenericBottomToolbar({
   )
 }
 
-/** Below this measured width, split the status line into two compact rows. */
-const COMPACT_TOOLBAR_PX = 384
+/**
+ * Below this measured width, split the status line into two compact rows.
+ *
+ * 384 → 520. The one-row packing needs about 520px before the only chips with
+ * long labels (the model id, the composition preset) are shaved past reading —
+ * and past that point every other chip starts giving up letters too, which is
+ * how a 420px pane ended up rendering "A…" and "Def…". Two honest rows beat one
+ * row of stubs; the compact branch already exists and holds the full roster.
+ */
+const COMPACT_TOOLBAR_PX = 520
 
 /**
  * The one chip style every toolbar control wears. Overrides each control's
  * own default (outline / muted fill / rounded-lg) so the row reads as a single
  * quiet strip: same height, same radius, hover-only affordance, no fills or
  * borders competing with the composer frame above it.
+ *
+ * `min-w-0 shrink` is load-bearing, not tidiness: the shadcn button base is
+ * `shrink-0`, so a chip inside a `min-w-0` group kept its full intrinsic width
+ * while the group compressed — and the surplus rendered OUTSIDE the group, on
+ * top of whatever followed it (the "No preset" chip printing through the
+ * runtime chip). Shrinkable chips ellipsize their own label instead.
  */
 export const TOOLBAR_CHIP =
-  "h-7 rounded-md border-transparent bg-transparent px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/60 hover:text-foreground dark:border-transparent dark:bg-transparent dark:hover:bg-muted/60"
+  "h-7 min-w-0 shrink rounded-md border-transparent bg-transparent px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/60 hover:text-foreground dark:border-transparent dark:bg-transparent dark:hover:bg-muted/60"
 
 /** Thin vertical rule between control groups on the wide row. */
 function ToolbarDivider() {
-  return <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border/60" />
+  return <span aria-hidden className="mx-1 h-3.5 w-px shrink-0 bg-border/50" />
 }
 
 /**

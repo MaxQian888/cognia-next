@@ -148,6 +148,7 @@ import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
 import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
+import { chatColumnClass } from "./chat-column"
 import { createDiagnostic } from "@cognia/diagnostics"
 import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { ChatSession, SendContent } from "@cognia/agent-config-types"
@@ -481,6 +482,18 @@ describe("ChatPane", () => {
       const { getByRole } = render(<ChatPane {...makeProps()} />)
       const notice = getByRole("status")
       expect(notice.textContent).toContain("overCapacity")
+      storeState.atCapacity = false
+    })
+
+    it("docks the over-capacity notice inside the chat reading column", () => {
+      // Notices sit between the transcript and the composer, which both cap at
+      // 52rem. Without the shared wrapper this one spans the whole pane and
+      // reads as a full-bleed band across a centred conversation.
+      storeState.atCapacity = true
+      const { getByRole } = render(<ChatPane {...makeProps()} />)
+      const column = getByRole("status").closest('[data-slot="chat-notice-column"]')
+      expect(column).not.toBeNull()
+      expect(column).toHaveClass(...chatColumnClass.split(" "))
       storeState.atCapacity = false
     })
 

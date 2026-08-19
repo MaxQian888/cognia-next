@@ -153,10 +153,14 @@ export function EffortSelector({
         <span className="shrink-0 text-[13px] leading-none text-muted-foreground">
           {t("title")}
         </span>
+        {/* Keyed by tier so React remounts it and the rise re-fires: the value
+            is the headline of this control, and a value that changes without
+            moving reads as a re-render rather than a new answer. */}
         <span
+          key={current}
           data-testid="effort-selector-value"
           className={cn(
-            "truncate text-[13px] font-semibold leading-none tracking-tight transition-colors",
+            "effort-value-rise truncate text-[13px] font-semibold leading-none tracking-tight transition-colors",
             isUltracodeLevel(current) ? "text-effort-ultra" : "text-foreground"
           )}
         >
@@ -366,9 +370,31 @@ function EffortTrack({
           "relative h-7 w-full min-w-0 touch-none rounded-full bg-muted outline-none",
           "transition-opacity focus-visible:ring-2 focus-visible:ring-ring/60",
           disabled ? "pointer-events-none opacity-50" : "cursor-pointer",
-          off && "opacity-60"
+          off && "opacity-60",
+          // Only the top tier keeps moving once it has arrived.
+          ultra && "effort-ultra-breathe"
         )}
       >
+        {/* The depth itself, drawn. The track used to carry ticks and a knob
+            only, which made "how deep is this" a matter of reading the knob's
+            position against six identical dots; a filled span states it, and
+            easing that span is what makes a tier change feel like a change in
+            energy rather than a repaint. Width shares `effortTrackOffset` with
+            the marker, so the fill can never disagree with the knob. */}
+        {!off && (
+          <span
+            aria-hidden
+            data-testid="effort-track-fill"
+            className={cn(
+              "effort-fill absolute inset-y-1 left-1 rounded-full",
+              // No easing mid-drag — the fill has to sit under the pointer, and
+              // an eased fill lags a knob that does not.
+              dragging && "effort-fill--dragging",
+              ultra ? "effort-fill--ultra bg-effort-ultra/45" : "bg-primary/25"
+            )}
+            style={{ width: `calc(${effortTrackOffset(currentIndex, lastIndex)} - 0.25rem)` }}
+          />
+        )}
         {/* Ultracode's track. A dot LATTICE that fades in left→right rather
             than a flat fill: the tier is a step change in kind (it also arms
             the dynamic-workflow tools), and a texture says that where another
@@ -381,7 +407,7 @@ function EffortTrack({
             // `rounded-full` on the lattice itself rather than `overflow-hidden`
             // on the track: clipping the track also clips the end markers,
             // which hang half their width past the last tick's centre.
-            className="absolute inset-0 rounded-full"
+            className="effort-ultra-drift absolute inset-0 rounded-full"
             style={{
               backgroundImage:
                 "radial-gradient(circle at center, var(--effort-ultra) 0.9px, transparent 1px)",
@@ -391,6 +417,31 @@ function EffortTrack({
             }}
           />
         )}
+        {/* The sweep that crosses the lattice. Its own element rather than a
+            second animation on the lattice: they run at different speeds, and
+            the lattice's mask must stay put while the highlight travels. */}
+        {ultra && (
+          <span
+            aria-hidden
+            data-testid="effort-track-sweep"
+            // The clip is the track itself, so the highlight enters and leaves
+            // behind its rounded caps instead of popping in mid-air.
+            className="pointer-events-none absolute inset-0 overflow-hidden rounded-full"
+          >
+            {/* Width is 2/5 of the track and the keyframes translate by
+                multiples of THAT, so the two have to move together — see
+                `effort-ultra-sweep` in globals.css. The core stop is mixed
+                toward white because at this tier the highlight crosses the
+                violet fill, and violet-on-violet is not a specular. */}
+            <span
+              className="effort-ultra-sweep absolute inset-y-0 left-0 w-2/5"
+              style={{
+                backgroundImage:
+                  "linear-gradient(100deg, transparent 0%, var(--effort-ultra-muted) 30%, color-mix(in oklab, var(--effort-ultra) 55%, white) 50%, var(--effort-ultra-muted) 70%, transparent 100%)",
+              }}
+            />
+          </span>
+        )}
         {/* One tick per OFFERED tier. `ultracode` keeps an accented dot even
             when inactive: it is the one tick that changes more than depth, and
             the scale reads as a plain ladder otherwise. */}
@@ -398,6 +449,7 @@ function EffortTrack({
           <span
             key={level}
             aria-hidden
+            data-testid="effort-track-tick"
             className={cn(
               "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors",
               level === "ultracode" ? "size-1.5 bg-effort-ultra" : "size-1 bg-muted-foreground/40"
@@ -420,8 +472,14 @@ function EffortTrack({
               "dark:bg-foreground dark:ring-white/10",
               // No transition while dragging: the marker must track the pointer
               // exactly, and easing it turns a drag into a lag.
-              !dragging && "transition-[left] duration-150 ease-out"
+              !dragging && "transition-[left] duration-150 ease-out",
+              // ...and for the same reason the landing pop is committed-only:
+              // popping on every previewed tier during a drag is a stutter.
+              !dragging && "effort-knob-pop",
+              ultra && "ring-effort-ultra/60 dark:ring-effort-ultra/60"
             )}
+            // Keyed by tier so the pop re-fires on each commit.
+            key={dragging ? "dragging" : current}
             style={{ left: effortTrackOffset(currentIndex, lastIndex) }}
           />
         )}

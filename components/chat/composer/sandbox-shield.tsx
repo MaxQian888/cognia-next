@@ -108,7 +108,7 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
           data-state={state}
           role="img"
           aria-label={ariaLabel}
-          className="inline-flex size-7 items-center justify-center"
+          className="inline-flex size-7 shrink-0 items-center justify-center"
         >
           {icon}
         </span>

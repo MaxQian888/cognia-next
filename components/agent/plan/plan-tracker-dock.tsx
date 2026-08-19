@@ -43,7 +43,7 @@ export function PlanTrackerDock({ sessionId }: PlanTrackerDockProps) {
 
   return (
     <div
-      className="max-h-[35vh] overflow-y-auto overscroll-contain px-3 pb-2"
+      className="max-h-[35vh] overflow-y-auto overscroll-contain pb-2"
       data-testid="plan-tracker-dock"
     >
       <PlanTrackerPanel plan={plan} />

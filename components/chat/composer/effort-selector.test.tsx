@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { EffortSelector } from "./effort-selector"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { updateSession } from "@/lib/db/sessions"
@@ -141,12 +141,29 @@ describe("provider adaptation", () => {
   })
 
   it("draws one tick per offered tier, not per ladder entry", () => {
-    const { container } = renderSelector(onModel("deepseek-reasoner", "deepseek"))
-    // 3 offered tiers ⇒ 3 ticks, plus the marker. (There is no progress fill:
-    // the redesigned track carries position through the marker and the tick
-    // scale alone, so a fourth kind of span would be a fourth thing to read.)
-    expect(container.querySelectorAll("[data-testid='effort-track'] > span")).toHaveLength(4)
+    renderSelector(onModel("deepseek-reasoner", "deepseek"))
+    expect(screen.getAllByTestId("effort-track-tick")).toHaveLength(3)
     expect(screen.getByTestId("effort-track")).toHaveAttribute("aria-valuemax", "2")
+  })
+
+  // The fill is what makes a tier change read as a change in ENERGY rather than
+  // a knob sliding: it shares `effortTrackOffset` with the marker, so the two
+  // can never disagree about where the current depth ends.
+  it("fills the track up to the active tier and leaves it empty on Auto", () => {
+    renderSelector(capableSession)
+    const fill = screen.getByTestId("effort-track-fill")
+    const markerOffset = screen
+      .getByTestId("effort-track-marker")
+      .getAttribute("style")
+      ?.replace("left: ", "")
+      .replace(/;$/, "")
+    expect(markerOffset).toBeTruthy()
+    expect(fill.getAttribute("style")).toContain(markerOffset as string)
+
+    // "Auto" is not a depth, so there is nothing to fill.
+    cleanup()
+    renderSelector({ ...capableSession, effort: undefined, thinkingLevel: "off" })
+    expect(screen.queryByTestId("effort-track-fill")).not.toBeInTheDocument()
   })
 
   it("displays a persisted tier the active model cannot honour as what will be sent", () => {
@@ -198,6 +215,31 @@ describe("tier presentation", () => {
     expect(screen.getByTestId("effort-track-ultra")).toBeInTheDocument()
     expect(screen.getByTestId("effort-track")).toHaveAttribute("data-ultra", "true")
     expect(screen.getByTestId("effort-selector-value").className).toContain("text-effort-ultra")
+  })
+
+  // Ultracode is a change in KIND (it also arms the dynamic-workflow tools), so
+  // it is the one tier that keeps moving after it lands: the lattice drifts, a
+  // highlight sweeps it, and the track breathes. Every other tier is still.
+  it("runs the ultracode-only motion on the track", () => {
+    renderSelector({ ...capableSession, effort: "high", thinkingLevel: "high" })
+    expect(screen.queryByTestId("effort-track-sweep")).not.toBeInTheDocument()
+    expect(screen.getByTestId("effort-track").className).not.toContain("effort-ultra-breathe")
+
+    cleanup()
+    renderSelector({ ...capableSession, effort: "high", thinkingLevel: "ultracode" })
+    const sweep = screen.getByTestId("effort-track-sweep")
+    expect(sweep).toBeInTheDocument()
+    // The keyframes translate by multiples of the highlight's OWN width, so
+    // that width is part of the animation's contract: `effort-ultra-sweep` in
+    // globals.css is calibrated to 2/5 of the track (-100% → 250% is exactly
+    // one full crossing). Change one and the sweep stops short of the far end —
+    // which is what a 1/3-wide clip did before, making it look like the scan
+    // died around the first tick.
+    expect(sweep.firstElementChild?.className).toContain("w-2/5")
+    expect(sweep.firstElementChild?.className).toContain("effort-ultra-sweep")
+    expect(screen.getByTestId("effort-track-ultra").className).toContain("effort-ultra-drift")
+    expect(screen.getByTestId("effort-track").className).toContain("effort-ultra-breathe")
+    expect(screen.getByTestId("effort-track-fill").className).toContain("effort-fill--ultra")
   })
 
   it("renders the standalone card variant without the in-popover divider", () => {

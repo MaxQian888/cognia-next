@@ -7,6 +7,8 @@
 // Submitting clears the per-session draft via Dexie — provide a real IndexedDB.
 import "fake-indexeddb/auto"
 
+const trackEvent = jest.fn(async () => true)
+
 jest.mock("@/lib/slash-commands/custom", () => ({
   loadCustomSlashCommands: jest.fn(async () => []),
 }))
@@ -19,6 +21,9 @@ jest.mock("@/lib/shell/exec", () => ({
   formatShellResult: jest.fn(),
 }))
 jest.mock("@/lib/files/memory", () => ({ appendMemory: jest.fn() }))
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => trackEvent(...(args as [])),
+}))
 jest.mock("./composer/voice-controls", () => ({ VoiceControls: () => null }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 
@@ -90,6 +95,7 @@ const textOf = (c: SendContent): string =>
 
 beforeEach(() => {
   useChatStore.getState().clear()
+  trackEvent.mockClear()
 })
 
 describe("Composer — multi-command submit", () => {
@@ -127,6 +133,13 @@ describe("Composer — multi-command submit", () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(ta.value).toBe("")
     expect(onSend).not.toHaveBeenCalled()
+    // The command name is a registered identifier; its argument string is not
+    // reported at all.
+    expect(trackEvent).toHaveBeenCalledWith("app.command.executed", {
+      command: "clear",
+      kind: "action",
+      outcome: "succeeded",
+    })
   })
 
   it("leaves a plain prose message untouched (no command)", async () => {

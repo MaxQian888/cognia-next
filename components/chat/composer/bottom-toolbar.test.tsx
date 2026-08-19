@@ -3,7 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
-import { BottomToolbar } from "./bottom-toolbar"
+import { BottomToolbar, TOOLBAR_CHIP } from "./bottom-toolbar"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -46,9 +46,12 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => undefined,
 }))
 jest.mock("../permission-mode-indicator", () => ({
+  // Mirrors the chip styling onto the stub: the row's shrink policy is a
+  // per-control decision, and `lastSelectorProps` only remembers whichever
+  // stub rendered last.
   PermissionModeIndicator: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
-    return <div data-testid="permission-mode-indicator" />
+    return <div data-testid="permission-mode-indicator" className={String(props.className ?? "")} />
   },
 }))
 jest.mock("./web-search-toggle", () => ({
@@ -230,12 +233,17 @@ describe("BottomToolbar — session-kind branching", () => {
   // The "\u22ef" is a packing device for narrow composers. On a row with the space
   // to show them, hiding the active Agent mode and the sandbox state behind a
   // button that advertises neither is the collapse this layout removed.
-  it("hosts the preset chip with model + permission and the session status at the right", () => {
+  it("hosts the preset chip with the session-shape controls and the status at the right", () => {
     movedControlsVisible = true
     try {
       render(<BottomToolbar session={session} />)
-      // Preset sits inside the execution group (it self-hides, so no divider of its own).
-      expect(screen.getByTestId("composer-execution-controls")).toContainElement(
+      // The system-prompt preset is a session-level choice, so it sits with the
+      // mode + runtime on the far side of the hairline — not with the per-turn
+      // model / thinking / permission answers.
+      expect(screen.getByTestId("composer-shape-controls")).toContainElement(
+        screen.getByTestId("composer-preset-chip")
+      )
+      expect(screen.getByTestId("composer-execution-controls")).not.toContainElement(
         screen.getByTestId("composer-preset-chip")
       )
       const cluster = screen.getByTestId("composer-status-cluster")
@@ -304,6 +312,26 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(nowrapRow?.querySelector('[data-testid="permission-mode-indicator"]')).not.toBeNull()
   })
 
+  // The overlap this row shipped with: the shadcn button base is `shrink-0`, so
+  // when the group hit its `min-w-0` floor its children kept their intrinsic
+  // width and rendered OUTSIDE the group — the preset chip printed through the
+  // runtime chip beside it. A chip that can shrink ellipsizes its own label
+  // instead, which is the whole fix.
+  it("keeps every toolbar chip shrinkable so labels ellipsize instead of overlapping", () => {
+    expect(TOOLBAR_CHIP).toContain("min-w-0")
+    expect(TOOLBAR_CHIP).toMatch(/(^|\s)shrink(\s|$)/)
+    expect(TOOLBAR_CHIP).not.toContain("shrink-0")
+  })
+
+  // ...except the two whose labels are already short. Shaving "Auto" to "A…"
+  // buys 30px and costs the word; the model id next to them is the string worth
+  // ellipsizing, and below the compact threshold the row re-packs anyway.
+  it("pins the short-labelled chips against shrinking", () => {
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("permission-mode-indicator").className).toContain("shrink-0")
+    expect(screen.getByTestId("effort-chip").className).toContain("shrink-0")
+  })
+
   // The wide branch is the one the user stares at all day, so it carries the
   // budget. Ratchet, not a target — see lib/ui/chrome-budget.ts.
   it("stays within the composer-toolbar chrome control budget", () => {
@@ -345,8 +373,10 @@ describe("BottomToolbar — narrow-width More menu", () => {
     expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
   })
 
+  // The threshold moved 384 → 520 with the roster: below that the one row can
+  // only be held by shaving every label to a stub. Above it, one row.
   it("keeps a medium-width toolbar on one row instead of splitting status chrome early", () => {
-    mockToolbarWidth = 420
+    mockToolbarWidth = 560
     const { container } = render(<BottomToolbar session={session} />)
     const root = container.firstChild as HTMLElement
     expect(root.className).toContain("flex-nowrap")

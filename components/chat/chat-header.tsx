@@ -67,10 +67,7 @@ interface Props {
 export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   const t = useTranslations("chat.header")
   const tConcurrent = useTranslations("chat.concurrent")
-  const tChannelList = useTranslations("desktop.channelList")
   const character = useCharacter(session.characterId)
-  const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
-  const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [codexDispatching, setCodexDispatching] = useState(false)
   const router = useRouter()
@@ -101,22 +98,11 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
 
   const content = (
     <>
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn(HEADER_ICON_BUTTON, "hidden shrink-0 md:inline-flex")}
-        aria-label={tChannelList(sidebarCollapsed ? "expandSidebar" : "collapseSidebar")}
-        aria-controls="conversation-sidebar"
-        aria-expanded={!sidebarCollapsed}
-        data-testid="chat-sidebar-toggle"
-        onClick={toggleSidebar}
-      >
-        {sidebarCollapsed ? (
-          <PanelLeftOpenIcon className="size-4" />
-        ) : (
-          <PanelLeftCloseIcon className="size-4" />
-        )}
-      </Button>
+      {/* Inline only. Projected, the bar keeps its own `primarySidebarToggle`
+          and `secondarySidebarToggle` segments a few pixels to the right —
+          those are on every route, so they own the two actions there and this
+          row would only double them up. */}
+      {outlet ? null : <ConversationListToggle />}
 
       <div className="flex flex-1 items-center gap-2 truncate">
         {character && (
@@ -164,7 +150,9 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
           aria-label={t("openInInbox")}
           title={t("openInInbox")}
           data-testid="chat-header-open-in-inbox"
-          onClick={() => router.push(inboxConversationHref(session.platformBinding!.conversationKey))}
+          onClick={() =>
+            router.push(inboxConversationHref(session.platformBinding!.conversationKey))
+          }
         >
           <InboxIcon className="size-4" />
         </Button>
@@ -228,10 +216,14 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         <Settings2Icon className="size-4" />
       </Button>
 
-      {/* Pointer-width only: below `md` the dock is a Sheet whose opener lives
+      {/* Inline only, for the same reason as the conversation-list toggle
+          above: the bar's `secondarySidebarToggle` drives the same dock.
+          Pointer-width only — below `md` the dock is a Sheet whose opener lives
           in the mobile shell's own top bar, and this header is suppressed
           there anyway (`showHeader={false}`). */}
-      <ArtifactDockToggle className={cn(HEADER_ICON_BUTTON, "hidden md:inline-flex")} />
+      {outlet ? null : (
+        <ArtifactDockToggle className={cn(HEADER_ICON_BUTTON, "hidden md:inline-flex")} />
+      )}
 
       <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
@@ -265,5 +257,39 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
     >
       {content}
     </header>
+  )
+}
+
+/**
+ * The conversation-list collapse toggle — the header's first control when it
+ * draws its own row.
+ *
+ * Not rendered while the header is projected into the title bar: the bar keeps
+ * its own `primarySidebarToggle` segment there and the two would sit a few
+ * pixels apart driving the same `sidebarCollapsed` field. The bar's copy wins
+ * because it is the one that is always present, on every route.
+ */
+function ConversationListToggle() {
+  const tChannelList = useTranslations("desktop.channelList")
+  const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
+  const toggleSidebar = useUIStore((state) => state.toggleSidebar)
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={cn(HEADER_ICON_BUTTON, "hidden shrink-0 md:inline-flex")}
+      aria-label={tChannelList(sidebarCollapsed ? "expandSidebar" : "collapseSidebar")}
+      aria-controls="conversation-sidebar"
+      aria-expanded={!sidebarCollapsed}
+      data-testid="chat-sidebar-toggle"
+      onClick={toggleSidebar}
+    >
+      {sidebarCollapsed ? (
+        <PanelLeftOpenIcon className="size-4" />
+      ) : (
+        <PanelLeftCloseIcon className="size-4" />
+      )}
+    </Button>
   )
 }

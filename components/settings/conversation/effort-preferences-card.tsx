@@ -129,17 +129,26 @@ export function EffortPreferencesCard() {
                 onClick={() => toggleTier(tier)}
                 data-testid={`effort-tier-toggle-${tier}`}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs",
+                  // Same motion vocabulary as the composer's ladder: the press
+                  // gives, the check pops in, and the top tier glows because it
+                  // is a change in kind rather than one more notch.
+                  "transition-[color,background-color,border-color,box-shadow,scale] duration-200 active:scale-[0.97]",
                   visible
                     ? ultra
-                      ? "border-effort-ultra/40 bg-effort-ultra-muted text-effort-ultra"
+                      ? "border-effort-ultra/40 bg-effort-ultra-muted text-effort-ultra shadow-[0_0_12px_-4px_var(--effort-ultra)]"
                       : "border-transparent bg-accent text-accent-foreground"
                     : "border-dashed border-border text-muted-foreground hover:text-foreground"
                 )}
               >
+                {/* Keyed by state so the pop re-fires on every toggle. */}
                 <CheckIcon
+                  key={visible ? "on" : "off"}
                   aria-hidden
-                  className={cn("size-3 shrink-0", visible ? "opacity-100" : "opacity-0")}
+                  className={cn(
+                    "size-3 shrink-0",
+                    visible ? "effort-glyph-pulse opacity-100" : "opacity-0"
+                  )}
                 />
                 {tLevel(tier as "off")}
               </button>

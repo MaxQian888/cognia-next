@@ -14,21 +14,15 @@ jest.mock("next-intl", () => ({
 // RadioItems are directly clickable in jsdom without pointer-event plumbing.
 jest.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  // Spreads the rest of the props (data-testid, data-labelled, …): the chip
+  // encodes its labelled/glyph state as data attributes, and a mock that
+  // dropped them would make those assertions untestable.
   DropdownMenuTrigger: ({
     children,
-    disabled,
-    className,
-    "aria-label": ariaLabel,
+    ...rest
   }: {
     children: React.ReactNode
-    disabled?: boolean
-    className?: string
-    "aria-label"?: string
-  }) => (
-    <button disabled={disabled} className={className} aria-label={ariaLabel}>
-      {children}
-    </button>
-  ),
+  } & React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...rest}>{children}</button>,
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
@@ -198,9 +192,16 @@ beforeEach(() => {
 })
 
 describe("AgentRuntimeSelector — chip label", () => {
-  it("names the built-in runtime by default", () => {
+  // The label is earned by being a choice. On the built-in runtime the trigger
+  // is a glyph: "Claude SDK" under every turn was the one value the chip can
+  // never be wrong about, and it cost the composer's status line ~100px it did
+  // not have. The wording moves into the accessible name, not out of reach.
+  it("wears a glyph on the built-in runtime and names it in the accessible name", () => {
     render(<AgentRuntimeSelector />)
-    expect(screen.getAllByText("claudeSdk").length).toBeGreaterThan(0)
+    const trigger = screen.getByTestId("agent-runtime-trigger")
+    expect(trigger).not.toHaveAttribute("data-labelled")
+    expect(trigger).toHaveTextContent("")
+    expect(trigger.getAttribute("aria-label")).toContain("claudeSdk")
   })
 
   it("names the selected external agent instead of a generic 'external' label", () => {
@@ -208,12 +209,16 @@ describe("AgentRuntimeSelector — chip label", () => {
     runtimeState.externalAgentId = "a1"
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
-    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0)
+    const trigger = screen.getByTestId("agent-runtime-trigger")
+    expect(trigger).toHaveAttribute("data-labelled", "true")
+    expect(trigger).toHaveTextContent("Codex")
   })
 
   it("renders the aria label from the translation key", () => {
     render(<AgentRuntimeSelector />)
-    expect(screen.getByRole("button", { name: "ariaLabel" })).toBeInTheDocument()
+    expect(screen.getByTestId("agent-runtime-trigger").getAttribute("aria-label")).toContain(
+      "ariaLabel"
+    )
   })
 })
 
@@ -433,8 +438,11 @@ describe("AgentRuntimeSelector — props", () => {
   })
 
   it("lets the runtime label use the available toolbar width before truncating", () => {
+    runtimeState.runtime = "external"
+    runtimeState.externalAgentId = "a1"
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
-    const trigger = screen.getByRole("button", { name: "ariaLabel" })
+    const trigger = screen.getByTestId("agent-runtime-trigger")
     expect(trigger.className).not.toContain("max-w-[9rem]")
   })
 })

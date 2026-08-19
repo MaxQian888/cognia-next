@@ -115,7 +115,7 @@
         "agent": "Agent",
         "date": "Date",
         "none": "No grouping",
-        "team": "Direct messages / Team",
+        "team": "Chats / Team",
         "workspace": "Workspace"
       }
     },

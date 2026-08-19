@@ -352,7 +352,7 @@ function RunPanelImpl({
       aria-atomic="false"
       data-testid="run-status-bar"
       className={cn(
-        "@container/runpanel flex flex-col gap-1 border-t border-border/50 bg-background/60 px-3 py-1.5 text-xs",
+        "@container/runpanel flex flex-col gap-1 border-t border-border/50 bg-background/60 py-1.5 text-xs",
         className
       )}
     >

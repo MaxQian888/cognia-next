@@ -160,6 +160,13 @@ export function AgentRuntimeSelector({ className, disabled }: Props) {
   const Icon = runtime === "external" ? PlugZapIcon : BotIcon
   const label =
     runtime === "external" ? (selectedRow?.agent.name ?? t("externalUnconfigured")) : t("claudeSdk")
+  // The label is earned by being a choice. On the built-in runtime the chip
+  // spelled "Claude SDK" under every single turn — the one value it can never
+  // be wrong about — while the composer's status line ran out of room and its
+  // neighbours overlapped. Off the default lane the agent's NAME is the whole
+  // point of the chip, so it always spells that out. The tooltip and the
+  // aria-label carry the wording in both states, so nothing is only visual.
+  const namesAChoice = runtime === "external"
 
   const handleValueChange = (next: string) => {
     if (next === "claude-sdk") {
@@ -188,13 +195,24 @@ export function AgentRuntimeSelector({ className, disabled }: Props) {
             disabled={disabled}
             className={cn(
               "inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg border border-transparent bg-muted/35 px-2 text-[11px] text-muted-foreground transition-colors hover:border-border/70 hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
-              className
+              className,
+              // Glyph-only on the default runtime: square it up so it reads as
+              // a peer of the other icon-sized status controls rather than a
+              // chip with a missing label. After `className` so the host's chip
+              // padding doesn't re-inflate the square.
+              !namesAChoice && "w-7 justify-center px-0"
             )}
-            aria-label={t("ariaLabel")}
+            aria-label={`${t("ariaLabel")} — ${label}`}
+            data-testid="agent-runtime-trigger"
+            data-labelled={namesAChoice || undefined}
           >
             <Icon className="size-3.5 shrink-0" />
-            <span className="min-w-0 truncate font-medium">{label}</span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
+            {namesAChoice ? (
+              <>
+                <span className="min-w-0 truncate font-medium">{label}</span>
+                <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
+              </>
+            ) : null}
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent side="top">{t("tooltip")}</TooltipContent>

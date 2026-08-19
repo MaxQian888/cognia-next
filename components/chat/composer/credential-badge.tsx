@@ -28,7 +28,15 @@ export function ComposerCredentialBadge({ onOpenSettings, className }: Props) {
   return (
     <Badge
       variant="destructive"
-      className={cn("h-6 cursor-pointer gap-1 px-2 text-[11px]", className)}
+      className={cn(
+        // Tinted, not solid. A filled red block sitting permanently in the
+        // composer's status line read as an alarm going off rather than a
+        // state to fix; the tint keeps it the loudest thing on the row without
+        // making the row about it. Border + text carry the colour, so it still
+        // survives a wallpaper behind the translucent surface.
+        "h-6 shrink-0 cursor-pointer gap-1 border border-destructive/30 bg-destructive/10 px-2 text-[11px] font-normal text-destructive shadow-none hover:bg-destructive/20 dark:bg-destructive/15",
+        className
+      )}
       onClick={onOpenSettings}
       role={onOpenSettings ? "button" : undefined}
       data-testid="composer-credential-badge"

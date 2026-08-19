@@ -27,7 +27,7 @@ export function FollowUpSuggestions({ session, onUseSample }: FollowUpSuggestion
 
   return (
     <div
-      className="flex flex-wrap items-center gap-1.5 px-1 pb-1"
+      className="flex flex-wrap items-center gap-1.5 pb-1"
       data-testid="follow-up-suggestions"
       aria-label={t("label")}
     >

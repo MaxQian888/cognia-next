@@ -70,11 +70,22 @@ export function EffortChip({ session, disabled, className }: EffortChipProps) {
           data-level={current}
           className={cn("gap-1", ultra && "text-effort-ultra hover:text-effort-ultra", className)}
         >
+          {/* Both halves are keyed by tier so React remounts them and their
+              entrance re-fires: this chip is often the only part of the control
+              on screen when the level changes (from the model popover, a
+              keyboard commit, or a preset), and a silent relabel is easy to
+              miss on a row this quiet. */}
           <BrainIcon
-            className={cn("size-3.5 shrink-0", ultra && "text-effort-ultra")}
+            key={`glyph-${current}`}
+            className={cn(
+              "effort-glyph-pulse size-3.5 shrink-0",
+              ultra && "text-effort-ultra drop-shadow-[0_0_6px_var(--effort-ultra)]"
+            )}
             aria-hidden
           />
-          <span className="truncate">{t(`level.${current}` as "level.off")}</span>
+          <span key={`label-${current}`} className="effort-value-rise truncate">
+            {t(`level.${current}` as "level.off")}
+          </span>
         </Button>
       </PopoverTrigger>
       {/* Width matches the model popover's, so opening one after the other

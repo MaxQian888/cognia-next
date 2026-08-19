@@ -56,14 +56,21 @@ export function PermissionModeIndicator({
           disabled={disabled}
           onClick={() => onCycle(nextPermissionMode(mode))}
           className={cn(
-            "h-auto px-2 py-0.5 font-mono text-[11px] font-normal transition-colors hover:bg-accent",
+            "h-auto min-w-0 shrink px-2 py-0.5 text-[11px] font-normal transition-colors hover:bg-accent",
             className,
             meta.tone
           )}
           aria-label={t("aria", { label })}
         >
-          ⇧⇥ {marker ? `${marker} ` : ""}
-          {label}
+          {/* The `⇧⇥` keycap that used to prefix this label taught the cycle
+              shortcut on every turn, forever, in a mono face that made the chip
+              read as a third typeface on the composer's status line. The hint
+              lives in the tooltip below, where it is read once and costs the
+              row nothing. */}
+          <span className="min-w-0 truncate">
+            {marker ? `${marker} ` : ""}
+            {label}
+          </span>
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs">

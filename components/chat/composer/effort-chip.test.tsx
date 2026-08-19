@@ -121,6 +121,24 @@ describe("label", () => {
     expect(chip).toHaveTextContent("Ultracode")
     expect(chip.className).toContain("text-effort-ultra")
   })
+
+  // The chip is often the only part of the control on screen when the tier
+  // changes (committed from the model popover, the keyboard, or a preset), so
+  // both halves animate their entrance rather than silently relabelling — and
+  // they are keyed by tier, which is what makes the entrance re-fire.
+  it("animates the glyph and the label when the tier changes under it", () => {
+    const { rerender } = render(<EffortChip session={{ ...session, thinkingLevel: "high" }} />)
+    const chip = () => screen.getByTestId("effort-chip")
+    expect(chip().querySelector(".effort-glyph-pulse")).not.toBeNull()
+    const label = chip().querySelector(".effort-value-rise")
+    expect(label).toHaveTextContent("High")
+
+    rerender(<EffortChip session={{ ...session, thinkingLevel: "ultracode" }} />)
+    // A fresh node, not the same one relabelled: React remounted it on the key
+    // change, which is the animation restart.
+    expect(chip().querySelector(".effort-value-rise")).not.toBe(label)
+    expect(chip()).toHaveAttribute("data-level", "ultracode")
+  })
 })
 
 describe("popover", () => {

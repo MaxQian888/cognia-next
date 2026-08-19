@@ -236,7 +236,7 @@ export function PlanApprovalDock({
   }
 
   return (
-    <div className="px-3 pb-2" data-testid="plan-approval-dock">
+    <div className="pb-2" data-testid="plan-approval-dock">
       <PlanApprovalCard
         plan={plan}
         disabled={busy}

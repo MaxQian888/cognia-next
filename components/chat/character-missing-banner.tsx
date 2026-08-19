@@ -58,7 +58,7 @@ export function CharacterMissingBanner({ characterId, onPickAnother }: Props) {
       : t("sourcePlugin", { name: pluginMeta?.name ?? pluginIdFromId })
 
   return (
-    <Alert variant="destructive" className="mx-4 mt-2" role="status">
+    <Alert variant="destructive" role="status">
       <AlertCircleIcon className="size-4" />
       <AlertTitle className="text-sm">{t("title")}</AlertTitle>
       <AlertDescription className="space-y-2 text-xs">

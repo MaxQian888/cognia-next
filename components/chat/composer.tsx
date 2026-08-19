@@ -156,6 +156,7 @@ import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
 import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 import { useInputHistory } from "./composer/hooks/use-input-history"
 import { CommandParamForm } from "./composer/command-param-form"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import { detectInteractiveCommand } from "@/lib/claude/permissions/interactive-command"
@@ -2577,16 +2578,35 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         }
         try {
           await cmd.handler(ctx)
+          // Registered command names only — never the argument string, which
+          // is free user text.
+          void trackEvent("app.command.executed", {
+            command: cmd.name,
+            kind: "action",
+            outcome: "succeeded",
+          })
         } catch (err) {
           loggers.chat.error("slash command failed", err, {
             command: cmd.name,
             sessionId: session?.id,
           })
+          void trackEvent("app.command.executed", {
+            command: cmd.name,
+            kind: "action",
+            outcome: "failed",
+          })
           toast.error(err instanceof Error ? err.message : tCommands("failed"))
         }
         return true
       }
-      if (cmd.template) return true
+      if (cmd.template) {
+        void trackEvent("app.command.executed", {
+          command: cmd.name,
+          kind: "template",
+          outcome: "succeeded",
+        })
+        return true
+      }
       return false
     },
     [

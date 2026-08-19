@@ -91,11 +91,32 @@ describe("ChatHeaderPresetPill", () => {
     expect(screen.getByTestId("chat-header-preset-pill")).toHaveTextContent("Beta")
   })
 
-  it("falls back to a 'none' label when no preset is active", () => {
+  // Idle is a glyph, not a label: "No preset" is the shipped value, and
+  // spelling it out cost ~90px of the composer's status line on every turn.
+  // The state still has to be readable without sight of the icon, so it moves
+  // into the accessible name and the tooltip.
+  it("drops to a glyph with an accessible name when no preset is active", () => {
     render(
       <ChatHeaderPresetPill session={session({})} presets={presets} onSelectPreset={jest.fn()} />
     )
-    expect(screen.getByTestId("chat-header-preset-pill")).toHaveTextContent("none")
+    const pill = screen.getByTestId("chat-header-preset-pill")
+    expect(pill).not.toHaveTextContent("none")
+    expect(pill).toHaveAttribute("aria-label", expect.stringContaining("none"))
+    expect(pill).toHaveAttribute("title", "none")
+  })
+
+  // ...and an actual choice earns the label back.
+  it("spells out a preset the user picked", () => {
+    render(
+      <ChatHeaderPresetPill
+        session={session({ activePresetId: "b" })}
+        presets={presets}
+        onSelectPreset={jest.fn()}
+      />
+    )
+    const pill = screen.getByTestId("chat-header-preset-pill")
+    expect(pill).toHaveTextContent("Beta")
+    expect(pill).toHaveAttribute("data-active-preset", "b")
   })
 
   it("opens the popover and renders grouped presets on click", () => {

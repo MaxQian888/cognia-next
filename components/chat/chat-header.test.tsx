@@ -583,9 +583,11 @@ describe("ChatHeader — title-bar projection", () => {
     const outlet = screen.getByTestId("center-outlet")
     expect(outlet).toContainElement(screen.getByTestId("chat-header"))
     expect(outlet).toHaveTextContent("Projected")
-    // The conversation-list toggle is still the first control in the row.
-    const toggle = screen.getByRole("button", { name: "Collapse conversation list" })
-    expect(screen.getByTestId("chat-header").firstElementChild).toBe(toggle)
+    // The bar keeps its own `primarySidebarToggle` / `secondarySidebarToggle`
+    // segments on every route, so the projected row drops its duplicates of
+    // both rather than parking two controls for one action side by side.
+    expect(screen.queryByTestId("chat-sidebar-toggle")).toBeNull()
+    expect(screen.queryByTestId("chat-artifact-dock-toggle")).toBeNull()
   })
 
   it("draws its own row when the outlet exists but nothing enabled projection", () => {

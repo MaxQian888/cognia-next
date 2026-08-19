@@ -40,7 +40,7 @@ export function PlanComposerDock({ sessionId, characterId }: PlanComposerDockPro
   if (plan) return null
 
   return (
-    <div className="flex justify-end px-3 pb-1" data-testid="plan-composer-dock">
+    <div className="flex justify-end pb-1" data-testid="plan-composer-dock">
       <Button
         size="sm"
         variant="ghost"

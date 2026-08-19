@@ -13,6 +13,7 @@ import { AlertTriangle, MessageCircleMore } from "lucide-react"
 import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { ChatHeader } from "./chat-header"
+import { ChatColumn } from "./chat-column"
 import { CharacterMissingBanner } from "./character-missing-banner"
 import { WorkSubmissionNotice } from "./work-submission-notice"
 import {
@@ -193,9 +194,9 @@ interface ChatPaneProps {
   /** Resume a recent session by id from the welcome page. */
   onResumeSession?: (id: string) => void
   /**
-   * Imperative handle on the Composer. The desktop shell uses it to insert
-   * `@CharacterName` mentions when the user clicks a row in the team
-   * member-list rail.
+   * Imperative handle on the Composer. Both shells hold it to insert
+   * `@CharacterName` mentions on behalf of the workbench's team-members panel
+   * (`lib/chat/composer-mention-request.ts`).
    */
   composerRef?: Ref<ComposerHandle>
   /** Keep cached history readable while runtime writes are unavailable. */
@@ -489,15 +490,19 @@ export function ChatPane({
   // Transient run-status layer (timer / interrupt / live tools / steer queue),
   // pinned directly above the composer. Self-hides when idle with no queue.
   const runStatusEl = (
-    <RunStatusBar
-      sessionId={boundId}
-      onStop={() => void onStop()}
-      onSteerNow={onSteerNow ? () => void onSteerNow() : undefined}
-      onSteerFlush={onSteerFlush ? () => void onSteerFlush() : undefined}
-    />
+    <ChatColumn>
+      <RunStatusBar
+        sessionId={boundId}
+        onStop={() => void onStop()}
+        onSteerNow={onSteerNow ? () => void onSteerNow() : undefined}
+        onSteerFlush={onSteerFlush ? () => void onSteerFlush() : undefined}
+      />
+    </ChatColumn>
   )
   const supportPanel = isSupportAgentId(activeSession.characterId) ? (
-    <SupportAgentPanel sessionId={boundId} />
+    <ChatColumn className="mb-2">
+      <SupportAgentPanel sessionId={boundId} />
+    </ChatColumn>
   ) : null
 
   // Error banner + footer plugin slot — identical in both layouts, sitting
@@ -505,46 +510,53 @@ export function ChatPane({
   const errorAndFooter = (
     <>
       {atCapacity && (
-        <div
-          role="status"
-          className="mx-3 mb-1 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300"
-        >
-          <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-          <span>{tConcurrent("overCapacity", { max: 3 })}</span>
-        </div>
+        <ChatColumn className="mb-1">
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300"
+          >
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+            <span>{tConcurrent("overCapacity", { max: 3 })}</span>
+          </div>
+        </ChatColumn>
       )}
       {/* Structured failures render the shared card, which derives its label,
           hint and buttons from the diagnostic's code. The string branch below
           is the fallback for producers not yet migrated. */}
       {errorDiagnostic ? (
-        <DiagnosticCard
-          className="mx-4 mt-2"
-          diagnostic={errorDiagnostic}
-          handlers={{
-            ...(hasHistory ? { retry: () => void handleRetry() } : {}),
-            "open-settings": (action) =>
-              onOpenSettings(
-                action.kind === "open-settings"
-                  ? (action.section as SettingsSectionId)
-                  : "providers"
-              ),
-          }}
-          onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
-        />
-      ) : (
-        errorMessage && (
-          <InlineError
-            message={errorMessage}
-            onRetry={hasHistory ? handleRetry : undefined}
-            onOpenSettings={() => onOpenSettings("providers")}
+        <ChatColumn className="mt-2">
+          <DiagnosticCard
+            diagnostic={errorDiagnostic}
+            handlers={{
+              ...(hasHistory ? { retry: () => void handleRetry() } : {}),
+              "open-settings": (action) =>
+                onOpenSettings(
+                  action.kind === "open-settings"
+                    ? (action.section as SettingsSectionId)
+                    : "providers"
+                ),
+            }}
             onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
           />
+        </ChatColumn>
+      ) : (
+        errorMessage && (
+          <ChatColumn className="mt-2">
+            <InlineError
+              message={errorMessage}
+              onRetry={hasHistory ? handleRetry : undefined}
+              onOpenSettings={() => onOpenSettings("providers")}
+              onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
+            />
+          </ChatColumn>
         )
       )}
-      <PluginExtensionSlot
-        point="chat.footer"
-        className="flex items-center justify-center gap-2 px-3 empty:hidden"
-      />
+      <ChatColumn>
+        <PluginExtensionSlot
+          point="chat.footer"
+          className="flex items-center justify-center gap-2 empty:hidden"
+        />
+      </ChatColumn>
     </>
   )
 
@@ -557,11 +569,15 @@ export function ChatPane({
           no longer resolves (plugin disabled, local pack deleted). Renders
           nothing when the character resolves or the id is a plain Dexie
           row that's simply missing. */}
-      <CharacterMissingBanner characterId={activeSession.characterId} onPickAnother={onCreate} />
+      <ChatColumn className="mt-2">
+        <CharacterMissingBanner characterId={activeSession.characterId} onPickAnother={onCreate} />
+      </ChatColumn>
       {/* ADR-0123 — explains a turn that was durably accepted but is waiting,
           held offline, or stopped for human recovery. Renders nothing when a
           turn is streaming normally or the feature is off. */}
-      <WorkSubmissionNotice sessionId={activeSession.id} />
+      <ChatColumn className="mt-2">
+        <WorkSubmissionNotice sessionId={activeSession.id} />
+      </ChatColumn>
       <ExternalAgentSessionPanel />
       {/* The surface swap (loader / welcome ⇄ transcript) is a crossfade IN
           PLACE, not a reflow. `popLayout` lifts the exiting branch out of the
@@ -663,25 +679,37 @@ export function ChatPane({
                 />
                 {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
               </div>
-              <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
+              <ChatColumn>
+                <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
+              </ChatColumn>
               {errorAndFooter}
               {boundId && onResumeAfterPlanApproval && (
-                <PlanApprovalDock
-                  sessionId={boundId}
-                  session={activeSession}
-                  onResume={onResumeAfterPlanApproval}
-                  onSendPlanFeedback={onSendPlanFeedback}
-                />
+                <ChatColumn>
+                  <PlanApprovalDock
+                    sessionId={boundId}
+                    session={activeSession}
+                    onResume={onResumeAfterPlanApproval}
+                    onSendPlanFeedback={onSendPlanFeedback}
+                  />
+                </ChatColumn>
               )}
               {/* Executing/paused plans surface the live tracker in the same slot
                 (statuses are mutually exclusive with awaiting_approval). */}
-              {boundId && <PlanTrackerDock sessionId={boundId} />}
+              {boundId && (
+                <ChatColumn>
+                  <PlanTrackerDock sessionId={boundId} />
+                </ChatColumn>
+              )}
               {/* Third mutually-exclusive state for this slot: planning, with no
                 plan yet — offer to hand-author one (PlanSource "manual"). */}
               {boundId && (
-                <PlanComposerDock sessionId={boundId} characterId={activeSession?.characterId} />
+                <ChatColumn>
+                  <PlanComposerDock sessionId={boundId} characterId={activeSession?.characterId} />
+                </ChatColumn>
               )}
-              <WorkspaceChangesCard session={activeSession} />
+              <ChatColumn>
+                <WorkspaceChangesCard session={activeSession} />
+              </ChatColumn>
               {supportPanel}
               {runStatusEl}
               {boundId ? (

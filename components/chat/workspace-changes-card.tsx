@@ -146,7 +146,7 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
 
   return (
     <div
-      className="mx-3 mb-1 overflow-hidden rounded-md border bg-muted/20"
+      className="mb-1 overflow-hidden rounded-md border bg-muted/20"
       data-testid="workspace-changes-card"
       data-breakpoint={breakpoint}
     >
