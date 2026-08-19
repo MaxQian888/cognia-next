@@ -107,7 +107,7 @@ const EMPTY_TABLES = {
 const EMPTY_SNAPSHOT: SiteSnapshot = { sites: [], selectedId: null, ...EMPTY_TABLES }
 
 function newestOperationForStep(
-  operations: SiteOperationRow[],
+  operations: readonly SiteOperationRow[],
   step: SiteStepKey
 ): SiteOperationRow | undefined {
   return operations
@@ -166,7 +166,9 @@ export function deriveStepStates(input: StepDerivationInput): Record<SiteStepKey
 }
 
 /** Newest in-flight operation across all steps (for the live sub-status line). */
-export function pickRunningOperation(operations: SiteOperationRow[]): SiteOperationRow | undefined {
+export function pickRunningOperation(
+  operations: readonly SiteOperationRow[]
+): SiteOperationRow | undefined {
   return operations
     .filter((operation) => operation.status === "running" || operation.status === "queued")
     .reduce<SiteOperationRow | undefined>(
@@ -178,7 +180,7 @@ export function pickRunningOperation(operations: SiteOperationRow[]): SiteOperat
 
 /** Message of the highest-sequence event for an operation, if any. */
 export function latestEventMessage(
-  events: SiteOperationEventRow[],
+  events: readonly SiteOperationEventRow[],
   operationId: string
 ): string | undefined {
   const forOperation = events.filter((event) => event.operationId === operationId)

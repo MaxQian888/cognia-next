@@ -138,3 +138,40 @@ it("uses the first root and the switched project when there is no primary root",
   )
   expect(onCreated).toHaveBeenCalledWith("site-new")
 })
+
+it("collects the zone id that add-domain has always required", async () => {
+  const { user } = renderDialog()
+  await user.click(screen.getByRole("button", { name: "actions.newSite" }))
+  await fillRequired()
+  await userEvent.type(screen.getByLabelText("provider.zoneId"), " zone_1 ")
+  await userEvent.type(screen.getByLabelText("provider.accessTeamName"), "acme")
+  await user.click(screen.getByRole("button", { name: "actions.create" }))
+
+  await waitFor(() =>
+    expect(createSiteProjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerConfig: {
+          accountId: "account-1",
+          workerName: "docs-worker",
+          zoneId: "zone_1",
+          accessTeamName: "acme",
+        },
+      })
+    )
+  )
+})
+
+it("omits the optional provider fields when they are left blank", async () => {
+  const { user } = renderDialog()
+  await user.click(screen.getByRole("button", { name: "actions.newSite" }))
+  await fillRequired()
+  await user.click(screen.getByRole("button", { name: "actions.create" }))
+
+  await waitFor(() =>
+    expect(createSiteProjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerConfig: { accountId: "account-1", workerName: "docs-worker" },
+      })
+    )
+  )
+})

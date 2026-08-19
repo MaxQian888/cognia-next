@@ -145,6 +145,11 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
   const fullViewport =
     pathname.startsWith("/workflows/") ||
     pathname === "/a2ui" ||
+    // `/sites`: the console is built on `FeaturePageShell`, whose desktop and
+    // mobile branches are both `flex h-full min-h-0 flex-1`. Without a definite
+    // viewport height that chain collapses to zero and the route paints a blank
+    // strip — which no overflow check would catch.
+    pathname === "/sites" ||
     pathname.startsWith("/a2ui/") ||
     pathname === "/me/terminal" ||
     pathname === "/onboarding" ||
