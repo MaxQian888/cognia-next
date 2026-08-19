@@ -2,6 +2,7 @@ import type { StoredMessage } from "@cognia/agent-config-types"
 
 import { normalizeStoredMessageMedia } from "@/lib/chat/media/normalize-message-media"
 import { collectUnreferencedMessageMedia, messageMediaRefRows } from "@/lib/db/message-media-refs"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
 
@@ -156,6 +157,13 @@ async function persistHistoryPage(rows: StoredMessage[]): Promise<void> {
     )
     if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
   })
+  // Hydrated history is chat history: queue the touched sessions so the ADR-0099
+  // index projects them. The lazy backfill cannot be relied on here — it walks
+  // once, newest-first, and latches `complete`, so anything pulled down after
+  // that walk finished would stay unsearchable forever.
+  for (const sessionId of new Set(normalized.map((message) => message.sessionId))) {
+    markSessionDirty(sessionId)
+  }
   if (orphanCandidates.size > 0) {
     await collectUnreferencedMessageMedia(orphanCandidates)
   }

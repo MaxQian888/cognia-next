@@ -23,6 +23,7 @@ import {
   type CanonicalSession,
 } from "@cognia/agent-config-types/canonical-session"
 import { isPlaceholderTitle } from "@/lib/ai/generation/run-title-task"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
 
 export const HOST_STATE_META_ID = "singleton" as const
 export const HOST_STATE_LEASE_TTL_MS = 30_000
@@ -681,6 +682,7 @@ async function persistBusinessProjection(
         updatedAt: now,
       })
       if (messages.length > 0) await db.messages.bulkAdd(messages)
+      if (messages.length > 0) markSessionDirty(messages[0].sessionId)
       await db.agentCanonicalSessions.put({
         canonicalSessionId: canonical.header.canonicalSessionId,
         sourceRuntime: canonical.header.sourceRuntime,
@@ -735,6 +737,7 @@ async function persistBusinessProjection(
         createdAt: now,
       }
       await db.messages.put(message)
+      markSessionDirty(action.sessionId)
       await db.chatDrafts.delete(action.sessionId)
       await db.sessions.update(action.sessionId, {
         ...(instantTitle && isPlaceholderTitle(session?.title)

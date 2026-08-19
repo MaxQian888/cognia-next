@@ -37,6 +37,7 @@ import { getDb } from "@/lib/db/schema"
 import { createPlatformSession } from "@/lib/connectors/session-bindings"
 import { larkTenantRequest, type LarkCredentials } from "./http"
 import { parseLarkEventEnvelope, type LarkEventEnvelope } from "./parse"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
 
 export const IMPORT_MAX_MESSAGES = 20
 
@@ -287,6 +288,7 @@ export async function importLarkMessages(
     createdAt: now,
   }
   await getDb().messages.add(message)
+  markSessionDirty(session.id)
 
   await recordMessageImport({
     sourceHash,

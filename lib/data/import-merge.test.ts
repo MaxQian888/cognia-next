@@ -221,4 +221,40 @@ describe("applyImportedMerged", () => {
     expect((await db.sessions.get("import:codex:a"))?.title).toBe("Imported title")
     expect((await db.sessions.get("import:codex:b"))?.title).toBe("changed-b")
   })
+
+  describe("search index projection (ADR-0099)", () => {
+    it("projects imported messages so the history is findable by content", async () => {
+      // The idle indexer only projects sessions the chat paths mark dirty, and
+      // the lazy backfill is a one-way descending walk that latches `complete`.
+      // So on an account whose walk had already finished, history imported
+      // afterwards was invisible to global search forever.
+      const db = getDb()
+      await applyImportedMerged([makeConv("import:codex:s1", {}, ["find me", "sure"])])
+
+      const rows = await db.chatSearchText.where("sessionId").equals("import:codex:s1").toArray()
+      expect(rows.map((r) => r.text).sort()).toEqual(["find me", "sure"])
+      expect(rows.every((r) => r.projectId === "")).toBe(true)
+    })
+
+    it("stamps the projection with the session's workspace", async () => {
+      const db = getDb()
+      const conv = makeConv("import:codex:s2", { projectId: "w1" }, ["scoped"])
+      for (const message of conv.messages) message.projectId = "w1"
+      await applyImportedMerged([conv])
+
+      const rows = await db.chatSearchText.where("sessionId").equals("import:codex:s2").toArray()
+      expect(rows).toHaveLength(1)
+      expect(rows[0].projectId).toBe("w1")
+    })
+
+    it("writes no projection for a frozen session", async () => {
+      const db = getDb()
+      await applyImportedMerged([makeConv("import:codex:s3", {}, ["original"])])
+      await db.sessions.update("import:codex:s3", { importFrozen: true })
+      await db.chatSearchText.where("sessionId").equals("import:codex:s3").delete()
+
+      await applyImportedMerged([makeConv("import:codex:s3", {}, ["source changed"])])
+      expect(await db.chatSearchText.where("sessionId").equals("import:codex:s3").count()).toBe(0)
+    })
+  })
 })

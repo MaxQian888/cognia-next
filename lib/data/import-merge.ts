@@ -20,6 +20,8 @@
 import type { ImportedConversation } from "./importers/types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { normalizeStoredMessageMedia } from "@/lib/chat/media/normalize-message-media"
+import { invalidateResidentCorpus } from "@/lib/chat/search/engine"
+import { projectMessageToSearchRow, type ChatSearchTextRow } from "@/lib/db/chat-search-text"
 import { collectUnreferencedMessageMedia, messageMediaRefRows } from "@/lib/db/message-media-refs"
 import { getDb } from "@/lib/db/schema"
 
@@ -101,37 +103,60 @@ export async function applyImportedMerged(
     })
   )
 
-  await db.transaction("rw", [db.sessions, db.messages, db.messageMediaRefs], async () => {
-    const sessionRows: ChatSession[] = []
-    const messageRows: StoredMessage[] = []
-    for (const entry of prepared) {
-      if (!entry) continue
-      const { conversation: conv } = entry
-      const existing = await db.sessions.get(conv.session.id)
-      // Frozen: the user continued this import in Cognia — leave it untouched.
-      if (existing?.importFrozen) continue
-      const merged = mergeImportedSession(conv.session, existing)
-      sessionRows.push({
-        ...merged,
-        transcriptRevision: (existing?.transcriptRevision ?? merged.transcriptRevision ?? 0) + 1,
-      })
-      for (const message of entry.messages) messageRows.push(message)
+  await db.transaction(
+    "rw",
+    [db.sessions, db.messages, db.messageMediaRefs, db.chatSearchText],
+    async () => {
+      const sessionRows: ChatSession[] = []
+      const messageRows: StoredMessage[] = []
+      for (const entry of prepared) {
+        if (!entry) continue
+        const { conversation: conv } = entry
+        const existing = await db.sessions.get(conv.session.id)
+        // Frozen: the user continued this import in Cognia — leave it untouched.
+        if (existing?.importFrozen) continue
+        const merged = mergeImportedSession(conv.session, existing)
+        sessionRows.push({
+          ...merged,
+          transcriptRevision: (existing?.transcriptRevision ?? merged.transcriptRevision ?? 0) + 1,
+        })
+        for (const message of entry.messages) messageRows.push(message)
+      }
+      if (sessionRows.length > 0) await db.sessions.bulkPut(sessionRows)
+      if (messageRows.length > 0) {
+        const messageIds = messageRows.map((message) => message.id)
+        const oldRefs = await db.messageMediaRefs.where("messageId").anyOf(messageIds).toArray()
+        for (const ref of oldRefs) orphanCandidates.add(ref.hash)
+        await db.messages.bulkPut(messageRows)
+        await db.messageMediaRefs.where("messageId").anyOf(messageIds).delete()
+        const replacementRefs = messageRows.flatMap((message) =>
+          messageMediaRefRows(message.id, message.sessionId, message.parts)
+        )
+        if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
+        // Project into the search index in the SAME transaction (ADR-0099).
+        //
+        // Without this an imported conversation is unfindable by content: the
+        // idle indexer only projects sessions the chat paths marked dirty, and
+        // the lazy backfill is a one-way descending walk that latches
+        // `complete` — so on any account whose walk already finished, history
+        // imported afterwards would never be projected at all. Projecting here
+        // costs nothing extra because the rows are already in hand.
+        const searchRows: ChatSearchTextRow[] = []
+        for (const message of messageRows) {
+          const projected = projectMessageToSearchRow(message)
+          if (projected) searchRows.push(projected)
+        }
+        if (searchRows.length > 0) await db.chatSearchText.bulkPut(searchRows)
+      }
+      sessionsWritten = sessionRows.length
+      messagesWritten = messageRows.length
     }
-    if (sessionRows.length > 0) await db.sessions.bulkPut(sessionRows)
-    if (messageRows.length > 0) {
-      const messageIds = messageRows.map((message) => message.id)
-      const oldRefs = await db.messageMediaRefs.where("messageId").anyOf(messageIds).toArray()
-      for (const ref of oldRefs) orphanCandidates.add(ref.hash)
-      await db.messages.bulkPut(messageRows)
-      await db.messageMediaRefs.where("messageId").anyOf(messageIds).delete()
-      const replacementRefs = messageRows.flatMap((message) =>
-        messageMediaRefRows(message.id, message.sessionId, message.parts)
-      )
-      if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
-    }
-    sessionsWritten = sessionRows.length
-    messagesWritten = messageRows.length
-  })
+  )
+
+  // The resident corpus is ordered newest-first and an import is overwhelmingly
+  // back-dated, so rebuilding it from Dexie is both cheaper and more correct
+  // than folding thousands of old rows into the live one.
+  if (messagesWritten > 0) invalidateResidentCorpus()
 
   if (orphanCandidates.size > 0) {
     await collectUnreferencedMessageMedia(orphanCandidates)

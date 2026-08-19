@@ -28,6 +28,7 @@ import type { ConversationReference } from "@/types/connectors/event"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
 
 export interface ManualReplyInput {
   adapterId: string
@@ -86,11 +87,16 @@ export function segmentsToMessageParts(
   return parts
 }
 
-async function findJobByIdempotencyKey(idempotencyKey: string): Promise<OutboundJobRow | undefined> {
+async function findJobByIdempotencyKey(
+  idempotencyKey: string
+): Promise<OutboundJobRow | undefined> {
   return getDb().outboundQueue.where("idempotencyKey").equals(idempotencyKey).first()
 }
 
-async function findMessageForJob(sessionId: string, jobId: string): Promise<StoredMessage | undefined> {
+async function findMessageForJob(
+  sessionId: string,
+  jobId: string
+): Promise<StoredMessage | undefined> {
   const rows = await getDb().messages.where("sessionId").equals(sessionId).toArray()
   return rows.find((row) => row.metadata?.outboundJobId === jobId)
 }
@@ -143,6 +149,7 @@ async function appendReplyMessage(input: ManualReplyInput, jobId: string): Promi
   // `put`, not `add`: a thin client may already hold the optimistic row under
   // the same client-minted id (host and client converge on one row).
   await getDb().messages.put(row)
+  markSessionDirty(input.sessionId)
   publishSyncInvalidate("messages", input.conversationKey)
   return id
 }

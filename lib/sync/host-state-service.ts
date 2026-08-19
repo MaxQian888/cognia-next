@@ -47,6 +47,7 @@ import {
   type HostStateActionRow,
   type HostStateMigrationStage,
 } from "./host-state-store"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
 
 export const HOST_STATE_ACTION_TOPIC = "host-state://action"
 export const MAX_HOST_STATE_SNAPSHOT_BYTES = 512 * 1024
@@ -595,6 +596,7 @@ async function materializeOptimisticMessages(
       createdAt: Date.now(),
     }
     await db.messages.put(message)
+    markSessionDirty(message.sessionId)
   }
 
   const terminalRows = await db.mobileOutboundQueue

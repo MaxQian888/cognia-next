@@ -101,6 +101,7 @@ import {
 } from "@/lib/ai/agent/execution/event-envelope"
 import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
 import { hasCapability } from "@/types/connectors/capability"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -622,6 +623,10 @@ export async function insertInboundMessage(
     createdAt: now,
   }
   await getDb().messages.add(row)
+  // Inbound platform traffic is chat history too: without this the global
+  // search index never learns about it (ADR-0099 indexes only what the chat
+  // paths mark dirty, and its backfill latches `complete`).
+  markSessionDirty(sessionId)
   // Bump the bound session's recency so "most-recently-updated" ordering in
   // `findActiveSessionForConversation` / `listSessionsByConversationKey`
   // reflects inbound traffic — without this, a conversation whose session

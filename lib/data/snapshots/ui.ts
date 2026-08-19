@@ -1,5 +1,5 @@
 // Snapshot for `localStorage["cognia-ui"]`. Window-layout preferences
-// (selectedGuild, showMemberList, scratchpadCollapsed). UI-only — not
+// (selectedGuild, sidebar/rail layout, scratchpadCollapsed). UI-only — not
 // exposed as a standalone domain to avoid cluttering the domain export
 // menu, but still part of the full backup so a restore lands the user in
 // the same shell layout they had.
