@@ -104,6 +104,7 @@ import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
 import { CommandQueueBar } from "./composer/command-queue-bar"
 import { CommandHintBar } from "./composer/command-hint-bar"
+import { resolveSendButton } from "./composer/send-button-mode"
 import { ComposerCheatsheet } from "./composer/composer-cheatsheet"
 import { ComposerAttachMenu } from "./composer/attach-menu"
 import { nextPermissionMode } from "./permission-mode-indicator"
@@ -1920,6 +1921,20 @@ function ComposerInner(props: InnerProps) {
   )
 
   const isStreaming = props.status === "streaming"
+  // The primary button's whole state (send / stop / spinner / draft) in one
+  // decision — see `send-button-mode.ts` for the combination table. The key
+  // case the inline ternaries used to miss: a turn streaming with text already
+  // typed is a *send* (it joins the running turn as a follow-up), not a stop.
+  const sendButton = resolveSendButton({
+    status: props.status,
+    isSending,
+    isPreparingAttachments,
+    hasContent: controller.textInput.value.trim().length > 0 || attachments.files.length > 0,
+    hasPendingDrafts,
+    composerDisabled: !!props.disabled,
+    // Web shell + a platform-bound session cannot write outbound at all.
+    outboundBlocked: !isDesktop && !!props.session?.platformBinding,
+  })
   // Cross-fade transition for the send/stop button icon swap (reduced-motion aware).
   const sendIconTransition = useReducedMotionTransition(mobileTransition("fast"))
 
@@ -2218,26 +2233,28 @@ function ComposerInner(props: InnerProps) {
         >
           <Tooltip>
             <TooltipTrigger asChild>
-              {hasPendingDrafts ? (
+              {sendButton.mode === "draft" ? (
                 <Button
                   aria-label={t("editDraftAria")}
                   className="h-9 rounded-full px-3 text-xs"
-                  disabled={props.disabled}
+                  disabled={sendButton.disabled}
                   onClick={() => void submit()}
                   type="button"
-                  variant="secondary"
+                  variant={sendButton.variant}
                 >
                   {t("editDraftTooltip")}
                 </Button>
               ) : (
                 <Button
                   aria-label={
-                    isStreaming
+                    sendButton.mode === "stop"
                       ? t("ariaStop")
-                      : isSending
-                        ? t("ariaSending")
-                        : isPreparingAttachments
+                      : sendButton.mode === "busy"
+                        ? isPreparingAttachments
                           ? tAttach("preparing")
+                          : t("ariaSending")
+                        : sendButton.queues
+                          ? t("ariaSendSteer")
                           : t("ariaSend")
                   }
                   className={cn(
@@ -2245,46 +2262,31 @@ function ComposerInner(props: InnerProps) {
                     // Mobile: 44px minimum tap target (primary send/stop action).
                     isMobile && "touch-target"
                   )}
-                  disabled={
-                    // In web mode, platform-bound sessions cannot send outbound messages.
-                    (!isDesktop && !!props.session?.platformBinding) ||
-                    // A turn is being dispatched: the button is a non-interactive
-                    // spinner until the store flips to "streaming" (then it becomes
-                    // the live Stop button).
-                    isSending ||
-                    isPreparingAttachments ||
-                    (!isStreaming &&
-                      (props.disabled ||
-                        (controller.textInput.value.trim().length === 0 &&
-                          attachments.files.length === 0)))
-                  }
-                  onClick={() => (isStreaming ? void props.onStop() : void submit())}
+                  disabled={sendButton.disabled}
+                  onClick={() => (sendButton.mode === "stop" ? void props.onStop() : void submit())}
                   size="icon"
                   type="button"
-                  variant={isStreaming ? "destructive" : "default"}
+                  variant={sendButton.variant}
                 >
                   {/* Icon swap genuinely cross-fades + zooms on each state
                       change (send → running → stop): AnimatePresence keeps the
                       outgoing icon mounted through its exit while the incoming
-                      one fades in, keyed by state. Honors reduced motion. */}
+                      one fades in, keyed by state. `queues` deliberately does
+                      NOT enter the key — a follow-up still sends with an arrow,
+                      so typing mid-turn must not re-run the zoom. Honors
+                      reduced motion. */}
                   <AnimatePresence mode="wait" initial={false}>
                     <motion.span
-                      key={
-                        isStreaming
-                          ? "stop"
-                          : isSending || isPreparingAttachments || props.status === "submitted"
-                            ? "sending"
-                            : "send"
-                      }
+                      key={sendButton.mode}
                       className="inline-flex"
                       initial={{ opacity: 0, scale: 0.75 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.75 }}
                       transition={sendIconTransition}
                     >
-                      {isStreaming ? (
+                      {sendButton.mode === "stop" ? (
                         <SquareIcon className="size-4" />
-                      ) : isSending || isPreparingAttachments || props.status === "submitted" ? (
+                      ) : sendButton.mode === "busy" ? (
                         <Loader2Icon className="size-4 animate-spin" />
                       ) : (
                         <ArrowUpIcon className="size-4" />
@@ -2295,11 +2297,13 @@ function ComposerInner(props: InnerProps) {
               )}
             </TooltipTrigger>
             <TooltipContent>
-              {hasPendingDrafts
+              {sendButton.mode === "draft"
                 ? t("editDraftTooltip")
-                : isStreaming
+                : sendButton.mode === "stop"
                   ? t("stopTooltip")
-                  : t("sendTooltip")}
+                  : sendButton.queues
+                    ? t("sendSteerTooltip")
+                    : t("sendTooltip")}
             </TooltipContent>
           </Tooltip>
         </div>

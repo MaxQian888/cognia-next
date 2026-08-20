@@ -4791,6 +4791,7 @@
       "ariaAttachImage": "添加文件",
       "ariaMessage": "消息",
       "ariaSend": "发送",
+      "ariaSendSteer": "作为补充发送",
       "ariaSending": "发送中…",
       "ariaStop": "停止",
       "ariaToggleWebSearch": "切换网络搜索",
@@ -5138,6 +5139,7 @@
         "captureFailed": "截图失败",
         "captureTooltip": "截图"
       },
+      "sendSteerTooltip": "作为补充发送给当前回合",
       "sendTooltip": "发送",
       "shell": {
         "failed": "`$ {cmd}` 执行失败：{error}",

@@ -4791,6 +4791,7 @@
       "ariaAttachImage": "Attach files",
       "ariaMessage": "Message",
       "ariaSend": "Send",
+      "ariaSendSteer": "Send as a follow-up",
       "ariaSending": "Sending…",
       "ariaStop": "Stop",
       "ariaToggleWebSearch": "Toggle web search",
@@ -5138,6 +5139,7 @@
         "captureFailed": "Screenshot failed",
         "captureTooltip": "Capture screenshot"
       },
+      "sendSteerTooltip": "Send as a follow-up to the running turn",
       "sendTooltip": "Send",
       "shell": {
         "failed": "`$ {cmd}` failed: {error}",

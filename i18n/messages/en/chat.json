@@ -167,12 +167,12 @@
     "title": "Restore file checkpoint"
   },
   "compactBoundary": {
+    "auto": "automatic",
     "checkpoint": {
       "failed": "checkpoint failed",
       "locked": "Vault locked",
       "stored": "checkpoint saved"
     },
-    "auto": "automatic",
     "detail": "{from} → {to} tokens",
     "effectiveness": "reclaimed {pct}%",
     "label": "Context compacted",
@@ -191,6 +191,7 @@
     "ariaAttachImage": "Attach files",
     "ariaMessage": "Message",
     "ariaSend": "Send",
+    "ariaSendSteer": "Send as a follow-up",
     "ariaSending": "Sending…",
     "ariaStop": "Stop",
     "ariaToggleWebSearch": "Toggle web search",
@@ -301,19 +302,19 @@
       "faster": "Faster",
       "hint": "Choose how much reasoning the model should use for this conversation.",
       "hintAria": "About thinking levels",
-      "smarter": "Smarter",
-      "title": "Effort",
-      "triggerAria": "Thinking level: {level}",
       "hintExternal": "Choose how much reasoning the external agent should use. The agent folds this onto whatever depth levels its own model publishes.",
       "level": {
-        "off": "Auto",
-        "low": "Low",
-        "medium": "Medium",
         "high": "High",
-        "xhigh": "Extra",
+        "low": "Low",
         "max": "Max",
-        "ultracode": "Ultracode"
-      }
+        "medium": "Medium",
+        "off": "Auto",
+        "ultracode": "Ultracode",
+        "xhigh": "Extra"
+      },
+      "smarter": "Smarter",
+      "title": "Effort",
+      "triggerAria": "Thinking level: {level}"
     },
     "enhance": {
       "modes": {
@@ -538,6 +539,7 @@
       "captureFailed": "Screenshot failed",
       "captureTooltip": "Capture screenshot"
     },
+    "sendSteerTooltip": "Send as a follow-up to the running turn",
     "sendTooltip": "Send",
     "shell": {
       "failed": "`$ {cmd}` failed: {error}",
@@ -1641,8 +1643,8 @@
       "twinRag": "Twin",
       "twinStyle": "Style"
     },
-    "recalledMemoriesHeader": "Recalled memories ({count})",
     "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
+    "recalledMemoriesHeader": "Recalled memories ({count})",
     "retrievedChunksHeader": "Retrieved chunks ({count})",
     "styleSamplesHeader": "Style samples ({count})",
     "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
@@ -1723,30 +1725,30 @@
     "toolLabel": "Tool"
   },
   "toolCards": {
-    "webSearch": {
-      "title": "Web search",
-      "via": "via {provider}",
-      "failed": "Search failed.",
-      "noResults": "No results."
-    },
-    "webFetch": {
-      "title": "Web fetch",
-      "status": "HTTP {status}",
-      "failed": "Fetch failed.",
-      "showMore": "Show all ({chars} characters)",
-      "showLess": "Show less"
-    },
-    "screenshot": {
-      "title": "Screenshot",
-      "alt": "Captured screen"
-    },
     "clipboardHistory": {
-      "title": "Clipboard history",
+      "copy": "Copy entry",
       "count": "{count, plural, =1 {1 entry} other {# entries}}",
       "empty": "No clipboard entries yet.",
-      "copy": "Copy entry",
       "showAll": "Show all {count}",
-      "showLess": "Show less"
+      "showLess": "Show less",
+      "title": "Clipboard history"
+    },
+    "screenshot": {
+      "alt": "Captured screen",
+      "title": "Screenshot"
+    },
+    "webFetch": {
+      "failed": "Fetch failed.",
+      "showLess": "Show less",
+      "showMore": "Show all ({chars} characters)",
+      "status": "HTTP {status}",
+      "title": "Web fetch"
+    },
+    "webSearch": {
+      "failed": "Search failed.",
+      "noResults": "No results.",
+      "title": "Web search",
+      "via": "via {provider}"
     }
   },
   "transcript": {
@@ -1792,17 +1794,17 @@
     "translate": "Translate"
   },
   "workSubmission": {
-    "queued": {
-      "title": "Waiting to start",
-      "body": "Your message is saved and will run as soon as a runtime is free."
-    },
     "blocked": {
-      "title": "Waiting to reconnect",
-      "body": "Your message is saved. It will run automatically once this device reaches the execution host again."
+      "body": "Your message is saved. It will run automatically once this device reaches the execution host again.",
+      "title": "Waiting to reconnect"
+    },
+    "queued": {
+      "body": "Your message is saved and will run as soon as a runtime is free.",
+      "title": "Waiting to start"
     },
     "recoveryRequired": {
-      "title": "Needs your attention",
-      "body": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again."
+      "body": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again.",
+      "title": "Needs your attention"
     }
   },
   "workspaceRestricted": {
