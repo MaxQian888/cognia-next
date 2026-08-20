@@ -191,6 +191,7 @@ pub fn installation_key_path(data_dir: &Path) -> PathBuf {
 // Transport seam
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct HttpRequest<'a> {
     pub method: &'static str,
     pub url: String,
@@ -198,6 +199,7 @@ pub struct HttpRequest<'a> {
     pub body: Option<&'a [u8]>,
 }
 
+#[derive(Debug)]
 pub struct HttpResponse {
     pub status: u16,
     pub body: Vec<u8>,

@@ -3,18 +3,20 @@ use std::{collections::BTreeMap, path::PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use cognia_observability::{
-    create_diagnostic_package, validate_diagnostic_package, AttachmentInput, DiagnosticPackageInput,
+    create_diagnostic_package, delete_incident, exchange_installation_grant, fetch_receipt,
+    submit_package, validate_diagnostic_package, withdraw_consent, AttachmentInput,
+    DiagnosticPackageInput, SubmissionRequest, SubmissionTarget,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
     cli::{CrashCommand, OutputFormat},
     commands::diagnostic_common::{
-        emit, load_or_create_signing_key, resolve_crash_dir, validate_stem,
+        emit, installation_identity, load_or_create_signing_key, resolve_crash_dir, validate_stem,
     },
+    commands::diagnostic_transport::UreqTransport,
     ui::RuntimeUi,
 };
 
@@ -51,19 +53,55 @@ pub fn run(command: CrashCommand, ui: &mut RuntimeUi) -> Result<()> {
             package,
             server,
             grant,
+            tenant_id,
+            project_id,
             format,
-        } => submit(package, &server, &grant, format, ui),
+        } => submit(
+            package,
+            &server,
+            grant.as_deref(),
+            tenant_id.as_deref(),
+            project_id.as_deref(),
+            format,
+            ui,
+        ),
         CrashCommand::Status {
             incident_id,
             server,
             grant,
+            tenant_id,
+            project_id,
             format,
-        } => status(&incident_id, &server, &grant, format),
+        } => status(
+            &incident_id,
+            &server,
+            grant.as_deref(),
+            tenant_id.as_deref(),
+            project_id.as_deref(),
+            format,
+        ),
+        CrashCommand::Withdraw {
+            incident_id,
+            server,
+            grant,
+            tenant_id,
+            project_id,
+            format,
+        } => withdraw_remote(
+            &incident_id,
+            &server,
+            grant.as_deref(),
+            tenant_id.as_deref(),
+            project_id.as_deref(),
+            format,
+        ),
         CrashCommand::Delete {
             target,
             remote,
             server,
             grant,
+            tenant_id,
+            project_id,
             crash_dir,
             format,
         } => {
@@ -71,7 +109,9 @@ pub fn run(command: CrashCommand, ui: &mut RuntimeUi) -> Result<()> {
                 delete_remote(
                     &target,
                     server.as_deref().expect("clap requires server"),
-                    grant.as_deref().expect("clap requires grant"),
+                    grant.as_deref(),
+                    tenant_id.as_deref(),
+                    project_id.as_deref(),
                     format,
                 )
             } else {
@@ -288,16 +328,53 @@ fn selected_name(path: &std::path::Path, fallback: &str) -> Result<String> {
         .to_owned())
 }
 
+/// Resolve an upload grant.
+///
+/// An explicit `--grant` wins. Otherwise the installation mints one from its
+/// own Ed25519 proof — the same key that signed the package — which is what
+/// makes `cognia crash submit` usable without first obtaining a token from
+/// somewhere else. That path needs the tenant and project the service scopes
+/// it to, so it says so plainly rather than failing at the exchange.
+fn resolve_grant(
+    server: &str,
+    grant: Option<&str>,
+    tenant_id: Option<&str>,
+    project_id: Option<&str>,
+) -> Result<String> {
+    if let Some(grant) = grant {
+        return Ok(grant.to_owned());
+    }
+    let (Some(tenant_id), Some(project_id)) = (tenant_id, project_id) else {
+        bail!(
+            "pass --grant, or --tenant-id and --project-id to mint one from this installation's key"
+        );
+    };
+    let identity = installation_identity(None)?;
+    let target = SubmissionTarget::new(server, tenant_id, project_id);
+    exchange_installation_grant(&UreqTransport, &target, &identity, Utc::now().timestamp())
+        .map_err(|error| anyhow!("could not obtain an upload grant: {error}"))
+}
+
+/// The tenant and project a grant is scoped to, for the routes that need a
+/// target rather than just a bearer token.
+fn submission_target(server: &str, tenant_id: Option<&str>, project_id: Option<&str>) -> SubmissionTarget {
+    SubmissionTarget::new(
+        server,
+        tenant_id.unwrap_or_default(),
+        project_id.unwrap_or_default(),
+    )
+}
+
 fn submit(
     package: PathBuf,
     server: &str,
-    grant: &str,
+    grant: Option<&str>,
+    tenant_id: Option<&str>,
+    project_id: Option<&str>,
     format: OutputFormat,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
     let validation = validate_diagnostic_package(&package)?;
-    let package_bytes = std::fs::read(&package)?;
-    let package_hash = hex::encode(Sha256::digest(&package_bytes));
     let selected = validation
         .manifest
         .inventory()
@@ -319,79 +396,114 @@ fn submit(
             bail!("submission cancelled; package remains local");
         }
     }
-    let base = server.trim_end_matches('/');
-    let create: Value = request_json(
-        &format!("{base}/v1/incidents"),
-        grant,
-        Some(json!({
-            "artifactHash": package_hash,
-            "buildId": validation.manifest.build_id(),
-            "platform": validation.manifest.platform(),
-            "module": "cognia-cli",
-            "exception": "offline_diagnostic_bundle",
-            "attachmentCount": validation.manifest.inventory().len(),
-            "eventCount": 0,
-            "totalBytes": package_bytes.len(),
-            "largestAttachmentBytes": package_bytes.len(),
-            "largestMinidumpBytes": 0,
-            "consent": true
-        })),
-    )?;
-    let incident_id = create
-        .pointer("/incident/id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("diagnostic service omitted incident id"))?;
-    request_bytes(
-        &format!("{base}/v1/incidents/{incident_id}/parts/1"),
-        grant,
-        &package_hash,
-        &package_bytes,
-    )?;
-    let receipt = request_json(
-        &format!("{base}/v1/incidents/{incident_id}/complete"),
-        grant,
-        Some(json!({"symbolizedFrames": []})),
-    )?;
+
+    let grant = resolve_grant(server, grant, tenant_id, project_id)?;
+    let target = submission_target(server, tenant_id, project_id);
+    // The shared sequence uploads one part per package entry with the artifact
+    // kind the service dispatches processing on. The previous single-blob
+    // upload produced no stack frames at all, so every submission grouped on
+    // module and exception alone.
+    let receipt = submit_package(
+        &UreqTransport,
+        &target,
+        &grant,
+        SubmissionRequest {
+            package: &package,
+            module: "cognia-cli",
+            exception: "offline_diagnostic_bundle",
+        },
+    )
+    .map_err(|error| anyhow!("submission failed: {error}"))?;
+
     emit(
         format,
         &receipt,
         &[
-            format!("Submitted incident {incident_id}"),
+            format!("Submitted incident {}", receipt.incident_id),
             format!(
                 "Support code: {}",
-                receipt
-                    .get("supportCode")
-                    .and_then(Value::as_str)
-                    .unwrap_or("pending")
+                if receipt.support_code.is_empty() {
+                    "pending"
+                } else {
+                    &receipt.support_code
+                }
+            ),
+            format!(
+                "{} part(s) uploaded, {} already stored",
+                receipt.uploaded_parts, receipt.resumed_parts
             ),
         ],
     )
 }
 
-fn status(incident_id: &str, server: &str, grant: &str, format: OutputFormat) -> Result<()> {
-    let receipt = request_json(
-        &format!(
-            "{}/v1/incidents/{incident_id}",
-            server.trim_end_matches('/')
-        ),
-        grant,
-        None,
-    )?;
+fn status(
+    incident_id: &str,
+    server: &str,
+    grant: Option<&str>,
+    tenant_id: Option<&str>,
+    project_id: Option<&str>,
+    format: OutputFormat,
+) -> Result<()> {
+    let grant = resolve_grant(server, grant, tenant_id, project_id)?;
+    let receipt = fetch_receipt(
+        &UreqTransport,
+        &submission_target(server, tenant_id, project_id),
+        &grant,
+        incident_id,
+    )
+    .map_err(|error| anyhow!("could not read the receipt: {error}"))?;
     emit(format, &receipt, &[serde_json::to_string_pretty(&receipt)?])
 }
 
-fn delete_remote(incident_id: &str, server: &str, grant: &str, format: OutputFormat) -> Result<()> {
-    request_empty(
-        &format!(
-            "{}/v1/incidents/{incident_id}",
-            server.trim_end_matches('/')
-        ),
-        grant,
-    )?;
+fn delete_remote(
+    incident_id: &str,
+    server: &str,
+    grant: Option<&str>,
+    tenant_id: Option<&str>,
+    project_id: Option<&str>,
+    format: OutputFormat,
+) -> Result<()> {
+    let grant = resolve_grant(server, grant, tenant_id, project_id)?;
+    delete_incident(
+        &UreqTransport,
+        &submission_target(server, tenant_id, project_id),
+        &grant,
+        incident_id,
+    )
+    .map_err(|error| anyhow!("could not delete the incident: {error}"))?;
     emit(
         format,
         &json!({"incidentId": incident_id, "state": "deleted"}),
         &[format!("Deleted remote incident {incident_id}")],
+    )
+}
+
+/// Withdraw consent for a submitted incident.
+///
+/// Distinct from deletion: it blocks processing *and* schedules removal, and
+/// it is the route that stays reachable while the service has stopped
+/// accepting new reports — the moment a withdrawal matters most. The CLI had
+/// no way to reach it at all.
+fn withdraw_remote(
+    incident_id: &str,
+    server: &str,
+    grant: Option<&str>,
+    tenant_id: Option<&str>,
+    project_id: Option<&str>,
+    format: OutputFormat,
+) -> Result<()> {
+    let grant = resolve_grant(server, grant, tenant_id, project_id)?;
+    withdraw_consent(
+        &UreqTransport,
+        &submission_target(server, tenant_id, project_id),
+        &grant,
+        incident_id,
+    )
+    .map_err(|error| anyhow!("could not withdraw consent: {error}"))?;
+    emit(
+        format,
+        &json!({"incidentId": incident_id, "state": "withdrawn"}),
+        &[format!("Withdrew consent for incident {incident_id}")],
     )
 }
 
@@ -415,78 +527,10 @@ fn delete_local(dir: PathBuf, stem: &str, format: OutputFormat) -> Result<()> {
     )
 }
 
-fn request_json(url: &str, grant: &str, body: Option<Value>) -> Result<Value> {
-    let response = match body {
-        Some(body) => ureq::post(url)
-            .header("Authorization", format!("Bearer {grant}"))
-            .content_type("application/json")
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .send_json(body),
-        None => ureq::get(url)
-            .header("Authorization", format!("Bearer {grant}"))
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .call(),
-    };
-    decode_response(response)
-}
 
-fn request_bytes(url: &str, grant: &str, package_hash: &str, body: &[u8]) -> Result<()> {
-    decode_response(
-        ureq::put(url)
-            .header("Authorization", format!("Bearer {grant}"))
-            .header("x-part-sha256", package_hash)
-            .header("x-artifact-kind", "attachment")
-            .content_type("application/octet-stream")
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .send(body),
-    )?;
-    Ok(())
-}
 
-fn request_empty(url: &str, grant: &str) -> Result<()> {
-    match ureq::delete(url)
-        .header("Authorization", format!("Bearer {grant}"))
-        .config()
-        .http_status_as_error(false)
-        .build()
-        .call()
-    {
-        Ok(response) if response.status().is_success() => Ok(()),
-        Ok(mut response) => Err(anyhow!(
-            "diagnostic service returned HTTP {}: {}",
-            response.status().as_u16(),
-            response.body_mut().read_to_string().unwrap_or_default()
-        )),
-        Err(error) => Err(http_error(error)),
-    }
-}
 
-fn decode_response(
-    response: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
-) -> Result<Value> {
-    match response {
-        Ok(mut response) if response.status().is_success() => response
-            .body_mut()
-            .read_json()
-            .context("decode diagnostic service response"),
-        Ok(mut response) => Err(anyhow!(
-            "diagnostic service returned HTTP {}: {}",
-            response.status().as_u16(),
-            response.body_mut().read_to_string().unwrap_or_default()
-        )),
-        Err(error) => Err(http_error(error)),
-    }
-}
 
-fn http_error(error: ureq::Error) -> anyhow::Error {
-    anyhow!("diagnostic service request failed: {error}")
-}
 
 #[cfg(test)]
 mod tests {

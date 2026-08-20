@@ -396,12 +396,20 @@ pub(crate) enum CrashCommand {
         format: OutputFormat,
     },
     /// Preview, consent to, and resumably submit a diagnostic package.
+    ///
+    /// `--grant` is optional: without one, this installation mints an uploader
+    /// grant from the same Ed25519 key that signed the package, which needs
+    /// only the tenant and project the service scopes it to.
     Submit {
         package: PathBuf,
         #[arg(long, env = "COGNIA_DIAGNOSTIC_URL")]
         server: String,
         #[arg(long, env = "COGNIA_DIAGNOSTIC_GRANT")]
-        grant: String,
+        grant: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_TENANT")]
+        tenant_id: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_PROJECT")]
+        project_id: Option<String>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
         format: OutputFormat,
     },
@@ -411,7 +419,28 @@ pub(crate) enum CrashCommand {
         #[arg(long, env = "COGNIA_DIAGNOSTIC_URL")]
         server: String,
         #[arg(long, env = "COGNIA_DIAGNOSTIC_GRANT")]
-        grant: String,
+        grant: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_TENANT")]
+        tenant_id: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_PROJECT")]
+        project_id: Option<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
+    /// Withdraw consent for a submitted incident.
+    ///
+    /// Blocks processing and schedules deletion. Stays available even while the
+    /// service has stopped accepting new reports, which is when it matters most.
+    Withdraw {
+        incident_id: String,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_URL")]
+        server: String,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_GRANT")]
+        grant: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_TENANT")]
+        tenant_id: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_PROJECT")]
+        project_id: Option<String>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
         format: OutputFormat,
     },
@@ -424,6 +453,10 @@ pub(crate) enum CrashCommand {
         server: Option<String>,
         #[arg(long, env = "COGNIA_DIAGNOSTIC_GRANT", requires = "remote")]
         grant: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_TENANT", requires = "remote")]
+        tenant_id: Option<String>,
+        #[arg(long, env = "COGNIA_DIAGNOSTIC_PROJECT", requires = "remote")]
+        project_id: Option<String>,
         #[arg(long)]
         crash_dir: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Human)]

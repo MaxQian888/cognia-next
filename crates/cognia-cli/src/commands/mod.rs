@@ -9,6 +9,7 @@ pub(crate) mod contract;
 pub(crate) mod crash;
 pub(crate) mod dev;
 pub(crate) mod diagnostic_common;
+pub(crate) mod diagnostic_transport;
 pub(crate) mod doctor;
 pub(crate) mod embed_version;
 pub(crate) mod host;

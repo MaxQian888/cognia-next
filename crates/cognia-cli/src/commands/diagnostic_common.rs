@@ -1,6 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
+use cognia_observability::{installation_key_path, InstallationIdentity};
 use ed25519_dalek::SigningKey;
 use serde::Serialize;
 
@@ -20,45 +21,27 @@ pub fn resolve_crash_dir(override_dir: Option<PathBuf>) -> Result<PathBuf> {
     Ok(override_dir.unwrap_or(cognia_data_dir()?.join("crash-reports")))
 }
 
-pub fn load_or_create_signing_key(override_path: Option<PathBuf>) -> Result<SigningKey> {
-    let path = override_path.unwrap_or(cognia_data_dir()?.join("diagnostic-signing.key"));
-    if path.exists() {
-        let encoded = std::fs::read_to_string(&path)
-            .with_context(|| format!("read diagnostic signing key {}", path.display()))?;
-        let bytes = hex::decode(encoded.trim()).context("decode diagnostic signing key")?;
-        let bytes: [u8; 32] = bytes
-            .try_into()
-            .map_err(|_| anyhow!("diagnostic signing key must contain 32 bytes"))?;
-        return Ok(SigningKey::from_bytes(&bytes));
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create diagnostic key directory {}", parent.display()))?;
-    }
-    let mut secret = [0_u8; 32];
-    rand::fill(&mut secret);
-    let key = SigningKey::from_bytes(&secret);
-    write_private_key(&path, &hex::encode(key.to_bytes()))?;
-    Ok(key)
+/// This installation's identity — the key that signs both diagnostic packages
+/// and the installation proof `/v1/grants/anonymous` verifies.
+///
+/// The same file the desktop shell uses, so `cognia crash` and the app are one
+/// installation to a service: whichever made a submission, either can read its
+/// receipt back and delete it.
+pub fn installation_identity(override_path: Option<PathBuf>) -> Result<InstallationIdentity> {
+    let path = match override_path {
+        Some(path) => path,
+        None => installation_key_path(&cognia_data_dir()?),
+    };
+    InstallationIdentity::load_or_create(&path)
+        .with_context(|| format!("load diagnostic installation key {}", path.display()))
 }
 
-fn write_private_key(path: &Path, encoded: &str) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt};
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-            .with_context(|| format!("create diagnostic signing key {}", path.display()))?;
-        std::io::Write::write_all(&mut file, encoded.as_bytes())?;
-    }
-    #[cfg(not(unix))]
-    std::fs::write(path, encoded)
-        .with_context(|| format!("create diagnostic signing key {}", path.display()))?;
-    Ok(())
+pub fn load_or_create_signing_key(override_path: Option<PathBuf>) -> Result<SigningKey> {
+    // Delegates so the CLI and the desktop cannot drift on where the key lives
+    // or how it is created; the signing key is the identity's key.
+    Ok(installation_identity(override_path)?.signing_key().clone())
 }
+
 
 pub fn emit<T: Serialize + ?Sized>(
     format: OutputFormat,
