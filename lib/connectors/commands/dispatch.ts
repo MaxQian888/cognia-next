@@ -431,28 +431,79 @@ export async function maybeHandleControlCommand(
         await reply(R.renderUsage("model"), "applied")
         return true
       }
-      // Accept `provider/model` or a bare model id. Validate the PROVIDER
-      // (when given) against the known set so a typo like `anthrpic/…`
-      // doesn't silently persist a broken override. The MODEL is trusted —
+      // Accept `provider/model` or a bare model id. The MODEL is trusted —
       // the catalog's model list is a quick-add subset, not exhaustive, and
       // custom/self-hosted model ids are common.
-      const slash = arg.indexOf("/")
-      const provider = slash > 0 ? arg.slice(0, slash) : undefined
-      const model = slash > 0 ? arg.slice(slash + 1) : arg
-      if (!model) {
-        await reply(R.renderUsage("model"), "applied")
-        return true
-      }
-      if (provider) {
-        const isKnown =
+      //
+      // The provider check runs BEFORE deciding to split, not after. Splitting
+      // first and validating the prefix afterwards is what made
+      // `/model anthropic/claude-sonnet-4` on an OpenRouter-bound channel
+      // silently repoint the whole channel at a different provider: `anthropic`
+      // passes the known-provider check, so no error surfaced. Gateway-style
+      // ids are exactly this shape, and on a connector channel a silent
+      // misroute costs money in a currency nobody notices for a week.
+      // `provider:model` is the unambiguous form. A colon never appears inside
+      // a model id the way a slash does (gateway ids are `vendor/model`), so
+      // this is the spelling the ambiguity message below can safely recommend.
+      const colon = arg.indexOf(":")
+      if (colon > 0) {
+        const explicitProvider = arg.slice(0, colon)
+        const explicitModel = arg.slice(colon + 1)
+        const isKnownExplicit =
           deps.isKnownProvider ?? ((p: string) => Promise.resolve(isBuiltInProviderId(p)))
-        if (!(await isKnown(provider))) {
-          await reply(R.denyUnknownProvider(provider), "denied", {
+        if (!explicitModel) {
+          await reply(R.renderUsage("model"), "applied")
+          return true
+        }
+        if (!(await isKnownExplicit(explicitProvider))) {
+          await reply(R.denyUnknownProvider(explicitProvider), "denied", {
             reason: "unknown_provider",
-            provider,
+            provider: explicitProvider,
           })
           return true
         }
+        await persist({ providerOverride: explicitProvider, modelOverride: explicitModel })
+        await reply(R.confirmModel(explicitModel, explicitProvider), "applied")
+        return true
+      }
+
+      const slash = arg.indexOf("/")
+      const prefix = slash > 0 ? arg.slice(0, slash) : undefined
+      const isKnown =
+        deps.isKnownProvider ?? ((p: string) => Promise.resolve(isBuiltInProviderId(p)))
+      const prefixIsProvider = prefix ? await isKnown(prefix) : false
+
+      // An unknown prefix is not a provider — the whole argument is a model id
+      // (`openai/gpt-oss-120b` on an OpenRouter channel). Unchanged behaviour.
+      const provider = prefixIsProvider ? prefix : undefined
+      const model = prefixIsProvider ? arg.slice(slash + 1) : arg
+
+      if (prefix && !prefixIsProvider && slash > 0) {
+        // Historical shape: `<unknown>/<rest>` was rejected as an unknown
+        // provider. Keep that, so a genuine typo still surfaces rather than
+        // silently persisting as a model id.
+        await reply(R.denyUnknownProvider(prefix), "denied", {
+          reason: "unknown_provider",
+          provider: prefix,
+        })
+        return true
+      }
+
+      if (provider) {
+        const current = override?.providerOverride ?? adapterRow.defaultProvider
+        if (current && current !== provider) {
+          // Two readings, both plausible, and guessing wrong is expensive.
+          await reply(R.denyAmbiguousModelArg(arg, provider, model, current), "denied", {
+            reason: "ambiguous_model_arg",
+            provider,
+            currentProvider: current,
+          })
+          return true
+        }
+      }
+      if (!model) {
+        await reply(R.renderUsage("model"), "applied")
+        return true
       }
       await persist(
         provider ? { providerOverride: provider, modelOverride: model } : { modelOverride: model }

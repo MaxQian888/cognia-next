@@ -416,6 +416,55 @@ describe("maybeHandleControlCommand", () => {
     expect(h.enqueued[0].text).toMatch(/Model set/)
   })
 
+  it("refuses to guess when provider/model would repoint an already-bound channel", async () => {
+    // `/model anthropic/claude-sonnet-4` on an OpenRouter-bound channel used to
+    // pass the known-provider check and silently switch the whole channel to a
+    // different vendor. Two readings, both plausible; on a connector channel a
+    // silent misroute costs money in a currency nobody notices for a week.
+    const h = harness({ active: session("s1") })
+    const handled = await maybeHandleControlCommand(
+      makeEvent({ plainText: "/model anthropic/claude-sonnet-4" }),
+      makeAdapter({ defaultProvider: "openrouter" }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(handled).toBe(true)
+    expect(h.patches).toHaveLength(0)
+    expect(h.enqueued[0].text).toMatch(/Ambiguous argument/)
+    expect(h.audits[0].kind).toBe("command.denied")
+  })
+
+  it("accepts the unambiguous provider:model form", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/model anthropic:claude-sonnet-4" }),
+      makeAdapter({ defaultProvider: "openrouter" }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches[0].patch).toEqual({
+      providerOverride: "anthropic",
+      modelOverride: "claude-sonnet-4",
+    })
+  })
+
+  it("still sets provider/model when the channel is not bound to another provider", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/model anthropic/claude-opus-4-8" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches[0].patch).toEqual({
+      providerOverride: "anthropic",
+      modelOverride: "claude-opus-4-8",
+    })
+  })
+
   it("denies a state-changing command from an un-allowlisted group sender", async () => {
     const h = harness({ active: session("s1") })
     const handled = await maybeHandleControlCommand(

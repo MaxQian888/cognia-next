@@ -300,3 +300,26 @@ export function confirmNewSession(title: string, idPrefix: string): string {
 export function confirmSwitched(title: string, idPrefix: string): string {
   return `已切换会话 / Switched to: ${title} (${idPrefix})`
 }
+
+/**
+ * `/model a/b` where `a` is a real provider but not THIS channel's provider.
+ *
+ * Two readings exist — "switch to provider a, model b" and "keep the current
+ * provider, model id is literally a/b" — and both are plausible on a channel
+ * bound to an aggregator, where gateway-style ids carry a slash. Guessing
+ * silently repoints the channel at a different vendor and the bill is where
+ * you find out, so ask instead.
+ */
+export function denyAmbiguousModelArg(
+  arg: string,
+  provider: string,
+  model: string,
+  currentProvider: string
+): string {
+  return (
+    `参数有歧义 / Ambiguous argument: ${arg}\n` +
+    `当前服务商 / Current provider: ${currentProvider}\n` +
+    `· 切换服务商 / Switch provider: /model ${provider}:${model}\n` +
+    `· 保持服务商，仅设模型 / Keep provider, set model only: /model ${currentProvider}:${arg}`
+  )
+}
