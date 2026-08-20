@@ -48,10 +48,11 @@
  * instead. Same user-visible result, no blast radius.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { TerminalDock } from "@/components/terminal/terminal-dock"
+import { bootReattachTerminals } from "@/lib/terminal/boot-reattach"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { useElementAxisSize } from "@/hooks/use-element-axis-size"
 import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
@@ -64,6 +65,16 @@ export interface TerminalDockRegionProps {
 }
 
 export function TerminalDockRegion({ slot }: TerminalDockRegionProps) {
+  // Reattaching lives here, not in the dock, because this region is mounted
+  // permanently by the shell while `<TerminalDock/>` only mounts when the panel
+  // is open — and the sessions a remote host kept across the reload have to be
+  // back before anything asks for the tab count (the status-bar chip does, and
+  // it hides itself at zero). `bootReattachTerminals` runs once per page load,
+  // which is what makes it safe to call from both slots.
+  useEffect(() => {
+    void bootReattachTerminals()
+  }, [])
+
   const panelOpen = useTerminalStore((s) => s.panelOpen)
   const panelPosition = useTerminalStore((s) => s.panelPosition)
   const panelHeightPct = useTerminalStore((s) => s.panelHeightPct)

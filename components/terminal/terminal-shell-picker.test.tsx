@@ -41,11 +41,21 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
+let mockHost: {
+  platform: string
+  defaultShell: string
+  availableShells: { path: string; kind: string }[]
+} | null = null
+jest.mock("@/hooks/terminal/use-host-capabilities", () => ({
+  useHostCapabilities: () => mockHost,
+}))
+
 import { TerminalShellPicker, type DetectShells } from "./terminal-shell-picker"
 
 beforeEach(() => {
   cleanup()
   mockIsTauri = false
+  mockHost = null
   mockInvoke.mockClear()
   mockInvoke.mockResolvedValue([])
 })
@@ -280,5 +290,68 @@ describe("TerminalShellPicker", () => {
       />
     )
     expect(screen.queryByTestId("terminal-shell-picker-ssh-ssh-1")).toBeNull()
+  })
+})
+
+/**
+ * Against a remote host the platform sniff and the PATH scan both describe the
+ * WRONG machine — the scan is a Tauri command running on the client. The host
+ * reports what it actually has instead, already filtered.
+ */
+describe("against a remote host", () => {
+  it("offers the host's shells rather than the client platform's", async () => {
+    mockHost = {
+      platform: "linux",
+      defaultShell: "/bin/ash",
+      availableShells: [
+        { path: "/bin/ash", kind: "sh" },
+        { path: "/bin/bash", kind: "bash" },
+      ],
+    }
+    const onNew = jest.fn()
+    await renderPicker(<TerminalShellPicker onNew={onNew} detectShells={noDetect} />)
+
+    expect(screen.getByTestId("terminal-shell-picker-shell-sh")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-shell-picker-shell-bash")).toBeInTheDocument()
+    expect(screen.queryByTestId("terminal-shell-picker-shell-zsh")).not.toBeInTheDocument()
+  })
+
+  it("spawns the host's own path, not a client-shaped one", async () => {
+    mockHost = {
+      platform: "linux",
+      defaultShell: "/bin/ash",
+      availableShells: [{ path: "/bin/ash", kind: "sh" }],
+    }
+    const onNew = jest.fn()
+    await renderPicker(<TerminalShellPicker onNew={onNew} detectShells={noDetect} />)
+    fireEvent.click(screen.getByTestId("terminal-shell-picker-shell-sh"))
+    expect(onNew).toHaveBeenCalledWith("/bin/ash")
+  })
+
+  it("does not run the PATH scan, which would probe the client", async () => {
+    mockHost = {
+      platform: "linux",
+      defaultShell: "/bin/bash",
+      availableShells: [{ path: "/bin/bash", kind: "bash" }],
+    }
+    const detect = jest.fn(async () => new Set<string>())
+    await renderPicker(<TerminalShellPicker onNew={jest.fn()} detectShells={detect} />)
+    expect(detect).not.toHaveBeenCalled()
+  })
+
+  // A hand-built shell or a Nix store path has no translated name; hiding it
+  // would drop a shell the host actually has.
+  it("still offers a shell it cannot name, labelled by path", async () => {
+    mockHost = {
+      platform: "linux",
+      defaultShell: "/nix/store/abc/bin/xonsh",
+      availableShells: [{ path: "/nix/store/abc/bin/xonsh", kind: "unknown" }],
+    }
+    const onNew = jest.fn()
+    await renderPicker(<TerminalShellPicker onNew={onNew} detectShells={noDetect} />)
+    const row = screen.getByTestId("terminal-shell-picker-shell-/nix/store/abc/bin/xonsh")
+    expect(row).toHaveTextContent("/nix/store/abc/bin/xonsh")
+    fireEvent.click(row)
+    expect(onNew).toHaveBeenCalledWith("/nix/store/abc/bin/xonsh")
   })
 })

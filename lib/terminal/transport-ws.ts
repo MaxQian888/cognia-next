@@ -18,6 +18,7 @@ import {
   type TerminalErrorCode,
   type TerminalFrame,
 } from "./protocol"
+import { recordHostCapabilities } from "./host-capabilities"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isCapacitor } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
@@ -249,6 +250,61 @@ export class RemoteTerminalSession extends BaseTerminalSession {
     }
   }
 
+  /**
+   * Ask the host to introduce itself, for callers that need its platform and
+   * shells *before* there is anything to list or attach to.
+   *
+   * A bare hello: the payload is empty, so the host applies nothing (config,
+   * PATH and profile mutations are refused for remote identities anyway) and
+   * answers with the ack that carries its description.
+   */
+  static async describeHost(): Promise<void> {
+    for (const connectionFactory of RemoteTerminalSession.connectionFactoryChain()) {
+      try {
+        await RemoteTerminalSession.describeHostWithConnection(connectionFactory)
+        return
+      } catch {
+        // Fall through to the next transport; the caller treats a fully failed
+        // probe as "host unknown" and keeps its own fallback.
+      }
+    }
+  }
+
+  private static async describeHostWithConnection(
+    connectionFactory: RemoteConnectionFactory
+  ): Promise<void> {
+    const connection = await connectionFactory()
+    const session = new RemoteTerminalSession(
+      { shell: "", rows: 1, cols: 1 },
+      connection,
+      connectionFactory
+    )
+    try {
+      const response = await session.sendCommand(TerminalFrameKind.Hello, EMPTY_SESSION_ID)
+      recordHostCapabilities(decodeTerminalJson<{ host?: unknown }>(response).host)
+    } finally {
+      session.intentionalClose = true
+      session.disposeConnectionListeners()
+      await session.closeOwnedConnection()
+    }
+  }
+
+  /**
+   * The connection factories for the current shell, in the same priority order
+   * `selectTerminalTransportChain()` gives the spawn path — so a probe reaches
+   * the host over whichever leg is actually up.
+   */
+  private static connectionFactoryChain(): RemoteConnectionFactory[] {
+    return [
+      async () => {
+        const endpoint = await endpointResolver()
+        if (!endpoint) throw new TerminalSessionError("unpaired", "terminal host is not paired")
+        return openLanConnection(endpoint)
+      },
+      openWanConnection,
+    ]
+  }
+
   private static async listWithConnection(
     connectionFactory: RemoteConnectionFactory
   ): Promise<SessionInfo[]> {
@@ -260,7 +316,11 @@ export class RemoteTerminalSession extends BaseTerminalSession {
     )
     try {
       const response = await session.sendCommand(TerminalFrameKind.List, EMPTY_SESSION_ID)
-      const snapshot = decodeTerminalJson<{ sessions: SessionInfo[] }>(response)
+      const snapshot = decodeTerminalJson<{ sessions: SessionInfo[]; host?: unknown }>(response)
+      // The snapshot describes the host it snapshots. Recording it here is what
+      // makes the reattach-at-mount path double as the capability probe, so the
+      // dock's first spawn already knows which shell the host has.
+      recordHostCapabilities(snapshot.host)
       return snapshot.sessions
     } finally {
       session.intentionalClose = true

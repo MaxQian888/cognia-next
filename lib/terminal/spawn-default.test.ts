@@ -19,10 +19,19 @@ jest.mock("./shell-detect", () => ({
   resolveDefaultShell: ({
     projectShell,
     settingShell,
+    hostDefaultShell,
   }: {
     projectShell?: string
     settingShell?: string
-  }) => projectShell ?? settingShell ?? "/platform/default",
+    hostDefaultShell?: string
+  }) => projectShell ?? settingShell ?? hostDefaultShell ?? "/platform/default",
+}))
+
+let mockHostCapabilities: { defaultShell: string } | null = null
+const mockEnsureHostCapabilities = jest.fn(async () => mockHostCapabilities)
+
+jest.mock("./host-capabilities", () => ({
+  ensureHostCapabilities: () => mockEnsureHostCapabilities(),
 }))
 
 const mockedSpawn = spawnFromDock as jest.MockedFunction<typeof spawnFromDock>
@@ -37,6 +46,8 @@ function lastRequest() {
 
 beforeEach(() => {
   mockedSpawn.mockClear()
+  mockEnsureHostCapabilities.mockClear()
+  mockHostCapabilities = null
   useProjectStore.setState({ projects: [], activeProjectId: null } as never)
   withSettings({})
 })
@@ -101,6 +112,28 @@ describe("spawnDefaultTerminal", () => {
     withSettings({ defaultShell: "/usr/bin/fish", defaultProfileId: "p1" })
     await spawnDefaultTerminal({ shellOverride: "/bin/dash" })
     expect(lastRequest().shell).toBe("/bin/dash")
+  })
+
+  // Over ws/webrtc the platform fallback describes the CLIENT: a macOS browser
+  // paired to a Linux cognia-server used to ask it for /bin/zsh and get a
+  // failed spawn with no explanation.
+  it("prefers what the host reported over the platform fallback", async () => {
+    mockHostCapabilities = { defaultShell: "/bin/ash" }
+    await spawnDefaultTerminal()
+    expect(lastRequest().shell).toBe("/bin/ash")
+  })
+
+  // A user who typed a shell path meant it, on whichever machine.
+  it("keeps the user setting above the host default", async () => {
+    mockHostCapabilities = { defaultShell: "/bin/ash" }
+    withSettings({ defaultShell: "/usr/bin/fish" })
+    await spawnDefaultTerminal()
+    expect(lastRequest().shell).toBe("/usr/bin/fish")
+  })
+
+  it("does not probe the host when the caller already named a shell", async () => {
+    await spawnDefaultTerminal({ shellOverride: "/bin/dash" })
+    expect(mockEnsureHostCapabilities).not.toHaveBeenCalled()
   })
 
   it("launches the configured default profile when there is one", async () => {

@@ -6,6 +6,7 @@ import {
   detectPlatform,
   detectShellKind,
   filterDetectedShellOptions,
+  hostShellOptions,
   platformDefaultShell,
   platformShellOptions,
   resolveDefaultShell,
@@ -100,6 +101,97 @@ describe("resolveDefaultShell", () => {
         userAgent: "Mozilla/5.0 (X11; Linux x86_64)",
       })
     ).toBe("/bin/bash")
+  })
+
+  // Over ws/webrtc the user agent describes the wrong machine — a macOS
+  // browser paired to a Linux server would ask it for /bin/zsh.
+  it("prefers the host's own default over the user-agent sniff", () => {
+    expect(
+      resolveDefaultShell({
+        hostDefaultShell: "/bin/ash",
+        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)",
+      })
+    ).toBe("/bin/ash")
+  })
+
+  it("keeps explicit project and user shells above the host default", () => {
+    expect(
+      resolveDefaultShell({ settingShell: "/usr/bin/fish", hostDefaultShell: "/bin/ash" })
+    ).toBe("/usr/bin/fish")
+    expect(resolveDefaultShell({ projectShell: "/bin/zsh", hostDefaultShell: "/bin/ash" })).toBe(
+      "/bin/zsh"
+    )
+  })
+
+  it("ignores a blank host default", () => {
+    expect(
+      resolveDefaultShell({
+        hostDefaultShell: "   ",
+        userAgent: "Mozilla/5.0 (X11; Linux x86_64)",
+      })
+    ).toBe("/bin/bash")
+  })
+})
+
+describe("hostShellOptions", () => {
+  it("labels a host's shells by family", () => {
+    expect(
+      hostShellOptions([
+        { path: "/bin/bash", kind: "bash" },
+        { path: "/usr/bin/fish", kind: "fish" },
+      ])
+    ).toEqual([
+      { value: "/bin/bash", labelKey: "terminal.shellPicker.bash", bin: "bash" },
+      { value: "/usr/bin/fish", labelKey: "terminal.shellPicker.fish", bin: "fish" },
+    ])
+  })
+
+  // A hand-built shell or a Nix store path has no translated name; showing its
+  // path beats silently dropping a shell the host actually has.
+  it("keeps an unrecognised shell, labelled by its path", () => {
+    const [option] = hostShellOptions([{ path: "/nix/store/abc/bin/xonsh", kind: "unknown" }])
+    expect(option).toEqual({
+      value: "/nix/store/abc/bin/xonsh",
+      labelKey: "",
+      bin: "/nix/store/abc/bin/xonsh",
+    })
+  })
+
+  it("drops blanks and duplicates", () => {
+    expect(
+      hostShellOptions([
+        { path: "/bin/bash", kind: "bash" },
+        { path: "  ", kind: "sh" },
+        { path: "/bin/bash", kind: "bash" },
+      ]).map((o) => o.value)
+    ).toEqual(["/bin/bash"])
+  })
+
+  // The host classifies against shells it can actually launch. Re-deriving the
+  // family here from the path would disagree with it — `detectShellKind` calls
+  // /bin/ash unknown, which would have hidden Alpine's only shell behind a raw
+  // store path instead of labelling it "sh".
+  it("trusts the family the host reported over the path", () => {
+    expect(hostShellOptions([{ path: "/bin/ash", kind: "sh" }])).toEqual([
+      { value: "/bin/ash", labelKey: "terminal.shellPicker.sh", bin: "sh" },
+    ])
+  })
+
+  it("refuses to invent a label key the picker has no message for", () => {
+    expect(hostShellOptions([{ path: "/bin/xonsh", kind: "xonsh" }])).toEqual([
+      { value: "/bin/xonsh", labelKey: "", bin: "/bin/xonsh" },
+    ])
+  })
+
+  // Order is the host's: it puts its default first so the picker needs no
+  // re-sort.
+  it("preserves the host's order", () => {
+    expect(
+      hostShellOptions([
+        { path: "/bin/sh", kind: "sh" },
+        { path: "/bin/bash", kind: "bash" },
+      ]).map((o) => o.value)
+    ).toEqual(["/bin/sh", "/bin/bash"])
   })
 })
 

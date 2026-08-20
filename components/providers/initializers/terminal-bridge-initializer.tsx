@@ -33,7 +33,6 @@ import {
   configureTerminalBridge,
   type TerminalOutputSink,
 } from "@/lib/plugin/vscode-shim/terminal-bridge"
-import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { syncTerminalHostProfiles } from "@/lib/terminal/host-profiles"
 
@@ -48,12 +47,12 @@ const noopSink: TerminalOutputSink = {
 
 export function TerminalBridgeInitializer() {
   useEffect(() => {
-    if (!isTauri()) {
-      // Only desktop PTYs can survive a webview reload. Clear any snapshot
-      // inherited by web/Capacitor so it cannot mask later live store updates.
-      useTerminalStore.getState().restorePersistedLayout()
-      return
-    }
+    // Unreachable in production — `desktop-only-initializers.tsx` mounts this
+    // component behind its own `isTauri()` gate — but kept as a local guard
+    // because the effect below unconditionally reaches for Tauri APIs. Web and
+    // Capacitor reattach through `lib/terminal/boot-reattach.ts` instead, which
+    // is mounted from the dock region and therefore actually runs there.
+    if (!isTauri()) return
     configureTerminalBridge({
       spawn: createPtyShellSpawn(),
       outputSink: noopSink,

@@ -18,6 +18,11 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
 }))
 
+const mockBootReattach = jest.fn(async () => {})
+jest.mock("@/lib/terminal/boot-reattach", () => ({
+  bootReattachTerminals: () => mockBootReattach(),
+}))
+
 /**
  * The region resolves its stored percentage against the measured parent, so a
  * jsdom parent (every rect is 0) has to be given one for the pixel assertions.
@@ -41,6 +46,7 @@ beforeEach(() => {
   useTerminalStore.getState().reset()
   flowMotion.reduce = false
   flowMotion.durationScale = 1
+  mockBootReattach.mockClear()
   unmeasureParents()
 })
 
@@ -236,5 +242,25 @@ describe("TerminalDockRegion", () => {
     act(() => useTerminalStore.getState().setPanelOpen(false))
     // Nothing to slide out with, so the dock goes immediately.
     expect(screen.queryByTestId("terminal-dock-stub")).toBeNull()
+  })
+})
+
+/**
+ * The region, not the dock, is where reattaching belongs: it is mounted
+ * permanently by the shell while `<TerminalDock/>` only exists while the panel
+ * is open — and the tab count a remote host kept across the reload has to be
+ * back before the status-bar chip reads it (the chip hides itself at zero).
+ */
+describe("reattaching at boot", () => {
+  it("asks for the host's surviving sessions on mount, panel closed included", () => {
+    useTerminalStore.setState({ panelOpen: false } as never)
+    render(<TerminalDockRegion slot="bottom" />)
+    expect(mockBootReattach).toHaveBeenCalledTimes(1)
+  })
+
+  it("still asks when the panel is open", () => {
+    useTerminalStore.setState({ panelOpen: true, panelPosition: "bottom" } as never)
+    render(<TerminalDockRegion slot="bottom" />)
+    expect(mockBootReattach).toHaveBeenCalledTimes(1)
   })
 })

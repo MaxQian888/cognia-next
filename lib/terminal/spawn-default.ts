@@ -14,12 +14,21 @@
  *   * the named `profileId`, or the configured default profile,
  *   * the project's `terminalConfig.shell`,
  *   * the user's `settings.terminal.defaultShell`,
+ *   * what the HOST reported as its own default, when the session will spawn
+ *     over `ws` / `webrtc` (`ensureHostCapabilities`),
  *   * the platform default (`resolveDefaultShell`).
+ *
+ * The host tier exists because the two below it describe the wrong machine on
+ * a remote transport: `resolveDefaultShell` falls back to a `navigator.userAgent`
+ * sniff, so a macOS browser paired to a Linux `cognia-server` asked it for
+ * `/bin/zsh` and got a failed spawn with no explanation. It sits *below* the
+ * explicit settings on purpose — a user who typed a shell path meant it.
  *
  * Toasts stay at the call sites: each surface has its own `useTranslations`
  * namespace, and this module has no React context to read one from.
  */
 
+import { ensureHostCapabilities } from "@/lib/terminal/host-capabilities"
 import { findProfile, profileToSpawnFields, type TerminalProfile } from "@/lib/terminal/profiles"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { spawnFromDock, type SpawnOutcome } from "@/lib/terminal/spawn-orchestrator"
@@ -87,12 +96,20 @@ export async function spawnDefaultTerminal(
     }
   }
 
+  // Only probed when nothing more specific was chosen, and a no-op on the
+  // local PTY (where `shell-detect` is already describing the right machine).
+  const hostDefaultShell =
+    opts.shellOverride && opts.shellOverride.trim().length > 0
+      ? undefined
+      : ((await ensureHostCapabilities())?.defaultShell ?? undefined)
+
   const shell =
     opts.shellOverride && opts.shellOverride.trim().length > 0
       ? opts.shellOverride
       : resolveDefaultShell({
           projectShell: project?.terminalConfig?.shell,
           settingShell: terminal.defaultShell,
+          hostDefaultShell,
         })
 
   return spawnFromDock({

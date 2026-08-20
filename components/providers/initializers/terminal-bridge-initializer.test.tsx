@@ -69,13 +69,18 @@ beforeEach(() => {
 })
 
 describe("TerminalBridgeInitializer", () => {
-  it("skips wiring entirely outside Tauri", () => {
+  // The component only mounts behind `desktop-only-initializers.tsx`'s own
+  // `isTauri()` gate, so this is the local guard, not the shell's story. Web
+  // and Capacitor reattach through `lib/terminal/boot-reattach.ts` instead —
+  // this initializer must not also touch the layout there, or the two would
+  // race to validate tab metadata against different session maps.
+  it("skips wiring entirely outside Tauri, and leaves the layout to boot-reattach", () => {
     mockedIsTauri.mockReturnValue(false)
     const { unmount } = render(<TerminalBridgeInitializer />)
     unmount()
     expect(mockedConfigure).not.toHaveBeenCalled()
     expect(mockedCreate).not.toHaveBeenCalled()
-    expect(restorePersistedLayout).toHaveBeenCalledTimes(1)
+    expect(restorePersistedLayout).not.toHaveBeenCalled()
   })
 
   it("wires configureTerminalBridge with the PTY spawn and a no-op sink in Tauri", () => {

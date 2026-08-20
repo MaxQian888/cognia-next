@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, act, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, act, cleanup, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -457,7 +457,7 @@ describe("TerminalDock", () => {
     expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe("remote")
   })
 
-  it("still offers a way to create a terminal over ws", () => {
+  it("still offers a way to create a terminal over ws", async () => {
     // Regression: the spawn affordances used to be gated on
     // `transport === "tauri-channel"`, so a desktop driving a remote host got a
     // dock with no way to open a terminal at all.
@@ -467,7 +467,9 @@ describe("TerminalDock", () => {
     render(<TerminalDock />)
     expect(screen.getByTestId("terminal-empty-state-new")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("terminal-empty-state-new"))
-    expect(mockSpawnFromDock).toHaveBeenCalled()
+    // A remote spawn now asks the host which shell it has before choosing one,
+    // so `spawnFromDock` lands a tick later than it used to.
+    await waitFor(() => expect(mockSpawnFromDock).toHaveBeenCalled())
   })
 
   it("offers Share on the desktop host and opens the share dialog for the active session (ADR-0133)", () => {
@@ -531,13 +533,13 @@ describe("TerminalDock", () => {
     expect(screen.getByTestId("terminal-empty-state").getAttribute("data-variant")).toBe("cloud")
   })
 
-  it("offers a spawn action to a paired browser", () => {
+  it("offers a spawn action to a paired browser", async () => {
     transportKind = "ws"
     platformKind = "web"
     seedProjectAndSession()
     render(<TerminalDock />)
     fireEvent.click(screen.getByTestId("terminal-empty-state-new"))
-    expect(mockSpawnFromDock).toHaveBeenCalled()
+    await waitFor(() => expect(mockSpawnFromDock).toHaveBeenCalled())
   })
 
   it("renders the unsupported empty state in plain browser", () => {

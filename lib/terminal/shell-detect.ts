@@ -110,6 +110,10 @@ export interface ShellOption {
  * entry, which the picker always renders. This is the platform half of
  * "show what fits the OS"; `filterDetectedShellOptions` is the
  * "show only what's installed" half.
+ *
+ * Pass the HOST's platform, not the client's, whenever the session will spawn
+ * over `ws` / `webrtc` — see `hostShellOptions`, which is the remote form of
+ * both halves at once.
  */
 export function platformShellOptions(platform: ShellPlatform): ShellOption[] {
   switch (platform) {
@@ -158,11 +162,68 @@ export function filterDetectedShellOptions(
   return kept.length > 0 ? kept : [...options]
 }
 
+/** Shell families the picker has a `terminal.shellPicker.*` label for. */
+const LABELLED_SHELL_KINDS: ReadonlySet<string> = new Set([
+  "bash",
+  "zsh",
+  "sh",
+  "fish",
+  "nu",
+  "pwsh",
+  "powershell",
+  "cmd",
+])
+
+/**
+ * Shell choices for a *remote* host, built from what it reported it has.
+ *
+ * This replaces both halves of the local story at once: the host already
+ * filtered to shells that exist on it, so there is nothing left to detect —
+ * and there is nothing the client *could* detect, since the PATH scan behind
+ * `filterDetectedShellOptions` runs a Tauri command against the wrong machine.
+ *
+ * The family comes from the host, deliberately, rather than from re-running
+ * `detectShellKind` on the path: the host classifies against the shells it can
+ * actually launch (it knows `/bin/ash` is a `sh`), and a second classifier here
+ * would be free to disagree with it about the very thing it just answered.
+ *
+ * A family with no translated name (a hand-built shell, a Nix store path) gets
+ * an empty `labelKey`, and the picker renders its path — an exotic `$SHELL` is
+ * still offered rather than silently dropped.
+ */
+export function hostShellOptions(
+  shells: ReadonlyArray<{ path: string; kind: string }>
+): ShellOption[] {
+  const labelled: ShellOption[] = []
+  const seen = new Set<string>()
+  for (const shell of shells) {
+    const path = shell.path.trim()
+    if (path === "" || seen.has(path)) continue
+    seen.add(path)
+    const known = LABELLED_SHELL_KINDS.has(shell.kind)
+    labelled.push({
+      value: path,
+      labelKey: known ? `terminal.shellPicker.${shell.kind}` : "",
+      bin: known ? shell.kind : path,
+    })
+  }
+  return labelled
+}
+
 export interface ResolveShellInput {
   projectShell?: string
   settingShell?: string
   /** Override for tests; defaults to `navigator.userAgent`. */
   userAgent?: string
+  /**
+   * What the *host* reported as its own default (`TerminalHostCapabilities.defaultShell`).
+   *
+   * Beats the user-agent sniff, because over `ws` / `webrtc` the user agent
+   * describes the wrong machine: a macOS browser paired to a Linux server used
+   * to ask it for `/bin/zsh`. Ranked *below* the explicit project and user
+   * settings — those are choices, and a user who typed a shell path meant it.
+   */
+  hostDefaultShell?: string
 }
 
 /**
@@ -176,6 +237,9 @@ export function resolveDefaultShell(input: ResolveShellInput): string {
   }
   if (input.settingShell && input.settingShell.trim().length > 0) {
     return input.settingShell
+  }
+  if (input.hostDefaultShell && input.hostDefaultShell.trim().length > 0) {
+    return input.hostDefaultShell
   }
   return platformDefaultShell(detectPlatform(input.userAgent))
 }

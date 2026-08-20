@@ -39,9 +39,11 @@ import type { SshHostProfile } from "@/lib/terminal/ssh-profiles"
 import {
   detectPlatform,
   filterDetectedShellOptions,
+  hostShellOptions,
   platformShellOptions,
   type ShellPlatform,
 } from "@/lib/terminal/shell-detect"
+import { useHostCapabilities } from "@/hooks/terminal/use-host-capabilities"
 
 /** Probe PATH for which of `bins` resolve to a real executable. */
 export type DetectShells = (bins: string[]) => Promise<ReadonlySet<string>>
@@ -79,6 +81,10 @@ export interface TerminalShellPickerProps {
  * binary resolves; on web, return an empty set (no detection → show the
  * full platform list). Matches case-insensitively and ignores a trailing
  * `.exe` so `cmd.exe` satisfies the `cmd` probe on Windows.
+ *
+ * Not used at all against a remote host: the scan is a Tauri command, so it
+ * would describe the wrong machine. The host reports its own shells instead —
+ * see `hostShellOptions`.
  */
 const defaultDetectShells: DetectShells = async (bins) => {
   if (!isTauri() || bins.length === 0) return new Set()
@@ -116,12 +122,22 @@ export function TerminalShellPicker({
     (h) => h.name.trim().length > 0 && h.host.trim().length > 0 && h.username.trim().length > 0
   )
 
-  const baseOptions = useMemo(() => platformShellOptions(platform ?? detectPlatform()), [platform])
+  // `null` on the local PTY (and before a remote host has answered), which is
+  // exactly when the platform sniff below is the right story.
+  const host = useHostCapabilities()
+  const baseOptions = useMemo(
+    () =>
+      host
+        ? hostShellOptions(host.availableShells)
+        : platformShellOptions(platform ?? detectPlatform()),
+    [host, platform]
+  )
   // Empty until the PATH scan resolves → the full platform list shows first,
   // then narrows to installed shells. `filterDetectedShellOptions` keeps the
   // full list when detection is empty or would hide everything.
   const [detectedBins, setDetectedBins] = useState<ReadonlySet<string>>(() => new Set())
   useEffect(() => {
+    if (host) return
     let alive = true
     void detectShells(baseOptions.map((o) => o.bin))
       .then((set) => {
@@ -136,9 +152,12 @@ export function TerminalShellPicker({
     return () => {
       alive = false
     }
-  }, [baseOptions, detectShells])
+  }, [baseOptions, detectShells, host])
 
-  const shellOptions = filterDetectedShellOptions(baseOptions, detectedBins)
+  // The host already filtered to shells that exist on it, so there is nothing
+  // left for the PATH scan to narrow — and nothing it *could* narrow, since it
+  // probes this machine.
+  const shellOptions = host ? baseOptions : filterDetectedShellOptions(baseOptions, detectedBins)
   return (
     <div className="flex items-center">
       <Button
@@ -225,7 +244,9 @@ export function TerminalShellPicker({
               className="text-xs"
               data-testid={`terminal-shell-picker-shell-${opt.bin}`}
             >
-              {t(opt.labelKey as never)}
+              {/* A host can report a shell with no translated name (a custom
+                  build, a Nix store path); showing its path beats hiding it. */}
+              {opt.labelKey ? t(opt.labelKey as never) : opt.value}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>

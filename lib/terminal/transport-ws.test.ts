@@ -35,6 +35,7 @@ import {
   pickRemoteSpawn,
   RemoteTerminalSession,
 } from "./transport-ws"
+import { __resetHostCapabilitiesForTests, getHostCapabilities } from "./host-capabilities"
 
 const COMPANION_ENDPOINT = {
   baseUrl: "https://desktop.local:27890",
@@ -234,6 +235,7 @@ beforeAll(() => {
 beforeEach(() => {
   sockets.splice(0)
   ticketCounter = 0
+  __resetHostCapabilitiesForTests()
   mockIsCapacitor = true
   mockHasWebCompanionTarget = false
   mockCompanionStorageLoad.mockClear()
@@ -607,5 +609,79 @@ describe("cloud companion endpoint resolution (ADR-0059 C1)", () => {
       RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })
     ).rejects.toMatchObject({ code: "unpaired" })
     expect(mockCompanionStorageLoad).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The client used to guess the shell from `navigator.userAgent`, which over
+ * ws/webrtc describes the wrong machine. The host says what it is instead, on
+ * the two frames the client already receives before it can spawn.
+ */
+describe("learning what the host is", () => {
+  const HOST = {
+    platform: "linux",
+    defaultShell: "/bin/ash",
+    availableShells: [{ path: "/bin/ash", kind: "sh" }],
+    homeDir: "/root",
+  }
+
+  it("records the description carried by a host snapshot", async () => {
+    const listPromise = RemoteTerminalSession.listLan()
+    await flush()
+    latestSocket().fireOpen()
+    await flush()
+    const list = decodeTerminalFrame(latestSocket().sent[0])
+    latestSocket().fireFrame(
+      TerminalFrameKind.HostSnapshot,
+      { hostId: "host-a", sessions: [], host: HOST },
+      list.sequence
+    )
+    await listPromise
+    expect(getHostCapabilities()).toEqual(HOST)
+  })
+
+  it("introduces itself with a bare hello and records the ack", async () => {
+    const promise = RemoteTerminalSession.describeHost()
+    await flush()
+    await flush()
+    latestSocket().fireOpen()
+    await flush()
+    await flush()
+    const hello = decodeTerminalFrame(latestSocket().sent[0])
+    expect(hello.kind).toBe(TerminalFrameKind.Hello)
+    // Empty on purpose: the host refuses config / PATH / profile mutations
+    // from a remote identity, so anything here would be a rejected frame.
+    expect(hello.payload.length).toBe(0)
+    latestSocket().fireFrame(
+      TerminalFrameKind.Ack,
+      { ok: true, hostId: "host-a", host: HOST },
+      hello.sequence
+    )
+    await promise
+    expect(getHostCapabilities()).toEqual(HOST)
+  })
+
+  // An older host predates the field. The client must keep its own fallback
+  // rather than caching a half-answer it would then spawn against.
+  it("leaves the host unknown when the snapshot does not describe one", async () => {
+    const listPromise = RemoteTerminalSession.listLan()
+    await flush()
+    latestSocket().fireOpen()
+    await flush()
+    const list = decodeTerminalFrame(latestSocket().sent[0])
+    latestSocket().fireFrame(
+      TerminalFrameKind.HostSnapshot,
+      { hostId: "host-a", sessions: [] },
+      list.sequence
+    )
+    await listPromise
+    expect(getHostCapabilities()).toBeNull()
+  })
+
+  it("does not throw when no transport can reach a host", async () => {
+    configureCompanionEndpointResolver(async () => null)
+    __setTerminalDataChannelResolverForTesting(async () => null)
+    await expect(RemoteTerminalSession.describeHost()).resolves.toBeUndefined()
+    expect(getHostCapabilities()).toBeNull()
   })
 })
