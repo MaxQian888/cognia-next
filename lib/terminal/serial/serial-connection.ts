@@ -2,8 +2,7 @@
  * Serial port connection manager — frontend orchestration layer.
  *
  * Bridges the Tauri serial port commands to a clean interface for the
- * terminal dock to consume. Like `buffer-persist.ts`, all operations
- * are no-ops outside of Tauri.
+ * terminal dock to consume. All operations are no-ops outside of Tauri.
  */
 
 import { isTauri } from "@/lib/tauri"
