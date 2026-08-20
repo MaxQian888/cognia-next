@@ -2,6 +2,24 @@ import { getExecutionRun } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
 import { registerRunControlHandler, type RunControlHandler } from "./run-control"
 
+/**
+ * The action exists in the vocabulary but this run kind cannot perform it.
+ *
+ * Carried as its own error type so `executeRunControlCommand` can report
+ * `unsupported_for_kind` instead of collapsing every handler throw into
+ * `source_rejected` — a card can then stop offering a button rather than
+ * showing a refusal the user has no way to act on.
+ */
+export class UnsupportedForKindError extends Error {
+  constructor(
+    readonly action: string,
+    readonly kind: string
+  ) {
+    super(`Run kind "${kind}" cannot ${action}`)
+    this.name = "UnsupportedForKindError"
+  }
+}
+
 const agentControllers = new Map<string, AbortController>()
 
 export function registerAgentRunController(runId: string, controller: AbortController): () => void {
@@ -68,7 +86,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       }
       return
     }
-    throw new Error(`Unsupported agent control: ${command.action}`)
+    throw new UnsupportedForKindError(command.action, "agent")
   }
 
   const workflow: RunControlHandler = async (command) => {
@@ -80,7 +98,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       await cancelWorkflowRun(run.sourceId, "im_control")
       return
     }
-    throw new Error(`Unsupported workflow control: ${command.action}`)
+    throw new UnsupportedForKindError(command.action, "workflow")
   }
 
   /**
@@ -115,7 +133,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
           : command.action === "resume"
             ? "resume"
             : undefined
-    if (!action) throw new Error(`Unsupported team control: ${command.action}`)
+    if (!action) throw new UnsupportedForKindError(command.action, "team")
     const { controlDurableRun } = await import("@/lib/ai/agent/team/durable-control")
     await controlDurableRun(run.sourceId, action)
   }
@@ -134,7 +152,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
           : command.action === "stop"
             ? await runtime.stopGoal(run.sourceId)
             : null
-    if (!result) throw new Error(`Unsupported goal control: ${command.action}`)
+    if (!result) throw new UnsupportedForKindError(command.action, "goal")
   }
 
   const plan: RunControlHandler = async (command) => {
@@ -170,7 +188,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
           : command.action === "stop"
             ? await runtime.cancelPlan(run.sourceId)
             : null
-    if (!result) throw new Error(`Unsupported plan control: ${command.action}`)
+    if (!result) throw new UnsupportedForKindError(command.action, "plan")
   }
 
   const unregisterAgent = registerRunControlHandler("agent-turn", agent)

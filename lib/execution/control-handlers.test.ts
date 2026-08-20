@@ -320,3 +320,43 @@ describe("team run control", () => {
     handlers.dispose()
   })
 })
+
+describe("unsupported actions report the kind, not a generic refusal", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    jest.clearAllMocks()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+  })
+
+  it("reports unsupported_for_kind when a kind cannot perform an action", async () => {
+    // Every handler used to throw a bare Error, which collapsed into
+    // `source_rejected` — indistinguishable from "the engine refused", so a
+    // card had no way to tell a permanent capability gap from a transient
+    // failure and kept offering a button that could never work.
+    const handlers = installExecutionRunControlHandlers()
+    await createExecutionRun({
+      id: "execution:workflow:w1",
+      kind: "workflow",
+      sourceId: "w1",
+      title: "t",
+      status: "running",
+      currentRevision: 0,
+      initiator: { remoteUserId: "operator-1" },
+      startedAt: 1,
+      updatedAt: 1,
+    })
+
+    const result = await executeRunControlCommand({
+      runId: "execution:workflow:w1",
+      action: "pause",
+      idempotencyKey: "wf-pause",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result.accepted).toBe(false)
+    expect(result.reason).toBe("unsupported_for_kind")
+    handlers.dispose()
+  })
+})

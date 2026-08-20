@@ -34,6 +34,11 @@ function allowedActions(
   kind: ExecutionRun["kind"],
   hasPendingInterrupt: boolean
 ): RunControlAction[] {
+  // No `retry` here, on purpose: the control exists in the vocabulary but the
+  // event journal closes on a settled run, so accepting it would need a NEW
+  // run linked by `parentRunId` rather than an event on the failed one. Until
+  // that lands, offering the button would render a control that always fails.
+  // See the note in `run-control.ts`.
   if (TERMINAL.has(status)) return ["open_details"]
   switch (status) {
     case "paused":

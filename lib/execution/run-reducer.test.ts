@@ -396,3 +396,30 @@ describe("team run allowed actions", () => {
     expect(snapshot.allowedActions).toEqual(["stop", "open_details"])
   })
 })
+
+describe("retry is declared but never offered", () => {
+  // The control exists in the vocabulary, but the event journal closes on a
+  // settled run — accepting it would need a NEW run linked by `parentRunId`
+  // rather than an event appended to the failed one. Until that lands,
+  // rendering the button would be rendering a control that always fails.
+  it("offers only open_details on every terminal status", () => {
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      for (const kind of ["team", "workflow", "agent-turn", "goal", "plan"] as const) {
+        const snapshot = reduceRunEvents(
+          {
+            id: `execution:${kind}:r`,
+            kind,
+            sourceId: "r",
+            title: "t",
+            status,
+            currentRevision: 1,
+            startedAt: 1,
+            updatedAt: 1,
+          },
+          []
+        )
+        expect(snapshot.allowedActions).toEqual(["open_details"])
+      }
+    }
+  })
+})

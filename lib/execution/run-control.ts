@@ -25,6 +25,14 @@ export interface RunControlResult {
     | "interrupt_expired"
     | "interrupt_resolved"
     | "source_rejected"
+    /**
+     * The action exists in the vocabulary but this run kind has no way to
+     * perform it. Distinct from `unsupported` (nothing handles this kind at
+     * all) and from `source_rejected` (the engine refused), so a card can stop
+     * offering a button that will always fail instead of reporting a generic
+     * refusal the user cannot act on.
+     */
+    | "unsupported_for_kind"
   duplicate?: boolean
   currentRevision?: number
 }
@@ -186,6 +194,17 @@ async function executeRunControlCommandUnlocked(
     }
   }
 
+  // `retry` is still structurally unreachable, and deliberately left so.
+  //
+  // Its whole point is a terminal run, but the event journal closes on a
+  // settled run (`appendInsideTransaction` refuses every event once a run is
+  // completed/failed/cancelled) — a sound invariant, and accepting a control
+  // event past it would weaken the guarantee that a settled run's history is
+  // final. The correct shape is the one the recovery policy already uses: mint
+  // a NEW run linked by `parentRunId` and journal there, leaving the failed row
+  // untouched. That needs the `parentRunId` index, so retry stays declared and
+  // unimplemented rather than half-wired — and `allowedActions` never offers
+  // it, so no surface renders a button that cannot work.
   if (["completed", "failed", "cancelled"].includes(run.status)) {
     return {
       accepted: false,
@@ -237,8 +256,15 @@ async function executeRunControlCommandUnlocked(
   if (!handler) return reject(command, "unsupported", run.currentRevision)
   try {
     await handler(command)
-  } catch {
-    return reject(command, "source_rejected", run.currentRevision)
+  } catch (error) {
+    // A handler that refuses because the KIND cannot do this action says so,
+    // instead of every throw collapsing into a generic engine refusal the user
+    // has no way to act on.
+    const reason =
+      error instanceof Error && error.name === "UnsupportedForKindError"
+        ? "unsupported_for_kind"
+        : "source_rejected"
+    return reject(command, reason, run.currentRevision)
   }
 
   const now = options.now ?? Date.now()
