@@ -279,6 +279,17 @@ const projectCommon: Config = {
     // syntax highlighting, so a thin mock is sufficient.
     "^shiki$": "<rootDir>/__mocks__/shiki.js",
 
+    // @xterm/addon-ligatures@0.10.0 is mis-packaged rather than ESM-only: its
+    // `main` points at `lib/addon-ligatures.js`, which the tarball does not
+    // contain (only `lib/addon-ligatures.mjs` ships). With no CJS entry to
+    // resolve, every suite reaching `components/terminal/terminal-instance.tsx`
+    // dies at load with `Cannot find module` — the component's `import()` of it
+    // is dynamic and try/caught, but resolution happens here, before any
+    // try/catch can run. Mapping to the real `.mjs` would need both a
+    // transformIgnorePatterns entry and a filesystem full of fonts for its
+    // `font-finder`/`font-ligatures` deps, so this maps to a faithful stub.
+    "^@xterm/addon-ligatures$": "<rootDir>/__mocks__/xterm-addon-ligatures.js",
+
     // ink (v7) + ink-spinner are ESM-only with a deep ESM dependency chain that
     // next/jest does not transform — same situation as shiki / react-markdown.
     // The standalone CLI's TUI uses real ink at runtime (esbuild bundle, native

@@ -224,6 +224,7 @@ jest.mock("@/hooks/terminal/use-terminal-autocomplete", () => ({
 import { Terminal as MockTerminal } from "@xterm/xterm"
 import { TerminalInstance } from "./terminal-instance"
 import { useFileViewerStore } from "@/stores/file-viewer/file-viewer-store"
+import { useProjectStore } from "@/stores/project/project-store"
 
 function makeFakeSession(): NonNullable<(typeof sessionRegistry)["current"]> {
   return {
@@ -270,6 +271,10 @@ beforeEach(() => {
   mockTermInstance.buffer = { active: { viewportY: 0 } }
   mockTermInstance.dispose = jest.fn()
   useFileViewerStore.setState({ open: false, request: null, failure: null })
+  // No open workspace by default. The file-viewer entry points are confined to
+  // the open workspace roots (ADR: `lib/file-viewer/open.ts`), so a test that
+  // expects a link to *resolve* has to say which workspace it resolves in.
+  useProjectStore.setState({ projects: [] })
   mockTermInstance.options = { fontFamily: "Menlo", fontSize: 13, scrollback: 10000 }
   mockTermInstance.rows = 24
   mockTermInstance.cols = 80
@@ -1045,7 +1050,12 @@ describe("TerminalInstance", () => {
     expect(mockTermInstance.scrollToLine).toHaveBeenCalledWith(30)
   })
 
-  it("registers a file link provider whose activate opens the file viewer (1D)", async () => {
+  /**
+   * Render the terminal, capture the link provider it registers, and return the
+   * links it produces for `lineText`. Shared by the resolve and refuse cases
+   * below, which differ only in the workspace roots that are open.
+   */
+  async function fileLinksFor(lineText: string) {
     type LinkProvider = {
       provideLinks: (
         y: number,
@@ -1060,8 +1070,7 @@ describe("TerminalInstance", () => {
     mockTermInstance.buffer = {
       active: {
         viewportY: 0,
-        getLine: (n: number) =>
-          n === 0 ? { translateToString: () => "see src/foo.ts:12:3 now" } : undefined,
+        getLine: (n: number) => (n === 0 ? { translateToString: () => lineText } : undefined),
       },
     }
     render(<TerminalInstance sessionId="s-1" />)
@@ -1072,15 +1081,55 @@ describe("TerminalInstance", () => {
     provider!.provideLinks(1, (l) => {
       if (l) links.push(...l)
     })
+    return links
+  }
+
+  it("registers a file link provider whose activate opens the file viewer (1D)", async () => {
+    // The terminal's `cwd` absolutizes the relative match; the *open workspace*
+    // is what confines the read. Both are needed for a link to resolve.
+    useProjectStore.setState({
+      projects: [
+        { id: "p-proj", name: "proj", roots: [{ id: "r1", path: "/proj", isPrimary: true }] },
+      ] as never,
+    })
+
+    const links = await fileLinksFor("see src/foo.ts:12:3 now")
     expect(links).toHaveLength(1)
     expect(links[0]!.text).toBe("src/foo.ts:12:3")
 
     links[0]!.activate()
-    const viewer = useFileViewerStore.getState()
-    expect(viewer.open).toBe(true)
-    expect(viewer.path).toBe("/proj/src/foo.ts") // resolved against cwd "/proj"
-    expect(viewer.line).toBe(12)
-    expect(viewer.column).toBe(3)
+
+    // The viewer takes a confined `{ root, relPath }` pair, never a bare
+    // absolute path — the old unconfined `openFile(absolutePath, …)` signature
+    // was deleted rather than deprecated (commit bedc4242f).
+    expect(useFileViewerStore.getState()).toMatchObject({
+      open: true,
+      failure: null,
+      // "src/foo.ts" absolutized against cwd "/proj", then resolved back
+      // against the open root.
+      request: { root: "/proj", relPath: "src/foo.ts", line: 12, column: 3 },
+    })
+  })
+
+  it("refuses a terminal link pointing outside every open workspace, visibly (1D)", async () => {
+    useProjectStore.setState({
+      projects: [
+        { id: "p-proj", name: "proj", roots: [{ id: "r1", path: "/proj", isPrimary: true }] },
+      ] as never,
+    })
+
+    const links = await fileLinksFor("at /usr/lib/node_modules/x/index.js:4")
+    expect(links).toHaveLength(1)
+
+    links[0]!.activate()
+
+    // Opens *on the refusal* rather than doing nothing: a click that silently
+    // no-ops is indistinguishable from a broken link.
+    expect(useFileViewerStore.getState()).toMatchObject({
+      open: true,
+      request: null,
+      failure: { code: "outside-workspace", displayName: "index.js" },
+    })
   })
 
   describe("autocomplete integration", () => {
