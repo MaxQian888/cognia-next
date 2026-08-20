@@ -334,3 +334,65 @@ describe("reduceRunEvents", () => {
     }
   })
 })
+
+describe("team run allowed actions", () => {
+  // Teams only ever offered stop/open_details, which was correct while `team`
+  // was registered to the workflow handler — that handler can only cancel, so
+  // a pause button would have been a control that always failed. Now that a
+  // durable AgentTeam run has a handler that can pause and resume it, the
+  // actions have to be offered or the capability stays unreachable.
+  it("offers pause while a team run is running", () => {
+    const snapshot = reduceRunEvents(
+      {
+        id: "execution:team:r1",
+        kind: "team",
+        sourceId: "r1",
+        title: "t",
+        status: "running",
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      []
+    )
+    expect(snapshot.allowedActions).toEqual(
+      expect.arrayContaining(["pause", "stop", "open_details"])
+    )
+  })
+
+  it("offers resume once a team run is paused", () => {
+    const snapshot = reduceRunEvents(
+      {
+        id: "execution:team:r1",
+        kind: "team",
+        sourceId: "r1",
+        title: "t",
+        status: "paused",
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      []
+    )
+    expect(snapshot.allowedActions).toEqual(
+      expect.arrayContaining(["resume", "stop", "open_details"])
+    )
+  })
+
+  it("still offers only stop for a workflow run", () => {
+    const snapshot = reduceRunEvents(
+      {
+        id: "execution:workflow:r2",
+        kind: "workflow",
+        sourceId: "r2",
+        title: "t",
+        status: "running",
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      []
+    )
+    expect(snapshot.allowedActions).toEqual(["stop", "open_details"])
+  })
+})

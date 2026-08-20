@@ -17,6 +17,8 @@
  * injectable for tests.
  */
 
+import type { ChatSession } from "@cognia/agent-config-types"
+
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 
@@ -29,6 +31,14 @@ export interface StartTeamRunFromIMInput {
   sessionId?: string
   characterId?: string
   permissionCeiling?: AgentPermissionCeiling
+  /**
+   * The conversation's ChatSession. Required to bind the run to the thread
+   * that asked for it — without a binding the run-presentation runner has
+   * nothing to project onto and every control callback is rejected as a
+   * conversation mismatch. Optional only so existing callers compile; a
+   * dispatch without it produces an uncarded, uncontrollable run.
+   */
+  session?: ChatSession
 }
 
 export interface StartTeamRunFromIMResult {
@@ -187,6 +197,28 @@ export async function startTeamRunFromIM(
       updateTeammate: (teammateId: string, updates: unknown) =>
         store.updateTeammate(teammateId, updates),
     },
+  }
+
+  // Create the execution run AND its conversation binding BEFORE firing the
+  // lifecycle. Afterwards would race: the lifecycle can emit its first events
+  // (and the runner can wake on them) before the binding exists, and the
+  // runner only projects onto a binding it can already see.
+  if (input.session) {
+    const now = Date.now()
+    try {
+      const { ensureImTeamExecutionRun } = await import("@/lib/execution/agent-team-bridge")
+      await ensureImTeamExecutionRun({
+        seed: {
+          sourceRunId: runId,
+          objective: input.goal.trim() || teamId,
+          startedAt: now,
+          updatedAt: now,
+        },
+        session: input.session,
+      })
+    } catch {
+      /* best-effort: an unbound run still executes, it is just uncarded */
+    }
   }
 
   // Fire-and-forget. The run-presentation runner owns IM fan-out; we swallow the

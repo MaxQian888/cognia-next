@@ -18,6 +18,7 @@ export interface ExecutionRunControlHandlerDeps {
 export function installExecutionRunControlHandlers(deps: ExecutionRunControlHandlerDeps = {}): {
   agent: RunControlHandler
   workflow: RunControlHandler
+  team: RunControlHandler
   goal: RunControlHandler
   plan: RunControlHandler
   dispose(): void
@@ -82,6 +83,43 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     throw new Error(`Unsupported workflow control: ${command.action}`)
   }
 
+  /**
+   * Team runs reach the execution journal by two routes with different
+   * `sourceId` semantics, and only one of them is a workflow:
+   *
+   *   - a `trigger.team` workflow run projected by `workflow-bridge.ts`, whose
+   *     `sourceId` is a workflow run id — `cancelWorkflowRun` is correct;
+   *   - a durable-v2 run projected by `agent-team-bridge.ts`, whose `sourceId`
+   *     is an `AgentTeamRunRecord` id — `cancelWorkflowRun` looks it up, finds
+   *     nothing, and the stop button does nothing.
+   *
+   * Both kinds were registered to the workflow handler, so half of them could
+   * not be stopped at all. Discriminate on the source row rather than on the
+   * kind, and hand a durable run to `controlDurableRun` — the function that
+   * has always known how, and had no registration.
+   */
+  const team: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    const run = await getExecutionRun(command.runId)
+    if (!run) throw new Error("Execution run not found")
+
+    const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+    const durable = await getAgentTeamRun(run.sourceId).catch(() => undefined)
+    if (!durable) return workflow(command)
+
+    const action =
+      command.action === "stop"
+        ? "stop"
+        : command.action === "pause"
+          ? "pause"
+          : command.action === "resume"
+            ? "resume"
+            : undefined
+    if (!action) throw new Error(`Unsupported team control: ${command.action}`)
+    const { controlDurableRun } = await import("@/lib/ai/agent/team/durable-control")
+    await controlDurableRun(run.sourceId, action)
+  }
+
   const goal: RunControlHandler = async (command) => {
     if (command.action === "open_details") return
     const run = await getExecutionRun(command.runId)
@@ -136,18 +174,21 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   }
 
   const unregisterAgent = registerRunControlHandler("agent-turn", agent)
-  const unregisterWorkflows = (["workflow", "team", "scheduled"] as const).map((kind) =>
+  const unregisterWorkflows = (["workflow", "scheduled"] as const).map((kind) =>
     registerRunControlHandler(kind, workflow)
   )
+  const unregisterTeam = registerRunControlHandler("team", team)
   const unregisterGoal = registerRunControlHandler("goal", goal)
   const unregisterPlan = registerRunControlHandler("plan", plan)
   return {
     agent,
     workflow,
+    team,
     goal,
     plan,
     dispose() {
       unregisterAgent()
+      unregisterTeam()
       for (const unregister of unregisterWorkflows) unregister()
       unregisterGoal()
       unregisterPlan()

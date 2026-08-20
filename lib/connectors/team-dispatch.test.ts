@@ -33,6 +33,13 @@ const runTeamLifecycleMock = jest.fn(async (_teamId: string, deps: Record<string
   writer.updateTeammate("m", {})
   return { runId: "r", status: "completed" }
 })
+const ensureImTeamExecutionRunMock = jest.fn(async () => "execution:team:stub")
+jest.mock("@/lib/execution/agent-team-bridge", () => ({
+  ensureImTeamExecutionRun: (...args: unknown[]) =>
+    ensureImTeamExecutionRunMock(...(args as [never])),
+  agentTeamExecutionRunId: (id: string) => `execution:team:${id}`,
+}))
+
 const getTeamMock = jest.fn((id: string) => (id === "team_real" ? { id, name: "Real" } : undefined))
 jest.mock("@/stores/agent/agent-team-store", () => ({
   __esModule: true,
@@ -226,5 +233,61 @@ describe("resolveTeamByNameOrId", () => {
 
   it("returns undefined for an unknown team", async () => {
     await expect(resolveTeamByNameOrId("ghost")).resolves.toBeUndefined()
+  })
+})
+
+describe("execution run binding", () => {
+  const session = {
+    id: "s1",
+    platformBinding: { adapterId: "a1", conversationKey: "telegram:a1:c1" },
+  } as never
+
+  beforeEach(() => ensureImTeamExecutionRunMock.mockClear())
+
+  it("creates the run and its conversation binding before firing the lifecycle", async () => {
+    // putExecutionRunBinding had three call sites and none was a team run, so
+    // a team dispatched from IM produced no card, no progress, and every
+    // control callback was rejected as a conversation mismatch.
+    const result = await startTeamRunFromIM({
+      teamId: "team_real",
+      goal: "Ship the thing",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+      sessionId: "s1",
+      session,
+    })
+
+    expect(result.started).toBe(true)
+    expect(ensureImTeamExecutionRunMock).toHaveBeenCalledTimes(1)
+    const arg = ensureImTeamExecutionRunMock.mock.calls[0][0] as {
+      seed: { sourceRunId: string; objective: string }
+      session: unknown
+    }
+    expect(arg.seed.sourceRunId).toBe(result.runId)
+    expect(arg.seed.objective).toBe("Ship the thing")
+    expect(arg.session).toBe(session)
+  })
+
+  it("still dispatches when no session is available, just uncarded", async () => {
+    const result = await startTeamRunFromIM({
+      teamId: "team_real",
+      goal: "Ship the thing",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+    })
+    expect(result.started).toBe(true)
+    expect(ensureImTeamExecutionRunMock).not.toHaveBeenCalled()
+  })
+
+  it("never lets a binding failure reject the dispatch", async () => {
+    ensureImTeamExecutionRunMock.mockRejectedValueOnce(new Error("dexie down"))
+    const result = await startTeamRunFromIM({
+      teamId: "team_real",
+      goal: "Ship the thing",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+      session,
+    })
+    expect(result.started).toBe(true)
   })
 })

@@ -37,7 +37,11 @@ function allowedActions(
   if (TERMINAL.has(status)) return ["open_details"]
   switch (status) {
     case "paused":
-      return kind === "plan" || kind === "goal" || kind === "agent-turn"
+      // `team` joined this list once a durable AgentTeam run got a control
+      // handler that can actually pause and resume it. Before that the kind
+      // was routed to the workflow handler, which only knows how to cancel —
+      // so offering resume would have been a button that always failed.
+      return kind === "plan" || kind === "goal" || kind === "agent-turn" || kind === "team"
         ? ["resume", "stop", "open_details"]
         : ["stop", "open_details"]
     case "recovery_required":
@@ -47,7 +51,7 @@ function allowedActions(
         ? ["approve", "deny", "stop", "open_details"]
         : ["stop", "open_details"]
     default:
-      return kind === "plan" || kind === "goal"
+      return kind === "plan" || kind === "goal" || kind === "team"
         ? ["pause", "stop", "open_details"]
         : ["stop", "open_details"]
   }

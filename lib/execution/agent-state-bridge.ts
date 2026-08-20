@@ -1,4 +1,4 @@
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import {
@@ -29,7 +29,17 @@ function bindingId(runId: string, adapterId: string, conversationKey: string): s
   return `execution-binding:${runId}:${adapterId}:${conversationKey}`
 }
 
-async function ensureBinding(
+/**
+ * Bind an execution run to the IM conversation that started it.
+ *
+ * Exported because the Agent Team bridge needs the identical rules — the
+ * `liveActivity` opt-out, the delivery-target resolution, and the idempotent
+ * id — and a second copy would drift. Without a binding row the run-presentation
+ * runner has nothing to project onto and `callback-authorization` rejects every
+ * control callback with `run_conversation_mismatch`, so a run with no binding
+ * is not merely uncarded: it is uncontrollable.
+ */
+export async function ensureConnectorRunBinding(
   runId: string,
   projectId: string | undefined,
   session: ChatSession
@@ -88,7 +98,7 @@ async function ensureRun(input: {
       if (!(error instanceof Error && error.name === "ConstraintError")) throw error
     }
   }
-  await ensureBinding(runId, input.projectId, input.session)
+  await ensureConnectorRunBinding(runId, input.projectId, input.session)
   return runId
 }
 
@@ -287,7 +297,10 @@ let subscription: Subscription | null = null
 
 export function startAgentStateExecutionBridge(): () => void {
   if (subscription) return stopAgentStateExecutionBridge
-  subscription = liveQuery(async () => {
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  subscription = Dexie.liveQuery(async () => {
     const [goals, plans, sessions] = await Promise.all([
       getDb().chatGoals.toArray(),
       getDb().agentPlans.toArray(),

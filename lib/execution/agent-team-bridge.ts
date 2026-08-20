@@ -6,27 +6,48 @@ import {
   runEventJournal,
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
+import type { ChatSession } from "@cognia/agent-config-types"
+
 import type { AgentTeamRunRecord } from "@/types/agent/agent-team-runtime"
 import type { RunEventType } from "@/types/execution/run"
+
+import { ensureConnectorRunBinding } from "./agent-state-bridge"
 
 export function agentTeamExecutionRunId(sourceRunId: string): string {
   return `execution:team:${sourceRunId}`
 }
 
-export async function ensureAgentTeamExecutionRun(sourceRun: AgentTeamRunRecord): Promise<string> {
-  const runId = agentTeamExecutionRunId(sourceRun.id)
+/**
+ * The minimum a team run has to say about itself to get an execution run.
+ *
+ * Taken as primitives rather than as an `AgentTeamRunRecord` so a caller that
+ * has only just minted a run id — the IM dispatch path, which fires the
+ * lifecycle and returns before any durable record exists — can create the same
+ * row. The ids converge because both derive from `agentTeamExecutionRunId`, so
+ * whichever path runs first wins and the second is a no-op.
+ */
+export interface TeamExecutionRunSeed {
+  sourceRunId: string
+  objective: string
+  projectId?: string
+  startedAt: number
+  updatedAt: number
+}
+
+export async function ensureTeamExecutionRun(seed: TeamExecutionRunSeed): Promise<string> {
+  const runId = agentTeamExecutionRunId(seed.sourceRunId)
   if (!(await getExecutionRun(runId))) {
     try {
       await createExecutionRun({
         id: runId,
         kind: "team",
-        sourceId: sourceRun.id,
-        ...(sourceRun.projectId ? { projectId: sourceRun.projectId } : {}),
-        title: sourceRun.objective,
+        sourceId: seed.sourceRunId,
+        ...(seed.projectId ? { projectId: seed.projectId } : {}),
+        title: seed.objective,
         status: "running",
         currentRevision: 0,
-        startedAt: sourceRun.startedAt ?? sourceRun.createdAt,
-        updatedAt: sourceRun.updatedAt,
+        startedAt: seed.startedAt,
+        updatedAt: seed.updatedAt,
       })
     } catch (error) {
       if (!(error instanceof Error && error.name === "ConstraintError")) throw error
@@ -36,13 +57,39 @@ export async function ensureAgentTeamExecutionRun(sourceRun: AgentTeamRunRecord)
       semanticRunEvent(
         "run.started",
         {},
-        {
-          ts: sourceRun.startedAt ?? sourceRun.createdAt,
-          sourceEventId: `agent-team:${sourceRun.id}:started`,
-        }
+        { ts: seed.startedAt, sourceEventId: `agent-team:${seed.sourceRunId}:started` }
       )
     )
   }
+  return runId
+}
+
+export async function ensureAgentTeamExecutionRun(sourceRun: AgentTeamRunRecord): Promise<string> {
+  return ensureTeamExecutionRun({
+    sourceRunId: sourceRun.id,
+    objective: sourceRun.objective,
+    ...(sourceRun.projectId ? { projectId: sourceRun.projectId } : {}),
+    startedAt: sourceRun.startedAt ?? sourceRun.createdAt,
+    updatedAt: sourceRun.updatedAt,
+  })
+}
+
+/**
+ * Create the execution run AND the IM binding for a team run started from a
+ * conversation.
+ *
+ * `putExecutionRunBinding` had exactly three call sites and none of them was a
+ * team run, so a team dispatched from IM produced no card, no progress, and no
+ * reachable control surface — "hand off to a team" was invisible from the
+ * platform that asked for it. The run row alone is not enough: the presentation
+ * runner keys off the binding.
+ */
+export async function ensureImTeamExecutionRun(input: {
+  seed: TeamExecutionRunSeed
+  session: ChatSession
+}): Promise<string> {
+  const runId = await ensureTeamExecutionRun(input.seed)
+  await ensureConnectorRunBinding(runId, input.seed.projectId, input.session)
   return runId
 }
 

@@ -12,6 +12,18 @@ jest.mock("@/lib/workflow/runtime/cancel-run", () => ({
     mockCancelWorkflowRun(...(args as Parameters<typeof mockCancelWorkflowRun>)),
 }))
 
+const mockGetAgentTeamRun = jest.fn(async (_id: string) => undefined as unknown)
+jest.mock("@/lib/db/agent-team-runtime", () => ({
+  getAgentTeamRun: (...args: unknown[]) =>
+    mockGetAgentTeamRun(...(args as Parameters<typeof mockGetAgentTeamRun>)),
+}))
+
+const mockControlDurableRun = jest.fn(async (_runId: string, _action: string) => undefined)
+jest.mock("@/lib/ai/agent/team/durable-control", () => ({
+  controlDurableRun: (...args: unknown[]) =>
+    mockControlDurableRun(...(args as Parameters<typeof mockControlDurableRun>)),
+}))
+
 const mockPauseGoal = jest.fn(async (id: string) => ({ id, status: "paused" }))
 const mockResumeGoal = jest.fn(async (id: string) => ({ id, status: "active" }))
 const mockStopGoal = jest.fn(async (id: string) => ({ id, status: "stopped" }))
@@ -226,5 +238,85 @@ describe("plan approval over run control", () => {
     expect(mockRejectPlan).toHaveBeenCalledWith("plan-source")
     expect(mockApprovePlan).not.toHaveBeenCalled()
     installed.dispose()
+  })
+})
+
+describe("team run control", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    jest.clearAllMocks()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+  })
+
+  async function seedTeamRun(sourceId: string) {
+    await createExecutionRun({
+      id: `execution:team:${sourceId}`,
+      kind: "team",
+      sourceId,
+      title: "Ship it",
+      status: "running",
+      currentRevision: 0,
+      // Control is authorized against the run's initiator (or an operator
+      // allowlist), so a run with no initiator rejects every command.
+      initiator: { remoteUserId: "operator-1" },
+      startedAt: 1,
+      updatedAt: 1,
+    })
+  }
+
+  it("stops a durable AgentTeam run through controlDurableRun", async () => {
+    // The bug: `team` was registered to the workflow handler, which calls
+    // `cancelWorkflowRun(run.sourceId)`. For a durable-v2 run `sourceId` is an
+    // AgentTeamRunRecord id, so the lookup found nothing and Stop did nothing.
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue({ id: "run_team_1", status: "running" })
+    await seedTeamRun("run_team_1")
+
+    await executeRunControlCommand({
+      runId: "execution:team:run_team_1",
+      action: "stop",
+      idempotencyKey: "team-stop",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(mockControlDurableRun).toHaveBeenCalledWith("run_team_1", "stop")
+    expect(mockCancelWorkflowRun).not.toHaveBeenCalled()
+    handlers.dispose()
+  })
+
+  it("still cancels a trigger.team workflow run through the workflow handler", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+    await seedTeamRun("wfrun_9")
+
+    await executeRunControlCommand({
+      runId: "execution:team:wfrun_9",
+      action: "stop",
+      idempotencyKey: "team-stop",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(mockCancelWorkflowRun).toHaveBeenCalledWith("wfrun_9", "im_control")
+    expect(mockControlDurableRun).not.toHaveBeenCalled()
+    handlers.dispose()
+  })
+
+  it("pauses and resumes a durable run", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue({ id: "run_team_2", status: "running" })
+    await seedTeamRun("run_team_2")
+
+    await executeRunControlCommand({
+      runId: "execution:team:run_team_2",
+      action: "pause",
+      idempotencyKey: "team-pause",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+    expect(mockControlDurableRun).toHaveBeenCalledWith("run_team_2", "pause")
+    handlers.dispose()
   })
 })
