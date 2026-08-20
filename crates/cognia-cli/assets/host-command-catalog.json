@@ -15414,10 +15414,52 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "integration-ingress"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "crates/cognia-scheduling/src/workflow/integration_spool.rs SpoolDelivery (serde rename_all = camelCase). `eventType` carries no skip_serializing_if, so it is always present and null when the route declares no event-type header.",
+          "required": [
+            "routeId",
+            "deliveryId",
+            "eventType",
+            "headers",
+            "body",
+            "receivedAt",
+            "attempts"
+          ],
+          "properties": {
+            "routeId": {
+              "type": "string"
+            },
+            "deliveryId": {
+              "type": "string"
+            },
+            "eventType": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "body": {
+              "type": "string"
+            },
+            "receivedAt": {
+              "type": "string"
+            },
+            "attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -19494,10 +19536,35 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "plugin"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/api_bridge.rs PluginApiCapability (serde rename_all = camelCase), returned as a list by plugin_get_capabilities_for_host.",
+          "required": [
+            "api",
+            "supported",
+            "highRisk",
+            "requiredPermissions"
+          ],
+          "properties": {
+            "api": {
+              "type": "string"
+            },
+            "supported": {
+              "type": "boolean"
+            },
+            "highRisk": {
+              "type": "boolean"
+            },
+            "requiredPermissions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -21611,20 +21678,43 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/lib.rs PluginRuntimeSnapshot. NOTE: no rename_all — the fields stay snake_case on the wire. The two Option fields carry no skip_serializing_if, so they are always present as null.",
+        "required": [
+          "plugin_id",
+          "version",
+          "status",
+          "last_error",
+          "loaded_at",
+          "install_path"
+        ],
+        "properties": {
+          "plugin_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "loaded_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "install_path": {
+            "type": "string"
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "plugin"
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -30115,9 +30205,19 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "task-workspaces"
       },
       "outputTyped": true
@@ -30643,6 +30743,338 @@
       "outputTyped": true
     },
     {
+      "name": "terminal_host_configure",
+      "category": "development",
+      "resource": "terminal",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "terminal_host_configure (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "settings"
+        ],
+        "properties": {
+          "settings": {
+            "type": "object",
+            "required": [
+              "allowRemoteAccess",
+              "startAtLogin",
+              "diagnostics",
+              "maxSessions",
+              "maxRemoteSessionsPerDevice",
+              "replayBytesPerSession",
+              "totalReplayBytes"
+            ],
+            "properties": {
+              "allowRemoteAccess": {
+                "type": "boolean"
+              },
+              "startAtLogin": {
+                "type": "boolean"
+              },
+              "diagnostics": {
+                "type": "boolean"
+              },
+              "maxSessions": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxRemoteSessionsPerDevice": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "replayBytesPerSession": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "totalReplayBytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms — provisioning a device descriptor has no remote path.",
+        "required": [
+          "running",
+          "endpoint",
+          "settings"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "x-cognia-wire-source": "crate::terminal_host_service::TerminalHostSettings (serde rename_all = camelCase). The terminal host's own settings file, not part of AppSettings.",
+            "required": [
+              "allowRemoteAccess",
+              "startAtLogin",
+              "diagnostics",
+              "maxSessions",
+              "maxRemoteSessionsPerDevice",
+              "replayBytesPerSession",
+              "totalReplayBytes"
+            ],
+            "properties": {
+              "allowRemoteAccess": {
+                "type": "boolean"
+              },
+              "startAtLogin": {
+                "type": "boolean"
+              },
+              "diagnostics": {
+                "type": "boolean"
+              },
+              "maxSessions": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxRemoteSessionsPerDevice": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "replayBytesPerSession": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "totalReplayBytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "terminal_host_status",
+      "category": "development",
+      "resource": "terminal",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "terminal_host_status (terminal.open)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms — provisioning a device descriptor has no remote path.",
+        "required": [
+          "running",
+          "endpoint",
+          "settings"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "x-cognia-wire-source": "crate::terminal_host_service::TerminalHostSettings (serde rename_all = camelCase). The terminal host's own settings file, not part of AppSettings.",
+            "required": [
+              "allowRemoteAccess",
+              "startAtLogin",
+              "diagnostics",
+              "maxSessions",
+              "maxRemoteSessionsPerDevice",
+              "replayBytesPerSession",
+              "totalReplayBytes"
+            ],
+            "properties": {
+              "allowRemoteAccess": {
+                "type": "boolean"
+              },
+              "startAtLogin": {
+                "type": "boolean"
+              },
+              "diagnostics": {
+                "type": "boolean"
+              },
+              "maxSessions": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxRemoteSessionsPerDevice": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "replayBytesPerSession": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "totalReplayBytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "terminal_host_sync_profiles",
+      "category": "development",
+      "resource": "terminal",
+      "target": "execution",
+      "operation": "write",
+      "capability": "terminal.open",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "terminal_host_sync_profiles (terminal.open)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "profileId",
+                "request"
+              ],
+              "properties": {
+                "profileId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "request": {
+                  "type": "object",
+                  "required": [
+                    "shell",
+                    "rows",
+                    "cols"
+                  ],
+                  "properties": {
+                    "shell": {
+                      "type": "string"
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "cwd": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "env": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "example": {}
+                    },
+                    "rows": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "cols": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "projectId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "extensionId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enableShellIntegration": {
+                      "type": "boolean"
+                    },
+                    "forceUtf8": {
+                      "type": "boolean"
+                    },
+                    "skipUserProfile": {
+                      "type": "boolean"
+                    },
+                    "sandboxed": {
+                      "type": "boolean"
+                    },
+                    "sandboxNetwork": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "profileId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` — how many profiles the device now owns on the host.",
+        "required": [
+          "installed"
+        ],
+        "properties": {
+          "installed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "terminal_kill",
       "category": "development",
       "resource": "terminal",
@@ -30746,6 +31178,7 @@
             "lastActivityAt",
             "currentController",
             "attachedClients",
+            "participants",
             "alive",
             "sandboxed",
             "integrationCapabilities",
@@ -30805,6 +31238,41 @@
             "attachedClients": {
               "type": "integer",
               "minimum": 0
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "x-cognia-wire-source": "cognia_terminal::host::SessionParticipant (serde rename_all = camelCase). `deviceId` carries no skip_serializing_if, so it is always present and null for the local desktop.",
+                "required": [
+                  "clientId",
+                  "deviceId",
+                  "local",
+                  "role"
+                ],
+                "properties": {
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "deviceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "local": {
+                    "type": "boolean"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "controller",
+                      "viewer"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
             },
             "alive": {
               "type": "boolean"
@@ -30922,6 +31390,7 @@
             "lastActivityAt",
             "currentController",
             "attachedClients",
+            "participants",
             "alive",
             "sandboxed",
             "integrationCapabilities",
@@ -30981,6 +31450,41 @@
             "attachedClients": {
               "type": "integer",
               "minimum": 0
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "x-cognia-wire-source": "cognia_terminal::host::SessionParticipant (serde rename_all = camelCase). `deviceId` carries no skip_serializing_if, so it is always present and null for the local desktop.",
+                "required": [
+                  "clientId",
+                  "deviceId",
+                  "local",
+                  "role"
+                ],
+                "properties": {
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "deviceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "local": {
+                    "type": "boolean"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "controller",
+                      "viewer"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
             },
             "alive": {
               "type": "boolean"
@@ -33044,5 +33548,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "59b5068b834793dfe1ffbd863bf07bd424a10fb2770d3d41ac63bd35c3f51299"
+  "catalogHash": "5b27ce966713a77d235f214da19d0e53dc3e1bb8cc99539b6194c2b1f573d0a8"
 }

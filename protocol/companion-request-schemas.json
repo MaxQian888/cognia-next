@@ -8693,6 +8693,157 @@
       },
       "additionalProperties": false
     },
+    "terminal_host_configure": {
+      "type": "object",
+      "required": [
+        "settings"
+      ],
+      "properties": {
+        "settings": {
+          "type": "object",
+          "required": [
+            "allowRemoteAccess",
+            "startAtLogin",
+            "diagnostics",
+            "maxSessions",
+            "maxRemoteSessionsPerDevice",
+            "replayBytesPerSession",
+            "totalReplayBytes"
+          ],
+          "properties": {
+            "allowRemoteAccess": {
+              "type": "boolean"
+            },
+            "startAtLogin": {
+              "type": "boolean"
+            },
+            "diagnostics": {
+              "type": "boolean"
+            },
+            "maxSessions": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxRemoteSessionsPerDevice": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "replayBytesPerSession": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "totalReplayBytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "terminal_host_status": {
+      "type": "object"
+    },
+    "terminal_host_sync_profiles": {
+      "type": "object",
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "profileId",
+              "request"
+            ],
+            "properties": {
+              "profileId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "request": {
+                "type": "object",
+                "required": [
+                  "shell",
+                  "rows",
+                  "cols"
+                ],
+                "properties": {
+                  "shell": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "cwd": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "rows": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "cols": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "projectId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "extensionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "enableShellIntegration": {
+                    "type": "boolean"
+                  },
+                  "forceUtf8": {
+                    "type": "boolean"
+                  },
+                  "skipUserProfile": {
+                    "type": "boolean"
+                  },
+                  "sandboxed": {
+                    "type": "boolean"
+                  },
+                  "sandboxNetwork": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "profileId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "terminal_kill": {
       "type": "object",
       "required": [

@@ -1158,6 +1158,54 @@
     "IntegerResult": {
       "type": "integer"
     },
+    "IntegrationSpoolDelivery": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-scheduling/src/workflow/integration_spool.rs SpoolDelivery (serde rename_all = camelCase). `eventType` carries no skip_serializing_if, so it is always present and null when the route declares no event-type header.",
+      "required": [
+        "routeId",
+        "deliveryId",
+        "eventType",
+        "headers",
+        "body",
+        "receivedAt",
+        "attempts"
+      ],
+      "properties": {
+        "routeId": {
+          "type": "string"
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "eventType": {
+          "type": ["string", "null"]
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "body": {
+          "type": "string"
+        },
+        "receivedAt": {
+          "type": "string"
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
+      },
+      "additionalProperties": false
+    },
+    "IntegrationSpoolDeliveryList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/IntegrationSpoolDelivery"
+      }
+    },
     "LarkEntryToken": {
       "type": "object",
       "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone — so only `token` is guaranteed.",
@@ -1790,6 +1838,61 @@
         "connection": {
           "type": "object",
           "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginApiCapability": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/api_bridge.rs PluginApiCapability (serde rename_all = camelCase), returned as a list by plugin_get_capabilities_for_host.",
+      "required": ["api", "supported", "highRisk", "requiredPermissions"],
+      "properties": {
+        "api": {
+          "type": "string"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "highRisk": {
+          "type": "boolean"
+        },
+        "requiredPermissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginApiCapabilityList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PluginApiCapability"
+      }
+    },
+    "PluginRuntimeSnapshot": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/lib.rs PluginRuntimeSnapshot. NOTE: no rename_all — the fields stay snake_case on the wire. The two Option fields carry no skip_serializing_if, so they are always present as null.",
+      "required": ["plugin_id", "version", "status", "last_error", "loaded_at", "install_path"],
+      "properties": {
+        "plugin_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "last_error": {
+          "type": ["string", "null"]
+        },
+        "loaded_at": {
+          "type": ["string", "null"]
+        },
+        "install_path": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -2567,6 +2670,40 @@
       },
       "additionalProperties": false
     },
+    "TerminalHostSettings": {
+      "type": "object",
+      "x-cognia-wire-source": "crate::terminal_host_service::TerminalHostSettings (serde rename_all = camelCase). The terminal host's own settings file, not part of AppSettings.",
+      "required": [
+        "allowRemoteAccess",
+        "startAtLogin",
+        "diagnostics",
+        "maxSessions",
+        "maxRemoteSessionsPerDevice",
+        "replayBytesPerSession",
+        "totalReplayBytes"
+      ],
+      "properties": {
+        "allowRemoteAccess": { "type": "boolean" },
+        "startAtLogin": { "type": "boolean" },
+        "diagnostics": { "type": "boolean" },
+        "maxSessions": { "type": "integer", "minimum": 1 },
+        "maxRemoteSessionsPerDevice": { "type": "integer", "minimum": 1 },
+        "replayBytesPerSession": { "type": "integer", "minimum": 1 },
+        "totalReplayBytes": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "TerminalHostStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms — provisioning a device descriptor has no remote path.",
+      "required": ["running", "endpoint", "settings"],
+      "properties": {
+        "running": { "type": "boolean" },
+        "endpoint": { "type": "string" },
+        "settings": { "$ref": "#/$defs/TerminalHostSettings" }
+      },
+      "additionalProperties": false
+    },
     "TerminalKilledPidList": {
       "type": "array",
       "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port — the PIDs actually signalled, possibly empty when nothing was listening.",
@@ -2592,6 +2729,15 @@
         "additionalProperties": false
       }
     },
+    "TerminalProfileSyncResult": {
+      "type": "object",
+      "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` — how many profiles the device now owns on the host.",
+      "required": ["installed"],
+      "properties": {
+        "installed": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
     "TerminalSession": {
       "type": "object",
       "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null — the two ssh_host_key_* fields are the exception and do skip.",
@@ -2608,6 +2754,7 @@
         "lastActivityAt",
         "currentController",
         "attachedClients",
+        "participants",
         "alive",
         "sandboxed",
         "integrationCapabilities",
@@ -2652,6 +2799,10 @@
         "attachedClients": {
           "type": "integer",
           "minimum": 0
+        },
+        "participants": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TerminalSessionParticipant" }
         },
         "alive": {
           "type": "boolean"
@@ -2714,6 +2865,18 @@
       "items": {
         "$ref": "#/$defs/TerminalSession"
       }
+    },
+    "TerminalSessionParticipant": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia_terminal::host::SessionParticipant (serde rename_all = camelCase). `deviceId` carries no skip_serializing_if, so it is always present and null for the local desktop.",
+      "required": ["clientId", "deviceId", "local", "role"],
+      "properties": {
+        "clientId": { "type": "string" },
+        "deviceId": { "type": ["string", "null"] },
+        "local": { "type": "boolean" },
+        "role": { "type": "string", "enum": ["controller", "viewer"] }
+      },
+      "additionalProperties": false
     },
     "WorkflowApprovalList": {
       "type": "object",
@@ -3601,7 +3764,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "integration_ingress_poll": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/IntegrationSpoolDeliveryList"
     },
     "integration_ingress_register": {
       "$ref": "#/$defs/NullableString"
@@ -3840,7 +4003,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "plugin_get_capabilities": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/PluginApiCapabilityList"
     },
     "plugin_install": {
       "$ref": "#/$defs/LegacyResult"
@@ -3934,7 +4097,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "plugin_runtime_snapshot": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/PluginRuntimeSnapshot"
     },
     "plugin_set_enabled": {
       "$ref": "#/$defs/LegacyResult"
@@ -4245,7 +4408,7 @@
       "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
     },
     "task_workspace_settle": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/LegacyList"
     },
     "task_workspace_status": {
       "$ref": "#/$defs/LegacyRecord"
@@ -4276,6 +4439,15 @@
     },
     "terminal_exec": {
       "$ref": "#/$defs/TerminalExecResult"
+    },
+    "terminal_host_configure": {
+      "$ref": "#/$defs/TerminalHostStatus"
+    },
+    "terminal_host_status": {
+      "$ref": "#/$defs/TerminalHostStatus"
+    },
+    "terminal_host_sync_profiles": {
+      "$ref": "#/$defs/TerminalProfileSyncResult"
     },
     "terminal_kill": {
       "$ref": "#/$defs/NullResult"

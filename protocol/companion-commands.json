@@ -2078,6 +2078,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "codeserver_agent_workspace_snapshot",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "codeserver_broker_content_create",
       "target": "client",
       "operation": "side-effect",
