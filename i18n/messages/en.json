@@ -12844,72 +12844,72 @@
         "title": "Submission preview"
       },
       "console": {
-        "notConnected": "No diagnostic service connected",
-        "notConnectedDescription": "Connect this account to a self-hosted diagnostic service to triage the crashes it has accepted.",
         "configure": "Open diagnostics settings",
-        "insufficientRole": "This identity cannot read the console",
-        "insufficientRoleDescription": "The service issued a grant below Viewer. Ask an administrator for a session with a viewer, triager, or admin role.",
-        "refresh": "Refresh",
+        "errors": {
+          "console_failed": "The console request did not complete.",
+          "group_not_found": "That crash group no longer exists.",
+          "incident_not_found": "That incident no longer exists.",
+          "insufficient_grant_scope": "This identity is not allowed to do that.",
+          "invalid_oidc_session": "The service rejected the stored identity session.",
+          "network_unavailable": "The diagnostic service could not be reached.",
+          "raw_minidump_access_disabled": "Raw minidump downloads are disabled for this tenant.",
+          "session_token_missing": "No identity session is stored for this connection."
+        },
         "filters": {
-          "status": "Status",
-          "statusAll": "Any status",
+          "assignee": "Assignee",
+          "assigneeLabel": "Filter groups by assignee",
           "search": "Exception, module or fingerprint",
           "searchLabel": "Filter groups by exception, module or fingerprint",
-          "assignee": "Assignee",
-          "assigneeLabel": "Filter groups by assignee"
-        },
-        "statuses": {
-          "open": "Open",
-          "suppressed": "Suppressed",
-          "resolved": "Resolved"
-        },
-        "groups": {
-          "loading": "Loading crash groups…",
-          "empty": "No crash groups",
-          "emptyDescription": "Nothing matches these filters. Widen the status filter or clear the search.",
-          "count": "{count, plural, =1 {1 incident} other {# incidents}}",
-          "lastSeen": "last seen {when}",
-          "regression": "{count, plural, =1 {1 regression} other {# regressions}}"
+          "status": "Status",
+          "statusAll": "Any status"
         },
         "group": {
-          "platform": "Platform",
+          "assign": "Assign",
+          "assignee": "Assignee",
+          "assigneePlaceholder": "Unassigned",
           "buildFamily": "Build family",
           "firstSeen": "First seen",
           "lastSeen": "Last seen",
-          "assignee": "Assignee",
-          "assigneePlaceholder": "Unassigned",
-          "assign": "Assign",
-          "unassign": "Unassign",
-          "readOnly": "Triage controls need a triager grant."
+          "platform": "Platform",
+          "readOnly": "Triage controls need a triager grant.",
+          "unassign": "Unassign"
         },
-        "incidents": {
-          "title": "Incidents in this group",
-          "empty": "No incidents recorded."
+        "groups": {
+          "count": "{count, plural, =1 {1 incident} other {# incidents}}",
+          "empty": "No crash groups",
+          "emptyDescription": "Nothing matches these filters. Widen the status filter or clear the search.",
+          "lastSeen": "last seen {when}",
+          "loading": "Loading crash groups…",
+          "regression": "{count, plural, =1 {1 regression} other {# regressions}}"
         },
         "incident": {
-          "close": "Close",
           "artifacts": "Artifacts",
-          "noArtifacts": "No stored artifacts.",
-          "download": "Download",
           "audit": "Audit trail",
+          "close": "Close",
+          "download": "Download",
+          "noArtifacts": "No stored artifacts.",
           "noAudit": "No audit events.",
           "system": "system"
         },
+        "incidents": {
+          "empty": "No incidents recorded.",
+          "title": "Incidents in this group"
+        },
+        "insufficientRole": "This identity cannot read the console",
+        "insufficientRoleDescription": "The service issued a grant below Viewer. Ask an administrator for a session with a viewer, triager, or admin role.",
+        "notConnected": "No diagnostic service connected",
+        "notConnectedDescription": "Connect this account to a self-hosted diagnostic service to triage the crashes it has accepted.",
         "policy": {
-          "title": "Tenant policy",
           "load": "Load tenant policy",
           "rawMinidump": "Allow raw minidump downloads",
-          "rawMinidumpDescription": "Minidumps can contain process memory. While this is off the service refuses every raw minidump read, and each allowed read is recorded in the incident's audit trail with the operator's identity."
+          "rawMinidumpDescription": "Minidumps can contain process memory. While this is off the service refuses every raw minidump read, and each allowed read is recorded in the incident's audit trail with the operator's identity.",
+          "title": "Tenant policy"
         },
-        "errors": {
-          "insufficient_grant_scope": "This identity is not allowed to do that.",
-          "raw_minidump_access_disabled": "Raw minidump downloads are disabled for this tenant.",
-          "invalid_oidc_session": "The service rejected the stored identity session.",
-          "session_token_missing": "No identity session is stored for this connection.",
-          "group_not_found": "That crash group no longer exists.",
-          "incident_not_found": "That incident no longer exists.",
-          "network_unavailable": "The diagnostic service could not be reached.",
-          "console_failed": "The console request did not complete."
+        "refresh": "Refresh",
+        "statuses": {
+          "open": "Open",
+          "resolved": "Resolved",
+          "suppressed": "Suppressed"
         }
       },
       "delete": {
@@ -12974,27 +12974,9 @@
         "transports": "{healthy}/{total} transports"
       },
       "submission": {
-        "submit": "Submit to diagnostic service",
-        "submitting": "Submitting…",
-        "resubmit": "Submit again",
-        "desktopOnly": "Submission is available in the desktop app.",
-        "notConfigured": "No diagnostic service is configured yet.",
         "configure": "Open diagnostics settings",
-        "screenshotUnavailable": "A screenshot was requested but this system did not allow one. The report was sent without it.",
-        "parts": "{uploaded} uploaded · {resumed} already stored",
-        "receiptTitle": "Receipt",
-        "supportCode": "Support code",
-        "incidentId": "Incident",
-        "submittedAt": "Submitted",
-        "processingState": "Processing",
-        "service": "Service",
-        "includedMinidump": "Minidump included",
-        "includedScreenshot": "Screenshot included",
-        "withdrawn": "Consent withdrawn",
-        "refresh": "Refresh status",
-        "withdraw": "Withdraw consent",
-        "withdrawDescription": "Blocks processing and schedules deletion. Stays available even while the service has stopped accepting new reports.",
         "deleteRemote": "Delete from service",
+        "desktopOnly": "Submission is available in the desktop app.",
         "errors": {
           "desktop_only": "Submission is available in the desktop app.",
           "ingest_disabled": "The service is not accepting new reports right now. This report is still on your machine — try again later.",
@@ -13007,7 +12989,25 @@
           "submission_failed": "The submission did not complete.",
           "submission_not_found": "There is no submission recorded for this report.",
           "unauthorized": "The service refused this installation's credentials."
-        }
+        },
+        "incidentId": "Incident",
+        "includedMinidump": "Minidump included",
+        "includedScreenshot": "Screenshot included",
+        "notConfigured": "No diagnostic service is configured yet.",
+        "parts": "{uploaded} uploaded · {resumed} already stored",
+        "processingState": "Processing",
+        "receiptTitle": "Receipt",
+        "refresh": "Refresh status",
+        "resubmit": "Submit again",
+        "screenshotUnavailable": "A screenshot was requested but this system did not allow one. The report was sent without it.",
+        "service": "Service",
+        "submit": "Submit to diagnostic service",
+        "submittedAt": "Submitted",
+        "submitting": "Submitting…",
+        "supportCode": "Support code",
+        "withdraw": "Withdraw consent",
+        "withdrawDescription": "Blocks processing and schedules deletion. Stays available even while the service has stopped accepting new reports.",
+        "withdrawn": "Consent withdrawn"
       },
       "title": "Logs and diagnostics",
       "traces": {
@@ -13130,8 +13130,8 @@
       "views": {
         "incidents": "Incidents",
         "logs": "Logs",
-        "traces": "Traces",
-        "service": "Service"
+        "service": "Service",
+        "traces": "Traces"
       }
     }
   },
@@ -13286,6 +13286,30 @@
       "title": "Remove MCP server?"
     },
     "description": "Model Context Protocol servers exposed to Claude on every turn. Toggle individually; disabled servers stay configured but inactive.",
+    "detail": {
+      "agentsSubtitle": "Which coding agents this server is mirrored into.",
+      "agentsTitle": "Agent targets",
+      "connectionSubtitle": "What this server runs, and where its settings came from.",
+      "connectionTitle": "Connection",
+      "copiedCommand": "Command copied",
+      "copiedJson": "JSON copied",
+      "copyCommand": "Copy command",
+      "copyJson": "Copy JSON",
+      "edit": "Edit",
+      "logsEmpty": "No log lines yet.",
+      "logsSubtitle": "The last lines this server wrote while connecting.",
+      "logsTitle": "Recent activity",
+      "metaEnv": "Secrets",
+      "metaOrigin": "Origin",
+      "metaRevision": "Revision",
+      "metaUpdated": "Updated",
+      "noSelection": "Select a server to see its tools, agent targets and logs.",
+      "nothingConfigured": "Nothing configured yet",
+      "openLogs": "Open logs",
+      "reviewBody": "It stays disconnected until you confirm the command or endpoint it runs is the one you expect.",
+      "reviewTitle": "This server needs a trust review",
+      "test": "Test"
+    },
     "drift": {
       "dismiss": "Dismiss until next refresh",
       "missingCount": "{count} missing",
@@ -13334,11 +13358,27 @@
       "placeholderUrl": "https://example.com/mcp",
       "save": "Save",
       "saving": "Saving…",
+      "sheetSubtitle": "Name, transport and connection settings.",
       "showForm": "Show form",
       "showJson": "Show JSON",
       "showValues": "Show values",
       "transport": "Transport",
       "url": "URL"
+    },
+    "export": {
+      "close": "Close",
+      "copied": "Copied",
+      "copy": "Copy",
+      "download": "Download",
+      "downloaded": "Downloaded",
+      "format": "Format",
+      "formatCommand": "Command",
+      "formatJson": "JSON",
+      "secretNote": "Stored credentials are exported as their reference, never as the secret itself.",
+      "subtitle": "{count, plural, one {# server} other {# servers}}, in another tool's format.",
+      "target": "For",
+      "targetCanonical": "Portable (mcpServers)",
+      "title": "Export servers"
     },
     "filter": {
       "all": "All",
@@ -13493,6 +13533,9 @@
       "viewLogsFor": "View logs for {name}"
     },
     "panel": {
+      "counts": "{enabled} of {total} enabled",
+      "exportAll": "Export all",
+      "paste": "Paste",
       "searchPlaceholder": "Filter servers by name, command, or URL…"
     },
     "row": {
@@ -13500,14 +13543,18 @@
       "disableSwitch": "Disable {name} in cognia",
       "edit": "Edit {name}",
       "enableSwitch": "Enable {name} in cognia",
+      "export": "Export {name}",
       "failed": "failed",
       "logs": "View {name} logs",
       "logsTooltip": "View logs",
+      "moreActions": "More actions for {name}",
       "test": "Test {name}",
       "testDesktopOnly": "Desktop only",
       "testTooltip": "Test connection (10s timeout)",
+      "toolsCount": "{count} tools",
       "toolsOne": "{count} tool",
-      "toolsOther": "{count} tools"
+      "toolsOther": "{count} tools",
+      "toolsWithDenied": "{total} tools · {denied} off"
     },
     "tabs": {
       "agents": "Agent Sync",
@@ -13527,14 +13574,78 @@
       "removed": "Removed \"{name}\".",
       "updated": "MCP server updated."
     },
+    "tools": {
+      "allowAll": "Allow all",
+      "allowToolAria": "Allow {name}",
+      "countBadge": "{denied}/{total} off",
+      "deniedByPattern": "rule {pattern}",
+      "denyAll": "Deny all",
+      "denyMatching": "Rule",
+      "denyMatchingTooltip": "Save the current filter as a rule that also covers future tools",
+      "denyToolAria": "Deny {name}",
+      "desktopOnly": "Tool discovery runs on the desktop app.",
+      "discoveredAt": "Tool list read {time}",
+      "emptyDesktop": "No tools discovered yet. Refresh to connect and read this server's tool list.",
+      "loading": "Loading tools…",
+      "noMatch": "No tool matches this filter.",
+      "orphansHint": "These tools are denied but this server no longer reports them.",
+      "orphansTitle": "Rules without a tool",
+      "patternHits": "· {count} now",
+      "patternLiteral": "No * or ? — this will only ever match that exact tool name.",
+      "patternPlaceholder": "e.g. write_*",
+      "patternsEmpty": "No rules yet.",
+      "patternsHint": "A rule keeps matching tools off, including ones this server adds later. Use * for any run of characters and ? for one.",
+      "patternsTitle": "Rules",
+      "refresh": "Refresh",
+      "refreshTooltip": "Connect and re-read this server's tool list",
+      "removeOrphan": "Remove rule for {name}",
+      "removePattern": "Remove rule {pattern}",
+      "searchPlaceholder": "Filter tools",
+      "subtitle": "Turn individual tools off, or write a rule that keeps them off.",
+      "title": "Tools"
+    },
+    "transfer": {
+      "cancel": "Cancel",
+      "created": "{count} added",
+      "errored": "{count} failed",
+      "errors": {
+        "empty": "Paste something first.",
+        "invalid-json": "That is not valid JSON.",
+        "missing-target": "No command or URL in that line.",
+        "no-entries": "No MCP server found in that block.",
+        "unrecognized": "Could not read that as a command or a config block."
+      },
+      "importN": "Add {count}",
+      "noChanges": "Nothing changed",
+      "onCollision": "If a name already exists",
+      "placeholder": "claude mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem ~/docs\n\n… or paste an mcpServers JSON block",
+      "skipped": "{count} skipped",
+      "strategy": {
+        "duplicate": "Add a copy",
+        "duplicateDesc": "Import under a suffixed name.",
+        "overwrite": "Overwrite",
+        "overwriteDesc": "Replace the configured server's settings.",
+        "skip": "Keep existing",
+        "skipDesc": "Leave the configured server untouched."
+      },
+      "subtitle": "Paste an install command (claude, codex, gemini…), a bare shell line, or an mcpServers block.",
+      "title": "Add from a command or JSON",
+      "updated": "{count} updated",
+      "warnings": {
+        "guessedName": "Named “{name}” — rename it after adding if you like.",
+        "ignoredFlag": "Ignored {flag} — it has no equivalent here.",
+        "renamed": "“{from}” renamed to “{to}” to fit the naming rules.",
+        "skippedEntry": "Skipped “{name}”: no command or URL."
+      }
+    },
     "view": {
+      "comfortable": "Comfortable rows",
+      "compact": "Compact rows",
       "filters": "Filters",
-      "grid": "Grid view",
       "groupBy": "Group by",
       "groupNone": "None",
       "groupStatus": "Status",
-      "groupTransport": "Transport",
-      "list": "List view"
+      "groupTransport": "Transport"
     }
   },
   "memory": {
@@ -14660,15 +14771,27 @@
       "title": "Project instructions"
     },
     "mcp": {
+      "allowToolAria": "Allow {name}",
       "backAria": "Back to settings",
+      "deniedByPattern": "rule {pattern}",
+      "denyToolAria": "Deny {name}",
+      "disableAria": "Turn off {name}",
       "disabled": "Off",
       "empty": "No MCP servers are configured on the paired desktop yet.",
+      "enableAria": "Turn on {name}",
       "enabled": "On",
-      "intro": "Browse the MCP servers configured on your paired desktop. Adding, editing and authenticating servers is done on the desktop.",
-      "manageOnDesktop": "MCP servers are managed on the desktop. Open Settings → MCP there to add, edit, enable or authenticate a server.",
+      "intro": "MCP servers configured on your paired desktop. You can switch a server or an individual tool off from here; adding, editing and authenticating a server is done on the desktop.",
+      "manageOnDesktop": "Adding, editing, deleting and authenticating MCP servers happens on the desktop — open Settings → MCP there. Rules that match tools by name are edited there too.",
+      "queueToggleLabel": "Turn {name} {state}",
+      "queueToolLabel": "Update {name} tool rules ({tool})",
       "remoteAuthNote": "authenticate on desktop",
+      "rulesOnDesktop": "Tools held off by a name rule can only be freed on the desktop.",
       "sectionTitle": "Configured servers",
-      "title": "MCP servers"
+      "title": "MCP servers",
+      "toolsCount": "{count} tools",
+      "toolsSectionTitle": "Tools",
+      "toolsWithDenied": "{total} tools · {denied} off",
+      "writeFailed": "Could not save that change: {message}"
     },
     "me": {
       "a2uiRow": "Mini apps (A2UI)",
@@ -28977,8 +29100,6 @@
         "debugMode": "Debug mode",
         "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process. Look for them in the Tauri dev console or the sidecar log file.",
         "description": "Low-level toggles for debugging and experimental plugin behavior.",
-        "taskWorkspace": "Task resource workspace",
-        "taskWorkspaceHint": "Experimental. Run agents in isolated task workspaces, review their resources, and explicitly apply or undo attributed changes.",
         "title": "Developer flags"
       },
       "inboxTelemetry": {

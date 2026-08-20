@@ -12844,72 +12844,72 @@
         "title": "提交预览"
       },
       "console": {
-        "notConnected": "尚未连接诊断服务",
-        "notConnectedDescription": "将该账户连接到自建诊断服务后，即可分诊服务已接收的崩溃。",
         "configure": "打开诊断设置",
-        "insufficientRole": "当前身份无法读取控制台",
-        "insufficientRoleDescription": "服务签发的凭据低于 Viewer。请向管理员申请具备 viewer、triager 或 admin 角色的会话。",
-        "refresh": "刷新",
+        "errors": {
+          "console_failed": "控制台请求未完成。",
+          "group_not_found": "该崩溃分组已不存在。",
+          "incident_not_found": "该事件已不存在。",
+          "insufficient_grant_scope": "当前身份无权执行该操作。",
+          "invalid_oidc_session": "服务拒绝了已保存的身份会话。",
+          "network_unavailable": "无法连接到诊断服务。",
+          "raw_minidump_access_disabled": "该租户已禁用原始 minidump 下载。",
+          "session_token_missing": "该连接没有保存身份会话。"
+        },
         "filters": {
-          "status": "状态",
-          "statusAll": "全部状态",
+          "assignee": "负责人",
+          "assigneeLabel": "按负责人筛选分组",
           "search": "异常、模块或指纹",
           "searchLabel": "按异常、模块或指纹筛选分组",
-          "assignee": "负责人",
-          "assigneeLabel": "按负责人筛选分组"
-        },
-        "statuses": {
-          "open": "待处理",
-          "suppressed": "已抑制",
-          "resolved": "已解决"
-        },
-        "groups": {
-          "loading": "正在加载崩溃分组…",
-          "empty": "没有崩溃分组",
-          "emptyDescription": "没有符合当前筛选条件的分组。请放宽状态筛选或清空搜索。",
-          "count": "{count, plural, other {# 个事件}}",
-          "lastSeen": "最近出现于 {when}",
-          "regression": "{count, plural, other {# 次回归}}"
+          "status": "状态",
+          "statusAll": "全部状态"
         },
         "group": {
-          "platform": "平台",
+          "assign": "指派",
+          "assignee": "负责人",
+          "assigneePlaceholder": "未指派",
           "buildFamily": "构建系列",
           "firstSeen": "首次出现",
           "lastSeen": "最近出现",
-          "assignee": "负责人",
-          "assigneePlaceholder": "未指派",
-          "assign": "指派",
-          "unassign": "取消指派",
-          "readOnly": "分诊操作需要 triager 凭据。"
+          "platform": "平台",
+          "readOnly": "分诊操作需要 triager 凭据。",
+          "unassign": "取消指派"
         },
-        "incidents": {
-          "title": "该分组下的事件",
-          "empty": "没有记录到事件。"
+        "groups": {
+          "count": "{count, plural, other {# 个事件}}",
+          "empty": "没有崩溃分组",
+          "emptyDescription": "没有符合当前筛选条件的分组。请放宽状态筛选或清空搜索。",
+          "lastSeen": "最近出现于 {when}",
+          "loading": "正在加载崩溃分组…",
+          "regression": "{count, plural, other {# 次回归}}"
         },
         "incident": {
-          "close": "关闭",
           "artifacts": "产物",
-          "noArtifacts": "没有已存储的产物。",
-          "download": "下载",
           "audit": "审计记录",
+          "close": "关闭",
+          "download": "下载",
+          "noArtifacts": "没有已存储的产物。",
           "noAudit": "没有审计事件。",
           "system": "系统"
         },
+        "incidents": {
+          "empty": "没有记录到事件。",
+          "title": "该分组下的事件"
+        },
+        "insufficientRole": "当前身份无法读取控制台",
+        "insufficientRoleDescription": "服务签发的凭据低于 Viewer。请向管理员申请具备 viewer、triager 或 admin 角色的会话。",
+        "notConnected": "尚未连接诊断服务",
+        "notConnectedDescription": "将该账户连接到自建诊断服务后，即可分诊服务已接收的崩溃。",
         "policy": {
-          "title": "租户策略",
           "load": "加载租户策略",
           "rawMinidump": "允许下载原始 minidump",
-          "rawMinidumpDescription": "minidump 可能包含进程内存。关闭时服务会拒绝所有原始 minidump 读取；每次允许的读取都会带上运维者身份写入该事件的审计记录。"
+          "rawMinidumpDescription": "minidump 可能包含进程内存。关闭时服务会拒绝所有原始 minidump 读取；每次允许的读取都会带上运维者身份写入该事件的审计记录。",
+          "title": "租户策略"
         },
-        "errors": {
-          "insufficient_grant_scope": "当前身份无权执行该操作。",
-          "raw_minidump_access_disabled": "该租户已禁用原始 minidump 下载。",
-          "invalid_oidc_session": "服务拒绝了已保存的身份会话。",
-          "session_token_missing": "该连接没有保存身份会话。",
-          "group_not_found": "该崩溃分组已不存在。",
-          "incident_not_found": "该事件已不存在。",
-          "network_unavailable": "无法连接到诊断服务。",
-          "console_failed": "控制台请求未完成。"
+        "refresh": "刷新",
+        "statuses": {
+          "open": "待处理",
+          "resolved": "已解决",
+          "suppressed": "已抑制"
         }
       },
       "delete": {
@@ -12974,27 +12974,9 @@
         "transports": "{healthy}/{total} 传输正常"
       },
       "submission": {
-        "submit": "提交到诊断服务",
-        "submitting": "提交中…",
-        "resubmit": "重新提交",
-        "desktopOnly": "仅桌面应用支持提交。",
-        "notConfigured": "尚未配置诊断服务。",
         "configure": "打开诊断设置",
-        "screenshotUnavailable": "已请求截图，但系统未允许。报告已在不含截图的情况下发送。",
-        "parts": "已上传 {uploaded} 个 · 服务已有 {resumed} 个",
-        "receiptTitle": "回执",
-        "supportCode": "支持代码",
-        "incidentId": "事件",
-        "submittedAt": "提交时间",
-        "processingState": "处理状态",
-        "service": "服务",
-        "includedMinidump": "已包含 minidump",
-        "includedScreenshot": "已包含截图",
-        "withdrawn": "已撤回同意",
-        "refresh": "刷新状态",
-        "withdraw": "撤回同意",
-        "withdrawDescription": "阻止继续处理并安排删除。即使服务已停止接收新报告，该操作仍然可用。",
         "deleteRemote": "从服务删除",
+        "desktopOnly": "仅桌面应用支持提交。",
         "errors": {
           "desktop_only": "仅桌面应用支持提交。",
           "ingest_disabled": "服务当前不接收新报告。报告仍保留在本机，请稍后重试。",
@@ -13007,7 +12989,25 @@
           "submission_failed": "提交未完成。",
           "submission_not_found": "该报告没有提交记录。",
           "unauthorized": "服务拒绝了本安装的凭据。"
-        }
+        },
+        "incidentId": "事件",
+        "includedMinidump": "已包含 minidump",
+        "includedScreenshot": "已包含截图",
+        "notConfigured": "尚未配置诊断服务。",
+        "parts": "已上传 {uploaded} 个 · 服务已有 {resumed} 个",
+        "processingState": "处理状态",
+        "receiptTitle": "回执",
+        "refresh": "刷新状态",
+        "resubmit": "重新提交",
+        "screenshotUnavailable": "已请求截图，但系统未允许。报告已在不含截图的情况下发送。",
+        "service": "服务",
+        "submit": "提交到诊断服务",
+        "submittedAt": "提交时间",
+        "submitting": "提交中…",
+        "supportCode": "支持代码",
+        "withdraw": "撤回同意",
+        "withdrawDescription": "阻止继续处理并安排删除。即使服务已停止接收新报告，该操作仍然可用。",
+        "withdrawn": "已撤回同意"
       },
       "title": "日志与诊断",
       "traces": {
@@ -13130,8 +13130,8 @@
       "views": {
         "incidents": "事故",
         "logs": "日志",
-        "traces": "追踪",
-        "service": "服务"
+        "service": "服务",
+        "traces": "追踪"
       }
     }
   },
@@ -13286,6 +13286,30 @@
       "title": "移除该 MCP 服务器？"
     },
     "description": "每轮对话向 Claude 暴露的 Model Context Protocol 服务器。可单独开关，禁用后保留配置但不生效。",
+    "detail": {
+      "agentsSubtitle": "这个服务器会被写入哪些编程 Agent 的配置文件。",
+      "agentsTitle": "Agent 目标",
+      "connectionSubtitle": "这个服务器运行什么，以及配置从哪里来。",
+      "connectionTitle": "连接配置",
+      "copiedCommand": "已复制命令",
+      "copiedJson": "已复制 JSON",
+      "copyCommand": "复制命令",
+      "copyJson": "复制 JSON",
+      "edit": "编辑",
+      "logsEmpty": "暂无日志。",
+      "logsSubtitle": "该服务器连接过程中最新的日志行。",
+      "logsTitle": "最近活动",
+      "metaEnv": "密钥项",
+      "metaOrigin": "来源",
+      "metaRevision": "修订号",
+      "metaUpdated": "更新于",
+      "noSelection": "选择一个服务器，查看它的工具、Agent 目标与日志。",
+      "nothingConfigured": "尚未配置任何内容",
+      "openLogs": "查看日志",
+      "reviewBody": "在你确认它运行的命令或端点无误之前，它不会连接。",
+      "reviewTitle": "该服务器需要信任复核",
+      "test": "测试"
+    },
     "drift": {
       "dismiss": "忽略至下次刷新",
       "missingCount": "{count} 个缺失",
@@ -13334,11 +13358,27 @@
       "placeholderUrl": "https://example.com/mcp",
       "save": "保存",
       "saving": "保存中…",
+      "sheetSubtitle": "名称、传输方式与连接配置。",
       "showForm": "切换到表单",
       "showJson": "切换到 JSON",
       "showValues": "显示值",
       "transport": "传输方式",
       "url": "URL"
+    },
+    "export": {
+      "close": "关闭",
+      "copied": "已复制",
+      "copy": "复制",
+      "download": "下载",
+      "downloaded": "已下载",
+      "format": "格式",
+      "formatCommand": "命令",
+      "formatJson": "JSON",
+      "secretNote": "已保存的凭据只会导出为引用，绝不会导出明文。",
+      "subtitle": "{count, plural, other {# 个服务器}}，导出为其他工具的格式。",
+      "target": "目标",
+      "targetCanonical": "通用格式（mcpServers）",
+      "title": "导出服务器"
     },
     "filter": {
       "all": "全部",
@@ -13493,6 +13533,9 @@
       "viewLogsFor": "查看 {name} 的日志"
     },
     "panel": {
+      "counts": "已启用 {enabled}/{total}",
+      "exportAll": "导出全部",
+      "paste": "粘贴添加",
       "searchPlaceholder": "按名称、命令或 URL 过滤服务器…"
     },
     "row": {
@@ -13500,14 +13543,18 @@
       "disableSwitch": "在 cognia 中禁用 {name}",
       "edit": "编辑 {name}",
       "enableSwitch": "在 cognia 中启用 {name}",
+      "export": "导出 {name}",
       "failed": "失败",
       "logs": "查看 {name} 日志",
       "logsTooltip": "查看日志",
+      "moreActions": "{name} 的更多操作",
       "test": "测试 {name}",
       "testDesktopOnly": "仅桌面端可用",
       "testTooltip": "测试连接（10 秒超时）",
+      "toolsCount": "{count} 个工具",
       "toolsOne": "{count} 个工具",
-      "toolsOther": "{count} 个工具"
+      "toolsOther": "{count} 个工具",
+      "toolsWithDenied": "{total} 个工具 · 已禁用 {denied}"
     },
     "tabs": {
       "agents": "Agent 同步",
@@ -13527,14 +13574,78 @@
       "removed": "已删除「{name}」。",
       "updated": "已更新 MCP 服务器。"
     },
+    "tools": {
+      "allowAll": "全部允许",
+      "allowToolAria": "允许 {name}",
+      "countBadge": "已禁用 {denied}/{total}",
+      "deniedByPattern": "规则 {pattern}",
+      "denyAll": "全部禁用",
+      "denyMatching": "存为规则",
+      "denyMatchingTooltip": "把当前筛选存成规则，之后新增的同名工具也会被禁用",
+      "denyToolAria": "禁用 {name}",
+      "desktopOnly": "工具探测只在桌面端可用。",
+      "discoveredAt": "工具列表读取于 {time}",
+      "emptyDesktop": "还没有探测到工具。点击刷新以连接并读取该服务器的工具列表。",
+      "loading": "正在加载工具…",
+      "noMatch": "没有匹配的工具。",
+      "orphansHint": "这些工具已被禁用，但服务器当前不再提供它们。",
+      "orphansTitle": "找不到对应工具的规则",
+      "patternHits": "· 当前 {count} 个",
+      "patternLiteral": "没有 * 或 ?，这条规则只会匹配这一个完整工具名。",
+      "patternPlaceholder": "例如 write_*",
+      "patternsEmpty": "还没有规则。",
+      "patternsHint": "规则会持续禁用匹配的工具，包括该服务器之后新增的工具。* 匹配任意字符，? 匹配单个字符。",
+      "patternsTitle": "规则",
+      "refresh": "刷新",
+      "refreshTooltip": "连接服务器并重新读取工具列表",
+      "removeOrphan": "删除 {name} 的禁用规则",
+      "removePattern": "删除规则 {pattern}",
+      "searchPlaceholder": "筛选工具",
+      "subtitle": "单独关闭某个工具，或写一条规则让它一直保持关闭。",
+      "title": "工具"
+    },
+    "transfer": {
+      "cancel": "取消",
+      "created": "新增 {count} 个",
+      "errored": "失败 {count} 个",
+      "errors": {
+        "empty": "请先粘贴内容。",
+        "invalid-json": "这不是合法的 JSON。",
+        "missing-target": "这行命令里没有命令或 URL。",
+        "no-entries": "这段配置里没有找到 MCP 服务器。",
+        "unrecognized": "无法把它解析成命令或配置。"
+      },
+      "importN": "添加 {count} 个",
+      "noChanges": "没有变化",
+      "onCollision": "名称冲突时",
+      "placeholder": "claude mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem ~/docs\n\n…或粘贴一段 mcpServers JSON 配置",
+      "skipped": "跳过 {count} 个",
+      "strategy": {
+        "duplicate": "另存一份",
+        "duplicateDesc": "以带后缀的新名称导入。",
+        "overwrite": "覆盖",
+        "overwriteDesc": "用新配置替换已配置的服务器。",
+        "skip": "保留现有",
+        "skipDesc": "不改动已配置的服务器。"
+      },
+      "subtitle": "粘贴安装命令（claude、codex、gemini…）、裸终端命令，或一段 mcpServers 配置。",
+      "title": "从命令或 JSON 添加",
+      "updated": "更新 {count} 个",
+      "warnings": {
+        "guessedName": "已命名为「{name}」，添加后可以自行改名。",
+        "ignoredFlag": "已忽略 {flag}——这里没有对应设置。",
+        "renamed": "「{from}」已改名为「{to}」以符合命名规则。",
+        "skippedEntry": "已跳过「{name}」：既没有命令也没有 URL。"
+      }
+    },
     "view": {
+      "comfortable": "宽松行高",
+      "compact": "紧凑行高",
       "filters": "筛选",
-      "grid": "网格视图",
       "groupBy": "分组方式",
       "groupNone": "不分组",
       "groupStatus": "状态",
-      "groupTransport": "传输方式",
-      "list": "列表视图"
+      "groupTransport": "传输方式"
     }
   },
   "memory": {
@@ -14660,15 +14771,27 @@
       "title": "项目指令"
     },
     "mcp": {
+      "allowToolAria": "允许 {name}",
       "backAria": "返回设置",
+      "deniedByPattern": "规则 {pattern}",
+      "denyToolAria": "禁用 {name}",
+      "disableAria": "停用 {name}",
       "disabled": "已关闭",
       "empty": "已配对的桌面端尚未配置任何 MCP 服务器。",
+      "enableAria": "启用 {name}",
       "enabled": "已启用",
-      "intro": "查看已配对桌面端配置的 MCP 服务器。添加、编辑和认证服务器需在桌面端完成。",
-      "manageOnDesktop": "MCP 服务器在桌面端管理。请在桌面端打开「设置 → MCP」添加、编辑、启用或认证服务器。",
+      "intro": "配对桌面上已配置的 MCP 服务器。你可以在这里关闭某个服务器或单个工具；新增、编辑与授权仍在桌面端完成。",
+      "manageOnDesktop": "新增、编辑、删除与授权 MCP 服务器都在桌面端进行——请在那里打开 设置 → MCP。按名称匹配的工具规则也在桌面端编辑。",
+      "queueToggleLabel": "将 {name} 设为{state}",
+      "queueToolLabel": "更新 {name} 的工具规则（{tool}）",
       "remoteAuthNote": "在桌面端认证",
+      "rulesOnDesktop": "被名称规则挡住的工具只能在桌面端解除。",
       "sectionTitle": "已配置的服务器",
-      "title": "MCP 服务器"
+      "title": "MCP 服务器",
+      "toolsCount": "{count} 个工具",
+      "toolsSectionTitle": "工具",
+      "toolsWithDenied": "{total} 个工具 · 已禁用 {denied}",
+      "writeFailed": "保存失败：{message}"
     },
     "me": {
       "a2uiRow": "迷你应用 (A2UI)",
@@ -28977,8 +29100,6 @@
         "debugMode": "调试模式",
         "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。可在 Tauri dev 控制台或 sidecar 日志中查看。",
         "description": "用于调试与实验性插件行为的底层开关。",
-        "taskWorkspace": "任务资源工作区",
-        "taskWorkspaceHint": "实验功能。让 Agent 在隔离的任务工作区中执行，审查其资源，并显式应用或精确撤销归因改动。",
         "title": "开发者选项"
       },
       "inboxTelemetry": {
