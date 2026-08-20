@@ -280,3 +280,137 @@ describe("legacy migration", () => {
     expect(resolved.legacyModeId).toBeUndefined()
   })
 })
+
+describe("autonomy", () => {
+  it("defaults to a level that caps nothing, so a chosen authority survives", () => {
+    // The regression this pins: if the host default were anything below
+    // `autopilot`, adding the axis would silently narrow every desktop user
+    // who had picked `bypassPermissions`.
+    const resolved = resolveComposition(
+      input({ selection: { presetId: "standard", authority: "bypassPermissions" } })
+    )
+    expect(DEFAULT_HOST_DEFAULTS.autonomy).toBe("autopilot")
+    expect(resolved.authority).toBe("bypassPermissions")
+    expect(resolved.autonomy).toBe("autopilot")
+    expect(resolved.warnings).toEqual([])
+  })
+
+  it("caps authority at the level the autonomy implies", () => {
+    const resolved = resolveComposition(
+      input({
+        selection: { presetId: "standard", authority: "bypassPermissions", autonomy: "confirm" },
+      })
+    )
+    expect(resolved.authority).toBe("default")
+    expect(resolved.warnings).toContainEqual({
+      reason: "authority-capped-by-autonomy",
+      requested: "bypassPermissions",
+      applied: "default",
+    })
+  })
+
+  it("names the value the caller asked for, not an intermediate one", () => {
+    // Code pins itself at `acceptEdits`; asking for bypass at `suggest`
+    // autonomy must report the preset cap and the autonomy cap separately.
+    const resolved = resolveComposition(
+      input({
+        selection: {
+          presetId: CODE_PRESET.id,
+          authority: "bypassPermissions",
+          autonomy: "suggest",
+        },
+      })
+    )
+    const reasons = resolved.warnings.map((warning) => warning.reason)
+    expect(reasons).toContain("authority-capped-by-autonomy")
+    expect(resolved.authority).toBe("plan")
+  })
+
+  it("applies the preset cap before the parent ceiling", () => {
+    const gated = { ...STANDARD_PRESET, maxAutonomy: "confirm" as const }
+    const resolved = resolveComposition(
+      input({
+        presets: [gated],
+        selection: { presetId: "standard", autonomy: "autopilot" },
+      })
+    )
+    expect(resolved.autonomy).toBe("confirm")
+    expect(resolved.warnings).toContainEqual({
+      reason: "autonomy-capped-by-preset",
+      requested: "autopilot",
+      applied: "confirm",
+    })
+  })
+
+  it("lets a child narrow its parent's autonomy and never widen it", () => {
+    const parent = resolveComposition(
+      input({ selection: { presetId: "standard", autonomy: "confirm" } })
+    )
+    const child = resolveChildComposition(parent, {
+      ...input({ selection: { presetId: "standard", autonomy: "autopilot" } }),
+    })
+    expect(child.autonomy).toBe("confirm")
+    expect(child.warnings).toContainEqual({
+      reason: "autonomy-capped-by-ceiling",
+      requested: "autopilot",
+      applied: "confirm",
+    })
+  })
+})
+
+describe("engagement", () => {
+  it("defaults to inline", () => {
+    const resolved = resolveComposition(input({ selection: { presetId: "standard" } }))
+    expect(resolved.engagement).toBe("inline")
+  })
+
+  it("honours an explicit selection", () => {
+    const resolved = resolveComposition(
+      input({ selection: { presetId: "standard", engagement: "background" } })
+    )
+    expect(resolved.engagement).toBe("background")
+    expect(resolved.warnings).toEqual([])
+  })
+
+  it("degrades loudly on a host that cannot detach a run", () => {
+    const resolved = resolveComposition(
+      input({
+        selection: { presetId: "standard", engagement: "background" },
+        supportedEngagements: ["inline"],
+      })
+    )
+    expect(resolved.engagement).toBe("inline")
+    expect(resolved.warnings).toContainEqual({
+      reason: "engagement-unavailable",
+      requested: "background",
+      applied: "inline",
+    })
+  })
+})
+
+describe("orchestration reference", () => {
+  it("carries the engine's target id without owning it", () => {
+    const resolved = resolveComposition(
+      input({
+        selection: { presetId: "standard", orchestration: "team", orchestrationRef: "team-42" },
+      })
+    )
+    expect(resolved.orchestration).toBe("team")
+    expect(resolved.orchestrationRef).toBe("team-42")
+  })
+
+  it("degrades an unsupported orchestration to direct", () => {
+    const resolved = resolveComposition(
+      input({
+        selection: { presetId: "standard", orchestration: "team" },
+        supportedOrchestrations: ["direct"],
+      })
+    )
+    expect(resolved.orchestration).toBe("direct")
+    expect(resolved.warnings).toContainEqual({
+      reason: "orchestration-unavailable",
+      requested: "team",
+      applied: "direct",
+    })
+  })
+})

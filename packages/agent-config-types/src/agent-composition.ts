@@ -3,14 +3,25 @@
 // A "mode" used to be one flat enum in `types/agent/agent-mode.ts` that mixed
 // persona (`research`), permission posture (`plan`, `build`), orchestration
 // (`workflow`) and provenance (`plugin`, `custom`). This module replaces that
-// single axis with five independent ones, WITHOUT re-declaring any authority
+// single axis with independent ones, WITHOUT re-declaring any authority
 // that already exists:
 //
 //   - Authority reuses {@link AgentPermissionMode} — the SDK's own union.
 //   - Runtime binding stays with `AgentExecutionPolicy` / the resolved spec.
 //     Nothing here re-derives a runtime; a composition only *references* one.
 //
-// The two genuinely new axes are tool presentation and orchestration.
+// The genuinely new axes are tool presentation, orchestration, engagement and
+// autonomy. Engagement and autonomy were added when the IM connector's own
+// mode stack (`ConnectorMode` × `ImExecutionTarget`) was folded into this one,
+// so "mode" means the same thing on the desktop and in a chat platform. Both
+// are deliberately narrow:
+//
+//   - Engagement names an *attachment* mechanism that already existed
+//     implicitly (inline capture vs a durable ExecutionRun vs a human
+//     assignee). It never chooses an executor — orchestration does.
+//   - Autonomy is a *cap* on authority plus a *floor* on the human ceremony a
+//     run owes (`lib/policy/risk/ceremony.ts`). It adds no third permission
+//     mechanism of its own.
 
 import type { ValidationResult } from "./agent-execution"
 import type { AgentPermissionMode } from "./index"
@@ -105,19 +116,128 @@ export const TOOL_PRESENTATION_MODES: readonly ToolPresentationMode[] = ["native
 /**
  * How the turn is decomposed.
  *
- * `direct` is one agent loop. `subagent` allows delegation to children.
+ * `direct` is one agent loop. `subagent` allows delegation to children through
+ * the SDK's own child-agent mechanism. `team` hands the turn to the Agent Team
+ * lifecycle, which is a different runtime with its own gates and trajectory —
+ * conflating it with `subagent` would make one value mean two schedulers.
  * `workflow` routes through the visual workflow engine. `verified-fresh-agent`
  * additionally requires an independent reviewer with its own context, which
  * may never inherit the producing agent's ceiling.
+ *
+ * `team` and `workflow` name *which* engine runs; the engine's target id
+ * travels separately in `orchestrationRef`, because the id's storage of record
+ * stays where it already lives (a conversation override's `teamId`, a
+ * session's binding). A composition never becomes a second router.
  */
-export type AgentOrchestrationPolicy = "direct" | "subagent" | "workflow" | "verified-fresh-agent"
+export type AgentOrchestrationPolicy =
+  "direct" | "subagent" | "team" | "workflow" | "verified-fresh-agent"
 
 export const AGENT_ORCHESTRATION_POLICIES: readonly AgentOrchestrationPolicy[] = [
   "direct",
   "subagent",
+  "team",
   "workflow",
   "verified-fresh-agent",
 ]
+
+// ---- Axis 6: engagement -----------------------------------------------------
+
+/**
+ * How a run is attached to whoever asked for it.
+ *
+ * This is not "who executes" — that is orchestration. It is the difference
+ * between an answer that comes back in the same breath, a task that detaches
+ * and reports on its own, and work that leaves the machine entirely.
+ *
+ * `inline`     — the turn's reply is the answer. One request, one response.
+ * `background` — the turn mints a durable ExecutionRun, acknowledges, reports
+ *                milestones, and stays steerable and stoppable until it
+ *                settles. Same executor as `inline` when orchestration is
+ *                `direct`; only the attachment differs, which is exactly why
+ *                this cannot be an orchestration value.
+ * `human`      — no agent loop runs at all; the work is assigned to a person.
+ */
+export type EngagementMode = "inline" | "background" | "human"
+
+export const ENGAGEMENT_MODES: readonly EngagementMode[] = ["inline", "background", "human"]
+
+// ---- Axis 7: autonomy -------------------------------------------------------
+
+/**
+ * How much a run may do before it owes a human a checkpoint.
+ *
+ * Authority answers "may the model call this tool, and does each call ask?".
+ * Autonomy answers "does this *run* owe a human a checkpoint — before it
+ * starts, before its product ships, on every turn?". Neither expresses the
+ * other: no permission mode can say "run at full authority but hold the
+ * finished reply for review", and no ceremony can say "this tool is off".
+ *
+ * The five levels map onto the IM connector's old three modes without loss:
+ * `observe` was `manual`, `suggest` was `draft`, `act` was `auto`. `confirm`
+ * and `autopilot` are the two rungs that mode stack never had.
+ */
+export type AutonomyLevel = "observe" | "suggest" | "confirm" | "act" | "autopilot"
+
+export const AUTONOMY_LEVELS: readonly AutonomyLevel[] = [
+  "observe",
+  "suggest",
+  "confirm",
+  "act",
+  "autopilot",
+]
+
+/**
+ * Escalation rank, least autonomous first. A total record so adding a level is
+ * a compile error here rather than an unranked value that comparisons would
+ * silently treat as maximal.
+ */
+export const AUTONOMY_RANK: Record<AutonomyLevel, number> = {
+  observe: 0,
+  suggest: 1,
+  confirm: 2,
+  act: 3,
+  autopilot: 4,
+}
+
+/** The less autonomous of two levels. Mirrors {@link narrowAuthority}. */
+export function narrowAutonomy(
+  ceiling: AutonomyLevel,
+  requested: AutonomyLevel | undefined
+): AutonomyLevel {
+  if (requested === undefined) return ceiling
+  return AUTONOMY_RANK[requested] < AUTONOMY_RANK[ceiling] ? requested : ceiling
+}
+
+/**
+ * The highest authority a level may resolve to, or `undefined` for uncapped.
+ *
+ * This is the whole of autonomy's interaction with the permission system: it
+ * feeds {@link narrowAuthority} as one more ceiling in the same loop that
+ * already applies the preset cap and the parent ceiling. There is no second
+ * enforcement point.
+ *
+ * `autopilot` returns `undefined` — it removes the *operator's* floor only. It
+ * can never lower a ceremony that risk classification raised; that opt-out is
+ * a separate, operator-visible switch (`riskGating`), deliberately not folded
+ * in here so the "gate on positive evidence" invariant stays intact.
+ */
+export function autonomyAuthorityCap(autonomy: AutonomyLevel): AgentAuthority | undefined {
+  switch (autonomy) {
+    // `observe` never runs a turn at all. The cap is still the strictest
+    // value rather than `undefined`, so a caller that ignores the no-run rule
+    // degrades to read-only instead of inheriting the host default.
+    case "observe":
+      return "plan"
+    case "suggest":
+      return "plan"
+    case "confirm":
+      return "default"
+    case "act":
+      return "acceptEdits"
+    case "autopilot":
+      return undefined
+  }
+}
 
 // ---- Axis 1: preset ---------------------------------------------------------
 
@@ -149,12 +269,20 @@ export interface AgentPresetDefinitionV1 {
     authority?: AgentAuthority
     toolPresentation?: ToolPresentationMode
     orchestration?: AgentOrchestrationPolicy
+    engagement?: EngagementMode
+    autonomy?: AutonomyLevel
   }
   /**
    * The highest authority this preset may ever resolve to. Minimal pins itself
    * to `plan` so no selection or legacy migration can turn it into an editor.
    */
   maxAuthority?: AgentAuthority
+  /**
+   * The most autonomous this preset may ever resolve to. Separate from
+   * {@link AgentPresetDefinitionV1.maxAuthority} because a preset can want a
+   * high tool authority with a mandatory review step, or the reverse.
+   */
+  maxAutonomy?: AutonomyLevel
   visibility?: AgentPresetVisibility
   /** Hidden from the picker unless the caller opts into experiments. */
   experimental?: boolean
@@ -179,6 +307,15 @@ export interface AgentCompositionSelectionV1 {
   authority?: AgentAuthority
   toolPresentation?: ToolPresentationMode
   orchestration?: AgentOrchestrationPolicy
+  engagement?: EngagementMode
+  autonomy?: AutonomyLevel
+  /**
+   * The id the chosen orchestration engine runs — a team id for `team`, a
+   * workflow id for `workflow`. Carried, never owned: the storage of record
+   * stays with whatever already holds the binding, so the composition cannot
+   * drift from it.
+   */
+  orchestrationRef?: string
   /**
    * Reference to an `AgentExecutionPolicy` binding. The composition never
    * describes a runtime itself — it points at the existing authority.
@@ -203,8 +340,12 @@ export type AgentCompositionFallbackReason =
   | "unknown-legacy-mode"
   | "authority-capped-by-preset"
   | "authority-capped-by-ceiling"
+  | "authority-capped-by-autonomy"
+  | "autonomy-capped-by-preset"
+  | "autonomy-capped-by-ceiling"
   | "presentation-unavailable"
   | "orchestration-unavailable"
+  | "engagement-unavailable"
 
 export interface AgentCompositionWarning {
   reason: AgentCompositionFallbackReason
@@ -229,6 +370,9 @@ export interface ResolvedAgentCompositionV1 {
   authority: AgentPermissionMode
   toolPresentation: ToolPresentationMode
   orchestration: AgentOrchestrationPolicy
+  engagement: EngagementMode
+  autonomy: AutonomyLevel
+  orchestrationRef?: string
   runtimeBindingRef?: string
   /** SHA-256 of the final system prompt. */
   promptDigest: string
@@ -262,6 +406,9 @@ export function compositionDigestPayload(
     | "authority"
     | "toolPresentation"
     | "orchestration"
+    | "engagement"
+    | "autonomy"
+    | "orchestrationRef"
     | "runtimeBindingRef"
     | "promptDigest"
     | "toolDigest"
@@ -275,6 +422,9 @@ export function compositionDigestPayload(
     authority: resolved.authority,
     toolPresentation: resolved.toolPresentation,
     orchestration: resolved.orchestration,
+    engagement: resolved.engagement,
+    autonomy: resolved.autonomy,
+    orchestrationRef: resolved.orchestrationRef,
     runtimeBindingRef: resolved.runtimeBindingRef,
     promptDigest: resolved.promptDigest,
     toolDigest: resolved.toolDigest,
@@ -299,6 +449,14 @@ export function isAgentOrchestrationPolicy(v: unknown): v is AgentOrchestrationP
   return typeof v === "string" && (AGENT_ORCHESTRATION_POLICIES as readonly string[]).includes(v)
 }
 
+export function isEngagementMode(v: unknown): v is EngagementMode {
+  return typeof v === "string" && (ENGAGEMENT_MODES as readonly string[]).includes(v)
+}
+
+export function isAutonomyLevel(v: unknown): v is AutonomyLevel {
+  return typeof v === "string" && (AUTONOMY_LEVELS as readonly string[]).includes(v)
+}
+
 export function validateAgentCompositionSelection(
   v: unknown
 ): ValidationResult<AgentCompositionSelectionV1> {
@@ -317,7 +475,13 @@ export function validateAgentCompositionSelection(
   if (v.orchestration !== undefined && !isAgentOrchestrationPolicy(v.orchestration)) {
     errors.push(`orchestration must be one of ${AGENT_ORCHESTRATION_POLICIES.join("|")}`)
   }
-  for (const key of ["runtimeBindingRef", "legacyModeId"] as const) {
+  if (v.engagement !== undefined && !isEngagementMode(v.engagement)) {
+    errors.push(`engagement must be one of ${ENGAGEMENT_MODES.join("|")}`)
+  }
+  if (v.autonomy !== undefined && !isAutonomyLevel(v.autonomy)) {
+    errors.push(`autonomy must be one of ${AUTONOMY_LEVELS.join("|")}`)
+  }
+  for (const key of ["runtimeBindingRef", "orchestrationRef", "legacyModeId"] as const) {
     if (v[key] !== undefined && typeof v[key] !== "string") {
       errors.push(`${key} must be a string when present`)
     }
@@ -355,6 +519,12 @@ export function validateResolvedAgentComposition(
   }
   if (!isAgentOrchestrationPolicy(v.orchestration)) {
     errors.push(`orchestration must be one of ${AGENT_ORCHESTRATION_POLICIES.join("|")}`)
+  }
+  if (!isEngagementMode(v.engagement)) {
+    errors.push(`engagement must be one of ${ENGAGEMENT_MODES.join("|")}`)
+  }
+  if (!isAutonomyLevel(v.autonomy)) {
+    errors.push(`autonomy must be one of ${AUTONOMY_LEVELS.join("|")}`)
   }
   for (const key of ["promptDigest", "toolDigest", "compositionDigest"] as const) {
     if (typeof v[key] !== "string" || !DIGEST_PATTERN.test(v[key] as string)) {

@@ -3,12 +3,19 @@ import {
   AGENT_COMPOSITION_SCHEMA_VERSION,
   AGENT_ORCHESTRATION_POLICIES,
   AUTHORITY_RANK,
+  AUTONOMY_LEVELS,
+  AUTONOMY_RANK,
+  ENGAGEMENT_MODES,
   TOOL_PRESENTATION_MODES,
+  autonomyAuthorityCap,
   compositionDigestPayload,
   isAgentAuthority,
   isAgentOrchestrationPolicy,
+  isAutonomyLevel,
+  isEngagementMode,
   isToolPresentationMode,
   narrowAuthority,
+  narrowAutonomy,
   validateAgentCompositionSelection,
   validateResolvedAgentComposition,
   widensAuthority,
@@ -29,6 +36,8 @@ function resolved(overrides: Partial<ResolvedAgentCompositionV1> = {}): Resolved
     authority: "default",
     toolPresentation: "native",
     orchestration: "direct",
+    engagement: "inline",
+    autonomy: "act",
     promptDigest: DIGEST_A,
     toolDigest: DIGEST_B,
     compositionDigest: DIGEST_C,
@@ -91,7 +100,7 @@ describe("axis guards", () => {
     expect(isAgentAuthority("build")).toBe(false)
     expect(isAgentAuthority("dontAsk")).toBe(false)
     expect(isToolPresentationMode("sandbox")).toBe(false)
-    expect(isAgentOrchestrationPolicy("team")).toBe(false)
+    expect(isAgentOrchestrationPolicy("swarm")).toBe(false)
     expect(isAgentAuthority(undefined)).toBe(false)
   })
 })
@@ -106,6 +115,9 @@ describe("compositionDigestPayload", () => {
       authority: "default",
       toolPresentation: "native",
       orchestration: "direct",
+      engagement: "inline",
+      autonomy: "act",
+      orchestrationRef: undefined,
       runtimeBindingRef: undefined,
       promptDigest: DIGEST_A,
       toolDigest: DIGEST_B,
@@ -135,6 +147,78 @@ describe("compositionDigestPayload", () => {
     expect(JSON.stringify(compositionDigestPayload(resolved({ presetVersion: "2" })))).not.toBe(
       base
     )
+    // Two turns that differ only in engagement or autonomy genuinely ran
+    // differently — one drafted its reply, the other sent it.
+    expect(
+      JSON.stringify(compositionDigestPayload(resolved({ engagement: "background" })))
+    ).not.toBe(base)
+    expect(JSON.stringify(compositionDigestPayload(resolved({ autonomy: "suggest" })))).not.toBe(
+      base
+    )
+    expect(
+      JSON.stringify(compositionDigestPayload(resolved({ orchestrationRef: "team-1" })))
+    ).not.toBe(base)
+  })
+})
+
+describe("narrowAutonomy", () => {
+  it("keeps the ceiling when nothing is requested", () => {
+    expect(narrowAutonomy("act", undefined)).toBe("act")
+  })
+
+  it("returns the less autonomous of the two, in either argument order", () => {
+    expect(narrowAutonomy("act", "suggest")).toBe("suggest")
+    expect(narrowAutonomy("suggest", "act")).toBe("suggest")
+  })
+
+  it("refuses to widen past the ceiling", () => {
+    expect(narrowAutonomy("confirm", "autopilot")).toBe("confirm")
+  })
+
+  it("ranks every level exactly once", () => {
+    const ranks = AUTONOMY_LEVELS.map((level) => AUTONOMY_RANK[level])
+    expect(new Set(ranks).size).toBe(AUTONOMY_LEVELS.length)
+  })
+})
+
+describe("autonomyAuthorityCap", () => {
+  it("caps each level at the authority that level implies", () => {
+    expect(autonomyAuthorityCap("observe")).toBe("plan")
+    expect(autonomyAuthorityCap("suggest")).toBe("plan")
+    expect(autonomyAuthorityCap("confirm")).toBe("default")
+    expect(autonomyAuthorityCap("act")).toBe("acceptEdits")
+  })
+
+  it("leaves autopilot uncapped so it removes the operator floor and nothing else", () => {
+    expect(autonomyAuthorityCap("autopilot")).toBeUndefined()
+  })
+
+  it("never produces a cap above the level below it", () => {
+    // Monotonic: a more autonomous level may never imply a *lower* authority.
+    const caps = AUTONOMY_LEVELS.map((level) => autonomyAuthorityCap(level))
+    for (let i = 1; i < caps.length; i += 1) {
+      const previous = caps[i - 1]
+      const current = caps[i]
+      if (previous === undefined) throw new Error("only the last level may be uncapped")
+      if (current === undefined) continue
+      expect(AUTHORITY_RANK[current]).toBeGreaterThanOrEqual(AUTHORITY_RANK[previous])
+    }
+  })
+})
+
+describe("engagement and autonomy guards", () => {
+  it("accepts every declared value and rejects everything else", () => {
+    for (const value of ENGAGEMENT_MODES) expect(isEngagementMode(value)).toBe(true)
+    for (const value of AUTONOMY_LEVELS) expect(isAutonomyLevel(value)).toBe(true)
+    expect(isEngagementMode("delegated")).toBe(false)
+    expect(isAutonomyLevel("auto")).toBe(false)
+    expect(isEngagementMode(undefined)).toBe(false)
+    expect(isAutonomyLevel(3)).toBe(false)
+  })
+
+  it("accepts `team` as an orchestration now that the Agent Team lifecycle is one", () => {
+    expect(isAgentOrchestrationPolicy("team")).toBe(true)
+    expect(isAgentOrchestrationPolicy("swarm")).toBe(false)
   })
 })
 
@@ -162,7 +246,7 @@ describe("validateAgentCompositionSelection", () => {
       presetId: "",
       authority: "build",
       toolPresentation: "sandbox",
-      orchestration: "team",
+      orchestration: "swarm",
       runtimeBindingRef: 7,
     })
     expect(result.ok).toBe(false)
@@ -227,7 +311,7 @@ describe("validateResolvedAgentComposition", () => {
         `toolPresentation must be one of ${TOOL_PRESENTATION_MODES.join("|")}`,
       ],
       [
-        { orchestration: "team" as never },
+        { orchestration: "swarm" as never },
         `orchestration must be one of ${AGENT_ORCHESTRATION_POLICIES.join("|")}`,
       ],
       [{ toolDigest: "sha256:xyz" }, "toolDigest must be a sha256:<64 hex> digest"],

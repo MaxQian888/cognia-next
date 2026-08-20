@@ -35,8 +35,13 @@ import type {
 export const REVIEWER_PRESET_ID = "minimal"
 
 export interface ReviewerCompositionInput {
-  /** The Creator turn's resolved composition; the reviewer's ceiling. */
-  parent: Pick<ResolvedAgentCompositionV1, "authority">
+  /**
+   * The Creator turn's resolved composition; the reviewer's ceiling on both
+   * authority and autonomy. The reviewer deliberately requests neither
+   * autonomy nor engagement of its own: it produces a verdict, not a product
+   * a human signs off, so it inherits the parent's level and can only narrow.
+   */
+  parent: Pick<ResolvedAgentCompositionV1, "authority" | "autonomy">
   presets: readonly AgentPresetDefinitionV1[]
   promptDigest: string
   toolDigest: string

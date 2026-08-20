@@ -12,9 +12,9 @@ import type { AuthoringRoot, CreatorReviewFinding } from "@/types/creator"
 const DIGEST = `sha256:${"0".repeat(64)}`
 const presets = builtInPresetCatalog()
 
-function resolve(parentAuthority: string) {
+function resolve(parentAuthority: string, parentAutonomy: string = "autopilot") {
   return resolveReviewerComposition({
-    parent: { authority: parentAuthority as never },
+    parent: { authority: parentAuthority as never, autonomy: parentAutonomy as never },
     presets,
     promptDigest: DIGEST,
     toolDigest: DIGEST,
@@ -142,5 +142,18 @@ describe("computeReviewVerdict", () => {
 
   it("approves with no findings and a passing toolchain", () => {
     expect(computeReviewVerdict({ verification: passing }, [], "plan").approved).toBe(true)
+  })
+})
+
+describe("reviewer autonomy", () => {
+  it("inherits the parent's autonomy rather than requesting one", () => {
+    // The reviewer produces a verdict, not a product a human signs off, so it
+    // must not raise a ceremony floor of its own.
+    expect(resolve("acceptEdits", "confirm").autonomy).toBe("confirm")
+    expect(resolve("acceptEdits", "autopilot").autonomy).toBe("autopilot")
+  })
+
+  it("can never be more autonomous than the turn it reviews", () => {
+    expect(resolve("acceptEdits", "suggest").autonomy).toBe("suggest")
   })
 })
