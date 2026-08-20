@@ -108,6 +108,61 @@ export interface CodeServerSaveResult {
   failed: string[]
 }
 
+/**
+ * One row in a companion-extension side-bar tree.
+ *
+ * Flat and pre-formatted on purpose: the extension renders what it is given and
+ * decides nothing. Anything it would need business logic for — which issues are
+ * open, what a plan's status means, how to order them — is the app's job, so a
+ * rendering bug can never become a wrong answer about the user's work.
+ */
+export interface CodeServerWorkspaceRow {
+  /** Stable id, used as the tree item id and echoed back on activation. */
+  id: string
+  label: string
+  /** Secondary text shown dimmed after the label (status, assignee, …). */
+  description?: string
+  /** Codicon id (e.g. `issue-opened`), already resolved by the app. */
+  icon?: string
+  /**
+   * Workspace-relative or absolute file this row points at, when it has one.
+   * Clicking a row with a path opens it in place; rows without one fall back to
+   * revealing the item in Cognia.
+   */
+  path?: string
+  /** 1-based line to reveal alongside `path`. */
+  line?: number
+}
+
+/** A titled group of rows — one tree in the Cognia view container. */
+export interface CodeServerWorkspaceGroup {
+  /** `issues` | `plans` | `runs` — matches the contributed view ids. */
+  id: string
+  /** Already-localized heading; the extension never translates app data. */
+  title: string
+  rows: CodeServerWorkspaceRow[]
+  /** Shown in place of an empty tree. */
+  emptyText?: string
+}
+
+/**
+ * What the companion extension renders: a connection summary for the status bar
+ * plus the grouped rows for its side-bar trees.
+ */
+export interface CodeServerWorkspaceSnapshot {
+  /** Status-bar text, already localized (e.g. "Cognia: 3 open"). */
+  statusText: string
+  /** Status-bar tooltip, already localized. */
+  statusTooltip?: string
+  /**
+   * Draws the user's eye when something needs it — mapped to VS Code's warning
+   * background. Set by the app (e.g. new errors past the threshold), never
+   * inferred by the extension.
+   */
+  attention?: boolean
+  groups: CodeServerWorkspaceGroup[]
+}
+
 /** Payload of the `codeserver://download-progress` event. */
 export interface CodeServerDownloadProgress {
   /**
@@ -319,6 +374,16 @@ export const codeServerClient = {
   /** Surface an app-side message inside the editor. */
   notify: (root: string, message: string, kind?: "info" | "warning" | "error") =>
     transport.call<void>("codeserver_agent_notify", { root, message, kind }),
+  /**
+   * Push the workspace snapshot the companion extension renders in its status
+   * bar item and side-bar trees.
+   *
+   * Whole snapshot, not a delta: the panel is small, the extension holds no
+   * business logic of its own, and a dropped delta would leave a silently wrong
+   * tree that nothing would ever correct.
+   */
+  pushWorkspaceSnapshot: (root: string, snapshot: CodeServerWorkspaceSnapshot) =>
+    transport.call<void>("codeserver_agent_workspace_snapshot", { root, snapshot }),
   respondToBroker: (
     request: Pick<CodeServerBrokerRequest, "root" | "generation" | "id">,
     outcome: { result?: unknown; error?: { code: number; message: string; data?: unknown } }

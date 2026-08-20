@@ -1,0 +1,14 @@
+{
+  "chooseAction": "选择一个 Cognia 模板",
+  "disconnected": "Cognia：未连接",
+  "issuesEmpty": "没有未完成的议题",
+  "issuesTitle": "议题",
+  "noCustomActions": "暂无可用的提示词模板。请在 Cognia 的模板库中添加。",
+  "noDiagnostics": "此工作区没有报告任何问题。",
+  "plansEmpty": "没有进行中的计划",
+  "plansTitle": "计划",
+  "runsEmpty": "没有 Agent 运行",
+  "runsTitle": "Agent 运行",
+  "statusText": "Cognia：{count} 项未完成",
+  "statusTooltip": "打开 Cognia 面板"
+}

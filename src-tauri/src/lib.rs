@@ -1447,6 +1447,7 @@ pub fn run() {
             codeserver::commands::codeserver_agent_reveal,
             codeserver::commands::codeserver_agent_run_in_terminal,
             codeserver::commands::codeserver_agent_notify,
+            codeserver::commands::codeserver_agent_workspace_snapshot,
             codeserver::commands::codeserver_read_runtime_args,
             codeserver::commands::codeserver_write_runtime_args,
             codeserver::commands::codeserver_language_pack_available,

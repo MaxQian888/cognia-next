@@ -11,6 +11,7 @@ import * as net from "node:net"
 import { createHmac, randomUUID } from "node:crypto"
 import * as vscode from "vscode"
 import { ContentHandleClient } from "./content-handles.mjs"
+import { WorkspacePanel } from "./workspace-panel.mjs"
 import { findOccupiedContributionIds } from "./contribution-ids.mjs"
 import {
   ContentLengthDecoder,
@@ -47,6 +48,18 @@ const RECONNECT_DELAY_MS = 1000
  */
 const EVENT_COALESCE_MS = 150
 const BROKER_REQUEST_TIMEOUT_MS = 30_000
+/**
+ * The workspace panel, and the app-supplied data it renders.
+ *
+ * `customActions` and `panelStrings` live here rather than in the panel because
+ * the chat-context commands need them too: every user-visible string this
+ * extension shows comes from the app's message catalog, so the extension ships
+ * no vocabulary of its own to drift from Cognia's.
+ */
+let workspacePanel = null
+let customActions = []
+let panelStrings = {}
+
 const IDE_CATALOG_HASH = "sha256:53cf23036ed2e14693f284778d7f2b0cd7cd5802ee63bb42c573063f40f86fb3"
 
 /**
@@ -370,6 +383,8 @@ async function dispatch(method, params, signal) {
       return runInTerminal(params)
     case "notify":
       return notify(params)
+    case "workspaceSnapshot":
+      return workspaceSnapshot(params)
     case "managedProxyHandshake":
       return managedProxyHandshake(params)
     case "restartManagedExtensionHost":
@@ -510,6 +525,61 @@ async function runInTerminal(params) {
 }
 
 /** Surface an app-side message inside the editor. */
+/**
+ * Apply a pushed workspace snapshot.
+ *
+ * Tolerant of a partial payload: a snapshot missing `groups` still updates the
+ * status bar, because a connected-but-empty panel is a truthful state and
+ * throwing here would only drop the connection the user can see.
+ */
+async function workspaceSnapshot(params) {
+  if (!params || typeof params !== "object") throw new Error("workspaceSnapshot requires an object")
+  panelStrings = params.strings && typeof params.strings === "object" ? params.strings : {}
+  customActions = Array.isArray(params.customActions) ? params.customActions : []
+  workspacePanel?.apply({
+    statusText: typeof params.statusText === "string" ? params.statusText : "",
+    statusTooltip: typeof params.statusTooltip === "string" ? params.statusTooltip : undefined,
+    attention: params.attention === true,
+    groups: Array.isArray(params.groups) ? params.groups : [],
+  })
+  return null
+}
+
+/**
+ * Everything the workspace's Problems panel currently reports, shaped like the
+ * chat-context payload the app already knows how to stage.
+ *
+ * Errors and warnings only: hints and info are editor chatter (spelling,
+ * unused-import suggestions) and would bury the two severities a person
+ * actually wants to hand over. Returns null when there is nothing to send, so
+ * the command can say so instead of staging an empty context chip.
+ */
+function captureDiagnosticsContext() {
+  const files = []
+  let total = 0
+  for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
+    const relevant = diagnostics.filter(
+      (d) =>
+        d.severity === vscode.DiagnosticSeverity.Error ||
+        d.severity === vscode.DiagnosticSeverity.Warning
+    )
+    if (relevant.length === 0) continue
+    total += relevant.length
+    files.push({
+      path: uri.fsPath,
+      relativePath: vscode.workspace.asRelativePath(uri, false),
+      diagnostics: relevant.map((d) => ({
+        message: d.message,
+        severity: diagnosticSeverityName(d.severity),
+        line: toZeroBased(d.range.start.line) + 1,
+        column: toZeroBased(d.range.start.character) + 1,
+      })),
+    })
+  }
+  if (total === 0) return null
+  return { total, files }
+}
+
 async function notify(params) {
   const message = String(params.message ?? "")
   if (!message) throw new Error("notify requires a message")
@@ -1010,16 +1080,22 @@ export function activate(context) {
       if (ctx) bridge?.emit("chatContextRequested", () => ctx)
     }),
     vscode.commands.registerCommand("cognia.chat.customAction", async () => {
-      const customActions = vscode.workspace.getConfiguration("cognia").get("customActions", [])
-      if (customActions.length === 0) {
+      // Sourced from the app's unified template platform, pushed with the
+      // workspace snapshot — NOT from a `cognia.customActions` array in
+      // code-server's own settings.json, which was an island: templates edited
+      // in Cognia never reached it, and actions defined in it existed nowhere
+      // else. There is exactly one place to define a prompt action now.
+      const actions = customActions
+      if (actions.length === 0) {
         vscode.window.showInformationMessage(
-          "No custom actions configured. Add them in Settings → Cognia → Custom Actions."
+          panelStrings.noCustomActions ??
+            "No prompt templates are available. Add one in Cognia's template library."
         )
         return
       }
       const picked = await vscode.window.showQuickPick(
-        customActions.map((a) => ({ label: a.label, description: a.prompt, action: a })),
-        { placeHolder: "Choose a Cognia action" }
+        actions.map((a) => ({ label: a.label, description: a.prompt, action: a })),
+        { placeHolder: panelStrings.chooseAction ?? "Choose a Cognia action" }
       )
       if (!picked) return
       const ctx = captureChatContext("custom")
@@ -1027,8 +1103,42 @@ export function activate(context) {
       ctx.customPrompt = picked.action.prompt
       ctx.customLabel = picked.action.label
       bridge?.emit("chatContextRequested", () => ctx)
+    }),
+    // ── Workspace panel ─────────────────────────────────────────────────
+    vscode.commands.registerCommand("cognia.workspace.focus", () => {
+      void vscode.commands.executeCommand("workbench.view.extension.cognia")
+    }),
+    // Manual, not automatic: a threshold that files issues by itself turns one
+    // large refactor into a flooded backlog. The status bar tints when the app
+    // says so; sending is always a person's click.
+    vscode.commands.registerCommand("cognia.diagnostics.send", () => {
+      const payload = captureDiagnosticsContext()
+      if (!payload) {
+        vscode.window.showInformationMessage(
+          panelStrings.noDiagnostics ?? "No problems are reported in this workspace."
+        )
+        return
+      }
+      bridge?.emit("diagnosticsHandoffRequested", () => payload)
     })
   )
+
+  // Built before any snapshot arrives so the container exists and can say "not
+  // connected"; a view that materializes only after the first push reads as
+  // broken to anyone who looks before then.
+  workspacePanel = new WorkspacePanel((row) => {
+    if (row?.path) {
+      void openFile({ path: row.path, line: row.line }).catch(() => {
+        // The file moved or was deleted since the app built the snapshot; fall
+        // back to handing the row to Cognia, which can still show the item.
+        bridge?.emit("workspaceRowActivated", () => row)
+      })
+      return
+    }
+    bridge?.emit("workspaceRowActivated", () => row)
+  })
+  workspacePanel.setDisconnected(panelStrings.disconnected ?? "Cognia: not connected")
+  context.subscriptions.push(workspacePanel)
 
   return {
     registerProxy: (proxyContext, descriptor) => registerProxy(proxyContext, descriptor),
@@ -1038,6 +1148,10 @@ export function activate(context) {
 export function deactivate() {
   bridge?.dispose()
   bridge = null
+  workspacePanel?.dispose()
+  workspacePanel = null
+  customActions = []
+  panelStrings = {}
   proposedContents.clear()
   proposedEmitter = null
   for (const registration of proxyRegistrations.values()) registration.dispose()

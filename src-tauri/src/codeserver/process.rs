@@ -566,6 +566,26 @@ impl CodeServerState {
             .await
     }
 
+    /// Push the app's workspace snapshot (issues / plans / agent runs, plus the
+    /// connection summary) to the companion extension, which renders it in the
+    /// Cognia status bar item and side-bar trees.
+    ///
+    /// One whole-snapshot push rather than a delta stream: the panel is small,
+    /// the extension holds no business logic, and a dropped delta would leave a
+    /// silently wrong tree with no way to notice. The snapshot is opaque here —
+    /// the renderer owns its shape, the extension owns its rendering, and Rust
+    /// only carries it.
+    pub async fn agent_workspace_snapshot(
+        &self,
+        root: &str,
+        snapshot: Value,
+    ) -> Result<Value, String> {
+        let canonical = canonicalize_root(root)?;
+        super::agent_channel::global()
+            .send(&canonical, "workspaceSnapshot", snapshot)
+            .await
+    }
+
     /// Open and reveal a project-relative file in this root's existing browser
     /// VS Code window through code-server's own session-socket CLI bridge.
     pub async fn open_file(
@@ -971,7 +991,7 @@ fn pick_free_loopback_port() -> Result<u16, String> {
 /// Version of the bundled agent-bridge extension. Bump in lockstep with
 /// `sidecar/codeserver-agent-ext/package.json` `version` so an upgrade triggers a
 /// reinstall (the marker below stores the installed version).
-const AGENT_EXT_VERSION: &str = "1.0.0";
+const AGENT_EXT_VERSION: &str = "1.1.0";
 /// Stable filename of the bundled `.vsix` (see the extension's `build.mjs`).
 const AGENT_EXT_VSIX: &str = "cognia-agent-bridge.vsix";
 

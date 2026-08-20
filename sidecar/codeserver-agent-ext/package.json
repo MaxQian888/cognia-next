@@ -2,7 +2,7 @@
   "name": "cognia-managed-broker",
   "displayName": "Cognia Managed IDE Broker",
   "description": "Capability-negotiated JSON-RPC broker for Cognia's managed Pro IDE profile, with one-release legacy bridge compatibility.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "cognia",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE",
@@ -20,39 +20,50 @@
     "commands": [
       {
         "command": "cognia.chat.addSelection",
-        "title": "Add Selection to Cognia Chat",
-        "category": "Cognia"
+        "title": "%command.chat.addSelection.title%",
+        "category": "%category.cognia%"
       },
       {
         "command": "cognia.chat.addFile",
-        "title": "Add File to Cognia Context",
-        "category": "Cognia"
+        "title": "%command.chat.addFile.title%",
+        "category": "%category.cognia%"
       },
       {
         "command": "cognia.chat.explain",
-        "title": "Explain This Code",
-        "category": "Cognia"
+        "title": "%command.chat.explain.title%",
+        "category": "%category.cognia%"
       },
       {
         "command": "cognia.chat.fix",
-        "title": "Fix This Code",
-        "category": "Cognia"
+        "title": "%command.chat.fix.title%",
+        "category": "%category.cognia%"
       },
       {
         "command": "cognia.chat.review",
-        "title": "Review This Code",
-        "category": "Cognia"
+        "title": "%command.chat.review.title%",
+        "category": "%category.cognia%"
       },
       {
         "command": "cognia.chat.customAction",
-        "title": "Custom Action...",
-        "category": "Cognia"
+        "title": "%command.chat.customAction.title%",
+        "category": "%category.cognia%"
+      },
+      {
+        "command": "cognia.workspace.focus",
+        "title": "%command.workspace.focus.title%",
+        "category": "%category.cognia%"
+      },
+      {
+        "command": "cognia.diagnostics.send",
+        "title": "%command.diagnostics.send.title%",
+        "category": "%category.cognia%",
+        "icon": "$(export)"
       }
     ],
     "submenus": [
       {
         "id": "cognia.chat.submenu",
-        "label": "Cognia"
+        "label": "%submenu.cognia%"
       }
     ],
     "menus": {
@@ -99,6 +110,13 @@
           "group": "3_custom@1",
           "when": "editorHasSelection"
         }
+      ],
+      "view/title": [
+        {
+          "command": "cognia.diagnostics.send",
+          "when": "view == cognia.issues",
+          "group": "navigation"
+        }
       ]
     },
     "keybindings": [
@@ -121,33 +139,37 @@
         "when": "editorTextFocus && editorHasSelection"
       }
     ],
-    "configuration": {
-      "title": "Cognia",
-      "properties": {
-        "cognia.customActions": {
-          "type": "array",
-          "default": [],
-          "markdownDescription": "Custom context menu actions for Cognia chat. Each item defines a menu entry with a label and a prompt template. Use `${selection}` in the prompt to include the selected text.",
-          "items": {
-            "type": "object",
-            "required": [
-              "label",
-              "prompt"
-            ],
-            "properties": {
-              "label": {
-                "type": "string",
-                "description": "The label shown in the Cognia context submenu."
-              },
-              "prompt": {
-                "type": "string",
-                "description": "The prompt template. ${selection} is replaced with the selected text."
-              }
-            }
-          }
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cognia",
+          "title": "%viewContainer.cognia%",
+          "icon": "$(circuit-board)"
         }
+      ]
+    },
+    "views": {
+      "cognia": [
+        {
+          "id": "cognia.issues",
+          "name": "%view.issues%"
+        },
+        {
+          "id": "cognia.plans",
+          "name": "%view.plans%"
+        },
+        {
+          "id": "cognia.runs",
+          "name": "%view.runs%"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "cognia.issues",
+        "contents": "%viewWelcome.notConnected%"
       }
-    }
+    ]
   },
   "scripts": {
     "build": "node build.mjs",

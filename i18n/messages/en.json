@@ -19784,6 +19784,55 @@
       "nameRequired": "Preset name is required."
     }
   },
+  "proIde": {
+    "category": {
+      "cognia": "Cognia"
+    },
+    "command": {
+      "chat.addFile.title": "Add File to Cognia Context",
+      "chat.addSelection.title": "Add Selection to Cognia Chat",
+      "chat.customAction.title": "Run a Cognia Template…",
+      "chat.explain.title": "Explain This Code",
+      "chat.fix.title": "Fix This Code",
+      "chat.review.title": "Review This Code",
+      "diagnostics.send.title": "Send Problems to Cognia",
+      "workspace.focus.title": "Show the Cognia Panel"
+    },
+    "panel": {
+      "chooseAction": "Choose a Cognia template",
+      "disconnected": "Cognia: not connected",
+      "noCustomActions": "No prompt templates are available. Add one in Cognia's template library.",
+      "noDiagnostics": "No problems are reported in this workspace."
+    },
+    "submenu": {
+      "cognia": "Cognia"
+    },
+    "view": {
+      "issues": "Issues",
+      "plans": "Plans",
+      "runs": "Agent runs"
+    },
+    "viewContainer": {
+      "cognia": "Cognia"
+    },
+    "viewWelcome": {
+      "notConnected": "Cognia is not connected to this editor yet.\nOpen the Pro IDE from Cognia to see your issues, plans and agent runs here."
+    }
+  },
+  "proIdePanel": {
+    "chooseAction": "Choose a Cognia template",
+    "disconnected": "Cognia: not connected",
+    "issuesEmpty": "No open issues",
+    "issuesTitle": "Issues",
+    "noCustomActions": "No prompt templates are available. Add one in Cognia's template library.",
+    "noDiagnostics": "No problems are reported in this workspace.",
+    "plansEmpty": "No active plans",
+    "plansTitle": "Plans",
+    "runsEmpty": "No agent runs",
+    "runsTitle": "Agent runs",
+    "statusText": "Cognia: {count} open",
+    "statusTooltip": "Open the Cognia panel"
+  },
   "projectEditor": {
     "action": {
       "copyPath": "Copy Path",

@@ -280,6 +280,7 @@
         "codeserver_agent_run_in_terminal",
         "codeserver_agent_save_all",
         "codeserver_agent_show_diff",
+        "codeserver_agent_workspace_snapshot",
         "codeserver_broker_content_create",
         "codeserver_broker_content_redeem",
         "codeserver_cancel_download",

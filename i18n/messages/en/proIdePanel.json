@@ -1,0 +1,14 @@
+{
+  "chooseAction": "Choose a Cognia template",
+  "disconnected": "Cognia: not connected",
+  "issuesEmpty": "No open issues",
+  "issuesTitle": "Issues",
+  "noCustomActions": "No prompt templates are available. Add one in Cognia's template library.",
+  "noDiagnostics": "No problems are reported in this workspace.",
+  "plansEmpty": "No active plans",
+  "plansTitle": "Plans",
+  "runsEmpty": "No agent runs",
+  "runsTitle": "Agent runs",
+  "statusText": "Cognia: {count} open",
+  "statusTooltip": "Open the Cognia panel"
+}

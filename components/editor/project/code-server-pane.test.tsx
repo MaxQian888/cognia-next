@@ -43,6 +43,7 @@ const showDiff = jest.fn()
 const reveal = jest.fn()
 const runInTerminal = jest.fn()
 const notify = jest.fn()
+const pushWorkspaceSnapshot = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/codeserver/client", () => ({
   codeServerClient: {
     driveOpen: (...args: unknown[]) => driveOpen(...args),
@@ -55,6 +56,7 @@ jest.mock("@/lib/codeserver/client", () => ({
     reveal: (...args: unknown[]) => reveal(...args),
     runInTerminal: (...args: unknown[]) => runInTerminal(...args),
     notify: (...args: unknown[]) => notify(...args),
+    pushWorkspaceSnapshot: (...args: unknown[]) => pushWorkspaceSnapshot(...args),
   },
 }))
 // The debounce/single-flight policy has its own suite; here it is a pass-through

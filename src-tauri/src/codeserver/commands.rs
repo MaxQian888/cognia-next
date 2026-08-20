@@ -444,6 +444,17 @@ pub async fn codeserver_agent_run_in_terminal(
         .await
 }
 
+/// Push the app's workspace snapshot (issues / plans / agent runs) to the
+/// companion extension for its status bar item and side-bar trees.
+#[tauri::command]
+pub async fn codeserver_agent_workspace_snapshot(
+    state: State<'_, CodeServerState>,
+    root: String,
+    snapshot: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.agent_workspace_snapshot(&root, snapshot).await
+}
+
 /// Surface an app-side notification inside the editor.
 #[tauri::command]
 pub async fn codeserver_agent_notify(

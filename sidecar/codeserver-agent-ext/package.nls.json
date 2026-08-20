@@ -1,0 +1,21 @@
+{
+  "category.cognia": "Cognia",
+  "command.chat.addFile.title": "Add File to Cognia Context",
+  "command.chat.addSelection.title": "Add Selection to Cognia Chat",
+  "command.chat.customAction.title": "Run a Cognia Template…",
+  "command.chat.explain.title": "Explain This Code",
+  "command.chat.fix.title": "Fix This Code",
+  "command.chat.review.title": "Review This Code",
+  "command.diagnostics.send.title": "Send Problems to Cognia",
+  "command.workspace.focus.title": "Show the Cognia Panel",
+  "panel.chooseAction": "Choose a Cognia template",
+  "panel.disconnected": "Cognia: not connected",
+  "panel.noCustomActions": "No prompt templates are available. Add one in Cognia's template library.",
+  "panel.noDiagnostics": "No problems are reported in this workspace.",
+  "submenu.cognia": "Cognia",
+  "view.issues": "Issues",
+  "view.plans": "Plans",
+  "view.runs": "Agent runs",
+  "viewContainer.cognia": "Cognia",
+  "viewWelcome.notConnected": "Cognia is not connected to this editor yet.\nOpen the Pro IDE from Cognia to see your issues, plans and agent runs here."
+}

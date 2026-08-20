@@ -13,6 +13,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
+import { useCodeServerWorkspaceSync } from "@/hooks/codeserver/use-code-server-workspace-sync"
 import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
@@ -120,6 +121,10 @@ export function CodeServerPane({
   // Bridge the extension's context-menu actions (Add to Chat, Explain, Fix…)
   // into the app's chat composer so they appear as staged context chips.
   useCodeServerChatBridge(phase === "ready", root)
+  // Feeds the extension's status bar item and side-bar trees. Gated on the
+  // same `ready` phase as the chat bridge: pushing before the workbench is up
+  // just fails, and the live queries re-push as soon as it is.
+  useCodeServerWorkspaceSync(phase === "ready", root)
   // `ready` only means code-server answers; the native webview lands a beat
   // later. Holding the placeholder until it is actually mounted removes the
   // flash of bare background in between.
