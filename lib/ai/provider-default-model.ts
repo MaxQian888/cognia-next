@@ -12,7 +12,10 @@
  * catalog is a module-level literal.
  */
 
-import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  ANTHROPIC_FALLBACK_MODEL_ID,
+  getBuiltInProviderDefaultModel,
+} from "@cognia/provider-types/built-in-provider-catalog"
 
 export const ANTHROPIC_DEFAULT_MODEL: string =
-  getBuiltInProviderDefaultModel("anthropic") ?? "claude-sonnet-5"
+  getBuiltInProviderDefaultModel("anthropic") ?? ANTHROPIC_FALLBACK_MODEL_ID

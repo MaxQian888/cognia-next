@@ -13,7 +13,10 @@ import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import type { LanguageModel } from "ai"
-import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  ANTHROPIC_FALLBACK_MODEL_ID,
+  getBuiltInProviderDefaultModel,
+} from "@cognia/provider-types/built-in-provider-catalog"
 import type { BedrockConnectionSettings, ProviderName } from "@cognia/provider-types"
 import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
 // Single source of truth for the OpenAI Responses-vs-Chat decision and the
@@ -77,7 +80,8 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
       // `model` silently ran a model the catalog had already retired, while
       // the composer chip and the effort ladder disagreed about whether that
       // model even supports `effort`.
-      const model = opts.model || getBuiltInProviderDefaultModel("anthropic")
+      const model =
+        opts.model || getBuiltInProviderDefaultModel("anthropic") || ANTHROPIC_FALLBACK_MODEL_ID
       return createAnthropic({ apiKey, baseURL })(model) as LanguageModel
     }
     case "google":

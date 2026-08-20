@@ -2,6 +2,7 @@ import {
   BUILT_IN_PROVIDER_IDS,
   buildDefaultBuiltInProviderSettings,
   buildQuickAddProviderPresets,
+  ANTHROPIC_FALLBACK_MODEL_ID,
   getBuiltInProviderCatalog,
   getBuiltInProviderCatalogEntry,
   getBuiltInProviderDefaultBaseURL,
@@ -252,5 +253,13 @@ describe("effort-gate parity", () => {
         blessed: ANTHROPIC_EFFORT_FRAGMENTS.some((fragment) => fragment.test(model.id)),
       }).toEqual({ id: model.id, blessed: true })
     }
+  })
+})
+
+describe("ANTHROPIC_FALLBACK_MODEL_ID", () => {
+  it("matches the entry's own default, so the one literal cannot go stale", () => {
+    expect(ANTHROPIC_FALLBACK_MODEL_ID).toBe(
+      getBuiltInProviderCatalogEntry("anthropic")?.defaultModel
+    )
   })
 })

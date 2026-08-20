@@ -3850,6 +3850,18 @@ export function getBuiltInProviderCatalogEntry(
   return isBuiltInProviderId(providerId) ? CATALOG_ENTRIES[providerId] : undefined
 }
 
+/**
+ * The one place an Anthropic model id is written as a literal.
+ *
+ * `getBuiltInProviderDefaultModel` is correctly optional — it takes any
+ * provider id — but a caller on the send path needs a definite string, and
+ * spelling one out at that call site is exactly how `claude-sonnet-4-5` ended
+ * up reaching the wire long after the catalog moved on. Keeping the literal
+ * here, beside the data it mirrors, means a stale value is one line from the
+ * entry it contradicts and is pinned by a test.
+ */
+export const ANTHROPIC_FALLBACK_MODEL_ID = "claude-sonnet-5"
+
 export function getBuiltInProviderDefaultModel(providerId: string): string | undefined {
   return getBuiltInProviderCatalogEntry(providerId)?.defaultModel
 }

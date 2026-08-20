@@ -29,7 +29,7 @@ import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-
 export function modelPresetOptions(): Array<{ id: string; name: string }> {
   const anthropic = getBuiltInProviderCatalogEntry("anthropic")
   if (!anthropic) return []
-  const options = anthropic.models.map((model) => ({ id: model.id, name: model.name }))
+  const options = (anthropic.models ?? []).map((model) => ({ id: model.id, name: model.name }))
   const defaultIndex = options.findIndex((option) => option.id === anthropic.defaultModel)
   if (defaultIndex > 0) {
     const [preferred] = options.splice(defaultIndex, 1)
