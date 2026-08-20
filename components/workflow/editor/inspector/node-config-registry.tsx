@@ -20,6 +20,14 @@ import {
   GitBranchConfig,
   OcrExtractConfig,
 } from "./forms/git-ocr-forms"
+import {
+  EditorApplyEditConfig,
+  EditorOpenConfig,
+  EditorReadActiveConfig,
+  EditorRevealConfig,
+  EditorSaveAllConfig,
+  EditorShowDiffConfig,
+} from "./forms/editor-forms"
 import { EvalRunConfig, EvalGateConfig } from "./forms/eval-forms"
 import { WebCloneConfig } from "./forms/web-clone-form"
 import {
@@ -278,6 +286,12 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.terminal.waitForExit": TerminalWaitForExitConfig,
   "trigger.terminal.command": TerminalCommandTriggerConfig,
   // Actions: local Git (ADR-0038)
+  "action.editor.open": EditorOpenConfig,
+  "action.editor.reveal": EditorRevealConfig,
+  "action.editor.showDiff": EditorShowDiffConfig,
+  "action.editor.readActive": EditorReadActiveConfig,
+  "action.editor.applyEdit": EditorApplyEditConfig,
+  "action.editor.saveAll": EditorSaveAllConfig,
   "action.git.stage": GitStageConfig,
   "action.git.commit": GitCommitConfig,
   "action.git.push": GitPushConfig,

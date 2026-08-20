@@ -74,6 +74,32 @@
         "label": "查询应用元素"
       }
     },
+    "editor": {
+      "open": {
+        "label": "在编辑器中打开",
+        "description": "在 Pro IDE 中打开文件并定位到指定行。默认使用当前绑定的 Pro IDE 工作区。"
+      },
+      "reveal": {
+        "label": "在编辑器资源管理器中定位",
+        "description": "在 Pro IDE 的文件资源管理器中定位某个路径，但不打开它。"
+      },
+      "showDiff": {
+        "label": "展示差异以供审阅",
+        "description": "在 Pro IDE 原生差异视图中，将建议内容与磁盘上的文件并排展示。建议内容只存在于内存中，绝不写入磁盘。"
+      },
+      "readActive": {
+        "label": "读取当前编辑器",
+        "description": "读取用户正在查看的内容：聚焦的文件、选区、选中文本、诊断信息、已打开的编辑器。进入运行上下文前会经过 PII 筛查。"
+      },
+      "applyEdit": {
+        "label": "在编辑器中反映改动",
+        "description": "把已写入磁盘的文件反映为可撤销的编辑器内改动，而不是一次生硬的外部重载。磁盘始终是真相源。"
+      },
+      "saveAll": {
+        "label": "保存编辑器缓冲区",
+        "description": "把 Pro IDE 中未保存的缓冲区刷入磁盘，使后续步骤读到的正是用户当前看到的内容。用 'path' 可只保存单个文件。"
+      }
+    },
     "git": {
       "branch": {
         "description": "创建或切换分支。",

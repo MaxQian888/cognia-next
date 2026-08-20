@@ -22,6 +22,9 @@ import "../terminal/session"
 // Script-file node — runs a .sh/.ps1/.py/… file under its detected
 // interpreter (lib/terminal/script-runner.ts), dock or unattended mode.
 import "../terminal/script"
+// Pro IDE editor nodes (ADR-0088 Phase 3) — open / reveal / diff / read / edit
+// / save against the bound embedded code-server.
+import "../editor"
 // Local Git action nodes (ADR-0038) — stage / commit / push / branch against
 // the active workspace repo.
 import "../source-control"

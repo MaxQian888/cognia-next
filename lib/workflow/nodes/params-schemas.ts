@@ -1879,6 +1879,45 @@ export const PARAMS_SCHEMAS = {
     checkout: z.boolean().optional(),
     from: z.string().optional(),
   }),
+  // Embedded code-server "Pro IDE" (ADR-0088 Phase 3). `root` is optional on
+  // every kind — it defaults to the bound Pro IDE at run time. `autoStart` is
+  // opt-in per node because bringing code-server up is a visible, potentially
+  // several-hundred-megabyte act, not something addressing should do silently.
+  "action.editor.open": z.object({
+    root: z.string().optional(),
+    path: z.string(),
+    line: z.number().int().min(1).optional(),
+    column: z.number().int().min(1).optional(),
+    autoStart: z.boolean().optional(),
+  }),
+  "action.editor.reveal": z.object({
+    root: z.string().optional(),
+    path: z.string(),
+    autoStart: z.boolean().optional(),
+  }),
+  "action.editor.showDiff": z.object({
+    root: z.string().optional(),
+    path: z.string(),
+    content: z.string(),
+    title: z.string().optional(),
+    autoStart: z.boolean().optional(),
+  }),
+  "action.editor.readActive": z.object({
+    root: z.string().optional(),
+    autoStart: z.boolean().optional(),
+  }),
+  "action.editor.applyEdit": z.object({
+    root: z.string().optional(),
+    path: z.string(),
+    line: z.number().int().min(1).optional(),
+    column: z.number().int().min(1).optional(),
+    autoStart: z.boolean().optional(),
+  }),
+  "action.editor.saveAll": z.object({
+    root: z.string().optional(),
+    path: z.string().optional(),
+    autoStart: z.boolean().optional(),
+  }),
   // Ultracode patterns (ADR-0022 addendum). Synthesizer-emitted only — the
   // params are shaped by `synthesize-ultracode.ts`, validated by the pattern
   // executors at run time, so the definition-level schema stays permissive.

@@ -82,10 +82,23 @@ describe("detectLocalCapabilities", () => {
         "mcp-runtime",
         "push-display",
         "browser",
+        "pro-ide",
       ])
     )
     expect(caps).not.toContain("camera")
     expect(caps).not.toContain("headless")
+  })
+
+  it("keeps the embedded Pro IDE off every non-desktop shell", () => {
+    // `action.editor.*` gates on this: the node palette greys those nodes out
+    // wherever code-server cannot be hosted, instead of letting a user drop a
+    // node onto the canvas that is guaranteed to fail at run time.
+    setCapacitorNative(true)
+    expect(detectLocalCapabilities()).not.toContain("pro-ide")
+  })
+
+  it("keeps the embedded Pro IDE off the web baseline", () => {
+    expect(detectLocalCapabilities()).not.toContain("pro-ide")
   })
 
   it("returns the mobile baseline under Capacitor native", () => {
@@ -105,6 +118,7 @@ describe("detectLocalCapabilities", () => {
     )
     expect(caps).not.toContain("shell")
     expect(caps).not.toContain("always-on")
+    expect(caps).not.toContain("pro-ide")
   })
 
   it("returns the minimal web baseline on a vanilla browser", () => {

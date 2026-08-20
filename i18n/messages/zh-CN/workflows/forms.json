@@ -975,6 +975,52 @@
       "label": "宽度（像素）"
     }
   },
+  "editor": {
+    "root": {
+      "label": "Pro IDE 工作区",
+      "hint": "可选。默认使用当前已打开的 Pro IDE。支持 '{{ }}' 表达式。",
+      "placeholder": "/Users/me/my-project"
+    },
+    "autoStart": {
+      "label": "需要时启动 IDE",
+      "hint": "当该工作区的 code-server 尚未运行时将其启动。默认关闭——首次启动可能需要下载较大的二进制文件。"
+    },
+    "path": {
+      "label": "文件路径",
+      "hint": "必填。可为绝对路径，或相对于上面的工作区。支持 '{{ }}' 表达式。",
+      "placeholder": "src/index.ts"
+    },
+    "position": {
+      "line": {
+        "label": "行",
+        "hint": "可选，从 1 开始的行号。",
+        "placeholder": "42"
+      },
+      "column": {
+        "label": "列",
+        "placeholder": "1"
+      }
+    },
+    "showDiff": {
+      "content": {
+        "label": "建议的内容",
+        "hint": "必填。与磁盘上的文件并排展示，不会写入磁盘。留空表示建议清空该文件。",
+        "placeholder": "完整的建议文件内容"
+      },
+      "title": {
+        "label": "对比标题",
+        "hint": "可选，对比标签页的标题。支持 '{{ }}' 表达式。",
+        "placeholder": "建议的修复"
+      }
+    },
+    "saveAll": {
+      "path": {
+        "label": "仅此文件",
+        "hint": "可选。留空表示刷新所有未保存的缓冲区。支持 '{{ }}' 表达式。",
+        "placeholder": "src/index.ts"
+      }
+    }
+  },
   "ensemble": {
     "aggField": {
       "hint": "用于投票/计数的对象字段。留空表示整个结果。",

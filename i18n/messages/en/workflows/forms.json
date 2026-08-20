@@ -975,6 +975,52 @@
       "label": "Width (px)"
     }
   },
+  "editor": {
+    "root": {
+      "label": "Pro IDE workspace",
+      "hint": "Optional. Defaults to the Pro IDE you currently have open. Supports '{{ }}' expressions.",
+      "placeholder": "/Users/me/my-project"
+    },
+    "autoStart": {
+      "label": "Start the IDE if needed",
+      "hint": "Bring code-server up when it is not already running for this workspace. Off by default — the first start can download a large binary."
+    },
+    "path": {
+      "label": "File path",
+      "hint": "Required. Absolute, or relative to the workspace above. Supports '{{ }}' expressions.",
+      "placeholder": "src/index.ts"
+    },
+    "position": {
+      "line": {
+        "label": "Line",
+        "hint": "Optional 1-based line to reveal.",
+        "placeholder": "42"
+      },
+      "column": {
+        "label": "Column",
+        "placeholder": "1"
+      }
+    },
+    "showDiff": {
+      "content": {
+        "label": "Proposed content",
+        "hint": "Required. Shown beside the file on disk; never written. An empty value proposes deleting the contents.",
+        "placeholder": "The full proposed file contents"
+      },
+      "title": {
+        "label": "Diff title",
+        "hint": "Optional label for the diff tab. Supports '{{ }}' expressions.",
+        "placeholder": "Proposed fix"
+      }
+    },
+    "saveAll": {
+      "path": {
+        "label": "Only this file",
+        "hint": "Optional. Leave empty to flush every dirty buffer. Supports '{{ }}' expressions.",
+        "placeholder": "src/index.ts"
+      }
+    }
+  },
   "ensemble": {
     "aggField": {
       "hint": "Object field to vote / count on. Empty = the whole result.",

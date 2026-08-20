@@ -74,6 +74,32 @@
         "label": "Query app elements"
       }
     },
+    "editor": {
+      "open": {
+        "label": "Open in editor",
+        "description": "Open a file in the Pro IDE and reveal a line. Defaults to the bound Pro IDE workspace."
+      },
+      "reveal": {
+        "label": "Reveal in editor explorer",
+        "description": "Reveal a path in the Pro IDE file explorer without opening it."
+      },
+      "showDiff": {
+        "label": "Show diff for review",
+        "description": "Show proposed content beside a file in the Pro IDE's native diff view. The proposal is served from memory and never written to disk."
+      },
+      "readActive": {
+        "label": "Read active editor",
+        "description": "Read what the user is looking at: focused file, selection, selected text, diagnostics, open editors. PII-screened before it enters the run."
+      },
+      "applyEdit": {
+        "label": "Reflect edit in editor",
+        "description": "Reflect an already-written file as an undo-able in-editor edit instead of a bare external reload. Disk stays the source of truth."
+      },
+      "saveAll": {
+        "label": "Save editor buffers",
+        "description": "Flush dirty Pro IDE buffers to disk so later steps read what the user is actually looking at. Narrow it to one file with 'path'."
+      }
+    },
     "git": {
       "branch": {
         "description": "Create or switch to a branch.",

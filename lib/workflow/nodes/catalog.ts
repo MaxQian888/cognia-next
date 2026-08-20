@@ -721,6 +721,62 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     desktopOnly: true,
     requires: ["shell"],
   },
+  // ── Embedded code-server "Pro IDE" (ADR-0088) ─────────────────────────────
+  // `root` is optional on every one: it defaults to the bound Pro IDE, exactly
+  // as `action.git.*`'s `repoPath` defaults to the active workspace root.
+  "action.editor.open": {
+    label: "Open in editor",
+    description:
+      "Open a file in the Pro IDE and reveal a line. Defaults to the bound Pro IDE workspace.",
+    iconName: "FileCode",
+    keywords: ["editor", "ide", "open", "file", "reveal", "vscode", "code-server", "pro ide"],
+    desktopOnly: true,
+    requires: ["pro-ide"],
+  },
+  "action.editor.reveal": {
+    label: "Reveal in editor explorer",
+    description: "Reveal a path in the Pro IDE file explorer without opening it.",
+    iconName: "FolderTree",
+    keywords: ["editor", "ide", "reveal", "explorer", "locate", "vscode", "pro ide"],
+    desktopOnly: true,
+    requires: ["pro-ide"],
+  },
+  "action.editor.showDiff": {
+    label: "Show diff for review",
+    description:
+      "Show proposed content beside a file in the Pro IDE's native diff view. The proposal is served from memory and never written to disk.",
+    iconName: "GitCompareArrows",
+    keywords: ["editor", "ide", "diff", "review", "compare", "propose", "pro ide"],
+    desktopOnly: true,
+    requires: ["pro-ide"],
+  },
+  "action.editor.readActive": {
+    label: "Read active editor",
+    description:
+      "Read what the user is looking at: focused file, selection, selected text, diagnostics, open editors. PII-screened before it enters the run.",
+    iconName: "ScanEye",
+    keywords: ["editor", "ide", "active", "selection", "context", "diagnostics", "pro ide"],
+    desktopOnly: true,
+    requires: ["pro-ide"],
+  },
+  "action.editor.applyEdit": {
+    label: "Reflect edit in editor",
+    description:
+      "Reflect an already-written file as an undo-able in-editor edit instead of a bare external reload. Disk stays the source of truth.",
+    iconName: "FilePen",
+    keywords: ["editor", "ide", "edit", "apply", "undo", "reflect", "pro ide"],
+    desktopOnly: true,
+    requires: ["pro-ide"],
+  },
+  "action.editor.saveAll": {
+    label: "Save editor buffers",
+    description:
+      "Flush dirty Pro IDE buffers to disk so later steps read what the user is actually looking at. Narrow it to one file with 'path'.",
+    iconName: "Save",
+    keywords: ["editor", "ide", "save", "flush", "dirty", "buffer", "pro ide"],
+    desktopOnly: true,
+    requires: ["pro-ide"],
+  },
   // ── Desktop UI automation ─────────────────────────────────────────────────
   "action.desktop.listApps": {
     label: "List desktop apps",

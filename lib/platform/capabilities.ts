@@ -38,6 +38,10 @@ import { detectPlatform, type Platform } from "./detect"
  *                         page (Rust cron daemon, webhook receiver).
  * - `connector-runtime` — platform connector adapters run here.
  * - `mcp-runtime`       — MCP client/server stack runs here.
+ * - `pro-ide`           — can host the embedded code-server "Pro IDE"
+ *                         (ADR-0088). Coarse like its neighbours: listed for
+ *                         the desktop shell, while `codeserver_supported()`
+ *                         still answers the per-OS/arch question at call time.
  */
 export const CORE_CAPABILITY_IDS = [
   "shell",
@@ -59,6 +63,7 @@ export const CORE_CAPABILITY_IDS = [
   "always-on",
   "connector-runtime",
   "mcp-runtime",
+  "pro-ide",
 ] as const
 
 export type CoreCapabilityId = (typeof CORE_CAPABILITY_IDS)[number]
@@ -110,6 +115,7 @@ const PLATFORM_BASELINES: Record<Platform, readonly CapabilityId[]> = {
     "mcp-runtime",
     "push-display",
     "browser",
+    "pro-ide",
   ] as const),
   mobile: Object.freeze([
     "webview",

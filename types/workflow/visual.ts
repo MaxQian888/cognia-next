@@ -165,6 +165,14 @@ export type WorkflowNodeKind =
   | "action.git.commit"
   | "action.git.push"
   | "action.git.branch"
+  // Embedded code-server "Pro IDE" (ADR-0088 Phase 3). Addressing mirrors
+  // `action.git.*`: an explicit `root`, else the bound Pro IDE, else a throw.
+  | "action.editor.open"
+  | "action.editor.reveal"
+  | "action.editor.showDiff"
+  | "action.editor.readActive"
+  | "action.editor.applyEdit"
+  | "action.editor.saveAll"
   // Desktop UI automation (provided by the automation subsystem — see
   // `docs/superpowers/specs/2026-05-12-ui-automation-subsystem-design.md`)
   | "action.desktop.listApps"
@@ -386,6 +394,12 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.git.commit",
   "action.git.push",
   "action.git.branch",
+  "action.editor.open",
+  "action.editor.reveal",
+  "action.editor.showDiff",
+  "action.editor.readActive",
+  "action.editor.applyEdit",
+  "action.editor.saveAll",
   "action.desktop.listApps",
   "action.desktop.getAppState",
   "action.desktop.queryElements",

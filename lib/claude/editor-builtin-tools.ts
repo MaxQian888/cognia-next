@@ -22,6 +22,7 @@
  */
 
 import type { ActiveEditorContext } from "@/lib/files/project-editor-bridge"
+import { screenActiveEditorContext } from "@/lib/files/active-editor-screen"
 
 export const READ_ACTIVE_EDITOR_TOOL_NAME = "read_active_editor"
 
@@ -118,16 +119,16 @@ export async function runEditorBuiltinTool(
     }
   }
 
-  if (!deps.gate(active)) {
-    // Withhold the text-bearing fields; keep the non-sensitive shape so the model
-    // still knows an editor is focused and how many files are open.
+  // Shared with `action.editor.readActive` so the two cannot drift on what a
+  // trip withholds; this tool only maps the verdict into its own wire shape.
+  const screened = screenActiveEditorContext(active, deps.gate)
+  if (screened.redacted) {
     return {
       available: true as const,
       redacted: true as const,
-      reason:
-        "The editor context was withheld because it may contain PII (emails, keys, IPs, cards, …).",
-      selection: active.selection,
-      openEditorCount: active.openEditors.length,
+      reason: screened.reason,
+      selection: screened.selection,
+      openEditorCount: screened.openEditorCount,
     }
   }
 
