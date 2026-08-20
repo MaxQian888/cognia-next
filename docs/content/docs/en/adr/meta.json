@@ -131,6 +131,7 @@
     "0131-cross-shell-inbox-relay",
     "0132-issue-tracker",
     "0133-terminal-session-sharing",
-    "0134-remote-document-providers"
+    "0134-remote-document-providers",
+    "0135-diagnostic-service-completion"
   ]
 }
