@@ -127,6 +127,88 @@ export function runTitleForPresentation(
   return safeName === "Execution run" || safeName === "Agent run" ? kind : `${kind} · ${safeName}`
 }
 
+const MILESTONE_STATUS_ICON: Record<RunStepSnapshot["status"], string> = {
+  pending: "○",
+  in_progress: "◐",
+  completed: "●",
+  failed: "✕",
+  blocked: "⊘",
+  skipped: "–",
+}
+
+/** How many milestones the block renders before collapsing the remainder. */
+const MILESTONE_WINDOW = 8
+
+/**
+ * The plan block — what the run set out to do, and where it has got to.
+ *
+ * Distinct from the activity timeline on purpose: the timeline is a rolling
+ * window of what just happened, and a person watching a long run needs to see
+ * the shape of the whole task. This is the `plan_update` / `task_update` split
+ * that the Lark and Slack native drivers already emit; every other platform
+ * had nothing, because `formatRunActivityTimeline` rendered only
+ * `runActivitiesForPresentation` and never read `activeSteps` / `pendingSteps`
+ * / `pendingStepCount` at all. Steps reached the card only through the legacy
+ * shim, and only when `activities` happened to be empty.
+ *
+ * Rendered by the shared surface builder, so every card-edit, append and
+ * final-only platform inherits it without adapter work.
+ */
+export function formatRunMilestones(
+  snapshot: RunProjectionSnapshot,
+  i18n: ActivityI18n
+): string | undefined {
+  const ordered = [...snapshot.recentSteps, ...snapshot.activeSteps, ...snapshot.pendingSteps]
+  if (ordered.length === 0) return undefined
+
+  const total = Math.max(ordered.length, snapshot.progress.total || 0)
+  const completed = ordered.filter((step) => step.status === "completed").length
+  const shown = ordered.slice(0, MILESTONE_WINDOW)
+  // `pendingStepCount` counts steps the projection knows about but did not
+  // include; the window may hide more on top of that.
+  const hidden =
+    ordered.length -
+    shown.length +
+    Math.max(0, snapshot.pendingStepCount - snapshot.pendingSteps.length)
+
+  const lines = shown.map((step) => {
+    const label = sanitizeActivityLabel(step.title, i18n.milestoneStatus(step.status))
+    return `${MILESTONE_STATUS_ICON[step.status]} ${markdownText(label)}`
+  })
+  if (hidden > 0) lines.push(i18n.moreMilestones(hidden))
+  return [i18n.milestones(completed, total), ...lines].join("\n")
+}
+
+/**
+ * Terminal note: what stopped the run, and what it never got to.
+ *
+ * Slack's guidance for a blocked agent is "save what it has accomplished,
+ * explain where it got stuck, give the user a clear set of options". The first
+ * is the milestone block; this is the second.
+ *
+ * Deliberately does NOT read `snapshot.error`. That field can carry a raw
+ * message or stack, and this builder runs on raw snapshots as well as on the
+ * IM-safe projection — the connector path substitutes a fixed string for it,
+ * but nothing structurally guarantees every caller does. `waitingReason` is a
+ * controlled value, and the genuinely useful "where" is already in the
+ * milestone block: the step that was in progress when the run stopped, with
+ * its title sanitized like every other label.
+ */
+export function formatRunStoppedNote(
+  snapshot: RunProjectionSnapshot,
+  i18n: ActivityI18n
+): string | undefined {
+  const reason = snapshot.waitingReason
+  const notRun = [...snapshot.activeSteps, ...snapshot.pendingSteps].filter(
+    (step) => step.status === "pending" || step.status === "in_progress"
+  ).length
+  const lines = [
+    reason ? i18n.stoppedBecause(sanitizeActivityLabel(reason, "unknown")) : undefined,
+    notRun > 0 ? i18n.notReached(notRun) : undefined,
+  ].filter((line): line is string => Boolean(line))
+  return lines.length > 0 ? lines.join("\n") : undefined
+}
+
 /** Deterministic, platform-neutral Markdown/plain-text projection for one durable run. */
 export function formatRunActivityTimeline(
   snapshot: RunProjectionSnapshot,
@@ -152,12 +234,18 @@ export function formatRunActivityTimeline(
           index < activityLines.length - 1 ? [line, "│"] : [line]
         )
       : [i18n.noPublicActivity]
+  const terminal = ["completed", "failed", "cancelled"].includes(snapshot.status)
   return [
     `**${markdownText(runTitleForPresentation(snapshot, i18n))}** · ${i18n.runStatus(snapshot.status)} · ${elapsed}`,
     progress,
     snapshot.connectorQueueDepth && snapshot.connectorQueueDepth > 0
       ? i18n.queuedTurns(snapshot.connectorQueueDepth)
       : undefined,
+    // The plan block sits ABOVE the rolling activity window: the shape of the
+    // task outranks the last few tool calls for someone deciding whether to
+    // intervene.
+    formatRunMilestones(snapshot, i18n),
+    terminal ? formatRunStoppedNote(snapshot, i18n) : undefined,
     snapshot.omittedActivityCount && snapshot.omittedActivityCount > 0
       ? i18n.omittedActivities(snapshot.omittedActivityCount)
       : undefined,

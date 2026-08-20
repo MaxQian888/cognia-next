@@ -60,6 +60,16 @@ export interface ActivityI18n {
   queuedTurns: (count: number) => string
   /** Empty public activity state. */
   noPublicActivity: string
+  /** Heading of the milestone block, with completed/total. */
+  milestones: (completed: number, total: number) => string
+  /** One milestone line: status icon is supplied by the caller. */
+  milestoneStatus: (status: import("@/types/execution/run").RunStepStatus) => string
+  /** "{count}" → milestones beyond the rendered window. */
+  moreMilestones: (count: number) => string
+  /** Terminal note naming where a run stopped. */
+  stoppedBecause: (reason: string) => string
+  /** Terminal note for milestones that never ran. */
+  notReached: (count: number) => string
 }
 
 const EN: ActivityI18n = {
@@ -123,6 +133,19 @@ const EN: ActivityI18n = {
   omittedActivities: (count) => `… ${count} earlier activities hidden`,
   queuedTurns: (count) => `${count} queued turn${count === 1 ? "" : "s"}`,
   noPublicActivity: "No public activity yet",
+  milestones: (completed, total) => `**Plan** — ${completed}/${total}`,
+  milestoneStatus: (status) =>
+    ({
+      pending: "Pending",
+      in_progress: "In progress",
+      completed: "Completed",
+      failed: "Failed",
+      blocked: "Blocked",
+      skipped: "Skipped",
+    })[status] ?? status,
+  moreMilestones: (count) => `… and ${count} more`,
+  stoppedBecause: (reason) => `Stopped: ${reason}`,
+  notReached: (count) => `${count} milestone${count === 1 ? "" : "s"} not reached`,
 }
 
 const ZH: ActivityI18n = {
@@ -185,6 +208,19 @@ const ZH: ActivityI18n = {
   omittedActivities: (count) => `… 已隐藏更早的 ${count} 项活动`,
   queuedTurns: (count) => `另有 ${count} 条消息排队`,
   noPublicActivity: "暂无可公开的执行活动",
+  milestones: (completed, total) => `**计划** — ${completed}/${total}`,
+  milestoneStatus: (status) =>
+    ({
+      pending: "待办",
+      in_progress: "进行中",
+      completed: "已完成",
+      failed: "失败",
+      blocked: "受阻",
+      skipped: "已跳过",
+    })[status] ?? status,
+  moreMilestones: (count) => `…还有 ${count} 项`,
+  stoppedBecause: (reason) => `已停止：${reason}`,
+  notReached: (count) => `${count} 项里程碑未执行`,
 }
 
 const MAPS: Record<string, ActivityI18n> = {
