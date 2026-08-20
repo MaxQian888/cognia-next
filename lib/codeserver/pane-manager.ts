@@ -20,6 +20,11 @@
  * Every native round-trip is serialized through one promise chain: create,
  * navigate and set_bounds against a single webview must not interleave, or a
  * late `create` can resurrect a webview a concurrent `release` just parked.
+ *
+ * Because ownership already answers "which Pro IDE is live", this module is also
+ * where the *bound project root* lives — see {@link getActiveProIdeRoot}. That
+ * root is what every headless caller (workflow nodes, agent tools, plan steps,
+ * issue runs) resolves against when it was not handed an explicit one.
  */
 import type { ElementRect } from "@/lib/browser/protocol"
 import { codeServerClient } from "@/lib/codeserver/client"
@@ -48,7 +53,38 @@ interface Owner {
   onRevoked: () => void
 }
 
+/** Everything a hosting surface must hand over to take the pane. */
+export interface CodeServerPaneClaim {
+  /** Stable id identifying the claiming surface. */
+  ownerId: string
+  /**
+   * Canonical project root the code-server behind this pane is serving.
+   *
+   * Carried through the claim rather than set separately so it can never drift
+   * from `url`: the two describe one instance, and a root that disagrees with
+   * the port the pane is pointed at would silently drive the wrong workspace.
+   */
+  root: string
+  /** Loopback url of the code-server serving {@link root}. */
+  url: string
+  rect: ElementRect
+  /** Called when another surface claims the pane away from this owner. */
+  onRevoked: () => void
+}
+
 let owner: Owner | null = null
+/**
+ * Project root of the last-claimed pane — the "bound Pro IDE" every headless
+ * caller resolves against.
+ *
+ * Deliberately NOT part of {@link owner}: `release` drops ownership but only
+ * *parks* the webview, and the code-server behind it keeps running and keeps
+ * serving this root. A workflow step that fires while the user is on another
+ * route must still resolve to it, so the binding outlives ownership and is
+ * cleared only by `destroy`, which is the one path that actually ends the
+ * instance.
+ */
+let boundRoot: string | null = null
 let created = false
 let mountedUrl: string | null = null
 let lastRect: ElementRect | null = null
@@ -111,18 +147,21 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
  * previous owner first. Rejects when the native webview can't be created or
  * navigated, so the caller can surface a retryable error.
  */
-export function claimCodeServerPane(
-  ownerId: string,
-  url: string,
-  rect: ElementRect,
-  onRevoked: () => void
-): Promise<void> {
+export function claimCodeServerPane(claim: CodeServerPaneClaim): Promise<void> {
+  const { ownerId, root, url, rect, onRevoked } = claim
   if (owner && owner.id !== ownerId) {
     const previous = owner
     owner = null
     previous.onRevoked()
   }
   owner = { id: ownerId, onRevoked }
+  // Bound synchronously, before the native round-trip, and left bound even when
+  // that round-trip fails: the embed is only the *view*. `ensure` already
+  // succeeded for this root by the time a surface claims, so code-server is
+  // serving it and the agent channel can drive it whether or not a webview ever
+  // painted. Clearing it on embed failure would make headless callers report
+  // "no IDE" for an IDE that is demonstrably running.
+  boundRoot = root
   lastRect = rect
   visible = true
   reflectActive()
@@ -203,6 +242,8 @@ export function destroyCodeServerPane(): Promise<void> {
   created = false
   mountedUrl = null
   lastRect = null
+  // The one path that actually ends the instance, so the one path that unbinds.
+  boundRoot = null
   if (!isTauri() || !wasCreated) return Promise.resolve()
   return enqueue(() => codeServerClient.embedDestroy()).catch(() => undefined)
 }
@@ -210,6 +251,23 @@ export function destroyCodeServerPane(): Promise<void> {
 /** The surface currently holding the pane, if any. */
 export function getCodeServerPaneOwner(): string | null {
   return owner?.id ?? null
+}
+
+/**
+ * Project root of the bound Pro IDE, or null when none has been claimed since
+ * the last `destroy`.
+ *
+ * This is the fallback target for every caller that can drive the editor without
+ * hosting it — workflow nodes, agent tools, plan steps, issue runs. It stays
+ * non-null across `release` on purpose (see {@link boundRoot}), so navigating
+ * away from the editor does not un-address it.
+ *
+ * Returns a root, never a guarantee: the instance can still have exited since.
+ * Callers surface the backend's own error rather than pre-checking here — a
+ * liveness probe would be stale by the time the caller acted on it.
+ */
+export function getActiveProIdeRoot(): string | null {
+  return boundRoot
 }
 
 /**
@@ -230,6 +288,7 @@ export function setCodeServerPaneBackground(hex: string): void {
 /** Test-only: drop all state without touching the (mocked) native layer. */
 export function __resetCodeServerPaneManagerForTesting(): void {
   owner = null
+  boundRoot = null
   reflectActive()
   created = false
   mountedUrl = null

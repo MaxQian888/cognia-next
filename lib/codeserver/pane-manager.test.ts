@@ -25,6 +25,7 @@ import {
   claimCodeServerPane,
   destroyCodeServerPane,
   getCodeServerPaneOwner,
+  getActiveProIdeRoot,
   isProIdePanePinnedWithin,
   PRO_IDE_REGION_ATTR,
   releaseCodeServerPane,
@@ -39,6 +40,8 @@ const RECT: ElementRect = { x: 10, y: 20, width: 300, height: 400 }
 const PARKED: ElementRect = { x: -32000, y: -32000, width: 0, height: 0 }
 const URL_A = "http://127.0.0.1:43117/"
 const URL_B = "http://127.0.0.1:43118/"
+const ROOT_EDITOR = "/Users/dev/project-a"
+const ROOT_DOCK = "/Users/dev/project-b"
 
 /** Let the manager's serialized promise chain drain. */
 const drain = async () => {
@@ -57,7 +60,13 @@ beforeEach(() => {
 })
 
 it("creates the webview on the first claim and records the owner", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
 
   expect(client.embedCreate).toHaveBeenCalledWith(URL_A, RECT, undefined)
   expect(client.embedNavigate).not.toHaveBeenCalled()
@@ -65,8 +74,20 @@ it("creates the webview on the first claim and records the owner", async () => {
 })
 
 it("re-shows the existing webview instead of recreating it on a repeat claim", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
 
   expect(client.embedCreate).toHaveBeenCalledTimes(1)
   expect(client.embedNavigate).not.toHaveBeenCalled()
@@ -74,8 +95,20 @@ it("re-shows the existing webview instead of recreating it on a repeat claim", a
 })
 
 it("navigates rather than recreating when the claimed url changes", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
-  await claimCodeServerPane("editor", URL_B, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_B,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
 
   expect(client.embedCreate).toHaveBeenCalledTimes(1)
   expect(client.embedNavigate).toHaveBeenCalledWith(URL_B)
@@ -83,9 +116,21 @@ it("navigates rather than recreating when the claimed url changes", async () => 
 
 it("revokes the previous owner when another surface claims the pane", async () => {
   const onRevoked = jest.fn()
-  await claimCodeServerPane("editor", URL_A, RECT, onRevoked)
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: onRevoked,
+  })
 
-  await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "dock",
+    root: ROOT_DOCK,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
 
   expect(onRevoked).toHaveBeenCalledTimes(1)
   expect(getCodeServerPaneOwner()).toBe("dock")
@@ -93,15 +138,33 @@ it("revokes the previous owner when another surface claims the pane", async () =
 
 it("does not revoke when the same owner re-claims", async () => {
   const onRevoked = jest.fn()
-  await claimCodeServerPane("editor", URL_A, RECT, onRevoked)
-  await claimCodeServerPane("editor", URL_B, RECT, onRevoked)
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: onRevoked,
+  })
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_B,
+    rect: RECT,
+    onRevoked: onRevoked,
+  })
 
   expect(onRevoked).not.toHaveBeenCalled()
 })
 
 it("is inert outside Tauri", async () => {
   mockIsTauri = false
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   updateCodeServerPaneRect("editor", RECT)
   setCodeServerPaneVisible("editor", false)
   releaseCodeServerPane("editor")
@@ -115,22 +178,46 @@ it("is inert outside Tauri", async () => {
 it("propagates creation failures and leaves the pane recreatable", async () => {
   client.embedCreate.mockRejectedValueOnce(new Error("main window not found"))
 
-  await expect(claimCodeServerPane("editor", URL_A, RECT, jest.fn())).rejects.toThrow(
-    "main window not found"
-  )
+  await expect(
+    claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+  ).rejects.toThrow("main window not found")
 
   client.embedCreate.mockResolvedValueOnce("codeserver-embed")
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   expect(client.embedCreate).toHaveBeenCalledTimes(2)
 })
 
 it("propagates navigation failures", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   client.embedNavigate.mockRejectedValueOnce(new Error("navigation failed"))
 
-  await expect(claimCodeServerPane("editor", URL_B, RECT, jest.fn())).rejects.toThrow(
-    "navigation failed"
-  )
+  await expect(
+    claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_B,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+  ).rejects.toThrow("navigation failed")
 })
 
 it("skips a queued claim whose owner was replaced while it waited", async () => {
@@ -140,11 +227,29 @@ it("skips a queued claim whose owner was replaced while it waited", async () => 
       releaseCreate = resolve
     })
   )
-  const first = claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  const first = claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   // Queue a second claim from another owner behind the in-flight create.
-  const second = claimCodeServerPane("dock", URL_B, RECT, jest.fn())
+  const second = claimCodeServerPane({
+    ownerId: "dock",
+    root: ROOT_DOCK,
+    url: URL_B,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   // Now a third claim takes ownership back before `second` gets its turn.
-  const third = claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  const third = claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
 
   releaseCreate("codeserver-embed")
   await Promise.all([first, second, third])
@@ -155,7 +260,13 @@ it("skips a queued claim whose owner was replaced while it waited", async () => 
 })
 
 it("pushes bounds only for the owner, and only while visible", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   client.embedSetBounds.mockClear()
 
   const next: ElementRect = { x: 1, y: 2, width: 30, height: 40 }
@@ -181,7 +292,13 @@ it("does not push bounds before the webview exists", async () => {
 })
 
 it("parks off-screen when hidden and restores the last rect when shown", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   client.embedSetVisible.mockClear()
 
   setCodeServerPaneVisible("editor", false)
@@ -198,7 +315,13 @@ it("ignores visibility changes from non-owners and before creation", async () =>
   await drain()
   expect(client.embedSetVisible).not.toHaveBeenCalled()
 
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   client.embedSetVisible.mockClear()
   setCodeServerPaneVisible("dock", false)
   await drain()
@@ -206,7 +329,13 @@ it("ignores visibility changes from non-owners and before creation", async () =>
 })
 
 it("release parks the webview but never destroys it", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   client.embedSetVisible.mockClear()
 
   releaseCodeServerPane("editor")
@@ -218,18 +347,36 @@ it("release parks the webview but never destroys it", async () => {
 })
 
 it("a claim after release re-shows the same webview without recreating it", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   releaseCodeServerPane("editor")
   await drain()
 
-  await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "dock",
+    root: ROOT_DOCK,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
 
   expect(client.embedCreate).toHaveBeenCalledTimes(1)
   expect(client.embedSetBounds).toHaveBeenCalledWith(RECT)
 })
 
 it("ignores a release from a surface that does not hold the pane", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   client.embedSetVisible.mockClear()
 
   releaseCodeServerPane("dock")
@@ -246,7 +393,13 @@ it("release is a no-op when nothing was ever created", async () => {
 })
 
 it("destroy tears the webview down and clears ownership", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
 
   await destroyCodeServerPane()
 
@@ -254,7 +407,13 @@ it("destroy tears the webview down and clears ownership", async () => {
   expect(getCodeServerPaneOwner()).toBeNull()
 
   // The next claim must create a fresh webview.
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   expect(client.embedCreate).toHaveBeenCalledTimes(2)
 })
 
@@ -264,7 +423,13 @@ it("destroy tells the current owner it lost the pane", async () => {
   // IDE mode and re-claims on its next rect update — resurrecting a webview
   // pointed at a port nothing serves any more.
   const onRevoked = jest.fn()
-  await claimCodeServerPane("editor", URL_A, RECT, onRevoked)
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: onRevoked,
+  })
 
   await destroyCodeServerPane()
 
@@ -284,7 +449,13 @@ it("destroy is a no-op when no webview exists", async () => {
 })
 
 it("destroy with no owner does not blow up", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   releaseCodeServerPane("editor")
   await drain()
 
@@ -293,7 +464,13 @@ it("destroy with no owner does not blow up", async () => {
 })
 
 it("swallows a destroy failure so teardown never rejects", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   client.embedDestroy.mockRejectedValueOnce(new Error("already gone"))
 
   await expect(destroyCodeServerPane()).resolves.toBeUndefined()
@@ -305,7 +482,13 @@ describe("shell-transition marker", () => {
   it("is set to the holding surface's id and cleared on release", async () => {
     expect(marker()).toBeNull()
 
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     // Valued rather than empty: `[data-pro-ide-active]` still matches for the
     // CSS guards, and a reader can tell *which* surface holds the pane.
     expect(marker()).toBe("editor")
@@ -315,8 +498,20 @@ describe("shell-transition marker", () => {
   })
 
   it("stays set across a handoff between surfaces", async () => {
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
-    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+    await claimCodeServerPane({
+      ownerId: "dock",
+      root: ROOT_DOCK,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
 
     // The webview never left the screen, so the guard must not blink off — it
     // just re-points at the new holder.
@@ -324,13 +519,25 @@ describe("shell-transition marker", () => {
   })
 
   it("is cleared by destroy", async () => {
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     await destroyCodeServerPane()
     expect(marker()).toBeNull()
   })
 
   it("is not cleared by a release from a non-owner", async () => {
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     releaseCodeServerPane("dock")
     expect(marker()).toBe("editor")
   })
@@ -354,25 +561,49 @@ describe("isProIdePanePinnedWithin", () => {
   })
 
   it("is true once a surface holds the pane and the region is inside", async () => {
-    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "dock",
+      root: ROOT_DOCK,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     expect(isProIdePanePinnedWithin(withRegion())).toBe(true)
   })
 
   it("is false for a container that does not contain the region", async () => {
-    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "dock",
+      root: ROOT_DOCK,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     // The Agent Team editor may hold the pane while an unrelated container
     // animates; that container must keep its animation.
     expect(isProIdePanePinnedWithin(document.createElement("div"))).toBe(false)
   })
 
   it("is false for a null container", async () => {
-    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "dock",
+      root: ROOT_DOCK,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     expect(isProIdePanePinnedWithin(null)).toBe(false)
   })
 
   it("goes false again once the holder releases", async () => {
     const container = withRegion()
-    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "dock",
+      root: ROOT_DOCK,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     expect(isProIdePanePinnedWithin(container)).toBe(true)
 
     releaseCodeServerPane("dock")
@@ -381,7 +612,13 @@ describe("isProIdePanePinnedWithin", () => {
 })
 
 it("keeps draining the queue after a failed round-trip", async () => {
-  await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+  await claimCodeServerPane({
+    ownerId: "editor",
+    root: ROOT_EDITOR,
+    url: URL_A,
+    rect: RECT,
+    onRevoked: jest.fn(),
+  })
   client.embedSetBounds.mockRejectedValueOnce(new Error("bounds failed"))
 
   updateCodeServerPaneRect("editor", { x: 0, y: 0, width: 1, height: 1 })
@@ -397,7 +634,13 @@ describe("pane background", () => {
     // Set before any claim — the appearance sync can run while no surface is
     // mounted, and the very first create must not flash the platform default.
     setCodeServerPaneBackground("#0b1220")
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
 
     expect(client.embedCreate).toHaveBeenCalledWith(URL_A, RECT, "#0b1220")
     // Nothing to push: the create already carried the colour.
@@ -405,7 +648,13 @@ describe("pane background", () => {
   })
 
   it("pushes a later theme flip to the live webview", async () => {
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     setCodeServerPaneBackground("#ffffff")
     await drain()
 
@@ -413,7 +662,13 @@ describe("pane background", () => {
   })
 
   it("ignores a repeat of the same colour", async () => {
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     setCodeServerPaneBackground("#ffffff")
     await drain()
     client.embedSetBackground.mockClear()
@@ -428,7 +683,13 @@ describe("pane background", () => {
     setCodeServerPaneBackground("#101010")
     expect(client.embedSetBackground).not.toHaveBeenCalled()
 
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     expect(client.embedCreate).toHaveBeenCalledWith(URL_A, RECT, "#101010")
   })
 
@@ -441,12 +702,110 @@ describe("pane background", () => {
   })
 
   it("swallows a failed background push", async () => {
-    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
     client.embedSetBackground.mockRejectedValue(new Error("pane closed"))
 
     setCodeServerPaneBackground("#222222")
     await drain()
 
     expect(client.embedSetBackground).toHaveBeenCalled()
+  })
+})
+
+describe("getActiveProIdeRoot", () => {
+  it("is null before anything has claimed", () => {
+    expect(getActiveProIdeRoot()).toBeNull()
+  })
+
+  it("reports the claimed root", async () => {
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+    expect(getActiveProIdeRoot()).toBe(ROOT_EDITOR)
+  })
+
+  it("follows the pane when another surface claims it away", async () => {
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+    await claimCodeServerPane({
+      ownerId: "dock",
+      root: ROOT_DOCK,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+    expect(getActiveProIdeRoot()).toBe(ROOT_DOCK)
+  })
+
+  it("outlives release, because release only parks a still-running instance", async () => {
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+    releaseCodeServerPane("editor")
+
+    expect(getCodeServerPaneOwner()).toBeNull()
+    // Ownership and binding are different questions: nobody is *hosting* the
+    // pane, but code-server is still serving this root and can still be driven.
+    expect(getActiveProIdeRoot()).toBe(ROOT_EDITOR)
+  })
+
+  it("is cleared by destroy, the one path that ends the instance", async () => {
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+    await destroyCodeServerPane()
+    expect(getActiveProIdeRoot()).toBeNull()
+  })
+
+  it("binds even when the native create rejects", async () => {
+    // The embed is only the view. `ensure` already brought this root up, so the
+    // agent channel can drive it whether or not a webview ever painted.
+    client.embedCreate.mockRejectedValueOnce(new Error("main window not found"))
+    await expect(
+      claimCodeServerPane({
+        ownerId: "editor",
+        root: ROOT_EDITOR,
+        url: URL_A,
+        rect: RECT,
+        onRevoked: jest.fn(),
+      })
+    ).rejects.toThrow("main window not found")
+    expect(getActiveProIdeRoot()).toBe(ROOT_EDITOR)
+  })
+
+  it("binds outside Tauri, where the claim never reaches the native layer", async () => {
+    mockIsTauri = false
+    await claimCodeServerPane({
+      ownerId: "editor",
+      root: ROOT_EDITOR,
+      url: URL_A,
+      rect: RECT,
+      onRevoked: jest.fn(),
+    })
+    expect(client.embedCreate).not.toHaveBeenCalled()
+    expect(getActiveProIdeRoot()).toBe(ROOT_EDITOR)
   })
 })

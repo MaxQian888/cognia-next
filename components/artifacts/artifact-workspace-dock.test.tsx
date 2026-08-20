@@ -888,7 +888,13 @@ describe("ArtifactWorkspaceDock", () => {
       await waitFor(() => expect(dockPanel.style.viewTransitionName).toBe(""))
 
       await act(async () => {
-        await claimCodeServerPane("session:s1", "http://127.0.0.1:1/", RECT, jest.fn())
+        await claimCodeServerPane({
+          ownerId: "session:s1",
+          root: "/Users/dev/project-a",
+          url: "http://127.0.0.1:1/",
+          rect: RECT,
+          onRevoked: jest.fn(),
+        })
       })
 
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))

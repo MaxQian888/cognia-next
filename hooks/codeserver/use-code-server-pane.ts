@@ -115,7 +115,13 @@ export function useCodeServerPane(
     const rect = rectRef.current
     const target = urlRef.current
     if (!isTauri() || !target || !rect) return
-    void claimCodeServerPane(ownerId, target, rect, () => onRevokedRef.current()).then(
+    void claimCodeServerPane({
+      ownerId,
+      root,
+      url: target,
+      rect,
+      onRevoked: () => onRevokedRef.current(),
+    }).then(
       () => {
         setMounted(true)
         // Claiming shows the pane; re-park immediately if it must stay hidden.
@@ -127,7 +133,7 @@ export function useCodeServerPane(
         setPhase("error")
       }
     )
-  }, [ownerId])
+  }, [ownerId, root])
 
   const onRect = useCallback(
     (next: ElementRect) => {

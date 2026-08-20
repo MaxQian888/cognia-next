@@ -116,7 +116,7 @@ beforeEach(() => {
   client.supported.mockReset().mockResolvedValue(true)
   client.ensure.mockReset().mockResolvedValue({ running: true, port: 43117, version: "4.128.0" })
   client.stop.mockReset().mockResolvedValue(true)
-  claim.mockReset().mockImplementation((ownerId: string) => {
+  claim.mockReset().mockImplementation(({ ownerId }: { ownerId: string }) => {
     paneOwner = ownerId
     return Promise.resolve()
   })
@@ -149,7 +149,13 @@ it("ensures code-server and claims the shared pane at the loopback port", async 
 
   expect(client.ensure).toHaveBeenCalledWith(ROOT, "managed")
   expect(result.current.phase).toBe("ready")
-  expect(claim).toHaveBeenCalledWith(OWNER, "http://127.0.0.1:43117/", RECT, expect.any(Function))
+  expect(claim).toHaveBeenCalledWith({
+    ownerId: OWNER,
+    root: ROOT,
+    url: "http://127.0.0.1:43117/",
+    rect: RECT,
+    onRevoked: expect.any(Function),
+  })
 })
 
 it("re-claims with the new url when the selected project root changes", async () => {
@@ -167,12 +173,13 @@ it("re-claims with the new url when the selected project root changes", async ()
   await flush()
 
   expect(client.ensure).toHaveBeenLastCalledWith("/work/other", "managed")
-  expect(claim).toHaveBeenLastCalledWith(
-    OWNER,
-    "http://127.0.0.1:43118/",
-    RECT,
-    expect.any(Function)
-  )
+  expect(claim).toHaveBeenLastCalledWith({
+    ownerId: OWNER,
+    root: "/work/other",
+    url: "http://127.0.0.1:43118/",
+    rect: RECT,
+    onRevoked: expect.any(Function),
+  })
 })
 
 it("pushes later rects through the manager instead of re-claiming", async () => {
@@ -196,7 +203,7 @@ it("forwards revocation from the manager to the host", async () => {
   deliverRect()
   await flush()
 
-  const revoke = claim.mock.calls[0][3] as () => void
+  const revoke = claim.mock.calls[0][0].onRevoked as () => void
   revoke()
 
   expect(onRevoked).toHaveBeenCalledTimes(1)
@@ -287,7 +294,7 @@ it("enters the error phase and retry re-runs ensure", async () => {
 
 it("reports mounted only after the claim resolves", async () => {
   let settle: () => void = () => {}
-  claim.mockImplementation((ownerId: string) => {
+  claim.mockImplementation(({ ownerId }: { ownerId: string }) => {
     paneOwner = ownerId
     return new Promise<void>((resolve) => {
       settle = resolve
@@ -414,12 +421,13 @@ it("recovers onto the replacement instance when retried after a watchdog exit", 
 
   expect(client.ensure).toHaveBeenCalledTimes(2)
   expect(result.current.phase).toBe("ready")
-  expect(claim).toHaveBeenLastCalledWith(
-    OWNER,
-    "http://127.0.0.1:43201/",
-    RECT,
-    expect.any(Function)
-  )
+  expect(claim).toHaveBeenLastCalledWith({
+    ownerId: OWNER,
+    root: ROOT,
+    url: "http://127.0.0.1:43201/",
+    rect: RECT,
+    onRevoked: expect.any(Function),
+  })
 })
 
 it("ignores a watchdog exit for a different instance", async () => {
@@ -521,12 +529,13 @@ describe("trust-domain profile", () => {
     await flush()
 
     expect(client.ensure).toHaveBeenLastCalledWith(ROOT, "native")
-    expect(claim).toHaveBeenLastCalledWith(
-      OWNER,
-      "http://127.0.0.1:43119/",
-      RECT,
-      expect.any(Function)
-    )
+    expect(claim).toHaveBeenLastCalledWith({
+      ownerId: OWNER,
+      root: ROOT,
+      url: "http://127.0.0.1:43119/",
+      rect: RECT,
+      onRevoked: expect.any(Function),
+    })
   })
 })
 
