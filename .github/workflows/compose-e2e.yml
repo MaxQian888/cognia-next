@@ -141,12 +141,21 @@ jobs:
           set -euo pipefail
           docker compose up -d --wait --force-recreate diagnostic-service
           status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-          intake="$(status -X POST http://127.0.0.1:18080/v1/grants/anonymous \
+          intake="$(status -X POST http://127.0.0.1:18080/v1/incidents \
             -H 'content-type: application/json' -d '{}')"
-          echo "grants/anonymous → $intake"
+          echo "POST /v1/incidents → $intake"
           [ "$intake" = "503" ] || { echo "::error::intake still accepting with the switch off"; exit 1; }
-          # The point of a *separate* switch: liveness and the read side stay up
-          # so deletion requests can still be served.
+          # The point of a *separate* switch: liveness, grant exchange and the
+          # read/triage side stay up so deletion requests can still be served.
+          # Grants live 15 minutes, so refusing to mint them would have taken
+          # the whole service down a quarter of an hour after the switch.
+          grants="$(status -X POST http://127.0.0.1:18080/v1/grants/anonymous \
+            -H 'content-type: application/json' -d '{}')"
+          echo "grants/anonymous → $grants"
+          [ "$grants" != "503" ] || { echo "::error::grant exchange must survive the intake switch"; exit 1; }
+          triage="$(status http://127.0.0.1:18080/v1/groups)"
+          echo "GET /v1/groups → $triage"
+          [ "$triage" = "400" ] || { echo "::error::triage console must stay mounted with intake off"; exit 1; }
           [ "$(status http://127.0.0.1:18080/health/live)" = "204" ]
 
       - name: Logs on failure

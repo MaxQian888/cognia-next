@@ -50,8 +50,12 @@ the database migration: older releases must continue to read expanded schemas.
 If processing is unhealthy, set `config.processingEnabled` to `"false"`; upload
 receipts and encrypted artifacts remain durable for later processing. Note that
 this keeps _accepting_ reports — to stop taking new data (a privacy incident,
-say) set `config.ingestEnabled` to `"false"`, which makes grant exchange and
-upload answer `503 ingest_disabled` while the read, withdraw and admin routes
-stay up so deletion requests can still be served. Restore
+say) set `config.ingestEnabled` to `"false"`, which makes incident creation and
+part upload answer `503 ingest_disabled` while the read, triage, withdraw and
+admin routes stay up so deletion requests can still be served. Grant exchange
+deliberately stays up too: grants live 15 minutes, and refusing to mint them
+would have made every "stays up" route unreachable a quarter of an hour after
+the switch flipped. A grant issued while intake is off still cannot upload —
+the routes that accept data are the ones that are down. Restore
 PostgreSQL using point-in-time recovery and recover object versions independently.
 Validate backups and rollback in every release-candidate environment.

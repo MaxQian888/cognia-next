@@ -17,10 +17,13 @@ paths:
         content:
           application/json:
             schema: { $ref: "#/components/schemas/OidcGrantRequest" }
+      description: >-
+        Exchange an identity-provider session for a grant. Not part of intake:
+        stays available while DIAGNOSTIC_INGEST_ENABLED is false so the read,
+        triage, withdraw and admin routes remain reachable.
       responses:
         "200": { $ref: "#/components/responses/Grant" }
         "401": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/IngestDisabled" }
   /grants/anonymous:
     post:
       security: []
@@ -30,12 +33,32 @@ paths:
         content:
           application/json:
             schema: { $ref: "#/components/schemas/AnonymousGrantRequest" }
+      description: >-
+        Exchange a single-use Ed25519 installation proof for an uploader grant.
+        Like the OIDC exchange, this is not intake and stays available while
+        uploads are switched off — a client still needs a grant to withdraw
+        consent or delete what it already submitted.
       responses:
         "200": { $ref: "#/components/responses/Grant" }
         "401": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/IngestDisabled" }
   /incidents:
+    get:
+      operationId: listIncidents
+      description: Viewer-or-better triage list, newest first.
+      parameters:
+        - { name: groupId, in: query, schema: { type: string, format: uuid } }
+        - {
+            name: processingState,
+            in: query,
+            schema: { $ref: "#/components/schemas/ProcessingState" },
+          }
+        - { name: supportCode, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: Tenant/project-scoped incidents }
+        "403": { $ref: "#/components/responses/Error" }
     post:
       operationId: createIncident
       requestBody:
@@ -115,6 +138,122 @@ paths:
         - { $ref: "#/components/parameters/IncidentId" }
       responses:
         "204": { description: Processing blocked and deletion scheduled immediately }
+  /incidents/{incidentId}/audit:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+    get:
+      operationId: readIncidentAudit
+      description: >-
+        Viewer-or-better. The immutable trail for one incident: consent,
+        processing transitions, retention, and every operator artifact read.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200": { description: Audit events, newest first }
+        "403": { $ref: "#/components/responses/Error" }
+  /incidents/{incidentId}/artifacts:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+    get:
+      operationId: listIncidentArtifacts
+      description: >-
+        Viewer-or-better inventory of the stored parts. Distinct from
+        `/parts`, which is the uploader's resume view and rides the intake
+        switch; triage has to keep working while intake is off.
+      responses:
+        "200": { description: Stored parts with redaction metadata }
+        "403": { $ref: "#/components/responses/Error" }
+  /incidents/{incidentId}/artifacts/{partNumber}:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+      - name: partNumber
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 10000 }
+    get:
+      operationId: downloadIncidentArtifact
+      description: >-
+        Triager-only. Returns the decrypted artifact and writes an audit event
+        naming the operator before the bytes leave. Parts of kind `minidump`
+        additionally require the tenant's `rawMinidumpAccessEnabled` opt-in and
+        answer 403 `raw_minidump_access_disabled` otherwise.
+      responses:
+        "200":
+          description: Decrypted artifact bytes
+          content:
+            application/octet-stream: { schema: { type: string, format: binary } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /groups:
+    get:
+      operationId: listIncidentGroups
+      description: Viewer-or-better. Deduplicated crash signatures, most recent activity first.
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/GroupStatus" } }
+        - { name: platform, in: query, schema: { type: string } }
+        - { name: assignedTo, in: query, schema: { type: string } }
+        - {
+            name: q,
+            in: query,
+            description: Substring match over exception,
+            module and fingerprint,
+            schema: { type: string },
+          }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: Tenant/project-scoped groups }
+        "403": { $ref: "#/components/responses/Error" }
+  /groups/{groupId}:
+    parameters:
+      - name: groupId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getIncidentGroup
+      responses:
+        "200": { description: One group }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: triageIncidentGroup
+      description: >-
+        Triager-only. Omitting `assignedTo` leaves the assignee untouched;
+        sending an explicit `null` or an empty string unassigns. The edit is
+        recorded in the audit trail against the grant's OIDC subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TriageGroupRequest" }
+      responses:
+        "200": { description: Updated group }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/tenant:
+    get:
+      operationId: getTenantPolicy
+      description: Administrator-only tenant policy.
+      responses:
+        "200": { description: Tenant policy }
+        "403": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateTenantPolicy
+      description: >-
+        Administrator-only. `rawMinidumpAccessEnabled` is the opt-in that
+        governs raw minidump downloads; `retentionOverrides` narrows the
+        per-artifact retention windows the sweeper applies.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTenantRequest" }
+      responses:
+        "200": { description: Updated tenant policy }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /admin/symbols:
     get:
       operationId: listSymbols
@@ -192,6 +331,15 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      description: Page size, clamped to 200.
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
   responses:
     Grant:
       description: Short-lived tenant/project-scoped grant
@@ -199,15 +347,18 @@ components:
         application/json:
           schema:
             type: object
-            required: [grant, expiresInSeconds]
+            required: [grant, role, expiresInSeconds]
             properties:
               grant: { type: string }
+              role: { $ref: "#/components/schemas/GrantRole" }
               expiresInSeconds: { type: integer }
     IngestDisabled:
       description: >-
-        Intake is switched off (DIAGNOSTIC_INGEST_ENABLED=false). The read,
-        withdraw and admin routes stay available; retry the upload later
-        rather than discarding the spooled report.
+        Intake is switched off (DIAGNOSTIC_INGEST_ENABLED=false). Grant
+        exchange, read, triage, withdraw and admin routes stay available —
+        grants live 15 minutes, so refusing to mint them would take the whole
+        service down with intake. Retry the upload later rather than
+        discarding the spooled report.
       content:
         application/json:
           schema:
@@ -229,6 +380,46 @@ components:
                 properties:
                   code: { type: string }
   schemas:
+    GrantRole:
+      type: string
+      enum: [uploader, viewer, triager, admin]
+    GroupStatus:
+      type: string
+      enum: [open, suppressed, resolved]
+    ProcessingState:
+      type: string
+      enum:
+        [
+          received,
+          scanning,
+          symbolicating,
+          grouping,
+          accepted,
+          retryable_failure,
+          permanent_failure,
+          deleted,
+        ]
+    TriageGroupRequest:
+      type: object
+      minProperties: 1
+      properties:
+        status: { $ref: "#/components/schemas/GroupStatus" }
+        assignedTo:
+          type: [string, "null"]
+          maxLength: 256
+          description: Explicit null (or an empty string) unassigns; omit the field to leave it alone.
+    UpdateTenantRequest:
+      type: object
+      minProperties: 1
+      properties:
+        rawMinidumpAccessEnabled: { type: boolean }
+        retentionOverrides:
+          type: object
+          properties:
+            minidumpDays: { type: integer, minimum: 1, maximum: 3650 }
+            attachmentDays: { type: integer, minimum: 1, maximum: 3650 }
+            metadataDays: { type: integer, minimum: 1, maximum: 3650 }
+            symbolDays: { type: integer, minimum: 1, maximum: 3650 }
     OidcGrantRequest:
       type: object
       required: [sessionToken, installationId]

@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post, put},
     Json, Router,
@@ -26,10 +26,14 @@ use crate::{
     },
     config::ServerConfig,
     db::{
-        CreateIncident, CreateSymbol, DiagnosticRepository, IncidentRecord, SymbolRecord,
-        UploadPartRecord,
+        AuditEventRecord, CreateIncident, CreateSymbol, DiagnosticRepository, GroupQuery,
+        GroupTriageUpdate, IncidentGroupRecord, IncidentQuery, IncidentRecord, SymbolRecord,
+        TenantRecord, TenantSettingsUpdate, UploadPartRecord, MAX_TRIAGE_PAGE,
     },
-    model::{IncidentLimits, MAX_ATTACHMENT_BYTES, MAX_INCIDENT_BYTES, MAX_MINIDUMP_BYTES},
+    model::{
+        IncidentLimits, ProcessingState, MAX_ATTACHMENT_BYTES, MAX_INCIDENT_BYTES,
+        MAX_MINIDUMP_BYTES,
+    },
     privacy::PrivacyGate,
     processing::validate_symbol_relative_path,
     storage::ArtifactStore,
@@ -72,15 +76,42 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health/ready", get(ready))
         .route("/openapi.yaml", get(openapi));
 
+    // Grant exchange is *not* intake and is deliberately outside the switch.
+    //
+    // Every route the kill switch is documented to keep up — read, withdraw,
+    // delete, triage, admin — needs a bearer grant, and grants live 15 minutes.
+    // Answering the exchange with 503 therefore locked the whole service out
+    // a quarter of an hour after the switch flipped, which is exactly when a
+    // deletion request has to be servable. A grant issued while intake is off
+    // can still only reach routes that are themselves still mounted.
+    router = router
+        .route("/v1/grants/oidc", post(exchange_oidc))
+        .route("/v1/grants/anonymous", post(exchange_anonymous));
+
     // The intake surface, behind its own switch. Turning it off is the
     // rollback for "stop taking reports right now" and deliberately leaves the
     // read, withdraw and admin routes mounted — an operator containing an
     // intake problem still has to be able to serve deletion requests.
+    //
+    // `POST /v1/incidents` is intake; `GET /v1/incidents` is the console's
+    // triage list and stays up regardless. They share a path, so the method
+    // router is built once with the intake half swapped rather than
+    // registering the same path twice.
+    //
+    // The disabled half answers rather than 404s: a client that gets "not
+    // found" retries forever against a spooled report, while 503 is the
+    // documented "come back later" that the upload client already understands.
+    router = router.route(
+        "/v1/incidents",
+        if ingest_enabled {
+            get(list_incidents).post(create_incident)
+        } else {
+            get(list_incidents).post(ingest_disabled)
+        },
+    );
+
     if ingest_enabled {
         router = router
-            .route("/v1/grants/oidc", post(exchange_oidc))
-            .route("/v1/grants/anonymous", post(exchange_anonymous))
-            .route("/v1/incidents", post(create_incident))
             .route("/v1/incidents/{incident_id}/parts", get(upload_progress))
             .route(
                 "/v1/incidents/{incident_id}/parts/{part_number}",
@@ -92,13 +123,7 @@ pub fn build_router(state: AppState) -> Router {
             )
             .route("/v1/incidents/{incident_id}/cancel", post(cancel_upload));
     } else {
-        // Answered rather than 404'd: a client that gets "not found" retries
-        // forever against a spooled report, while 503 is the documented
-        // "come back later" that the upload client already understands.
         router = router
-            .route("/v1/grants/oidc", post(ingest_disabled))
-            .route("/v1/grants/anonymous", post(ingest_disabled))
-            .route("/v1/incidents", post(ingest_disabled))
             .route("/v1/incidents/{incident_id}/parts", get(ingest_disabled))
             .route(
                 "/v1/incidents/{incident_id}/parts/{part_number}",
@@ -120,10 +145,31 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/incidents/{incident_id}/withdraw",
             post(withdraw_consent),
         )
+        .route("/v1/incidents/{incident_id}/audit", get(incident_audit))
+        // The console's own view of stored artifacts. Separate from
+        // `/parts` — that one is the uploader's resume inventory and rides the
+        // intake switch, while triage has to keep working with intake off.
+        .route(
+            "/v1/incidents/{incident_id}/artifacts",
+            get(list_artifacts),
+        )
+        .route(
+            "/v1/incidents/{incident_id}/artifacts/{part_number}",
+            get(download_artifact),
+        )
+        .route("/v1/groups", get(list_groups))
+        .route(
+            "/v1/groups/{group_id}",
+            get(get_group).patch(triage_group),
+        )
         .route("/v1/admin/symbols", get(list_symbols))
         .route(
             "/v1/admin/symbols/{build_id}/{platform}",
             put(upload_symbol),
+        )
+        .route(
+            "/v1/admin/tenant",
+            get(get_tenant).patch(update_tenant),
         )
         .route(
             "/v1/admin/tenant-key",
@@ -188,6 +234,9 @@ struct AnonymousGrantRequest {
 #[serde(rename_all = "camelCase")]
 struct GrantResponse {
     grant: String,
+    /// Echoed so a console can render the surfaces this operator may use
+    /// instead of discovering its own permissions through 403s.
+    role: GrantRole,
     expires_in_seconds: u64,
 }
 
@@ -195,7 +244,7 @@ async fn exchange_oidc(
     State(state): State<AppState>,
     Json(request): Json<OidcGrantRequest>,
 ) -> ApiResult<Json<GrantResponse>> {
-    let (tenant_id, project_id, _, role) = verify_oidc_session(
+    let (tenant_id, project_id, subject, role) = verify_oidc_session(
         &request.session_token,
         &state.config.oidc_issuer,
         &state.config.oidc_audience,
@@ -209,11 +258,16 @@ async fn exchange_oidc(
             project_id,
             request.installation_id,
             role,
+            // The OIDC subject rides the grant so every triage edit and raw
+            // artifact read this session performs names a person in the
+            // audit trail instead of leaving `actor_id` null.
+            Some(subject),
             GRANT_TTL,
         )
         .map_err(ApiError::internal)?;
     Ok(Json(GrantResponse {
         grant,
+        role,
         expires_in_seconds: GRANT_TTL.as_secs(),
     }))
 }
@@ -263,11 +317,15 @@ async fn exchange_anonymous(
             request.project_id,
             request.installation_id,
             GrantRole::Uploader,
+            // An installation proof authenticates a machine, not a person.
+            // Naming one would make the audit trail lie.
+            None,
             GRANT_TTL,
         )
         .map_err(ApiError::internal)?;
     Ok(Json(GrantResponse {
         grant,
+        role: GrantRole::Uploader,
         expires_in_seconds: GRANT_TTL.as_secs(),
     }))
 }
@@ -527,6 +585,328 @@ async fn delete_incident(
         .await
         .map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Triage console
+//
+// Everything below is Viewer-or-better and scoped by the grant's tenant and
+// project. `authorize(.., Uploader)` admits every role, so the read routes an
+// installation legitimately needs (its own receipt, its own withdrawal) stay
+// where they are; these are the routes an uploader must *not* reach, and they
+// say so by requiring Viewer.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListGroupsQuery {
+    status: Option<String>,
+    platform: Option<String>,
+    assigned_to: Option<String>,
+    /// Substring match over exception, module, and fingerprint.
+    q: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+async fn list_groups(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ListGroupsQuery>,
+) -> ApiResult<Json<Vec<IncidentGroupRecord>>> {
+    let claims = authorize(&state, &headers, GrantRole::Viewer)?;
+    if let Some(status) = &query.status {
+        crate::db::validate_group_status(status)
+            .map_err(|_| ApiError::bad_request("invalid_group_status"))?;
+    }
+    let groups = state
+        .repository
+        .list_groups(
+            claims.tenant_id,
+            claims.project_id,
+            &GroupQuery {
+                status: query.status,
+                platform: query.platform,
+                assigned_to: query.assigned_to,
+                search: query.q.filter(|value| !value.trim().is_empty()),
+                limit: query.limit.unwrap_or(50),
+                offset: query.offset.unwrap_or(0),
+            },
+        )
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(groups))
+}
+
+async fn get_group(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(group_id): Path<Uuid>,
+) -> ApiResult<Json<IncidentGroupRecord>> {
+    let claims = authorize(&state, &headers, GrantRole::Viewer)?;
+    state
+        .repository
+        .group(claims.tenant_id, claims.project_id, group_id)
+        .await
+        .map_err(ApiError::internal)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("group_not_found"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TriageGroupRequest {
+    status: Option<String>,
+    /// Absent leaves the assignee alone; an explicit `null` unassigns.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    assigned_to: Option<Option<String>>,
+}
+
+async fn triage_group(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(group_id): Path<Uuid>,
+    Json(request): Json<TriageGroupRequest>,
+) -> ApiResult<Json<IncidentGroupRecord>> {
+    let claims = authorize(&state, &headers, GrantRole::Triager)?;
+    let assigned_to = match request.assigned_to {
+        // An assignee is an identity string from the operator's directory, not
+        // free-form prose: bound so a paste accident cannot fill the column.
+        Some(Some(value)) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Some(None)
+            } else if trimmed.len() > 256 {
+                return Err(ApiError::bad_request("assignee_too_long"));
+            } else {
+                Some(Some(trimmed.to_owned()))
+            }
+        }
+        Some(None) => Some(None),
+        None => None,
+    };
+    let update = GroupTriageUpdate {
+        status: request.status,
+        assigned_to,
+    };
+    if update.is_empty() {
+        return Err(ApiError::bad_request("empty_triage_update"));
+    }
+    if let Some(status) = &update.status {
+        crate::db::validate_group_status(status)
+            .map_err(|_| ApiError::bad_request("invalid_group_status"))?;
+    }
+    state
+        .repository
+        .update_group(
+            claims.tenant_id,
+            claims.project_id,
+            group_id,
+            &update,
+            claims.actor_id.as_deref(),
+        )
+        .await
+        .map_err(ApiError::internal)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("group_not_found"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListIncidentsQuery {
+    group_id: Option<Uuid>,
+    processing_state: Option<ProcessingState>,
+    support_code: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+async fn list_incidents(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ListIncidentsQuery>,
+) -> ApiResult<Json<Vec<IncidentRecord>>> {
+    let claims = authorize(&state, &headers, GrantRole::Viewer)?;
+    let incidents = state
+        .repository
+        .list_incidents(
+            claims.tenant_id,
+            claims.project_id,
+            &IncidentQuery {
+                group_id: query.group_id,
+                processing_state: query.processing_state,
+                support_code: query.support_code.filter(|code| !code.trim().is_empty()),
+                limit: query.limit.unwrap_or(50),
+                offset: query.offset.unwrap_or(0),
+            },
+        )
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(incidents))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditQuery {
+    limit: Option<i64>,
+}
+
+async fn incident_audit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(incident_id): Path<Uuid>,
+    Query(query): Query<AuditQuery>,
+) -> ApiResult<Json<Vec<AuditEventRecord>>> {
+    let claims = authorize(&state, &headers, GrantRole::Viewer)?;
+    owned_incident(&state, &claims, incident_id).await?;
+    let events = state
+        .repository
+        .incident_audit(
+            claims.tenant_id,
+            incident_id,
+            query.limit.unwrap_or(MAX_TRIAGE_PAGE),
+        )
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(events))
+}
+
+async fn list_artifacts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(incident_id): Path<Uuid>,
+) -> ApiResult<Json<Vec<UploadPartRecord>>> {
+    let claims = authorize(&state, &headers, GrantRole::Viewer)?;
+    owned_incident(&state, &claims, incident_id).await?;
+    let parts = state
+        .repository
+        .parts(claims.tenant_id, incident_id)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(parts))
+}
+
+/// Hand one stored artifact back, decrypted.
+///
+/// Minidumps are the one artifact class that can still hold process memory
+/// after the privacy gate, so they are gated a second time on the tenant's own
+/// `raw_minidump_access_enabled` opt-in — the column that existed from the
+/// first migration and until now was never read. Every read is audited with
+/// the operator's identity *before* the bytes leave, so an attempt that fails
+/// downstream is still on the immutable trail.
+async fn download_artifact(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((incident_id, part_number)): Path<(Uuid, i32)>,
+) -> ApiResult<Response> {
+    let claims = authorize(&state, &headers, GrantRole::Triager)?;
+    owned_incident(&state, &claims, incident_id).await?;
+    let part = state
+        .repository
+        .part(claims.tenant_id, incident_id, part_number)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("artifact_not_found"))?;
+    if part.artifact_kind == "minidump"
+        && !state
+            .repository
+            .raw_minidump_access_enabled(claims.tenant_id)
+            .await
+            .map_err(ApiError::internal)?
+    {
+        return Err(ApiError::forbidden("raw_minidump_access_disabled"));
+    }
+    state
+        .repository
+        .record_artifact_access(
+            claims.tenant_id,
+            incident_id,
+            &part,
+            claims.actor_id.as_deref(),
+        )
+        .await
+        .map_err(ApiError::internal)?;
+    let body = state
+        .artifacts
+        .get(claims.tenant_id, &part.object_key)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!(
+                    "attachment; filename=\"{incident_id}-{part_number:05}-{}\"",
+                    part.artifact_kind
+                ),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+async fn get_tenant(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<TenantRecord>> {
+    let claims = authorize(&state, &headers, GrantRole::Admin)?;
+    state
+        .repository
+        .tenant(claims.tenant_id)
+        .await
+        .map_err(ApiError::internal)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("tenant_not_found"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateTenantRequest {
+    raw_minidump_access_enabled: Option<bool>,
+    retention_overrides: Option<serde_json::Value>,
+}
+
+async fn update_tenant(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateTenantRequest>,
+) -> ApiResult<Json<TenantRecord>> {
+    let claims = authorize(&state, &headers, GrantRole::Admin)?;
+    if let Some(overrides) = &request.retention_overrides {
+        if !overrides.is_object() {
+            return Err(ApiError::bad_request("retention_overrides_must_be_object"));
+        }
+    }
+    let update = TenantSettingsUpdate {
+        raw_minidump_access_enabled: request.raw_minidump_access_enabled,
+        retention_overrides: request.retention_overrides,
+    };
+    if update.is_empty() {
+        return Err(ApiError::bad_request("empty_tenant_update"));
+    }
+    state
+        .repository
+        .update_tenant_settings(claims.tenant_id, &update, claims.actor_id.as_deref())
+        .await
+        .map_err(ApiError::internal)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("tenant_not_found"))
+}
+
+/// Distinguish "field absent" from "field explicitly null" in a PATCH body.
+///
+/// Serde collapses both to `None` for a plain `Option<T>`; wrapping in a second
+/// `Option` and requiring the field to have been present is what lets the
+/// console unassign a group instead of only ever reassigning it.
+fn deserialize_optional_field<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
@@ -805,6 +1185,232 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{crypto::TenantKeyManager, kms::AwsKmsClient};
+    use axum::body::Body;
+    use axum::http::Request;
+    use sqlx::postgres::PgPoolOptions;
+    use tower::ServiceExt;
+
+    /// A router over lazily-connected dependencies.
+    ///
+    /// Nothing here dials Postgres, S3, or KMS: every assertion below is
+    /// answered by routing or by the grant check, both of which run before the
+    /// first query. A test that did reach the database would fail loudly on
+    /// connect rather than pass by accident.
+    fn router(ingest_enabled: bool) -> (Router, GrantSigner) {
+        let config = Arc::new(ServerConfig::for_router_tests(ingest_enabled));
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy(&config.database_url)
+            .expect("lazy pool");
+        let repository = DiagnosticRepository::new(pool);
+        let kms = AwsKmsClient::new(
+            config.kms_endpoint.clone(),
+            config.kms_region.clone(),
+            config.kms_key_id.clone(),
+            config.kms_access_key_id.clone(),
+            config.kms_secret_access_key.clone(),
+            None,
+            config.kms_timeout,
+        )
+        .expect("kms client");
+        let artifacts = ArtifactStore::in_memory(TenantKeyManager::new(
+            Arc::new(repository.clone()),
+            Arc::new(kms),
+            config.kms_key_id.clone(),
+        ));
+        let signer = GrantSigner::new(config.grant_signing_key.as_bytes()).expect("signer");
+        let state = AppState::new(
+            config,
+            repository,
+            artifacts,
+            signer.clone(),
+            PrivacyGate::v1(),
+        );
+        (build_router(state), signer)
+    }
+
+    fn grant(signer: &GrantSigner, role: GrantRole) -> String {
+        signer
+            .issue(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                "install-test".to_owned(),
+                role,
+                None,
+                Duration::from_secs(60),
+            )
+            .expect("issue grant")
+    }
+
+    async fn status_of(router: &Router, request: Request<Body>) -> StatusCode {
+        router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("router response")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn the_intake_switch_stops_uploads_without_locking_the_console_out() {
+        let (router, _) = router(false);
+
+        // Intake itself is closed.
+        assert_eq!(
+            status_of(
+                &router,
+                Request::post("/v1/incidents")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap()
+            )
+            .await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        // Grant exchange is not intake. It used to answer 503 here, which meant
+        // every route the switch is documented to keep up became unreachable
+        // once the last 15-minute grant expired. A bad session is now rejected
+        // on its merits (401) rather than by the switch.
+        assert_eq!(
+            status_of(
+                &router,
+                Request::post("/v1/grants/oidc")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sessionToken":"not-a-jwt","installationId":"install-test"}"#
+                    ))
+                    .unwrap()
+            )
+            .await,
+            StatusCode::UNAUTHORIZED
+        );
+
+        // And triage stays mounted: no auth header is a 400, not a 404.
+        assert_eq!(
+            status_of(&router, Request::get("/v1/groups").body(Body::empty()).unwrap()).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
+    async fn an_upload_grant_cannot_reach_the_triage_console() {
+        let (router, signer) = router(true);
+        let uploader = grant(&signer, GrantRole::Uploader);
+        for path in [
+            "/v1/groups",
+            "/v1/incidents",
+            "/v1/admin/symbols",
+            "/v1/admin/tenant",
+        ] {
+            assert_eq!(
+                status_of(
+                    &router,
+                    Request::get(path)
+                        .header("authorization", format!("Bearer {uploader}"))
+                        .body(Body::empty())
+                        .unwrap()
+                )
+                .await,
+                StatusCode::FORBIDDEN,
+                "{path} must refuse an upload-only grant"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn triage_and_admin_sit_at_different_heights() {
+        let (router, signer) = router(true);
+        let viewer = grant(&signer, GrantRole::Viewer);
+        let incident = Uuid::new_v4();
+        // A Viewer may read groups but may not edit them…
+        assert_eq!(
+            status_of(
+                &router,
+                Request::patch(format!("/v1/groups/{}", Uuid::new_v4()))
+                    .header("authorization", format!("Bearer {viewer}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"status":"resolved"}"#))
+                    .unwrap()
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        // …and may not pull raw artifact bytes, which is Triager-only.
+        assert_eq!(
+            status_of(
+                &router,
+                Request::get(format!("/v1/incidents/{incident}/artifacts/1"))
+                    .header("authorization", format!("Bearer {viewer}"))
+                    .body(Body::empty())
+                    .unwrap()
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        // Triager is still not Admin.
+        let triager = grant(&signer, GrantRole::Triager);
+        assert_eq!(
+            status_of(
+                &router,
+                Request::get("/v1/admin/tenant")
+                    .header("authorization", format!("Bearer {triager}"))
+                    .body(Body::empty())
+                    .unwrap()
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[test]
+    fn every_console_route_is_in_the_published_contract() {
+        // The spec is `include_str!`-ed into the binary, so this is a real
+        // drift check: a route added without a contract entry (or an entry
+        // deleted out from under a live route) fails here rather than in a
+        // client that generated its types from the published document.
+        let contract = include_str!("../openapi.yaml");
+        for path in [
+            "/incidents/{incidentId}/audit:",
+            "/incidents/{incidentId}/artifacts:",
+            "/incidents/{incidentId}/artifacts/{partNumber}:",
+            "/groups:",
+            "/groups/{groupId}:",
+            "/admin/tenant:",
+        ] {
+            assert!(contract.contains(path), "{path} missing from openapi.yaml");
+        }
+        for operation in [
+            "listIncidents",
+            "listIncidentGroups",
+            "triageIncidentGroup",
+            "downloadIncidentArtifact",
+            "readIncidentAudit",
+            "updateTenantPolicy",
+        ] {
+            assert!(
+                contract.contains(operation),
+                "{operation} missing from openapi.yaml"
+            );
+        }
+        // The switch semantics the router now implements have to be what the
+        // contract promises, or an operator reads the wrong runbook.
+        assert!(contract.contains("Not part of intake"));
+    }
+
+    #[test]
+    fn a_patch_can_unassign_as_well_as_reassign() {
+        let cleared: TriageGroupRequest =
+            serde_json::from_str(r#"{"assignedTo":null}"#).expect("explicit null parses");
+        assert_eq!(cleared.assigned_to, Some(None));
+        let untouched: TriageGroupRequest =
+            serde_json::from_str(r#"{"status":"resolved"}"#).expect("absent field parses");
+        assert_eq!(untouched.assigned_to, None);
+        let assigned: TriageGroupRequest =
+            serde_json::from_str(r#"{"assignedTo":"ops@example.com"}"#).expect("value parses");
+        assert_eq!(assigned.assigned_to, Some(Some("ops@example.com".to_owned())));
+    }
 
     #[test]
     fn validates_checksums_and_artifact_kinds() {

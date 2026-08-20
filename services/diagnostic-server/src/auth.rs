@@ -40,6 +40,18 @@ pub struct GrantClaims {
     pub project_id: Uuid,
     pub installation_id: String,
     pub role: GrantRole,
+    /// The human behind a console grant — the OIDC `sub`.
+    ///
+    /// `None` for installation-proof grants, which are issued to a machine and
+    /// have no operator to name. Every audit event written by a route that
+    /// mutates triage or reaches raw artifacts carries this, which is what
+    /// makes `audit_events.actor_id` answerable.
+    ///
+    /// `#[serde(default)]` so a grant minted before this field existed still
+    /// verifies for the remainder of its 15-minute TTL instead of logging the
+    /// whole fleet out on deploy.
+    #[serde(default)]
+    pub actor_id: Option<String>,
     pub issued_at: i64,
     pub expires_at: i64,
 }
@@ -63,6 +75,7 @@ impl GrantSigner {
         project_id: Uuid,
         installation_id: String,
         role: GrantRole,
+        actor_id: Option<String>,
         ttl: Duration,
     ) -> anyhow::Result<String> {
         let issued_at = unix_now()?;
@@ -72,6 +85,7 @@ impl GrantSigner {
             project_id,
             installation_id,
             role,
+            actor_id,
             issued_at,
             expires_at: issued_at + ttl.as_secs() as i64,
         };
@@ -181,6 +195,7 @@ mod tests {
                 project_id,
                 "install-a".into(),
                 GrantRole::Uploader,
+                None,
                 Duration::from_secs(60),
             )
             .unwrap();
@@ -188,7 +203,53 @@ mod tests {
         assert_eq!(claims.tenant_id, tenant_id);
         assert_eq!(claims.project_id, project_id);
         assert_eq!(claims.installation_id, "install-a");
+        assert_eq!(claims.actor_id, None);
         assert!(signer.verify(&(token + "x")).is_err());
+    }
+
+    #[test]
+    fn console_grants_carry_the_operator_through_to_the_audit_trail() {
+        let signer = GrantSigner::new(&[9; 32]).unwrap();
+        let token = signer
+            .issue(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                "console".into(),
+                GrantRole::Triager,
+                Some("ops@example.com".to_owned()),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        assert_eq!(
+            signer.verify(&token).unwrap().actor_id.as_deref(),
+            Some("ops@example.com")
+        );
+    }
+
+    #[test]
+    fn a_grant_minted_before_actor_id_existed_still_verifies() {
+        // The field is additive, and grants live 15 minutes. Rejecting the
+        // older shape would log every in-flight console out on deploy.
+        let signer = GrantSigner::new(&[5; 32]).unwrap();
+        let legacy = serde_json::json!({
+            "grantId": Uuid::new_v4(),
+            "tenantId": Uuid::new_v4(),
+            "projectId": Uuid::new_v4(),
+            "installationId": "install-legacy",
+            "role": "viewer",
+            "issuedAt": unix_now().unwrap(),
+            "expiresAt": unix_now().unwrap() + 60,
+        });
+        let encoded = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&legacy).unwrap());
+        let mut mac = HmacSha256::new_from_slice(&signer.key).unwrap();
+        mac.update(encoded.as_bytes());
+        let token = format!(
+            "{encoded}.{}",
+            URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+        );
+        let claims = signer.verify(&token).unwrap();
+        assert_eq!(claims.actor_id, None);
+        assert_eq!(claims.role, GrantRole::Viewer);
     }
 
     #[test]

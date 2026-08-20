@@ -195,6 +195,59 @@ impl ServerConfig {
             )?,
         })
     }
+
+    /// A config with every required field filled and no live dependency.
+    ///
+    /// Lets the router tests assert which routes are mounted under each
+    /// position of the intake switch without an environment, a database, or an
+    /// object store — the switch is a routing decision, and that is all these
+    /// tests exercise.
+    #[cfg(test)]
+    pub fn for_router_tests(ingest_enabled: bool) -> Self {
+        Self {
+            bind_address: "127.0.0.1:0".parse().expect("valid test bind address"),
+            database_url: "postgres://diagnostics@127.0.0.1/diagnostics".to_owned(),
+            database_max_connections: 1,
+            object_store_endpoint: None,
+            object_store_bucket: "test".to_owned(),
+            object_store_region: "us-east-1".to_owned(),
+            object_store_access_key: None,
+            object_store_secret_key: None,
+            object_store_local_dir: Some(PathBuf::from("/tmp/cognia-diagnostic-test")),
+            grant_signing_key: "0".repeat(32),
+            oidc_issuer: "https://issuer.test".to_owned(),
+            oidc_audience: "cognia-diagnostics".to_owned(),
+            oidc_public_key_pem: String::new(),
+            processing_enabled: false,
+            processing_interval: Duration::from_secs(1),
+            processing_batch_size: 1,
+            processing_temp_dir: PathBuf::from("/tmp/cognia-diagnostic-test/tmp"),
+            minidump_stackwalk_path: PathBuf::from("/nonexistent/minidump-stackwalk"),
+            minidump_stackwalk_timeout: Duration::from_secs(1),
+            kms_endpoint: "https://kms.test/".parse().expect("valid test KMS url"),
+            kms_region: "us-east-1".to_owned(),
+            kms_key_id: "alias/test".to_owned(),
+            kms_access_key_id: "test".to_owned(),
+            kms_secret_access_key: "test".to_owned(),
+            kms_session_token: None,
+            kms_timeout: Duration::from_secs(1),
+            retention_enabled: false,
+            retention_interval: Duration::from_secs(1),
+            retention_batch_size: 1,
+            alert_enabled: false,
+            alert_interval: Duration::from_secs(1),
+            alert_batch_size: 1,
+            alert_timeout: Duration::from_secs(1),
+            alert_webhook_url: None,
+            alert_webhook_secret: None,
+            alert_smtp_url: None,
+            alert_smtp_from: None,
+            alert_smtp_to: None,
+            migrate_only: false,
+            run_migrations: false,
+            ingest_enabled,
+        }
+    }
 }
 
 /// Reject the one combination of the two migration switches that is a lie.

@@ -87,6 +87,135 @@ pub struct SymbolRecord {
     pub created_at: DateTime<Utc>,
 }
 
+/// One deduplicated crash signature — the unit an operator actually triages.
+///
+/// Written by `accept_processing` since the grouping pipeline shipped; until
+/// the triage routes existed nothing ever read it back, which is why `status`
+/// never left `open` and `assigned_to` was never anything but NULL.
+#[derive(Debug, Clone, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncidentGroupRecord {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub fingerprint: String,
+    pub fingerprint_version: String,
+    pub status: String,
+    pub assigned_to: Option<String>,
+    pub regression_count: i32,
+    pub compatible_build_family: String,
+    pub platform: String,
+    pub exception: String,
+    pub module: String,
+    pub top_frames: serde_json::Value,
+    pub incident_count: i64,
+    pub first_seen_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Tenant-level policy an operator can read and change from the console.
+#[derive(Debug, Clone, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TenantRecord {
+    pub id: Uuid,
+    pub name: String,
+    pub retention_overrides: serde_json::Value,
+    pub raw_minidump_access_enabled: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+/// One immutable audit row, as the console renders it.
+#[derive(Debug, Clone, FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEventRecord {
+    pub id: i64,
+    pub action: String,
+    pub incident_id: Option<Uuid>,
+    pub actor_id: Option<String>,
+    pub reason: Option<String>,
+    pub details: serde_json::Value,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// The statuses `incident_groups.status` accepts, mirroring its CHECK.
+pub const GROUP_STATUSES: [&str; 3] = ["open", "suppressed", "resolved"];
+
+/// Upper bound on any triage page, so a console cannot ask for the whole table.
+pub const MAX_TRIAGE_PAGE: i64 = 200;
+
+#[derive(Debug, Clone)]
+pub struct GroupQuery {
+    pub status: Option<String>,
+    pub platform: Option<String>,
+    pub assigned_to: Option<String>,
+    pub search: Option<String>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+impl Default for GroupQuery {
+    fn default() -> Self {
+        Self {
+            status: None,
+            platform: None,
+            assigned_to: None,
+            search: None,
+            limit: 50,
+            offset: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IncidentQuery {
+    pub group_id: Option<Uuid>,
+    pub processing_state: Option<ProcessingState>,
+    pub support_code: Option<String>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+impl Default for IncidentQuery {
+    fn default() -> Self {
+        Self {
+            group_id: None,
+            processing_state: None,
+            support_code: None,
+            limit: 50,
+            offset: 0,
+        }
+    }
+}
+
+/// A triage edit. Every field is optional because the console PATCHes one
+/// control at a time; `assigned_to: Some(None)` is the explicit "unassign",
+/// which a plain `Option<String>` could not distinguish from "leave alone".
+#[derive(Debug, Clone, Default)]
+pub struct GroupTriageUpdate {
+    pub status: Option<String>,
+    pub assigned_to: Option<Option<String>>,
+}
+
+impl GroupTriageUpdate {
+    pub fn is_empty(&self) -> bool {
+        self.status.is_none() && self.assigned_to.is_none()
+    }
+}
+
+/// Tenant policy edit, same one-control-at-a-time shape as the triage update.
+#[derive(Debug, Clone, Default)]
+pub struct TenantSettingsUpdate {
+    pub raw_minidump_access_enabled: Option<bool>,
+    pub retention_overrides: Option<serde_json::Value>,
+}
+
+impl TenantSettingsUpdate {
+    pub fn is_empty(&self) -> bool {
+        self.raw_minidump_access_enabled.is_none() && self.retention_overrides.is_none()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AcceptProcessing {
     pub fingerprint: String,
@@ -1030,6 +1159,296 @@ impl DiagnosticRepository {
         Ok(())
     }
 
+    /// One page of triage groups, newest activity first.
+    ///
+    /// Filters are bound as nullable parameters rather than concatenated, so
+    /// the statement is the same prepared plan for every filter combination
+    /// and no operator-supplied text ever reaches the parser.
+    pub async fn list_groups(
+        &self,
+        tenant_id: Uuid,
+        project_id: Uuid,
+        query: &GroupQuery,
+    ) -> anyhow::Result<Vec<IncidentGroupRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let groups = sqlx::query_as::<_, IncidentGroupRecord>(
+            r#"SELECT id, project_id, fingerprint, fingerprint_version, status, assigned_to,
+                regression_count, compatible_build_family, platform, exception, module,
+                top_frames, incident_count, first_seen_at, last_seen_at, created_at, updated_at
+            FROM incident_groups
+            WHERE project_id = $1
+              AND ($2::text IS NULL OR status = $2)
+              AND ($3::text IS NULL OR platform = $3)
+              AND ($4::text IS NULL OR assigned_to = $4)
+              AND ($5::text IS NULL
+                   OR exception ILIKE '%' || $5 || '%'
+                   OR module ILIKE '%' || $5 || '%'
+                   OR fingerprint ILIKE '%' || $5 || '%')
+            ORDER BY last_seen_at DESC, id
+            LIMIT $6 OFFSET $7"#,
+        )
+        .bind(project_id)
+        .bind(query.status.as_deref())
+        .bind(query.platform.as_deref())
+        .bind(query.assigned_to.as_deref())
+        .bind(query.search.as_deref())
+        .bind(query.limit.clamp(1, MAX_TRIAGE_PAGE))
+        .bind(query.offset.max(0))
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(groups)
+    }
+
+    pub async fn group(
+        &self,
+        tenant_id: Uuid,
+        project_id: Uuid,
+        group_id: Uuid,
+    ) -> anyhow::Result<Option<IncidentGroupRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let group = sqlx::query_as::<_, IncidentGroupRecord>(
+            r#"SELECT id, project_id, fingerprint, fingerprint_version, status, assigned_to,
+                regression_count, compatible_build_family, platform, exception, module,
+                top_frames, incident_count, first_seen_at, last_seen_at, created_at, updated_at
+            FROM incident_groups WHERE id = $1 AND project_id = $2"#,
+        )
+        .bind(group_id)
+        .bind(project_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(group)
+    }
+
+    /// Apply a triage edit and record who made it.
+    ///
+    /// Returns `None` when the group does not exist in this tenant/project, so
+    /// the route can answer 404 rather than a silent no-op. `COALESCE` leaves
+    /// untouched columns alone; the assignee is handled by a separate flag
+    /// because clearing it is a real edit that `COALESCE` cannot express.
+    pub async fn update_group(
+        &self,
+        tenant_id: Uuid,
+        project_id: Uuid,
+        group_id: Uuid,
+        update: &GroupTriageUpdate,
+        actor: Option<&str>,
+    ) -> anyhow::Result<Option<IncidentGroupRecord>> {
+        if let Some(status) = &update.status {
+            validate_group_status(status)?;
+        }
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let (assign_requested, assignee) = match &update.assigned_to {
+            Some(value) => (true, value.clone()),
+            None => (false, None),
+        };
+        let group = sqlx::query_as::<_, IncidentGroupRecord>(
+            r#"UPDATE incident_groups SET
+                status = COALESCE($3, status),
+                assigned_to = CASE WHEN $4 THEN $5 ELSE assigned_to END,
+                updated_at = now()
+            WHERE id = $1 AND project_id = $2
+            RETURNING id, project_id, fingerprint, fingerprint_version, status, assigned_to,
+                regression_count, compatible_build_family, platform, exception, module,
+                top_frames, incident_count, first_seen_at, last_seen_at, created_at, updated_at"#,
+        )
+        .bind(group_id)
+        .bind(project_id)
+        .bind(update.status.as_deref())
+        .bind(assign_requested)
+        .bind(assignee.as_deref())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(group) = group else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+        audit_actor(
+            &mut tx,
+            tenant_id,
+            "group.triaged",
+            None,
+            actor,
+            Some(serde_json::json!({
+                "groupId": group.id,
+                "status": group.status,
+                "assignedTo": group.assigned_to,
+            })),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(Some(group))
+    }
+
+    /// One page of incidents for the console, newest first.
+    pub async fn list_incidents(
+        &self,
+        tenant_id: Uuid,
+        project_id: Uuid,
+        query: &IncidentQuery,
+    ) -> anyhow::Result<Vec<IncidentRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let incidents = sqlx::query_as::<_, IncidentRecord>(
+            r#"SELECT id, tenant_id, project_id, installation_id, artifact_hash, build_id,
+                platform, module, exception, client_state, processing_state, support_code,
+                fingerprint, processing_attempts, next_processing_at, failure_code,
+                grouping_basis, raw_stack, symbolized_stack, missing_symbols, group_id,
+                accepted_at, consent_withdrawn_at, created_at, updated_at
+            FROM incidents
+            WHERE project_id = $1
+              AND ($2::uuid IS NULL OR group_id = $2)
+              AND ($3::processing_state IS NULL OR processing_state = $3)
+              AND ($4::text IS NULL OR support_code = upper($4))
+            ORDER BY created_at DESC, id
+            LIMIT $5 OFFSET $6"#,
+        )
+        .bind(project_id)
+        .bind(query.group_id)
+        .bind(query.processing_state)
+        .bind(query.support_code.as_deref())
+        .bind(query.limit.clamp(1, MAX_TRIAGE_PAGE))
+        .bind(query.offset.max(0))
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(incidents)
+    }
+
+    pub async fn part(
+        &self,
+        tenant_id: Uuid,
+        incident_id: Uuid,
+        part_number: i32,
+    ) -> anyhow::Result<Option<UploadPartRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let part = sqlx::query_as::<_, UploadPartRecord>(
+            r#"SELECT incident_id, part_number, object_key, source_sha256, stored_sha256,
+                stored_bytes, redaction_version, removed_fields, artifact_kind, created_at
+            FROM upload_parts WHERE incident_id = $1 AND part_number = $2"#,
+        )
+        .bind(incident_id)
+        .bind(part_number)
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(part)
+    }
+
+    /// Tenant policy row. `tenants` is the one table without RLS — it is keyed
+    /// by the id the grant already pins, so the lookup is explicitly scoped.
+    pub async fn tenant(&self, tenant_id: Uuid) -> anyhow::Result<Option<TenantRecord>> {
+        let tenant = sqlx::query_as::<_, TenantRecord>(
+            r#"SELECT id, name, retention_overrides, raw_minidump_access_enabled, created_at
+            FROM tenants WHERE id = $1"#,
+        )
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(tenant)
+    }
+
+    /// Whether this tenant has opted into operators reading raw minidumps.
+    ///
+    /// Missing tenant reads as `false`: an unknown tenant is never granted the
+    /// most sensitive artifact in the system.
+    pub async fn raw_minidump_access_enabled(&self, tenant_id: Uuid) -> anyhow::Result<bool> {
+        Ok(self
+            .tenant(tenant_id)
+            .await?
+            .is_some_and(|tenant| tenant.raw_minidump_access_enabled))
+    }
+
+    pub async fn update_tenant_settings(
+        &self,
+        tenant_id: Uuid,
+        update: &TenantSettingsUpdate,
+        actor: Option<&str>,
+    ) -> anyhow::Result<Option<TenantRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let tenant = sqlx::query_as::<_, TenantRecord>(
+            r#"UPDATE tenants SET
+                raw_minidump_access_enabled = COALESCE($2, raw_minidump_access_enabled),
+                retention_overrides = COALESCE($3, retention_overrides)
+            WHERE id = $1
+            RETURNING id, name, retention_overrides, raw_minidump_access_enabled, created_at"#,
+        )
+        .bind(tenant_id)
+        .bind(update.raw_minidump_access_enabled)
+        .bind(update.retention_overrides.as_ref())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(tenant) = tenant else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+        audit_actor(
+            &mut tx,
+            tenant_id,
+            "tenant.policy_changed",
+            None,
+            actor,
+            Some(serde_json::json!({
+                "rawMinidumpAccessEnabled": tenant.raw_minidump_access_enabled,
+                "retentionOverrides": tenant.retention_overrides,
+            })),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(Some(tenant))
+    }
+
+    /// Record that an operator read an artifact out of the store.
+    ///
+    /// Written before the bytes are handed over, and in its own transaction, so
+    /// a read that later fails still leaves the attempt on the immutable trail.
+    pub async fn record_artifact_access(
+        &self,
+        tenant_id: Uuid,
+        incident_id: Uuid,
+        part: &UploadPartRecord,
+        actor: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        audit_actor(
+            &mut tx,
+            tenant_id,
+            "artifact.read",
+            Some(incident_id),
+            actor,
+            Some(serde_json::json!({
+                "partNumber": part.part_number,
+                "artifactKind": part.artifact_kind,
+                "storedBytes": part.stored_bytes,
+            })),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The audit trail for one incident, newest first — the console's evidence
+    /// that consent, processing, and every operator read are accounted for.
+    pub async fn incident_audit(
+        &self,
+        tenant_id: Uuid,
+        incident_id: Uuid,
+        limit: i64,
+    ) -> anyhow::Result<Vec<AuditEventRecord>> {
+        let mut tx = self.tenant_transaction(tenant_id).await?;
+        let events = sqlx::query_as::<_, AuditEventRecord>(
+            r#"SELECT id, action, incident_id, actor_id, reason, details, occurred_at
+            FROM audit_events WHERE incident_id = $1
+            ORDER BY occurred_at DESC, id DESC LIMIT $2"#,
+        )
+        .bind(incident_id)
+        .bind(limit.clamp(1, MAX_TRIAGE_PAGE))
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(events)
+    }
+
     async fn tenant_transaction(
         &self,
         tenant_id: Uuid,
@@ -1040,6 +1459,18 @@ impl DiagnosticRepository {
             .execute(&mut *tx)
             .await?;
         Ok(tx)
+    }
+}
+
+/// Reject a status the CHECK constraint would reject anyway.
+///
+/// Checked before the transaction opens so a typo comes back as a 400 rather
+/// than a constraint violation surfaced as an opaque 500.
+pub fn validate_group_status(status: &str) -> anyhow::Result<()> {
+    if GROUP_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        anyhow::bail!("unsupported group status {status}")
     }
 }
 
@@ -1189,19 +1620,41 @@ async fn upsert_retention_job(
     Ok(())
 }
 
+/// Append one immutable audit row.
+///
+/// `actor` is `None` for everything a worker does on its own schedule — a
+/// retention sweep or a symbolication retry has no operator to name, and
+/// inventing one would make the trail lie. Routes that act on behalf of a
+/// signed-in operator pass the grant's `actor_id` through.
+async fn audit_actor(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    action: &str,
+    incident_id: Option<Uuid>,
+    actor: Option<&str>,
+    details: Option<serde_json::Value>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"INSERT INTO audit_events (tenant_id, action, incident_id, actor_id, details)
+        VALUES ($1, $2, $3, $4, $5)"#,
+    )
+    .bind(tenant_id)
+    .bind(action)
+    .bind(incident_id)
+    .bind(actor)
+    .bind(details.unwrap_or_else(|| serde_json::json!({})))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 async fn audit_admin(
     tx: &mut Transaction<'_, Postgres>,
     tenant_id: Uuid,
     action: &str,
     details: Option<serde_json::Value>,
 ) -> anyhow::Result<()> {
-    sqlx::query("INSERT INTO audit_events (tenant_id, action, details) VALUES ($1, $2, $3)")
-        .bind(tenant_id)
-        .bind(action)
-        .bind(details.unwrap_or_else(|| serde_json::json!({})))
-        .execute(&mut **tx)
-        .await?;
-    Ok(())
+    audit_actor(tx, tenant_id, action, None, None, details).await
 }
 
 async fn audit(
@@ -1211,16 +1664,7 @@ async fn audit(
     incident_id: Uuid,
     details: Option<serde_json::Value>,
 ) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO audit_events (tenant_id, action, incident_id, details) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(tenant_id)
-    .bind(action)
-    .bind(incident_id)
-    .bind(details.unwrap_or_else(|| serde_json::json!({})))
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
+    audit_actor(tx, tenant_id, action, Some(incident_id), None, details).await
 }
 
 #[cfg(test)]
@@ -1237,5 +1681,43 @@ mod tests {
             processing_failure_target(false),
             (ProcessingState::PermanentFailure, IncidentState::Rejected)
         );
+    }
+
+    #[test]
+    fn group_status_matches_the_check_constraint() {
+        for status in GROUP_STATUSES {
+            validate_group_status(status).unwrap();
+        }
+        assert!(validate_group_status("wontfix").is_err());
+        assert!(validate_group_status("OPEN").is_err());
+    }
+
+    #[test]
+    fn an_unassign_is_distinguishable_from_leaving_the_assignee_alone() {
+        let untouched = GroupTriageUpdate {
+            status: Some("resolved".to_owned()),
+            assigned_to: None,
+        };
+        let cleared = GroupTriageUpdate {
+            status: None,
+            assigned_to: Some(None),
+        };
+        assert!(!untouched.is_empty() && !cleared.is_empty());
+        // The flag the UPDATE binds: false leaves the column, true writes it.
+        assert!(untouched.assigned_to.is_none());
+        assert_eq!(cleared.assigned_to, Some(None));
+        assert!(GroupTriageUpdate::default().is_empty());
+        assert!(TenantSettingsUpdate::default().is_empty());
+    }
+
+    #[test]
+    fn triage_pages_are_bounded_in_both_directions() {
+        let query = GroupQuery::default();
+        assert_eq!(query.limit, 50);
+        assert_eq!(query.limit.clamp(1, MAX_TRIAGE_PAGE), 50);
+        assert_eq!(i64::MAX.clamp(1, MAX_TRIAGE_PAGE), MAX_TRIAGE_PAGE);
+        assert_eq!(0_i64.clamp(1, MAX_TRIAGE_PAGE), 1);
+        let negative_offset: i64 = -5;
+        assert_eq!(negative_offset.max(0), 0);
     }
 }
