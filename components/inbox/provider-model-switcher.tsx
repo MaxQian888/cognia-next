@@ -13,6 +13,15 @@
  * Mirrors the `ModeSwitcher` pattern so the inbox header chrome stays
  * uniform. Clearing the override is exposed as a `default` menu entry
  * that writes `undefined` to both fields.
+ *
+ * The option source is `collectModelOptions` — the same one the composer
+ * picker, the settings default-model picker, the routing alias combobox, and
+ * the routing engine's candidate set all read. This file used to collect its
+ * own, against an invented settings shape (`cfg.models`, a field that does not
+ * exist on `UserProviderSettings`), so every built-in provider offered exactly
+ * one model: its default. Discovered models, the OpenRouter catalog, and every
+ * enabled-model whitelist were invisible here and in the bot default-model
+ * dropdown that imports from this file.
  */
 
 import { useState } from "react"
@@ -29,6 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { getDb } from "@/lib/db/schema"
+import { collectModelOptions } from "@/lib/ai/model-options"
 import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import type { AppSettings } from "@cognia/agent-config-types"
 
@@ -49,49 +59,23 @@ export interface ProviderModelOption {
 }
 
 /**
- * Enumerate the configured provider+model pairs from app settings. Exported
- * (pure) so the adapter-detail `AiBindingDefaults` section reuses the exact
- * same option source as this per-conversation switcher.
+ * Enumerate the selectable provider+model pairs. Exported (pure) so the
+ * adapter-detail `AiBindingDefaults` section reuses the exact same option
+ * source as this per-conversation switcher.
+ *
+ * No local collection: `collectModelOptions` takes the real settings types, so
+ * a field that does not exist on `UserProviderSettings` is a compile error
+ * rather than a silently-empty list.
  */
 export function collectOptions(settings: AppSettings | undefined): ProviderModelOption[] {
-  const out: ProviderModelOption[] = []
-  if (!settings) return out
-
-  // Provider settings map: provider id → {enabled, models?}.
-  const providerSettings = (settings.providerSettings ?? {}) as Record<
-    string,
-    { enabled?: boolean; models?: string[]; defaultModel?: string }
-  >
-  for (const [providerId, cfg] of Object.entries(providerSettings)) {
-    if (cfg.enabled === false) continue
-    const models = cfg.models ?? (cfg.defaultModel ? [cfg.defaultModel] : [])
-    for (const modelId of models) {
-      out.push({
-        providerId,
-        modelId,
-        label: `${providerId} · ${modelId}`,
-      })
-    }
-  }
-
-  // Custom providers from `customProviders` array.
-  const customProviders = (settings.customProviders ?? []) as Array<{
-    id: string
-    enabled?: boolean
-    models?: string[]
-  }>
-  for (const p of customProviders) {
-    if (p.enabled === false) continue
-    for (const modelId of p.models ?? []) {
-      out.push({
-        providerId: p.id,
-        modelId,
-        label: `${p.id} · ${modelId}`,
-      })
-    }
-  }
-
-  return out
+  if (!settings) return []
+  return collectModelOptions(settings.providerSettings, settings.customProviders).map((option) => ({
+    providerId: option.providerId,
+    modelId: option.modelId,
+    // Display names, not raw ids — `openai · gpt-5.4` was never a label a
+    // person picked out of a list of thirty.
+    label: `${option.providerName} · ${option.modelName ?? option.modelId}`,
+  }))
 }
 
 export function ProviderModelSwitcher({

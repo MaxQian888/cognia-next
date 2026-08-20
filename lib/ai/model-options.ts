@@ -12,6 +12,7 @@ import type {
 } from "@cognia/provider-types/provider"
 import { getModelDisplayName } from "@/lib/ai/icons"
 import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
+import { customProviderModelIds } from "@cognia/provider-routing/model-option-source"
 
 /**
  * The synced OpenRouter live-models catalog (Dexie v93), as the synchronous
@@ -299,13 +300,10 @@ export function collectModelOptions(
   }
   for (const cp of customProviders ?? []) {
     if (cp.enabled === false) continue
-    const ids = new Set<string>()
-    if (cp.defaultModel) ids.add(cp.defaultModel)
-    for (const m of cp.models ?? []) {
-      const mid = (m as { id?: string }).id
-      if (mid) ids.add(mid)
-    }
-    for (const modelId of ids) {
+    // Shared with the routing engine's candidate source. Reading `models` as
+    // `{id}` objects here (which is what this loop used to do) silently
+    // dropped every custom-provider model, because the field is `string[]`.
+    for (const modelId of customProviderModelIds(cp)) {
       out.push({
         providerId: cp.id,
         providerName: cp.name ?? cp.id,

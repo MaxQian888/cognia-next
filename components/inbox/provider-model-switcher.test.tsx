@@ -64,15 +64,22 @@ describe("ProviderModelSwitcher", () => {
   })
 
   it("lists configured providers + models from app settings", () => {
+    // `enabledModels` is the real whitelist field. The fixtures used to say
+    // `models`, which does not exist on `UserProviderSettings` — the same
+    // invented shape the component itself collected against, so the test
+    // agreed with the bug instead of catching it.
     mockSettingsValue = {
       providerSettings: {
-        anthropic: { enabled: true, models: ["claude-opus-4-7", "claude-sonnet-4-6"] },
-        openai: { enabled: true, models: ["gpt-5"] },
-        disabled: { enabled: false, models: ["model-x"] },
+        anthropic: {
+          enabled: true,
+          enabledModels: ["claude-opus-4-7", "claude-sonnet-4-6"],
+        },
+        openai: { enabled: true, enabledModels: ["gpt-5"] },
+        disabled: { enabled: false, enabledModels: ["model-x"] },
       },
       customProviders: [
-        { id: "homegrown", enabled: true, models: ["lava-1"] },
-        { id: "disabled-custom", enabled: false, models: ["lava-2"] },
+        { id: "homegrown", enabled: true, name: "Homegrown", customModels: ["lava-1"] },
+        { id: "disabled-custom", enabled: false, customModels: ["lava-2"] },
       ],
     } as unknown as AppSettings
 
@@ -97,7 +104,7 @@ describe("ProviderModelSwitcher", () => {
   it("selecting an option relays an upsert mutation with both overrides", async () => {
     mockSettingsValue = {
       providerSettings: {
-        codex: { enabled: true, models: ["gpt-5"] },
+        codex: { enabled: true, enabledModels: ["gpt-5"] },
       },
     } as unknown as AppSettings
     const onChange = jest.fn()
@@ -151,15 +158,45 @@ describe("ProviderModelSwitcher", () => {
     })
   })
 
-  it("shows the empty-state row when no providers are configured", () => {
+  it("shows the empty-state row only when Anthropic is explicitly opted out", () => {
+    // An empty `providerSettings` is NOT an empty option list: the sidecar
+    // authenticates Anthropic via API key or subscription OAuth and needs no
+    // provider config, so a subscription-only user must still get a model
+    // list. Opting out takes an explicit `enabled: false`.
     mockSettingsValue = { providerSettings: {} } as unknown as AppSettings
+    const { unmount } = render(<ProviderModelSwitcher conversationKey="ck" sessionId="s" />)
+    expect(screen.queryByTestId("provider-model-option-empty")).not.toBeInTheDocument()
+    unmount()
+
+    mockSettingsValue = {
+      providerSettings: { anthropic: { enabled: false } },
+    } as unknown as AppSettings
     render(<ProviderModelSwitcher conversationKey="ck" sessionId="s" />)
     expect(screen.getByTestId("provider-model-option-empty")).toBeInTheDocument()
   })
 
+  it("offers every model a provider has, not just its default", () => {
+    // The regression: a local collector read `cfg.models`, so each built-in
+    // provider contributed exactly one option — its default.
+    mockSettingsValue = {
+      providerSettings: {
+        openai: {
+          enabled: true,
+          defaultModel: "gpt-4.1",
+          enabledModels: ["gpt-5.4", "gpt-5.4-mini"],
+          discoveredModels: [{ id: "o4-mini" }],
+        },
+      },
+    } as unknown as AppSettings
+    render(<ProviderModelSwitcher conversationKey="ck" sessionId="s" />)
+    for (const modelId of ["gpt-4.1", "gpt-5.4", "gpt-5.4-mini", "o4-mini"]) {
+      expect(screen.getByTestId(`provider-model-option-openai-${modelId}`)).toBeInTheDocument()
+    }
+  })
+
   it("no-ops when the selected option matches the current overrides", async () => {
     mockSettingsValue = {
-      providerSettings: { codex: { enabled: true, models: ["gpt-5"] } },
+      providerSettings: { codex: { enabled: true, enabledModels: ["gpt-5"] } },
     } as unknown as AppSettings
     render(
       <ProviderModelSwitcher

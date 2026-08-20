@@ -4,9 +4,16 @@
  * Extracted from `components/settings/agent-runtime/parts/default-model-picker.tsx`
  * so the routing alias editor's provider:model combobox and the default-model
  * picker present the exact same option universe (enabled providers, discovered
- * models, curated built-in catalog fallback, custom providers).
+ * models, OpenRouter's synced catalog, curated built-in catalog fallback,
+ * custom providers).
+ *
+ * This is also the routing engine's candidate universe
+ * (`build-preview-engine.ts` builds `deps.listCandidates` from it), which is
+ * why a picker and the router must never collect differently: a model a user
+ * can select but the router cannot see is a routing bug wearing a UI costume.
  */
 
+import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 
@@ -35,6 +42,34 @@ export function catalogModelIds(providerId: string): string[] {
   return [...ids]
 }
 
+/**
+ * Every model id a custom provider offers.
+ *
+ * `CustomProviderSettings` declares `models: string[]` and `customModels:
+ * string[]`, the former documented as a convenience alias of the latter. Both
+ * are read, and object entries are tolerated, because the two collectors that
+ * predate this helper each read only one of them — and one read `models` as
+ * `{id}` objects, so it always resolved `undefined` and dropped every custom
+ * model. That was not a display bug: the routing engine builds its candidate
+ * set from the same collector, so a custom provider with no `defaultModel`
+ * contributed zero routing candidates.
+ */
+export function customProviderModelIds(cp: CustomProviderSettings): string[] {
+  const ids = new Set<string>()
+  if (cp.defaultModel) ids.add(cp.defaultModel)
+  for (const list of [cp.customModels, cp.models]) {
+    for (const entry of list ?? []) {
+      if (typeof entry === "string") {
+        if (entry) ids.add(entry)
+        continue
+      }
+      const id = (entry as { id?: string } | null)?.id
+      if (id) ids.add(id)
+    }
+  }
+  return [...ids]
+}
+
 export function collectOptions(
   providerSettings: Record<string, UserProviderSettings> | undefined,
   customProviders: CustomProviderSettings[] | undefined
@@ -54,6 +89,12 @@ export function collectOptions(
     for (const m of settings.discoveredModels ?? []) {
       if (m?.id) allowed.add(m.id)
     }
+    // OpenRouter's live list lives in the synced catalog, not `discoveredModels`.
+    if (providerId === "openrouter") {
+      for (const m of getCachedOpenRouterCatalogModels()) {
+        if (m?.id) allowed.add(m.id)
+      }
+    }
     // Nothing configured at all → curated built-in catalog, never an empty group.
     const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId)
     for (const modelId of modelIds) {
@@ -62,13 +103,7 @@ export function collectOptions(
   }
   for (const cp of customProviders ?? []) {
     if (cp.enabled === false) continue
-    const ids = new Set<string>()
-    if (cp.defaultModel) ids.add(cp.defaultModel)
-    for (const m of cp.models ?? []) {
-      const mid = (m as { id?: string }).id
-      if (mid) ids.add(mid)
-    }
-    for (const modelId of ids) {
+    for (const modelId of customProviderModelIds(cp)) {
       out.push({ providerId: cp.id, providerName: cp.name ?? cp.id, modelId })
     }
   }
