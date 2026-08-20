@@ -12,6 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
 use crate::host::{ClientIdentity, HostError, HostEvent, TerminalHost, TerminalHostConfig};
+use crate::host_capabilities::{host_capabilities, TerminalHostCapabilities};
 use crate::protocol::{FrameKind, TerminalFrame, HEADER_LEN, MAX_FRAME_PAYLOAD};
 use crate::session::{PathInjection, SpawnRequest};
 use crate::ssh::SshSpawnRequest;
@@ -130,17 +131,28 @@ struct TransportStatePayload {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AckPayload {
+struct AckPayload<'a> {
     ok: bool,
     host_id: String,
     protocol_features: &'static [&'static str],
+    /// Present on the hello ack and the host snapshot only.
+    ///
+    /// Every other ack answers a hot command (`Resize` fires on each window
+    /// drag), and a remote client only needs this once per connection — so it
+    /// rides the two frames it is already guaranteed to see before it can
+    /// spawn anything, and nowhere else.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<&'a TerminalHostCapabilities>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct HostSnapshotPayload<T> {
+struct HostSnapshotPayload<'a, T> {
     host_id: String,
     sessions: T,
+    /// See [`AckPayload::host`]. Carried here too because reattaching after a
+    /// page reload lists before it spawns, and that path never sends a hello.
+    host: Option<&'a TerminalHostCapabilities>,
 }
 
 #[derive(Debug, Serialize)]
@@ -235,7 +247,7 @@ async fn dispatch_command(
                             .collect::<HashMap<_, _>>(),
                     )?;
                 }
-                ack_frame(host, session_id, sequence)
+                hello_ack_frame(host, session_id, sequence)
             })
         }
         FrameKind::List => host.list(connection_id).and_then(|sessions| {
@@ -246,6 +258,7 @@ async fn dispatch_command(
                 &HostSnapshotPayload {
                     host_id: host.host_id().to_string(),
                     sessions,
+                    host: Some(host_capabilities()),
                 },
             )
             .map_err(HostError::InvalidRequest)
@@ -375,6 +388,25 @@ fn ack_frame(
     session_id: Uuid,
     sequence: u64,
 ) -> Result<TerminalFrame, HostError> {
+    ack_frame_with(host, session_id, sequence, None)
+}
+
+/// The hello ack — the one ack that also describes the host, so a remote
+/// client learns which platform and shells it is about to spawn on.
+fn hello_ack_frame(
+    host: &TerminalHost,
+    session_id: Uuid,
+    sequence: u64,
+) -> Result<TerminalFrame, HostError> {
+    ack_frame_with(host, session_id, sequence, Some(host_capabilities()))
+}
+
+fn ack_frame_with(
+    host: &TerminalHost,
+    session_id: Uuid,
+    sequence: u64,
+    capabilities: Option<&TerminalHostCapabilities>,
+) -> Result<TerminalFrame, HostError> {
     json_frame(
         FrameKind::Ack,
         session_id,
@@ -383,6 +415,7 @@ fn ack_frame(
             ok: true,
             host_id: host.host_id().to_string(),
             protocol_features: PROTOCOL_FEATURES,
+            host: capabilities,
         },
     )
     .map_err(HostError::InvalidRequest)
@@ -585,10 +618,62 @@ mod tests {
         serve.await.unwrap().unwrap();
     }
 
-    /// The hello frame is how the app hands the out-of-process host its PATH
-    /// view (which the host cannot derive: the managed-CLI registry is an
-    /// in-process static on the app side) and how the app learns which
-    /// post-1.0 frame kinds this host understands.
+    /// A reattaching remote client lists before it spawns and never sends a
+    /// hello, so the snapshot is its only chance to learn which shell exists
+    /// on the host it is about to spawn on.
+    #[tokio::test]
+    async fn the_host_snapshot_describes_the_host_it_snapshots() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::local("desktop"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(FrameKind::List, Uuid::nil(), 1, Vec::new()),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        assert_eq!(
+            payload["host"]["defaultShell"],
+            serde_json::Value::String(host_capabilities().default_shell.clone())
+        );
+        assert!(payload["host"]["platform"].is_string());
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// Hot commands must not pay for the host description. `Resize` fires on
+    /// every window drag and `Stdin` on every keystroke; carrying a
+    /// filesystem-derived shell list on each one would put that blob in the
+    /// middle of the interactive path.
+    #[test]
+    fn only_the_hello_ack_carries_the_host_description() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+
+        let hello = hello_ack_frame(&host, Uuid::nil(), 1).unwrap();
+        let hello_payload: serde_json::Value = serde_json::from_slice(&hello.payload).unwrap();
+        assert!(
+            hello_payload["host"]["defaultShell"].is_string(),
+            "the hello ack is where a connecting client learns the host"
+        );
+
+        let plain = ack_frame(&host, Uuid::nil(), 2).unwrap();
+        let plain_payload: serde_json::Value = serde_json::from_slice(&plain.payload).unwrap();
+        assert!(
+            plain_payload.get("host").is_none(),
+            "resize/stdin acks must stay lean"
+        );
+        assert_eq!(plain_payload["ok"], serde_json::json!(true));
+    }
+
     #[tokio::test]
     async fn hello_updates_path_injection_and_advertises_protocol_features() {
         let host = TerminalHost::new("host-test", test_config()).unwrap();

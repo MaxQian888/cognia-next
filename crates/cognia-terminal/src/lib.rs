@@ -24,6 +24,7 @@ pub mod complete;
 pub mod exec;
 pub mod headless;
 pub mod host;
+pub mod host_capabilities;
 pub mod host_wire;
 pub mod integration;
 pub mod osc633;
