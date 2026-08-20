@@ -31,6 +31,7 @@
  * always stay visible.
  */
 
+import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
 import { AtSignIcon, CheckCircle2Icon, HelpCircleIcon, LightbulbIcon } from "lucide-react"
@@ -68,7 +69,7 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
   // Mirrors the generic toolbar's model resolution: per-session override
   // > app default. Character / member overrides aren't relevant for the
   // workflow-editor session kind.
-  const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
+  const modelId = session?.model ?? defaultModel ?? ANTHROPIC_DEFAULT_MODEL
   const providerId = session?.providerOverride ?? defaultProvider ?? "anthropic"
 
   // SDK-authoritative context usage (Anthropic + desktop only; estimate fallback).

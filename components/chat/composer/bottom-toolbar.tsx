@@ -38,6 +38,7 @@
 // permission) on the left of it, session shape (mode, runtime, preset) on the
 // right, ambient status pinned to the far end.
 
+import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { MoreHorizontalIcon } from "lucide-react"
@@ -133,7 +134,7 @@ function GenericBottomToolbar({
   // Mirrors `lib/claude/build-options.ts` model resolution: per-session
   // override > app default. (Character / member overrides aren't loaded
   // here — the user-facing display is the most-likely-active value.)
-  const modelId = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
+  const modelId = session?.model ?? defaultModel ?? ANTHROPIC_DEFAULT_MODEL
   const providerId = session?.providerOverride ?? defaultProvider ?? "anthropic"
 
   // SDK-authoritative context usage for the live session (Anthropic + desktop

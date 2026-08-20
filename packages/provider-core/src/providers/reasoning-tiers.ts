@@ -75,7 +75,8 @@ export type ReasoningSurface =
 const ANTHROPIC_EFFORT_FAMILIES = [
   /opus-4-(?:5|6|7|8|9)/,
   /sonnet-4-6/,
-  /(?:opus|sonnet|fable|mythos)-5/,
+  // Narrowed with the mirrored list: `mythos-5` has no catalog entry.
+  /(?:opus|sonnet|fable)-5/,
 ]
 
 /** Tiers the OpenAI-native surface accepts, in canonical order. `none` is not a

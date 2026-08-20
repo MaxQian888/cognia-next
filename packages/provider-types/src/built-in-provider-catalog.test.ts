@@ -99,6 +99,10 @@ describe("built-in provider catalog", () => {
     expect(anthropic?.models?.map((model) => model.id)).toEqual([
       "claude-fable-5",
       "claude-opus-4-8",
+      // `claude-opus-5` was blessed by both effort gates but existed in no
+      // catalog entry — a model the gate vouched for that no picker could
+      // offer and no send could resolve.
+      "claude-opus-5",
       "claude-sonnet-5",
       "claude-haiku-4-5-20251001",
     ])
@@ -202,5 +206,51 @@ describe("built-in provider catalog", () => {
       )
     ).toBe(true)
     expect(presets.some((preset) => preset.id === "modelscope")).toBe(true)
+  })
+})
+
+describe("effort-gate parity", () => {
+  // The gates in `lib/ai/reasoning-capability.ts` and
+  // `packages/provider-core/.../reasoning-tiers.ts` are pinned to each other,
+  // but nothing pinned either of them to the catalog. `claude-opus-5` and
+  // `claude-mythos-5` were both blessed while existing in no entry: one was a
+  // real model missing its row, the other was not a model at all. Narrowing a
+  // real model silently removes effort support; blessing a fake one silently
+  // mis-prices. This asserts the missing direction.
+  const ANTHROPIC_EFFORT_FRAGMENTS = [
+    /opus-4-(?:5|6|7|8|9)/,
+    /sonnet-4-6/,
+    /(?:opus|sonnet|fable)-5/,
+  ]
+
+  // Haiku reasons but still rejects the `effort` parameter — documented in
+  // `reasoning-capability.ts` and the one deliberate exclusion.
+  const NO_EFFORT_ALLOWLIST = new Set(["claude-haiku-4-5-20251001"])
+
+  it("blesses only model families the catalog actually carries", () => {
+    // Scanned across EVERY entry, not just the first-party Anthropic one:
+    // `sonnet-4-6` is legitimately served by the Anthropic-wire relays and by
+    // aggregators, so narrowing the search to one provider would report a
+    // live family as dead.
+    const ids = getBuiltInProviderCatalog().flatMap((provider) =>
+      (provider.models ?? []).map((model) => model.id)
+    )
+    for (const fragment of ANTHROPIC_EFFORT_FRAGMENTS) {
+      expect({ fragment: fragment.source, matched: ids.some((id) => fragment.test(id)) }).toEqual({
+        fragment: fragment.source,
+        matched: true,
+      })
+    }
+  })
+
+  it("leaves no catalogued Anthropic model unaccounted for", () => {
+    const anthropic = getBuiltInProviderCatalogEntry("anthropic")
+    for (const model of anthropic?.models ?? []) {
+      if (NO_EFFORT_ALLOWLIST.has(model.id)) continue
+      expect({
+        id: model.id,
+        blessed: ANTHROPIC_EFFORT_FRAGMENTS.some((fragment) => fragment.test(model.id)),
+      }).toEqual({ id: model.id, blessed: true })
+    }
   })
 })

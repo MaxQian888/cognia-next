@@ -11,6 +11,7 @@ import {
   tokensInWindow,
 } from "./usage"
 import type { UsageInfo } from "./adapter"
+import { getBuiltInProviderCatalog } from "@cognia/provider-types/built-in-provider-catalog"
 
 function asUiMessage(role: UIMessage["role"], metadata?: Record<string, unknown>): UIMessage {
   return {
@@ -267,5 +268,45 @@ describe("sumSessionUsage", () => {
     const total = sumSessionUsage(messages)
     expect(total.totalCostUsd).toBeCloseTo(0.001, 6)
     expect(total.turns).toBe(1)
+  })
+})
+
+describe("Claude 5 context windows", () => {
+  // The regex table is ordered, and the generic Claude fallback sits below the
+  // 1M rows. Without an explicit Claude-5 row `claude-sonnet-5` matched the
+  // fallback and reported 200k against a catalogued 1M, while `claude-fable-5`
+  // matched nothing and fell to the 128k default. That only bites where
+  // `getModelConfig` misses — gateway-prefixed ids and relay providers — which
+  // is exactly where it will bite.
+  it("reports 1M for every catalogued Claude-5 model", () => {
+    for (const modelId of ["claude-opus-5", "claude-sonnet-5", "claude-fable-5"]) {
+      expect(getModelContextWindow(modelId)).toBe(1_000_000)
+    }
+  })
+
+  it("resolves vendor-prefixed and gateway-prefixed Claude-5 ids", () => {
+    expect(getModelContextWindow("us.anthropic.claude-sonnet-5")).toBe(1_000_000)
+    expect(getModelContextWindow("anthropic/claude-opus-5")).toBe(1_000_000)
+    expect(getModelContextWindow("claude-sonnet-5@default")).toBe(1_000_000)
+  })
+
+  it("keeps Haiku 4.5 at 200k", () => {
+    expect(getModelContextWindow("claude-haiku-4-5-20251001")).toBe(200_000)
+  })
+})
+
+describe("catalog parity", () => {
+  // Turns "add a model family, forget the regex row" from a silent 5x context
+  // error into a red test.
+  it("agrees with every Anthropic catalog entry that declares a context length", () => {
+    const anthropic = getBuiltInProviderCatalog().find((p) => p.id === "anthropic")
+    expect(anthropic).toBeDefined()
+    for (const model of anthropic?.models ?? []) {
+      if (!model.contextLength) continue
+      expect({ id: model.id, window: getModelContextWindow(model.id) }).toEqual({
+        id: model.id,
+        window: model.contextLength,
+      })
+    }
   })
 })

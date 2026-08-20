@@ -28,11 +28,19 @@ import {
   visibleThinkingLevels,
   type EffortTier,
 } from "@/lib/ai/thinking-level"
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { AgentRuntime } from "@/stores/agent/agent-runtime-store"
 
-/** Fallback model id when neither the session nor the app settings name one. */
-const FALLBACK_MODEL = "claude-sonnet-5"
+/**
+ * Fallback model id when neither the session nor the app settings name one.
+ *
+ * Read from the catalog rather than spelled out, so the chip's label and the
+ * effort ladder can never be computed for two different models — which is what
+ * happened while the wire fallback said `claude-sonnet-4-5` (deliberately
+ * excluded from the effort families) and this said `claude-sonnet-5`.
+ */
+const FALLBACK_MODEL = getBuiltInProviderDefaultModel("anthropic") ?? "claude-sonnet-5"
 /** Fallback provider id — the native Anthropic dispatcher. */
 const FALLBACK_PROVIDER = "anthropic"
 

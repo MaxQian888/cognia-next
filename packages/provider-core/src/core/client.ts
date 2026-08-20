@@ -13,6 +13,7 @@ import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import type { LanguageModel } from "ai"
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import type { BedrockConnectionSettings, ProviderName } from "@cognia/provider-types"
 import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
 // Single source of truth for the OpenAI Responses-vs-Chat decision and the
@@ -71,7 +72,12 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
 
   switch (provider) {
     case "anthropic": {
-      const model = opts.model || "claude-sonnet-4-5"
+      // The catalog's own default, never a literal. A hard-coded id here does
+      // not merely go stale — it reaches the wire, so a caller that omitted
+      // `model` silently ran a model the catalog had already retired, while
+      // the composer chip and the effort ladder disagreed about whether that
+      // model even supports `effort`.
+      const model = opts.model || getBuiltInProviderDefaultModel("anthropic")
       return createAnthropic({ apiKey, baseURL })(model) as LanguageModel
     }
     case "google":

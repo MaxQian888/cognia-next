@@ -57,6 +57,11 @@ const MODEL_CONTEXT_WINDOWS: Array<{ pattern: RegExp; window: number }> = [
   // Claude 4.6+ Opus / Sonnet — 1M context tier.
   { pattern: /claude-opus-4-(6|7|8)/i, window: 1_000_000 },
   { pattern: /claude-sonnet-4-(6|7|8)/i, window: 1_000_000 },
+  // Claude 5 — 1M for Opus / Sonnet / Fable. This row has to come BEFORE the
+  // generic Claude fallback below, which would otherwise match `claude-sonnet-5`
+  // and answer 200k — a 5x under-report — while `claude-fable-5` matched nothing
+  // at all and fell to the 128k default. Haiku 4.5 stays 200k via the fallback.
+  { pattern: /claude-(opus|sonnet|fable)-5/i, window: 1_000_000 },
   // Every other Claude (Opus 4 / 4.1, Sonnet 4.5, Haiku 4.x, and all Claude
   // 3.x) — 200k. The optional `(-[\d.]+)*` segment matches BOTH the family-first
   // ids (`claude-sonnet-4-5`) and the version-first 3.x ids (`claude-3-5-sonnet`,

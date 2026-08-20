@@ -7,7 +7,7 @@ describe("modelSupportsEffort", () => {
   })
 
   describe("Anthropic (native) path", () => {
-    it("accepts effort on Opus 4.5–4.9, Sonnet 4.6, and Fable/Mythos 5", () => {
+    it("accepts effort on Opus 4.5–4.9, Sonnet 4.6, and the Claude 5 family", () => {
       for (const id of [
         "claude-opus-4-5",
         "claude-opus-4-6-20250101",
@@ -15,7 +15,7 @@ describe("modelSupportsEffort", () => {
         "claude-opus-4-9",
         "claude-sonnet-4-6",
         "claude-fable-5",
-        "claude-mythos-5",
+        "claude-opus-5",
       ]) {
         expect(modelSupportsEffort("anthropic", id)).toBe(true)
       }
@@ -28,7 +28,7 @@ describe("modelSupportsEffort", () => {
     // empty ladder, and the composer's thinking-level control removed itself
     // entirely — the feature read as missing rather than broken.
     it("accepts effort across the Claude 5 family", () => {
-      for (const id of ["claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5"]) {
+      for (const id of ["claude-opus-5", "claude-sonnet-5", "claude-fable-5"]) {
         expect(modelSupportsEffort("anthropic", id)).toBe(true)
       }
     })

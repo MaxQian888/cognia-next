@@ -51,6 +51,7 @@ jest.mock("@ai-sdk/amazon-bedrock", () => ({
   createAmazonBedrock: makeFactoryMock("amazon-bedrock"),
 }))
 
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import { getProviderModel, isGenuineOpenAiEndpoint } from "./client"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
@@ -91,9 +92,9 @@ describe("getProviderModel", () => {
     expect(m.modelId).toBe("claude-3-7-haiku")
   })
 
-  it("falls back to claude-sonnet-4-5 when an anthropic model is empty", () => {
+  it("falls back to the catalog default when an anthropic model is empty", () => {
     const m = getProviderModel({ provider: "anthropic", model: "" }) as ResolvedModel
-    expect(m.modelId).toBe("claude-sonnet-4-5")
+    expect(m.modelId).toBe(getBuiltInProviderDefaultModel("anthropic"))
   })
 
   it("routes genuine OpenAI (no base URL) through the Responses API, not Anthropic", () => {

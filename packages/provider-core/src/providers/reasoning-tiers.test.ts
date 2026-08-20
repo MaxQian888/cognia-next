@@ -13,7 +13,7 @@ describe("reasoningSurfaceFor", () => {
       "claude-opus-4-8",
       "claude-sonnet-4-6",
       "claude-fable-5",
-      "claude-mythos-5",
+      "claude-opus-5",
     ]) {
       expect(reasoningSurfaceFor({ providerId: "anthropic", modelId: model })).toBe(
         "anthropic-effort"

@@ -48,7 +48,11 @@ const ANTHROPIC_EFFORT_FAMILIES = [
   // vendor-prefixed ids resolve too — `us.anthropic.claude-opus-5` (Bedrock),
   // `claude-sonnet-5@default` (Vertex) and `anthropic/claude-opus-5` (gateways)
   // all carry the same fragment.
-  /(?:opus|sonnet|fable|mythos)-5/, // Opus 5 / Sonnet 5 / Fable 5 / Mythos 5
+  // `mythos-5` was blessed here and in the mirrored list but exists in no
+  // catalog entry, so the gate vouched for a model no picker could offer and
+  // no send could resolve. Narrowed to the three that do exist; add it back
+  // together with its catalog row, not before.
+  /(?:opus|sonnet|fable)-5/, // Opus 5 / Sonnet 5 / Fable 5
 ]
 
 /** Reasoning-model id fragments on the non-Anthropic (ai-sdk) path. */

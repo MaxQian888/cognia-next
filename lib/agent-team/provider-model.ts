@@ -7,8 +7,12 @@ import {
   type ProviderSettingsEntry,
   type RichCustomProviderEntry,
 } from "@/lib/ai/provider-consumption"
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 
-const LEGACY_ANTHROPIC_MODEL = "claude-sonnet-4-5"
+/** The catalog's Anthropic default, resolved lazily so it can never go stale. */
+function anthropicDefaultModel(): string | undefined {
+  return getBuiltInProviderDefaultModel("anthropic")
+}
 
 export function buildTeamClaudeRuntimeModel(
   settings: AppSettings | null | undefined
@@ -46,7 +50,7 @@ export function buildTeamClaudeRuntimeModel(
     protocol: "anthropic",
     apiKey: settings?.apiKey,
     baseURL: undefined,
-    model: settings?.defaultModel ?? LEGACY_ANTHROPIC_MODEL,
+    model: settings?.defaultModel ?? anthropicDefaultModel(),
     isCustomProvider: false,
     useProxy: false,
   }) as LanguageModel
