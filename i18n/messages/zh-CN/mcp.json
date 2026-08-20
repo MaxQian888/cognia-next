@@ -53,6 +53,12 @@
     "reviewTrust": "检查信任设置",
     "reviewed": "已审查",
     "selectAria": "选择 {name}",
+    "trust": {
+      "blocked": "已阻止",
+      "legacy": "未复核",
+      "pending": "待复核",
+      "trusted": "已复核"
+    },
     "unfavorite": "将 {name} 移出收藏"
   },
   "chips": {
@@ -115,8 +121,6 @@
     "config": "配置",
     "copyValue": "复制值",
     "createTitle": "添加 MCP 服务器",
-    "disallowedTools": "禁用的工具",
-    "disallowedToolsHint": "每行填写一个 MCP 工具原始名称。修改此列表后需要重新进行信任审查。",
     "editTitle": "编辑 MCP 服务器",
     "enabled": "已启用",
     "env": "环境变量",
@@ -136,7 +140,6 @@
     "name": "名称",
     "placeholderArgs": "-y\n@modelcontextprotocol/server-filesystem\n/Users/me/work",
     "placeholderCommand": "npx",
-    "placeholderDisallowedTools": "browser_run_code_unsafe",
     "placeholderEnvKey": "MY_TOKEN",
     "placeholderEnvValue": "值",
     "placeholderHeaderKey": "Authorization",
@@ -149,6 +152,7 @@
     "showForm": "切换到表单",
     "showJson": "切换到 JSON",
     "showValues": "显示值",
+    "toolRulesElsewhere": "按工具的禁用规则在旁边的「工具」卡片里设置——它需要该服务器已探测到的工具列表才有意义。",
     "transport": "传输方式",
     "url": "URL"
   },
@@ -322,8 +326,7 @@
   "panel": {
     "counts": "已启用 {enabled}/{total}",
     "exportAll": "导出全部",
-    "paste": "粘贴添加",
-    "searchPlaceholder": "按名称、命令或 URL 过滤服务器…"
+    "paste": "粘贴添加"
   },
   "row": {
     "delete": "删除 {name}",

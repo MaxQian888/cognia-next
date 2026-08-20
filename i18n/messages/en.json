@@ -13266,6 +13266,12 @@
       "reviewTrust": "Review trust",
       "reviewed": "Reviewed",
       "selectAria": "Select {name}",
+      "trust": {
+        "blocked": "Blocked",
+        "legacy": "Unreviewed",
+        "pending": "Needs review",
+        "trusted": "Reviewed"
+      },
       "unfavorite": "Unpin {name} from favorites"
     },
     "chips": {
@@ -13328,8 +13334,6 @@
       "config": "Config",
       "copyValue": "Copy value",
       "createTitle": "Add MCP server",
-      "disallowedTools": "Disallowed tools",
-      "disallowedToolsHint": "One bare MCP tool name per line. Changing this list requires a new trust review.",
       "editTitle": "Edit MCP server",
       "enabled": "Enabled",
       "env": "Environment variables",
@@ -13349,7 +13353,6 @@
       "name": "Name",
       "placeholderArgs": "-y\n@modelcontextprotocol/server-filesystem\n/Users/me/work",
       "placeholderCommand": "npx",
-      "placeholderDisallowedTools": "browser_run_code_unsafe",
       "placeholderEnvKey": "MY_TOKEN",
       "placeholderEnvValue": "value",
       "placeholderHeaderKey": "Authorization",
@@ -13362,6 +13365,7 @@
       "showForm": "Show form",
       "showJson": "Show JSON",
       "showValues": "Show values",
+      "toolRulesElsewhere": "Per-tool rules live in the Tools card beside this form — they need the server's discovered tool list to mean anything.",
       "transport": "Transport",
       "url": "URL"
     },
@@ -13535,8 +13539,7 @@
     "panel": {
       "counts": "{enabled} of {total} enabled",
       "exportAll": "Export all",
-      "paste": "Paste",
-      "searchPlaceholder": "Filter servers by name, command, or URL…"
+      "paste": "Paste"
     },
     "row": {
       "delete": "Delete {name}",
