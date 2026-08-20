@@ -1,4 +1,5 @@
 pub mod diagnostic_package;
+pub mod diagnostic_submit;
 pub mod event;
 pub mod log_query;
 pub mod privacy;
@@ -8,8 +9,14 @@ pub mod spool;
 pub mod writer;
 
 pub use diagnostic_package::{
-    create_diagnostic_package, validate_diagnostic_package, AttachmentInput, DiagnosticManifestV1,
-    DiagnosticPackageInput, DiagnosticPackageValidation, PackageError,
+    create_diagnostic_package, validate_diagnostic_package, AttachmentInput, AttachmentKind,
+    DiagnosticManifestV1, DiagnosticPackageInput, DiagnosticPackageValidation, PackageError,
+};
+pub use diagnostic_submit::{
+    build_installation_proof_body, count_events, delete_incident, exchange_installation_grant,
+    fetch_receipt, installation_key_path, read_package_parts, submit_package, withdraw_consent,
+    DiagnosticTransport, HttpRequest, HttpResponse, InstallationIdentity, PackagePart,
+    SubmissionReceipt, SubmissionRequest, SubmissionTarget, SubmitError, INSTALLATION_KEY_FILE,
 };
 pub use event::{
     create_traceparent, EventError, ObservabilityCapturePolicy, ObservabilityCorrelation,

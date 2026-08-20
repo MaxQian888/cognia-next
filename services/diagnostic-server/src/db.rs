@@ -58,6 +58,18 @@ pub struct IncidentRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+/// An incident plus whether this call is the one that created it.
+///
+/// `xmax = 0` is true only on the INSERT branch of an upsert — the row has no
+/// deleting transaction. It is how the route learns that a retry resumed an
+/// existing incident and must not hand out a second deletion credential.
+#[derive(Debug, Clone, FromRow)]
+pub struct CreatedIncident {
+    #[sqlx(flatten)]
+    pub incident: IncidentRecord,
+    pub inserted: bool,
+}
+
 #[derive(Debug, Clone, FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadPartRecord {
@@ -436,9 +448,21 @@ impl DiagnosticRepository {
         Ok(result.rows_affected() == 1)
     }
 
-    pub async fn create_incident(&self, input: CreateIncident) -> anyhow::Result<IncidentRecord> {
+    /// Create an incident, or hand back the one this artifact already made.
+    ///
+    /// Idempotent on `(tenant, project, artifact_hash)` so a client that
+    /// retries a spooled package resumes instead of duplicating. The returned
+    /// flag says which happened, because the caller must NOT mint a second
+    /// deletion credential for an existing incident: `DO UPDATE` deliberately
+    /// leaves `deletion_credential_hash` alone, so a freshly generated
+    /// credential would be handed to the client while the stored hash still
+    /// belonged to the first one — a credential that can never verify.
+    pub async fn create_incident(
+        &self,
+        input: CreateIncident,
+    ) -> anyhow::Result<CreatedIncident> {
         let mut tx = self.tenant_transaction(input.tenant_id).await?;
-        let record = sqlx::query_as::<_, IncidentRecord>(
+        let record = sqlx::query_as::<_, CreatedIncident>(
             r#"INSERT INTO incidents (
                 id, tenant_id, project_id, installation_id, artifact_hash, build_id,
                 platform, module, exception, deletion_credential_hash
@@ -449,7 +473,8 @@ impl DiagnosticRepository {
                 platform, module, exception, client_state, processing_state, support_code,
                 fingerprint, processing_attempts, next_processing_at, failure_code,
                 grouping_basis, raw_stack, symbolized_stack, missing_symbols, group_id,
-                accepted_at, consent_withdrawn_at, created_at, updated_at"#,
+                accepted_at, consent_withdrawn_at, created_at, updated_at,
+                (xmax = 0) AS inserted"#,
         )
         .bind(input.id)
         .bind(input.tenant_id)
@@ -465,9 +490,13 @@ impl DiagnosticRepository {
         .await?;
         audit(
             &mut tx,
-            record.tenant_id,
-            "incident.created",
-            record.id,
+            record.incident.tenant_id,
+            if record.inserted {
+                "incident.created"
+            } else {
+                "incident.resumed"
+            },
+            record.incident.id,
             None,
         )
         .await?;

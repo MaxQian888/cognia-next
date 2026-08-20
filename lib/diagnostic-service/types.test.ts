@@ -5,6 +5,7 @@ import {
   DIAGNOSTIC_ROLES,
   rolePermits,
   type ArtifactKind,
+  type CreateIncidentResponse,
   type GroupStatus,
   type IncidentClientState,
   type IncidentProcessingState,
@@ -97,6 +98,18 @@ describe("wire enums", () => {
     // `events` and `screenshot` are set by the service's own pipeline, and
     // letting an uploader claim them would let it steer processing.
     expect(CONTRACT).toContain("enum: [attachment, minidump]")
+  })
+
+  it("documents that a resumed submission carries no deletion credential", () => {
+    // The service withholds it deliberately: the upsert leaves the stored hash
+    // alone, so a second credential could never verify. The type has to make
+    // that absence representable or a caller will assume it is always there.
+    const resumed: CreateIncidentResponse = {
+      incident: {} as CreateIncidentResponse["incident"],
+      created: false,
+    }
+    expect(resumed.deletionCredential).toBeUndefined()
+    expect(CONTRACT).toContain("only when `created` is true")
   })
 
   it("keeps the client lifecycle aligned with the incident state machine", () => {

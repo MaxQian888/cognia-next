@@ -67,7 +67,15 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/CreateIncidentRequest" }
       responses:
-        "201": { description: Idempotently created incident and one-time deletion credential }
+        "201":
+          description: >-
+            Created, or resumed when an identical artifactHash already exists.
+            `deletionCredential` is present only when `created` is true — the
+            upsert leaves the stored credential hash alone, so a second
+            credential could never verify.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateIncidentResponse" }
         "413": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/IngestDisabled" }
   /incidents/{incidentId}:
@@ -380,6 +388,17 @@ components:
                 properties:
                   code: { type: string }
   schemas:
+    CreateIncidentResponse:
+      type: object
+      required: [incident, created]
+      properties:
+        incident: { type: object }
+        created:
+          type: boolean
+          description: False when an identical artifactHash resumed an existing incident.
+        deletionCredential:
+          type: string
+          description: One-time credential, returned only when `created` is true.
     GrantRole:
       type: string
       enum: [uploader, viewer, triager, admin]

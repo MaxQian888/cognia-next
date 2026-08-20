@@ -350,7 +350,17 @@ struct CreateIncidentRequest {
 #[serde(rename_all = "camelCase")]
 struct CreateIncidentResponse {
     incident: IncidentRecord,
-    deletion_credential: String,
+    /// True when this call created the incident, false when an identical
+    /// artifact hash resumed an existing one.
+    created: bool,
+    /// One-time credential, present only on creation.
+    ///
+    /// The upsert deliberately leaves `deletion_credential_hash` untouched on
+    /// conflict, so minting a fresh credential for a resumed incident would
+    /// hand the client a string that can never verify against the stored hash.
+    /// A resuming client keeps the credential it stored the first time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deletion_credential: Option<String>,
 }
 
 async fn create_incident(
@@ -374,7 +384,7 @@ async fn create_incident(
     validate_hex_sha256(&request.artifact_hash)?;
     let deletion_credential = format!("del_{}", Uuid::new_v4().simple());
     let deletion_credential_hash = sha256_hex(deletion_credential.as_bytes());
-    let incident = state
+    let created = state
         .repository
         .create_incident(CreateIncident {
             id: Uuid::new_v4(),
@@ -393,8 +403,9 @@ async fn create_incident(
     Ok((
         StatusCode::CREATED,
         Json(CreateIncidentResponse {
-            incident,
-            deletion_credential,
+            incident: created.incident,
+            created: created.inserted,
+            deletion_credential: created.inserted.then_some(deletion_credential),
         }),
     ))
 }
@@ -1397,6 +1408,69 @@ mod tests {
         // The switch semantics the router now implements have to be what the
         // contract promises, or an operator reads the wrong runbook.
         assert!(contract.contains("Not part of intake"));
+        // And the resume contract: a client that retries a spooled package
+        // must be told it resumed rather than handed a credential that cannot
+        // verify against the stored hash.
+        assert!(contract.contains("CreateIncidentResponse"));
+        assert!(contract.contains("only when `created` is true"));
+    }
+
+    fn incident_record() -> IncidentRecord {
+        let now = Utc::now();
+        IncidentRecord {
+            id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            installation_id: "install-test".to_owned(),
+            artifact_hash: "a".repeat(64),
+            build_id: "1.0.0".to_owned(),
+            platform: "macos".to_owned(),
+            module: "cognia".to_owned(),
+            exception: "panic".to_owned(),
+            client_state: crate::model::IncidentState::Processing,
+            processing_state: ProcessingState::Received,
+            support_code: "ABCDEF1234".to_owned(),
+            fingerprint: None,
+            processing_attempts: 0,
+            next_processing_at: now,
+            failure_code: None,
+            grouping_basis: None,
+            raw_stack: serde_json::json!([]),
+            symbolized_stack: serde_json::json!([]),
+            missing_symbols: Vec::new(),
+            group_id: None,
+            accepted_at: None,
+            consent_withdrawn_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn a_resumed_incident_withholds_the_credential_it_cannot_honour() {
+        // `create_incident` mints a credential unconditionally but the upsert
+        // stores its hash only on the INSERT branch. Returning it anyway would
+        // hand a resuming client a string that can never verify.
+        let created = serde_json::to_value(CreateIncidentResponse {
+            incident: incident_record(),
+            created: true,
+            deletion_credential: Some("del_abc".to_owned()),
+        })
+        .unwrap();
+        assert_eq!(created["created"], serde_json::json!(true));
+        assert_eq!(created["deletionCredential"], serde_json::json!("del_abc"));
+
+        let resumed = serde_json::to_value(CreateIncidentResponse {
+            incident: incident_record(),
+            created: false,
+            deletion_credential: None,
+        })
+        .unwrap();
+        assert_eq!(resumed["created"], serde_json::json!(false));
+        // Absent, not null: a client that reads the key at all must not find
+        // an empty credential it might then try to use.
+        assert!(resumed.get("deletionCredential").is_none());
+        assert_eq!(resumed["incident"]["supportCode"], serde_json::json!("ABCDEF1234"));
     }
 
     #[test]

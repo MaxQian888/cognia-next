@@ -87,12 +87,21 @@ export interface IncidentRecord {
 export interface CreateIncidentResponse {
   incident: IncidentRecord
   /**
-   * One-time credential returned only at creation. The service stores its
-   * SHA-256 and never shows it again, so a caller that drops it cannot get it
-   * back — persist it beside the local report or lose the ability to prove
-   * ownership of the submission later.
+   * False when an identical `artifactHash` resumed an existing incident.
+   *
+   * Creation is idempotent on the artifact hash so a retried upload resumes
+   * instead of duplicating, and the upsert deliberately leaves the stored
+   * credential hash alone — which is why a resumed response carries no
+   * credential at all rather than one that could never verify.
    */
-  deletionCredential: string
+  created: boolean
+  /**
+   * One-time credential, present only when `created` is true. The service
+   * stores its SHA-256 and never shows it again, so a caller that drops it
+   * cannot get it back — persist it beside the local report or lose the
+   * ability to prove ownership of the submission later.
+   */
+  deletionCredential?: string
 }
 
 export interface UploadPartRecord {
