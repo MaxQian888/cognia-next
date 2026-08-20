@@ -715,6 +715,75 @@
       "screenshotDescription": "Captured only now after consent; it is never presented as a crash-time screenshot.",
       "title": "Submission preview"
     },
+    "console": {
+      "notConnected": "No diagnostic service connected",
+      "notConnectedDescription": "Connect this account to a self-hosted diagnostic service to triage the crashes it has accepted.",
+      "configure": "Open diagnostics settings",
+      "insufficientRole": "This identity cannot read the console",
+      "insufficientRoleDescription": "The service issued a grant below Viewer. Ask an administrator for a session with a viewer, triager, or admin role.",
+      "refresh": "Refresh",
+      "filters": {
+        "status": "Status",
+        "statusAll": "Any status",
+        "search": "Exception, module or fingerprint",
+        "searchLabel": "Filter groups by exception, module or fingerprint",
+        "assignee": "Assignee",
+        "assigneeLabel": "Filter groups by assignee"
+      },
+      "statuses": {
+        "open": "Open",
+        "suppressed": "Suppressed",
+        "resolved": "Resolved"
+      },
+      "groups": {
+        "loading": "Loading crash groups…",
+        "empty": "No crash groups",
+        "emptyDescription": "Nothing matches these filters. Widen the status filter or clear the search.",
+        "count": "{count, plural, =1 {1 incident} other {# incidents}}",
+        "lastSeen": "last seen {when}",
+        "regression": "{count, plural, =1 {1 regression} other {# regressions}}"
+      },
+      "group": {
+        "platform": "Platform",
+        "buildFamily": "Build family",
+        "firstSeen": "First seen",
+        "lastSeen": "Last seen",
+        "assignee": "Assignee",
+        "assigneePlaceholder": "Unassigned",
+        "assign": "Assign",
+        "unassign": "Unassign",
+        "readOnly": "Triage controls need a triager grant."
+      },
+      "incidents": {
+        "title": "Incidents in this group",
+        "empty": "No incidents recorded."
+      },
+      "incident": {
+        "close": "Close",
+        "artifacts": "Artifacts",
+        "noArtifacts": "No stored artifacts.",
+        "download": "Download",
+        "audit": "Audit trail",
+        "noAudit": "No audit events.",
+        "system": "system"
+      },
+      "policy": {
+        "title": "Tenant policy",
+        "load": "Load tenant policy",
+        "rawMinidump": "Allow raw minidump downloads",
+        "rawMinidumpDescription": "Minidumps can contain process memory. While this is off the service refuses every raw minidump read, and each allowed read is recorded in the incident's audit trail with the operator's identity."
+      },
+      "errors": {
+        "insufficient_grant_scope": "This identity is not allowed to do that.",
+        "raw_minidump_access_disabled": "Raw minidump downloads are disabled for this tenant.",
+        "invalid_oidc_session": "The service rejected the stored identity session.",
+        "session_token_missing": "No identity session is stored for this connection.",
+        "group_not_found": "That crash group no longer exists.",
+        "incident_not_found": "That incident no longer exists.",
+        "network_unavailable": "The diagnostic service could not be reached.",
+        "console_failed": "The console request did not complete."
+      }
+    },
     "delete": {
       "action": "Delete local report",
       "cancel": "Keep report",
@@ -933,7 +1002,8 @@
     "views": {
       "logs": "Logs",
       "traces": "Traces",
-      "incidents": "Incidents"
+      "incidents": "Incidents",
+      "service": "Service"
     }
   }
 }

@@ -38,6 +38,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
+  ServerIcon,
   RotateCcwIcon,
   ScrollTextIcon,
   Settings2Icon,
@@ -48,6 +49,7 @@ import type { FeatureHeaderAction } from "@/components/feature-shell/feature-pag
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { IncidentDetail, IncidentWorkspace } from "@/components/logging/incident-workspace"
+import { ServiceConsoleWorkspace } from "@/components/logging/service-console-workspace"
 import { LogPanel } from "@/components/logging/log-panel"
 import { TraceWorkspace } from "@/components/logging/trace-workspace"
 import { Badge } from "@/components/ui/badge"
@@ -82,6 +84,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useDiagnosticConnection } from "@/hooks/diagnostic-service/use-diagnostic-connection"
 import { useDiagnosticIncidents } from "@/hooks/logging/use-diagnostic-incidents"
 import { useIncidentSubmission } from "@/hooks/logging/use-incident-submission"
+import { useTriageConsole } from "@/hooks/diagnostic-service/use-triage-console"
 import type { DiagnosticIncidentSummary } from "@/hooks/logging/use-diagnostic-incidents"
 import { useTransportHealth } from "@/hooks/logging"
 import { useEdgeResize, useIsNarrow } from "@/hooks/ui"
@@ -98,6 +101,7 @@ const CHANNEL_ICONS: Record<LogWorkspaceView, typeof ScrollTextIcon> = {
   logs: ScrollTextIcon,
   traces: WaypointsIcon,
   incidents: AlertTriangleIcon,
+  service: ServerIcon,
 }
 
 /** Query keys this page owns. `useLogPanelUrlSync` preserves anything it does
@@ -155,6 +159,10 @@ export function DiagnosticsWorkspace() {
   // The Incidents channel's consent panel needs a service to submit to; the
   // connection lives with Settings → Diagnostics and is read, not owned, here.
   const diagnosticService = useDiagnosticConnection()
+  const triageConsole = useTriageConsole({
+    client: diagnosticService.client,
+    can: diagnosticService.can,
+  })
   const submission = useIncidentSubmission({
     connection: diagnosticService.connection,
     accountId: diagnosticService.accountId,
@@ -400,6 +408,13 @@ export function DiagnosticsWorkspace() {
             onSelectTrace={selectTrace}
             onOpenInLogs={(trace) => openInLogs({ trace })}
             onOpenSession={(session) => openInLogs({ session })}
+          />
+        ) : activeView === "service" ? (
+          <ServiceConsoleWorkspace
+            console={triageConsole}
+            configured={Boolean(diagnosticService.connection)}
+            can={diagnosticService.can}
+            onConfigure={() => router.push("/settings?section=diagnostics")}
           />
         ) : (
           <IncidentWorkspace

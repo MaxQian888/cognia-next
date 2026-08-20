@@ -715,6 +715,75 @@
       "screenshotDescription": "只会在此刻获得同意后采集，绝不会伪装成崩溃时截图。",
       "title": "提交预览"
     },
+    "console": {
+      "notConnected": "尚未连接诊断服务",
+      "notConnectedDescription": "将该账户连接到自建诊断服务后，即可分诊服务已接收的崩溃。",
+      "configure": "打开诊断设置",
+      "insufficientRole": "当前身份无法读取控制台",
+      "insufficientRoleDescription": "服务签发的凭据低于 Viewer。请向管理员申请具备 viewer、triager 或 admin 角色的会话。",
+      "refresh": "刷新",
+      "filters": {
+        "status": "状态",
+        "statusAll": "全部状态",
+        "search": "异常、模块或指纹",
+        "searchLabel": "按异常、模块或指纹筛选分组",
+        "assignee": "负责人",
+        "assigneeLabel": "按负责人筛选分组"
+      },
+      "statuses": {
+        "open": "待处理",
+        "suppressed": "已抑制",
+        "resolved": "已解决"
+      },
+      "groups": {
+        "loading": "正在加载崩溃分组…",
+        "empty": "没有崩溃分组",
+        "emptyDescription": "没有符合当前筛选条件的分组。请放宽状态筛选或清空搜索。",
+        "count": "{count, plural, other {# 个事件}}",
+        "lastSeen": "最近出现于 {when}",
+        "regression": "{count, plural, other {# 次回归}}"
+      },
+      "group": {
+        "platform": "平台",
+        "buildFamily": "构建系列",
+        "firstSeen": "首次出现",
+        "lastSeen": "最近出现",
+        "assignee": "负责人",
+        "assigneePlaceholder": "未指派",
+        "assign": "指派",
+        "unassign": "取消指派",
+        "readOnly": "分诊操作需要 triager 凭据。"
+      },
+      "incidents": {
+        "title": "该分组下的事件",
+        "empty": "没有记录到事件。"
+      },
+      "incident": {
+        "close": "关闭",
+        "artifacts": "产物",
+        "noArtifacts": "没有已存储的产物。",
+        "download": "下载",
+        "audit": "审计记录",
+        "noAudit": "没有审计事件。",
+        "system": "系统"
+      },
+      "policy": {
+        "title": "租户策略",
+        "load": "加载租户策略",
+        "rawMinidump": "允许下载原始 minidump",
+        "rawMinidumpDescription": "minidump 可能包含进程内存。关闭时服务会拒绝所有原始 minidump 读取；每次允许的读取都会带上运维者身份写入该事件的审计记录。"
+      },
+      "errors": {
+        "insufficient_grant_scope": "当前身份无权执行该操作。",
+        "raw_minidump_access_disabled": "该租户已禁用原始 minidump 下载。",
+        "invalid_oidc_session": "服务拒绝了已保存的身份会话。",
+        "session_token_missing": "该连接没有保存身份会话。",
+        "group_not_found": "该崩溃分组已不存在。",
+        "incident_not_found": "该事件已不存在。",
+        "network_unavailable": "无法连接到诊断服务。",
+        "console_failed": "控制台请求未完成。"
+      }
+    },
     "delete": {
       "action": "删除本地报告",
       "cancel": "保留报告",
@@ -933,7 +1002,8 @@
     "views": {
       "logs": "日志",
       "traces": "追踪",
-      "incidents": "事故"
+      "incidents": "事故",
+      "service": "服务"
     }
   }
 }

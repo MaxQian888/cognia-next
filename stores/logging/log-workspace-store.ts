@@ -22,7 +22,13 @@ import { persistLocalStorage } from "@/stores/persist-storage"
 import type { AgentTraceStatsWindow } from "@/lib/observability/trace-window"
 import { resolveAgentTraceWindow } from "@/lib/observability/trace-window"
 
-export type LogWorkspaceView = "logs" | "traces" | "incidents"
+/**
+ * `service` is the diagnostic service's triage console (ADR-0102). It reads a
+ * remote host rather than local state, which is why it is a channel of its own
+ * rather than a filter on `incidents`: those are the crashes this machine
+ * captured, these are the ones a service accepted from everyone.
+ */
+export type LogWorkspaceView = "logs" | "traces" | "incidents" | "service"
 export type LogWorkspaceDensity = "compact" | "comfortable" | "spacious"
 export type LogWorkspaceSource = "all" | "desktop" | "mobile"
 export type IncidentStateFilter =
@@ -37,7 +43,12 @@ export type IncidentStateFilter =
   | "cancelled"
   | "deleted"
 
-export const LOG_WORKSPACE_VIEWS: readonly LogWorkspaceView[] = ["logs", "traces", "incidents"]
+export const LOG_WORKSPACE_VIEWS: readonly LogWorkspaceView[] = [
+  "logs",
+  "traces",
+  "incidents",
+  "service",
+]
 
 const DEFAULTS = {
   activeView: "logs" as LogWorkspaceView,

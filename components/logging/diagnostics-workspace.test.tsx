@@ -204,6 +204,17 @@ describe("DiagnosticsWorkspace", () => {
     expect(new URLSearchParams(window.location.search).get("channel")).toBe("traces")
   })
 
+  it("opens the diagnostic service console on its own channel", async () => {
+    const user = userEvent.setup()
+    render(<DiagnosticsWorkspace />)
+    await user.click(screen.getByTestId("logs-channel-service"))
+    // Unconfigured is the honest first state: the mocked connection has no
+    // service, and the console says so with a way to configure one rather than
+    // rendering an empty triage list that reads as "no crashes".
+    expect(screen.getByTestId("console-unconfigured")).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get("channel")).toBe("service")
+  })
+
   it("drops the channel param again on the default channel", async () => {
     const user = userEvent.setup()
     render(<DiagnosticsWorkspace />)
