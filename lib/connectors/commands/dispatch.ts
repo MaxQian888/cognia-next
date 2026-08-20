@@ -565,7 +565,16 @@ export async function maybeHandleControlCommand(
 
     case "workflow": {
       if (!arg || arg.toLowerCase() === "off") {
-        await persist({ workflowId: undefined, workflowDisabled: true })
+        // `workflowDisabled` is a ROUTING_SNAPSHOT_KEYS member, so writing it
+        // without clearing the assignment marker meant a later unassign ran
+        // `restoreRouting` and silently reinstated the pre-assignment value —
+        // undoing the operator. Every sibling arm already spreads this; this
+        // one was the only omission.
+        await persist({
+          workflowId: undefined,
+          workflowDisabled: true,
+          ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
+        })
         await reply(R.confirmWorkflowCleared(), "applied")
         return true
       }
@@ -590,6 +599,7 @@ export async function maybeHandleControlCommand(
         workflowDisabled: undefined,
         teamId: undefined,
         teamDisabled: true,
+        ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
       })
       await reply(R.confirmWorkflow(res.name), "applied")
       return true

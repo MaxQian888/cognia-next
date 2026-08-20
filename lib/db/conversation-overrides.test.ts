@@ -385,6 +385,67 @@ describe("conversation-overrides — CRM (v83)", () => {
         .connectorAudit.filter((r) => r.conversationKey === AKEY)
         .toArray()
 
+    it("keeps an operator's explicit /workflow off across an escalation and an unassign", async () => {
+      // The walk that used to lose the operator's choice:
+      //   reassign(team) -> switchMode(manual) -> /workflow off -> unassign
+      // `/workflow` was the one arm that did not clear the assignment marker,
+      // and `workflowDisabled` IS a ROUTING_SNAPSHOT_KEYS member — so unassign
+      // ran `restoreRouting` and silently reinstated the pre-assignment value.
+      const WKEY = "telegram:adp_a:chat_workflow_walk"
+      await upsertByConversationKey({
+        conversationKey: WKEY,
+        sessionId: "s1",
+        workflowId: "wf-old",
+      })
+      await setAssignee(WKEY, { kind: "team", id: "team-1" }, { via: "manual" })
+      await updateConversationConfigSection({
+        adapterId: "adp_a",
+        conversationKey: WKEY,
+        section: "behavior",
+        patch: { mode: "manual", autonomy: "observe", modeForcedBy: "escalation" },
+        source: "sla-escalation",
+      })
+
+      // The operator takes over explicitly — this is what must survive.
+      await patchConversationOverride(WKEY, {
+        workflowId: undefined,
+        workflowDisabled: true,
+        ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
+      })
+      await setAssignee(WKEY, null, { via: "manual" })
+
+      const row = await readForResolution(WKEY)
+      expect(row?.workflowDisabled).toBe(true)
+      expect(row?.workflowId).toBeUndefined()
+      expect(row?.routingSource).toBeUndefined()
+      // The escalation label goes with the explicit edit: attributing the
+      // operator's own choice to the ladder would be worse than no label.
+      expect(row?.modeForcedBy).toBeUndefined()
+    })
+
+    it("restores autonomy and engagement alongside the mode on unassign", async () => {
+      const RKEY = "telegram:adp_a:chat_axis_restore"
+      await upsertByConversationKey({
+        conversationKey: RKEY,
+        sessionId: "s1",
+        mode: "auto",
+        autonomy: "act",
+        engagement: "inline",
+      })
+      await setAssignee(RKEY, { kind: "human", id: "u1" }, { via: "manual" })
+
+      const assigned = await readForResolution(RKEY)
+      expect(assigned?.mode).toBe("manual")
+      expect(assigned?.engagement).toBe("human")
+      expect(assigned?.autonomy).toBe("observe")
+
+      await setAssignee(RKEY, null, { via: "manual" })
+      const restored = await readForResolution(RKEY)
+      expect(restored?.mode).toBe("auto")
+      expect(restored?.autonomy).toBe("act")
+      expect(restored?.engagement).toBe("inline")
+    })
+
     it("assigning a character writes characterId + marker, snapshots the previous routing, and audits", async () => {
       await upsertByConversationKey({
         conversationKey: AKEY,
@@ -469,7 +530,17 @@ describe("conversation-overrides — CRM (v83)", () => {
       expect(row?.assignmentPreviousMode).toBe("auto")
       const audits = await auditRows()
       expect(audits[0]?.adapterId).toBe("adp_explicit")
-      expect(audits[0]?.fields?.changedKeys).toEqual(["assignmentPreviousMode", "mode"])
+      // The axis fields are snapshotted and written alongside their legacy
+      // mirror, so `human` becomes a visible engagement rather than an
+      // unexplained Manual chip.
+      expect(audits[0]?.fields?.changedKeys).toEqual([
+        "assignmentPreviousAutonomy",
+        "assignmentPreviousEngagement",
+        "assignmentPreviousMode",
+        "autonomy",
+        "engagement",
+        "mode",
+      ])
       const trail = await listAssignmentEvents(AKEY)
       expect(trail.at(-1)?.fields?.routing).toEqual({ kind: "manual-mode", mode: "manual" })
 

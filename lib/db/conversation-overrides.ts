@@ -186,40 +186,45 @@ export async function updateConversationConfigSection(input: {
   const changedKeys = Object.keys(input.patch).sort()
   if (changedKeys.length === 0 && existing) return existing
 
-  const result = await db.transaction("rw", db.conversationOverrides, db.connectorAudit, async () => {
-    const latest =
-      (await db.conversationOverrides
-        .where("conversationKey")
-        .equals(input.conversationKey)
-        .first()) ?? existing
-    const row: ConversationOverrideRow = latest
-      ? { ...latest, ...input.patch, updatedAt: now }
-      : {
-          id: newId(),
-          conversationKey: input.conversationKey,
-          sessionId: input.sessionId as string,
-          projectId,
-          ...input.patch,
-          createdAt: now,
-          updatedAt: now,
-        }
-    await db.conversationOverrides.put(row)
-    await db.connectorAudit.add({
-      id: crypto.randomUUID(),
-      adapterId: input.adapterId,
-      projectId: row.projectId,
-      conversationKey: input.conversationKey,
-      kind: "override.config_changed",
-      at: now,
-      fields: {
-        scope: "conversation",
-        section: input.section,
-        changedKeys,
-        source: input.source ?? "inbox",
-      },
-    })
-    return row
-  })
+  const result = await db.transaction(
+    "rw",
+    db.conversationOverrides,
+    db.connectorAudit,
+    async () => {
+      const latest =
+        (await db.conversationOverrides
+          .where("conversationKey")
+          .equals(input.conversationKey)
+          .first()) ?? existing
+      const row: ConversationOverrideRow = latest
+        ? { ...latest, ...input.patch, updatedAt: now }
+        : {
+            id: newId(),
+            conversationKey: input.conversationKey,
+            sessionId: input.sessionId as string,
+            projectId,
+            ...input.patch,
+            createdAt: now,
+            updatedAt: now,
+          }
+      await db.conversationOverrides.put(row)
+      await db.connectorAudit.add({
+        id: crypto.randomUUID(),
+        adapterId: input.adapterId,
+        projectId: row.projectId,
+        conversationKey: input.conversationKey,
+        kind: "override.config_changed",
+        at: now,
+        fields: {
+          scope: "conversation",
+          section: input.section,
+          changedKeys,
+          source: input.source ?? "inbox",
+        },
+      })
+      return row
+    }
+  )
   invalidate(input.conversationKey)
   return result
 }
@@ -348,14 +353,26 @@ const ROUTING_SNAPSHOT_KEYS = [
  * Spread into an explicit routing edit (`/character`, `/team`, `/mode`, the
  * override form) so a later unassign no longer restores the pre-assignment
  * routing the operator has since overridden by hand.
+ *
+ * `modeForcedBy` joins it for the same reason: an explicit edit is precisely
+ * the event that makes "an SLA step chose this" stop being true, and leaving
+ * the label behind would attribute the operator's own choice to the ladder.
  */
 export const ASSIGNMENT_ROUTING_MARKER_CLEAR: Pick<
   ConversationOverrideRow,
-  "routingSource" | "assignmentPreviousMode" | "assignmentPreviousRouting"
+  | "routingSource"
+  | "assignmentPreviousMode"
+  | "assignmentPreviousAutonomy"
+  | "assignmentPreviousEngagement"
+  | "assignmentPreviousRouting"
+  | "modeForcedBy"
 > = {
   routingSource: undefined,
   assignmentPreviousMode: undefined,
+  assignmentPreviousAutonomy: undefined,
+  assignmentPreviousEngagement: undefined,
   assignmentPreviousRouting: undefined,
+  modeForcedBy: undefined,
 }
 
 /**
@@ -448,6 +465,18 @@ export async function setAssignee(
         if (row.assignmentPreviousMode === undefined) return
         routingPatch.mode = row.assignmentPreviousMode ?? undefined
         routingPatch.assignmentPreviousMode = undefined
+        // The axis fields are restored alongside their legacy mirror, and only
+        // when they were snapshotted — an operator may have set `autonomy`
+        // without ever touching `mode`, and unassign has to give back exactly
+        // what it took rather than deriving a value nobody stored.
+        if (row.assignmentPreviousAutonomy !== undefined) {
+          routingPatch.autonomy = row.assignmentPreviousAutonomy ?? undefined
+          routingPatch.assignmentPreviousAutonomy = undefined
+        }
+        if (row.assignmentPreviousEngagement !== undefined) {
+          routingPatch.engagement = row.assignmentPreviousEngagement ?? undefined
+          routingPatch.assignmentPreviousEngagement = undefined
+        }
       }
       const restoreRouting = (): void => {
         if (row.routingSource !== "assignment") return
@@ -493,10 +522,19 @@ export async function setAssignee(
           routing.mode = routingPatch.mode ?? null
         }
       } else if (assignee?.kind === "human") {
+        // Snapshot ONCE, all three together: a reassignment must not overwrite
+        // the pre-assignment values with the ones the previous assignment set.
         if (row.assignmentPreviousMode === undefined) {
           routingPatch.assignmentPreviousMode = row.mode ?? null
+          routingPatch.assignmentPreviousAutonomy = row.autonomy ?? null
+          routingPatch.assignmentPreviousEngagement = row.engagement ?? null
         }
         routingPatch.mode = "manual"
+        // The axis-native statement of the same fact. `human` is what makes
+        // the coupling visible: the chip can say "assignment", where before
+        // the conversation just silently showed Manual with no explanation.
+        routingPatch.engagement = "human"
+        routingPatch.autonomy = "observe"
         routing = { kind: "manual-mode", mode: "manual" }
       } else if (!assignee) {
         restoreRouting()

@@ -152,7 +152,27 @@ async function runSwitchMode(
       conversationKey: ctx.conversationKey,
       sessionId: ctx.row.sessionId,
       section: "behavior",
-      patch: { mode },
+      patch: {
+        mode,
+        // The axis-native counterpart, written alongside its legacy mirror.
+        autonomy: mode === "manual" ? "observe" : "suggest",
+        // Provenance. Without it the effective-config facade collapses an
+        // escalation-driven change to `conversation-override`, so the ladder
+        // rewriting a conversation's mode was invisible in every UI — the same
+        // defect `routingSource: "assignment"` was added to fix.
+        modeForcedBy: "escalation",
+        // Snapshot ONCE so a later unassign can undo an escalation-forced mode
+        // while an assignment is in force. Without this `restoreMode` had
+        // nothing to restore and the escalation's choice outlived the
+        // assignment that framed it.
+        ...(ctx.row.routingSource === "assignment" && ctx.row.assignmentPreviousMode === undefined
+          ? {
+              assignmentPreviousMode: ctx.row.mode ?? null,
+              assignmentPreviousAutonomy: ctx.row.autonomy ?? null,
+              assignmentPreviousEngagement: ctx.row.engagement ?? null,
+            }
+          : {}),
+      },
       source: "sla-escalation",
     })
     return { ok: true }

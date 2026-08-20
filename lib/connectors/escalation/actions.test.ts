@@ -156,9 +156,53 @@ describe("runEscalationAction — switchMode", () => {
       conversationKey: "lark:adp-1:oc_1",
       sessionId: "s1",
       section: "behavior",
-      patch: { mode: "draft" },
+      patch: { mode: "draft", autonomy: "suggest", modeForcedBy: "escalation" },
       source: "sla-escalation",
     })
+  })
+
+  it("labels the change as escalation, not as an operator edit", async () => {
+    // Without the label the effective-config facade collapses this to
+    // `conversation-override`, so the ladder silently rewriting a
+    // conversation's mode is invisible in every UI.
+    const d = deps()
+    await runEscalationAction(ctx(), { type: "switchMode", mode: "manual" }, d)
+    const call = (d.updateConversationConfigSection as jest.Mock).mock.calls[0][0]
+    expect(call.patch).toMatchObject({
+      mode: "manual",
+      autonomy: "observe",
+      modeForcedBy: "escalation",
+    })
+  })
+
+  it("snapshots the previous values once while an assignment is in force", async () => {
+    // Otherwise `restoreMode` has nothing to restore and the escalation's
+    // choice outlives the assignment that framed it.
+    const d = deps()
+    const withAssignment = ctx()
+    withAssignment.row.routingSource = "assignment"
+    withAssignment.row.mode = "auto"
+    await runEscalationAction(withAssignment, { type: "switchMode", mode: "draft" }, d)
+    const call = (d.updateConversationConfigSection as jest.Mock).mock.calls[0][0]
+    expect(call.patch).toMatchObject({ assignmentPreviousMode: "auto" })
+  })
+
+  it("does not re-snapshot when one already exists", async () => {
+    const d = deps()
+    const withSnapshot = ctx()
+    withSnapshot.row.routingSource = "assignment"
+    withSnapshot.row.mode = "manual"
+    withSnapshot.row.assignmentPreviousMode = "auto"
+    await runEscalationAction(withSnapshot, { type: "switchMode", mode: "draft" }, d)
+    const call = (d.updateConversationConfigSection as jest.Mock).mock.calls[0][0]
+    expect(call.patch.assignmentPreviousMode).toBeUndefined()
+  })
+
+  it("takes no snapshot when no assignment is in force", async () => {
+    const d = deps()
+    await runEscalationAction(ctx(), { type: "switchMode", mode: "draft" }, d)
+    const call = (d.updateConversationConfigSection as jest.Mock).mock.calls[0][0]
+    expect(call.patch.assignmentPreviousMode).toBeUndefined()
   })
 
   it("reports switch_mode_failed", async () => {
