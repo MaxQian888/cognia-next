@@ -8619,6 +8619,30 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "mcp_set_enabled",
+      "target": "client",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "mcp_set_tool_rules",
+      "target": "client",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "plugin_set_network_allowlist",
       "target": "service",
       "operation": "write",

@@ -243,6 +243,10 @@ export async function dispatchCommand(
       return skillSetEnabled(payload)
     case "plugin_set_enabled":
       return pluginSetEnabled(payload)
+    case "mcp_set_enabled":
+      return mcpSetEnabled(payload)
+    case "mcp_set_tool_rules":
+      return mcpSetToolRules(payload)
     case "adapter_update_policy":
       return adapterUpdatePolicy(payload)
     case "app_settings_update":
@@ -860,6 +864,58 @@ async function pluginSetEnabled(payload: Record<string, unknown>): Promise<null>
     }
     throw error
   }
+}
+
+/**
+ * Flip one MCP server's `enabled` flag from a paired client.
+ *
+ * Routed through `updateMcpServer` rather than a bare Dexie write so the
+ * governance side effects a desktop toggle has still run: the trust gate, the
+ * summary mirror the caller reads back, and the coalesced sync into every
+ * agent config file this server is projected into.
+ */
+async function mcpSetEnabled(payload: Record<string, unknown>): Promise<null> {
+  const id = payload.id as string | undefined
+  const enabled = payload.enabled as boolean | undefined
+  if (!id) throw new Error("mcp_set_enabled.id is required")
+  if (typeof enabled !== "boolean") throw new Error("mcp_set_enabled.enabled must be boolean")
+  const { updateMcpServer } = await import("@/lib/db/mcp-servers")
+  await updateMcpServer(id, { enabled })
+  return null
+}
+
+/**
+ * Replace one MCP server's per-tool deny rules from a paired client.
+ *
+ * Both axes are sent whole rather than as add/remove deltas: the client
+ * renders the full list it read from `mcpServerSummaries`, and a delta applied
+ * against a stale mirror would silently re-allow a tool the user had denied on
+ * another device.
+ */
+async function mcpSetToolRules(payload: Record<string, unknown>): Promise<null> {
+  const id = payload.id as string | undefined
+  if (!id) throw new Error("mcp_set_tool_rules.id is required")
+  const toStringList = (value: unknown, field: string): string[] | undefined => {
+    if (value === undefined) return undefined
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+      throw new Error(`mcp_set_tool_rules.${field} must be a string array`)
+    }
+    return value as string[]
+  }
+  const disallowedTools = toStringList(payload.disallowedTools, "disallowedTools")
+  const disallowedToolPatterns = toStringList(
+    payload.disallowedToolPatterns,
+    "disallowedToolPatterns"
+  )
+  if (disallowedTools === undefined && disallowedToolPatterns === undefined) {
+    throw new Error("mcp_set_tool_rules requires disallowedTools or disallowedToolPatterns")
+  }
+  const { updateMcpServer } = await import("@/lib/db/mcp-servers")
+  await updateMcpServer(id, {
+    ...(disallowedTools !== undefined ? { disallowedTools } : {}),
+    ...(disallowedToolPatterns !== undefined ? { disallowedToolPatterns } : {}),
+  })
+  return null
 }
 
 type ConnectorMode = "auto" | "manual" | "draft"

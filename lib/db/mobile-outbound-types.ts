@@ -60,6 +60,12 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "character_bind_twin",
   "skill_set_enabled",
   "plugin_set_enabled",
+  // MCP servers (ADR-0056 Wave 4 follow-up): a paired client can flip a
+  // server on/off and rewrite its per-tool deny rules. Creating, editing and
+  // deleting a definition stays desktop-only — those carry credentials and a
+  // trust decision, neither of which belongs on the wire.
+  "mcp_set_enabled",
+  "mcp_set_tool_rules",
   "adapter_update_policy",
   "app_settings_update",
   // Long-term memory mutations — mobile edits must reach the desktop

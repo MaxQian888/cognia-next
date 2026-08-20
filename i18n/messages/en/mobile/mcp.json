@@ -1,11 +1,23 @@
 {
+  "allowToolAria": "Allow {name}",
   "backAria": "Back to settings",
+  "deniedByPattern": "rule {pattern}",
+  "denyToolAria": "Deny {name}",
+  "disableAria": "Turn off {name}",
   "disabled": "Off",
   "empty": "No MCP servers are configured on the paired desktop yet.",
+  "enableAria": "Turn on {name}",
   "enabled": "On",
-  "intro": "Browse the MCP servers configured on your paired desktop. Adding, editing and authenticating servers is done on the desktop.",
-  "manageOnDesktop": "MCP servers are managed on the desktop. Open Settings → MCP there to add, edit, enable or authenticate a server.",
+  "intro": "MCP servers configured on your paired desktop. You can switch a server or an individual tool off from here; adding, editing and authenticating a server is done on the desktop.",
+  "manageOnDesktop": "Adding, editing, deleting and authenticating MCP servers happens on the desktop — open Settings → MCP there. Rules that match tools by name are edited there too.",
+  "queueToggleLabel": "Turn {name} {state}",
+  "queueToolLabel": "Update {name} tool rules ({tool})",
   "remoteAuthNote": "authenticate on desktop",
+  "rulesOnDesktop": "Tools held off by a name rule can only be freed on the desktop.",
   "sectionTitle": "Configured servers",
-  "title": "MCP servers"
+  "title": "MCP servers",
+  "toolsCount": "{count} tools",
+  "toolsSectionTitle": "Tools",
+  "toolsWithDenied": "{total} tools · {denied} off",
+  "writeFailed": "Could not save that change: {message}"
 }

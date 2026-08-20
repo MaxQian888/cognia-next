@@ -66,6 +66,8 @@ const COMMAND_KINDS = [
   "character_bind_twin",
   "skill_set_enabled",
   "plugin_set_enabled",
+  "mcp_set_enabled",
+  "mcp_set_tool_rules",
   "adapter_update_policy",
   "app_settings_update",
   // Long-term memory

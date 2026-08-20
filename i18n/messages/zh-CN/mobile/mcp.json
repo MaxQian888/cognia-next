@@ -1,11 +1,23 @@
 {
+  "allowToolAria": "允许 {name}",
   "backAria": "返回设置",
+  "deniedByPattern": "规则 {pattern}",
+  "denyToolAria": "禁用 {name}",
+  "disableAria": "停用 {name}",
   "disabled": "已关闭",
   "empty": "已配对的桌面端尚未配置任何 MCP 服务器。",
+  "enableAria": "启用 {name}",
   "enabled": "已启用",
-  "intro": "查看已配对桌面端配置的 MCP 服务器。添加、编辑和认证服务器需在桌面端完成。",
-  "manageOnDesktop": "MCP 服务器在桌面端管理。请在桌面端打开「设置 → MCP」添加、编辑、启用或认证服务器。",
+  "intro": "配对桌面上已配置的 MCP 服务器。你可以在这里关闭某个服务器或单个工具；新增、编辑与授权仍在桌面端完成。",
+  "manageOnDesktop": "新增、编辑、删除与授权 MCP 服务器都在桌面端进行——请在那里打开 设置 → MCP。按名称匹配的工具规则也在桌面端编辑。",
+  "queueToggleLabel": "将 {name} 设为{state}",
+  "queueToolLabel": "更新 {name} 的工具规则（{tool}）",
   "remoteAuthNote": "在桌面端认证",
+  "rulesOnDesktop": "被名称规则挡住的工具只能在桌面端解除。",
   "sectionTitle": "已配置的服务器",
-  "title": "MCP 服务器"
+  "title": "MCP 服务器",
+  "toolsCount": "{count} 个工具",
+  "toolsSectionTitle": "工具",
+  "toolsWithDenied": "{total} 个工具 · 已禁用 {denied}",
+  "writeFailed": "保存失败：{message}"
 }

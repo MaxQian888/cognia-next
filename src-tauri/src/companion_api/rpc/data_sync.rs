@@ -28,6 +28,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "character_bind_twin",
     "skill_set_enabled",
     "plugin_set_enabled",
+    "mcp_set_enabled",
+    "mcp_set_tool_rules",
     "adapter_update_policy",
     "twin_profile_get",
     "host_capabilities",
@@ -556,6 +558,10 @@ pub(super) async fn dispatch(
         | "character_bind_twin"
         | "skill_set_enabled"
         | "plugin_set_enabled"
+        // MCP server enable/disable + per-tool deny rules. Definition CRUD is
+        // deliberately absent: it carries credentials and a trust decision.
+        | "mcp_set_enabled"
+        | "mcp_set_tool_rules"
         | "adapter_update_policy"
         | "twin_profile_get"
         | "host_capabilities"

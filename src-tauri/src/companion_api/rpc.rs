@@ -445,6 +445,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "character_bind_twin",
     "skill_set_enabled",
     "plugin_set_enabled",
+    "mcp_set_enabled",
+    "mcp_set_tool_rules",
     "adapter_update_policy",
     "app_settings_update",
     // Wave 2 read-only projection routed through desktop_writes_bridge.
