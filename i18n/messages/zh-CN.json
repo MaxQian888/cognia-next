@@ -29013,6 +29013,36 @@
         "refresh": "刷新",
         "title": "沙盒事件日志"
       },
+      "service": {
+        "autoSubmit": "自动提交崩溃报告",
+        "autoSubmitDescription": "默认关闭。开启后，捕获到的崩溃会直接打包发送，不再显示同意预览；minidump 与截图仍然只在你逐次勾选时才会包含。",
+        "browserTransport": "在浏览器中，只有服务端开启 CORS 时请求才能到达。桌面与移动应用具备直连传输。",
+        "connect": "连接",
+        "connected": "已连接",
+        "description": "该账户的崩溃报告提交到哪里，以及分诊控制台读取的服务。",
+        "disconnect": "断开连接",
+        "disconnected": "未连接",
+        "errors": {
+          "ids": "租户与项目 ID 必须是 UUID。",
+          "save": "无法保存该连接。",
+          "url": "请填写 http 或 https 的服务地址。"
+        },
+        "projectId": "项目 ID",
+        "roles": {
+          "admin": "管理员",
+          "triager": "分诊者",
+          "uploader": "上传者",
+          "viewer": "查看者"
+        },
+        "sessionDescription": "提交自己的崩溃无需令牌：桌面应用会用自己的密钥证明安装身份。来自身份提供方的令牌用于把该连接提升为可读取并分诊所有人的报告。令牌保存在系统钥匙串中，绝不写入应用数据库。",
+        "sessionOptional": "可选 —— 仅分诊需要",
+        "sessionStored": "系统钥匙串中已保存会话",
+        "sessionToken": "身份会话令牌",
+        "tenantId": "租户 ID",
+        "title": "诊断服务",
+        "update": "保存",
+        "url": "服务地址"
+      },
       "sidecarRestart": {
         "count": "次数",
         "description": "应用启动以来 Node sidecar 已经 spawn 过的次数。数字持续增长通常意味着 SDK 在自动重启。",
@@ -35390,6 +35420,7 @@
       "building": "正在生成脱敏预览…",
       "channel": {
         "copy": "复制报告",
+        "diagnostic-service": "发送到诊断服务",
         "download": "下载 Markdown",
         "issue": "打开 GitHub Issue"
       },

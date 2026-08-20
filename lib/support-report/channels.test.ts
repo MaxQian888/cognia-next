@@ -25,6 +25,8 @@ import {
   listAvailableSupportReportChannels,
   listSupportReportChannels,
   registerSupportReportChannel,
+  subscribeSupportReportChannels,
+  supportReportChannelsVersion,
 } from "./channels"
 import type { SupportReport, SupportReportChannelSpec } from "./types"
 
@@ -168,5 +170,73 @@ describe("registry", () => {
     off()
     expect(listSupportReportChannels().some((c) => c.id === "team-inbox")).toBe(true)
     again()
+  })
+})
+
+describe("registry subscription", () => {
+  /**
+   * The registry is a module singleton. Before it notified, a React surface
+   * that read it during render had no way to learn a channel appeared
+   * afterwards — which is exactly what a channel registered from an effect
+   * does, and what this module's own header promises will show up.
+   */
+  it("notifies subscribers when a channel is registered and unregistered", () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeSupportReportChannels(listener)
+    const before = supportReportChannelsVersion()
+
+    const unregister = registerSupportReportChannel({
+      id: "late-arrival",
+      labelKey: "late-arrival",
+      isAvailable: () => true,
+      deliver: async () => {},
+    })
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(supportReportChannelsVersion()).toBeGreaterThan(before)
+
+    unregister()
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    unsubscribe()
+    registerSupportReportChannel({
+      id: "after-unsubscribe",
+      labelKey: "after-unsubscribe",
+      isAvailable: () => true,
+      deliver: async () => {},
+    })
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not notify twice when an unregister runs more than once", () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeSupportReportChannels(listener)
+    const unregister = registerSupportReportChannel({
+      id: "idempotent-unregister",
+      labelKey: "idempotent-unregister",
+      isAvailable: () => true,
+      deliver: async () => {},
+    })
+    unregister()
+    unregister()
+    // Registration + one removal. A second removal changed nothing, so a
+    // subscriber must not be told that it did.
+    expect(listener).toHaveBeenCalledTimes(2)
+    unsubscribe()
+  })
+
+  it("returns a monotonically increasing snapshot useSyncExternalStore can trust", () => {
+    const first = supportReportChannelsVersion()
+    expect(supportReportChannelsVersion()).toBe(first)
+    const unregister = registerSupportReportChannel({
+      id: "snapshot-stability",
+      labelKey: "snapshot-stability",
+      isAvailable: () => true,
+      deliver: async () => {},
+    })
+    const second = supportReportChannelsVersion()
+    expect(second).toBeGreaterThan(first)
+    // Stable between changes — a snapshot that varied per call would loop.
+    expect(supportReportChannelsVersion()).toBe(second)
+    unregister()
   })
 })

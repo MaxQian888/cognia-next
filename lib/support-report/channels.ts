@@ -85,14 +85,48 @@ export function createBuiltinSupportReportChannels(
 const builtins = createBuiltinSupportReportChannels()
 const registered = new Map<string, SupportReportChannelSpec>()
 
+/**
+ * Bumped on every registration change.
+ *
+ * The registry is a module singleton, so a React surface that read it during
+ * render had no way to learn that a channel appeared afterwards — which is
+ * exactly what happens when a channel is registered from an effect. Exposing a
+ * version plus a subscription makes the promise in this module's own header
+ * ("the dialog will render a button for it") true for late registrations too.
+ */
+let version = 0
+const listeners = new Set<() => void>()
+
+function notify(): void {
+  version += 1
+  for (const listener of listeners) listener()
+}
+
+/** Current registry version — a `useSyncExternalStore` snapshot. */
+export function supportReportChannelsVersion(): number {
+  return version
+}
+
+/** Subscribe to registration changes. Returns the unsubscribe function. */
+export function subscribeSupportReportChannels(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
 /** Contribute a channel. Duplicate ids throw. Returns the unregister function. */
 export function registerSupportReportChannel(spec: SupportReportChannelSpec): () => void {
   if (registered.has(spec.id) || builtins.some((c) => c.id === spec.id)) {
     throw new Error(`Support report channel "${spec.id}" is already registered.`)
   }
   registered.set(spec.id, spec)
+  notify()
   return () => {
-    if (registered.get(spec.id) === spec) registered.delete(spec.id)
+    if (registered.get(spec.id) === spec) {
+      registered.delete(spec.id)
+      notify()
+    }
   }
 }
 
@@ -131,4 +165,5 @@ export async function deliverSupportReport(
 /** Test-only: drop every registration. */
 export function __resetSupportReportChannelsForTesting(): void {
   registered.clear()
+  notify()
 }

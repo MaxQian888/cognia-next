@@ -12,6 +12,7 @@ import { SandboxAuditCard } from "./sandbox-audit-card"
 import { SidecarRestartCard } from "./sidecar-restart-card"
 import { InboxTelemetryCard } from "./inbox-telemetry-card"
 import { NativeCrashReportsCard } from "./native-crash-reports-card"
+import { DiagnosticServiceCard } from "./diagnostic-service-card"
 import { DeveloperFlagsCard } from "./developer-flags-card"
 import { PluginMessagingCard } from "./plugin-messaging-card"
 
@@ -77,7 +78,11 @@ export function DiagnosticsSection() {
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto w-full max-w-5xl space-y-4">
             {activeTab === "native-reports" ? (
-              <NativeCrashReportsCard />
+              <>
+                {/* Where these reports go, above the list of what is here. */}
+                <DiagnosticServiceCard />
+                <NativeCrashReportsCard />
+              </>
             ) : (
               <>
                 <DeveloperFlagsCard />

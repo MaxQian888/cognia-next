@@ -19,8 +19,6 @@
     "debugMode": "Debug mode",
     "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process. Look for them in the Tauri dev console or the sidecar log file.",
     "description": "Low-level toggles for debugging and experimental plugin behavior.",
-    "taskWorkspace": "Task resource workspace",
-    "taskWorkspaceHint": "Experimental. Run agents in isolated task workspaces, review their resources, and explicitly apply or undo attributed changes.",
     "title": "Developer flags"
   },
   "inboxTelemetry": {
@@ -54,6 +52,36 @@
     "empty": "No sandbox events recorded yet.",
     "refresh": "Refresh",
     "title": "Sandbox event log"
+  },
+  "service": {
+    "title": "Diagnostic service",
+    "description": "Where crash reports from this account are submitted, and the service the triage console reads.",
+    "connected": "Connected",
+    "disconnected": "Not connected",
+    "url": "Service URL",
+    "tenantId": "Tenant ID",
+    "projectId": "Project ID",
+    "sessionToken": "Identity session token",
+    "sessionOptional": "Optional — needed only for triage",
+    "sessionStored": "A session is stored in the system keychain",
+    "sessionDescription": "Submitting your own crashes needs no token: the desktop app proves its installation with its own key. A token from your identity provider is what promotes this connection to reading and triaging everyone's reports. It is stored in the system keychain and never in the app database.",
+    "browserTransport": "In a browser, requests reach the service only if it opts into CORS. The desktop and mobile apps have a direct transport.",
+    "connect": "Connect",
+    "update": "Save",
+    "disconnect": "Disconnect",
+    "autoSubmit": "Submit crash reports automatically",
+    "autoSubmitDescription": "Off by default. When on, a captured crash is packaged and sent without the consent preview — minidumps and screenshots are still never included unless you ask for them per report.",
+    "roles": {
+      "uploader": "Uploader",
+      "viewer": "Viewer",
+      "triager": "Triager",
+      "admin": "Admin"
+    },
+    "errors": {
+      "url": "Enter an http or https service URL.",
+      "ids": "Tenant and project IDs must be UUIDs.",
+      "save": "The connection could not be saved."
+    }
   },
   "sidecarRestart": {
     "count": "Count",

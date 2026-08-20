@@ -34,6 +34,14 @@ const channels: Array<{
 jest.mock("@/lib/support-report/channels", () => ({
   deliverSupportReport: (...args: unknown[]) => deliverSupportReport(...args),
   listAvailableSupportReportChannels: () => channels,
+  // The registry is a module singleton the dialog subscribes to, so a channel
+  // registered from an effect appears without a remount. Inert here: this
+  // suite drives the list directly.
+  subscribeSupportReportChannels: () => () => {},
+  supportReportChannelsVersion: () => 0,
+}))
+jest.mock("@/hooks/support/use-diagnostic-report-channel", () => ({
+  useDiagnosticReportChannel: () => undefined,
 }))
 const sections: Array<{
   id: string

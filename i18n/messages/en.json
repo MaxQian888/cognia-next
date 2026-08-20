@@ -29013,6 +29013,36 @@
         "refresh": "Refresh",
         "title": "Sandbox event log"
       },
+      "service": {
+        "autoSubmit": "Submit crash reports automatically",
+        "autoSubmitDescription": "Off by default. When on, a captured crash is packaged and sent without the consent preview — minidumps and screenshots are still never included unless you ask for them per report.",
+        "browserTransport": "In a browser, requests reach the service only if it opts into CORS. The desktop and mobile apps have a direct transport.",
+        "connect": "Connect",
+        "connected": "Connected",
+        "description": "Where crash reports from this account are submitted, and the service the triage console reads.",
+        "disconnect": "Disconnect",
+        "disconnected": "Not connected",
+        "errors": {
+          "ids": "Tenant and project IDs must be UUIDs.",
+          "save": "The connection could not be saved.",
+          "url": "Enter an http or https service URL."
+        },
+        "projectId": "Project ID",
+        "roles": {
+          "admin": "Admin",
+          "triager": "Triager",
+          "uploader": "Uploader",
+          "viewer": "Viewer"
+        },
+        "sessionDescription": "Submitting your own crashes needs no token: the desktop app proves its installation with its own key. A token from your identity provider is what promotes this connection to reading and triaging everyone's reports. It is stored in the system keychain and never in the app database.",
+        "sessionOptional": "Optional — needed only for triage",
+        "sessionStored": "A session is stored in the system keychain",
+        "sessionToken": "Identity session token",
+        "tenantId": "Tenant ID",
+        "title": "Diagnostic service",
+        "update": "Save",
+        "url": "Service URL"
+      },
       "sidecarRestart": {
         "count": "Count",
         "description": "How many times the Node sidecar has spawned since the app booted. A growing count usually means SDK errors are causing automatic restarts.",
@@ -35390,6 +35420,7 @@
       "building": "Building the redacted preview…",
       "channel": {
         "copy": "Copy report",
+        "diagnostic-service": "Send to diagnostic service",
         "download": "Download Markdown",
         "issue": "Open GitHub issue"
       },

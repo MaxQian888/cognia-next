@@ -13,7 +13,7 @@
  * the dialog is open, so every open starts clean without effect-driven resets.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import {
   BugIcon,
@@ -43,9 +43,12 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { buildSupportReport } from "@/lib/support-report/build"
+import { useDiagnosticReportChannel } from "@/hooks/support/use-diagnostic-report-channel"
 import {
   deliverSupportReport,
   listAvailableSupportReportChannels,
+  subscribeSupportReportChannels,
+  supportReportChannelsVersion,
   type SupportReportChannelDeps,
 } from "@/lib/support-report/channels"
 import {
@@ -139,7 +142,24 @@ function ReportProblemForm({
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(defaultSupportReportSectionIds(context))
   )
-  const channels = useMemo(() => listAvailableSupportReportChannels(channelDeps), [channelDeps])
+  // Registers the "send to diagnostic service" channel for as long as this
+  // form is mounted, and only when a service is actually configured — a button
+  // that cannot deliver is worse than an absent one.
+  useDiagnosticReportChannel()
+  // The registry is a module singleton; subscribing is what lets a channel
+  // registered from an effect (or by a plugin, later) appear without a remount.
+  const channelsVersion = useSyncExternalStore(
+    subscribeSupportReportChannels,
+    supportReportChannelsVersion,
+    supportReportChannelsVersion
+  )
+  const channels = useMemo(() => {
+    // Referenced so the memo is keyed on the registry version. The list is
+    // module state the dependency checker cannot see, so without this the
+    // memo would never recompute for a late registration.
+    void channelsVersion
+    return listAvailableSupportReportChannels(channelDeps)
+  }, [channelDeps, channelsVersion])
   const [previewOpen, setPreviewOpen] = useState(false)
   const [preview, setPreview] = useState<string | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)

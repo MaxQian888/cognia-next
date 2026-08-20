@@ -16,30 +16,30 @@
     "supportResponse": "Support response"
   },
   "report": {
-    "title": "Report a problem",
-    "description": "Everything below is assembled on this device and redacted before it goes anywhere. Nothing is sent until you choose where.",
-    "descriptionLabel": "What happened?",
-    "descriptionPlaceholder": "What were you doing, what did you expect, and what happened instead?",
-    "includeTitle": "Include in the report",
     "alwaysIncluded": "Always included: {items}",
-    "redacted": "Redacted",
-    "preview": "Preview report",
-    "hidePreview": "Hide preview",
     "building": "Building the redacted preview…",
-    "previewFailed": "The report could not be built — some content still looked sensitive after redaction. Untick a section and try again.",
-    "privacyNote": "Personal data (emails, keys, phone numbers, names) is replaced with placeholders and re-checked before the report leaves this device.",
+    "channel": {
+      "copy": "Copy report",
+      "diagnostic-service": "Send to diagnostic service",
+      "download": "Download Markdown",
+      "issue": "Open GitHub issue"
+    },
     "delivered": {
       "copy": "Report copied to the clipboard.",
       "download": "Report downloaded.",
       "issue": "Issue tracker opened with the report pre-filled.",
       "generic": "Report sent via {channel}."
     },
+    "description": "Everything below is assembled on this device and redacted before it goes anywhere. Nothing is sent until you choose where.",
+    "descriptionLabel": "What happened?",
+    "descriptionPlaceholder": "What were you doing, what did you expect, and what happened instead?",
     "failed": "The report could not be delivered.",
-    "channel": {
-      "copy": "Copy report",
-      "download": "Download Markdown",
-      "issue": "Open GitHub issue"
-    },
+    "hidePreview": "Hide preview",
+    "includeTitle": "Include in the report",
+    "preview": "Preview report",
+    "previewFailed": "The report could not be built — some content still looked sensitive after redaction. Untick a section and try again.",
+    "privacyNote": "Personal data (emails, keys, phone numbers, names) is replaced with placeholders and re-checked before the report leaves this device.",
+    "redacted": "Redacted",
     "section": {
       "description": {
         "label": "Your description",
@@ -77,6 +77,7 @@
         "label": "Sync state",
         "description": "Per-table companion sync status on this device."
       }
-    }
+    },
+    "title": "Report a problem"
   }
 }

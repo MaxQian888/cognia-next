@@ -19,8 +19,6 @@
     "debugMode": "调试模式",
     "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。可在 Tauri dev 控制台或 sidecar 日志中查看。",
     "description": "用于调试与实验性插件行为的底层开关。",
-    "taskWorkspace": "任务资源工作区",
-    "taskWorkspaceHint": "实验功能。让 Agent 在隔离的任务工作区中执行，审查其资源，并显式应用或精确撤销归因改动。",
     "title": "开发者选项"
   },
   "inboxTelemetry": {
@@ -54,6 +52,36 @@
     "empty": "暂无沙盒事件。",
     "refresh": "刷新",
     "title": "沙盒事件日志"
+  },
+  "service": {
+    "title": "诊断服务",
+    "description": "该账户的崩溃报告提交到哪里，以及分诊控制台读取的服务。",
+    "connected": "已连接",
+    "disconnected": "未连接",
+    "url": "服务地址",
+    "tenantId": "租户 ID",
+    "projectId": "项目 ID",
+    "sessionToken": "身份会话令牌",
+    "sessionOptional": "可选 —— 仅分诊需要",
+    "sessionStored": "系统钥匙串中已保存会话",
+    "sessionDescription": "提交自己的崩溃无需令牌：桌面应用会用自己的密钥证明安装身份。来自身份提供方的令牌用于把该连接提升为可读取并分诊所有人的报告。令牌保存在系统钥匙串中，绝不写入应用数据库。",
+    "browserTransport": "在浏览器中，只有服务端开启 CORS 时请求才能到达。桌面与移动应用具备直连传输。",
+    "connect": "连接",
+    "update": "保存",
+    "disconnect": "断开连接",
+    "autoSubmit": "自动提交崩溃报告",
+    "autoSubmitDescription": "默认关闭。开启后，捕获到的崩溃会直接打包发送，不再显示同意预览；minidump 与截图仍然只在你逐次勾选时才会包含。",
+    "roles": {
+      "uploader": "上传者",
+      "viewer": "查看者",
+      "triager": "分诊者",
+      "admin": "管理员"
+    },
+    "errors": {
+      "url": "请填写 http 或 https 的服务地址。",
+      "ids": "租户与项目 ID 必须是 UUID。",
+      "save": "无法保存该连接。"
+    }
   },
   "sidecarRestart": {
     "count": "次数",

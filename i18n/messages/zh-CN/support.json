@@ -16,30 +16,30 @@
     "supportResponse": "支持回复"
   },
   "report": {
-    "title": "反馈问题",
-    "description": "以下内容全部在本机生成，并在离开设备前完成脱敏。在你选择去向之前不会发送任何内容。",
-    "descriptionLabel": "发生了什么？",
-    "descriptionPlaceholder": "你当时在做什么、期望什么结果、实际发生了什么？",
-    "includeTitle": "报告中包含",
     "alwaysIncluded": "始终包含：{items}",
-    "redacted": "已脱敏",
-    "preview": "预览报告",
-    "hidePreview": "隐藏预览",
     "building": "正在生成脱敏预览…",
-    "previewFailed": "无法生成报告——脱敏后仍有内容疑似敏感。请取消勾选某个段落后重试。",
-    "privacyNote": "个人信息（邮箱、密钥、电话、姓名）会被替换为占位符，并在报告离开本机前再次核验。",
+    "channel": {
+      "copy": "复制报告",
+      "diagnostic-service": "发送到诊断服务",
+      "download": "下载 Markdown",
+      "issue": "打开 GitHub Issue"
+    },
     "delivered": {
       "copy": "报告已复制到剪贴板。",
       "download": "报告已下载。",
       "issue": "已打开问题追踪器并预填报告。",
       "generic": "已通过“{channel}”发送报告。"
     },
+    "description": "以下内容全部在本机生成，并在离开设备前完成脱敏。在你选择去向之前不会发送任何内容。",
+    "descriptionLabel": "发生了什么？",
+    "descriptionPlaceholder": "你当时在做什么、期望什么结果、实际发生了什么？",
     "failed": "报告发送失败。",
-    "channel": {
-      "copy": "复制报告",
-      "download": "下载 Markdown",
-      "issue": "打开 GitHub Issue"
-    },
+    "hidePreview": "隐藏预览",
+    "includeTitle": "报告中包含",
+    "preview": "预览报告",
+    "previewFailed": "无法生成报告——脱敏后仍有内容疑似敏感。请取消勾选某个段落后重试。",
+    "privacyNote": "个人信息（邮箱、密钥、电话、姓名）会被替换为占位符，并在报告离开本机前再次核验。",
+    "redacted": "已脱敏",
     "section": {
       "description": {
         "label": "你的描述",
@@ -77,6 +77,7 @@
         "label": "同步状态",
         "description": "本机各表的伴侣同步状态。"
       }
-    }
+    },
+    "title": "反馈问题"
   }
 }
