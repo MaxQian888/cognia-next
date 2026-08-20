@@ -950,6 +950,29 @@ async function teamHasKnowledgeTwins(
   }
 }
 
+/**
+ * Whether this turn should surface the Pro-IDE-only editor write tools — and,
+ * with them, their baked-in consent tier.
+ *
+ * Three conditions, all of them real: a project to act inside, a workspace
+ * filesystem backend (the same gate the read tool uses), and a shell that can
+ * host code-server at all. Never throws: a failure to answer means "do not
+ * surface", because the write tools are an enhancement and no turn should fail
+ * over their absence.
+ */
+async function proIdeWriteToolsAvailable(ctx: BuildOptionsContext): Promise<boolean> {
+  if (!ctx.activeProject) return false
+  try {
+    const [{ hasWorkspaceFsBackend }, { hasCapability }] = await Promise.all([
+      import("@/lib/files/workspace-backend"),
+      import("@/lib/platform/capabilities"),
+    ])
+    return hasWorkspaceFsBackend() && hasCapability("pro-ide")
+  } catch {
+    return false
+  }
+}
+
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
   const { session, appSettings, memberOverride } = ctx
   const opts: SendOptions = {}
@@ -1858,9 +1881,25 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Agent → Permissions). toolRules wins on conflicts (later argument). The
   // result is key-sorted so the serialized SendOptions stay byte-identical
   // across turns (provider prompt-cache prefix matching).
+  //
+  // The Pro IDE editor tools carry a baked-in tier (`editor-tool-rules`) as the
+  // LOWEST layer, so `save_editor_buffers` asks by default while the four
+  // viewport-only tools do not — and an explicit user rule still overrides
+  // either way. It is a genuine exception to "only explicit rules are sent":
+  // without it every one of the five would prompt on every call, since a
+  // non-shell tool with no rule falls through to a human approval.
+  //
+  // Gated on the same condition that surfaces the tools, not merely on desktop:
+  // rules for tools this turn never offers are inert payload, and emitting them
+  // unconditionally would also break the "no rules configured → no ruleset at
+  // all" invariant that keeps SendOptions byte-identical across turns for the
+  // provider prompt cache.
+  const editorWriteToolsSurfaced = await proIdeWriteToolsAvailable(ctx)
   const commandRules = appSettings?.agentPermissions?.commandRules
   const toolRules = appSettings?.agentPermissions?.toolRules
+  const { buildEditorToolRuleset } = await import("@/lib/claude/permissions/editor-tool-rules")
   const mergedRuleset = mergeRulesets(
+    editorWriteToolsSurfaced ? buildEditorToolRuleset() : undefined,
     commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
     toolRules
   )
@@ -2497,9 +2536,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   try {
     const { hasWorkspaceFsBackend } = await import("@/lib/files/workspace-backend")
     if (ctx.activeProject && hasWorkspaceFsBackend()) {
-      const { buildEditorBuiltinManifestEntries } =
+      const { buildEditorBuiltinManifestEntries, buildEditorWriteManifestEntries } =
         await import("@/lib/claude/editor-builtin-tools")
       opts.pluginTools = [...(opts.pluginTools ?? []), ...buildEditorBuiltinManifestEntries()]
+      // The write tools are Pro-IDE-only (native diff view, undo-able external
+      // edit, explorer reveal), so they ride the same flag the consent tier was
+      // gated on above — one source of truth, so the tools and their rules can
+      // never be surfaced apart from each other.
+      if (editorWriteToolsSurfaced) {
+        opts.pluginTools = [...opts.pluginTools, ...buildEditorWriteManifestEntries()]
+      }
     }
   } catch (err) {
     loggers.app.warn("failed to append editor built-in tool", { error: String(err) })

@@ -92,6 +92,20 @@ jest.mock("@/lib/files/workspace-backend", () => ({
   hasWorkspaceFsBackend: () => mockHasWorkspaceFsBackend(),
 }))
 
+// Pro IDE reachability — drives whether the editor write tools and their
+// consent tier are surfaced at all. Defaults off so every existing expectation
+// keeps describing a non-desktop shell.
+const mockLocalCapabilities = jest.fn<string[], []>(() => [])
+jest.mock("@/lib/platform/capabilities", () => {
+  const actual = jest.requireActual("@/lib/platform/capabilities")
+  return {
+    ...actual,
+    detectLocalCapabilities: () => mockLocalCapabilities(),
+    hasCapability: (cap: string, caps?: string[]) =>
+      (caps ?? mockLocalCapabilities()).includes(cap),
+  }
+})
+
 jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: jest.fn(),
 }))
@@ -2812,6 +2826,83 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     const opts = await resolveSendOptions({
       appSettings: { agentPermissions: {} } as unknown as AppSettings,
     })
+    expect(opts.permissionRuleset).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — Pro IDE editor write tools (ADR-0088 Phase 3)", () => {
+  const onProIdeDesktop = () => mockLocalCapabilities.mockReturnValue(["pro-ide", "shell"])
+  const withProject = { activeProject: { path: "/repo" } } as unknown as BuildOptionsContext
+
+  afterEach(() => mockLocalCapabilities.mockReturnValue([]))
+
+  it("surfaces the five write tools beside the read on a Pro-IDE-capable shell", async () => {
+    onProIdeDesktop()
+    const opts = await resolveSendOptions({ ...withProject })
+    const names = (opts.pluginTools ?? []).map((t) => (t as { name: string }).name)
+    expect(names).toContain("read_active_editor")
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "open_in_editor",
+        "reveal_in_editor",
+        "show_editor_diff",
+        "apply_editor_edit",
+        "save_editor_buffers",
+      ])
+    )
+  })
+
+  it("keeps the read but drops the writes where code-server cannot run", async () => {
+    // Web and mobile: the read still answers through Monaco, so withholding it
+    // too would be a regression. The writes have no Monaco equivalent.
+    const opts = await resolveSendOptions({ ...withProject })
+    const names = (opts.pluginTools ?? []).map((t) => (t as { name: string }).name)
+    expect(names).toContain("read_active_editor")
+    expect(names).not.toContain("open_in_editor")
+    expect(names).not.toContain("save_editor_buffers")
+  })
+
+  it("ships the consent tier exactly when it ships the tools", async () => {
+    onProIdeDesktop()
+    const opts = await resolveSendOptions({
+      ...withProject,
+      appSettings: { agentPermissions: {} } as unknown as AppSettings,
+    })
+    expect(opts.permissionRuleset).toMatchObject({
+      save_editor_buffers: "ask",
+      open_in_editor: "allow",
+      show_editor_diff: "allow",
+    })
+  })
+
+  it("still omits the ruleset entirely where the tools are not surfaced", async () => {
+    // Rules for tools this turn never offers are inert payload, and emitting
+    // them would break the byte-identical SendOptions the prompt cache needs.
+    const opts = await resolveSendOptions({
+      ...withProject,
+      appSettings: { agentPermissions: {} } as unknown as AppSettings,
+    })
+    expect(opts.permissionRuleset).toBeUndefined()
+  })
+
+  it("lets an explicit user rule override the baked-in ask", async () => {
+    onProIdeDesktop()
+    const opts = await resolveSendOptions({
+      ...withProject,
+      appSettings: {
+        agentPermissions: { toolRules: { save_editor_buffers: "allow" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.permissionRuleset).toMatchObject({ save_editor_buffers: "allow" })
+  })
+
+  it("withholds both tools and tier when the session has no project", async () => {
+    onProIdeDesktop()
+    const opts = await resolveSendOptions({
+      appSettings: { agentPermissions: {} } as unknown as AppSettings,
+    })
+    const names = (opts.pluginTools ?? []).map((t) => (t as { name: string }).name)
+    expect(names).not.toContain("open_in_editor")
     expect(opts.permissionRuleset).toBeUndefined()
   })
 })

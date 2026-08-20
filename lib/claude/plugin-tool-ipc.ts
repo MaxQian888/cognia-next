@@ -253,12 +253,16 @@ async function resolveEditorToolDeps(): Promise<EditorToolRunDeps> {
     { resolveSessionProjectRoot },
     { useProjectStore },
     { hasNoLeakingPiiDeep },
+    { codeServerClient },
+    { getActiveProIdeRoot },
   ] = await Promise.all([
     import("@/lib/files/project-editor-bridge"),
     import("@/lib/db/sessions"),
     import("@/lib/workspace/roots"),
     import("@/stores/project/project-store"),
     import("@cognia/redact"),
+    import("@/lib/codeserver/client"),
+    import("@/lib/codeserver/pane-manager"),
   ])
   return {
     resolveRoot: async (sessionId) => {
@@ -272,6 +276,19 @@ async function resolveEditorToolDeps(): Promise<EditorToolRunDeps> {
     // almost all of them — while Monaco could answer the whole time.
     readActive: readActiveFromProjectEditor,
     gate: (payload) => hasNoLeakingPiiDeep(payload),
+    // The write half goes direct to code-server rather than through the bridge:
+    // a native diff view, an undo-able external-edit reflection and an explorer
+    // reveal have no Monaco equivalent for the bridge to dispatch to.
+    proIde: {
+      resolveProIdeRoot: getActiveProIdeRoot,
+      open: (root, path, line, column) => codeServerClient.driveOpen(root, path, line, column),
+      reveal: (root, path) => codeServerClient.reveal(root, path),
+      showDiff: (root, path, content, title) =>
+        codeServerClient.showDiff(root, path, content, title),
+      applyEdit: (root, path, line, column) =>
+        codeServerClient.driveApplyEdit(root, path, line, column),
+      saveAll: (root, path) => codeServerClient.saveAll(root, path),
+    },
   }
 }
 

@@ -1,8 +1,11 @@
 import type { ActiveEditorContext } from "@/lib/files/project-editor-bridge"
 import {
+  EDITOR_WRITE_TOOL_NAMES,
   READ_ACTIVE_EDITOR_TOOL_NAME,
   buildEditorBuiltinManifestEntries,
+  buildEditorWriteManifestEntries,
   isEditorBuiltinTool,
+  isEditorWriteTool,
   runEditorBuiltinTool,
   type EditorToolRunDeps,
 } from "./editor-builtin-tools"
@@ -102,5 +105,157 @@ describe("editor-builtin-tools", () => {
     >
     expect(result.available).toBe(false)
     expect(d.readActive).not.toHaveBeenCalled()
+  })
+})
+
+// ── Pro IDE write tools (ADR-0088 Phase 3) ──────────────────────────────────
+
+describe("editor write tools", () => {
+  const open = jest.fn().mockResolvedValue(undefined)
+  const reveal = jest.fn().mockResolvedValue(undefined)
+  const showDiff = jest.fn().mockResolvedValue(undefined)
+  const applyEdit = jest.fn().mockResolvedValue(undefined)
+  const saveAll = jest.fn().mockResolvedValue({ saved: ["/repo/a.ts"], failed: [] })
+  let boundRoot: string | null = "/repo"
+
+  const deps = (): EditorToolRunDeps => ({
+    resolveRoot: async () => "/repo",
+    readActive: async () => null,
+    gate: () => true,
+    proIde: {
+      resolveProIdeRoot: () => boundRoot,
+      open,
+      reveal,
+      showDiff,
+      applyEdit,
+      saveAll,
+    },
+  })
+
+  const run = (name: string, args: Record<string, unknown> = {}) =>
+    runEditorBuiltinTool(name, args, deps(), { sessionId: "s1" }) as Promise<
+      Record<string, unknown>
+    >
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    boundRoot = "/repo"
+    saveAll.mockResolvedValue({ saved: ["/repo/a.ts"], failed: [] })
+  })
+
+  it("routes every write tool name to the write runner", () => {
+    for (const name of EDITOR_WRITE_TOOL_NAMES) {
+      expect(isEditorBuiltinTool(name)).toBe(true)
+      expect(isEditorWriteTool(name)).toBe(true)
+    }
+    // The read stays outside the write set — it is engine-agnostic.
+    expect(isEditorBuiltinTool("read_active_editor")).toBe(true)
+    expect(isEditorWriteTool("read_active_editor")).toBe(false)
+  })
+
+  it("opens a relative path against the bound workspace", async () => {
+    const r = await run("open_in_editor", { path: "src/a.ts", line: 12 })
+    expect(open).toHaveBeenCalledWith("/repo", "/repo/src/a.ts", 12, undefined)
+    expect(r).toMatchObject({ available: true, opened: "/repo/src/a.ts" })
+  })
+
+  it("leaves an absolute path alone", async () => {
+    await run("open_in_editor", { path: "/tmp/x.ts" })
+    expect(open).toHaveBeenCalledWith("/repo", "/tmp/x.ts", undefined, undefined)
+  })
+
+  it("ignores a non-positive line rather than forwarding it", async () => {
+    await run("open_in_editor", { path: "a.ts", line: 0 })
+    expect(open).toHaveBeenCalledWith("/repo", "/repo/a.ts", undefined, undefined)
+  })
+
+  it("reveals a path", async () => {
+    const r = await run("reveal_in_editor", { path: "src" })
+    expect(reveal).toHaveBeenCalledWith("/repo", "/repo/src")
+    expect(r).toMatchObject({ available: true, revealed: "/repo/src" })
+  })
+
+  it("tells the model explicitly that a diff did not write anything", async () => {
+    // Left implicit, the model assumes the change landed and moves on.
+    const r = await run("show_editor_diff", { path: "a.ts", content: "next", title: "Fix" })
+    expect(showDiff).toHaveBeenCalledWith("/repo", "/repo/a.ts", "next", "Fix")
+    expect(String(r.note)).toMatch(/Nothing was written to disk/)
+  })
+
+  it("accepts an empty diff proposal but not an absent one", async () => {
+    await run("show_editor_diff", { path: "a.ts", content: "" })
+    expect(showDiff).toHaveBeenCalledWith("/repo", "/repo/a.ts", "", undefined)
+
+    const r = await run("show_editor_diff", { path: "a.ts" })
+    expect(r.available).toBe(false)
+    expect(String(r.reason)).toMatch(/requires a string "content"/)
+  })
+
+  it("reflects an already-written file", async () => {
+    const r = await run("apply_editor_edit", { path: "a.ts", line: 3 })
+    expect(applyEdit).toHaveBeenCalledWith("/repo", "/repo/a.ts", 3, undefined)
+    expect(r).toMatchObject({ available: true, reflected: "/repo/a.ts" })
+  })
+
+  it("saves every dirty buffer, or just one", async () => {
+    await run("save_editor_buffers", {})
+    expect(saveAll).toHaveBeenCalledWith("/repo", undefined)
+
+    await run("save_editor_buffers", { path: "a.ts" })
+    expect(saveAll).toHaveBeenLastCalledWith("/repo", "/repo/a.ts")
+  })
+
+  it("reports a partial flush as data instead of failing", async () => {
+    saveAll.mockResolvedValueOnce({ saved: [], failed: ["/repo/locked.ts"] })
+    const r = await run("save_editor_buffers", {})
+    expect(r).toMatchObject({ available: true, failed: ["/repo/locked.ts"] })
+  })
+
+  describe("degradation", () => {
+    it("tells the model to fall back to chat when no workspace is bound", async () => {
+      boundRoot = null
+      const r = await run("open_in_editor", { path: "a.ts" })
+      expect(r.available).toBe(false)
+      expect(String(r.reason)).toMatch(/No Pro IDE workspace is open/)
+      expect(open).not.toHaveBeenCalled()
+    })
+
+    it("reports unavailability rather than crashing when the deps are absent", async () => {
+      // Surfaced only where `pro-ide` is a capability, so this is a caller bug —
+      // it must still read as a tool result, not a thrown turn-ender.
+      const r = (await runEditorBuiltinTool(
+        "open_in_editor",
+        { path: "a.ts" },
+        { resolveRoot: async () => "/repo", readActive: async () => null, gate: () => true },
+        { sessionId: "s1" }
+      )) as Record<string, unknown>
+      expect(r.available).toBe(false)
+      expect(String(r.reason)).toMatch(/not available on this device/)
+    })
+
+    it("rejects a missing path before reaching the backend", async () => {
+      const r = await run("reveal_in_editor", {})
+      expect(r.available).toBe(false)
+      expect(reveal).not.toHaveBeenCalled()
+    })
+
+    it("turns a backend rejection into a readable reason", async () => {
+      open.mockRejectedValueOnce(new Error("no extension connected"))
+      const r = await run("open_in_editor", { path: "a.ts" })
+      expect(r.available).toBe(false)
+      expect(String(r.reason)).toMatch(/no extension connected/)
+    })
+  })
+
+  it("surfaces one manifest entry per write tool, with required args declared", () => {
+    const entries = buildEditorWriteManifestEntries()
+    expect(entries.map((e) => e.name)).toEqual([...EDITOR_WRITE_TOOL_NAMES])
+    const byName = new Map(entries.map((e) => [e.name, e]))
+    const required = (n: string) =>
+      (byName.get(n)!.jsonSchema as { required?: string[] }).required ?? []
+    expect(required("open_in_editor")).toEqual(["path"])
+    expect(required("show_editor_diff")).toEqual(["path", "content"])
+    // saveAll's `path` is the optional narrowing filter, not a target.
+    expect(required("save_editor_buffers")).toEqual([])
   })
 })
