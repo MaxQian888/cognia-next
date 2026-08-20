@@ -9,12 +9,18 @@
 // settings-panel UI state and shouldn't be persisted to localStorage.
 
 import { create } from "zustand"
-import type { McpServer, McpTransport } from "@cognia/agent-config-types"
+import type { McpServer, McpServerTrustState, McpTransport } from "@cognia/agent-config-types"
 
 export type McpPanelTab = "my-servers" | "presets" | "agents" | "health"
 
 export type McpTransportFilter = "all" | McpTransport
 export type McpStatusFilter = "all" | "enabled" | "disabled"
+/**
+ * Review standing. Worth its own axis because "what is waiting on me?" is a
+ * question with an action attached — an unreviewed server cannot connect at
+ * all, so finding those is different from browsing.
+ */
+export type McpTrustFilter = "all" | McpServerTrustState
 
 /** The minimal server shape the editor seeds from (no id/timestamps). */
 export type McpEditorSeed = Pick<
@@ -34,6 +40,7 @@ interface McpPanelStoreState {
   search: string
   transportFilter: McpTransportFilter
   statusFilter: McpStatusFilter
+  trustFilter: McpTrustFilter
   /** Set of selected server ids for batch operations. */
   selection: Set<string>
   /** When non-null, the editor sheet is open for create/edit. */
@@ -61,6 +68,7 @@ interface McpPanelStoreState {
   setSearch: (search: string) => void
   setTransportFilter: (filter: McpTransportFilter) => void
   setStatusFilter: (filter: McpStatusFilter) => void
+  setTrustFilter: (filter: McpTrustFilter) => void
   resetFilters: () => void
   toggleSelection: (id: string) => void
   selectAll: (ids: string[]) => void
@@ -82,6 +90,7 @@ export const useMcpPanelStore = create<McpPanelStoreState>((set) => ({
   search: "",
   transportFilter: "all",
   statusFilter: "all",
+  trustFilter: "all",
   selection: new Set<string>(),
   editorTarget: null,
   deleteTarget: null,
@@ -94,7 +103,9 @@ export const useMcpPanelStore = create<McpPanelStoreState>((set) => ({
   setSearch: (search) => set({ search }),
   setTransportFilter: (transportFilter) => set({ transportFilter }),
   setStatusFilter: (statusFilter) => set({ statusFilter }),
-  resetFilters: () => set({ search: "", transportFilter: "all", statusFilter: "all" }),
+  setTrustFilter: (trustFilter) => set({ trustFilter }),
+  resetFilters: () =>
+    set({ search: "", transportFilter: "all", statusFilter: "all", trustFilter: "all" }),
   toggleSelection: (id) =>
     set((s) => {
       const next = new Set(s.selection)

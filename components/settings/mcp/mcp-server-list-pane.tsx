@@ -94,10 +94,14 @@ export function McpServerListPane({
   const setSearch = useMcpPanelStore((s) => s.setSearch)
   const transportFilter = useMcpPanelStore((s) => s.transportFilter)
   const statusFilter = useMcpPanelStore((s) => s.statusFilter)
+  const trustFilter = useMcpPanelStore((s) => s.trustFilter)
   const setFilterSheetOpen = useMcpPanelStore((s) => s.setFilterSheetOpen)
   const resetFilters = useMcpPanelStore((s) => s.resetFilters)
 
-  const activeFilterCount = (transportFilter !== "all" ? 1 : 0) + (statusFilter !== "all" ? 1 : 0)
+  const activeFilterCount =
+    (transportFilter !== "all" ? 1 : 0) +
+    (statusFilter !== "all" ? 1 : 0) +
+    (trustFilter !== "all" ? 1 : 0)
   const filtersActive = search.trim().length > 0 || activeFilterCount > 0
   const allVisibleSelected = servers.length > 0 && servers.every((s) => selection.has(s.id))
 

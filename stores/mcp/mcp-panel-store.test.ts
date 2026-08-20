@@ -94,6 +94,22 @@ describe("useMcpPanelStore", () => {
     expect(useMcpPanelStore.getState().filterSheetOpen).toBe(true)
   })
 
+  it("resets every filter axis, including trust", () => {
+    const { setTransportFilter, setStatusFilter, setTrustFilter, setSearch, resetFilters } =
+      useMcpPanelStore.getState()
+    setTransportFilter("http")
+    setStatusFilter("disabled")
+    setTrustFilter("pending")
+    setSearch("git")
+    resetFilters()
+    expect(useMcpPanelStore.getState()).toMatchObject({
+      transportFilter: "all",
+      statusFilter: "all",
+      trustFilter: "all",
+      search: "",
+    })
+  })
+
   it("tracks the master-detail selection independently of the editor", () => {
     const { openDetail, openEdit, closeDetail } = useMcpPanelStore.getState()
     openDetail("srv1")

@@ -42,6 +42,11 @@ export interface McpServerRowProps {
   toolCount?: number
   /** How many of those tools the deny rules currently block. */
   deniedToolCount?: number
+  /**
+   * Roving tabindex slot. Exactly one row in the rail carries `0`; the rest
+   * carry `-1`, so Tab enters the list once and the arrow keys move within it.
+   */
+  tabIndex: number
   onOpen: (id: string) => void
   onToggleSelect: (id: string) => void
   onToggleFavorite: (id: string) => void
@@ -73,6 +78,7 @@ export function McpServerRow({
   density,
   toolCount,
   deniedToolCount = 0,
+  tabIndex,
   onOpen,
   onToggleSelect,
   onToggleFavorite,
@@ -91,7 +97,7 @@ export function McpServerRow({
     <div
       role="option"
       aria-selected={active}
-      tabIndex={0}
+      tabIndex={tabIndex}
       onClick={() => onOpen(server.id)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -106,6 +112,7 @@ export function McpServerRow({
         !server.enabled && "opacity-70"
       )}
       data-testid="mcp-server-row"
+      data-server-id={server.id}
       data-active={active}
     >
       <span onClick={(event) => event.stopPropagation()} className="flex shrink-0 items-center">

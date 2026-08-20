@@ -29,10 +29,12 @@ import {
   useMcpPanelStore,
   type McpStatusFilter,
   type McpTransportFilter,
+  type McpTrustFilter,
 } from "@/stores/mcp/mcp-panel-store"
 import { MCP_TRANSPORT_VALUES } from "./mcp-server-utils"
 
 const STATUS_OPTIONS: Exclude<McpStatusFilter, "all">[] = ["enabled", "disabled"]
+const TRUST_OPTIONS: Exclude<McpTrustFilter, "all">[] = ["pending", "legacy", "trusted", "blocked"]
 
 export function McpFilterSheet() {
   const t = useTranslations("mcp")
@@ -42,6 +44,8 @@ export function McpFilterSheet() {
   const statusFilter = useMcpPanelStore((s) => s.statusFilter)
   const setTransportFilter = useMcpPanelStore((s) => s.setTransportFilter)
   const setStatusFilter = useMcpPanelStore((s) => s.setStatusFilter)
+  const trustFilter = useMcpPanelStore((s) => s.trustFilter)
+  const setTrustFilter = useMcpPanelStore((s) => s.setTrustFilter)
   const resetFilters = useMcpPanelStore((s) => s.resetFilters)
 
   return (
@@ -90,6 +94,25 @@ export function McpFilterSheet() {
                 {STATUS_OPTIONS.map((s) => (
                   <SelectItem key={s} value={s} className="text-xs">
                     {t(`filter.${s}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t("filter.trust")}</Label>
+            <Select value={trustFilter} onValueChange={(v) => setTrustFilter(v as McpTrustFilter)}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  {t("filter.all")}
+                </SelectItem>
+                {TRUST_OPTIONS.map((state) => (
+                  <SelectItem key={state} value={state} className="text-xs">
+                    {t(`card.trust.${state}`)}
                   </SelectItem>
                 ))}
               </SelectContent>

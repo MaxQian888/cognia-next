@@ -46,6 +46,7 @@ export function McpMyServersTab() {
   const search = useMcpPanelStore((s) => s.search)
   const transportFilter = useMcpPanelStore((s) => s.transportFilter)
   const statusFilter = useMcpPanelStore((s) => s.statusFilter)
+  const trustFilter = useMcpPanelStore((s) => s.trustFilter)
   const selection = useMcpPanelStore((s) => s.selection)
   const toggleSelection = useMcpPanelStore((s) => s.toggleSelection)
   const selectAll = useMcpPanelStore((s) => s.selectAll)
@@ -73,7 +74,7 @@ export function McpMyServersTab() {
   // One capability query for the whole rail — the alternative (a hook per row)
   // is what made the old grid slow to open with many servers.
   const capabilityRows = useLiveQuery(() => getDb().mcpCapabilityCache.toArray(), [])
-  const { toolCounts, deniedToolCounts } = useMemo(() => {
+  const { toolNames, toolCounts, deniedToolCounts } = useMemo(() => {
     const freshest = new Map<string, string[]>()
     const seenAt = new Map<string, number>()
     for (const row of capabilityRows ?? []) {
@@ -93,7 +94,7 @@ export function McpMyServersTab() {
       const deniedNames = new Set(resolveDeniedToolNames(server, tools))
       denied.set(server.id, tools.filter((tool) => deniedNames.has(tool)).length)
     }
-    return { toolCounts: counts, deniedToolCounts: denied }
+    return { toolNames: freshest, toolCounts: counts, deniedToolCounts: denied }
   }, [capabilityRows, servers])
 
   const visibleServers = useMemo(() => {
@@ -102,6 +103,7 @@ export function McpMyServersTab() {
       if (transportFilter !== "all" && s.transport !== transportFilter) return false
       if (statusFilter === "enabled" && !s.enabled) return false
       if (statusFilter === "disabled" && s.enabled) return false
+      if (trustFilter !== "all" && (s.trust?.state ?? "legacy") !== trustFilter) return false
       if (!q) return true
       const cfg = s.config as { command?: string; url?: string; args?: string[] }
       const haystack = [
@@ -111,12 +113,15 @@ export function McpMyServersTab() {
         cfg.command ?? "",
         cfg.url ?? "",
         (cfg.args ?? []).join(" "),
+        // Tool names too: "which server gives me `create_issue`?" is the
+        // question a tool list makes askable, and the rail is where it lands.
+        (toolNames.get(s.id) ?? []).join(" "),
       ]
         .join(" ")
         .toLowerCase()
       return haystack.includes(q)
     })
-  }, [servers, search, transportFilter, statusFilter])
+  }, [servers, search, transportFilter, statusFilter, trustFilter, toolNames])
 
   // Keep the detail pane pointed at a row that is actually visible. A still-
   // visible selection is left alone; otherwise the first visible server takes

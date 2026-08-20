@@ -70,6 +70,7 @@ beforeEach(() => {
     search: "",
     transportFilter: "all",
     statusFilter: "all",
+    trustFilter: "all",
     filterSheetOpen: false,
   })
 })

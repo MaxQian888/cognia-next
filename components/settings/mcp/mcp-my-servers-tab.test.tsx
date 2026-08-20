@@ -113,6 +113,7 @@ beforeEach(() => {
     search: "",
     transportFilter: "all",
     statusFilter: "all",
+    trustFilter: "all",
     selection: new Set(),
     editorTarget: null,
     detailServerId: null,
@@ -242,6 +243,39 @@ describe("McpMyServersTab", () => {
     useMcpPanelStore.setState({ search: "a" })
     rerender(<McpMyServersTab />)
     await waitFor(() => expect(screen.getByTestId("server-detail")).toHaveTextContent("a"))
+  })
+
+  it("filters by review state, so 'what is waiting on me' is one click", () => {
+    mockServers = [
+      server("a", { trust: { state: "trusted" } }),
+      server("b", { trust: { state: "pending" } }),
+    ]
+    useMcpPanelStore.setState({ trustFilter: "pending" })
+    render(<McpMyServersTab />)
+    expect(screen.getByTestId("server-list")).toHaveTextContent("1")
+  })
+
+  it("treats a pre-governance row as unreviewed for the trust filter", () => {
+    mockServers = [server("a")]
+    useMcpPanelStore.setState({ trustFilter: "legacy" })
+    render(<McpMyServersTab />)
+    expect(screen.getByTestId("server-list")).toHaveTextContent("1")
+  })
+
+  it("counts the trust axis in the active-filter badge", () => {
+    mockServers = [server("a")]
+    useMcpPanelStore.setState({ trustFilter: "pending" })
+    render(<McpMyServersTab />)
+    expect(screen.getByTestId("mcp-filter-count")).toHaveTextContent("1")
+  })
+
+  it("finds a server by a tool it provides", () => {
+    mockServers = [server("a"), server("b")]
+    mockCapabilities = [{ serverId: "b", updatedAt: 1, tools: [{ name: "create_issue" }] }]
+    useMcpPanelStore.setState({ search: "create_issue" })
+    render(<McpMyServersTab />)
+    // The tool list is what makes "which server gives me X?" askable.
+    expect(screen.getByTestId("server-list")).toHaveTextContent("1")
   })
 
   it("derives per-server tool counts from the freshest capability row", () => {

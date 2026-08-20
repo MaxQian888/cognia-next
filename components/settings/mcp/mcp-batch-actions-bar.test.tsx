@@ -96,4 +96,13 @@ describe("McpBatchActionsBar", () => {
     await waitFor(() => expect(requestMcpSync).toHaveBeenCalledTimes(1))
     expect([...requestMcpSync.mock.calls[0][0]]).toEqual(["claude-code"])
   })
+
+  it("opens the export dialog for exactly the selected servers", () => {
+    useMcpPanelStore.setState({ selection: new Set(["b"]) })
+    render(<McpBatchActionsBar servers={servers} />)
+    fireEvent.click(screen.getByTestId("mcp-batch-export"))
+    // An empty id list means "everything" to the dialog, so a selection-scoped
+    // export has to pass the ids explicitly.
+    expect(useMcpPanelStore.getState().exportTarget).toEqual({ serverIds: ["b"] })
+  })
 })

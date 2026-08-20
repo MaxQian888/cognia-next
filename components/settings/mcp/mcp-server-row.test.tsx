@@ -45,6 +45,7 @@ function renderRow(overrides: Partial<React.ComponentProps<typeof McpServerRow>>
       selected={false}
       favorite={false}
       density="comfortable"
+      tabIndex={0}
       {...handlers}
       {...overrides}
     />
@@ -56,6 +57,16 @@ beforeEach(() => {
 })
 
 describe("McpServerRow", () => {
+  it("takes its tabstop from the caller's roving index", () => {
+    renderRow({ tabIndex: -1 })
+    expect(screen.getByTestId("mcp-server-row")).toHaveAttribute("tabindex", "-1")
+  })
+
+  it("exposes its id so the list's arrow handler can find it", () => {
+    renderRow()
+    expect(screen.getByTestId("mcp-server-row")).toHaveAttribute("data-server-id", "mcp_1")
+  })
+
   it("opens the detail pane when the row is clicked", () => {
     renderRow()
     fireEvent.click(screen.getByTestId("mcp-server-row"))
@@ -104,6 +115,7 @@ describe("McpServerRow", () => {
         selected={false}
         favorite={false}
         density="comfortable"
+        tabIndex={0}
         toolCount={12}
         deniedToolCount={3}
         {...handlers}

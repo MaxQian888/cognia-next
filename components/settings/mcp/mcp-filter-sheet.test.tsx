@@ -16,6 +16,7 @@ beforeEach(() => {
     search: "",
     transportFilter: "all",
     statusFilter: "all",
+    trustFilter: "all",
   })
 })
 
@@ -26,6 +27,7 @@ describe("McpFilterSheet", () => {
     expect(screen.getByText("filter.description")).toBeInTheDocument()
     expect(screen.getByText("filter.transport")).toBeInTheDocument()
     expect(screen.getByText("filter.status")).toBeInTheDocument()
+    expect(screen.getByText("filter.trust")).toBeInTheDocument()
   })
 
   it("renders nothing visible when the sheet is closed", () => {
@@ -34,13 +36,20 @@ describe("McpFilterSheet", () => {
     expect(screen.queryByText("filter.transport")).not.toBeInTheDocument()
   })
 
-  it("resets both filter axes via the footer clear button", () => {
-    useMcpPanelStore.setState({ transportFilter: "http", statusFilter: "disabled" })
+  it("resets every filter axis via the footer clear button", () => {
+    useMcpPanelStore.setState({
+      transportFilter: "http",
+      statusFilter: "disabled",
+      trustFilter: "pending",
+      search: "git",
+    })
     render(<McpFilterSheet />)
     fireEvent.click(screen.getByText("list.clearFilters"))
-    const { transportFilter, statusFilter } = useMcpPanelStore.getState()
+    const { transportFilter, statusFilter, trustFilter, search } = useMcpPanelStore.getState()
     expect(transportFilter).toBe("all")
     expect(statusFilter).toBe("all")
+    expect(trustFilter).toBe("all")
+    expect(search).toBe("")
   })
 
   it("closing the sheet via onOpenChange flips the store flag", () => {

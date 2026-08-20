@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { PowerIcon, RefreshCwIcon, Trash2Icon, XIcon } from "lucide-react"
+import { PowerIcon, RefreshCwIcon, ShareIcon, Trash2Icon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ export function McpBatchActionsBar({ servers }: Props) {
   const t = useTranslations("mcp.batch")
   const selection = useMcpPanelStore((s) => s.selection)
   const clear = useMcpPanelStore((s) => s.clearSelection)
+  const openExport = useMcpPanelStore((s) => s.openExport)
   const reduce = useReducedMotion()
   const count = selection.size
 
@@ -112,6 +113,15 @@ export function McpBatchActionsBar({ servers }: Props) {
             <Button size="sm" variant="ghost" onClick={() => void handleSync()}>
               <RefreshCwIcon className="size-3.5 sm:mr-1.5" />
               <span className="hidden sm:inline">{t("sync")}</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => openExport(selected.map((s) => s.id))}
+              data-testid="mcp-batch-export"
+            >
+              <ShareIcon className="size-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">{t("export")}</span>
             </Button>
             <Button
               size="sm"
