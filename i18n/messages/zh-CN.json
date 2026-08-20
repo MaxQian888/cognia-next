@@ -32231,7 +32231,8 @@
         "startAtLogin": {
           "helper": "登录系统时启动轻量终端主机，使 Cognia 尚未打开时远程终端仍可连接。",
           "label": "登录时启动主机"
-        }
+        },
+        "unreachable": "以下设置属于终端主机。当前环境尚未连接任何主机，改动无法生效——请先配对主机，或在主机所在环境中配置。"
       },
       "letterSpacing": {
         "label": "字间距（px）"
@@ -35686,6 +35687,7 @@
         "incompatible": "终端主机与当前应用版本不兼容。",
         "offline": "终端主机离线。",
         "reconnecting": "正在重新连接终端主机…",
+        "remote_access_disabled": "主机已关闭远程终端访问。",
         "resource_limited": "终端主机已达到资源上限。",
         "unauthorized": "此设备没有远程终端权限。",
         "unpaired": "请先配对此设备，再打开远程终端。"

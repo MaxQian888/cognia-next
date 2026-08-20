@@ -32231,7 +32231,8 @@
         "startAtLogin": {
           "helper": "Start the lightweight terminal host when you sign in so remote sessions are reachable before Cognia opens.",
           "label": "Start host at login"
-        }
+        },
+        "unreachable": "These settings belong to the terminal host. This shell is not connected to one, so nothing here can be applied — pair with a host, or configure it where it runs."
       },
       "letterSpacing": {
         "label": "Letter spacing (px)"
@@ -35686,6 +35687,7 @@
         "incompatible": "The terminal host is incompatible with this app build.",
         "offline": "The terminal host is offline.",
         "reconnecting": "Reconnecting to the terminal host…",
+        "remote_access_disabled": "Remote terminal access is switched off on the host.",
         "resource_limited": "The terminal host has reached its resource limit.",
         "unauthorized": "This device is not allowed to use remote terminals.",
         "unpaired": "Pair this device before opening a remote terminal."

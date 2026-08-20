@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+The integrated terminal now works from a browser paired to a Cognia server, instead of only appearing to. Reloading the page reattaches to the sessions the host kept running (previously they were orphaned with no way back — only the mobile screen ever reattached). New terminals spawn the shell you picked: the host reports its own platform and installed shells, and your saved profiles are pushed to it, so a profile no longer fails as "unknown terminal profile" and the shell picker offers what the host actually has rather than what your laptop has. Terminal settings — the host's session and replay limits, and the remote-access switch — now reach the host over a capability-gated call and show what it actually has, rather than writing a local copy nothing read. When a server has remote terminal access switched off, the dock says so and points at the setting, instead of reporting a generic connection failure. The "free the port" quick fix frees it on the host that owns it, and workflow and agent terminal steps run on the host you are attached to instead of refusing with "requires the desktop app".
