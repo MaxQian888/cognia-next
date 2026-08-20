@@ -90,6 +90,7 @@ import { TerminalCommandMenu } from "@/components/terminal/terminal-command-menu
 import { TerminalCompletionPopup } from "@/components/terminal/terminal-completion-popup"
 import { TerminalGhostText } from "@/components/terminal/terminal-ghost-text"
 import { TerminalQuickFix } from "@/components/terminal/terminal-quick-fix"
+import { runQuickFixAction } from "@/lib/terminal/quick-fix/run-action"
 import { TerminalSessionChip } from "@/components/terminal/terminal-session-chip"
 import { TerminalStickyScroll } from "@/components/terminal/terminal-sticky-scroll"
 
@@ -574,27 +575,23 @@ function TerminalInstanceImpl(
     }
   }
 
-  // Dispatch a chosen quick-fix action. `run-command` writes into the PTY
-  // (auto-running only when the matcher set `addNewLine`); `open-url` reuses
-  // the OSC 8 allowlist; `kill-port` frees the port via the Tauri command then
-  // re-runs the original command (VS Code's free-port behaviour).
-  const runQuickFix = async (action: QuickFixAction): Promise<void> => {
-    try {
-      if (action.type === "run-command") {
+  // Dispatch a chosen quick-fix action. The policy lives in
+  // `lib/terminal/quick-fix/run-action.ts` so it can be tested without driving
+  // a command-end event through xterm; this only supplies the effects.
+  const runQuickFix = (action: QuickFixAction): Promise<void> =>
+    runQuickFixAction(action, {
+      write: (data) => {
         const s = getLiveSession(sessionId)
-        if (s) void s.write(action.command + (action.addNewLine ? "\r" : ""))
-      } else if (action.type === "open-url") {
-        openExternalLink(action.url)
-      } else if (action.type === "kill-port") {
-        const { invoke } = await import("@tauri-apps/api/core")
-        await invoke("terminal_kill_port", { port: action.port })
-        const s = getLiveSession(sessionId)
-        if (s) void s.write(action.command + "\r")
-      }
-    } catch {
-      // Best-effort — a quick fix must never break the terminal.
-    }
-  }
+        if (s) void s.write(data)
+      },
+      openUrl: openExternalLink,
+      // Routed, not `invoke`d: the busy port belongs to whichever machine ran
+      // the command, and over ws/webrtc that is the host, not this one.
+      killPort: async (port) => {
+        const { killTerminalPort } = await import("@/lib/terminal/remote-api")
+        return killTerminalPort(port)
+      },
+    })
 
   // Re-anchor the ghost text / popup to the cursor whenever the suffix or
   // popup state changes (covers both keystroke-driven and async-resolved

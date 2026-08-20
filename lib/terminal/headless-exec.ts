@@ -10,8 +10,10 @@
  *      — off (the default) fails closed.
  *   2. `deny` verdicts never run, regardless of any policy.
  *   3. `allow` verdicts run on the active host execution backend: the
- *      companion `terminal_exec` RPC in brain, or the desktop
- *      `terminal_headless_exec` / `terminal_headless_run` commands.
+ *      desktop `terminal_headless_exec` / `terminal_headless_run` commands
+ *      when this shell owns a PTY, otherwise the routed `terminal_exec` RPC —
+ *      which covers the headless brain, a browser paired to a cognia-server,
+ *      and the Capacitor shell alike.
  *   4. `ask` verdicts follow the effective ask-policy
  *      (`input.onAskVerdict` → `settings.terminal.unattendedAskPolicy` →
  *      `"fail"`): fail the step, fall back to the visible-dock consent
@@ -23,6 +25,8 @@
 
 import { classifyCommand } from "@/lib/claude/permissions/command-safety"
 import { useSettingsStore } from "@/stores/settings"
+
+import { selectTerminalTransportChain } from "./pick-transport"
 
 export type UnattendedAskPolicy = "fail" | "consent" | "run"
 
@@ -226,13 +230,19 @@ async function execHeadless(
   source: "workflow" | "agent"
 ): Promise<HeadlessExecOutcome> {
   const { isHeadlessHost } = await import("@/lib/platform/detect")
-  if (isHeadlessHost()) {
-    return execOnHeadlessServer(input, command, verdict, source)
+  const { isTauri } = await import("@/lib/tauri")
+  // Anything without a local PTY runs on the host it is attached to, over the
+  // same routed `terminal_exec` RPC. This used to be gated on `isHeadlessHost()`
+  // alone, so a workflow's terminal step failed outright in a browser paired to
+  // a cognia-server — "requires the desktop app" — even though the RPC it needed
+  // was already there and already capability-gated.
+  if (isHeadlessHost() || (!isTauri() && selectTerminalTransportChain().length > 0)) {
+    return execOnRemoteHost(input, command, verdict, source)
   }
 
-  const { isTauri } = await import("@/lib/tauri")
   if (!isTauri()) {
-    return { ok: false, reason: "headless terminal execution requires the desktop app" }
+    // Web standalone: no host of any kind. There is nothing to run on.
+    return { ok: false, reason: "headless terminal execution requires a connected host" }
   }
   const { invoke } = await import("@tauri-apps/api/core")
   let result: RustHeadlessResult
@@ -294,7 +304,16 @@ async function execHeadless(
   }
 }
 
-async function execOnHeadlessServer(
+/**
+ * Run one command on a host this shell does not own — the headless brain, a
+ * paired cognia-server, or the desktop a phone is attached to.
+ *
+ * The constraints below are the execution plane's, not a policy choice: the
+ * routed `terminal_exec` RPC is a one-shot capture with no session, no sandbox
+ * policy and no shell selection, so anything asking for those is refused by
+ * name rather than run under different rules than the caller asked for.
+ */
+async function execOnRemoteHost(
   input: HeadlessExecInput,
   command: string,
   verdict: "allow" | "ask",
@@ -314,16 +333,16 @@ async function execOnHeadlessServer(
 
   if (input.sessionId) {
     return reject(
-      "persistent headless terminal sessions are unavailable on the server execution plane"
+      "persistent headless terminal sessions are unavailable on the remote execution plane"
     )
   }
 
   const sandboxed = readTerminalSettings()?.sandboxed ?? false
   if (sandboxed) {
-    return reject("sandboxed headless execution is unavailable on the server execution plane")
+    return reject("sandboxed headless execution is unavailable on the remote execution plane")
   }
   if (input.shell?.trim()) {
-    return reject("custom shells are unavailable on the server execution plane")
+    return reject("custom shells are unavailable on the remote execution plane")
   }
 
   const { transport } = await import("@/lib/tauri")

@@ -37,10 +37,13 @@ jest.mock("@/lib/claude/permissions/command-safety", () => {
 })
 
 jest.mock("@/lib/tauri", () => {
-  const state = { headless: false }
+  // `tauri` is deliberately independent of `headless`: a browser paired to a
+  // cognia-server is neither, and conflating them is what hid the bug these
+  // tests cover.
+  const state = { headless: false, tauri: true }
   return {
     __mockHostState: state,
-    isTauri: () => !state.headless,
+    isTauri: () => state.tauri && !state.headless,
     transport: {
       call: jest.fn(async () => ({
         stdout: "server out",
@@ -52,9 +55,14 @@ jest.mock("@/lib/tauri", () => {
   }
 })
 
+let mockChain: string[] = ["tauri-channel"]
+jest.mock("./pick-transport", () => ({
+  selectTerminalTransportChain: () => mockChain,
+}))
+
 jest.mock("@/lib/platform/detect", () => {
   const { __mockHostState } = jest.requireMock("@/lib/tauri") as {
-    __mockHostState: { headless: boolean }
+    __mockHostState: { headless: boolean; tauri: boolean }
   }
   return { isHeadlessHost: () => __mockHostState.headless }
 })
@@ -88,7 +96,7 @@ const { __mockClassifyState } = jest.requireMock("@/lib/claude/permissions/comma
 }
 const { invoke: mockInvoke } = jest.requireMock("@tauri-apps/api/core") as { invoke: jest.Mock }
 const { __mockHostState, transport: mockTransport } = jest.requireMock("@/lib/tauri") as {
-  __mockHostState: { headless: boolean }
+  __mockHostState: { headless: boolean; tauri: boolean }
   transport: { call: jest.Mock }
 }
 const { appendUnattendedExecAudit: mockAudit } = jest.requireMock("@/lib/db/terminal-audit") as {
@@ -103,7 +111,9 @@ async function flushAudit(): Promise<void> {
 }
 
 beforeEach(() => {
+  mockChain = ["tauri-channel"]
   __mockHostState.headless = false
+  __mockHostState.tauri = true
   __mockTerminalSettings.allowUnattendedExecution = true
   __mockTerminalSettings.unattendedAskPolicy = undefined
   __mockTerminalSettings.sandboxed = false
@@ -349,5 +359,69 @@ describe("runHeadlessExec — policy matrix", () => {
     mockAudit.mockRejectedValue(new Error("quota"))
     const out = await runHeadlessExec({ command: "echo hi" })
     expect(out.ok).toBe(true)
+  })
+})
+
+/**
+ * A workflow's terminal step used to fail outright in a browser paired to a
+ * cognia-server — "requires the desktop app" — even though the routed,
+ * capability-gated `terminal_exec` RPC it needed was already there. The gate
+ * was `isHeadlessHost()`, which is true only *inside* the brain.
+ */
+describe("unattended execution on an attached host", () => {
+  beforeEach(() => {
+    __mockHostState.headless = false
+    __mockTerminalSettings.allowUnattendedExecution = true
+    __mockClassifyState.verdict = "allow"
+  })
+
+  it("runs on the paired host from a browser", async () => {
+    __mockHostState.tauri = false
+    mockChain = ["ws", "webrtc"]
+    const out = await runHeadlessExec({ command: "echo hi" })
+    expect(out).toMatchObject({ ok: true, output: "server out", exitCode: 0 })
+    expect(mockTransport.call).toHaveBeenCalledWith(
+      "terminal_exec",
+      expect.objectContaining({ command: "echo hi", shell: true })
+    )
+    // Never the local PTY commands — there is no PTY in this shell.
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("still uses the local PTY commands when this shell owns one", async () => {
+    mockChain = ["tauri-channel"]
+    const out = await runHeadlessExec({ command: "echo hi" })
+    expect(out).toMatchObject({ ok: true })
+    expect(mockInvoke).toHaveBeenCalled()
+    expect(mockTransport.call).not.toHaveBeenCalled()
+  })
+
+  // Web standalone: no host of any kind, and the old copy pointed at the
+  // desktop app as if that were the only option.
+  it("refuses when no host is attached at all", async () => {
+    __mockHostState.tauri = false
+    mockChain = []
+    const out = await runHeadlessExec({ command: "echo hi" })
+    expect(out).toMatchObject({ ok: false })
+    expect((out as { reason: string }).reason).toMatch(/connected host/i)
+    expect(mockTransport.call).not.toHaveBeenCalled()
+  })
+
+  // The routed RPC is a one-shot capture: no session, no sandbox policy, no
+  // shell selection. Refusing by name beats running under different rules than
+  // the caller asked for.
+  it("refuses what the remote plane cannot honour, by name", async () => {
+    __mockHostState.tauri = false
+    mockChain = ["ws"]
+    await expect(runHeadlessExec({ command: "echo hi", sessionId: "s-1" })).resolves.toMatchObject({
+      ok: false,
+    })
+    __mockTerminalSettings.sandboxed = true
+    await expect(runHeadlessExec({ command: "echo hi" })).resolves.toMatchObject({ ok: false })
+    __mockTerminalSettings.sandboxed = false
+    await expect(
+      runHeadlessExec({ command: "echo hi", shell: "/bin/fish" })
+    ).resolves.toMatchObject({ ok: false })
+    expect(mockTransport.call).not.toHaveBeenCalled()
   })
 })

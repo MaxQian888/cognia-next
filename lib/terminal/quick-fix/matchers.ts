@@ -18,8 +18,10 @@
  *     whether it auto-runs; suggestion-derived fixes leave it for the user to
  *     confirm, deterministic fixes auto-run, matching VS Code).
  *   * `open-url`    — open via the existing `openExternalLink` allowlist.
- *   * `kill-port`   — invoke the `terminal_kill_port` Tauri command, then
- *     re-run the original command (VS Code's free-port behaviour).
+ *   * `kill-port`   — free the port through `remote-api.killTerminalPort`,
+ *     which routes to whichever host ran the command, then re-run it (VS
+ *     Code's free-port behaviour). Routed rather than `invoke`d: over
+ *     ws/webrtc the busy port is the host's, not this machine's.
  */
 
 export type CommandExitResult = "success" | "error"
