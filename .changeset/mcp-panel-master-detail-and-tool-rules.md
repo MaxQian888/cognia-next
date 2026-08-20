@@ -9,3 +9,5 @@ Individual MCP tools can now be turned off — by exact name, or with a rule lik
 Adding a server no longer means retyping a README: paste a `claude mcp add …` / `codex mcp add …` line, a bare `npx …` command, or an `mcpServers` JSON block and it is parsed into a reviewable list. The reverse direction exports any server as JSON or an install command for another agent, with stored credentials emitted as references rather than secrets.
 
 On a paired phone or web client, `/me/mcp` can now switch a server or an individual tool off through the offline-capable outbound queue; creating, editing and authenticating a server remain desktop-only.
+
+Smaller things in the same pass: the server list is keyboard-navigable (Tab in once, then arrows, with the detail pane following focus), search matches tool names so you can find the server that provides a given tool, servers can be filtered by review state, and the batch bar can export the current selection.
