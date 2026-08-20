@@ -25,6 +25,7 @@ import { runWorkflow, type RunWorkflowResult } from "@/lib/workflow/runtime/orch
 import type { VisualWorkflow, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
+import { cheapModelHintFromSettings } from "@/lib/ai/routing/cheap-model-hint"
 import { createTeammatePool } from "./team/teammate-pool"
 import { resolveTeamTwinRuntime } from "./team/twin-context"
 import { createTeamNotifier, type TeamNotifierDeps } from "./team/team-notifier"
@@ -565,7 +566,9 @@ export async function runTeamLifecycle(
 
     // ── Build per-run shared state (notifier hoisted above the pre-run gates) ──
     const concurrency = createConcurrencyController(team.config.maxConcurrentTeammates ?? 5)
-    const modelPref = createModelPreferenceController()
+    const modelPref = createModelPreferenceController({
+      resolveCheapModel: cheapModelHintFromSettings,
+    })
     const pool = createTeammatePool({ teammates: workers, teamId, runId })
     // ADR-0090 Phase 7: one budget authority per run tree. The governor owns
     // the root guard (same thresholds/escalations as before); dispatches draw

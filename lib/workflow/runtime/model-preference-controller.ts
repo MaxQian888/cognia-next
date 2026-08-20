@@ -21,6 +21,17 @@ export interface ModelPreferenceController {
 export interface ModelPreferenceControllerOptions {
   /** Model id to recommend after downshift (e.g., "claude-haiku-4-5-20251001"). */
   cheapModel?: string
+  /**
+   * Resolve the cheap lane lazily, at downshift time.
+   *
+   * Preferred over `cheapModel` for every real caller: the cheap lane depends
+   * on the user's enabled providers and routing aliases, which a controller
+   * constructed at run start has no business snapshotting — and one of the two
+   * construction sites is synchronous, so it cannot await the catalog either.
+   * Returning `undefined` is a valid answer and leaves the controller in the
+   * `preferCheap`-only state, which is exactly the historical behaviour.
+   */
+  resolveCheapModel?: () => string | undefined
 }
 
 export function createModelPreferenceController(
@@ -33,9 +44,18 @@ export function createModelPreferenceController(
     get: () => ({ ...state }),
     downshift: () => {
       if (state.preferCheap) return
-      state = opts.cheapModel
-        ? { preferCheap: true, modelHint: opts.cheapModel }
-        : { preferCheap: true }
+      // Resolved here rather than at construction: the answer depends on live
+      // settings, and a resolver that throws must not take the run with it —
+      // a downshift that fails to find a lane still means "prefer cheap".
+      let hint = opts.cheapModel
+      if (!hint && opts.resolveCheapModel) {
+        try {
+          hint = opts.resolveCheapModel()
+        } catch {
+          hint = undefined
+        }
+      }
+      state = hint ? { preferCheap: true, modelHint: hint } : { preferCheap: true }
       for (const fn of listeners) {
         try {
           fn({ ...state })

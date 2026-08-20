@@ -7,7 +7,12 @@ export const ROUTING_CANDIDATE_SET_VERSION = "2026-07-31"
 
 export type CatalogRoutingRole = "fast" | "balanced" | "powerful" | "reasoning" | "coding"
 
-interface RoutingCandidatePolicy {
+/**
+ * Exported so a consumer can state which lane it means without re-declaring
+ * the shape. Deliberately still contains no model ids: a role is a policy over
+ * capabilities and an ordering, never a list.
+ */
+export interface RoutingCandidatePolicy {
   capabilities: ModelCapability[]
   order: "cost" | "quality"
   limit: number

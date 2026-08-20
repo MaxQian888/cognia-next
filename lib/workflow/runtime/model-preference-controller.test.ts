@@ -55,3 +55,43 @@ describe("ModelPreferenceController", () => {
     expect(good).toHaveBeenCalled()
   })
 })
+
+describe("lazy cheap-lane resolution", () => {
+  it("asks the resolver at downshift time, not at construction", () => {
+    // The regression: both production call sites constructed the controller
+    // with no options, so `cheapModel` was always undefined and downshift()
+    // set a flag nobody read. The budget guard's documented cost escalation
+    // therefore never changed a model.
+    const resolveCheapModel = jest.fn(() => "fast")
+    const ctrl = createModelPreferenceController({ resolveCheapModel })
+    expect(resolveCheapModel).not.toHaveBeenCalled()
+
+    ctrl.downshift()
+    expect(resolveCheapModel).toHaveBeenCalledTimes(1)
+    expect(ctrl.get()).toEqual({ preferCheap: true, modelHint: "fast" })
+  })
+
+  it("keeps the preferCheap-only state when there is no cheap lane", () => {
+    const ctrl = createModelPreferenceController({ resolveCheapModel: () => undefined })
+    ctrl.downshift()
+    expect(ctrl.get()).toEqual({ preferCheap: true })
+  })
+
+  it("never lets a throwing resolver take the run with it", () => {
+    const ctrl = createModelPreferenceController({
+      resolveCheapModel: () => {
+        throw new Error("settings unavailable")
+      },
+    })
+    expect(() => ctrl.downshift()).not.toThrow()
+    expect(ctrl.get()).toEqual({ preferCheap: true })
+  })
+
+  it("still honours an explicit cheapModel without calling the resolver", () => {
+    const resolveCheapModel = jest.fn(() => "fast")
+    const ctrl = createModelPreferenceController({ cheapModel: "pinned", resolveCheapModel })
+    ctrl.downshift()
+    expect(ctrl.get().modelHint).toBe("pinned")
+    expect(resolveCheapModel).not.toHaveBeenCalled()
+  })
+})

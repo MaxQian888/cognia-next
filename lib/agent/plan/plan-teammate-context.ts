@@ -21,6 +21,7 @@
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
+import { cheapModelHintFromSettings } from "@/lib/ai/routing/cheap-model-hint"
 import { createTeammatePool } from "@/lib/ai/agent/team/teammate-pool"
 import { createBudgetGuard } from "@/lib/ai/agent/team/budget-guard"
 import { createTeamNotifier } from "@/lib/ai/agent/team/team-notifier"
@@ -51,7 +52,9 @@ export function createPlanTeammateRunContext(
   const { runId, team, teammates } = input
 
   const concurrency = createConcurrencyController(team.config?.maxConcurrentTeammates ?? 5)
-  const modelPref = createModelPreferenceController()
+  const modelPref = createModelPreferenceController({
+    resolveCheapModel: cheapModelHintFromSettings,
+  })
   const notifier = createTeamNotifier({ runId, teamId: team.id })
   const pool = createTeammatePool({ teammates, teamId: team.id, runId })
   const budget = createBudgetGuard({
