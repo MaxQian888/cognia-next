@@ -619,6 +619,133 @@ pub async fn terminal_host_remote_list(
         .map_err(|error| format!("terminal session list is invalid: {error}"))
 }
 
+/// Read the host's own settings, for a client that cannot reach the local
+/// `terminal_host_service` command.
+///
+/// Host-neutral: the settings live in a file next to the terminal host, not in
+/// Tauri state, so this is the same answer on a desktop and on a headless
+/// `cognia-server`.
+pub async fn terminal_host_remote_status() -> Result<TerminalHostStatus, String> {
+    let endpoint = default_terminal_host_endpoint();
+    let settings = tokio::task::spawn_blocking(load_terminal_host_settings)
+        .await
+        .map_err(|error| format!("terminal host settings task failed: {error}"))??;
+    Ok(TerminalHostStatus {
+        running: true,
+        endpoint,
+        settings,
+        descriptor: None,
+    })
+}
+
+/// Apply host settings on behalf of an authenticated remote administrator.
+///
+/// Connects to the terminal host as a **local** client, which is what lets the
+/// config actually land: `TerminalHost::update_config` refuses non-local
+/// connections on purpose, so a paired device can never rewrite host state by
+/// talking to the socket itself. The authority here is the RPC layer's
+/// `host.admin` capability check, which is a stronger gate than the desktop
+/// toggle it mirrors — and it is the only way to turn remote terminal access
+/// on for a headless server that was started without `--allow-remote-terminal`,
+/// short of shelling into the box.
+///
+/// Rolls the live config back if persisting fails, so the running host and the
+/// settings file cannot disagree about what was configured.
+pub async fn terminal_host_remote_configure(
+    app: Option<&tauri::AppHandle>,
+    updated: TerminalHostSettings,
+) -> Result<TerminalHostStatus, String> {
+    let config = updated.host_config()?;
+    let previous = tokio::task::spawn_blocking(load_terminal_host_settings)
+        .await
+        .map_err(|error| format!("terminal host settings task failed: {error}"))??;
+    let endpoint = default_terminal_host_endpoint();
+    let mut stream =
+        connect_terminal_host_client(app, ClientIdentity::local("companion-rpc:configure")).await?;
+    request_over_host_stream(
+        &mut stream,
+        TerminalFrame::command(
+            FrameKind::Hello,
+            Uuid::nil(),
+            1,
+            serde_json::to_vec(&serde_json::json!({ "config": config }))
+                .map_err(|error| error.to_string())?,
+        ),
+    )
+    .await?;
+
+    let persisted = updated.clone();
+    if let Err(error) = tokio::task::spawn_blocking(move || save_terminal_host_settings(&persisted))
+        .await
+        .map_err(|task| format!("terminal host settings task failed: {task}"))?
+    {
+        if let Ok(rollback) = previous.host_config() {
+            let _ = request_over_host_stream(
+                &mut stream,
+                TerminalFrame::command(
+                    FrameKind::Hello,
+                    Uuid::nil(),
+                    2,
+                    serde_json::to_vec(&serde_json::json!({ "config": rollback }))
+                        .unwrap_or_default(),
+                ),
+            )
+            .await;
+        }
+        return Err(error);
+    }
+
+    Ok(TerminalHostStatus {
+        running: true,
+        endpoint,
+        settings: updated,
+        descriptor: None,
+    })
+}
+
+/// Install a paired device's terminal profiles on the host.
+///
+/// This is what makes a remote shell choice mean anything. A remote spawn frame
+/// carries a profile id and nothing else — `TerminalHost::spawn_local` refuses
+/// non-local identities — so before this existed, a browser's picker selection
+/// was discarded and the host fell back to whichever profile happened to be
+/// installed. On a headless server that was only the bootstrap `default`, and
+/// every configured profile id came back "unknown terminal profile".
+///
+/// Scoped to `device_id` so one device's sync cannot erase another's: the
+/// shared profile map is *replaced* by `replace_synchronized_profiles`, so a
+/// phone and a desktop writing into it would take turns deleting each other.
+pub async fn terminal_host_remote_sync_profiles(
+    app: Option<&tauri::AppHandle>,
+    device_id: &str,
+    profiles: Vec<serde_json::Value>,
+) -> Result<usize, String> {
+    if device_id.trim().is_empty() {
+        return Err("deviceId is required".to_string());
+    }
+    let mut stream = connect_terminal_host_client(
+        app,
+        ClientIdentity::local(format!("companion-rpc:profiles:{device_id}")),
+    )
+    .await?;
+    let count = profiles.len();
+    request_over_host_stream(
+        &mut stream,
+        TerminalFrame::command(
+            FrameKind::Hello,
+            Uuid::nil(),
+            1,
+            serde_json::to_vec(&serde_json::json!({
+                "onBehalfOfDevice": device_id,
+                "profiles": profiles,
+            }))
+            .map_err(|error| error.to_string())?,
+        ),
+    )
+    .await?;
+    Ok(count)
+}
+
 pub async fn terminal_host_remote_kill(
     app: Option<&tauri::AppHandle>,
     device_id: &str,

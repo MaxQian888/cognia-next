@@ -11871,6 +11871,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "terminal_host_configure",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "terminal_host_service",
       "target": "client",
       "operation": "side-effect",
@@ -11879,6 +11891,30 @@
       "approval": "none",
       "idempotency": "required",
       "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "terminal_host_status",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "terminal_host_sync_profiles",
+      "target": "execution",
+      "operation": "write",
+      "capability": "terminal.open",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },

@@ -29,6 +29,7 @@
  */
 
 import { ensureHostCapabilities } from "@/lib/terminal/host-capabilities"
+import { ensureTerminalHostProfilesSynced } from "@/lib/terminal/host-profiles"
 import { findProfile, profileToSpawnFields, type TerminalProfile } from "@/lib/terminal/profiles"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { spawnFromDock, type SpawnOutcome } from "@/lib/terminal/spawn-orchestrator"
@@ -71,6 +72,12 @@ export async function spawnDefaultTerminal(
   const sandboxed = terminal.sandboxed ?? false
   const rows = opts.rows ?? 24
   const cols = opts.cols ?? 80
+
+  // A remote host only ever receives a profile *id* — the shell, args, cwd and
+  // env below never cross the wire — so it has to have been told what that id
+  // means before the spawn frame arrives, or it answers "unknown terminal
+  // profile". Shares boot's sync, so this is normally already settled.
+  await ensureTerminalHostProfilesSynced()
 
   // A profile carries its own shell, args, cwd and env, so resolve it first and
   // only fall through when it is gone or has a blank shell.

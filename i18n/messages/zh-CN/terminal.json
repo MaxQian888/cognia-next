@@ -104,15 +104,15 @@
     "sshCredentialRequired": "请先在 设置 → 终端 中为「{name}」设置密码，然后再连接。"
   },
   "emptyState": {
-    "desktop": {
-      "action": "+ 新建终端",
-      "body": "点击下方按钮启动 shell，或按 Ctrl+` 在任意页面切换面板。",
-      "title": "暂无终端"
-    },
     "cloud": {
       "action": "+ 新建终端",
       "body": "新建的终端将在已配对的 Cognia 服务器上启动。若创建被拒绝，说明服务器启动时未开启远程终端访问。",
       "title": "服务器上暂无终端"
+    },
+    "desktop": {
+      "action": "+ 新建终端",
+      "body": "点击下方按钮启动 shell，或按 Ctrl+` 在任意页面切换面板。",
+      "title": "暂无终端"
     },
     "mobile": {
       "action": "+ 新建终端",
@@ -140,6 +140,28 @@
     "expand": "展开输出",
     "linesHidden": "已隐藏 {count} 行"
   },
+  "forwards": {
+    "active": "{count} 个连接",
+    "close": "关闭端口转发",
+    "direction": {
+      "local": "本地 (-L)",
+      "remote": "远程 (-R)"
+    },
+    "open": "显示端口转发",
+    "queued": "{count} 个等待中",
+    "state": {
+      "failed": "失败",
+      "listening": "监听中",
+      "starting": "启动中…",
+      "stopped": "已关闭",
+      "waiting": "等待连接恢复"
+    },
+    "title": "端口转发",
+    "toggle": {
+      "local": "启用或停用本地转发 {summary}",
+      "remote": "启用或停用远程转发 {summary}"
+    }
+  },
   "ghost": {
     "acceptHint": "Tab"
   },
@@ -165,6 +187,7 @@
       "incompatible": "终端主机与当前应用版本不兼容。",
       "offline": "终端主机离线。",
       "reconnecting": "正在重新连接终端主机…",
+      "remote_access_disabled": "主机已关闭远程终端访问。",
       "resource_limited": "终端主机已达到资源上限。",
       "unauthorized": "此设备没有远程终端权限。",
       "unpaired": "请先配对此设备，再打开远程终端。"
@@ -257,29 +280,29 @@
     "takeoverConfirm": "要接管此会话吗？当前控制者将变为只读。"
   },
   "share": {
-    "title": "分享终端",
     "description": "持有远程终端授权的已配对设备会通过伴侣链路接入这个宿主会话，并共用同一把控制权租约：同一时刻只有一个控制者，其余只读。不会复制任何内容，也不会生成链接。",
-    "remoteAccessOff": "本机的远程终端访问已关闭，在「设置 → 终端」中打开之前任何设备都无法接入。",
-    "openTerminalSettings": "打开终端设置",
-    "participants": {
-      "title": "本会话中",
-      "notLive": "此会话未在本窗口中接入。",
-      "unknown": "{count, plural, =0 {宿主未报告任何已接入客户端} other {已接入 # 个客户端 — 该宿主不报告具体身份}}",
-      "thisDevice": "本设备",
-      "controller": "控制者",
-      "viewer": "查看者"
-    },
     "devices": {
-      "title": "已配对设备",
-      "scope": "该授权作用于本机的所有终端，而不仅是当前会话。",
-      "empty": "还没有已配对设备。先配对手机或另一台 Cognia 才能分享。",
-      "pair": "配对设备",
       "attached": "已接入",
       "blocked": "已撤销或已暂停",
+      "empty": "还没有已配对设备。先配对手机或另一台 Cognia 才能分享。",
       "granted": "可以接入本机的终端",
       "notGranted": "无法接入 — 打开以分享",
+      "pair": "配对设备",
+      "scope": "该授权作用于本机的所有终端，而不仅是当前会话。",
+      "title": "已配对设备",
       "toggleAria": "允许 {label} 接入终端"
-    }
+    },
+    "openTerminalSettings": "打开终端设置",
+    "participants": {
+      "controller": "控制者",
+      "notLive": "此会话未在本窗口中接入。",
+      "thisDevice": "本设备",
+      "title": "本会话中",
+      "unknown": "{count, plural, =0 {宿主未报告任何已接入客户端} other {已接入 # 个客户端 — 该宿主不报告具体身份}}",
+      "viewer": "查看者"
+    },
+    "remoteAccessOff": "本机的远程终端访问已关闭，在「设置 → 终端」中打开之前任何设备都无法接入。",
+    "title": "分享终端"
   },
   "shellPicker": {
     "auto": "默认 Shell",
@@ -360,27 +383,5 @@
     "run": "运行",
     "selectPlaceholder": "请选择",
     "title": "填写模板变量"
-  },
-  "forwards": {
-    "title": "端口转发",
-    "open": "显示端口转发",
-    "close": "关闭端口转发",
-    "active": "{count} 个连接",
-    "queued": "{count} 个等待中",
-    "direction": {
-      "local": "本地 (-L)",
-      "remote": "远程 (-R)"
-    },
-    "state": {
-      "stopped": "已关闭",
-      "starting": "启动中…",
-      "listening": "监听中",
-      "waiting": "等待连接恢复",
-      "failed": "失败"
-    },
-    "toggle": {
-      "local": "启用或停用本地转发 {summary}",
-      "remote": "启用或停用远程转发 {summary}"
-    }
   }
 }

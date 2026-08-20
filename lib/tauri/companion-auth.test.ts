@@ -1,6 +1,8 @@
 import { decodePairPayload, encodePairPayload } from "@/lib/qr/pair-payload"
 import {
   clearCompanionAccessTokens,
+  CompanionApiError,
+  companionErrorCode,
   devicePlatformLabel,
   issueSocketTicket,
   registerCompanionDevice,
@@ -69,6 +71,61 @@ describe("companion auth lifecycle", () => {
       )
     ).rejects.toThrow("browser socket tickets require a sessionId")
     expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  // Two refusals can share a status and a shape but need opposite remedies: a
+  // missing capability wants a grant from an owner, a host-wide switch wants
+  // the switch. Callers were left string-matching English server copy to tell
+  // them apart — `lib/terminal/host-state.ts` classifies on the code instead.
+  it("carries the refusal code alongside the message", async () => {
+    const fetcher = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: {
+          code: "terminal_remote_access_disabled",
+          message: "remote terminal access is disabled on this host",
+        },
+      }),
+    })
+
+    const error = await issueSocketTicket(
+      {
+        baseUrl: "https://host.test",
+        serviceToken: "service-token",
+        deviceId: "device-a",
+        serverVersion: "1.0.0",
+      },
+      "terminal",
+      fetcher
+    ).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(CompanionApiError)
+    expect(companionErrorCode(error)).toBe("terminal_remote_access_disabled")
+    expect((error as Error).message).toBe("remote terminal access is disabled on this host")
+    expect((error as CompanionApiError).status).toBe(403)
+  })
+
+  it("reports no code when the host did not send one", async () => {
+    const fetcher = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => null,
+    })
+
+    const error = await issueSocketTicket(
+      {
+        baseUrl: "https://host.test",
+        serviceToken: "service-token",
+        deviceId: "device-a",
+        serverVersion: "1.0.0",
+      },
+      "terminal",
+      fetcher
+    ).catch((caught: unknown) => caught)
+
+    expect(companionErrorCode(error)).toBe("")
+    expect((error as Error).message).toBe("HTTP 500")
   })
 
   it("requests the dedicated worker socket channel without path credentials", async () => {

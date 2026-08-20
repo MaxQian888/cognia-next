@@ -18,6 +18,17 @@ jest.mock("@/stores/terminal/terminal-store", () => ({
   useTerminalStore: { getState: () => ({ restorePersistedLayout }) },
 }))
 
+let profileSyncSettled = false
+const mockEnsureProfiles = jest.fn(
+  () =>
+    new Promise<void>((resolve) => {
+      if (profileSyncSettled) resolve()
+    })
+)
+jest.mock("./host-profiles", () => ({
+  ensureTerminalHostProfilesSynced: () => mockEnsureProfiles(),
+}))
+
 import { __resetBootReattachForTests, bootReattachTerminals } from "./boot-reattach"
 
 beforeEach(() => {
@@ -26,6 +37,8 @@ beforeEach(() => {
   mockRehydrate.mockClear()
   mockRehydrate.mockResolvedValue({ restored: 0, failed: 0 })
   restorePersistedLayout.mockClear()
+  mockEnsureProfiles.mockClear()
+  profileSyncSettled = true
 })
 
 describe("bootReattachTerminals", () => {
@@ -64,6 +77,24 @@ describe("bootReattachTerminals", () => {
     await Promise.all([bootReattachTerminals(), bootReattachTerminals(), bootReattachTerminals()])
     await bootReattachTerminals()
     expect(mockRehydrate).toHaveBeenCalledTimes(1)
+  })
+
+  // Profiles are needed by the next *spawn*, not by reattaching — and the sync
+  // waits on the settings store, which must never be able to hold the
+  // reattach hostage. The spawn path awaits the same shared promise, so
+  // nothing can outrun it.
+  it("starts the profile sync without waiting for it", async () => {
+    mockChain = ["ws"]
+    profileSyncSettled = false
+    await bootReattachTerminals()
+    expect(mockEnsureProfiles).toHaveBeenCalledTimes(1)
+    expect(mockRehydrate).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not sync profiles when there is no host", async () => {
+    mockChain = []
+    await bootReattachTerminals()
+    expect(mockEnsureProfiles).not.toHaveBeenCalled()
   })
 
   it("does not let a failed reattach escape into boot", async () => {

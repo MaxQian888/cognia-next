@@ -24,8 +24,15 @@
  * Idempotent by construction: the region mounts twice — once per dock slot —
  * and reattaching the same PTY twice would wire two logical streams to one
  * session. Concurrent callers share the first call's promise.
+ *
+ * It also pushes the user's terminal profiles, which the desktop initializer
+ * does on its own path. That is not cosmetic over a remote transport: a remote
+ * spawn frame names a profile and carries nothing else, so a profile the host
+ * has never been told about comes back "unknown terminal profile" and the
+ * shell the user picked is silently replaced by the host's bootstrap default.
  */
 
+import { ensureTerminalHostProfilesSynced } from "./host-profiles"
 import { selectTerminalTransportChain } from "./pick-transport"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
@@ -57,6 +64,12 @@ async function run(): Promise<void> {
     useTerminalStore.getState().restorePersistedLayout()
     return
   }
+  // Started, not awaited. Reattaching only touches sessions that already
+  // exist, so it does not need the profiles — and the sync waits for the
+  // settings store, which must never be able to hold the reattach hostage.
+  // The spawn path awaits the same shared promise, so a spawn still cannot
+  // outrun it.
+  void ensureTerminalHostProfilesSynced()
   try {
     const { rehydrateTerminals } = await import("./rehydrate")
     await rehydrateTerminals()

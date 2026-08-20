@@ -15,9 +15,12 @@ export function TerminalHostStateBanner({
   const t = useTranslations("terminal.hostState")
   const state = useTerminalStore((value) => value.hostState)
   if (state === "online") return null
+  // Which button helps. Everything here is fixed in settings, not by retrying;
+  // `offline` and `reconnecting` are the two a retry can actually resolve.
   const settingsAction =
     state === "unpaired" ||
     state === "unauthorized" ||
+    state === "remote_access_disabled" ||
     state === "resource_limited" ||
     state === "incompatible"
 

@@ -104,15 +104,15 @@
     "sshCredentialRequired": "Set a password for “{name}” in Settings → Terminal before connecting."
   },
   "emptyState": {
-    "desktop": {
-      "action": "+ New terminal",
-      "body": "Spawn a shell with the button below, or press Ctrl+` to toggle the dock anywhere in the app.",
-      "title": "No terminals yet"
-    },
     "cloud": {
       "action": "+ New terminal",
       "body": "New terminals open on the paired Cognia server. If a spawn is refused, the server must be started with remote terminal access enabled.",
       "title": "No terminals on the server"
+    },
+    "desktop": {
+      "action": "+ New terminal",
+      "body": "Spawn a shell with the button below, or press Ctrl+` to toggle the dock anywhere in the app.",
+      "title": "No terminals yet"
     },
     "mobile": {
       "action": "+ New terminal",
@@ -140,6 +140,28 @@
     "expand": "Unfold output",
     "linesHidden": "{count} lines hidden"
   },
+  "forwards": {
+    "active": "{count} open",
+    "close": "Close port forwards",
+    "direction": {
+      "local": "Local (-L)",
+      "remote": "Remote (-R)"
+    },
+    "open": "Show port forwards",
+    "queued": "{count} waiting",
+    "state": {
+      "failed": "Failed",
+      "listening": "Listening",
+      "starting": "Starting…",
+      "stopped": "Off",
+      "waiting": "Waiting for the connection"
+    },
+    "title": "Port forwards",
+    "toggle": {
+      "local": "Enable or disable the local forward {summary}",
+      "remote": "Enable or disable the remote forward {summary}"
+    }
+  },
   "ghost": {
     "acceptHint": "Tab"
   },
@@ -165,6 +187,7 @@
       "incompatible": "The terminal host is incompatible with this app build.",
       "offline": "The terminal host is offline.",
       "reconnecting": "Reconnecting to the terminal host…",
+      "remote_access_disabled": "Remote terminal access is switched off on the host.",
       "resource_limited": "The terminal host has reached its resource limit.",
       "unauthorized": "This device is not allowed to use remote terminals.",
       "unpaired": "Pair this device before opening a remote terminal."
@@ -257,29 +280,29 @@
     "takeoverConfirm": "Take control of this session? The current controller will become read-only."
   },
   "share": {
-    "title": "Share terminal",
     "description": "Paired devices with the remote-terminal grant attach to this host session over the companion link and share the same control lease: one controller at a time, everyone else read-only. Nothing is copied and no link is created.",
-    "remoteAccessOff": "Remote terminal access is turned off on this host, so no device can attach until it is enabled in Settings → Terminal.",
-    "openTerminalSettings": "Open terminal settings",
-    "participants": {
-      "title": "In this session",
-      "notLive": "This session is not attached in this window.",
-      "unknown": "{count, plural, =0 {No attached clients reported} one {# attached client — this host does not report who} other {# attached clients — this host does not report who}}",
-      "thisDevice": "This device",
-      "controller": "Controller",
-      "viewer": "Viewer"
-    },
     "devices": {
-      "title": "Paired devices",
-      "scope": "The grant applies to every terminal on this host, not just this session.",
-      "empty": "No paired devices yet. Pair a phone or another Cognia to share with it.",
-      "pair": "Pair a device",
       "attached": "Attached",
       "blocked": "Revoked or paused",
+      "empty": "No paired devices yet. Pair a phone or another Cognia to share with it.",
       "granted": "Can attach to terminals on this host",
       "notGranted": "Cannot attach — turn on to share",
+      "pair": "Pair a device",
+      "scope": "The grant applies to every terminal on this host, not just this session.",
+      "title": "Paired devices",
       "toggleAria": "Allow {label} to attach to terminals"
-    }
+    },
+    "openTerminalSettings": "Open terminal settings",
+    "participants": {
+      "controller": "Controller",
+      "notLive": "This session is not attached in this window.",
+      "thisDevice": "This device",
+      "title": "In this session",
+      "unknown": "{count, plural, =0 {No attached clients reported} one {# attached client — this host does not report who} other {# attached clients — this host does not report who}}",
+      "viewer": "Viewer"
+    },
+    "remoteAccessOff": "Remote terminal access is turned off on this host, so no device can attach until it is enabled in Settings → Terminal.",
+    "title": "Share terminal"
   },
   "shellPicker": {
     "auto": "Default shell",
@@ -360,27 +383,5 @@
     "run": "Run",
     "selectPlaceholder": "Choose an option",
     "title": "Fill template variables"
-  },
-  "forwards": {
-    "title": "Port forwards",
-    "open": "Show port forwards",
-    "close": "Close port forwards",
-    "active": "{count} open",
-    "queued": "{count} waiting",
-    "direction": {
-      "local": "Local (-L)",
-      "remote": "Remote (-R)"
-    },
-    "state": {
-      "stopped": "Off",
-      "starting": "Starting…",
-      "listening": "Listening",
-      "waiting": "Waiting for the connection",
-      "failed": "Failed"
-    },
-    "toggle": {
-      "local": "Enable or disable the local forward {summary}",
-      "remote": "Enable or disable the remote forward {summary}"
-    }
   }
 }

@@ -110,14 +110,49 @@ function pickSpawnChain(): Array<(req: SpawnRequest) => Promise<BaseTerminalSess
         chain.push(TerminalSession.spawn.bind(TerminalSession))
         break
       case "ws":
-        chain.push(RemoteTerminalSession.spawn.bind(RemoteTerminalSession))
+        chain.push(withRemoteProfile(RemoteTerminalSession.spawn.bind(RemoteTerminalSession)))
         break
       case "webrtc":
-        chain.push(RemoteTerminalSession.spawnWan.bind(RemoteTerminalSession))
+        chain.push(withRemoteProfile(RemoteTerminalSession.spawnWan.bind(RemoteTerminalSession)))
         break
     }
   }
   return chain
+}
+
+/**
+ * Make a remote spawn actually spawn what was asked for.
+ *
+ * A remote Spawn frame carries a profile **id and nothing else** — the host's
+ * `spawn_local` refuses non-local identities, so `shell`, `cwd` and `env` are
+ * dropped in transit. That is deliberate (it stops a paired device smuggling an
+ * environment into a host PTY down the streaming socket), but it also meant the
+ * shell a user picked was silently replaced by whatever profile the host
+ * happened to have — and on a headless host that was only its bootstrap
+ * `default`, so every configured profile id came back "unknown terminal
+ * profile".
+ *
+ * `ensureRemoteSpawnProfile` installs the request as a profile first, through
+ * the `terminal.open`-gated sync RPC, and returns the id to name. The socket
+ * keeps its narrow contract; the exposure moves to the channel that is
+ * capability-checked and audited.
+ *
+ * Local spawns are untouched: they send the request itself.
+ */
+function withRemoteProfile(
+  spawn: (req: SpawnRequest) => Promise<BaseTerminalSession>
+): (req: SpawnRequest) => Promise<BaseTerminalSession> {
+  return async (req) => {
+    const { ensureRemoteSpawnProfile } = await import("./host-profiles")
+    let profileId = req.profileId
+    try {
+      profileId = await ensureRemoteSpawnProfile(req)
+    } catch {
+      // A host that refuses the sync may still know the id the caller named;
+      // let the spawn try rather than failing before it has been attempted.
+    }
+    return spawn({ ...req, profileId })
+  }
 }
 
 /**

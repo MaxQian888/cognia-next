@@ -163,6 +163,42 @@ impl DispatchHost {
         crate::terminal_host_bridge::terminal_host_remote_kill(app, device_id, session_id).await
     }
 
+    /// The terminal host's own settings, as the file on disk has them.
+    ///
+    /// Host-neutral: they live next to the terminal host, not in Tauri state,
+    /// so the desktop and a headless `cognia-server` answer identically.
+    pub async fn terminal_host_status(
+        &self,
+    ) -> Result<crate::terminal_host_bridge::TerminalHostStatus, String> {
+        crate::terminal_host_bridge::terminal_host_remote_status().await
+    }
+
+    /// Apply terminal-host settings on behalf of an authenticated administrator.
+    pub async fn terminal_host_configure(
+        &self,
+        settings: crate::terminal_host_service::TerminalHostSettings,
+    ) -> Result<crate::terminal_host_bridge::TerminalHostStatus, String> {
+        let app = match self {
+            Self::Tauri(app) => Some(app),
+            Self::Headless(_) => None,
+        };
+        crate::terminal_host_bridge::terminal_host_remote_configure(app, settings).await
+    }
+
+    /// Install a paired device's terminal profiles on the host.
+    pub async fn terminal_host_sync_profiles(
+        &self,
+        device_id: &str,
+        profiles: Vec<serde_json::Value>,
+    ) -> Result<usize, String> {
+        let app = match self {
+            Self::Tauri(app) => Some(app),
+            Self::Headless(_) => None,
+        };
+        crate::terminal_host_bridge::terminal_host_remote_sync_profiles(app, device_id, profiles)
+            .await
+    }
+
     /// The sidecar host seam for this host — what `sidecar::spawn` needs.
     pub fn sidecar_host(&self) -> Arc<dyn crate::claude::host::SidecarHost> {
         match self {

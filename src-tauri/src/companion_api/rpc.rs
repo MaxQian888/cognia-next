@@ -766,6 +766,16 @@ const KNOWN_COMMANDS: &[&str] = &[
     // "free a busy port" quick fix — both mirror the local Tauri commands.
     "terminal_complete_paths",
     "terminal_kill_port",
+    // Terminal-host administration. The desktop drives these through the local
+    // `terminal_host_service` command, which no remote client can reach — so a
+    // browser's terminal settings used to write a local mirror and nothing
+    // else, and its profiles never reached the host at all (a remote spawn
+    // names a profile and nothing else, so every one came back "unknown
+    // terminal profile"). `provision` has no remote arm on purpose: minting a
+    // host descriptor for a device key stays a decision made at the host.
+    "terminal_host_status",
+    "terminal_host_configure",
+    "terminal_host_sync_profiles",
     // ── Plugins ─────────────────────────────────────────────────────────────
     // Native install/uninstall manage the on-disk plugin dir + Rust snapshot.
     // Headless mutations publish a Node-brain reconciliation event; desktop
@@ -1366,6 +1376,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     "terminal_exec",
     // Kills whatever process listens on a port — same elevation as exec.
     "terminal_kill_port",
+    // Rewrites the host's terminal limits and its remote-access switch, and
+    // decides which shells a device can name — every one of them decides what
+    // a later `terminal.open` can do.
+    "terminal_host_configure",
+    "terminal_host_sync_profiles",
     // Raw absolute-path *directory listing* — `cwd` is unconfined, so a
     // chat-only paired device could enumerate the whole filesystem. Same
     // asymmetry-closing rationale as `read_text_file` above; the devices

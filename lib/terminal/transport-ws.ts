@@ -22,7 +22,7 @@ import { recordHostCapabilities } from "./host-capabilities"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isCapacitor } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
-import { issueSocketTicket } from "@/lib/tauri/companion-auth"
+import { companionErrorCode, issueSocketTicket } from "@/lib/tauri/companion-auth"
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 
 import type { IntegrationEvent, SessionInfo, SpawnRequest, TerminalReplayGap } from "./types"
@@ -112,10 +112,13 @@ const defaultTicketIssuer: SocketTicketIssuer = async (endpoint) => {
   try {
     return await issueSocketTicket(endpoint, "terminal")
   } catch (error) {
-    throw new TerminalSessionError(
-      "unauthorized",
-      error instanceof Error ? error.message : "terminal socket ticket request failed"
-    )
+    const message = error instanceof Error ? error.message : "terminal socket ticket request failed"
+    // Keep the refusal code in the message. `classifyTerminalHostError` reads
+    // it to tell "the host's remote-terminal switch is off" (fixed in settings)
+    // apart from "this device lacks the grant" (fixed by an owner) — two 403s
+    // with opposite remedies that the human copy alone cannot separate.
+    const code = companionErrorCode(error)
+    throw new TerminalSessionError("unauthorized", code ? `${code}: ${message}` : message)
   }
 }
 

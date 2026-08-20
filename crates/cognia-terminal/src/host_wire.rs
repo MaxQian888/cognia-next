@@ -41,6 +41,16 @@ struct HelloPayload {
     profiles: Option<Vec<ProfilePayload>>,
     ssh_profiles: Option<Vec<SshProfilePayload>>,
     path_injection: Option<PathInjectionPayload>,
+    /// Install `profiles` as the set owned by this paired device instead of
+    /// replacing the shared one.
+    ///
+    /// Only the host process sends this, servicing an authenticated
+    /// `terminal_host_sync_profiles` RPC — the frame is still refused unless
+    /// the connection is local, so a paired client cannot reach it by talking
+    /// to the socket itself. It exists because a remote spawn names a profile
+    /// and nothing else, which used to leave a headless host with only its
+    /// bootstrap `default` and every configured profile id unknown.
+    on_behalf_of_device: Option<String>,
 }
 
 /// Wire form of [`PathInjection`].
@@ -230,22 +240,47 @@ async fn dispatch_command(
                 if let Some(path) = payload.path_injection {
                     host.set_path_injection(connection_id, path.into())?;
                 }
-                if payload.profiles.is_some() || payload.ssh_profiles.is_some() {
-                    host.replace_synchronized_profiles(
-                        connection_id,
-                        payload
-                            .profiles
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|profile| (profile.profile_id, profile.request))
-                            .collect::<HashMap<_, _>>(),
-                        payload
-                            .ssh_profiles
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|profile| (profile.profile_id, profile.request))
-                            .collect::<HashMap<_, _>>(),
-                    )?;
+                match payload.on_behalf_of_device.as_deref() {
+                    // A device's set is replaced within its own namespace, so a
+                    // phone syncing cannot erase the desktop user's profiles —
+                    // which folding both into the shared map would do on every
+                    // sync, because that map is replaced wholesale.
+                    Some(device_id) => {
+                        if payload.ssh_profiles.is_some() {
+                            return Err(HostError::InvalidRequest(
+                                "SSH profiles cannot be synchronized on behalf of a device".into(),
+                            ));
+                        }
+                        host.replace_device_profiles(
+                            connection_id,
+                            device_id,
+                            payload
+                                .profiles
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|profile| (profile.profile_id, profile.request))
+                                .collect::<HashMap<_, _>>(),
+                        )?;
+                    }
+                    None => {
+                        if payload.profiles.is_some() || payload.ssh_profiles.is_some() {
+                            host.replace_synchronized_profiles(
+                                connection_id,
+                                payload
+                                    .profiles
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .map(|profile| (profile.profile_id, profile.request))
+                                    .collect::<HashMap<_, _>>(),
+                                payload
+                                    .ssh_profiles
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .map(|profile| (profile.profile_id, profile.request))
+                                    .collect::<HashMap<_, _>>(),
+                            )?;
+                        }
+                    }
                 }
                 hello_ack_frame(host, session_id, sequence)
             })
@@ -646,6 +681,88 @@ mod tests {
             serde_json::Value::String(host_capabilities().default_shell.clone())
         );
         assert!(payload["host"]["platform"].is_string());
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// The RPC path: the host process connects to itself as a local client and
+    /// installs a paired device's profiles on its behalf. Without this a remote
+    /// spawn could only ever name a profile the host already had.
+    #[tokio::test]
+    async fn a_hello_can_install_profiles_on_behalf_of_a_device() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host.clone(),
+            ClientIdentity::local("companion-rpc"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::Hello,
+                Uuid::nil(),
+                1,
+                serde_json::to_vec(&serde_json::json!({
+                    "onBehalfOfDevice": "device-a",
+                    "profiles": [{
+                        "profileId": "build",
+                        "request": {
+                            "shell": "/bin/bash",
+                            "rows": 24,
+                            "cols": 80,
+                            "cwd": null,
+                            "projectId": null,
+                            "extensionId": null,
+                        },
+                    }],
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::Ack);
+        assert_eq!(host.device_profile_count("device-a"), 1);
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// An SSH profile names a destination and a credential; installing one for
+    /// a paired device would let it drive outbound connections from the host.
+    #[tokio::test]
+    async fn a_device_hello_refuses_ssh_profiles() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host.clone(),
+            ClientIdentity::local("companion-rpc"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::Hello,
+                Uuid::nil(),
+                1,
+                serde_json::to_vec(&serde_json::json!({
+                    "onBehalfOfDevice": "device-a",
+                    "sshProfiles": [],
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::Error);
         drop(client);
         serve.await.unwrap().unwrap();
     }

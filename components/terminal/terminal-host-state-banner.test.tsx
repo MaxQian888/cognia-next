@@ -29,3 +29,19 @@ it("offers retry for an offline host and settings for authorization failures", (
   fireEvent.click(screen.getByRole("button"))
   expect(openSettings).toHaveBeenCalled()
 })
+
+// A retry cannot turn a switch back on. Sending the user to settings is the
+// only button that leads anywhere.
+it("sends the user to settings when the host's remote-access switch is off", () => {
+  const retry = jest.fn()
+  const openSettings = jest.fn()
+  act(() => useTerminalStore.getState().setHostState("remote_access_disabled"))
+  render(<TerminalHostStateBanner onRetry={retry} onOpenSettings={openSettings} />)
+  expect(screen.getByTestId("terminal-host-state-banner")).toHaveAttribute(
+    "data-state",
+    "remote_access_disabled"
+  )
+  fireEvent.click(screen.getByRole("button"))
+  expect(openSettings).toHaveBeenCalled()
+  expect(retry).not.toHaveBeenCalled()
+})

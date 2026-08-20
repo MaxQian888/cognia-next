@@ -7,6 +7,9 @@ pub(super) const COMMANDS: &[&str] = &[
     "terminal_exec",
     "terminal_complete_paths",
     "terminal_kill_port",
+    "terminal_host_status",
+    "terminal_host_configure",
+    "terminal_host_sync_profiles",
 ];
 
 pub(super) async fn dispatch(
@@ -18,7 +21,7 @@ pub(super) async fn dispatch(
     account_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let _ = (state, host, device_id, account_id, scope);
+    let _ = (state, account_id, scope);
     let result = match name {
         // ── Terminal ───────────────────────────────────────────────────────
         // Live PTY streaming stays on `/ws/terminal`. These are
@@ -96,6 +99,54 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(e.to_string()))?
                 .map_err(RpcError::internal)
                 .and_then(to_json)
+        }
+        // ── Terminal host administration ──────────────────────────────────
+        //
+        // The desktop drives these through the local `terminal_host_service`
+        // command, which no remote client can reach. Without them a browser's
+        // terminal settings wrote a local mirror and nothing else: the host
+        // limits never moved, the remote-access switch could only be flipped by
+        // restarting the server with `--allow-remote-terminal`, and profiles
+        // never arrived at all — so every profile a browser picked came back
+        // "unknown terminal profile".
+        //
+        // `provision` deliberately has no remote arm. It mints a host
+        // descriptor for a device public key, and that has to stay a decision
+        // made at the host.
+        "terminal_host_status" => {
+            // Not gated on the remote-access switch: reading that it is OFF is
+            // exactly what a client needs in order to explain itself, and a
+            // gate here would make the switch invisible from the only surface
+            // that can turn it on.
+            to_json(
+                host.terminal_host_status()
+                    .await
+                    .map_err(RpcError::internal)?,
+            )
+        }
+        "terminal_host_configure" => {
+            // Same reason, more sharply: gating this on the switch would make
+            // it impossible to ever turn on remotely. The authority is the
+            // manifest's `host.admin` capability, which owner devices hold and
+            // chat-only ones do not.
+            let settings: crate::terminal_host_service::TerminalHostSettings =
+                required(&args, "settings")?;
+            to_json(
+                host.terminal_host_configure(settings)
+                    .await
+                    .map_err(RpcError::internal)?,
+            )
+        }
+        "terminal_host_sync_profiles" => {
+            // Profiles only matter to a device that can open a terminal, so
+            // this one does follow the switch.
+            ensure_terminal_rpc_authorized(device_id).await?;
+            let profiles: Vec<Value> = optional(&args, "profiles")?.unwrap_or_default();
+            let installed = host
+                .terminal_host_sync_profiles(device_id, profiles)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(serde_json::json!({ "installed": installed }))
         }
         unknown => Err(RpcError::unknown_command(unknown)),
     };

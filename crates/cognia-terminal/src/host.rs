@@ -481,6 +481,21 @@ struct HostState {
     sessions: HashMap<String, HostedSession>,
     profiles: HashMap<String, SpawnRequest>,
     ssh_profiles: HashMap<String, SshSpawnRequest>,
+    /// Profiles a *paired device* owns, keyed by device id.
+    ///
+    /// Remote clients cannot send a `SpawnRequest` — [`TerminalHost::spawn_local`]
+    /// refuses non-local identities, so a remote spawn names a profile and
+    /// nothing else. That left a headless host with only the bootstrap
+    /// `default` profile: every configured profile id failed as "unknown
+    /// terminal profile", and the shell a browser picked was silently
+    /// discarded. Devices can now have their profile set pushed in on their
+    /// behalf (see `replace_device_profiles`).
+    ///
+    /// Kept out of `profiles` on purpose. That map is one shared namespace, and
+    /// `replace_synchronized_profiles` *replaces* it — so folding a phone's
+    /// profiles into it would erase the desktop user's on every sync. Per
+    /// device, replace stays the right verb and cannot reach anyone else.
+    device_profiles: HashMap<String, HashMap<String, SpawnRequest>>,
     audit: VecDeque<HostAuditEvent>,
 }
 
@@ -560,6 +575,7 @@ impl TerminalHost {
                     sessions: HashMap::new(),
                     profiles: HashMap::new(),
                     ssh_profiles: HashMap::new(),
+                    device_profiles: HashMap::new(),
                     audit: VecDeque::new(),
                 }),
             }),
@@ -742,6 +758,82 @@ impl TerminalHost {
         Ok(())
     }
 
+    /// Replace the profile set owned by one paired device.
+    ///
+    /// Local connections only, and the device is named by the caller rather
+    /// than taken from the connection: the only caller is the host process
+    /// itself, servicing an authenticated `terminal_host_sync_profiles` RPC on
+    /// behalf of the device that made it. Keeping the frame-level rule intact
+    /// ("only a local connection mutates host state") means a paired client
+    /// still cannot rewrite anything by talking to the socket directly — it has
+    /// to come through the capability-gated RPC.
+    ///
+    /// SSH profiles are deliberately not accepted here. An SSH profile carries
+    /// a destination and credential reference, and letting a remote device
+    /// install one would let it drive outbound connections from the host. SSH
+    /// stays local-only, which is what the dock's own picker already assumes.
+    pub fn replace_device_profiles(
+        &self,
+        connection_id: &str,
+        device_id: &str,
+        profiles: HashMap<String, SpawnRequest>,
+    ) -> Result<(), HostError> {
+        let connection = parse_connection_id(connection_id)?;
+        if !self.identity(connection)?.local {
+            return Err(HostError::PermissionDenied);
+        }
+        if device_id.trim().is_empty() {
+            return Err(HostError::InvalidRequest("deviceId is required".into()));
+        }
+        if profiles
+            .keys()
+            .any(|profile_id| profile_id.trim().is_empty())
+        {
+            return Err(HostError::InvalidRequest("profileId is required".into()));
+        }
+        let mut state = self.inner.state.lock();
+        if profiles.is_empty() {
+            state.device_profiles.remove(device_id);
+        } else {
+            state
+                .device_profiles
+                .insert(device_id.to_string(), profiles);
+        }
+        Ok(())
+    }
+
+    /// How many profiles a device currently owns. Used by the RPC to report
+    /// what a sync actually installed.
+    pub fn device_profile_count(&self, device_id: &str) -> usize {
+        self.inner
+            .state
+            .lock()
+            .device_profiles
+            .get(device_id)
+            .map_or(0, HashMap::len)
+    }
+
+    /// The profile a connection means by `profile_id`.
+    ///
+    /// A device's own profiles shadow the shared set, so two devices can each
+    /// have a profile called `"default"` without colliding — and a device that
+    /// synced nothing still resolves the host's shared profiles, which is what
+    /// keeps the bootstrap `"default"` working for a client that has never
+    /// synced.
+    fn resolve_profile(&self, identity: &ClientIdentity, profile_id: &str) -> Option<SpawnRequest> {
+        let state = self.inner.state.lock();
+        if let Some(device_id) = identity.device_id.as_deref() {
+            if let Some(request) = state
+                .device_profiles
+                .get(device_id)
+                .and_then(|profiles| profiles.get(profile_id))
+            {
+                return Some(request.clone());
+            }
+        }
+        state.profiles.get(profile_id).cloned()
+    }
+
     /// Spawn a host-synchronized local PTY or SSH profile. Remote callers can
     /// only select the stable identifier; credentials and connection metadata
     /// remain inside the host process.
@@ -825,12 +917,7 @@ impl TerminalHost {
         let connection = parse_connection_id(connection_id)?;
         let identity = self.identity(connection)?;
         let mut request = self
-            .inner
-            .state
-            .lock()
-            .profiles
-            .get(&profile_id)
-            .cloned()
+            .resolve_profile(&identity, &profile_id)
             .ok_or_else(|| HostError::InvalidRequest("unknown terminal profile".into()))?;
         if !identity.local {
             request.origin = SessionOrigin::Remote;
@@ -2179,6 +2266,117 @@ mod tests {
         assert!(host
             .connect(ClientIdentity::remote("phone", "device-a", true))
             .is_ok());
+    }
+
+    /// A remote spawn names a profile and nothing else, so a device's profiles
+    /// have to be installed for it — but not into the shared map, which
+    /// `replace_synchronized_profiles` replaces wholesale.
+    #[test]
+    fn a_device_profile_set_is_replaced_without_touching_anyone_elses() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let local = host.connect(ClientIdentity::local("desktop")).unwrap();
+
+        let mut shared = HashMap::new();
+        shared.insert("desktop-shell".into(), profile_request());
+        host.replace_synchronized_profiles(&local.connection_id, shared, HashMap::new())
+            .unwrap();
+
+        let mut phone = HashMap::new();
+        phone.insert("phone-shell".into(), profile_request());
+        host.replace_device_profiles(&local.connection_id, "device-a", phone)
+            .unwrap();
+
+        assert_eq!(host.device_profile_count("device-a"), 1);
+        assert!(host
+            .inner
+            .state
+            .lock()
+            .profiles
+            .contains_key("desktop-shell"));
+
+        // A second device is independent of the first.
+        let mut tablet = HashMap::new();
+        tablet.insert("tablet-shell".into(), profile_request());
+        host.replace_device_profiles(&local.connection_id, "device-b", tablet)
+            .unwrap();
+        assert_eq!(host.device_profile_count("device-a"), 1);
+        assert_eq!(host.device_profile_count("device-b"), 1);
+
+        // An empty set is a deletion, not an empty namespace left behind.
+        host.replace_device_profiles(&local.connection_id, "device-a", HashMap::new())
+            .unwrap();
+        assert_eq!(host.device_profile_count("device-a"), 0);
+        assert!(host
+            .inner
+            .state
+            .lock()
+            .profiles
+            .contains_key("desktop-shell"));
+    }
+
+    /// The frame-level rule stands: only a local connection mutates host state.
+    /// A paired device reaches this through the capability-gated RPC, which
+    /// runs in the host process, not by talking to the socket itself.
+    #[test]
+    fn a_remote_connection_cannot_install_device_profiles_directly() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let remote = host
+            .connect(ClientIdentity::remote("phone", "device-a", true))
+            .unwrap();
+        let mut profiles = HashMap::new();
+        profiles.insert("mine".into(), profile_request());
+        assert_eq!(
+            host.replace_device_profiles(&remote.connection_id, "device-a", profiles),
+            Err(HostError::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn a_device_profile_shadows_the_shared_one_of_the_same_name() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let local = host.connect(ClientIdentity::local("desktop")).unwrap();
+
+        let mut shared = HashMap::new();
+        shared.insert("default".into(), profile_request());
+        host.replace_synchronized_profiles(&local.connection_id, shared, HashMap::new())
+            .unwrap();
+
+        let mut device = HashMap::new();
+        let mut own = profile_request();
+        own.shell = "/bin/dash".into();
+        device.insert("default".into(), own);
+        host.replace_device_profiles(&local.connection_id, "device-a", device)
+            .unwrap();
+
+        let identity = ClientIdentity::remote("phone", "device-a", true);
+        assert_eq!(
+            host.resolve_profile(&identity, "default").unwrap().shell,
+            "/bin/dash"
+        );
+
+        // A device that synced nothing still resolves the shared set — which is
+        // what keeps the bootstrap `default` working for a fresh client.
+        let untouched = ClientIdentity::remote("other", "device-z", true);
+        assert_eq!(
+            host.resolve_profile(&untouched, "default").unwrap().shell,
+            profile_request().shell
+        );
+    }
+
+    #[test]
+    fn a_device_profile_set_needs_a_device_and_named_profiles() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let local = host.connect(ClientIdentity::local("desktop")).unwrap();
+        let mut profiles = HashMap::new();
+        profiles.insert("  ".to_string(), profile_request());
+        assert!(matches!(
+            host.replace_device_profiles(&local.connection_id, "device-a", profiles),
+            Err(HostError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            host.replace_device_profiles(&local.connection_id, "  ", HashMap::new()),
+            Err(HostError::InvalidRequest(_))
+        ));
     }
 
     #[test]

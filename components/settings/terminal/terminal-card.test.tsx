@@ -80,6 +80,26 @@ jest.mock("@/stores/project/project-store", () => ({
   ),
 }))
 
+// The host settings are NOT part of AppSettings: they live next to the terminal
+// host process and are reached over the transport. The card writes them there
+// first and only mirrors locally once the host agreed.
+let hostSettings: Record<string, unknown> | null = null
+let hostReachable = true
+const writeHostSettings = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/terminal/host-settings", () => ({
+  readTerminalHostSettings: async () => hostSettings,
+  writeTerminalHostSettings: (...args: unknown[]) => writeHostSettings(...args),
+  terminalHostReachable: () => hostReachable,
+}))
+
+jest.mock("@/hooks/terminal/use-terminal-transport", () => ({
+  useTerminalTransport: () => ({
+    kind: hostReachable ? "ws" : "unsupported",
+    canSpawn: hostReachable,
+    isLocalPty: false,
+  }),
+}))
+
 import { TerminalCard } from "./terminal-card"
 
 beforeEach(() => {
@@ -87,6 +107,10 @@ beforeEach(() => {
   settingsSave.mockClear()
   settingsState = {}
   settingsListeners.clear()
+  hostSettings = null
+  hostReachable = true
+  writeHostSettings.mockClear()
+  writeHostSettings.mockResolvedValue(undefined)
 })
 
 /** Last `terminal` blob handed to `save()`, or `{}` when nothing was saved. */
@@ -644,5 +668,89 @@ describe("TerminalCard", () => {
         host: expect.objectContaining({ totalReplayBytes: 16 * 1024 * 1024 }),
       })
     })
+  })
+})
+
+/**
+ * These controls configure the terminal HOST, not the app. Before this, the
+ * card's host call was wrapped in `isTauri()`, so on web every switch here
+ * moved a local mirror and left the host untouched — with the remote-access
+ * switch, the one users go looking for when a browser terminal will not
+ * connect, doing precisely nothing.
+ */
+describe("TerminalCard host settings reach the host", () => {
+  it("writes to the host before mirroring locally", async () => {
+    render(<TerminalCard />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("terminal-host-allowRemoteAccess"))
+    })
+    expect(writeHostSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ allowRemoteAccess: true })
+    )
+    expect(lastSavedTerminal()).toMatchObject({
+      host: expect.objectContaining({ allowRemoteAccess: true }),
+    })
+  })
+
+  // Mirroring a change the host refused is how the card ends up describing a
+  // state that does not exist.
+  it("leaves the mirror untouched when the host refuses", async () => {
+    writeHostSettings.mockRejectedValue(new Error("missing_capability"))
+    render(<TerminalCard />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("terminal-host-allowRemoteAccess"))
+    })
+    expect(writeHostSettings).toHaveBeenCalled()
+    expect(lastSavedTerminal()).toEqual({})
+  })
+
+  // The mirror drifts for reasons the app never sees: a server started with
+  // --allow-remote-terminal, or an operator editing the host's settings file.
+  it("reconciles the mirror to what the host actually reports", async () => {
+    hostSettings = {
+      allowRemoteAccess: true,
+      startAtLogin: false,
+      diagnostics: false,
+      maxSessions: 64,
+      maxRemoteSessionsPerDevice: 8,
+      replayBytesPerSession: 8 * 1024 * 1024,
+      totalReplayBytes: 128 * 1024 * 1024,
+    }
+    await act(async () => {
+      render(<TerminalCard />)
+    })
+    expect(lastSavedTerminal()).toMatchObject({
+      host: expect.objectContaining({ allowRemoteAccess: true, maxSessions: 64 }),
+    })
+  })
+
+  it("does not rewrite the mirror when it already agrees with the host", async () => {
+    settingsState = {
+      terminal: {
+        host: {
+          allowRemoteAccess: false,
+          startAtLogin: false,
+          diagnostics: false,
+          maxSessions: 32,
+          maxRemoteSessionsPerDevice: 8,
+          replayBytesPerSession: 8 * 1024 * 1024,
+          totalReplayBytes: 128 * 1024 * 1024,
+        },
+      },
+    }
+    hostSettings = { ...(settingsState.terminal!.host as Record<string, unknown>) }
+    await act(async () => {
+      render(<TerminalCard />)
+    })
+    expect(settingsSave).not.toHaveBeenCalled()
+  })
+
+  it("says so, and disables the controls, when no host can be reached", async () => {
+    hostReachable = false
+    await act(async () => {
+      render(<TerminalCard />)
+    })
+    expect(screen.getByTestId("terminal-host-unreachable")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-host-allowRemoteAccess")).toBeDisabled()
   })
 })

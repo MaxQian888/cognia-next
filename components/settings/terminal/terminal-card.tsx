@@ -17,6 +17,7 @@
 
 import type { ReactNode } from "react"
 
+import { useEffect } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -40,7 +41,8 @@ import { Switch } from "@/components/ui/switch"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import { DeferredTextInput } from "@/components/settings/common/deferred-text-input"
 import { useSettingsStore } from "@/stores/settings"
-import { isTauri, transport } from "@/lib/tauri"
+import { readTerminalHostSettings, writeTerminalHostSettings } from "@/lib/terminal/host-settings"
+import { useTerminalTransport } from "@/hooks/terminal/use-terminal-transport"
 
 import { FontFamilyPicker } from "@/components/settings/appearance/components/font-family-picker"
 import { TerminalFontPreview } from "./terminal-font-preview"
@@ -238,6 +240,10 @@ export function TerminalCard() {
   const t = useTranslations()
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
+  // `canSpawn` is exactly "some host can answer" — local PTY, paired desktop,
+  // or cognia-server. Without one, the whole host group below describes a
+  // machine that is not there.
+  const { canSpawn: hostReachable } = useTerminalTransport()
 
   const terminal: TerminalSettings = {
     ...DEFAULT_VALUES,
@@ -245,10 +251,49 @@ export function TerminalCard() {
   }
   const autocomplete = terminal.autocomplete ?? DEFAULT_VALUES.autocomplete!
 
+  /**
+   * Show what the host has, not what we last wrote down.
+   *
+   * `AppSettings.terminal.host` is a mirror, and it drifts for reasons the app
+   * never sees: a server started with `--allow-remote-terminal`, an operator
+   * editing `terminal-host/settings.json`, or — until this change — every
+   * switch flipped from a browser, which wrote the mirror while the host stayed
+   * put. Rendering the mirror as if it were the host is how a settings page
+   * ends up lying about the state of the thing it configures.
+   */
+  useEffect(() => {
+    let cancelled = false
+    void readTerminalHostSettings().then((actual) => {
+      if (cancelled || !actual) return
+      const mirrored = { ...DEFAULT_HOST_SETTINGS, ...(terminal.host ?? {}) }
+      const agrees = (Object.keys(DEFAULT_HOST_SETTINGS) as (keyof typeof actual)[]).every(
+        (key) => mirrored[key] === actual[key]
+      )
+      if (agrees) return
+      void save({ terminal: { ...terminal, host: actual } })
+    })
+    return () => {
+      cancelled = true
+    }
+    // Once per mount: this reconciles the mirror *to* the host, so re-running
+    // it on every settings write would chase its own tail.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function update(patch: Partial<TerminalSettings>): void {
     void save({ terminal: { ...terminal, ...patch } })
   }
 
+  /**
+   * Apply a host-settings change to the host, then mirror it locally.
+   *
+   * The host call used to be wrapped in `isTauri()`, which made every switch
+   * here a lie on web: the mirror moved, the host did not. The remote-access
+   * switch was the worst of them — it is the one a user goes looking for when a
+   * browser terminal will not connect. `writeTerminalHostSettings` routes to
+   * whichever host this shell actually has, and throws when there is none, so
+   * the mirror is only written after the host agreed.
+   */
   async function updateHost(patch: Partial<TerminalHostSettings>): Promise<void> {
     const host: Required<TerminalHostSettings> = {
       ...DEFAULT_HOST_SETTINGS,
@@ -262,11 +307,7 @@ export function TerminalCard() {
       host.totalReplayBytes = host.replayBytesPerSession
     }
     try {
-      if (isTauri()) {
-        await transport.call("terminal_host_service", {
-          action: { kind: "configure", settings: host },
-        })
-      }
+      await writeTerminalHostSettings(host)
       await save({ terminal: { ...terminal, host } })
     } catch {
       toast.error(t("settings.terminal.host.operationFailed"))
@@ -1042,79 +1083,93 @@ export function TerminalCard() {
       </Section>
 
       <Section title={t("settings.terminal.groups.host")}>
-        <div className="grid gap-3 md:grid-cols-3">
-          {(
-            [
-              ["allowRemoteAccess", "remoteAccess"],
-              ["startAtLogin", "startAtLogin"],
-              ["diagnostics", "diagnostics"],
-            ] as const
-          ).map(([key, message]) => (
-            <div key={key} className="flex items-center justify-between gap-3 rounded border p-3">
-              <div className="space-y-0.5">
-                <Label className="text-xs">{t(`settings.terminal.host.${message}.label`)}</Label>
-                <p className="text-[11px] text-muted-foreground">
-                  {t(`settings.terminal.host.${message}.helper`)}
-                </p>
+        {/* Every control below configures the terminal HOST. Without one to
+            configure they would write a local mirror nobody reads — the exact
+            shape of "settings that lie" this card was changed to stop. */}
+        {!hostReachable ? (
+          <p
+            className="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-[11px]"
+            role="status"
+            data-testid="terminal-host-unreachable"
+          >
+            {t("settings.terminal.host.unreachable")}
+          </p>
+        ) : null}
+        <fieldset disabled={!hostReachable} className="space-y-3 disabled:opacity-60">
+          <div className="grid gap-3 md:grid-cols-3">
+            {(
+              [
+                ["allowRemoteAccess", "remoteAccess"],
+                ["startAtLogin", "startAtLogin"],
+                ["diagnostics", "diagnostics"],
+              ] as const
+            ).map(([key, message]) => (
+              <div key={key} className="flex items-center justify-between gap-3 rounded border p-3">
+                <div className="space-y-0.5">
+                  <Label className="text-xs">{t(`settings.terminal.host.${message}.label`)}</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    {t(`settings.terminal.host.${message}.helper`)}
+                  </p>
+                </div>
+                <Switch
+                  checked={terminal.host?.[key] ?? DEFAULT_HOST_SETTINGS[key]}
+                  onCheckedChange={(checked) => void updateHost({ [key]: checked })}
+                  aria-label={t(`settings.terminal.host.${message}.label`)}
+                  data-testid={`terminal-host-${key}`}
+                />
               </div>
-              <Switch
-                checked={terminal.host?.[key] ?? DEFAULT_HOST_SETTINGS[key]}
-                onCheckedChange={(checked) => void updateHost({ [key]: checked })}
-                aria-label={t(`settings.terminal.host.${message}.label`)}
-                data-testid={`terminal-host-${key}`}
-              />
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
-          <HostNumberSetting
-            id="max-sessions"
-            label={t("settings.terminal.host.maxSessions.label")}
-            helper={t("settings.terminal.host.maxSessions.helper")}
-            value={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
-            min={1}
-            max={256}
-            onCommit={(maxSessions) => void updateHost({ maxSessions })}
-          />
-          <HostNumberSetting
-            id="max-remote-sessions"
-            label={t("settings.terminal.host.maxRemoteSessions.label")}
-            helper={t("settings.terminal.host.maxRemoteSessions.helper")}
-            value={
-              terminal.host?.maxRemoteSessionsPerDevice ??
-              DEFAULT_HOST_SETTINGS.maxRemoteSessionsPerDevice
-            }
-            min={1}
-            max={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
-            onCommit={(maxRemoteSessionsPerDevice) =>
-              void updateHost({ maxRemoteSessionsPerDevice })
-            }
-          />
-          <HostNumberSetting
-            id="replay-per-session"
-            label={t("settings.terminal.host.replayPerSession.label")}
-            helper={t("settings.terminal.host.replayPerSession.helper")}
-            value={
-              (terminal.host?.replayBytesPerSession ??
-                DEFAULT_HOST_SETTINGS.replayBytesPerSession) / MIB
-            }
-            min={1}
-            max={64}
-            onCommit={(value) => void updateHost({ replayBytesPerSession: value * MIB })}
-          />
-          <HostNumberSetting
-            id="replay-total"
-            label={t("settings.terminal.host.replayTotal.label")}
-            helper={t("settings.terminal.host.replayTotal.helper")}
-            value={
-              (terminal.host?.totalReplayBytes ?? DEFAULT_HOST_SETTINGS.totalReplayBytes) / MIB
-            }
-            min={1}
-            max={1024}
-            onCommit={(value) => void updateHost({ totalReplayBytes: value * MIB })}
-          />
-        </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <HostNumberSetting
+              id="max-sessions"
+              label={t("settings.terminal.host.maxSessions.label")}
+              helper={t("settings.terminal.host.maxSessions.helper")}
+              value={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
+              min={1}
+              max={256}
+              onCommit={(maxSessions) => void updateHost({ maxSessions })}
+            />
+            <HostNumberSetting
+              id="max-remote-sessions"
+              label={t("settings.terminal.host.maxRemoteSessions.label")}
+              helper={t("settings.terminal.host.maxRemoteSessions.helper")}
+              value={
+                terminal.host?.maxRemoteSessionsPerDevice ??
+                DEFAULT_HOST_SETTINGS.maxRemoteSessionsPerDevice
+              }
+              min={1}
+              max={terminal.host?.maxSessions ?? DEFAULT_HOST_SETTINGS.maxSessions}
+              onCommit={(maxRemoteSessionsPerDevice) =>
+                void updateHost({ maxRemoteSessionsPerDevice })
+              }
+            />
+            <HostNumberSetting
+              id="replay-per-session"
+              label={t("settings.terminal.host.replayPerSession.label")}
+              helper={t("settings.terminal.host.replayPerSession.helper")}
+              value={
+                (terminal.host?.replayBytesPerSession ??
+                  DEFAULT_HOST_SETTINGS.replayBytesPerSession) / MIB
+              }
+              min={1}
+              max={64}
+              onCommit={(value) => void updateHost({ replayBytesPerSession: value * MIB })}
+            />
+            <HostNumberSetting
+              id="replay-total"
+              label={t("settings.terminal.host.replayTotal.label")}
+              helper={t("settings.terminal.host.replayTotal.helper")}
+              value={
+                (terminal.host?.totalReplayBytes ?? DEFAULT_HOST_SETTINGS.totalReplayBytes) / MIB
+              }
+              min={1}
+              max={1024}
+              onCommit={(value) => void updateHost({ totalReplayBytes: value * MIB })}
+            />
+          </div>
+        </fieldset>
       </Section>
 
       <Section title={t("settings.terminal.groups.agents")}>

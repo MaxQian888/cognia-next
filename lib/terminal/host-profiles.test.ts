@@ -1,8 +1,18 @@
+let mockChain: string[] = ["tauri-channel"]
+jest.mock("./pick-transport", () => ({
+  selectTerminalTransportChain: () => mockChain,
+}))
+
 import {
+  ADHOC_PROFILE_ID,
   buildSynchronizedSshProfiles,
   buildSynchronizedTerminalProfiles,
   syncTerminalHostProfiles,
 } from "./host-profiles"
+
+beforeEach(() => {
+  mockChain = ["tauri-channel"]
+})
 
 describe("terminal host profile synchronization", () => {
   it("sends only complete named profiles and preserves sandbox policy", () => {
@@ -122,5 +132,66 @@ describe("terminal host profile synchronization", () => {
     expect(call).toHaveBeenCalledWith("terminal_host_service", {
       action: { kind: "syncProfiles", profiles: [], sshProfiles: [] },
     })
+  })
+
+  // Two commands, two authorities: the local one also owns `provision` and the
+  // login-service registration and stays local; the remote one is gated on
+  // `terminal.open` and scoped to the calling device.
+  it("uses the capability-gated RPC against a remote host", async () => {
+    mockChain = ["ws", "webrtc"]
+    const call = jest.fn(async () => undefined)
+    await syncTerminalHostProfiles(
+      [{ id: "build", name: "Build", shell: "/bin/bash" }],
+      {},
+      call as never
+    )
+    const [command, payload] = call.mock.calls[0] as unknown as [
+      string,
+      { profiles: { profileId: string }[] },
+    ]
+    expect(command).toBe("terminal_host_sync_profiles")
+    expect(payload.profiles.map((entry) => entry.profileId)).toEqual(["build"])
+  })
+
+  // An SSH profile names a destination and a credential. Installing one from a
+  // paired device would let it drive outbound connections from the host, so the
+  // Rust arm refuses them and the client must not send them either.
+  it("never sends SSH profiles to a remote host", async () => {
+    mockChain = ["ws"]
+    const call = jest.fn(async () => undefined)
+    await syncTerminalHostProfiles(
+      [],
+      {
+        sshProfiles: [
+          {
+            id: "prod",
+            name: "prod",
+            host: "example.com",
+            username: "root",
+            auth: "agent",
+          } as never,
+        ],
+      },
+      call as never
+    )
+    expect(call.mock.calls[0][1]).toEqual({ profiles: [] })
+  })
+
+  // A remote spawn frame carries a profile id and nothing else, so a shell the
+  // user picked has to arrive as a profile or it is silently replaced by the
+  // host's bootstrap default.
+  it("carries an ad-hoc spawn alongside the saved profiles, never instead of them", async () => {
+    mockChain = ["ws"]
+    const call = jest.fn(async () => undefined)
+    await syncTerminalHostProfiles(
+      [{ id: "build", name: "Build", shell: "/bin/bash" }],
+      { adHoc: { shell: "/bin/zsh", rows: 24, cols: 80 } },
+      call as never
+    )
+    const payload = call.mock.calls[0][1] as unknown as {
+      profiles: { profileId: string; request: { shell: string } }[]
+    }
+    expect(payload.profiles.map((entry) => entry.profileId)).toEqual(["build", ADHOC_PROFILE_ID])
+    expect(payload.profiles.at(-1)?.request.shell).toBe("/bin/zsh")
   })
 })
