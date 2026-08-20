@@ -13256,6 +13256,7 @@
       "disabledCount": "已停用 {count} 个服务器。",
       "enable": "启用",
       "enabledCount": "已启用 {count} 个服务器。",
+      "export": "导出",
       "selectedCount": "已选 {count} 项",
       "sync": "同步",
       "syncedCount": "已重新同步 {count} 个服务器。"
@@ -13390,7 +13391,8 @@
       "disabled": "已禁用",
       "enabled": "已启用",
       "status": "状态",
-      "transport": "传输方式"
+      "transport": "传输方式",
+      "trust": "复核状态"
     },
     "gallery": {
       "addServer": "添加服务器",

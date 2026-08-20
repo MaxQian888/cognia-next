@@ -13256,6 +13256,7 @@
       "disabledCount": "Disabled {count} server(s).",
       "enable": "Enable",
       "enabledCount": "Enabled {count} server(s).",
+      "export": "Export",
       "selectedCount": "{count, plural, =1 {# selected} other {# selected}}",
       "sync": "Sync",
       "syncedCount": "Re-synced {count} server(s)."
@@ -13390,7 +13391,8 @@
       "disabled": "Disabled",
       "enabled": "Enabled",
       "status": "Status",
-      "transport": "Transport"
+      "transport": "Transport",
+      "trust": "Review state"
     },
     "gallery": {
       "addServer": "Add server",
