@@ -146,7 +146,19 @@ export function fingerprintMcpDefinition(
     .padStart(8, "0")}`
 }
 
-export function toMcpServerSummary(server: McpServer): McpServerSummary {
+/**
+ * Project a server row into the sync mirror a paired client reads.
+ *
+ * `toolNames` is passed in rather than read here: the names live in the
+ * capability cache, this function is sync and runs inside the write
+ * transaction, and a summary must never lose the tool list just because the
+ * caller had no cache handy — so an omitted argument preserves whatever the
+ * previous summary carried (see `projectMcpSummaryTools`).
+ */
+export function toMcpServerSummary(
+  server: McpServer,
+  toolNames?: readonly string[]
+): McpServerSummary {
   return {
     id: server.id,
     displayName: server.displayName?.trim() || server.name,
@@ -154,5 +166,10 @@ export function toMcpServerSummary(server: McpServer): McpServerSummary {
     enabled: server.enabled,
     trustState: server.trust?.state ?? "legacy",
     updatedAt: server.updatedAt,
+    ...(server.disallowedTools?.length ? { disallowedTools: [...server.disallowedTools] } : {}),
+    ...(server.disallowedToolPatterns?.length
+      ? { disallowedToolPatterns: [...server.disallowedToolPatterns] }
+      : {}),
+    ...(toolNames?.length ? { toolNames: [...toolNames] } : {}),
   }
 }

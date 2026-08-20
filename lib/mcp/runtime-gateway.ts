@@ -404,6 +404,33 @@ function runtimeFingerprint(server: McpServer): string {
   return `${server.revision ?? 1}:${server.credentialVersion ?? 0}:${fingerprintMcpDefinition(server)}`
 }
 
+/**
+ * Persist capabilities discovered OUTSIDE the gateway — the settings panel's
+ * per-server "Test" runs through the sidecar directly (`discoverMcpServerViaSidecar`)
+ * because it must work before a server is enabled, and its result would
+ * otherwise be thrown away the moment the dialog closed. Writing it through
+ * the same cache keeps one source of truth for "which tools does this server
+ * have", which is what the per-tool switches and the glob deny rules read.
+ */
+export async function recordMcpCapabilities(
+  server: McpServer,
+  capabilities: Pick<McpCapabilityCacheRow, "tools" | "resources" | "prompts">,
+  ttlMs: number = DEFAULT_CAPABILITY_TTL_MS
+): Promise<void> {
+  const now = Date.now()
+  const fingerprint = runtimeFingerprint(server)
+  await writeCapabilityCache({
+    id: `${server.id}:${fingerprint}`,
+    serverId: server.id,
+    fingerprint,
+    tools: capabilities.tools,
+    resources: capabilities.resources,
+    prompts: capabilities.prompts,
+    expiresAt: now + ttlMs,
+    updatedAt: now,
+  })
+}
+
 async function readCapabilityCache(id: string, now: number): Promise<McpCapabilityCacheRow | null> {
   try {
     const row = await getDb().mcpCapabilityCache.get(id)
@@ -416,6 +443,14 @@ async function readCapabilityCache(id: string, now: number): Promise<McpCapabili
 async function writeCapabilityCache(row: McpCapabilityCacheRow): Promise<void> {
   try {
     await getDb().mcpCapabilityCache.put(row)
+    // Mirror the tool names onto the synced summary. The capability cache is
+    // host-local, so a paired client would otherwise see a server with no
+    // tools and nothing to toggle.
+    const { projectMcpSummaryTools } = await import("@/lib/db/mcp-servers")
+    await projectMcpSummaryTools(
+      row.serverId,
+      row.tools.map((tool) => tool.name)
+    )
   } catch {
     // Persistence is best-effort in CLI/tests; the scoped connection is still valid.
   }

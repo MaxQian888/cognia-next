@@ -5159,6 +5159,15 @@ export interface McpServer {
   pluginId?: string
   /** Bare tool names denied whenever this server is attached to an agent run. */
   disallowedTools?: string[]
+  /**
+   * Glob deny rules evaluated against the server's discovered tool names
+   * (`*` = any run, `?` = one character, matched case-insensitively). Unlike
+   * {@link McpServer.disallowedTools}, which pins the exact tools that existed
+   * when the user clicked, a pattern keeps denying tools the server grows
+   * later — which is what "disable everything that writes" has to mean.
+   * Expanded against the capability cache at send time.
+   */
+  disallowedToolPatterns?: string[]
   /** Human-facing label; changing it never changes the SDK namespace. */
   displayName?: string
   /** Persisted governance contract version. Legacy rows omit this until migration. */
@@ -5180,6 +5189,16 @@ export interface McpServerSummary {
   enabled: boolean
   trustState: McpServerTrustState
   updatedAt: number
+  /** Exact per-tool deny rules, mirrored so paired clients can render them. */
+  disallowedTools?: string[]
+  /** Glob deny rules, mirrored so paired clients can render them. */
+  disallowedToolPatterns?: string[]
+  /**
+   * Tool names from the last successful discovery, projected here so a paired
+   * client (which has no capability cache of its own) can list and toggle the
+   * server's tools instead of only its name. Absent until first discovery.
+   */
+  toolNames?: string[]
 }
 
 export type McpSyncJobStatus = "pending" | "running" | "retrying" | "succeeded" | "failed"

@@ -38,6 +38,10 @@ jest.mock("@/lib/db/mcp-servers", () => ({
   buildMcpServerMapResolved: jest.fn(),
   buildMcpDisallowedToolNames:
     jest.requireActual("@/lib/db/mcp-servers").buildMcpDisallowedToolNames,
+  // Real implementation: it is what expands glob deny rules, and the send-path
+  // assertions below are about the tool names it emits.
+  resolveMcpDisallowedToolNames:
+    jest.requireActual("@/lib/db/mcp-servers").resolveMcpDisallowedToolNames,
 }))
 
 jest.mock("@/lib/db/teams", () => ({

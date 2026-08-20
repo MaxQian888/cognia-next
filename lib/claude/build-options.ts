@@ -43,9 +43,9 @@ import { builtinSkillId, getCatalogSkill } from "@/lib/skills/built-in-catalog"
 import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/surface-activation"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
 import {
-  buildMcpDisallowedToolNames,
   buildMcpServerMapResolved,
   listEnabledMcpServers,
+  resolveMcpDisallowedToolNames,
 } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -2171,7 +2171,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
 
     if (chosen.length > 0) {
       const denied = new Set(opts.disallowedTools ?? [])
-      for (const tool of buildMcpDisallowedToolNames(chosen)) denied.add(tool)
+      // Async because glob deny rules expand against the capability cache —
+      // a pattern the user saved has to keep covering tools the server grew
+      // after they saved it.
+      for (const tool of await resolveMcpDisallowedToolNames(chosen)) denied.add(tool)
       if (denied.size > 0) opts.disallowedTools = [...denied]
 
       // Desktop injects send-time OAuth bearer headers for remote (sse/http)

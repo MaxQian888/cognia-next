@@ -21,6 +21,9 @@ import {
   buildMcpServerMapResolved,
   buildMcpServerMapWithAuth,
   buildMcpDisallowedToolNames,
+  resolveMcpDisallowedToolNames,
+  loadMcpServerToolNames,
+  projectMcpSummaryTools,
   bulkImportMcpServers,
   parseClaudeMcpConfig,
   MCP_TRANSPORTS,
@@ -289,6 +292,183 @@ describe("updateMcpServer", () => {
       trust: { state: "pending" },
       disallowedTools: [],
     })
+  })
+
+  it("keeps the server trusted and enabled when a deny rule is TIGHTENED", async () => {
+    const server = await createReviewed({
+      name: "tighten",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: true,
+    })
+    await updateMcpServer(server.id, { disallowedTools: ["write_file"] })
+    // Flipping one tool off must not disable the whole server — that would
+    // make the per-tool switches unusable.
+    expect(await getMcpServer(server.id)).toMatchObject({
+      enabled: true,
+      revision: 1,
+      trust: { state: "trusted" },
+      disallowedTools: ["write_file"],
+    })
+  })
+
+  it("keeps trust when pinned names are replaced by a pattern that covers them", async () => {
+    const server = await createReviewed({
+      name: "swap",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: true,
+      disallowedTools: ["write_file"],
+    })
+    await getDb().mcpCapabilityCache.put({
+      id: `${server.id}:fp`,
+      serverId: server.id,
+      fingerprint: "fp",
+      tools: [{ name: "write_file" }, { name: "read_file" }],
+      resources: [],
+      prompts: [],
+      expiresAt: Date.now() + 60_000,
+      updatedAt: Date.now(),
+    })
+    await updateMcpServer(server.id, {
+      disallowedTools: [],
+      disallowedToolPatterns: ["write_*"],
+    })
+    expect(await getMcpServer(server.id)).toMatchObject({
+      enabled: true,
+      trust: { state: "trusted" },
+      disallowedToolPatterns: ["write_*"],
+    })
+  })
+
+  it("re-opens review when a deny pattern is dropped", async () => {
+    const server = await createReviewed({
+      name: "relax",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: true,
+      disallowedToolPatterns: ["write_*"],
+    })
+    await updateMcpServer(server.id, { disallowedToolPatterns: [] })
+    expect(await getMcpServer(server.id)).toMatchObject({
+      enabled: false,
+      trust: { state: "pending" },
+    })
+  })
+
+  it("mirrors deny rules onto the synced summary", async () => {
+    const server = await createReviewed({
+      name: "mirrored",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: true,
+      disallowedTools: ["danger"],
+      disallowedToolPatterns: ["write_*"],
+    })
+    expect(await getDb().mcpServerSummaries.get(server.id)).toMatchObject({
+      disallowedTools: ["danger"],
+      disallowedToolPatterns: ["write_*"],
+    })
+  })
+})
+
+describe("tool-name projection", () => {
+  it("reads the freshest capability-cache row, expired or not", async () => {
+    const server = await createReviewed({
+      name: "cached",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    await getDb().mcpCapabilityCache.bulkPut([
+      {
+        id: `${server.id}:old`,
+        serverId: server.id,
+        fingerprint: "old",
+        tools: [{ name: "stale_tool" }],
+        resources: [],
+        prompts: [],
+        expiresAt: 0,
+        updatedAt: 1,
+      },
+      {
+        id: `${server.id}:new`,
+        serverId: server.id,
+        fingerprint: "new",
+        // An expired row still names the tools; dropping it would silently
+        // un-expand every glob rule.
+        tools: [{ name: "read_file" }, { name: "write_file" }],
+        resources: [],
+        prompts: [],
+        expiresAt: 0,
+        updatedAt: 2,
+      },
+    ])
+    expect(await loadMcpServerToolNames(server.id)).toEqual(["read_file", "write_file"])
+  })
+
+  it("returns no names for a server that was never discovered", async () => {
+    const server = await createReviewed({
+      name: "undiscovered",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    expect(await loadMcpServerToolNames(server.id)).toEqual([])
+  })
+
+  it("projects discovered tool names onto the summary a paired client reads", async () => {
+    const server = await createReviewed({
+      name: "projected",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    await projectMcpSummaryTools(server.id, ["read_file", "write_file"])
+    expect(await getDb().mcpServerSummaries.get(server.id)).toMatchObject({
+      toolNames: ["read_file", "write_file"],
+    })
+  })
+
+  it("ignores a projection for a server that no longer exists", async () => {
+    await expect(projectMcpSummaryTools("mcp_gone", ["x"])).resolves.toBeUndefined()
+  })
+})
+
+describe("resolveMcpDisallowedToolNames", () => {
+  it("expands glob rules against the server's discovered tools", async () => {
+    const server = await createReviewed({
+      name: "globbed",
+      transport: "stdio",
+      config: { command: "x" },
+      disallowedTools: ["browser_evaluate"],
+      disallowedToolPatterns: ["write_*"],
+    })
+    await getDb().mcpCapabilityCache.put({
+      id: `${server.id}:fp`,
+      serverId: server.id,
+      fingerprint: "fp",
+      tools: [{ name: "write_file" }, { name: "write_dir" }, { name: "read_file" }],
+      resources: [],
+      prompts: [],
+      expiresAt: Date.now() + 60_000,
+      updatedAt: Date.now(),
+    })
+    expect(await resolveMcpDisallowedToolNames([server])).toEqual([
+      "mcp__globbed__browser_evaluate",
+      "mcp__globbed__write_dir",
+      "mcp__globbed__write_file",
+    ])
+  })
+
+  it("emits only the pinned names when nothing has been discovered", async () => {
+    const server = await createReviewed({
+      name: "undiscovered-globs",
+      transport: "stdio",
+      config: { command: "x" },
+      disallowedTools: ["pinned"],
+      disallowedToolPatterns: ["write_*"],
+    })
+    expect(await resolveMcpDisallowedToolNames([server])).toEqual([
+      "mcp__undiscovered-globs__pinned",
+    ])
   })
 })
 

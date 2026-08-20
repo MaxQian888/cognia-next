@@ -17,6 +17,11 @@ import {
   validateMcpDefinition,
 } from "@/lib/mcp/server-definition"
 import { validateMcpRemoteEgress } from "@/lib/mcp/policy"
+import {
+  isToolRuleTightening,
+  normalizeToolRuleList,
+  resolveDeniedToolNames,
+} from "@/lib/mcp/tool-rules"
 import { getDb } from "./schema"
 
 function newId() {
@@ -52,6 +57,8 @@ export async function createMcpServer(
     pluginId?: string
     /** Bare MCP tool names denied whenever this server is selected. */
     disallowedTools?: string[]
+    /** Glob deny rules expanded against the server's discovered tools. */
+    disallowedToolPatterns?: string[]
   }
 ): Promise<McpServer> {
   const now = Date.now()
@@ -76,6 +83,9 @@ export async function createMcpServer(
     ...(partial.pluginId !== undefined ? { pluginId: partial.pluginId } : {}),
     ...(partial.disallowedTools !== undefined
       ? { disallowedTools: normalizeDisallowedTools(partial.disallowedTools) }
+      : {}),
+    ...(partial.disallowedToolPatterns !== undefined
+      ? { disallowedToolPatterns: normalizeToolRuleList(partial.disallowedToolPatterns) }
       : {}),
     createdAt: now,
     updatedAt: now,
@@ -119,6 +129,7 @@ export async function updateMcpServer(
       | "enabled"
       | "appsEnabled"
       | "disallowedTools"
+      | "disallowedToolPatterns"
     >
   >
 ): Promise<void> {
@@ -143,12 +154,26 @@ export async function updateMcpServer(
   if (patch.disallowedTools !== undefined) {
     next.disallowedTools = normalizeDisallowedTools(patch.disallowedTools)
   }
+  if (patch.disallowedToolPatterns !== undefined) {
+    next.disallowedToolPatterns = normalizeToolRuleList(patch.disallowedToolPatterns)
+  }
   validateMcpDefinition(next)
   assertUniqueMcpNamespace(next.name, await db.mcpServers.toArray(), id)
 
-  const beforeFingerprint = fingerprintMcpDefinition(prev)
-  const afterFingerprint = fingerprintMcpDefinition(next)
-  const materialChange = beforeFingerprint !== afterFingerprint
+  // Split the fingerprint's two jobs. The executable/endpoint shape is what a
+  // trust review is *about*, so any change there re-opens review. The deny
+  // rules are also fingerprinted (they must invalidate the capability cache),
+  // but re-reviewing on every rule edit would disable the whole server the
+  // moment a user flips one tool off. So rules re-open review only when they
+  // are RELAXED — handing back a tool the user had taken away — judged against
+  // the tools actually discovered, so swapping pinned names for a pattern that
+  // covers them still reads as a tightening.
+  const shapeChanged =
+    fingerprintMcpDefinition({ ...prev, disallowedTools: [] }) !==
+    fingerprintMcpDefinition({ ...next, disallowedTools: [] })
+  const knownTools = await loadMcpServerToolNames(id)
+  const rulesRelaxed = !isToolRuleTightening(prev, next, knownTools)
+  const materialChange = shapeChanged || rulesRelaxed
   if (materialChange) {
     next.revision = (prev.revision ?? 1) + 1
     next.trust = { state: "pending" }
@@ -167,8 +192,8 @@ export async function updateMcpServer(
     async () => {
       assertUniqueMcpNamespace(next.name, await db.mcpServers.toArray(), id)
       await db.mcpServers.put(next)
-      await db.mcpServerSummaries.put(toMcpServerSummary(next))
-      if (materialChange || next.credentialVersion !== prev.credentialVersion) {
+      await db.mcpServerSummaries.put(toMcpServerSummary(next, knownTools))
+      if (shapeChanged || next.credentialVersion !== prev.credentialVersion) {
         await db.mcpCapabilityCache.where("serverId").equals(id).delete()
       }
       await enqueueSyncJobs(affectedApps, next.revision ?? 1, renamed ? [prev.name] : [])
@@ -181,6 +206,7 @@ export async function reviewMcpServer(id: string, trusted: boolean): Promise<voi
   const db = getDb()
   const server = await db.mcpServers.get(id)
   if (!server) return
+  const knownTools = await loadMcpServerToolNames(id)
   const now = Date.now()
   const next: McpServer = {
     ...server,
@@ -196,10 +222,28 @@ export async function reviewMcpServer(id: string, trusted: boolean): Promise<voi
   }
   await db.transaction("rw", db.mcpServers, db.mcpServerSummaries, db.mcpSyncJobs, async () => {
     await db.mcpServers.put(next)
-    await db.mcpServerSummaries.put(toMcpServerSummary(next))
+    await db.mcpServerSummaries.put(toMcpServerSummary(next, knownTools))
     await enqueueSyncJobs(next.appsEnabled, next.revision ?? 1)
   })
   wakeSyncCoordinator()
+}
+
+/**
+ * Refresh the sync mirror's projected tool list after a discovery run.
+ *
+ * The capability cache is desktop-local, so without this a paired client would
+ * see server names and no tools — and the tool switches it is supposed to
+ * render would have nothing to render. Best-effort: a missing row (deleted
+ * mid-discovery) is a no-op, never a thrown discovery.
+ */
+export async function projectMcpSummaryTools(
+  serverId: string,
+  toolNames: readonly string[]
+): Promise<void> {
+  const db = getDb()
+  const server = await db.mcpServers.get(serverId)
+  if (!server) return
+  await db.mcpServerSummaries.put(toMcpServerSummary(server, toolNames))
 }
 
 export async function deleteMcpServer(id: string): Promise<void> {
@@ -307,9 +351,51 @@ function normalizeDisallowedTools(tools: readonly string[]): string[] {
   return [...new Set(tools.map((tool) => tool.trim()).filter(Boolean))].sort()
 }
 
+/**
+ * Tool names from this server's freshest capability-cache row, or `[]` when
+ * nothing has been discovered yet. Expired rows still count here: an expiry
+ * means "re-discover before connecting", not "forget which tools exist", and
+ * dropping the names would silently un-expand every glob deny rule.
+ */
+export async function loadMcpServerToolNames(serverId: string): Promise<string[]> {
+  try {
+    const rows = await getDb().mcpCapabilityCache.where("serverId").equals(serverId).toArray()
+    if (rows.length === 0) return []
+    const freshest = rows.reduce((best, row) => (row.updatedAt > best.updatedAt ? row : best))
+    return freshest.tools.map((tool) => tool.name).filter(Boolean)
+  } catch {
+    // No Dexie (CLI / tests): patterns simply do not expand.
+    return []
+  }
+}
+
+/**
+ * Send-path resolver: the SDK-namespaced deny list for the servers attached to
+ * this turn, with every glob rule expanded against that server's discovered
+ * tools. Async because the expansion needs the capability cache; callers that
+ * already hold the tool names use {@link buildMcpDisallowedToolNames}.
+ */
+export async function resolveMcpDisallowedToolNames(
+  servers: ReadonlyArray<
+    Pick<McpServer, "id" | "name" | "disallowedTools" | "disallowedToolPatterns">
+  >
+): Promise<string[]> {
+  const knownTools = new Map<string, string[]>()
+  await Promise.all(
+    servers
+      .filter((server) => (server.disallowedToolPatterns?.length ?? 0) > 0)
+      .map(async (server) => {
+        knownTools.set(server.name, await loadMcpServerToolNames(server.id))
+      })
+  )
+  return buildMcpDisallowedToolNames(servers, knownTools)
+}
+
 /** Convert selected servers' bare deny rules into Claude SDK MCP tool names. */
 export function buildMcpDisallowedToolNames(
-  servers: ReadonlyArray<Pick<McpServer, "name" | "disallowedTools">>
+  servers: ReadonlyArray<Pick<McpServer, "name" | "disallowedTools" | "disallowedToolPatterns">>,
+  /** Discovered tool names per server name, so glob rules can be expanded. */
+  knownToolsByServerName: ReadonlyMap<string, readonly string[]> = new Map()
 ): string[] {
   const denied = new Set<string>()
   for (const server of servers) {
@@ -317,7 +403,8 @@ export function buildMcpDisallowedToolNames(
     // Preserve that runtime namespace; lower-casing here would make deny rules
     // miss servers whose valid configured name contains upper-case letters.
     const namespace = server.name.trim()
-    for (const tool of normalizeDisallowedTools(server.disallowedTools ?? [])) {
+    const tools = resolveDeniedToolNames(server, knownToolsByServerName.get(server.name) ?? [])
+    for (const tool of tools) {
       denied.add(`mcp__${namespace}__${tool}`)
     }
   }
@@ -545,7 +632,9 @@ export async function bulkImportMcpServers(
         }
         if (creates.length) await db.mcpServers.bulkAdd(creates)
         if (updates.length) await db.mcpServers.bulkPut(updates)
-        await db.mcpServerSummaries.bulkPut([...creates, ...updates].map(toMcpServerSummary))
+        await db.mcpServerSummaries.bulkPut(
+          [...creates, ...updates].map((row) => toMcpServerSummary(row))
+        )
         for (const server of updates) {
           await db.mcpCapabilityCache.where("serverId").equals(server.id).delete()
           await enqueueSyncJobs(server.appsEnabled, server.revision ?? 1)
