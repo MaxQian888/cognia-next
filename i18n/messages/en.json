@@ -11767,6 +11767,7 @@
       "empty": "Select an issue to see its details",
       "labels": "Labels",
       "openInGithub": "Open in GitHub",
+      "openInProIde": "Open {path} in Pro IDE",
       "priority": "Priority",
       "project": "Project",
       "properties": "Properties",
@@ -17915,10 +17916,13 @@
       "createFailed": "Could not create the plan.",
       "description": "One step per line. You can reorder and edit the steps before approving.",
       "field": {
+        "content": "Proposed contents",
+        "path": "File path",
         "prompt": "Prompt (optional)",
         "serverId": "MCP server id",
         "teamId": "Team id",
         "teammateId": "Teammate id (optional)",
+        "title": "Diff title (optional)",
         "toolInput": "Input (JSON)",
         "toolName": "Tool name",
         "workflowId": "Workflow id"

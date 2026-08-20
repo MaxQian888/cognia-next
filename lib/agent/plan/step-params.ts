@@ -53,6 +53,29 @@ export function validatePlanStepParams(kind: PlanStepKind, raw: unknown): PlanSt
       const prompt = str(p.prompt)
       return prompt ? { params: { kind: "approval_gate", prompt } } : { params: undefined }
     }
+    case "editor_review": {
+      // `path` and `content` are structural — without them there is nothing to
+      // review, so unlike the optional-prompt kinds this one has no
+      // derive-from-title fallback.
+      const path = str(p.path)
+      if (!path) return { error: "missing" }
+      // Read directly, not through `str`: an empty proposal is meaningful
+      // ("empty this file"), so only a non-string is a validation failure.
+      if (typeof p.content !== "string") return { error: "missing" }
+      const title = str(p.title)
+      const prompt = str(p.prompt)
+      const root = str(p.root)
+      return {
+        params: {
+          kind: "editor_review",
+          path,
+          content: p.content,
+          ...(title ? { title } : {}),
+          ...(prompt ? { prompt } : {}),
+          ...(root ? { root } : {}),
+        },
+      }
+    }
     case "teammate_dispatch": {
       // The dispatcher requires a team; the teammate is optional (the run's
       // teammate pool picks one when it is absent).

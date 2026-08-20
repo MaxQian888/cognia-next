@@ -186,6 +186,7 @@ export const PLAN_STEP_KINDS = new Set<PlanStepKind>([
   "mcp_tool_call",
   "sub_workflow",
   "approval_gate",
+  "editor_review",
 ])
 
 export const PLAN_STEP_STATUSES = new Set<PlanStepStatus>([

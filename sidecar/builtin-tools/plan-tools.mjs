@@ -35,6 +35,7 @@ export const PLAN_STEP_KINDS = [
   "mcp_tool_call",
   "sub_workflow",
   "approval_gate",
+  "editor_review",
 ]
 
 /** Step statuses the agent may report (terminal + live). */

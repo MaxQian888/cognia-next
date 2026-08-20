@@ -52,12 +52,15 @@
     "createFailed": "Could not create the plan.",
     "description": "One step per line. You can reorder and edit the steps before approving.",
     "field": {
+      "content": "Proposed contents",
+      "path": "File path",
       "prompt": "Prompt (optional)",
+      "serverId": "MCP server id",
       "teamId": "Team id",
       "teammateId": "Teammate id (optional)",
-      "toolName": "Tool name",
+      "title": "Diff title (optional)",
       "toolInput": "Input (JSON)",
-      "serverId": "MCP server id",
+      "toolName": "Tool name",
       "workflowId": "Workflow id"
     },
     "invalidJson": "Step {index}: input must be valid JSON.",

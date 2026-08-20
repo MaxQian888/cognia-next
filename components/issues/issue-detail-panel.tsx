@@ -13,10 +13,11 @@
  * refresh. Comments are activity entries — see `lib/db/issue-events.ts`.
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   CircleSlashIcon,
   ExternalLinkIcon,
+  FileCodeIcon,
   MessageSquarePlusIcon,
   PlayIcon,
   SquareIcon,
@@ -29,6 +30,7 @@ import { toast } from "sonner"
 import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { primaryFileReference } from "@/lib/issues/editor-links"
 import { Separator } from "@/components/ui/separator"
 import { useClientLiveQuery } from "@/hooks/data"
 import { parseGithubMirrorId } from "@/lib/db/github-issue-mirror"
@@ -207,6 +209,8 @@ export function IssueDetailPanel({
             </section>
           </>
         ) : null}
+
+        <OpenInProIde item={item} />
 
         {item.kind !== "local" ? (
           <a
@@ -443,5 +447,66 @@ function PropertyRow({ label, children }: { label: string; children: React.React
       <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
       <span className="min-w-0 flex-1">{children}</span>
     </div>
+  )
+}
+
+/**
+ * "Open in Pro IDE" — the shortest path from an issue to the code it is about.
+ *
+ * Rendered only when the issue actually names a linkable file (see
+ * `lib/issues/editor-links`) AND a Pro IDE is bound, because an affordance that
+ * is usually disabled teaches people to ignore it. Both checks are cheap and
+ * synchronous, so this stays a plain render-time decision rather than an
+ * effect.
+ *
+ * Deliberately NOT an `IssueRunAdapter`: a run owns `in_progress` and advances
+ * the issue to `in_review` when it ends, and opening a file must not move an
+ * issue's state at all.
+ */
+function OpenInProIde({ item }: { item: UnifiedIssueItem }) {
+  const t = useTranslations("issues")
+  const reference = primaryFileReference(item.title, item.description)
+  const [root, setRoot] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Read after mount: the binding lives in a renderer module the server pass
+    // never runs, and reading it during render would desync hydration.
+    let cancelled = false
+    void import("@/lib/codeserver/pane-manager").then(({ getActiveProIdeRoot }) => {
+      if (!cancelled) setRoot(getActiveProIdeRoot())
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [item.unifiedId])
+
+  if (!reference || !root) return null
+
+  const open = async () => {
+    const { codeServerClient } = await import("@/lib/codeserver/client")
+    const absolute =
+      reference.path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(reference.path)
+        ? reference.path
+        : `${root.replace(/[/\\]+$/, "")}/${reference.path.replace(/^[./\\]+/, "")}`
+    try {
+      await codeServerClient.driveOpen(root, absolute, reference.line, reference.column)
+    } catch {
+      // The companion extension is not connected yet; the CLI opener still
+      // gets the user to the file, just without the reveal fidelity.
+      await codeServerClient.openFile(root, absolute, reference.line, reference.column)
+    }
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-7 w-fit gap-1.5 text-xs"
+      onClick={() => void open()}
+      data-testid="issue-detail-open-in-pro-ide"
+    >
+      <FileCodeIcon className="size-3.5" />
+      {t("detail.openInProIde", { path: reference.path })}
+    </Button>
   )
 }

@@ -41,6 +41,7 @@ const STEP_KINDS: readonly PlanStepKind[] = [
   "mcp_tool_call",
   "sub_workflow",
   "approval_gate",
+  "editor_review",
 ]
 const STEP_STATUSES: readonly PlanStepStatus[] = [
   "pending",

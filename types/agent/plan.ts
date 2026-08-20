@@ -45,6 +45,7 @@ export type PlanStepKind =
   | "mcp_tool_call"
   | "sub_workflow"
   | "approval_gate"
+  | "editor_review"
 
 /** Per-kind execution parameters. Discriminated by `PlanStep.kind`. */
 export type PlanStepParams =
@@ -54,6 +55,29 @@ export type PlanStepParams =
   | { kind: "mcp_tool_call"; serverId: string; toolName: string; input?: Record<string, unknown> }
   | { kind: "sub_workflow"; workflowId: string; triggerPayload?: unknown }
   | { kind: "approval_gate"; prompt?: string }
+  /**
+   * Show proposed contents beside a file in the Pro IDE's native diff view, then
+   * block on the same human gate `approval_gate` uses (ADR-0088 Phase 3).
+   *
+   * A review step, not an edit step: `content` is served from memory and nothing
+   * is written. The plan writes the file in a LATER step, once this one is
+   * approved. Degrades to a plain approval gate carrying the proposal as text
+   * when no Pro IDE is available, so a plan authored on the desktop still runs
+   * elsewhere.
+   */
+  | {
+      kind: "editor_review"
+      /** Absolute, or relative to the resolved workspace. */
+      path: string
+      /** Full proposed contents. Empty is a real proposal ("empty this file"). */
+      content: string
+      /** Optional label for the diff tab. */
+      title?: string
+      /** Optional question shown in the approval dialog. */
+      prompt?: string
+      /** Optional explicit workspace; defaults to the bound Pro IDE. */
+      root?: string
+    }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PlanStep

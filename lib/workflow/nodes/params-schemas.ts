@@ -448,6 +448,7 @@ const PlanStepKind = z.enum([
   "mcp_tool_call",
   "sub_workflow",
   "approval_gate",
+  "editor_review",
 ])
 
 const PlanStepStatus = z.enum([

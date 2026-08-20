@@ -60,6 +60,7 @@ export const COMPOSER_STEP_KINDS: readonly PlanStepKind[] = [
   "mcp_tool_call",
   "sub_workflow",
   "approval_gate",
+  "editor_review",
 ]
 
 /** Free-text draft of one step's kind-specific params (validated on submit). */
@@ -72,6 +73,10 @@ export interface StepKindDraft {
   toolInput?: string
   serverId?: string
   workflowId?: string
+  /** `editor_review` — the file under review and its proposed contents. */
+  path?: string
+  content?: string
+  title?: string
 }
 
 export const DEFAULT_STEP_DRAFT: StepKindDraft = { kind: "agent_turn" }
@@ -100,6 +105,13 @@ export function buildStepParams(
     toolName: draft.toolName,
     serverId: draft.serverId,
     workflowId: draft.workflowId,
+    path: draft.path,
+    // Passed through even when blank: `validatePlanStepParams` treats an empty
+    // string as a real proposal ("empty this file") and only a non-string as a
+    // validation failure, so coercing undefined→"" here would turn "the author
+    // forgot the content box" into a silent request to blank the file.
+    content: draft.content,
+    title: draft.title,
     input,
   })
 }
@@ -313,9 +325,10 @@ function StepKindRow({
   onPatch: (patch: Partial<StepKindDraft>) => void
 }) {
   const t = useTranslations("plan.composer")
-  const field = (
-    key: "prompt" | "teamId" | "teammateId" | "toolName" | "toolInput" | "serverId" | "workflowId"
-  ) => (
+  // Derived from the draft rather than restated: the two lists drifted the
+  // moment `editor_review` added fields, and a hardcoded union fails at the
+  // call site instead of where the field was actually forgotten.
+  const field = (key: Exclude<keyof StepKindDraft, "kind">) => (
     <div className="space-y-1" key={key}>
       <Label htmlFor={`plan-step-${index}-${key}`} className="text-[11px]">
         {t(`field.${key}`)}
@@ -347,6 +360,9 @@ function StepKindRow({
       break
     case "sub_workflow":
       fields.push(field("workflowId"))
+      break
+    case "editor_review":
+      fields.push(field("path"), field("content"), field("title"), field("prompt"))
       break
   }
 

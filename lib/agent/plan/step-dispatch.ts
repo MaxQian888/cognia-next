@@ -43,6 +43,7 @@ interface StepWorkResult {
 function stepPrompt(step: PlanStep): string {
   if (step.params?.kind === "agent_turn" && step.params.prompt) return step.params.prompt
   if (step.params?.kind === "approval_gate" && step.params.prompt) return step.params.prompt
+  if (step.params?.kind === "editor_review" && step.params.prompt) return step.params.prompt
   return step.description ? `${step.title}\n\n${step.description}` : step.title
 }
 
@@ -57,6 +58,37 @@ function stringifySummary(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+/**
+ * What the approval dialog says for an `editor_review` step.
+ *
+ * When the diff is up, the dialog is only a decision point and should not
+ * duplicate the content. When it is not, the dialog IS the review surface, so
+ * the proposal is carried into it as text along with the reason — silently
+ * asking "approve?" with nothing to look at is how a gate becomes a rubber
+ * stamp.
+ */
+function editorReviewGateBody(
+  step: PlanStep,
+  diffShown: boolean,
+  degradedReason: string | null
+): string {
+  const params = step.params?.kind === "editor_review" ? step.params : null
+  const prompt = params?.prompt ?? step.description ?? ""
+  if (diffShown) {
+    return [prompt, `Review the diff for ${params?.path ?? "the file"} in the Pro IDE.`]
+      .filter(Boolean)
+      .join("\n\n")
+  }
+  return [
+    prompt,
+    `The Pro IDE could not show this diff${degradedReason ? ` (${degradedReason})` : ""}, ` +
+      `so the proposed contents of ${params?.path ?? "the file"} are below.`,
+    params?.content ?? "",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
 }
 
 async function runStepWork(
@@ -109,6 +141,62 @@ async function runStepWork(
         )
       }
       return { value: { outcome: decision.outcome }, summary: "approved" }
+    }
+
+    case "editor_review": {
+      if (step.params?.kind !== "editor_review") {
+        throw nonRetryable("editor_review step requires params.path and params.content")
+      }
+      const { path, content, title } = step.params
+      // Try to put the proposal in front of the user as a real diff. Failure is
+      // NOT fatal: the review still has to happen, so a missing Pro IDE degrades
+      // to the plain gate below with the proposal carried as text. A plan
+      // authored on the desktop therefore still runs on a phone — it just
+      // reviews in a dialog instead of in VS Code.
+      let diffShown = false
+      let degradedReason: string | null = null
+      try {
+        const [{ codeServerClient }, { resolveProIdeRoot }] = await Promise.all([
+          import("@/lib/codeserver/client"),
+          import("@/lib/codeserver/resolve-root"),
+        ])
+        const root = resolveProIdeRoot("editor_review", step.params.root)
+        const absolute =
+          path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)
+            ? path
+            : `${root.replace(/[/\\]+$/, "")}/${path.replace(/^[/\\]+/, "")}`
+        await codeServerClient.showDiff(root, absolute, content, title)
+        diffShown = true
+      } catch (cause) {
+        degradedReason = cause instanceof Error ? cause.message : String(cause)
+      }
+
+      const { waitForDecision } = await import("@/lib/runtime/approval-bus")
+      const key = planApprovalKey(runCtx.planId, step.id)
+      const gates = usePendingGatesStore.getState()
+      gates.open({
+        key,
+        gateType: "plan_step",
+        title: step.title,
+        body: editorReviewGateBody(step, diffShown, degradedReason),
+        planId: runCtx.planId,
+        ...(runCtx.plan.sessionId ? { sessionId: runCtx.plan.sessionId } : {}),
+      })
+      let decision
+      try {
+        decision = await waitForDecision(key, signal)
+      } finally {
+        usePendingGatesStore.getState().close(key)
+      }
+      if (decision.outcome === "reject") {
+        throw nonRetryable(
+          `editor review rejected${decision.feedback ? `: ${decision.feedback}` : ""}`
+        )
+      }
+      return {
+        value: { outcome: decision.outcome, path, diffShown },
+        summary: diffShown ? "approved in editor" : "approved",
+      }
     }
 
     case "sub_workflow": {

@@ -11767,6 +11767,7 @@
       "empty": "选择一个议题查看详情",
       "labels": "标签",
       "openInGithub": "在 GitHub 中打开",
+      "openInProIde": "在 Pro IDE 中打开 {path}",
       "priority": "优先级",
       "project": "项目",
       "properties": "属性",
@@ -17915,10 +17916,13 @@
       "createFailed": "无法创建计划。",
       "description": "每行一个步骤。批准前仍可重新排序和编辑步骤。",
       "field": {
+        "content": "建议的内容",
+        "path": "文件路径",
         "prompt": "提示词（可选）",
         "serverId": "MCP 服务器 ID",
         "teamId": "团队 ID",
         "teammateId": "队友 ID（可选）",
+        "title": "对比标题（可选）",
         "toolInput": "输入（JSON）",
         "toolName": "工具名称",
         "workflowId": "工作流 ID"

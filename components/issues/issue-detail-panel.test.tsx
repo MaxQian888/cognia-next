@@ -41,6 +41,21 @@ jest.mock("@/hooks/data", () => ({
 }))
 jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: jest.fn() }))
 
+// Pro IDE binding + transport — the "open in Pro IDE" affordance reads the
+// bound root after mount and drives code-server directly.
+let mockProIdeRoot: string | null = "/repo"
+jest.mock("@/lib/codeserver/pane-manager", () => ({
+  getActiveProIdeRoot: () => mockProIdeRoot,
+}))
+const mockDriveOpen = jest.fn().mockResolvedValue(undefined)
+const mockOpenFile = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/codeserver/client", () => ({
+  codeServerClient: {
+    driveOpen: (...a: unknown[]) => mockDriveOpen(...a),
+    openFile: (...a: unknown[]) => mockOpenFile(...a),
+  },
+}))
+
 const mockSetIssueAssignee = jest.fn()
 jest.mock("@/lib/db/issues", () => ({
   setIssueAssignee: (...a: unknown[]) => mockSetIssueAssignee(...a),
@@ -392,5 +407,64 @@ describe("GitHub write-back", () => {
     // A malformed id must not produce a write aimed at the wrong issue.
     render(<IssueDetailPanel item={githubItem({ unifiedId: "github:garbage" })} />)
     expect(screen.queryByTestId("issue-writeback-comment")).not.toBeInTheDocument()
+  })
+})
+
+describe("open in Pro IDE", () => {
+  const testId = "issue-detail-open-in-pro-ide"
+
+  beforeEach(() => {
+    mockProIdeRoot = "/repo"
+    mockDriveOpen.mockClear().mockResolvedValue(undefined)
+    mockOpenFile.mockClear().mockResolvedValue(undefined)
+  })
+
+  it("offers the file an issue names in its title", async () => {
+    render(<IssueDetailPanel item={item({ title: "crash in lib/foo/bar.ts:42" })} />)
+    const button = await screen.findByTestId(testId)
+    fireEvent.click(button)
+    await waitFor(() =>
+      expect(mockDriveOpen).toHaveBeenCalledWith("/repo", "/repo/lib/foo/bar.ts", 42, undefined)
+    )
+  })
+
+  it("finds a path in the description too", async () => {
+    render(
+      <IssueDetailPanel item={item({ title: "Login broken", description: "see src/auth.ts" })} />
+    )
+    fireEvent.click(await screen.findByTestId(testId))
+    await waitFor(() =>
+      expect(mockDriveOpen).toHaveBeenCalledWith("/repo", "/repo/src/auth.ts", undefined, undefined)
+    )
+  })
+
+  it("stays hidden when the issue names no file", async () => {
+    // An affordance that is usually disabled teaches people to ignore it.
+    render(<IssueDetailPanel item={item({ title: "The login button is the wrong colour" })} />)
+    await waitFor(() => expect(screen.getByTestId("assignee-picker-stub")).toBeInTheDocument())
+    expect(screen.queryByTestId(testId)).toBeNull()
+  })
+
+  it("stays hidden when no Pro IDE is bound", async () => {
+    mockProIdeRoot = null
+    render(<IssueDetailPanel item={item({ title: "crash in lib/a.ts" })} />)
+    await waitFor(() => expect(screen.getByTestId("assignee-picker-stub")).toBeInTheDocument())
+    expect(screen.queryByTestId(testId)).toBeNull()
+  })
+
+  it("falls back to the CLI opener when the companion extension is absent", async () => {
+    mockDriveOpen.mockRejectedValueOnce(new Error("no extension connected"))
+    render(<IssueDetailPanel item={item({ title: "crash in lib/a.ts" })} />)
+    fireEvent.click(await screen.findByTestId(testId))
+    await waitFor(() =>
+      expect(mockOpenFile).toHaveBeenCalledWith("/repo", "/repo/lib/a.ts", undefined, undefined)
+    )
+  })
+
+  it("does not touch the issue's state — opening a file is not a run", async () => {
+    render(<IssueDetailPanel item={item({ title: "crash in lib/a.ts" })} />)
+    fireEvent.click(await screen.findByTestId(testId))
+    await waitFor(() => expect(mockDriveOpen).toHaveBeenCalled())
+    expect(mockSetIssueAssignee).not.toHaveBeenCalled()
   })
 })

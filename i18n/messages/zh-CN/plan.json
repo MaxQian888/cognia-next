@@ -52,12 +52,15 @@
     "createFailed": "无法创建计划。",
     "description": "每行一个步骤。批准前仍可重新排序和编辑步骤。",
     "field": {
+      "content": "建议的内容",
+      "path": "文件路径",
       "prompt": "提示词（可选）",
+      "serverId": "MCP 服务器 ID",
       "teamId": "团队 ID",
       "teammateId": "队友 ID（可选）",
-      "toolName": "工具名称",
+      "title": "对比标题（可选）",
       "toolInput": "输入（JSON）",
-      "serverId": "MCP 服务器 ID",
+      "toolName": "工具名称",
       "workflowId": "工作流 ID"
     },
     "invalidJson": "第 {index} 步：输入必须是合法 JSON。",

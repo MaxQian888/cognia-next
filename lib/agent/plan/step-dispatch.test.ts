@@ -10,6 +10,24 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
   executeAgent: (...a: unknown[]) => executeAgentMock(...a),
 }))
 
+const showDiffMock = jest.fn()
+jest.mock("@/lib/codeserver/client", () => ({
+  codeServerClient: { showDiff: (...a: unknown[]) => showDiffMock(...a) },
+}))
+
+let proIdeRoot: string | null = "/repo"
+jest.mock("@/lib/codeserver/resolve-root", () => {
+  const actual = jest.requireActual("@/lib/codeserver/resolve-root")
+  return {
+    ...actual,
+    resolveProIdeRoot: (caller: string, explicit?: string | null) => {
+      if (explicit) return explicit
+      if (proIdeRoot) return proIdeRoot
+      throw new actual.ProIdeRootUnresolvedError(caller)
+    },
+  }
+})
+
 const waitForDecisionMock = jest.fn()
 jest.mock("@/lib/runtime/approval-bus", () => ({
   waitForDecision: (...a: unknown[]) => waitForDecisionMock(...a),
@@ -578,5 +596,101 @@ describe("dispatchPlanStepNode — guards", () => {
     await expect(dispatchPlanStepNode(ctx, "ghost", signal)).rejects.toMatchObject({
       retryable: false,
     })
+  })
+})
+
+describe("editor_review", () => {
+  const reviewStep = (params: Record<string, unknown> = {}) =>
+    step({
+      kind: "editor_review",
+      title: "Review the fix",
+      params: {
+        kind: "editor_review",
+        path: "src/a.ts",
+        content: "next",
+        ...params,
+      } as PlanStep["params"],
+    })
+
+  beforeEach(() => {
+    proIdeRoot = "/repo"
+    showDiffMock.mockReset().mockResolvedValue(undefined)
+    waitForDecisionMock.mockReset().mockResolvedValue({ outcome: "approve" })
+  })
+
+  it("shows the proposal in the Pro IDE, then blocks on the human gate", async () => {
+    const { ctx } = makeCtx(reviewStep({ title: "Proposed fix" }))
+    const result = await dispatchPlanStepNode(ctx, "s1", new AbortController().signal)
+
+    expect(showDiffMock).toHaveBeenCalledWith("/repo", "/repo/src/a.ts", "next", "Proposed fix")
+    expect(waitForDecisionMock).toHaveBeenCalled()
+    expect(result.output).toMatchObject({ outcome: "approve", path: "src/a.ts", diffShown: true })
+  })
+
+  it("honours an explicit root over the bound one", async () => {
+    const { ctx } = makeCtx(reviewStep({ root: "/other" }))
+    await dispatchPlanStepNode(ctx, "s1", new AbortController().signal)
+    expect(showDiffMock).toHaveBeenCalledWith("/other", "/other/src/a.ts", "next", undefined)
+  })
+
+  it("leaves an absolute path alone", async () => {
+    const { ctx } = makeCtx(reviewStep({ path: "/tmp/x.ts" }))
+    await dispatchPlanStepNode(ctx, "s1", new AbortController().signal)
+    expect(showDiffMock).toHaveBeenCalledWith("/repo", "/tmp/x.ts", "next", undefined)
+  })
+
+  it("still reviews when no Pro IDE is bound, carrying the proposal as text", async () => {
+    // A plan authored on the desktop must still run elsewhere; degrading to the
+    // plain gate keeps the review, just not the native diff.
+    proIdeRoot = null
+    const { ctx } = makeCtx(reviewStep())
+    const gate = jest.spyOn(usePendingGatesStore.getState(), "open")
+    const result = await dispatchPlanStepNode(ctx, "s1", new AbortController().signal)
+
+    expect(showDiffMock).not.toHaveBeenCalled()
+    expect(waitForDecisionMock).toHaveBeenCalled()
+    expect(result.output).toMatchObject({ diffShown: false })
+    const body = String(gate.mock.calls.at(-1)?.[0]?.body ?? "")
+    expect(body).toContain("could not show this diff")
+    // The content is the review surface now — asking "approve?" with nothing to
+    // look at is how a gate becomes a rubber stamp.
+    expect(body).toContain("next")
+    gate.mockRestore()
+  })
+
+  it("degrades the same way when the editor itself rejects the diff", async () => {
+    showDiffMock.mockRejectedValueOnce(new Error("no extension connected"))
+    const { ctx } = makeCtx(reviewStep())
+    const gate = jest.spyOn(usePendingGatesStore.getState(), "open")
+    const result = await dispatchPlanStepNode(ctx, "s1", new AbortController().signal)
+    expect(result.output).toMatchObject({ diffShown: false })
+    expect(String(gate.mock.calls.at(-1)?.[0]?.body ?? "")).toContain("no extension connected")
+    gate.mockRestore()
+  })
+
+  it("does not repeat the content in the dialog when the diff is up", async () => {
+    const { ctx } = makeCtx(reviewStep({ prompt: "Does this look right?" }))
+    const gate = jest.spyOn(usePendingGatesStore.getState(), "open")
+    await dispatchPlanStepNode(ctx, "s1", new AbortController().signal)
+    const body = String(gate.mock.calls.at(-1)?.[0]?.body ?? "")
+    expect(body).toContain("Does this look right?")
+    expect(body).toContain("Review the diff")
+    expect(body).not.toContain("next")
+    gate.mockRestore()
+  })
+
+  it("fails the step when the reviewer rejects", async () => {
+    waitForDecisionMock.mockResolvedValue({ outcome: "reject", feedback: "wrong file" })
+    const { ctx } = makeCtx(reviewStep())
+    await expect(dispatchPlanStepNode(ctx, "s1", new AbortController().signal)).rejects.toThrow(
+      /editor review rejected: wrong file/
+    )
+  })
+
+  it("rejects a step whose params never made it through validation", async () => {
+    const { ctx } = makeCtx(step({ kind: "editor_review" }))
+    await expect(dispatchPlanStepNode(ctx, "s1", new AbortController().signal)).rejects.toThrow(
+      /requires params.path and params.content/
+    )
   })
 })

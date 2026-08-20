@@ -252,3 +252,43 @@ describe("PlanComposerDialog", () => {
     expect(screen.queryByTestId("plan-composer-dialog")).not.toBeInTheDocument()
   })
 })
+
+describe("buildStepParams — editor_review", () => {
+  it("requires both the file and the proposal", () => {
+    // Unlike the optional-prompt kinds there is no derive-from-title fallback:
+    // without a path and contents there is nothing to review.
+    expect(buildStepParams({ kind: "editor_review" })).toEqual({ error: "missing" })
+    expect(buildStepParams({ kind: "editor_review", path: "src/a.ts" })).toEqual({
+      error: "missing",
+    })
+    expect(buildStepParams({ kind: "editor_review", content: "next" })).toEqual({
+      error: "missing",
+    })
+  })
+
+  it("accepts an empty proposal — that is 'empty this file', not a blank field", () => {
+    expect(buildStepParams({ kind: "editor_review", path: "src/a.ts", content: "" })).toEqual({
+      params: { kind: "editor_review", path: "src/a.ts", content: "" },
+    })
+  })
+
+  it("carries the optional title and prompt through", () => {
+    expect(
+      buildStepParams({
+        kind: "editor_review",
+        path: "src/a.ts",
+        content: "next",
+        title: "Proposed fix",
+        prompt: "Does this look right?",
+      })
+    ).toEqual({
+      params: {
+        kind: "editor_review",
+        path: "src/a.ts",
+        content: "next",
+        title: "Proposed fix",
+        prompt: "Does this look right?",
+      },
+    })
+  })
+})
