@@ -62,7 +62,7 @@ import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
 import { maybeHandleControlCommand } from "./commands/dispatch"
 import {
   LarkFollowUpControlDispatchError,
-  maybeHandleLarkFollowUpControl,
+  maybeHandleRunControlFollowUp,
 } from "./follow-up-control"
 import { parseControlCommand } from "./commands/parse"
 import { parseConversationKey } from "@/types/connectors/event"
@@ -877,7 +877,7 @@ export class ConnectorBus {
     // inbound pipeline.
     if (decision !== "drop" && !evalResult.blocked) {
       try {
-        if (await maybeHandleLarkFollowUpControl(event, adapterRow)) {
+        if (await maybeHandleRunControlFollowUp(event, adapterRow)) {
           await appendAudit({
             adapterId: event.adapterId,
             kind: "inbound.received",

@@ -11,13 +11,13 @@ import { getExecutionRun } from "@/lib/db/execution-runs"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { executeRunControlCommand, type RunControlResult } from "@/lib/execution/run-control"
 
-interface FollowUpControlItem {
+export interface FollowUpControlItem {
   action: RunControlAction | "status"
   content: string
   localizedContent: string
 }
 
-interface FollowUpControlRegistration {
+export interface FollowUpControlRegistration {
   platformMessageId: string
   runId: string
   createdAt: number
@@ -92,24 +92,39 @@ async function reply(
     request: {
       conversationRef: event.conversationRef,
       segments: [{ type: "text", text }],
-      metadata: { idempotencyKey: `lark-follow-up:${event.messageId}:${suffix}` },
+      metadata: { idempotencyKey: `run-follow-up:${event.messageId}:${suffix}` },
     },
     source: "ai-run",
   })
 }
 
 /**
- * Consume Feishu's P2P follow-up click, which arrives as an ordinary user
- * message. The durable presentation registration scopes label matching to one
- * active run and a 600-second window; authorization always uses the real
- * inbound sender and the shared execution-control gate.
+ * Consume a run-control follow-up that arrives as an ordinary user message.
+ *
+ * Named for Feishu because Feishu's P2P follow-up bubbles are what it was
+ * built for, but nothing below the old platform gate was Feishu-specific: it
+ * reads bindings by `conversationKey`, matches against the durable
+ * presentation registration, checks `snapshot.allowedActions`, and calls the
+ * shared execution-control gate. The gate meant run control existed on exactly
+ * one of twelve platforms, and only in direct chats — everywhere else a person
+ * watching a delegated run had no way to stop it from the thread they were
+ * watching it in.
+ *
+ * `followUpBubbles` stays the RENDERING switch: a platform without bubbles
+ * still gets the verbs printed as text, and typing one back works.
+ *
+ * Group chats are still excluded. A bare word like "stop" is a plausible thing
+ * to say in a group for reasons that have nothing to do with a run, and the
+ * registration match is by exact label — in a direct chat that is unambiguous,
+ * in a group it is not. Groups keep the card buttons, which carry an explicit
+ * action id.
  */
-export async function maybeHandleLarkFollowUpControl(
+export async function maybeHandleRunControlFollowUp(
   event: NormalizedInboundEvent,
   adapterRow: AdapterInstanceRow,
   overrides: Partial<FollowUpControlDependencies> = {}
 ): Promise<boolean> {
-  if (event.platform !== "lark" || event.channel.kind !== "private") return false
+  if (event.channel.kind !== "private") return false
   if (event.kind && event.kind !== "create") return false
 
   const deps: FollowUpControlDependencies = {
@@ -181,7 +196,7 @@ export async function maybeHandleLarkFollowUpControl(
         {
           runId: run.id,
           action: item.action,
-          idempotencyKey: `lark-follow-up:${event.messageId}`,
+          idempotencyKey: `run-follow-up:${event.messageId}`,
           expectedRevision: run.currentRevision,
           actor: {
             platformIdentityId: event.sender.id,
@@ -209,3 +224,12 @@ export async function maybeHandleLarkFollowUpControl(
   }
   return false
 }
+
+/**
+ * Back-compat alias.
+ *
+ * Kept so a caller that names the platform still resolves while the rename
+ * settles; the behaviour is the generalized one, because a Feishu-only run
+ * control was the defect, not the contract.
+ */
+export const maybeHandleLarkFollowUpControl = maybeHandleRunControlFollowUp

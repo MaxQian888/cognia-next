@@ -12,6 +12,7 @@ import {
 } from "@/lib/connectors/activity/activity-to-a2ui"
 import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
 import { safeStableActivityId } from "@/lib/execution/run-activity"
+import { buildFollowUpItems, RUN_ACTION_LABEL_EN, RUN_ACTION_LABEL_ZH } from "./follow-up-items"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 type LarkMethod = "POST" | "PUT" | "PATCH"
@@ -99,25 +100,10 @@ export interface LarkRunPresentationDriverOptions {
   now?: () => number
 }
 
-const ACTION_LABEL_EN: Record<RunControlAction, string> = {
-  stop: "Stop",
-  pause: "Pause",
-  resume: "Resume",
-  approve: "Approve",
-  deny: "Deny",
-  retry: "Retry",
-  open_details: "View details",
-}
-
-const ACTION_LABEL_ZH: Record<RunControlAction, string> = {
-  stop: "停止",
-  pause: "暂停",
-  resume: "继续",
-  approve: "批准",
-  deny: "拒绝",
-  retry: "重试",
-  open_details: "查看详情",
-}
+// Shared with the generic fallback path, which registers the same verbs so
+// run control is not a one-platform feature.
+const ACTION_LABEL_EN = RUN_ACTION_LABEL_EN
+const ACTION_LABEL_ZH = RUN_ACTION_LABEL_ZH
 
 function clamp(value: string | undefined, max: number): string | undefined {
   if (!value || value.length <= max) return value
@@ -251,23 +237,7 @@ function actionsElement(snapshot: RunProjectionSnapshot): Record<string, unknown
   )
 }
 
-function followUpItems(snapshot: RunProjectionSnapshot): FollowUpControlItem[] {
-  const actionable = snapshot.allowedActions
-    .filter((action) => action !== "open_details")
-    .slice(0, 2)
-    .map((action) => ({
-      action,
-      content: ACTION_LABEL_EN[action],
-      localizedContent: ACTION_LABEL_ZH[action],
-      ...(snapshot.pendingInterrupt
-        ? { interruptId: safeStableActivityId(snapshot.pendingInterrupt.id) }
-        : {}),
-    }))
-  return [
-    ...actionable,
-    { action: "status" as const, content: "View status", localizedContent: "查看状态" },
-  ].slice(0, 3)
-}
+const followUpItems = buildFollowUpItems
 
 function state(ref: RunPresentationRef): LarkCardState {
   const cardId = ref.opaqueState?.cardId

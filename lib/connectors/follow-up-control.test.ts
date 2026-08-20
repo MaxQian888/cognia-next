@@ -4,6 +4,7 @@ import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import {
   LarkFollowUpControlDispatchError,
   maybeHandleLarkFollowUpControl,
+  maybeHandleRunControlFollowUp,
 } from "./follow-up-control"
 
 const event = (text: string): NormalizedInboundEvent => ({
@@ -174,5 +175,63 @@ describe("Lark follow-up controls", () => {
         enqueue: jest.fn(),
       })
     ).rejects.toBeInstanceOf(LarkFollowUpControlDispatchError)
+  })
+})
+
+describe("run control is not a one-platform feature", () => {
+  // Everything below the old `event.platform !== "lark"` gate was already
+  // platform-neutral: bindings are read by conversationKey, the match is
+  // against the durable registration, and authorization goes through the
+  // shared execution-control gate. The gate meant eleven of twelve platforms
+  // had no way to stop a delegated run from the thread showing it.
+  const onPlatform = (platform: string, text: string): NormalizedInboundEvent => ({
+    ...event(text),
+    platform: platform as NormalizedInboundEvent["platform"],
+  })
+
+  it.each(["telegram", "discord", "matrix", "wecom", "onebot"])(
+    "accepts a typed control on %s",
+    async (platform) => {
+      const execute = jest.fn(async () => ({ accepted: true }))
+      const handled = await maybeHandleRunControlFollowUp(onPlatform(platform, "Stop"), adapter, {
+        now: () => 500,
+        listBindings: async () => [binding],
+        getRun: async () => run,
+        execute,
+        consume: jest.fn(async () => undefined),
+        enqueue: jest.fn(),
+      })
+
+      expect(handled).toBe(true)
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-1", action: "stop" }),
+        { operatorIds: ["ou-operator"] }
+      )
+    }
+  )
+
+  it("still ignores group messages on every platform", async () => {
+    // A bare "stop" is a plausible thing to say in a group for reasons that
+    // have nothing to do with a run, and the match is by exact label. Groups
+    // keep the card buttons, which carry an explicit action id.
+    const execute = jest.fn(async () => ({ accepted: true }))
+    const handled = await maybeHandleRunControlFollowUp(
+      { ...onPlatform("discord", "Stop"), channel: { id: "chat-1", kind: "group" } },
+      adapter,
+      {
+        now: () => 500,
+        listBindings: async () => [binding],
+        getRun: async () => run,
+        execute,
+        consume: jest.fn(async () => undefined),
+        enqueue: jest.fn(),
+      }
+    )
+    expect(handled).toBe(false)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("keeps the old name working while the rename settles", () => {
+    expect(maybeHandleLarkFollowUpControl).toBe(maybeHandleRunControlFollowUp)
   })
 })
