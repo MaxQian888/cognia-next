@@ -30,22 +30,25 @@
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
-import { getCapacitorHttp } from "@/lib/connectivity/capacitor-http"
-import { createProxyFetch } from "@/lib/network/proxy-fetch"
-import { detectPlatform } from "@/lib/platform/detect"
+import {
+  createPlatformFetch,
+  platformFetchKind,
+  PlatformFetchUnavailableError,
+  type PlatformFetchKind,
+} from "@/lib/network/platform-fetch"
 import { OpsError, type OperationEvent, type OpsFetch } from "./client"
 
-export type OpsTransportKind = "tauri" | "capacitor" | "browser"
+export type OpsTransportKind = PlatformFetchKind
 
-/** Which transport this shell will use for controller traffic. */
+/**
+ * Which transport this shell will use for controller traffic.
+ *
+ * The routing itself is not controller-specific and lives in
+ * `lib/network/platform-fetch.ts`; the diagnostic service console reaches a
+ * user-configured host under exactly the same three constraints.
+ */
 export function opsTransportKind(): OpsTransportKind {
-  const platform = detectPlatform()
-  if (platform === "tauri") return "tauri"
-  // `detectPlatform` reports `mobile` for the Capacitor shell, but the native
-  // HTTP plugin is what actually decides whether the CORS-free path exists —
-  // a mobile web build has the former without the latter.
-  if (platform === "mobile" && getCapacitorHttp()) return "capacitor"
-  return "browser"
+  return platformFetchKind()
 }
 
 /**
@@ -59,61 +62,24 @@ export function supportsLiveOperationEvents(): boolean {
   return opsTransportKind() === "tauri"
 }
 
-function headerRecord(headers: Headers): Record<string, string> {
-  const record: Record<string, string> = {}
-  headers.forEach((value, key) => {
-    record[key] = value
-  })
-  return record
-}
-
 /**
- * `fetch` over `CapacitorHttp`. Only the shapes the controller client actually
- * sends are supported: text bodies, JSON responses, no redirect following
- * beyond what the native stack does on its own.
+ * The `fetch` implementation this shell should give [`OpsClient`].
+ *
+ * Wraps the shared platform fetch so a missing native bridge still surfaces as
+ * an `OpsError` with the `network_unavailable` code the client's callers
+ * already branch on.
  */
-async function capacitorFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const plugin = getCapacitorHttp()
-  if (!plugin) throw new OpsError("network_unavailable", 0, "CapacitorHttp is unavailable")
-  const request = new Request(input, init)
-  const body =
-    request.method === "GET" || request.method === "HEAD" ? undefined : await request.text()
-  const response = await plugin.request({
-    url: request.url,
-    method: request.method as "GET" | "POST",
-    headers: headerRecord(request.headers),
-    data: body,
-    // Text, not json: the controller's error bodies and its success bodies are
-    // both JSON, but a native auto-parse would hand back an object the
-    // `Response` constructor cannot take, and `OpsClient` parses either way.
-    responseType: "text",
-    connectTimeout: 30_000,
-    readTimeout: 30_000,
-  })
-  const payload = typeof response.data === "string" ? response.data : JSON.stringify(response.data)
-  // 204/304 carry no body, and `new Response(body)` throws on a non-null body
-  // for those statuses — an empty string is still a body.
-  const nullBody = response.status === 204 || response.status === 304
-  return new Response(nullBody ? null : payload, {
-    status: response.status,
-    headers: response.headers,
-  })
-}
-
-/** The `fetch` implementation this shell should give [`OpsClient`]. */
 export function createOpsFetch(): OpsFetch {
-  switch (opsTransportKind()) {
-    case "capacitor":
-      return capacitorFetch
-    case "tauri": {
-      // Wrapped rather than returned directly: `createProxyFetch` accepts its
-      // own `ProxyFetchOptions` init, which is narrower than `RequestInit` and
-      // so not assignable to `OpsFetch` under `strictFunctionTypes`.
-      const proxied = createProxyFetch()
-      return (input, init) => proxied(input, init)
+  const platform = createPlatformFetch()
+  return async (input, init) => {
+    try {
+      return await platform(input, init)
+    } catch (cause) {
+      if (cause instanceof PlatformFetchUnavailableError) {
+        throw new OpsError("network_unavailable", 0, cause.message)
+      }
+      throw cause
     }
-    default:
-      return (input, init) => fetch(input, init)
   }
 }
 
