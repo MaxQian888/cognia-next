@@ -4,7 +4,7 @@ import { McpMyServersTab } from "./mcp-my-servers-tab"
 import { resetStore } from "@/lib/storybook/seed-stores"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import { seedDb } from "@/lib/storybook/seed-db"
-import { makeMcpServerList } from "@/lib/storybook/fixtures/settings-mcp"
+import { makeMcpCapabilityList, makeMcpServerList } from "@/lib/storybook/fixtures/settings-mcp"
 
 // Store + Dexie: view/group/filter UI state lives on `useMcpPanelStore`; the
 // server rows are read from IndexedDB via `useLiveQuery(listMcpServers)`. Empty
@@ -41,6 +41,9 @@ export const Populated: Story = {
     resetStore(useMcpPanelStore)
     await seedDb(async (db) => {
       await db.mcpServers.bulkPut(makeMcpServerList())
+      // Seeding the capability cache is what makes the Tools card render
+      // outside the desktop shell (discovery itself is desktop-only).
+      await db.mcpCapabilityCache.bulkPut(makeMcpCapabilityList())
     })
   },
 }

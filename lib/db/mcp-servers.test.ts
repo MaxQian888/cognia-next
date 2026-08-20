@@ -356,6 +356,34 @@ describe("updateMcpServer", () => {
     })
   })
 
+  it("keeps a legacy row's discovered tools when its rules are edited", async () => {
+    // Pre-governance rows carry no `credentialVersion`. `next` normalizes it to
+    // 0, so a raw !== comparison would read the first edit as a credential
+    // rotation and throw away the tool list the deny rules expand against.
+    const now = Date.now()
+    await getDb().mcpServers.put({
+      id: "mcp_legacy",
+      name: "legacy",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    } as never)
+    await getDb().mcpCapabilityCache.put({
+      id: "mcp_legacy:fp",
+      serverId: "mcp_legacy",
+      fingerprint: "fp",
+      tools: [{ name: "write_file" }],
+      resources: [],
+      prompts: [],
+      expiresAt: now + 60_000,
+      updatedAt: now,
+    })
+    await updateMcpServer("mcp_legacy", { disallowedTools: ["write_file"] })
+    expect(await loadMcpServerToolNames("mcp_legacy")).toEqual(["write_file"])
+  })
+
   it("mirrors deny rules onto the synced summary", async () => {
     const server = await createReviewed({
       name: "mirrored",

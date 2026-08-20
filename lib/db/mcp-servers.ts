@@ -193,7 +193,12 @@ export async function updateMcpServer(
       assertUniqueMcpNamespace(next.name, await db.mcpServers.toArray(), id)
       await db.mcpServers.put(next)
       await db.mcpServerSummaries.put(toMcpServerSummary(next, knownTools))
-      if (shapeChanged || next.credentialVersion !== prev.credentialVersion) {
+      // Compare NORMALIZED credential versions. A pre-governance row carries
+      // `undefined`, which `next` normalizes to 0 — so a raw !== would read
+      // every legacy row's first edit as a credential rotation and throw away
+      // its discovered tool list, which is exactly what the per-tool rules
+      // need to stay expanded.
+      if (shapeChanged || (next.credentialVersion ?? 0) !== (prev.credentialVersion ?? 0)) {
         await db.mcpCapabilityCache.where("serverId").equals(id).delete()
       }
       await enqueueSyncJobs(affectedApps, next.revision ?? 1, renamed ? [prev.name] : [])

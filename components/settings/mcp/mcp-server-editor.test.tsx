@@ -66,20 +66,17 @@ describe("McpServerEditor", () => {
     expect(arg.disallowedTools).toEqual(["browser_run_code_unsafe"])
   })
 
-  it("edits server-level disallowed tools as one bare name per line", async () => {
+  it("carries the existing deny rules through a config edit untouched", async () => {
     const onSave = jest.fn().mockResolvedValue(undefined)
     render(<McpServerEditor initial={base} onCancel={jest.fn()} onSave={onSave} />)
-    const input = screen.getByLabelText("disallowedTools")
-    expect(input).toHaveValue("browser_run_code_unsafe")
-    fireEvent.change(input, {
-      target: { value: "browser_run_code_unsafe\nbrowser_evaluate\nbrowser_evaluate" },
-    })
+    // Deny rules are edited in the Tools card (which needs the discovered tool
+    // list); this form must never be a second, blank source of truth for them.
+    expect(screen.queryByLabelText("disallowedTools")).toBeNull()
+    fireEvent.change(screen.getByDisplayValue("npx"), { target: { value: "pnpx" } })
     fireEvent.click(screen.getByText("save"))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
-    expect(onSave.mock.calls[0][0].disallowedTools).toEqual([
-      "browser_run_code_unsafe",
-      "browser_evaluate",
-    ])
+    expect(onSave.mock.calls[0][0].config.command).toBe("pnpx")
+    expect(onSave.mock.calls[0][0].disallowedTools).toEqual(["browser_run_code_unsafe"])
   })
 
   it("calls onCancel", () => {

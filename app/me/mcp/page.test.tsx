@@ -19,7 +19,7 @@ const rawRows = [
   { id: "a", displayName: "Alpha" },
 ]
 const toArrayMock = jest.fn(async () => rawRows)
-const updateMock = jest.fn(async () => 1)
+const updateMock = jest.fn<Promise<number>, [string, Record<string, unknown>]>(async () => 1)
 const orderByMock = jest.fn(() => {
   throw new Error(
     "SchemaError: KeyPath displayName on object store mcpServerSummaries is not indexed"
@@ -38,14 +38,14 @@ jest.mock("@/lib/db/schema", () => ({
     mcpServerSummaries: {
       toArray: toArrayMock,
       orderBy: orderByMock,
-      update: (...args: unknown[]) => updateMock(...(args as [])),
+      update: (id: string, patch: Record<string, unknown>) => updateMock(id, patch),
     },
   }),
 }))
 
-const enqueueMock = jest.fn(async () => undefined)
+const enqueueMock = jest.fn<Promise<void>, [Record<string, unknown>]>(async () => undefined)
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
-  enqueue: (...args: unknown[]) => enqueueMock(...(args as [])),
+  enqueue: (job: Record<string, unknown>) => enqueueMock(job),
 }))
 
 const mockPaired = (paired: boolean) =>

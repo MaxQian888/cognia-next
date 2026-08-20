@@ -2,7 +2,7 @@
 // (`components/settings/mcp/**`). Kept dependency-light: it imports only the
 // shared domain types so importing it from a story never drags a store/db graph
 // into the bundle. Stories pass overrides to shape each scenario.
-import type { McpServer } from "@cognia/agent-config-types"
+import type { McpCapabilityCacheRow, McpServer } from "@cognia/agent-config-types"
 import type { McpAuditLogRow } from "@/types/wiki"
 
 let seq = 0
@@ -23,6 +23,14 @@ export function makeMcpServer(overrides: Partial<McpServer> = {}): McpServer {
     config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "."] },
     enabled: true,
     appsEnabled: { "claude-code": true },
+    // Governance fields a real row always carries (`createMcpServer` sets
+    // them). Seeding without them makes stories exercise the legacy-row path
+    // rather than the one users are on.
+    schemaVersion: 1,
+    revision: 1,
+    credentialVersion: 0,
+    origin: "manual",
+    trust: { state: "trusted" },
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -71,6 +79,55 @@ export function makeMcpServerList(): McpServer[] {
       enabled: false,
       appsEnabled: { "claude-code": true },
     }),
+  ]
+}
+
+/**
+ * Discovered capabilities for one server. The panel's per-tool switches read
+ * the capability cache rather than talking to the server, so seeding this table
+ * is what makes the Tools card render outside the desktop shell.
+ */
+export function makeMcpCapabilityRow(
+  serverId: string,
+  toolNames: readonly string[],
+  overrides: Partial<McpCapabilityCacheRow> = {}
+): McpCapabilityCacheRow {
+  const updatedAt = overrides.updatedAt ?? Date.UTC(2026, 5, 1, 10, 0, 0)
+  return {
+    id: `${serverId}:storybook`,
+    serverId,
+    fingerprint: "storybook",
+    tools: toolNames.map((name) => ({
+      name,
+      description: `Storybook fixture for ${name}.`,
+    })),
+    resources: [],
+    prompts: [],
+    expiresAt: updatedAt + 600_000,
+    updatedAt,
+    ...overrides,
+  }
+}
+
+/** Capability rows matching `makeMcpServerList()`. */
+export function makeMcpCapabilityList(): McpCapabilityCacheRow[] {
+  return [
+    makeMcpCapabilityRow("mcp_fs", [
+      "read_file",
+      "read_multiple_files",
+      "write_file",
+      "edit_file",
+      "create_directory",
+      "list_directory",
+      "move_file",
+      "search_files",
+    ]),
+    makeMcpCapabilityRow("mcp_github", [
+      "search_repositories",
+      "get_file_contents",
+      "create_issue",
+      "create_pull_request",
+    ]),
   ]
 }
 

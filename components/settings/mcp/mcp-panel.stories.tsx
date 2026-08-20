@@ -4,7 +4,7 @@ import { McpPanel } from "./mcp-panel"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import { seedDb } from "@/lib/storybook/seed-db"
-import { makeMcpServerList } from "@/lib/storybook/fixtures/settings-mcp"
+import { makeMcpCapabilityList, makeMcpServerList } from "@/lib/storybook/fixtures/settings-mcp"
 
 // The full four-tab MCP panel. Active tab lives on `useMcpPanelStore`; the My
 // Servers tab reads rows from Dexie. Each story seeds the tab + (where useful)
@@ -34,6 +34,9 @@ export const MyServers: Story = {
     seedStore(useMcpPanelStore, { activeTab: "my-servers" })
     await seedDb(async (db) => {
       await db.mcpServers.bulkPut(makeMcpServerList())
+      // Seeding the capability cache is what makes the Tools card render
+      // outside the desktop shell (discovery itself is desktop-only).
+      await db.mcpCapabilityCache.bulkPut(makeMcpCapabilityList())
     })
   },
 }

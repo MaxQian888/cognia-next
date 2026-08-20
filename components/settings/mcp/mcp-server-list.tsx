@@ -1,9 +1,7 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
 
-import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import type { McpServer } from "@cognia/agent-config-types"
 import { McpServerRow, type McpRowDensity } from "./mcp-server-row"
 import { groupServers, type McpGroupBy } from "./mcp-server-utils"
@@ -34,6 +32,13 @@ interface Props {
  * floated to the top of each section. Single-column by construction — this is
  * a rail beside a detail pane, so a responsive card grid here would just make
  * every row narrower.
+ *
+ * Deliberately unanimated. The rows used to fade in on a `staggerChildren`
+ * container, which cost more than it gave: at 0.04s per child a hundred-server
+ * rail finishes four seconds after it renders, and when variant propagation
+ * does not fire (observed in the settings pane) every row stays stranded at
+ * `opacity: 0` — present in the DOM, invisible on screen. The tab crossfade
+ * already covers the transition into this list.
  */
 export function McpServerList({
   servers,
@@ -54,7 +59,6 @@ export function McpServerList({
   onDelete,
 }: Props) {
   const t = useTranslations("mcp.group")
-  const reduce = useReducedMotion()
   const groups = groupServers(servers, groupBy, isFavorite)
 
   return (
@@ -67,34 +71,28 @@ export function McpServerList({
               <span className="text-muted-foreground/60">({group.servers.length})</span>
             </h3>
           )}
-          <motion.div
-            className="flex flex-col gap-0.5"
-            variants={reduce ? undefined : STAGGER_CONTAINER}
-            initial={reduce ? false : "initial"}
-            animate="animate"
-          >
+          <div className="flex flex-col gap-0.5">
             {group.servers.map((server) => (
-              <motion.div key={server.id} variants={reduce ? undefined : STAGGER_CHILD}>
-                <McpServerRow
-                  server={server}
-                  density={density}
-                  active={activeId === server.id}
-                  selected={selection.has(server.id)}
-                  favorite={isFavorite(server.id)}
-                  toolCount={toolCounts.get(server.id)}
-                  deniedToolCount={deniedToolCounts.get(server.id) ?? 0}
-                  onOpen={onOpen}
-                  onToggleSelect={onToggleSelect}
-                  onToggleFavorite={onToggleFavorite}
-                  onToggle={(enabled) => onToggle(server, enabled)}
-                  onEdit={onEdit}
-                  onClone={onClone}
-                  onExport={onExport}
-                  onDelete={onDelete}
-                />
-              </motion.div>
+              <McpServerRow
+                key={server.id}
+                server={server}
+                density={density}
+                active={activeId === server.id}
+                selected={selection.has(server.id)}
+                favorite={isFavorite(server.id)}
+                toolCount={toolCounts.get(server.id)}
+                deniedToolCount={deniedToolCounts.get(server.id) ?? 0}
+                onOpen={onOpen}
+                onToggleSelect={onToggleSelect}
+                onToggleFavorite={onToggleFavorite}
+                onToggle={(enabled) => onToggle(server, enabled)}
+                onEdit={onEdit}
+                onClone={onClone}
+                onExport={onExport}
+                onDelete={onDelete}
+              />
             ))}
-          </motion.div>
+          </div>
         </div>
       ))}
     </div>
