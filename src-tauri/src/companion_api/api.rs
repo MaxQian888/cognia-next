@@ -1668,6 +1668,10 @@ async fn socket_ticket_handler(
             )
             .map_err(|error| ApiError::new(StatusCode::FORBIDDEN, error.code, error.message))?;
     }
+    socket_channel_host_gate(
+        request.channel,
+        crate::terminal_host_service::terminal_remote_access_enabled().await,
+    )?;
     let ticket = security
         .issue_socket_ticket(
             &access.tenant_id,
@@ -1682,6 +1686,32 @@ async fn socket_ticket_handler(
         ticket,
         expires_in: SOCKET_TICKET_TTL_SECS,
     }))
+}
+
+/// Host-wide switches that refuse a channel outright, independent of who is
+/// asking.
+///
+/// The remote-terminal switch is enforced again at the WebSocket upgrade, but
+/// a browser cannot read a status code off a failed upgrade — it gets an
+/// untyped `error` event and reports "connection failed", which sent users
+/// hunting for a network fault instead of for the switch. Refusing the ticket
+/// puts the reason in a response the client can read and name, and costs
+/// nothing: a ticket the upgrade would reject anyway has no other use.
+///
+/// Split out as a pure function for the same reason `rpc::terminal_rpc_authorization`
+/// is — the handler around it needs a full DPoP-signed access token to reach.
+fn socket_channel_host_gate(
+    channel: SocketChannel,
+    remote_terminal_enabled: bool,
+) -> Result<(), ApiError> {
+    if matches!(channel, SocketChannel::Terminal) && !remote_terminal_enabled {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "terminal_remote_access_disabled",
+            "remote terminal access is disabled on this host",
+        ));
+    }
+    Ok(())
 }
 
 fn decode_access_token(token: &str) -> Result<AccessClaims, ApiError> {
@@ -2112,6 +2142,35 @@ mod tests {
             ("/ws/worker".to_string(), "worker")
         );
         assert_eq!(SocketChannel::Worker.capability(), "agent.worker");
+    }
+
+    /// A browser gets an untyped `error` event off a rejected WebSocket
+    /// upgrade, so the switch has to refuse at ticket time or the UI can only
+    /// say "connection failed".
+    #[test]
+    fn a_terminal_ticket_is_refused_by_name_when_the_host_switch_is_off() {
+        let error = socket_channel_host_gate(SocketChannel::Terminal, false)
+            .expect_err("a terminal ticket must not be issued while remote access is off");
+        assert_eq!(error.code, "terminal_remote_access_disabled");
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+
+        socket_channel_host_gate(SocketChannel::Terminal, true)
+            .expect("the switch being on is the whole point of the switch");
+    }
+
+    /// The switch is about terminals. Gating events/browser/acp/worker on it
+    /// would take the rest of the companion surface down with it.
+    #[test]
+    fn the_terminal_switch_does_not_reach_other_channels() {
+        for channel in [
+            SocketChannel::Events,
+            SocketChannel::Browser,
+            SocketChannel::Acp,
+            SocketChannel::Worker,
+        ] {
+            socket_channel_host_gate(channel, false)
+                .unwrap_or_else(|_| panic!("{channel:?} must not depend on the terminal switch"));
+        }
     }
 
     #[test]
