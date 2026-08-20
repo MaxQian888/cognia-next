@@ -21,12 +21,6 @@
     "ultracode": "ultracode",
     "xhigh": "xhigh"
   },
-  "model": {
-    "claude-haiku-4-5": "Claude Haiku 4.5",
-    "claude-opus-4-5": "Claude Opus 4.5",
-    "claude-opus-4-7": "Claude Opus 4.7",
-    "claude-sonnet-4-5": "Claude Sonnet 4.5"
-  },
   "noneYet": "暂无。在审批弹窗中选择「始终允许」的工具会出现在这里。",
   "orPasteModelId": "或粘贴自定义模型 id",
   "permission": {

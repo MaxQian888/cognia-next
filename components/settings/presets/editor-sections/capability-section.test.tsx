@@ -9,7 +9,14 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("@/lib/claude/model-presets", () => ({
-  MODEL_PRESET_VALUES: ["claude-sonnet-4-5", "claude-opus-4-7"],
+  // Options carry their own display name now — the catalog's `name` is a
+  // proper noun that reads the same in both locales, so there is no i18n key
+  // per model id to keep in sync (and four had already gone stale).
+  modelPresetOptions: () => [
+    { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
+    { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
+  ],
+  MODEL_PRESET_VALUES: ["claude-sonnet-5", "claude-opus-4-8"],
   PERMISSION_MODE_VALUES: ["default", "acceptEdits", "plan", "bypassPermissions"],
 }))
 

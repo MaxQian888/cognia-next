@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { SettingsCard } from "@/components/settings/common/settings-section"
-import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
+import { modelPresetOptions, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import type { AppSettings, SendOptions } from "@cognia/agent-config-types"
 
 import { EFFORT_LEVELS } from "./constants"
@@ -71,9 +71,9 @@ export function CapabilitySection({ state, onPatch, defaultOpen = true }: Capabi
               <SelectItem value="__default__">
                 {safeT("editor.useAppDefault", "Use app default")}
               </SelectItem>
-              {MODEL_PRESET_VALUES.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {tGeneral(`model.${v}` as `model.${typeof v}`)}
+              {modelPresetOptions().map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.name}
                 </SelectItem>
               ))}
             </SelectContent>

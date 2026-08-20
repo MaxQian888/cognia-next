@@ -21,12 +21,6 @@
     "ultracode": "ultracode",
     "xhigh": "xhigh"
   },
-  "model": {
-    "claude-haiku-4-5": "Claude Haiku 4.5",
-    "claude-opus-4-5": "Claude Opus 4.5",
-    "claude-opus-4-7": "Claude Opus 4.7",
-    "claude-sonnet-4-5": "Claude Sonnet 4.5"
-  },
   "noneYet": "None yet. Tools you mark \"Allow always\" in approval dialogs appear here.",
   "orPasteModelId": "Or paste a custom model id",
   "permission": {

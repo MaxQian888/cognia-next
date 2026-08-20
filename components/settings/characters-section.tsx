@@ -150,7 +150,7 @@ import { characterToPackDef, filterCharacters } from "@/lib/plugin/character-pac
 import { serializeLocalPackFile } from "@/lib/plugin/character-pack/schema"
 import { downloadBlob } from "@/lib/files/download"
 import { createLogger } from "@cognia/logging"
-import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
+import { modelPresetOptions, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { isValidAgentEnvName } from "@/lib/agent/agent-profile-policy"
 import { createAgentEnvSecretRef, saveAgentEnvSecret } from "@/lib/agent/agent-env-keyring"
@@ -2138,9 +2138,9 @@ export function CharacterEditor({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__default__">{tEditor("useDefault")}</SelectItem>
-                {MODEL_PRESET_VALUES.map((v) => (
-                  <SelectItem key={v} value={v}>
-                    {tGeneral(`model.${v}` as `model.${typeof v}`)}
+                {modelPresetOptions().map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.name}
                   </SelectItem>
                 ))}
               </SelectContent>
