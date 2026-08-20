@@ -120,6 +120,31 @@ const READ_ONLY_AGENTS: AgentId[] = ["cline", "roo-code"]
 
 托管 agent 会得到调用 `patchAppsEnabled` 的开关；只读 agent 则以禁用状态渲染并带有一个 X 图标。
 
+## 配对端（`/me/mcp`）
+
+手机或 Web 伴生端通过 `mcpServerSummaries` 镜像桌面端的服务器，并写回两条轴——服务器是否开启，以及哪些工具被禁用：
+
+| 命令 | Payload | 处理器 |
+| ---- | ------- | ------ |
+| `mcp_set_enabled` | `{ id, enabled }` | `desktop-write-source.ts` → `updateMcpServer` |
+| `mcp_set_tool_rules` | `{ id, disallowedTools?, disallowedToolPatterns? }` | 同上 |
+
+两者都走 `updateMcpServer` 而不是裸 Dexie 写入，这样桌面端开关所带来的治理副作用——信任门、调用方随后读到的同步镜像、
+向每个 agent 配置文件的合并同步——在远端调用时表现完全一致。写入经由持久化的 `mobileOutboundQueue`，
+所以离线时做出的更改之后依然会落地。
+
+工具规则是**整体**下发而非增量：客户端渲染的是它从同步镜像读到的那份列表，若把增量应用到一份过期镜像上，
+会悄悄放行用户在另一台设备上刚刚禁用的工具。
+
+<Callout type="info">
+  写入面到此为止。新增、编辑、删除定义都携带凭据与信任决策，OAuth 流程又需要桌面端 keyring——这些保持桌面独有，
+  而不是在这里做一份劣化副本，页面也会明确说明哪些能做、哪些不能。被**规则**挡住的工具同样只能在桌面端解除，
+  因为规则是在有已探测工具列表的地方编写的。
+</Callout>
+
+工具名之所以能到达手机，是因为每次探测后 `writeCapabilityCache` 会把它们投射到 summary 上——能力缓存本身只存在于宿主机。
+因此桌面端从未探测过的服务器会**不显示**工具列表，而不是显示一个空列表，因为"没有工具"和"还没问过"是两个不同的答案。
+
 ## 消费面 → 数据映射
 
 ```mermaid
@@ -136,6 +161,9 @@ flowchart LR
   Tab --> DB
   Bridge --> A2tab["a2ui bridge 标签页 → patchAppsEnabled"]
   A2tab --> DB
+  DB --> Sum["mcpServerSummaries mirror"]
+  Sum --> Me["/me/mcp → mcp_set_enabled / mcp_set_tool_rules"]
+  Me --> DB
   ToolUI["tool-* part"] --> Router["mcp-tool-card REGISTRY"]
   Router --> Cards["定制卡片 / 回退"]
 ```

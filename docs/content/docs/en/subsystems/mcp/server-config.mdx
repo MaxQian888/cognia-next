@@ -155,6 +155,97 @@ trusted host, and sends the ephemeral definition through the allowlisted `mcp-di
 same socket-level DNS/redirect guard as AI SDK and OAuth, lists tools/resources/prompts, and guarantees
 client and dispatcher teardown.
 
+## Per-tool deny rules
+
+A server row carries **two** deny axes, and they answer different questions:
+
+```typescript title="packages/agent-config-types/src/index.ts:5154"
+/** Bare tool names denied whenever this server is attached to an agent run. */
+disallowedTools?: string[]
+/**
+ * Glob deny rules evaluated against the server's discovered tool names
+ * (`*` = any run, `?` = one character, matched case-insensitively).
+ */
+disallowedToolPatterns?: string[]
+```
+
+`disallowedTools` pins precisely the tools that existed when the user flipped them off — a tool the
+server adds later is allowed, because the user never saw it. `disallowedToolPatterns` keeps denying
+tools the server grows later, which is the only honest reading of "disable everything that writes".
+
+Both are *bare* names. The `mcp__<server>__` namespace is stamped on at the send-options seam, because
+the namespace is the runtime server-map key and belongs to the SDK, not to the rule. `lib/mcp/tool-rules.ts`
+holds every predicate, pure, so the settings UI, the send path and the companion write handlers evaluate
+rules identically.
+
+### Expansion at send time
+
+Patterns expand against the **capability cache**, so discovery is what makes them bite:
+
+```typescript title="lib/db/mcp-servers.ts:383"
+export async function resolveMcpDisallowedToolNames(
+  servers: ReadonlyArray<
+    Pick<McpServer, "id" | "name" | "disallowedTools" | "disallowedToolPatterns">
+  >
+): Promise<string[]> {
+```
+
+An unexpanded pattern denies nothing — the fail-open direction. The alternative (sending a wildcard the
+SDK treats as a literal tool name) denies nothing *and* hides that fact, so the UI says which tools a
+rule currently covers instead.
+
+<Callout type="info">
+  Expired capability rows still count. An expiry means "re-discover before connecting", not "forget which
+  tools exist"; dropping the names would silently un-expand every glob rule ten minutes after a
+  successful test.
+</Callout>
+
+### Rule edits and trust review
+
+`fingerprintMcpDefinition` covers `disallowedTools`, because a rule change must invalidate the capability
+cache. Left alone, that also means every rule edit re-opens trust review — which disables the server, and
+makes a per-tool switch unusable. `updateMcpServer` therefore splits the fingerprint's two jobs:
+
+```typescript title="lib/db/mcp-servers.ts:171"
+const shapeChanged =
+  fingerprintMcpDefinition({ ...prev, disallowedTools: [] }) !==
+  fingerprintMcpDefinition({ ...next, disallowedTools: [] })
+const knownTools = await loadMcpServerToolNames(id)
+const rulesRelaxed = !isToolRuleTightening(prev, next, knownTools)
+const materialChange = shapeChanged || rulesRelaxed
+```
+
+| Edit | Re-opens review? | Why |
+| ---- | ---------------- | --- |
+| command / url / env / name / transport | **yes** | the executable or endpoint is what a review is *about* |
+| deny rule **relaxed** | **yes** | hands back a tool the user had taken away |
+| deny rule **tightened** | no | cannot grant anything; forcing a review would disable the server |
+| pinned names → a pattern covering them | no | judged against discovered tools, so a swap reads as a tightening |
+
+<Callout type="warn">
+  Compare **normalized** credential versions when deciding to drop the capability cache. `next` is built
+  with `credentialVersion: prev.credentialVersion ?? 0`, so a raw `!==` reads every pre-governance row's
+  first edit as a credential rotation and deletes that server's tool list — exactly what the rules need
+  to stay expanded.
+</Callout>
+
+### Mirrored to paired clients
+
+`toMcpServerSummary` carries the rules, and the discovered tool names, into the sync mirror a phone or
+web companion reads:
+
+```typescript title="lib/mcp/server-definition.ts:158"
+export function toMcpServerSummary(
+  server: McpServer,
+  toolNames?: readonly string[]
+): McpServerSummary {
+```
+
+`toolNames` is a parameter rather than a lookup because the names live in the capability cache, this
+function is sync and runs inside the write transaction, and a summary must never lose the tool list just
+because the caller had no cache handy. `writeCapabilityCache` projects it after each discovery
+(`projectMcpSummaryTools`), which is what gives `/me/mcp` something to render.
+
 ## UI helpers
 
 `mcp-server-utils.ts` also carries the panel-side glue:
@@ -182,7 +273,7 @@ export function summarizeServer(s: McpServer): string {
 flowchart LR
   subgraph UI["Settings UI"]
     Editor["mcp-server-editor"]
-    Card["mcp-server-card"]
+    Card["mcp-server-row"]
   end
 
   subgraph CRUD["mcp-servers.ts"]

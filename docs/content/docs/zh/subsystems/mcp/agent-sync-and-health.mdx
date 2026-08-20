@@ -98,6 +98,23 @@ transport，连接/列表超时为 15 秒，不自动重试工具调用，并始
 `mcp-stdio-relay.mjs` 则负责上游 HTTP/SSE socket，并应用与 AI SDK/OAuth 相同的受防护 Undici DNS
 lookup，从而关闭 DNS rebinding 缺口。
 
+## 健康标签页
+
+`McpHealthTab` 从两个方向回答 MCP 的健康状况，章节顺序也照此排列。
+
+**出站**（Cognia 作为 MCP *客户端*）以 `McpLiveSessionCard` 开头——由 SDK 的 `mcpServerStatus()` 控制方法驱动的、
+当前运行中 agent 会话的逐服务器状态，带有重连与按会话开关的操作。它也包含根本没有 `McpServer` 记录的进程内
+`cognia` / `a2ui` / 插件服务器。随后是一小时滚动窗口的日志摘要、runtime gateway 指标（热复用、能力缓存命中、重试、超时、
+策略拒绝、平均连接延迟）、持久化的逐服务器运行表，以及 `<LogPanel sources={["mcp"]} />`。
+
+**入站**（Cognia 作为 MCP *服务器*，经 External Bridge）紧随其后：bridge 状态、通往 bridge 自身设置的深链，
+以及[审计日志](#审计日志)。
+
+<Callout type="info">
+  实时会话卡片放在这里而不是服务器列表上方，是因为它回答的是一个健康问题——"运行中的 agent 现在看到了什么？"——
+  而且一个高度可变的卡片压在主从列表顶部，会在每次切换会话时把列表推来推去。
+</Callout>
+
 ## 审计日志
 
 `lib/db/mcp-audit-log.ts` 将**出站与入站** MCP 操作的无内容审计记录到 `mcpAuditLog` Dexie

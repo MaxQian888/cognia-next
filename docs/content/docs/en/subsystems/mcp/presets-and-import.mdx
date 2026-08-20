@@ -209,6 +209,55 @@ The result toast summarizes `{ created, updated, skipped, errored }`, then
 > CCSwitch offers a *parallel* importer that pulls MCP configs from CCSwitch-managed CLIs — see the
 > [consumption surfaces](./consumption-surfaces#ccswitch-mcp-tab) page.
 
+## Paste-to-add and export
+
+Every published MCP server documents itself as either a `… mcp add …` command or an `mcpServers` JSON
+block, so `lib/mcp/config-transfer.ts` reads both — and writes both back.
+
+```typescript title="lib/mcp/config-transfer.ts:597"
+export function parseMcpTransferInput(input: string): McpTransferParse {
+  const text = stripPromptChrome(input)
+  if (!text) return { kind: "empty", drafts: [], warnings: [], error: "empty" }
+  if (text.startsWith("{") || text.startsWith("[")) return parseMcpConfigJson(text)
+  return parseMcpInstallCommand(text)
+}
+```
+
+JSON wins when the text opens a brace: a JSON block can never be a valid command line, and the reverse
+guess would silently tokenize a config into garbage.
+
+| Input | Handled |
+| ----- | ------- |
+| `claude mcp add …`, `codex mcp add …`, `gemini mcp add …`, `opencode`, `cognia` | `-t/--transport`, repeated `-e/--env`, `-H/--header`, `--url`, a bare `--` separator; `-s/--scope` and friends are dropped with a warning |
+| `claude mcp add-json <name> '<json>'` | payload routed to the JSON parser |
+| `code --add-mcp '<json>'` | VS Code's inline-`name` shape |
+| `API_KEY=… npx -y @scope/server` | bare command line; the `KEY=value` prefix lifts into `env` |
+| `https://mcp.example.com/mcp` | bare URL → an http server |
+| `{"mcpServers": …}` / `servers` / `mcp_servers` / a single entry | all four wrappers agents write |
+
+Entries go through `normalizeMcpEntry` — the same normalizer every agent adapter uses — so a pasted
+config is parsed exactly the way an imported file is. Names are sanitized to the namespace charset, and
+anything guessed or renamed is surfaced as a warning rather than applied silently.
+
+### The reverse
+
+`buildMcpInstallCommand` and `buildMcpTransferJson` render a configured server back out. Agent-shaped
+JSON delegates to that adapter's own `project()`, so the output is byte-identical to what the sync writer
+would have produced; commands are quoted only where a POSIX shell needs it.
+
+```typescript title="lib/mcp/config-transfer.ts:643"
+export function buildMcpInstallCommand(server: InstallCommandInput, agent?: AgentId): string {
+```
+
+<Callout type="warn">
+  A stored credential is emitted as its `secretRef` locator, never as the secret. The whole point of
+  these strings is that they get pasted into a terminal or a chat, and neither is a place for a
+  decrypted token.
+</Callout>
+
+Both directions share one parser/serializer pair, so anything the export dialog emits the paste box can
+read back — a property the test suite asserts by round-tripping.
+
 ## Sources → catalog → install
 
 ```mermaid

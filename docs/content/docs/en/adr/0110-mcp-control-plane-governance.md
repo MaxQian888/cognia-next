@@ -7,7 +7,7 @@ description: Govern outbound MCP definitions, credentials, policy, runtime scope
 
 ## Status
 
-Accepted — implemented in schema v151.
+Accepted — implemented in schema v151; extended 2026-08-21 with decisions 13–14 (per-tool deny rules, paired-client writes).
 
 ## Context
 
@@ -27,6 +27,8 @@ Outbound consumption, external-Agent projection, built-in hosting, and the inbou
 10. Settings capability discovery uses the sidecar `mcp-discover` feature operation; the hand-written Rust probe and its Companion/Tauri command surface are retired.
 11. Anthropic remote servers are presented to the Agent SDK as SDK-managed stdio relays. The relay owns the guarded upstream HTTP/SSE socket, so DNS resolution is checked at connect time rather than only before SDK handoff.
 12. `loadMcpOperationsSnapshot` derives persistent per-server failure rate/connect p95/capability freshness and Agent sync lag from the existing audit, cache, and sync tables; it does not introduce a second log.
+13. A definition carries two per-tool deny axes: `disallowedTools` (exact bare names) and `disallowedToolPatterns` (globs, expanded against the capability cache at send time). Trust review re-opens on an executable/endpoint change or on a **relaxed** rule; a tightening does not, because forcing a review would disable the server and make a per-tool switch unusable. Capability rows survive a rules-only edit — the names are what the globs expand against.
+14. `McpServerSummary` additionally carries the deny rules and the tool names from the last discovery, projected on every capability-cache write. A paired client may write exactly two commands, `mcp_set_enabled` and `mcp_set_tool_rules`, both routed through `updateMcpServer` so the trust gate, summary mirror, and Agent projection behave as they do for a local edit. Definition CRUD and the OAuth flow remain host-only.
 
 ## Consequences
 
@@ -36,6 +38,8 @@ Outbound consumption, external-Agent projection, built-in hosting, and the inbou
 - Legacy SSE uses the 2024-11-05 fallback; current stdio and Streamable HTTP advertise 2025-11-25.
 - The inbound bridge has no single-token HTTP facade or compatibility route; clients must use a scoped client credential and `/mcp/stream`.
 - The Registry, Sync Coordinator, and Runtime Gateway are independently reversible seams.
+- A glob deny rule is only as complete as the last discovery: an unexpanded pattern denies nothing, which is the fail-open direction, so the settings UI states how many tools each rule currently covers.
+- Decision 8 is narrowed, not reversed: paired clients still receive only a summary, but that summary is now large enough to render and govern a tool list.
 
 ## References
 

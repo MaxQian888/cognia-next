@@ -152,6 +152,89 @@ MCP policy，在可信宿主解析 `SecretRef`，再通过 allowlist 中的 `mcp
 `sidecar/dispatch/mcp-runtime-gateway.mjs` 使用官方 client-managed transport，复用 AI SDK/OAuth 的
 socket 级 DNS 与重定向防护，列出 tools/resources/prompts，并保证 client 与 dispatcher 被拆除。
 
+## 按工具的禁用规则
+
+一条服务器记录带有**两条**禁用轴，它们回答的是不同的问题：
+
+```typescript title="packages/agent-config-types/src/index.ts:5154"
+/** Bare tool names denied whenever this server is attached to an agent run. */
+disallowedTools?: string[]
+/**
+ * Glob deny rules evaluated against the server's discovered tool names
+ * (`*` = any run, `?` = one character, matched case-insensitively).
+ */
+disallowedToolPatterns?: string[]
+```
+
+`disallowedTools` 精确钉住用户当时看到并关闭的那些工具——服务器之后新增的工具是放行的，因为用户从未见过它。
+`disallowedToolPatterns` 会持续禁用服务器之后新增的匹配工具，这才是"把所有会写入的工具都关掉"唯一诚实的语义。
+
+两者都是**裸**工具名。`mcp__<server>__` 命名空间在 send-options 接缝处才拼上，因为这个命名空间是运行时
+server-map 的键，属于 SDK 而不属于规则本身。`lib/mcp/tool-rules.ts` 以纯函数持有全部判定逻辑，所以设置界面、
+发送路径和配对端写入处理器对规则的解释完全一致。
+
+### 发送时展开
+
+通配规则针对**能力缓存**展开，因此是「探测」让规则真正生效：
+
+```typescript title="lib/db/mcp-servers.ts:383"
+export async function resolveMcpDisallowedToolNames(
+  servers: ReadonlyArray<
+    Pick<McpServer, "id" | "name" | "disallowedTools" | "disallowedToolPatterns">
+  >
+): Promise<string[]> {
+```
+
+未展开的规则不禁用任何东西——这是 fail-open 的方向。另一种做法（把通配符当字面工具名发给 SDK）同样什么都不禁用，
+而且还把这一事实藏了起来，所以界面会直接显示某条规则当前覆盖了几个工具。
+
+<Callout type="info">
+  已过期的能力缓存行仍然计入。过期的含义是"连接前需要重新探测"，而不是"忘记有哪些工具"；丢掉这些名字会让每条通配规则
+  在一次成功测试的十分钟后悄悄失效。
+</Callout>
+
+### 规则编辑与信任复核
+
+`fingerprintMcpDefinition` 覆盖了 `disallowedTools`，因为规则变化必须让能力缓存失效。若放任不管，这也意味着任何一次
+规则编辑都会重新触发信任复核——那会禁用服务器，让「按工具开关」根本不可用。因此 `updateMcpServer` 把指纹的两个职责拆开：
+
+```typescript title="lib/db/mcp-servers.ts:171"
+const shapeChanged =
+  fingerprintMcpDefinition({ ...prev, disallowedTools: [] }) !==
+  fingerprintMcpDefinition({ ...next, disallowedTools: [] })
+const knownTools = await loadMcpServerToolNames(id)
+const rulesRelaxed = !isToolRuleTightening(prev, next, knownTools)
+const materialChange = shapeChanged || rulesRelaxed
+```
+
+| 编辑 | 重新复核？ | 原因 |
+| ---- | ---------- | ---- |
+| command / url / env / name / transport | **是** | 可执行体或端点正是复核所针对的对象 |
+| 禁用规则**放宽** | **是** | 把用户拿走的工具又还了回去 |
+| 禁用规则**收紧** | 否 | 不可能授予任何东西；强制复核会把服务器禁用掉 |
+| 精确名 → 覆盖它们的通配规则 | 否 | 针对已探测工具判定，这种替换读作一次收紧 |
+
+<Callout type="warn">
+  决定是否丢弃能力缓存时，要比较**归一化后**的 credentialVersion。`next` 用
+  `credentialVersion: prev.credentialVersion ?? 0` 构造，所以裸 `!==` 会把每条治理前的旧记录的首次编辑读成一次凭据轮换，
+  从而删掉该服务器的工具列表——而那正是规则展开所依赖的东西。
+</Callout>
+
+### 镜像到配对端
+
+`toMcpServerSummary` 会把规则和已探测的工具名一并带进手机 / Web 伴生端读取的同步镜像：
+
+```typescript title="lib/mcp/server-definition.ts:158"
+export function toMcpServerSummary(
+  server: McpServer,
+  toolNames?: readonly string[]
+): McpServerSummary {
+```
+
+`toolNames` 采用入参而非内部查询：工具名存在能力缓存里，而这个函数是同步的、运行在写事务内部，并且不能因为调用方手头
+没有缓存就让镜像丢掉工具列表。每次探测之后由 `writeCapabilityCache` 投射（`projectMcpSummaryTools`），
+这正是 `/me/mcp` 有东西可渲染的原因。
+
 ## UI 辅助函数
 
 `mcp-server-utils.ts` 还携带面板侧的胶水代码：
@@ -179,7 +262,7 @@ export function summarizeServer(s: McpServer): string {
 flowchart LR
   subgraph UI["设置 UI"]
     Editor["mcp-server-editor"]
-    Card["mcp-server-card"]
+    Card["mcp-server-row"]
   end
 
   subgraph CRUD["mcp-servers.ts"]

@@ -121,6 +121,37 @@ const READ_ONLY_AGENTS: AgentId[] = ["cline", "roo-code"]
 
 Managed agents get switches that `patchAppsEnabled`; read-only agents render disabled with an X icon.
 
+## Paired client (`/me/mcp`)
+
+A phone or web companion mirrors the desktop's servers through `mcpServerSummaries` and writes two axes
+back — whether a server is on, and which of its tools are denied:
+
+| Command | Payload | Handler |
+| ------- | ------- | ------- |
+| `mcp_set_enabled` | `{ id, enabled }` | `desktop-write-source.ts` → `updateMcpServer` |
+| `mcp_set_tool_rules` | `{ id, disallowedTools?, disallowedToolPatterns? }` | same |
+
+Both route through `updateMcpServer` rather than a bare Dexie write, so the governance side effects a
+desktop toggle has — the trust gate, the summary mirror the caller reads back, the coalesced sync into
+every agent config file — behave identically for a remote caller. Writes go through the durable
+`mobileOutboundQueue`, so a change made offline still lands.
+
+Tool rules are sent **whole**, not as deltas: the client renders the list it read from the summary
+mirror, and a delta applied against a stale mirror would silently re-allow a tool the user had denied on
+another device.
+
+<Callout type="info">
+  The write surface stops there. Creating, editing and deleting a definition carries credentials and a
+  trust decision, and the OAuth flow needs the desktop keyring — those stay desktop-only rather than
+  becoming a lesser copy, and the page says which is which. Tools held off by a *rule* are also
+  desktop-only to free, since rules are authored where the discovered tool list lives.
+</Callout>
+
+Tool names reach the phone only because `writeCapabilityCache` projects them onto the summary after each
+discovery — the capability cache itself is host-local. A server the desktop has never probed therefore
+shows no tool list rather than an empty one, because "no tools" and "not yet asked" are different
+answers.
+
 ## Surface → data map
 
 ```mermaid
@@ -139,6 +170,9 @@ flowchart LR
   A2tab --> DB
   ToolUI["tool-* part"] --> Router["mcp-tool-card REGISTRY"]
   Router --> Cards["bespoke cards / fallback"]
+  DB --> Sum["mcpServerSummaries mirror"]
+  Sum --> Me["/me/mcp → mcp_set_enabled / mcp_set_tool_rules"]
+  Me --> DB
 ```
 
 ## Related pages

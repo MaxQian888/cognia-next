@@ -209,6 +209,50 @@ async function importFromAgentWithSelection(agentId, drafts, strategy) {
 > CCSwitch 提供一个 *并行* 的导入器，从 CCSwitch 托管的 CLI 中拉取 MCP 配置 —— 参见
 > [消费面](./consumption-surfaces#ccswitch-mcp-tab) 页面。
 
+## 粘贴添加与导出
+
+几乎每个公开的 MCP 服务器，自我介绍的方式要么是一条 `… mcp add …` 命令，要么是一段 `mcpServers` JSON，
+所以 `lib/mcp/config-transfer.ts` 两种都读，也两种都能写回去。
+
+```typescript title="lib/mcp/config-transfer.ts:597"
+export function parseMcpTransferInput(input: string): McpTransferParse {
+  const text = stripPromptChrome(input)
+  if (!text) return { kind: "empty", drafts: [], warnings: [], error: "empty" }
+  if (text.startsWith("{") || text.startsWith("[")) return parseMcpConfigJson(text)
+  return parseMcpInstallCommand(text)
+}
+```
+
+文本以花括号开头时优先按 JSON 解析：一段 JSON 不可能是合法命令行，而反过来猜则会把配置悄悄切成一堆垃圾 token。
+
+| 输入 | 支持情况 |
+| ---- | -------- |
+| `claude mcp add …`、`codex mcp add …`、`gemini mcp add …`、`opencode`、`cognia` | `-t/--transport`、可重复的 `-e/--env`、`-H/--header`、`--url`、裸 `--` 分隔符；`-s/--scope` 等会被丢弃并给出提示 |
+| `claude mcp add-json <name> '<json>'` | payload 转交 JSON 解析器 |
+| `code --add-mcp '<json>'` | VS Code 的内联 `name` 形态 |
+| `API_KEY=… npx -y @scope/server` | 裸命令行；`KEY=value` 前缀会提升为 `env` |
+| `https://mcp.example.com/mcp` | 裸 URL → http 服务器 |
+| `{"mcpServers": …}` / `servers` / `mcp_servers` / 单条目 | agent 会写出的全部四种包装 |
+
+条目走的是 `normalizeMcpEntry`——和每个 agent adapter 用的是同一个归一化器，所以粘贴进来的配置与导入文件的解析方式完全一致。
+名称会被规整到命名空间字符集；任何猜测或改名都会作为提示显示出来，而不是悄悄生效。
+
+### 反方向
+
+`buildMcpInstallCommand` 与 `buildMcpTransferJson` 把已配置的服务器渲染回去。面向具体 agent 的 JSON 交由该 adapter 自己的
+`project()` 生成，所以输出与同步写入器产生的内容逐字节一致；命令只在 POSIX shell 确实需要时才加引号。
+
+```typescript title="lib/mcp/config-transfer.ts:643"
+export function buildMcpInstallCommand(server: InstallCommandInput, agent?: AgentId): string {
+```
+
+<Callout type="warn">
+  已保存的凭据只会输出为它的 `secretRef` 定位符，绝不会输出明文。这些字符串存在的意义就是被粘贴到终端或聊天里，
+  而这两个地方都不适合放解密后的 token。
+</Callout>
+
+两个方向共用同一对解析器 / 序列化器，所以导出对话框吐出的东西，粘贴框都能读回来——测试用例正是通过往返验证这一性质的。
+
 ## 来源 → 目录 → 安装
 
 ```mermaid

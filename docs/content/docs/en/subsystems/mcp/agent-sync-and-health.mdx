@@ -100,6 +100,26 @@ Remote Anthropic Agent SDK entries are converted to SDK-managed stdio relays. Th
 child lifecycle and reconnect behavior, while `mcp-stdio-relay.mjs` owns the upstream HTTP/SSE socket
 and applies the same guarded Undici DNS lookup used by AI SDK and OAuth, closing the rebinding gap.
 
+## Health tab
+
+`McpHealthTab` answers MCP health in both directions, and its sections are ordered that way.
+
+**Outbound** (Cognia as MCP *client*) leads with `McpLiveSessionCard` — per-server status for the running
+agent session, driven by the SDK's `mcpServerStatus()` control method, with reconnect and per-session
+toggle actions. It includes the in-process `cognia` / `a2ui` / plugin servers that have no `McpServer`
+row at all. Then the rolling one-hour log summary, the runtime-gateway metrics (warm reuse, capability
+cache hits, retries, timeouts, policy denials, mean connect latency), the persisted per-server operation
+table, and `<LogPanel sources={["mcp"]} />`.
+
+**Inbound** (Cognia as MCP *server*, via the External Bridge) follows: bridge status, a deep link to the
+bridge's own settings, and [the audit log](#the-audit-log).
+
+<Callout type="info">
+  The live-session card lives here rather than above the server list because it answers a health question
+  — "what does the running agent see right now?" — and because a variable-height card at the top of a
+  master-detail rail shoves the list around on every session change.
+</Callout>
+
 ## The audit log
 
 `lib/db/mcp-audit-log.ts` records content-free **outbound and inbound** MCP operations into the `mcpAuditLog` Dexie

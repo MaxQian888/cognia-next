@@ -7,7 +7,7 @@ description: 在不合并入站 External Bridge 的前提下，统一治理出�
 
 ## 状态
 
-已接受——由 schema v151 落地。
+已接受——由 schema v151 落地；2026-08-21 扩展决策 13–14（按工具禁用规则、配对端写入）。
 
 ## 背景
 
@@ -27,6 +27,8 @@ description: 在不合并入站 External Bridge 的前提下，统一治理出�
 10. 设置页能力发现使用 sidecar `mcp-discover` feature operation；手写 Rust 探针及其 Companion/Tauri 命令面退役。
 11. Anthropic 远程服务器以 SDK-managed stdio relay 的形式交给 Agent SDK。Relay 负责受防护的上游 HTTP/SSE socket，使 DNS 在实际连接时校验，而不是只在 SDK handoff 前校验。
 12. `loadMcpOperationsSnapshot` 从既有 audit、cache 与 sync 表派生持久化的按服务器失败率、连接 P95、能力新鲜度与 Agent 同步延迟，不创建第二套日志。
+13. 一条定义携带两条按工具的禁用轴：`disallowedTools`（精确裸工具名）与 `disallowedToolPatterns`（通配规则，发送时针对能力缓存展开）。可执行体/端点变更，或规则被**放宽**，会重新触发信任复核；收紧则不会——强制复核会禁用服务器，让按工具开关无法使用。仅改规则的编辑不清除能力缓存行，因为那些工具名正是通配规则展开所依赖的对象。
+14. `McpServerSummary` 额外携带禁用规则与最近一次探测得到的工具名，在每次能力缓存写入时投射。配对端可写且仅可写两条命令：`mcp_set_enabled` 与 `mcp_set_tool_rules`，二者都经由 `updateMcpServer`，使信任门、同步镜像与 Agent 投射的行为与本机编辑一致。定义的增删改与 OAuth 流程仍然仅限宿主端。
 
 ## 影响
 
@@ -36,6 +38,8 @@ description: 在不合并入站 External Bridge 的前提下，统一治理出�
 - Legacy SSE 使用 2024-11-05 回退；当前 stdio 与 Streamable HTTP 使用 2025-11-25。
 - 入站 Bridge 不提供 single-token HTTP facade 或兼容路由；客户端必须使用 scoped client credential 与 `/mcp/stream`。
 - Registry、Sync Coordinator 与 Runtime Gateway 均是可独立回滚的边界。
+- 通配禁用规则的完整度取决于最近一次探测：未展开的规则不禁用任何东西，这是 fail-open 的方向，因此设置界面会明确显示每条规则当前覆盖了多少个工具。
+- 决策 8 是被收窄而非推翻：配对端拿到的仍然只有 summary，只是这份 summary 现在大到足以渲染并治理一份工具列表。
 
 ## 参考
 
