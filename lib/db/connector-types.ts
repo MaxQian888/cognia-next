@@ -13,6 +13,11 @@
 //   * keeps `lib/db/schema.ts` from depending on `types/connectors/*` until
 //     those types are fully stabilised.
 
+import type {
+  AgentAuthority,
+  AutonomyLevel,
+  EngagementMode,
+} from "@cognia/agent-config-types/agent-composition"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type {
@@ -366,6 +371,21 @@ export interface AdapterInstanceRow {
   defaultModel?: string
   defaultProvider?: string
   defaultReasoning?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Composed-mode defaults for this bot (ADR-0117 axes).
+   *
+   * These are the axis-native successors to `defaultMode`, which stays as the
+   * compat mirror: every write sets both, and a read prefers these when
+   * present. Keeping `defaultMode` is not sentiment — `InboxSendPolicy.
+   * forcedMode` still reads it on the scheduled-digest path, which has no
+   * mode router of its own.
+   *
+   * Non-indexed additive fields — no Dexie bump, matching `defaultTeamId` /
+   * `defaultModel` / `defaultReasoning` above.
+   */
+  defaultAutonomy?: AutonomyLevel
+  defaultEngagement?: EngagementMode
+  defaultAuthority?: AgentAuthority
   /** Optional channel ceiling over registered built-in skill ids/wildcards. */
   builtInSkillCeiling?: string[]
   /** Optional channel ceiling over host-owned capabilities. Undefined means no extra clamp. */
@@ -819,6 +839,34 @@ export interface ConversationOverrideRow {
    */
   approvalMode?: "prompt" | "yolo"
   /**
+   * Composed-mode axes for this conversation (ADR-0117).
+   *
+   * `autonomy` and `engagement` are the axis-native successors to `mode`, and
+   * `authority` is the successor to `approvalMode` (`"yolo"` was
+   * `bypassPermissions` scoped by the IM ceiling, which is a duplicate
+   * permission model the composition already owns). All three are read in
+   * preference to the legacy fields, which every write still mirrors so a
+   * rollback needs no reverse migration.
+   *
+   * Orchestration is deliberately absent: its storage of record stays with
+   * `teamId` / `workflowId` above, so a conversation can never carry two
+   * disagreeing answers to "which engine runs this".
+   *
+   * Non-indexed additive fields — no Dexie bump.
+   */
+  autonomy?: AutonomyLevel
+  engagement?: EngagementMode
+  authority?: AgentAuthority
+  /**
+   * Marks a `mode` / `autonomy` that an SLA escalation step forced rather than
+   * an operator choosing it (`runSwitchMode`). Provenance only: without it the
+   * effective-config facade collapses an escalation-driven change to
+   * `conversation-override`, so the ladder silently changing a conversation's
+   * mode is invisible in every UI — the same defect `routingSource:
+   * "assignment"` was added to fix. Cleared by any explicit mode write.
+   */
+  modeForcedBy?: "escalation"
+  /**
    * Per-conversation opt-in for proactive event-driven notifications over IM
    * (control-plane notifications). Fail-closed default OFF: the
    * Notification Center's `im` delivery channel
@@ -979,6 +1027,14 @@ export interface ConversationOverrideRow {
    * or when the conversation is reassigned to a character / team.
    */
   assignmentPreviousMode?: ConnectorMode | null
+  /**
+   * The axis-native counterparts of {@link assignmentPreviousMode}, snapshotted
+   * and restored by the same code path. Separate fields rather than a derived
+   * value because an operator may have set `autonomy` without ever touching
+   * the legacy `mode`, and unassign has to give back exactly what it took.
+   */
+  assignmentPreviousAutonomy?: AutonomyLevel | null
+  assignmentPreviousEngagement?: EngagementMode | null
   /**
    * Snapshot of the routing fields taken ONCE when the first assignment-driven
    * routing write happened (slice 1A). Restored verbatim on unassign while
