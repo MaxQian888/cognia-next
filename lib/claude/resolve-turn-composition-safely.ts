@@ -17,7 +17,10 @@ import {
   resolveTurnComposition,
   toolSurfaceFromNames,
 } from "@/lib/agent/composition/resolve-turn-composition"
-import type { ResolvedAgentCompositionV1 } from "@cognia/agent-config-types/agent-composition"
+import type {
+  AgentCompositionSelectionV1,
+  ResolvedAgentCompositionV1,
+} from "@cognia/agent-config-types/agent-composition"
 
 export interface SafeTurnCompositionInput {
   sessionId?: string
@@ -25,6 +28,12 @@ export interface SafeTurnCompositionInput {
   /** `SendOptions.allowedTools` — names only; schemas are not assembled here. */
   toolNames?: readonly string[]
   executionFingerprint?: string
+  /**
+   * Pre-resolved selection. When absent `resolveTurnComposition` reads the
+   * session store, which is right for direct chat and wrong for any surface
+   * that owns its own configuration (the IM connector).
+   */
+  selection?: AgentCompositionSelectionV1
 }
 
 export async function resolveTurnCompositionSafely(
@@ -36,6 +45,7 @@ export async function resolveTurnCompositionSafely(
       systemPrompt: input.systemPrompt,
       tools: toolSurfaceFromNames(input.toolNames ?? []),
       executionFingerprint: input.executionFingerprint,
+      selection: input.selection,
     })
   } catch {
     return undefined

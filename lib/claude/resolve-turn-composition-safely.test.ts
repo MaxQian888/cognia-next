@@ -26,7 +26,24 @@ describe("resolveTurnCompositionSafely", () => {
         { name: "grep", schema: null, visibility: "native" },
       ],
       executionFingerprint: "fp_1",
+      selection: undefined,
     })
+  })
+
+  // The seam that stops an IM turn composing from the desktop's localStorage:
+  // without a forwarded selection `resolveTurnComposition` reads the session
+  // store, which for a connector turn is a value nobody chose.
+  it("forwards a pre-resolved selection instead of letting the store decide", async () => {
+    mockResolve.mockResolvedValue({ presetId: "standard" })
+    const selection = {
+      presetId: "standard",
+      orchestration: "team" as const,
+      orchestrationRef: "team-1",
+      engagement: "background" as const,
+      autonomy: "suggest" as const,
+    }
+    await resolveTurnCompositionSafely({ sessionId: "s1", selection })
+    expect(mockResolve).toHaveBeenCalledWith(expect.objectContaining({ selection }))
   })
 
   it("returns the resolved composition", async () => {
