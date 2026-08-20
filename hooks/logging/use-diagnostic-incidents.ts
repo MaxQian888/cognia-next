@@ -13,6 +13,7 @@ import {
   readCrashReport,
   type CrashReportSummary,
 } from "@/lib/native/crash-reports"
+import { listSubmissionRecords, type SubmissionRecord } from "@/lib/native/diagnostic-submit"
 import type { MobileCrashSummary } from "@/lib/capacitor/crash-diagnostics"
 
 export interface DiagnosticIncidentSummary {
@@ -20,10 +21,21 @@ export interface DiagnosticIncidentSummary {
   runtime: "desktop" | "mobile"
   source: string
   capturedAt: string
+  /**
+   * Position in the `incident_state` lifecycle.
+   *
+   * `detected` means captured locally and never sent. Anything beyond it comes
+   * from a receipt: the mobile plugin stores one through `markReceipt`, and the
+   * desktop stores one in its submissions sidecar. Before either was wired, the
+   * desktop reported `detected` forever while the UI offered a lifecycle filter
+   * that could never match.
+   */
   state: string
   receiptCode?: string
   sizeBytes: number
   artifacts: Array<"text" | "metadata" | "minidump" | "report">
+  /** The full desktop submission record, when this report has been sent. */
+  submission?: SubmissionRecord
 }
 
 type MobileListOutcome = Awaited<ReturnType<typeof listMobileCrashReports>>
@@ -32,6 +44,7 @@ type MobileDeleteOutcome = Awaited<ReturnType<typeof deleteMobileCrashReport>>
 
 export interface DiagnosticIncidentDependencies {
   listDesktop: () => Promise<CrashReportSummary[]>
+  listSubmissions: () => Promise<Record<string, SubmissionRecord>>
   listMobile: () => Promise<MobileListOutcome>
   readDesktop: (id: string) => Promise<string | null>
   readMobile: (id: string) => Promise<MobileReadOutcome>
@@ -41,6 +54,7 @@ export interface DiagnosticIncidentDependencies {
 
 const defaultDependencies: DiagnosticIncidentDependencies = {
   listDesktop: listCrashReports,
+  listSubmissions: listSubmissionRecords,
   listMobile: listMobileCrashReports,
   readDesktop: readCrashReport,
   readMobile: readMobileCrashReport,
@@ -48,7 +62,10 @@ const defaultDependencies: DiagnosticIncidentDependencies = {
   deleteMobile: deleteMobileCrashReport,
 }
 
-function normalizeDesktop(report: CrashReportSummary): DiagnosticIncidentSummary {
+function normalizeDesktop(
+  report: CrashReportSummary,
+  submission?: SubmissionRecord
+): DiagnosticIncidentSummary {
   const artifacts: DiagnosticIncidentSummary["artifacts"] = []
   if (report.hasTxt) artifacts.push("text")
   if (report.hasJson) artifacts.push("metadata")
@@ -58,9 +75,13 @@ function normalizeDesktop(report: CrashReportSummary): DiagnosticIncidentSummary
     runtime: "desktop",
     source: report.kind ?? "unknown",
     capturedAt: report.capturedAt ?? new Date(0).toISOString(),
-    state: "detected",
+    // The receipt is the authority once one exists; a report that was never
+    // submitted has only ever been detected.
+    state: submission?.clientState ?? "detected",
+    receiptCode: submission?.supportCode || undefined,
     sizeBytes: report.sizeBytes,
     artifacts,
+    submission,
   }
 }
 
@@ -80,11 +101,12 @@ function normalizeMobile(report: MobileCrashSummary): DiagnosticIncidentSummary 
 export async function loadDiagnosticIncidents(
   dependencies: DiagnosticIncidentDependencies = defaultDependencies
 ): Promise<DiagnosticIncidentSummary[]> {
-  const [desktop, mobile] = await Promise.all([
+  const [desktop, mobile, submissions] = await Promise.all([
     dependencies.listDesktop(),
     dependencies.listMobile(),
+    dependencies.listSubmissions(),
   ])
-  const incidents = desktop.map(normalizeDesktop)
+  const incidents = desktop.map((report) => normalizeDesktop(report, submissions[report.stem]))
   if (mobile.kind === "ok") incidents.push(...mobile.value.map(normalizeMobile))
   return incidents.sort((left, right) => right.capturedAt.localeCompare(left.capturedAt))
 }

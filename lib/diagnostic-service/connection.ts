@@ -187,6 +187,15 @@ export class DiagnosticGrantCache {
       sessionToken: () => Promise<string | null>
       fetchImpl: DiagnosticFetch
       now?: () => number
+      /**
+       * Called after each successful exchange with the role the service
+       * assigned.
+       *
+       * Pushed rather than polled: a consumer that read `role` off the cache
+       * would only ever see it change on some *other* render, which is how a
+       * console ends up rendering surfaces the operator cannot use.
+       */
+      onRole?: (role: DiagnosticRole) => void
     }
   ) {}
 
@@ -233,6 +242,7 @@ export class DiagnosticGrantCache {
       expiresAtMs: this.now + response.expiresInSeconds * 1000,
     }
     this.cached = fresh
+    this.options.onRole?.(fresh.role)
     return fresh
   }
 }

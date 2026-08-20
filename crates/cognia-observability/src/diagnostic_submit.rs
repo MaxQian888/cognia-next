@@ -129,6 +129,18 @@ impl InstallationIdentity {
         Self { key }
     }
 
+    /// Build an identity from a raw 32-byte seed.
+    ///
+    /// Exists so a consumer can construct one in a test without naming
+    /// `ed25519_dalek::SigningKey`: `src-tauri` resolves a *different* major
+    /// version of that crate than this one does, so the type is not
+    /// nameable across the boundary even though values flow through it fine.
+    pub fn from_seed(seed: &[u8; 32]) -> Self {
+        Self {
+            key: SigningKey::from_bytes(seed),
+        }
+    }
+
     pub fn signing_key(&self) -> &SigningKey {
         &self.key
     }

@@ -1,5 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 
+import type { SubmissionRecord } from "@/lib/native/diagnostic-submit"
+
 import {
   loadDiagnosticIncidents,
   useDiagnosticIncidents,
@@ -49,7 +51,19 @@ function dependencies(): DiagnosticIncidentDependencies {
     })),
     deleteDesktop: jest.fn(async () => true),
     deleteMobile: jest.fn(async () => ({ kind: "ok" as const })),
+    listSubmissions: jest.fn(async () => ({}) as Record<string, SubmissionRecord>),
   }
+}
+
+const submission: SubmissionRecord = {
+  incidentId: "inc-1",
+  supportCode: "DESK-9",
+  clientState: "accepted",
+  processingState: "accepted",
+  serviceUrl: "https://diag.example.com",
+  submittedAt: "2026-08-01T10:00:00.000Z",
+  includedMinidump: true,
+  includedScreenshot: false,
 }
 
 describe("loadDiagnosticIncidents", () => {
@@ -67,6 +81,40 @@ describe("loadDiagnosticIncidents", () => {
       runtime: "desktop",
       artifacts: ["text", "metadata"],
     })
+  })
+
+  it("reports a desktop crash as detected until a receipt says otherwise", async () => {
+    // The lifecycle filter offers `queued`/`uploading`/`accepted`, and before
+    // submission was wired no desktop report could ever leave `detected`.
+    const incidents = await loadDiagnosticIncidents(dependencies())
+    const desktop = incidents.find((incident) => incident.runtime === "desktop")
+    expect(desktop).toMatchObject({ state: "detected", receiptCode: undefined })
+    expect(desktop?.submission).toBeUndefined()
+  })
+
+  it("takes the state and receipt code from the submission record once it exists", async () => {
+    const deps = dependencies()
+    deps.listSubmissions = jest.fn(async () => ({ "desktop-panic": submission }))
+
+    const incidents = await loadDiagnosticIncidents(deps)
+    const desktop = incidents.find((incident) => incident.runtime === "desktop")
+    expect(desktop).toMatchObject({ state: "accepted", receiptCode: "DESK-9" })
+    expect(desktop?.submission?.includedMinidump).toBe(true)
+  })
+
+  it("ignores a record whose report is gone and a blank support code", async () => {
+    const deps = dependencies()
+    deps.listSubmissions = jest.fn(async () => ({
+      "desktop-panic": { ...submission, supportCode: "" },
+      "already-pruned": submission,
+    }))
+
+    const incidents = await loadDiagnosticIncidents(deps)
+    // Retention prunes reports; a stranded record must not conjure a row.
+    expect(incidents.map((incident) => incident.id)).toEqual(["mobile-native", "desktop-panic"])
+    // An empty support code is absent, not an empty badge.
+    expect(incidents[1].receiptCode).toBeUndefined()
+    expect(incidents[1].state).toBe("accepted")
   })
 
   it("keeps desktop reports when the mobile bridge is unsupported", async () => {

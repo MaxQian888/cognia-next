@@ -34,7 +34,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
@@ -79,7 +79,9 @@ import {
 } from "@/components/ui/sheet"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useDiagnosticConnection } from "@/hooks/diagnostic-service/use-diagnostic-connection"
 import { useDiagnosticIncidents } from "@/hooks/logging/use-diagnostic-incidents"
+import { useIncidentSubmission } from "@/hooks/logging/use-incident-submission"
 import type { DiagnosticIncidentSummary } from "@/hooks/logging/use-diagnostic-incidents"
 import { useTransportHealth } from "@/hooks/logging"
 import { useEdgeResize, useIsNarrow } from "@/hooks/ui"
@@ -148,7 +150,17 @@ export function DiagnosticsWorkspace() {
   const setTraceErrorsOnly = useLogWorkspaceStore((state) => state.setTraceErrorsOnly)
   const resetWorkspace = useLogWorkspaceStore((state) => state.resetWorkspace)
 
+  const router = useRouter()
   const incidents = useDiagnosticIncidents()
+  // The Incidents channel's consent panel needs a service to submit to; the
+  // connection lives with Settings → Diagnostics and is read, not owned, here.
+  const diagnosticService = useDiagnosticConnection()
+  const submission = useIncidentSubmission({
+    connection: diagnosticService.connection,
+    accountId: diagnosticService.accountId,
+    onChanged: () => incidents.refresh(),
+    onConfigure: () => router.push("/settings?section=diagnostics"),
+  })
   const { nativeLogging, healthByTransport } = useTransportHealth({
     autoRefresh: true,
     refreshInterval: 5000,
@@ -408,6 +420,7 @@ export function DiagnosticsWorkspace() {
             detailResize={detailResize}
             receiptsOnly={receiptsOnly}
             onReceiptsOnlyChange={setReceiptsOnly}
+            submission={submission}
           />
         )}
       </main>
@@ -437,6 +450,7 @@ export function DiagnosticsWorkspace() {
               preview={preview}
               previewLoading={previewLoading}
               onDelete={() => setDeleteTarget(selectedIncident)}
+              submission={submission}
             />
           )}
         </SheetContent>

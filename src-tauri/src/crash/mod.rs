@@ -24,9 +24,11 @@ pub mod commands;
 pub mod context;
 pub mod monitor;
 pub mod panic_hook;
+pub mod receipts;
 pub mod report;
 pub mod retention;
 pub mod sentinel;
+pub mod submit;
 pub mod system_info;
 
 use std::path::PathBuf;

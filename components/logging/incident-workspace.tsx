@@ -13,7 +13,14 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, ReceiptTextIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import {
+  Loader2Icon,
+  ReceiptTextIcon,
+  RefreshCwIcon,
+  SendIcon,
+  ShieldOffIcon,
+  Trash2Icon,
+} from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -36,6 +43,74 @@ import type { DiagnosticIncidentSummary } from "@/hooks/logging/use-diagnostic-i
 import type { useEdgeResize } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
 import type { IncidentStateFilter, LogWorkspaceSource } from "@/stores/logging/log-workspace-store"
+
+/**
+ * What the Incidents channel needs in order to actually submit something.
+ *
+ * The consent panel shipped with working checkboxes, a description box, and no
+ * way to send anything — the checkboxes were local state nothing read and the
+ * textarea was uncontrolled. This is the contract that makes them mean
+ * something; `diagnostics-workspace.tsx` supplies it.
+ */
+export interface IncidentSubmissionControls {
+  /** Whether this shell can submit at all (packaging is native-only). */
+  supported: boolean
+  /** Whether a diagnostic service has been configured for this account. */
+  configured: boolean
+  /** A submit/withdraw/delete call is in flight for the selected incident. */
+  busy: boolean
+  /** Stable code from the last failure, translated by the panel. */
+  errorCode: string | null
+  /** What the last successful submission actually moved. */
+  lastOutcome: {
+    uploadedParts: number
+    resumedParts: number
+    screenshotUnavailable: boolean
+  } | null
+  onSubmit: (incident: DiagnosticIncidentSummary, consent: IncidentConsent) => void
+  onRefresh: (incident: DiagnosticIncidentSummary) => void
+  onWithdraw: (incident: DiagnosticIncidentSummary) => void
+  onDeleteRemote: (incident: DiagnosticIncidentSummary) => void
+  /** Opens Settings → Diagnostics so an unconfigured user has somewhere to go. */
+  onConfigure: () => void
+}
+
+/**
+ * Failure codes the panel has a translated string for.
+ *
+ * An allowlist rather than `t.has`: the set of codes is a contract between the
+ * native command, the hook and this panel, and pinning it here is what makes a
+ * new service code degrade to the generic message instead of rendering a
+ * missing-key placeholder at the user.
+ */
+export const SUBMISSION_ERROR_CODES = [
+  "ingest_disabled",
+  "unauthorized",
+  "network_unavailable",
+  "package_invalid",
+  "malformed_response",
+  "report_not_found",
+  "submission_not_found",
+  "desktop_only",
+  "not_configured",
+  "installation_proof_unsupported",
+  "submission_failed",
+] as const
+
+export type SubmissionErrorCode = (typeof SUBMISSION_ERROR_CODES)[number]
+
+/** Map any code onto one this panel can actually render. */
+export function translatableErrorCode(code: string): SubmissionErrorCode {
+  return (SUBMISSION_ERROR_CODES as readonly string[]).includes(code)
+    ? (code as SubmissionErrorCode)
+    : "submission_failed"
+}
+
+export interface IncidentConsent {
+  includeMinidump: boolean
+  includeScreenshot: boolean
+  description: string
+}
 
 export const INCIDENT_STATES: IncidentStateFilter[] = [
   "all",
@@ -80,6 +155,7 @@ export function IncidentWorkspace({
   detailResize,
   receiptsOnly,
   onReceiptsOnlyChange,
+  submission,
 }: {
   incidents: DiagnosticIncidentSummary[]
   loading: boolean
@@ -98,6 +174,7 @@ export function IncidentWorkspace({
   detailResize: ReturnType<typeof useEdgeResize>
   receiptsOnly: boolean
   onReceiptsOnlyChange: (receiptsOnly: boolean) => void
+  submission?: IncidentSubmissionControls
 }) {
   const t = useTranslations("logging.workspace")
   return (
@@ -249,6 +326,7 @@ export function IncidentWorkspace({
             preview={preview}
             previewLoading={previewLoading}
             onDelete={() => onDelete(selected)}
+            submission={submission}
           />
         </aside>
       )}
@@ -261,15 +339,29 @@ export function IncidentDetail({
   preview,
   previewLoading,
   onDelete,
+  submission,
 }: {
   incident: DiagnosticIncidentSummary
   preview: unknown
   previewLoading: boolean
   onDelete: () => void
+  submission?: IncidentSubmissionControls
 }) {
   const t = useTranslations("logging.workspace")
   const [includeMinidump, setIncludeMinidump] = useState(false)
   const [includeScreenshot, setIncludeScreenshot] = useState(false)
+  const [description, setDescription] = useState("")
+
+  const record = incident.submission
+  const withdrawn = Boolean(record?.withdrawnAt)
+  // A minidump can only be offered when one was actually captured; a panic
+  // report has no `.dmp` beside it, and a checkbox that sends nothing is the
+  // same lie this panel already had once.
+  const minidumpAvailable = incident.artifacts.includes("minidump")
+  const canSubmit = Boolean(
+    submission && submission.supported && submission.configured && !submission.busy
+  )
+
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 p-4">
@@ -297,38 +389,153 @@ export function IncidentDetail({
               : displayPreview(preview) || t("detail.noPreview")}
           </pre>
         </div>
-        <div className="space-y-3">
-          <div className="text-sm font-medium">{t("consent.title")}</div>
-          <p className="text-xs text-muted-foreground">{t("consent.description")}</p>
-          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-            <Checkbox
-              checked={includeMinidump}
-              onCheckedChange={(checked) => setIncludeMinidump(checked === true)}
-            />
-            <span>
-              <span className="font-medium">{t("consent.minidump")}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {t("consent.minidumpDescription")}
+
+        {record ? (
+          <div className="space-y-3" data-testid="incident-receipt">
+            <div className="text-sm font-medium">{t("submission.receiptTitle")}</div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+              <dt className="text-muted-foreground">{t("submission.supportCode")}</dt>
+              <dd className="font-mono">{record.supportCode || "—"}</dd>
+              <dt className="text-muted-foreground">{t("submission.incidentId")}</dt>
+              <dd className="truncate font-mono">{record.incidentId}</dd>
+              <dt className="text-muted-foreground">{t("submission.processingState")}</dt>
+              <dd>{record.processingState}</dd>
+              <dt className="text-muted-foreground">{t("submission.submittedAt")}</dt>
+              <dd>{new Date(record.submittedAt).toLocaleString()}</dd>
+              <dt className="text-muted-foreground">{t("submission.service")}</dt>
+              <dd className="truncate">{record.serviceUrl}</dd>
+            </dl>
+            <div className="flex flex-wrap gap-1.5">
+              {record.includedMinidump && (
+                <Badge variant="outline">{t("submission.includedMinidump")}</Badge>
+              )}
+              {record.includedScreenshot && (
+                <Badge variant="outline">{t("submission.includedScreenshot")}</Badge>
+              )}
+              {withdrawn && <Badge variant="destructive">{t("submission.withdrawn")}</Badge>}
+            </div>
+            {submission && !withdrawn && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => submission.onRefresh(incident)}
+                  disabled={submission.busy}
+                >
+                  <RefreshCwIcon className={cn("size-4", submission.busy && "animate-spin")} />
+                  {t("submission.refresh")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => submission.onWithdraw(incident)}
+                  disabled={submission.busy}
+                  title={t("submission.withdrawDescription")}
+                >
+                  <ShieldOffIcon className="size-4" />
+                  {t("submission.withdraw")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => submission.onDeleteRemote(incident)}
+                  disabled={submission.busy}
+                >
+                  <Trash2Icon className="size-4" />
+                  {t("submission.deleteRemote")}
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="text-sm font-medium">{t("consent.title")}</div>
+            <p className="text-xs text-muted-foreground">{t("consent.description")}</p>
+            {minidumpAvailable && (
+              <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+                <Checkbox
+                  checked={includeMinidump}
+                  onCheckedChange={(checked) => setIncludeMinidump(checked === true)}
+                  aria-label={t("consent.minidump")}
+                />
+                <span>
+                  <span className="font-medium">{t("consent.minidump")}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {t("consent.minidumpDescription")}
+                  </span>
+                </span>
+              </label>
+            )}
+            <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+              <Checkbox
+                checked={includeScreenshot}
+                onCheckedChange={(checked) => setIncludeScreenshot(checked === true)}
+                aria-label={t("consent.screenshot")}
+              />
+              <span>
+                <span className="font-medium">{t("consent.screenshot")}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {t("consent.screenshotDescription")}
+                </span>
               </span>
-            </span>
-          </label>
-          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
-            <Checkbox
-              checked={includeScreenshot}
-              onCheckedChange={(checked) => setIncludeScreenshot(checked === true)}
+            </label>
+            <Textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder={t("consent.descriptionPlaceholder")}
+              aria-label={t("consent.descriptionLabel")}
             />
-            <span>
-              <span className="font-medium">{t("consent.screenshot")}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {t("consent.screenshotDescription")}
-              </span>
-            </span>
-          </label>
-          <Textarea
-            placeholder={t("consent.descriptionPlaceholder")}
-            aria-label={t("consent.descriptionLabel")}
-          />
-        </div>
+            {submission && !submission.supported ? (
+              <p className="text-xs text-muted-foreground">{t("submission.desktopOnly")}</p>
+            ) : submission && !submission.configured ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">{t("submission.notConfigured")}</p>
+                <Button variant="outline" size="sm" onClick={submission.onConfigure}>
+                  {t("submission.configure")}
+                </Button>
+              </div>
+            ) : null}
+            <Button
+              className="w-full"
+              disabled={!canSubmit}
+              data-testid="incident-submit"
+              onClick={() =>
+                submission?.onSubmit(incident, {
+                  includeMinidump: minidumpAvailable && includeMinidump,
+                  includeScreenshot,
+                  description,
+                })
+              }
+            >
+              {submission?.busy ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : (
+                <SendIcon className="size-4" />
+              )}
+              {submission?.busy ? t("submission.submitting") : t("submission.submit")}
+            </Button>
+          </div>
+        )}
+
+        {submission?.errorCode && (
+          <Alert variant="destructive" data-testid="incident-submit-error">
+            <AlertDescription>
+              {t(`submission.errors.${translatableErrorCode(submission.errorCode)}`)}
+            </AlertDescription>
+          </Alert>
+        )}
+        {submission?.lastOutcome && (
+          <p className="text-xs text-muted-foreground" data-testid="incident-submit-outcome">
+            {t("submission.parts", {
+              uploaded: submission.lastOutcome.uploadedParts,
+              resumed: submission.lastOutcome.resumedParts,
+            })}
+            {submission.lastOutcome.screenshotUnavailable && (
+              <span className="mt-1 block">{t("submission.screenshotUnavailable")}</span>
+            )}
+          </p>
+        )}
+
         <Button variant="destructive" className="w-full" onClick={onDelete}>
           <Trash2Icon className="size-4" />
           {t("delete.action")}

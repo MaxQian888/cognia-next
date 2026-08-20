@@ -18,8 +18,44 @@ jest.mock("next-intl", () => ({
 }))
 
 const mockSearchParams = jest.fn<URLSearchParams | null, []>()
+const mockRouterPush = jest.fn()
 jest.mock("next/navigation", () => ({
   useSearchParams: () => mockSearchParams(),
+  useRouter: () => ({ push: mockRouterPush }),
+}))
+
+// Both diagnostic-service hooks are mocked rather than exercised here: the
+// connection hook reaches the account store, which pulls in the agent-team and
+// workflow graphs, and this suite is about channel routing. Their own suites
+// cover them, and `incident-workspace.test.tsx` covers the panel they feed.
+jest.mock("@/hooks/diagnostic-service/use-diagnostic-connection", () => ({
+  useDiagnosticConnection: () => ({
+    accountId: "account-a",
+    connection: null,
+    authenticated: false,
+    loading: false,
+    role: null,
+    reachable: true,
+    client: null,
+    can: () => false,
+    connect: jest.fn(),
+    disconnect: jest.fn(),
+    reload: jest.fn(),
+  }),
+}))
+jest.mock("@/hooks/logging/use-incident-submission", () => ({
+  useIncidentSubmission: () => ({
+    supported: false,
+    configured: false,
+    busy: false,
+    errorCode: null,
+    lastOutcome: null,
+    onSubmit: jest.fn(),
+    onRefresh: jest.fn(),
+    onWithdraw: jest.fn(),
+    onDeleteRemote: jest.fn(),
+    onConfigure: jest.fn(),
+  }),
 }))
 
 const logPanelProps = jest.fn()
