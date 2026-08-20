@@ -15,9 +15,11 @@ const meta = {
   beforeEach: () => {
     resetStore(useMcpPanelStore)
   },
+  // The tab is a master-detail grid that fills its parent, so the decorator
+  // has to supply a bounded height — an auto-height box collapses the rail.
   decorators: [
     (Story) => (
-      <div className="max-w-4xl">
+      <div className="flex h-[620px] w-full">
         <Story />
       </div>
     ),

@@ -93,4 +93,33 @@ describe("useMcpPanelStore", () => {
     setFilterSheetOpen(true)
     expect(useMcpPanelStore.getState().filterSheetOpen).toBe(true)
   })
+
+  it("tracks the master-detail selection independently of the editor", () => {
+    const { openDetail, openEdit, closeDetail } = useMcpPanelStore.getState()
+    openDetail("srv1")
+    expect(useMcpPanelStore.getState().detailServerId).toBe("srv1")
+    // Opening the config form must not move the detail pane off the row.
+    openEdit("srv2")
+    expect(useMcpPanelStore.getState().detailServerId).toBe("srv1")
+    closeDetail()
+    expect(useMcpPanelStore.getState().detailServerId).toBeNull()
+  })
+
+  it("toggles the paste dialog", () => {
+    const { setTransferOpen } = useMcpPanelStore.getState()
+    setTransferOpen(true)
+    expect(useMcpPanelStore.getState().transferOpen).toBe(true)
+    setTransferOpen(false)
+    expect(useMcpPanelStore.getState().transferOpen).toBe(false)
+  })
+
+  it("carries the export target, where an empty list means every server", () => {
+    const { openExport, closeExport } = useMcpPanelStore.getState()
+    openExport(["srv1"])
+    expect(useMcpPanelStore.getState().exportTarget).toEqual({ serverIds: ["srv1"] })
+    openExport([])
+    expect(useMcpPanelStore.getState().exportTarget).toEqual({ serverIds: [] })
+    closeExport()
+    expect(useMcpPanelStore.getState().exportTarget).toBeNull()
+  })
 })

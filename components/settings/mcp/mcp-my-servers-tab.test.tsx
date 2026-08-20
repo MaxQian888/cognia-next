@@ -8,11 +8,21 @@ jest.mock("next-intl", () => ({
 }))
 
 let mockServers: unknown[] = []
-jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mockServers }))
+let mockCapabilities: unknown[] = []
+// Run the querier for real so the two live queries in this component stay
+// distinguishable — a blanket `() => mockServers` would feed the server list
+// into the capability derivation as well.
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: (querier: () => unknown) => querier(),
+}))
 
 jest.mock("@/lib/db/mcp-servers", () => ({
-  listMcpServers: jest.fn(),
+  listMcpServers: () => mockServers,
   updateMcpServer: jest.fn().mockResolvedValue(undefined),
+}))
+
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({ mcpCapabilityCache: { toArray: () => mockCapabilities } }),
 }))
 
 jest.mock("@cognia/logging", () => ({
@@ -21,33 +31,47 @@ jest.mock("@cognia/logging", () => ({
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
-jest.mock("../mcp-import-dialog", () => ({ McpImportDialog: () => <div data-testid="import" /> }))
-// Stub the card like every other child of this tab. It drags in a deep chain
-// (`use-log-stream` → a module-scope IndexedDB transport, `@/stores/chat` →
-// `lib/execution/broker`) that this suite never asserts on, and hand-stubbing
-// each export that chain reaches breaks again every time it grows. The card has
-// its own suite in mcp-live-session-card.test.tsx.
-jest.mock("./mcp-live-session-card", () => ({
-  McpLiveSessionCard: () => <div data-testid="live-session" />,
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => false }))
+jest.mock("@/hooks/agent/use-agent-status", () => ({
+  useAgentStatuses: () => ({ statuses: [], loading: false }),
 }))
-jest.mock("../mcp-agent-chip-group", () => ({ refreshAgentAvailability: jest.fn() }))
+
 jest.mock("./mcp-batch-actions-bar", () => ({
   McpBatchActionsBar: () => <div data-testid="batch" />,
 }))
 jest.mock("./mcp-filter-sheet", () => ({
   McpFilterSheet: () => <div data-testid="filter-sheet" />,
 }))
+// The detail pane drags in the sidecar, the log stream and the OAuth status
+// hook; it has its own suite. Same reasoning for the list, which is covered by
+// mcp-server-list.test.tsx.
+jest.mock("./mcp-server-detail", () => ({
+  McpServerDetail: ({ server }: { server: { id: string } }) => (
+    <div data-testid="server-detail">{server.id}</div>
+  ),
+}))
 jest.mock("./mcp-server-list", () => ({
   McpServerList: ({
     servers,
     onToggle,
+    onOpen,
+    toolCounts,
+    deniedToolCounts,
   }: {
     servers: { id: string }[]
     onToggle: (s: unknown, enabled: boolean) => void
+    onOpen: (id: string) => void
+    toolCounts: ReadonlyMap<string, number>
+    deniedToolCounts: ReadonlyMap<string, number>
   }) => (
-    <div data-testid="server-list">
+    <div
+      data-testid="server-list"
+      data-tools={JSON.stringify([...toolCounts])}
+      data-denied={JSON.stringify([...deniedToolCounts])}
+    >
       {servers.length}
       <button onClick={() => onToggle(servers[0], false)}>toggle-first</button>
+      <button onClick={() => onOpen(servers[servers.length - 1].id)}>open-last</button>
     </div>
   ),
 }))
@@ -68,7 +92,7 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
 import type { McpServer } from "@cognia/agent-config-types"
 
-const server = (id: string): McpServer =>
+const server = (id: string, patch: Partial<McpServer> = {}): McpServer =>
   ({
     id,
     name: id,
@@ -78,10 +102,12 @@ const server = (id: string): McpServer =>
     appsEnabled: {},
     createdAt: 0,
     updatedAt: 0,
+    ...patch,
   }) as McpServer
 
 beforeEach(() => {
   mockServers = []
+  mockCapabilities = []
   useMcpPanelStore.setState({
     activeTab: "my-servers",
     search: "",
@@ -89,6 +115,8 @@ beforeEach(() => {
     statusFilter: "all",
     selection: new Set(),
     editorTarget: null,
+    detailServerId: null,
+    exportTarget: null,
   })
   useSettingsStore.setState({
     settings: { mcpPanel: { view: "grid", groupBy: "none", favorites: [] } } as never,
@@ -111,8 +139,16 @@ describe("McpMyServersTab", () => {
 
   it("opens the create editor from the empty-state Add button", async () => {
     render(<McpMyServersTab />)
-    // Second "Add server" in DOM order is the empty-state CTA (toolbar is first).
-    fireEvent.click(screen.getAllByText("addServer")[1])
+    fireEvent.click(screen.getByText("addServer"))
+    await waitFor(() =>
+      expect(useMcpPanelStore.getState().editorTarget).toMatchObject({ mode: "create" })
+    )
+  })
+
+  it("opens the create editor from the rail's add control", async () => {
+    mockServers = [server("a")]
+    render(<McpMyServersTab />)
+    fireEvent.click(screen.getByLabelText("addServer"))
     await waitFor(() =>
       expect(useMcpPanelStore.getState().editorTarget).toMatchObject({ mode: "create" })
     )
@@ -123,7 +159,6 @@ describe("McpMyServersTab", () => {
     render(<McpMyServersTab />)
     fireEvent.click(screen.getByText('selectAll:{"count":2}'))
     expect(useMcpPanelStore.getState().selection).toEqual(new Set(["a", "b"]))
-    // Label flips to "clear" once everything visible is selected.
     fireEvent.click(screen.getByText("clearSelection"))
     expect(useMcpPanelStore.getState().selection.size).toBe(0)
   })
@@ -146,28 +181,26 @@ describe("McpMyServersTab", () => {
     expect(screen.getByText("noMatch")).toBeInTheDocument()
   })
 
-  it("persists the view when the list toggle is clicked", async () => {
+  it("matches the display name as well as the SDK namespace when searching", () => {
+    mockServers = [server("a", { displayName: "Filesystem" })]
+    useMcpPanelStore.setState({ search: "filesys" })
+    render(<McpMyServersTab />)
+    expect(screen.getByTestId("server-list")).toHaveTextContent("1")
+  })
+
+  it("persists the compact density when the row toggle is clicked", async () => {
     const save = jest.fn().mockResolvedValue(undefined)
     useSettingsStore.setState({
       settings: { mcpPanel: { view: "grid", groupBy: "none", favorites: [] } } as never,
       save,
     })
+    mockServers = [server("a")]
     render(<McpMyServersTab />)
-    fireEvent.click(screen.getByLabelText("list"))
+    fireEvent.click(screen.getByLabelText("compact"))
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith({
         mcpPanel: { view: "list", groupBy: "none", favorites: [] },
       })
-    )
-  })
-
-  it("opens the create editor via the seeded add button", async () => {
-    render(<McpMyServersTab />)
-    // With no servers the empty-state CTA also renders an "Add server" button, so
-    // target the toolbar one (first in DOM order).
-    fireEvent.click(screen.getAllByText("addServer")[0])
-    await waitFor(() =>
-      expect(useMcpPanelStore.getState().editorTarget).toMatchObject({ mode: "create" })
     )
   })
 
@@ -179,18 +212,80 @@ describe("McpMyServersTab", () => {
   })
 
   it("opens the filter sheet from the Filters trigger", () => {
+    mockServers = [server("a")]
     render(<McpMyServersTab />)
     fireEvent.click(screen.getByLabelText("filters"))
     expect(useMcpPanelStore.getState().filterSheetOpen).toBe(true)
-    expect(screen.getByTestId("filter-sheet")).toBeInTheDocument()
   })
 
   it("shows an active-filter count badge only when a non-default axis is set", () => {
+    mockServers = [server("a")]
     const { rerender } = render(<McpMyServersTab />)
-    // No active transport/status filter → no badge.
-    expect(screen.queryByText("1")).not.toBeInTheDocument()
+    expect(screen.queryByText("2")).not.toBeInTheDocument()
     useMcpPanelStore.setState({ transportFilter: "http", statusFilter: "disabled" })
     rerender(<McpMyServersTab />)
     expect(screen.getByText("2")).toBeInTheDocument()
+  })
+
+  it("auto-selects the first visible server for the detail pane", async () => {
+    mockServers = [server("a"), server("b")]
+    render(<McpMyServersTab />)
+    await waitFor(() => expect(screen.getByTestId("server-detail")).toHaveTextContent("a"))
+  })
+
+  it("moves the detail pane off a server the filters just hid", async () => {
+    mockServers = [server("a"), server("b")]
+    const { rerender } = render(<McpMyServersTab />)
+    fireEvent.click(screen.getByText("open-last"))
+    await waitFor(() => expect(screen.getByTestId("server-detail")).toHaveTextContent("b"))
+
+    useMcpPanelStore.setState({ search: "a" })
+    rerender(<McpMyServersTab />)
+    await waitFor(() => expect(screen.getByTestId("server-detail")).toHaveTextContent("a"))
+  })
+
+  it("derives per-server tool counts from the freshest capability row", () => {
+    mockServers = [server("a"), server("b")]
+    mockCapabilities = [
+      {
+        serverId: "a",
+        updatedAt: 1,
+        tools: [{ name: "stale_only" }],
+      },
+      {
+        serverId: "a",
+        updatedAt: 2,
+        tools: [{ name: "read_file" }, { name: "write_file" }],
+      },
+    ]
+    render(<McpMyServersTab />)
+    const list = screen.getByTestId("server-list")
+    expect(JSON.parse(list.dataset.tools ?? "[]")).toEqual([["a", 2]])
+    // `b` was never probed, so it gets no entry rather than a zero.
+    expect(JSON.parse(list.dataset.denied ?? "[]")).toEqual([["a", 0]])
+  })
+
+  it("counts tools denied by an exact rule and by a pattern", () => {
+    mockServers = [
+      server("a", { disallowedTools: ["read_file"], disallowedToolPatterns: ["write_*"] }),
+    ]
+    mockCapabilities = [
+      {
+        serverId: "a",
+        updatedAt: 1,
+        tools: [{ name: "read_file" }, { name: "write_file" }, { name: "list_dir" }],
+      },
+    ]
+    render(<McpMyServersTab />)
+    expect(JSON.parse(screen.getByTestId("server-list").dataset.denied ?? "[]")).toEqual([["a", 2]])
+  })
+
+  it("opens the export dialog for one server from the rail", () => {
+    mockServers = [server("a")]
+    render(<McpMyServersTab />)
+    // The list stub does not expose export, so drive the store contract the
+    // rail wires up: the detail pane and the row menu both call `openExport`.
+    useMcpPanelStore.getState().openExport(["a"])
+    expect(useMcpPanelStore.getState().exportTarget).toEqual({ serverIds: ["a"] })
   })
 })

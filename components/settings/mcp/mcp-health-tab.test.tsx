@@ -7,8 +7,12 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-const mockIsTauri = jest.fn(() => true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
+// The factory must not close over an outer `const`: importing this component
+// pulls `components/ui/table` → density-applier → settings-store → the keyring,
+// which calls `isTauri()` at module-eval time, i.e. while that `const` is still
+// in its temporal dead zone. Declaring the spy inside the factory and reaching
+// it through the imported binding sidesteps the TDZ entirely.
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 
 const getLogs = jest.fn()
 const onLogsUpdated = jest.fn((_cb?: () => void) => jest.fn())
@@ -90,6 +94,9 @@ jest.mock("@/lib/mcp/runtime-gateway", () => ({
 }))
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { isTauri } from "@/lib/tauri"
+
+const mockIsTauri = isTauri as jest.Mock
 import { McpHealthTab } from "./mcp-health-tab"
 import type { McpAuditLogRow } from "@/types/wiki"
 

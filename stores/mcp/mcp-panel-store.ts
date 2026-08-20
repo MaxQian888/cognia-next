@@ -42,6 +42,20 @@ interface McpPanelStoreState {
   deleteTarget: { serverId: string; name: string } | null
   /** Mobile-only right-hand filter sheet toggle. */
   filterSheetOpen: boolean
+  /**
+   * Row shown in the master-detail pane. Independent of `selection` (which is
+   * for batch actions) and of `editorTarget` (which is the config form): the
+   * detail pane is a read-and-operate surface — tools, agent projection, auth,
+   * recent logs — that stays open while the user works through a server.
+   */
+  detailServerId: string | null
+  /** Paste-to-import dialog (install command / JSON). */
+  transferOpen: boolean
+  /**
+   * Export dialog target. An empty array means "every configured server",
+   * which is what the panel-level Export action passes.
+   */
+  exportTarget: { serverIds: string[] } | null
 
   setActiveTab: (tab: McpPanelTab) => void
   setSearch: (search: string) => void
@@ -56,6 +70,11 @@ interface McpPanelStoreState {
   closeEditor: () => void
   setDeleteTarget: (target: { serverId: string; name: string } | null) => void
   setFilterSheetOpen: (open: boolean) => void
+  openDetail: (serverId: string) => void
+  closeDetail: () => void
+  setTransferOpen: (open: boolean) => void
+  openExport: (serverIds: string[]) => void
+  closeExport: () => void
 }
 
 export const useMcpPanelStore = create<McpPanelStoreState>((set) => ({
@@ -67,6 +86,9 @@ export const useMcpPanelStore = create<McpPanelStoreState>((set) => ({
   editorTarget: null,
   deleteTarget: null,
   filterSheetOpen: false,
+  detailServerId: null,
+  transferOpen: false,
+  exportTarget: null,
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setSearch: (search) => set({ search }),
@@ -87,4 +109,9 @@ export const useMcpPanelStore = create<McpPanelStoreState>((set) => ({
   closeEditor: () => set({ editorTarget: null }),
   setDeleteTarget: (deleteTarget) => set({ deleteTarget }),
   setFilterSheetOpen: (filterSheetOpen) => set({ filterSheetOpen }),
+  openDetail: (detailServerId) => set({ detailServerId }),
+  closeDetail: () => set({ detailServerId: null }),
+  setTransferOpen: (transferOpen) => set({ transferOpen }),
+  openExport: (serverIds) => set({ exportTarget: { serverIds } }),
+  closeExport: () => set({ exportTarget: null }),
 }))

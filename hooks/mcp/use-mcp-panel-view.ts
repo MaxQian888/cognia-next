@@ -1,8 +1,14 @@
 "use client"
 
 /**
- * View preferences for the MCP servers management panel — the card-grid vs.
- * dense-list toggle, the section grouping mode, and the favorites set.
+ * View preferences for the MCP servers management panel — the master list's
+ * row density, the section grouping mode, and the favorites set.
+ *
+ * `view` is stored as `"grid"` / `"list"` for backwards compatibility with
+ * rows written before the panel became a master-detail pane; the values now
+ * mean "comfortable" and "compact" rows in a single-column rail. Renaming the
+ * stored literals would silently reset every existing user's preference for no
+ * behavioural gain.
  *
  * Persisted on `AppSettings.mcpPanel` via `useSettingsStore.save()` — the same
  * cross-device settings singleton that backs `useGoalConsoleView` /

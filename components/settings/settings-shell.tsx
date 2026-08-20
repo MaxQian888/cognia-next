@@ -320,6 +320,10 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "agent-modes",
   "agent-runtime",
   "memory",
+  // Same conversion again: the MCP panel is now a master/detail pane that owns
+  // its own scroll, so the capped-width ScrollArea branch would waste the
+  // window and stack a second scrollbar on it.
+  "mcp",
   "logs",
 ])
 

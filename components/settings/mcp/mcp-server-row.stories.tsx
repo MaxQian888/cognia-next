@@ -1,13 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
-import { McpServerCard } from "./mcp-server-card"
+import { McpServerRow } from "./mcp-server-row"
 import { makeMcpServer } from "@/lib/storybook/fixtures/settings-mcp"
 
-// Pure, props-only tile. Callbacks are spies; the test/auth actions are
-// desktop-only and resolve to no-ops in the Storybook browser (isTauri() is
-// false). It renders the per-agent chip group + auth button children, both of
-// which take their web/no-token branch here.
+// Pure, props-only master-list row. Callbacks are spies; everything that needs
+// the desktop shell lives in the detail pane, so this renders identically in
+// the Storybook browser.
 const stdioServer = makeMcpServer({
   id: "mcp_fs",
   name: "filesystem",
@@ -25,36 +24,47 @@ const httpServer = makeMcpServer({
 })
 
 const meta = {
-  title: "Settings/MCP/McpServerCard",
-  component: McpServerCard,
+  title: "Settings/MCP/McpServerRow",
+  component: McpServerRow,
   args: {
     server: stdioServer,
+    active: false,
     selected: false,
     favorite: false,
-    variant: "card",
+    density: "comfortable",
+    onOpen: fn(),
     onToggleSelect: fn(),
     onToggleFavorite: fn(),
     onToggle: fn(),
     onEdit: fn(),
     onClone: fn(),
+    onExport: fn(),
     onDelete: fn(),
   },
   decorators: [
     (Story) => (
-      <div className="max-w-md">
+      <div className="max-w-xs border p-1.5">
         <Story />
       </div>
     ),
   ],
-} satisfies Meta<typeof McpServerCard>
+} satisfies Meta<typeof McpServerRow>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Card: Story = {}
+export const Comfortable: Story = {}
 
-export const SelectedFavorite: Story = {
-  args: { selected: true, favorite: true },
+export const WithTools: Story = {
+  args: { toolCount: 14, deniedToolCount: 3 },
+}
+
+export const ActiveFavorite: Story = {
+  args: { active: true, favorite: true, selected: true },
+}
+
+export const Compact: Story = {
+  args: { density: "compact" },
 }
 
 export const Disabled: Story = {
@@ -62,16 +72,5 @@ export const Disabled: Story = {
 }
 
 export const RemoteHttp: Story = {
-  args: { server: httpServer },
-}
-
-export const Row: Story = {
-  args: { variant: "row" },
-  decorators: [
-    (Story) => (
-      <div className="max-w-2xl">
-        <Story />
-      </div>
-    ),
-  ],
+  args: { server: httpServer, toolCount: 6 },
 }

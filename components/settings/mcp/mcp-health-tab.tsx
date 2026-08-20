@@ -29,6 +29,7 @@ import { downloadFile } from "@/lib/files/download"
 import { defaultMcpRuntimeGateway, type McpRuntimeMetricsSnapshot } from "@/lib/mcp/runtime-gateway"
 import { loadMcpOperationsSnapshot } from "@/lib/mcp/operations"
 import type { McpAuditLogRow } from "@/types/wiki"
+import { McpLiveSessionCard } from "./mcp-live-session-card"
 
 /** Rolling window for the outbound-log overview stats. */
 const OVERVIEW_WINDOW_MS = 60 * 60 * 1000
@@ -175,6 +176,13 @@ export function McpHealthTab() {
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {t("sectionOutbound")}
       </p>
+
+      {/* Live per-session client status. It lives here rather than above the
+          server list because it answers a health question ("what does the
+          running agent see right now?"), and a variable-height card at the top
+          of a master-detail rail pushed the list around on every session
+          change. */}
+      <McpLiveSessionCard />
 
       <Card data-testid="mcp-health-overview">
         <CardHeader className="pb-3">

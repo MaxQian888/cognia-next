@@ -34,7 +34,7 @@ jest.mock("dexie-react-hooks", () => {
 })
 
 jest.mock("@/lib/db/mcp-servers", () => ({
-  createMcpServer: jest.fn().mockResolvedValue(undefined),
+  createMcpServer: jest.fn().mockResolvedValue({ id: "mcp_new" }),
   updateMcpServer: jest.fn().mockResolvedValue(undefined),
   deleteMcpServer: jest.fn().mockResolvedValue(undefined),
   getMcpServer: jest.fn().mockResolvedValue(undefined),
@@ -75,6 +75,17 @@ jest.mock("./mcp-preset-grid", () => ({
   ),
 }))
 jest.mock("./mcp-health-tab", () => ({ McpHealthTab: () => <div data-testid="t-health" /> }))
+// Header children with their own suites; both reach for Tauri IPC on mount.
+jest.mock("../mcp-import-dialog", () => ({
+  McpImportDialog: () => <div data-testid="t-import" />,
+}))
+jest.mock("../mcp-agent-chip-group", () => ({ refreshAgentAvailability: jest.fn() }))
+jest.mock("./mcp-transfer-dialog", () => ({
+  McpTransferDialog: () => <div data-testid="t-transfer" />,
+}))
+jest.mock("./mcp-export-dialog", () => ({
+  McpExportDialog: () => <div data-testid="t-export" />,
+}))
 jest.mock("../mcp-agent-status-bar", () => ({
   McpAgentStatusBar: () => <div data-testid="t-agents" />,
 }))
@@ -120,6 +131,7 @@ jest.mock("./mcp-server-editor", () => {
 })
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { McpPanel } from "./mcp-panel"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import {
@@ -134,12 +146,16 @@ beforeEach(() => {
   ;(createMcpServer as jest.Mock).mockClear()
   ;(updateMcpServer as jest.Mock).mockClear()
   ;(deleteMcpServer as jest.Mock).mockClear()
+  ;(createMcpServer as jest.Mock).mockResolvedValue({ id: "mcp_new" })
   ;(getMcpServer as jest.Mock).mockReset().mockResolvedValue(undefined)
   ;(listMcpServers as jest.Mock).mockReset().mockResolvedValue([])
   useMcpPanelStore.setState({
     activeTab: "my-servers",
     editorTarget: null,
     deleteTarget: null,
+    detailServerId: null,
+    transferOpen: false,
+    exportTarget: null,
     search: "",
   })
 })
@@ -154,18 +170,54 @@ describe("McpPanel", () => {
     expect(screen.getByTestId("t-servers")).toBeInTheDocument()
   })
 
-  it("shows the search box only on the My Servers tab", () => {
+  it("swaps the tab body without ever mounting two tabs at once", async () => {
     render(<McpPanel />)
-    expect(screen.getByPlaceholderText("searchPlaceholder")).toBeInTheDocument()
-    fireEvent.click(screen.getByText("presets"))
-    expect(screen.queryByPlaceholderText("searchPlaceholder")).not.toBeInTheDocument()
-    expect(screen.getByTestId("t-presets")).toBeInTheDocument()
+    // Radix selects a tab on mousedown/focus, not click, so drive it with
+    // user-event rather than fireEvent.click.
+    await userEvent.setup().click(screen.getByText("presets"))
+    expect(await screen.findByTestId("t-presets")).toBeInTheDocument()
+    // `mode="wait"` is what keeps the frame from briefly holding both panels,
+    // which is what made the old panel jump on every tab switch.
+    expect(screen.queryByTestId("t-servers")).not.toBeInTheDocument()
   })
 
-  it("switches to the health tab", () => {
+  it("switches to the health tab", async () => {
     render(<McpPanel />)
-    fireEvent.click(screen.getByText("health"))
-    expect(screen.getByTestId("t-health")).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByText("health"))
+    expect(await screen.findByTestId("t-health")).toBeInTheDocument()
+  })
+
+  it("reports how many servers are enabled", async () => {
+    ;(listMcpServers as jest.Mock).mockResolvedValue([
+      { name: "a", enabled: true },
+      { name: "b", enabled: false },
+    ])
+    render(<McpPanel />)
+    await waitFor(() =>
+      expect(screen.getByTestId("mcp-panel-counts")).toHaveTextContent(
+        'counts:{"enabled":1,"total":2}'
+      )
+    )
+  })
+
+  it("opens the paste dialog from the header", () => {
+    render(<McpPanel />)
+    fireEvent.click(screen.getByTestId("mcp-open-transfer"))
+    expect(useMcpPanelStore.getState().transferOpen).toBe(true)
+  })
+
+  it("exports every server when the header action is used", async () => {
+    ;(listMcpServers as jest.Mock).mockResolvedValue([{ name: "a", enabled: true }])
+    render(<McpPanel />)
+    await waitFor(() => expect(screen.getByTestId("mcp-open-export")).toBeEnabled())
+    fireEvent.click(screen.getByTestId("mcp-open-export"))
+    // An empty id list means "everything", which is what the dialog resolves.
+    expect(useMcpPanelStore.getState().exportTarget).toEqual({ serverIds: [] })
+  })
+
+  it("disables the export action while nothing is configured", () => {
+    render(<McpPanel />)
+    expect(screen.getByTestId("mcp-open-export")).toBeDisabled()
   })
 
   it("opens the editor sheet when an editor target is set", () => {

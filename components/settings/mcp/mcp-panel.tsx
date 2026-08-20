@@ -4,13 +4,10 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { SearchIcon, ServerIcon } from "lucide-react"
+import { ClipboardPasteIcon, PlusIcon, ServerIcon, ShareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Sheet,
   SheetContent,
@@ -28,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
@@ -39,7 +37,7 @@ import {
   updateMcpServer,
 } from "@/lib/db/mcp-servers"
 import { applyPresetFields, type McpPreset } from "@/lib/claude/mcp-presets"
-import { useMcpPanelStore, type McpPanelTab } from "@/stores/mcp/mcp-panel-store"
+import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import { blankServerSeed } from "./server-seed"
 import {
   CLAUDE_CODE_RELATED,
@@ -47,39 +45,41 @@ import {
 } from "@/components/settings/common/related-sections-strip"
 import { McpAgentStatusBar } from "../mcp-agent-status-bar"
 import { McpDriftBanner } from "../mcp-drift-banner"
+import { McpImportDialog } from "../mcp-import-dialog"
+import { refreshAgentAvailability } from "../mcp-agent-chip-group"
+import { McpExportDialog } from "./mcp-export-dialog"
 import { McpMyServersTab } from "./mcp-my-servers-tab"
+import { McpPanelTabs } from "./mcp-panel-tabs"
 import { McpPresetGrid } from "./mcp-preset-grid"
 import { McpHealthTab } from "./mcp-health-tab"
 import { McpServerEditor } from "./mcp-server-editor"
+import { McpTransferDialog } from "./mcp-transfer-dialog"
 import type { McpEditorInitial } from "./mcp-server-utils"
-
-const TAB_ORDER: McpPanelTab[] = ["my-servers", "presets", "agents", "health"]
-
-const TAB_LABEL_KEY: Record<McpPanelTab, string> = {
-  "my-servers": "myServers",
-  presets: "presets",
-  agents: "agents",
-  health: "health",
-}
 
 const BLANK_CONFIG = { command: "", args: [] as string[] }
 
 /**
- * The MCP servers management panel — a four-tab surface (My Servers, Preset
- * Market, Agent Sync, Health & Logs) that replaces the legacy single-file
- * section. Tab state lives in `useMcpPanelStore`; the editor + delete dialogs
- * are hosted here so any tab can drive them.
+ * The MCP servers management panel — four tabs over one fixed-height frame.
+ *
+ * Two layout rules earn their keep here, because breaking either is what made
+ * the previous version jump on every tab switch:
+ *
+ * 1. `AnimatePresence mode="wait"` with an opacity-only transition. In the
+ *    default `"sync"` mode both the outgoing and incoming panel are in normal
+ *    flow at once, so the container's height briefly doubles; a `y` offset on
+ *    top of that made it visibly lurch.
+ * 2. Every tab body fills `min-h-0 flex-1` and owns its own scroll container.
+ *    Nothing here wraps the tabs in a shared ScrollArea, so a tall tab cannot
+ *    change the height of the frame the tab bar sits in.
  */
 export function McpPanel({ className }: { className?: string }) {
   const t = useTranslations("mcp")
-  const tTabs = useTranslations("mcp.tabs")
-  const tPanel = useTranslations("mcp.panel")
   const tGallery = useTranslations("mcp.gallery")
   const activeTab = useMcpPanelStore((s) => s.activeTab)
   const setActiveTab = useMcpPanelStore((s) => s.setActiveTab)
-  const search = useMcpPanelStore((s) => s.search)
-  const setSearch = useMcpPanelStore((s) => s.setSearch)
   const openCreate = useMcpPanelStore((s) => s.openCreate)
+  const setTransferOpen = useMcpPanelStore((s) => s.setTransferOpen)
+  const openExport = useMcpPanelStore((s) => s.openExport)
   const reduce = useReducedMotion()
 
   // Lowercased names of the servers already configured, so the Preset Market can
@@ -87,10 +87,9 @@ export function McpPanel({ className }: { className?: string }) {
   // preset id becomes the server name on add (see `onPresetSelected`), so a
   // case-insensitive name match is the right membership test.
   const liveServers = useLiveQuery(() => listMcpServers(), [])
-  const existingNames = useMemo(
-    () => (liveServers ?? []).map((s) => s.name.toLowerCase()),
-    [liveServers]
-  )
+  const servers = useMemo(() => liveServers ?? [], [liveServers])
+  const existingNames = useMemo(() => servers.map((s) => s.name.toLowerCase()), [servers])
+  const enabledCount = useMemo(() => servers.filter((s) => s.enabled).length, [servers])
 
   const fade = reduce ? { duration: 0 } : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
 
@@ -126,85 +125,82 @@ export function McpPanel({ className }: { className?: string }) {
       className={cn("relative flex h-full min-h-0 flex-col overflow-hidden", className)}
       data-testid="mcp-panel"
     >
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:gap-3 sm:px-4 sm:py-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <ServerIcon className="size-4 shrink-0" />
-          <div className="min-w-0">
-            <Label className="block truncate text-sm font-medium">{t("title")}</Label>
-          </div>
-        </div>
-        {activeTab === "my-servers" && (
-          <div className="relative order-last w-full sm:order-none sm:w-56 md:w-64">
-            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={tPanel("searchPlaceholder")}
-              className="h-9 pl-8 text-xs"
-            />
-          </div>
-        )}
-        <div className="min-w-0 max-w-full overflow-x-auto">
-          <div
-            role="tablist"
-            aria-label={t("title")}
-            className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-[3px]"
-          >
-            {TAB_ORDER.map((tab) => {
-              const active = activeTab === tab
-              return (
-                <Button
-                  key={tab}
-                  type="button"
-                  role="tab"
-                  variant="ghost"
-                  size="sm"
-                  aria-selected={active}
-                  onClick={() => setActiveTab(tab)}
-                  className={cn(
-                    "h-auto rounded-md px-2.5 py-1 text-xs font-medium",
-                    active
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {tTabs(TAB_LABEL_KEY[tab])}
-                </Button>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-
-      <ScrollArea className="flex-1">
-        <div className="p-3 sm:p-4">
-          <AnimatePresence initial={false}>
-            <motion.div
-              key={activeTab}
-              initial={reduce ? false : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={reduce ? undefined : { opacity: 0, y: -4 }}
-              transition={fade}
+      <FeaturePageHeader
+        icon={<ServerIcon />}
+        title={t("title")}
+        description={t("description")}
+        summary={
+          <span className="tabular-nums" data-testid="mcp-panel-counts">
+            {t("panel.counts", { enabled: enabledCount, total: servers.length })}
+          </span>
+        }
+        navigation={<McpPanelTabs />}
+        actions={
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setTransferOpen(true)}
+              data-testid="mcp-open-transfer"
             >
-              {activeTab === "my-servers" && <McpMyServersTab />}
-              {activeTab === "presets" && (
+              <ClipboardPasteIcon className="size-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">{t("panel.paste")}</span>
+            </Button>
+            <McpImportDialog onImported={refreshAgentAvailability} />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => openExport([])}
+              disabled={servers.length === 0}
+              data-testid="mcp-open-export"
+            >
+              <ShareIcon className="size-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">{t("panel.exportAll")}</span>
+            </Button>
+            <Button size="sm" onClick={() => void blankServerSeed().then(openCreate)}>
+              <PlusIcon className="size-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">{t("addServer")}</span>
+            </Button>
+          </>
+        }
+      />
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={activeTab}
+            initial={reduce ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={reduce ? undefined : { opacity: 0 }}
+            transition={fade}
+            className="flex min-h-0 w-full flex-1 overflow-hidden"
+          >
+            {activeTab === "my-servers" && <McpMyServersTab />}
+            {activeTab === "presets" && (
+              <div className="min-h-0 w-full flex-1 overflow-y-auto p-3 sm:p-4">
                 <McpPresetGrid existingNames={existingNames} onPresetSelected={onPresetSelected} />
-              )}
-              {activeTab === "agents" && (
-                <div className="space-y-4">
-                  <McpAgentStatusBar />
-                  <McpDriftBanner />
-                  <RelatedSectionsStrip current="mcp" targets={CLAUDE_CODE_RELATED} />
-                </div>
-              )}
-              {activeTab === "health" && <McpHealthTab />}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-      </ScrollArea>
+              </div>
+            )}
+            {activeTab === "agents" && (
+              <div className="min-h-0 w-full flex-1 space-y-4 overflow-y-auto p-3 sm:p-4">
+                <McpAgentStatusBar />
+                <McpDriftBanner />
+                <RelatedSectionsStrip current="mcp" targets={CLAUDE_CODE_RELATED} />
+              </div>
+            )}
+            {activeTab === "health" && (
+              <div className="min-h-0 w-full flex-1 overflow-y-auto p-3 sm:p-4">
+                <McpHealthTab />
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
 
       <McpEditorHost />
       <McpDeleteHost />
+      <McpTransferDialog onImported={refreshAgentAvailability} />
+      <McpExportDialog />
     </div>
   )
 }
@@ -215,6 +211,7 @@ function McpEditorHost() {
   const tToasts = useTranslations("mcp.toasts")
   const editorTarget = useMcpPanelStore((s) => s.editorTarget)
   const closeEditor = useMcpPanelStore((s) => s.closeEditor)
+  const openDetail = useMcpPanelStore((s) => s.openDetail)
   const open = editorTarget !== null
 
   // The row loads async (undefined on first render, and useLiveQuery retains
@@ -272,7 +269,10 @@ function McpEditorHost() {
       } else {
         // Merge the seed's appsEnabled (the editor doesn't round-trip it) so
         // hand-made / cloned servers still land in the target agent files.
-        await createMcpServer({ ...data, appsEnabled: initial.appsEnabled })
+        const created = await createMcpServer({ ...data, appsEnabled: initial.appsEnabled })
+        // Land the user on what they just created, so the tool switches and
+        // agent projection for it are one glance away instead of a hunt.
+        openDetail(created.id)
         toast.success(tToasts("added"))
       }
       closeEditor()
@@ -284,14 +284,20 @@ function McpEditorHost() {
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && closeEditor()}>
-      <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-xl">
-        <SheetHeader className="border-b px-5 py-3">
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-xl"
+        data-testid="mcp-editor-sheet"
+      >
+        <SheetHeader className="shrink-0 border-b px-5 py-3">
           <SheetTitle>
             {editorTarget?.mode === "edit" ? t("editTitle") : t("createTitle")}
           </SheetTitle>
-          <SheetDescription>{t("config")}</SheetDescription>
+          <SheetDescription>{t("sheetSubtitle")}</SheetDescription>
         </SheetHeader>
-        <div className="px-5 py-4">
+        {/* The form scrolls; the header and the editor's own action row stay
+            put, so a long env list can never push Save off-screen. */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {/* Key by target so the form re-seeds when switching rows; hold off
               mounting until the edited row has loaded so the one-shot seed
               never captures a blank/stale `initial`. */}
