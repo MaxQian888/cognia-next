@@ -93,7 +93,7 @@ pub fn build_proxy(
     let broker_vsix = crate::claude::sidecar::sidecar_dir(app)
         .map_err(|error| format!("resolve broker VSIX: {error}"))?
         .join("codeserver-agent-ext")
-        .join("cognia-agent-bridge.vsix");
+        .join("cognia-managed-broker.vsix");
     build_proxy_at_root(&root, &broker_vsix, request)
 }
 

@@ -181,12 +181,12 @@ impl CodeServerState {
         let port = pick_free_loopback_port()?;
         let args = code_server_args(&canonical, port, &user_data_dir, &extensions_dir, profile);
 
-        // Side-load the agent-bridge extension (best-effort, once per version) BEFORE
+        // Side-load the managed-broker extension (best-effort, once per version) BEFORE
         // the child starts so it activates on this launch. A missing/failed install
         // only degrades the Pro IDE agent-drive features, never the spawn itself.
         let broker_enabled = profile.allows_broker() && super::managed_platform_enabled();
         if broker_enabled {
-            install_agent_extension(app, &info.binary_path, &extensions_dir, &user_data_dir).await;
+            install_broker_extension(app, &info.binary_path, &extensions_dir, &user_data_dir).await;
             install_managed_proxy_extensions(
                 app,
                 &info.binary_path,
@@ -839,7 +839,7 @@ pub fn language_pack_extension_id(locale: &str) -> Option<&'static str> {
 
 /// Install the display-language pack for `locale`, at most once per locale.
 ///
-/// Best-effort in exactly the way {@link install_agent_extension} is: the display
+/// Best-effort in exactly the way {@link install_broker_extension} is: the display
 /// language is a nicety, and a failed or unavailable pack must never stop a
 /// code-server from spawning. Returns whether a pack is now believed installed, so
 /// the caller can tell the user why the UI is still English.
@@ -988,47 +988,48 @@ fn pick_free_loopback_port() -> Result<u16, String> {
     Ok(port)
 }
 
-/// Version of the bundled agent-bridge extension. Bump in lockstep with
+/// Version of the bundled managed-broker extension. Bump in lockstep with
 /// `sidecar/codeserver-agent-ext/package.json` `version` so an upgrade triggers a
 /// reinstall (the marker below stores the installed version).
-const AGENT_EXT_VERSION: &str = "1.1.0";
+/// `pnpm audit:pro-ide-constants` fails when the two drift.
+const BROKER_EXT_VERSION: &str = "1.1.0";
 /// Stable filename of the bundled `.vsix` (see the extension's `build.mjs`).
-const AGENT_EXT_VSIX: &str = "cognia-agent-bridge.vsix";
+const BROKER_EXT_VSIX: &str = "cognia-managed-broker.vsix";
 
 /// Whether a stored install-marker value means the current extension version is
 /// already installed (so the reinstall can be skipped). Pure, so the version-gate
 /// contract is unit-tested without spawning code-server.
-fn agent_ext_install_up_to_date(marker: Option<&str>) -> bool {
-    marker == Some(AGENT_EXT_VERSION)
+fn broker_ext_install_up_to_date(marker: Option<&str>) -> bool {
+    marker == Some(BROKER_EXT_VERSION)
 }
 
-/// Side-load the Cognia agent-bridge extension into `extensions_dir`, at most once
+/// Side-load the Cognia managed-broker extension into `extensions_dir`, at most once
 /// per version. Best-effort: a missing vsix or a failed install only degrades the
 /// Pro IDE agent-drive features (open/reveal falls back to the CLI, edits to a disk
 /// reload) — it must never block a code-server spawn, so every failure just logs.
-async fn install_agent_extension(
+async fn install_broker_extension(
     app: &tauri::AppHandle,
     binary: &str,
     extensions_dir: &Path,
     user_data_dir: &Path,
 ) {
-    let marker = extensions_dir.join(".cognia-agent-ext-version");
+    let marker = extensions_dir.join(".cognia-managed-broker-version");
     // Async I/O on the runtime thread (this runs under `ensure`'s operation_lock);
     // matches the spawn_blocking-avoidance the sibling settings commands use.
     let existing = tokio::fs::read_to_string(&marker).await.ok();
-    if agent_ext_install_up_to_date(existing.as_deref()) {
+    if broker_ext_install_up_to_date(existing.as_deref()) {
         return;
     }
     let vsix = match crate::claude::sidecar::sidecar_dir(app) {
-        Ok(dir) => dir.join("codeserver-agent-ext").join(AGENT_EXT_VSIX),
+        Ok(dir) => dir.join("codeserver-agent-ext").join(BROKER_EXT_VSIX),
         Err(e) => {
-            log::warn!("code-server agent ext: sidecar dir unresolved: {e}");
+            log::warn!("code-server managed broker: sidecar dir unresolved: {e}");
             return;
         }
     };
     if !vsix.exists() {
         log::warn!(
-            "code-server agent ext: vsix not found at {} (Pro IDE agent-drive disabled)",
+            "code-server managed broker: vsix not found at {} (Pro IDE agent-drive disabled)",
             vsix.display()
         );
         return;
@@ -1049,16 +1050,16 @@ async fn install_agent_extension(
 
     match tokio::time::timeout(Duration::from_secs(60), command.output()).await {
         Ok(Ok(output)) if output.status.success() => {
-            if let Err(e) = tokio::fs::write(&marker, AGENT_EXT_VERSION).await {
-                log::warn!("code-server agent ext: write install marker: {e}");
+            if let Err(e) = tokio::fs::write(&marker, BROKER_EXT_VERSION).await {
+                log::warn!("code-server managed broker: write install marker: {e}");
             }
         }
         Ok(Ok(output)) => log::warn!(
-            "code-server agent ext install failed: {}",
+            "code-server managed broker install failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ),
-        Ok(Err(e)) => log::warn!("code-server agent ext install: {e}"),
-        Err(_) => log::warn!("code-server agent ext install timed out"),
+        Ok(Err(e)) => log::warn!("code-server managed broker install: {e}"),
+        Err(_) => log::warn!("code-server managed broker install timed out"),
     }
 }
 
@@ -1488,11 +1489,11 @@ mod tests {
     }
 
     #[test]
-    fn agent_ext_marker_gates_reinstall_on_version() {
+    fn broker_ext_marker_gates_reinstall_on_version() {
         // Same version → skip; different or absent marker → (re)install.
-        assert!(agent_ext_install_up_to_date(Some(AGENT_EXT_VERSION)));
-        assert!(!agent_ext_install_up_to_date(Some("0.0.1")));
-        assert!(!agent_ext_install_up_to_date(None));
+        assert!(broker_ext_install_up_to_date(Some(BROKER_EXT_VERSION)));
+        assert!(!broker_ext_install_up_to_date(Some("0.0.1")));
+        assert!(!broker_ext_install_up_to_date(None));
     }
 
     #[test]

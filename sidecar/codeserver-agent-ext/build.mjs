@@ -1,4 +1,4 @@
-// Build the Cognia Agent Bridge extension and package it as a .vsix.
+// Build the Cognia Managed IDE Broker extension and package it as a .vsix.
 //
 //   1. esbuild-bundle `src/extension.mjs` → `dist/extension.js` (CJS, `vscode`
 //      external — the host provides it at runtime).
@@ -21,7 +21,7 @@ const stage = join(root, ".vsix-stage")
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
 // Stable filename (version lives inside the manifest) so bumping the extension
 // version never churns the Tauri resource path or the Rust install constant.
-const vsixName = "cognia-agent-bridge.vsix"
+const vsixName = "cognia-managed-broker.vsix"
 const vsixPath = join(root, vsixName)
 
 // 1. Bundle.

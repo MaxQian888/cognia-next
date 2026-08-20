@@ -717,7 +717,7 @@ fn broker_vsix_path(data_dir: &Path) -> PathBuf {
             data_dir
                 .join("sidecar")
                 .join("codeserver-agent-ext")
-                .join("cognia-agent-bridge.vsix")
+                .join("cognia-managed-broker.vsix")
         })
 }
 

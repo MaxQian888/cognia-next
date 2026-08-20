@@ -1,0 +1,58 @@
+{
+  "id": "cognia-pro-ide-fixture",
+  "name": "Pro IDE Contribution (fixture)",
+  "version": "0.1.0",
+  "description": "Fixture plugin that exercises the managed Pro IDE pathway end to end (ADR-0088): manifest.ide → normalizeIdeManifest → signed proxy VSIX → side-load → broker handshake → contribution render → provider round-trip. Contributes one command and one CodeLens provider that annotates the first line of any file with a lens whose click invokes that command. Use it to verify the whole chain without needing a real third-party plugin.",
+  "type": "frontend",
+  "capabilities": ["editor"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["editor:read"],
+  "activationEvents": ["startup"],
+  "ide": {
+    "schemaVersion": 1,
+    "targets": ["pro-ide"],
+    "contributions": {
+      "commands": [
+        {
+          "command": "ping",
+          "title": "Pro IDE fixture: ping the plugin runtime",
+          "category": "Cognia Fixture"
+        }
+      ]
+    },
+    "providers": [
+      {
+        "id": "fixture-lens",
+        "kind": "code-lens",
+        "handler": "provideFixtureLenses",
+        "permission": "editor:read",
+        "selector": [
+          {
+            "scheme": "file"
+          }
+        ]
+      }
+    ]
+  },
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "reason": "The managed Pro IDE proxy pathway requires the embedded code-server — desktop only."
+    },
+    "tauri": {
+      "availability": "available",
+      "entrypoint": "src/index.ts",
+      "reason": "Enabling the plugin builds and activates a signed proxy VSIX; the broker then calls provideFixtureLenses over the agent channel."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "The managed Pro IDE proxy pathway requires the embedded code-server — unavailable on mobile."
+    }
+  }
+}

@@ -182,6 +182,7 @@ const REGISTRY = [
   { script: "audit:docs-links", group: "audit" },
   { script: "audit:adr-catalog", group: "audit" },
   { script: "audit:colocated-tests", group: "audit" },
+  { script: "audit:pro-ide-constants", group: "audit" },
   { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
   { script: "audit:root-loading", group: "audit" },

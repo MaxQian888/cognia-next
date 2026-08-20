@@ -68,6 +68,6 @@ test("the manifest version matches what the host installs", () => {
     join(EXT_DIR, "..", "..", "src-tauri", "src", "codeserver", "process.rs"),
     "utf8"
   )
-  const declared = /const AGENT_EXT_VERSION: &str = "([^"]+)"/.exec(rust)?.[1]
+  const declared = /const BROKER_EXT_VERSION: &str = "([^"]+)"/.exec(rust)?.[1]
   assert.equal(manifest.version, declared)
 })

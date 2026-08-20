@@ -57,7 +57,7 @@
       "../sidecar/webclone/package.json",
       "../sidecar/webclone/dist/**/*",
       "../sidecar/webclone/node_modules/**/*",
-      "../sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix",
+      "../sidecar/codeserver-agent-ext/cognia-managed-broker.vsix",
       "resources/terminal/shell-integration.bash",
       "resources/terminal/shell-integration.zsh",
       "resources/terminal/shell-integration.ps1",

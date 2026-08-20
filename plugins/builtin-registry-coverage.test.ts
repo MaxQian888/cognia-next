@@ -37,6 +37,8 @@ const PLUGINS_ROOT = join(__dirname)
 const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze({
   "cognia-test-lsp-contribution":
     "Phase-B LSP fixture — exercised by its own co-located suite (which drives the bundled echo-lsp server over real stdio framing), not shipped to end users.",
+  "cognia-pro-ide-fixture":
+    "ADR-0088 managed Pro IDE fixture — proves the proxy/broker chain end to end on the desktop; blocked in browser and mobile shells because that chain needs the embedded code-server, so bundling it into the browser registry would ship a plugin that can never activate.",
   "cognia-external-agent-preset-example":
     "Author reference plugin — copy-paste template, not a default.",
   "cognia-external-agent-adapter-example":

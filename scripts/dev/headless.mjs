@@ -169,7 +169,7 @@ function pathsFor(options, env) {
     ),
     codeServerVsix: path.resolve(
       env.COGNIA_CODE_SERVER_AGENT_VSIX ||
-        path.join(repoRoot, "sidecar", "codeserver-agent-ext", "cognia-agent-bridge.vsix")
+        path.join(repoRoot, "sidecar", "codeserver-agent-ext", "cognia-managed-broker.vsix")
     ),
   }
 }

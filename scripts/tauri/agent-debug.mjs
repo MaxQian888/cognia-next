@@ -32,7 +32,7 @@ export function agentDebugEnvironment(baseEnv = process.env, repoRoot = REPO_ROO
     COGNIA_MCP_SIDECAR_PATH: path.join(repoRoot, "sidecar/cognia-mcp.mjs"),
     COGNIA_CODE_SERVER_AGENT_VSIX: path.join(
       repoRoot,
-      "sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix"
+      "sidecar/codeserver-agent-ext/cognia-managed-broker.vsix"
     ),
   }
 }
