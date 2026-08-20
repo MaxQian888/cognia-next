@@ -111,3 +111,69 @@ describe("applyGateBehavior", () => {
     }
   })
 })
+
+describe("attended headless origins", () => {
+  it("keeps every existing caller on today's policy by default", () => {
+    // The option defaults to false precisely so adding `delegate` cannot
+    // change the behaviour of a caller that never opted in.
+    for (const origin of [
+      "scheduler",
+      "remote",
+      "external",
+      "plugin",
+      "im",
+      "delegation",
+    ] as const) {
+      expect(resolveGatePolicy(origin)).toEqual(resolveGatePolicy(origin, {}))
+      expect(resolveGatePolicy(origin).planApproval).toBe("fail-fast")
+    }
+  })
+
+  it("delegates plan approval when the caller proves it can reach a human", () => {
+    const policy = resolveGatePolicy("im", { approvalChannel: true })
+    expect(policy.planApproval).toBe("delegate")
+  })
+
+  it("leaves the gates that block indefinitely by design on fail-fast", () => {
+    // Handing deadlock or budget to a card would park a run on a question no
+    // answer can unblock.
+    const policy = resolveGatePolicy("im", { approvalChannel: true })
+    expect(policy.deadlock).toBe("fail-fast")
+    expect(policy.budget).toBe("fail-fast")
+    expect(policy.capabilityAudit).toBe("auto-approve")
+    expect(policy.teammateFix).toBe("auto-reject")
+    expect(policy.replan).toBe("auto-reject")
+  })
+
+  it("never attends an interactive origin — it already blocks on a real modal", () => {
+    expect(resolveGatePolicy("interactive", { approvalChannel: true }).planApproval).toBe("block")
+    expect(resolveGatePolicy(undefined, { approvalChannel: true }).planApproval).toBe("block")
+  })
+})
+
+describe("applyGateBehavior — delegate", () => {
+  it("asks through the supplied channel and returns its decision", async () => {
+    const wait = jest.fn()
+    const delegate = jest.fn(async () => ({ outcome: "reject" as const, feedback: "not yet" }))
+    await expect(applyGateBehavior("delegate", wait, { delegate })).resolves.toEqual({
+      outcome: "reject",
+      feedback: "not yet",
+    })
+    expect(wait).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when the caller declared a channel it cannot service", async () => {
+    // Not "proceed", and not a hang either — both are worse than the loud
+    // failure this replaced.
+    const result = await applyGateBehavior("delegate", jest.fn())
+    expect(result.outcome).toBe("reject")
+  })
+
+  it("fails closed when the channel throws", async () => {
+    const delegate = jest.fn(async () => {
+      throw new Error("card delivery failed")
+    })
+    const result = await applyGateBehavior("delegate", jest.fn(), { delegate })
+    expect(result.outcome).toBe("reject")
+  })
+})
