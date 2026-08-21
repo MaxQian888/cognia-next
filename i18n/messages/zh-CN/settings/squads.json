@@ -1,0 +1,31 @@
+{
+  "detail": {
+    "dangerDescription": "绑定到它的会话会回退为单个 Agent。已产生的运行记录会保留。",
+    "dangerTitle": "删除这个小队",
+    "deleteAction": "删除小队",
+    "deleteBody": "这会删除该小队及其成员。它已经产生的运行记录仍保留在运行历史中。",
+    "deleteTitle": "删除 {name}？",
+    "descriptionLabel": "描述",
+    "descriptionPlaceholder": "这个小队是做什么的？",
+    "memberCount": "{count, plural, =0 {无} other {# 名成员}}",
+    "missingDescription": "它已被删除，可能是在另一个窗口里。请从列表另选一个。",
+    "missingTitle": "小队已不存在",
+    "nameLabel": "名称",
+    "noMembersDescription": "可以从模板添加成员，或在该小队自己的运行界面里添加。",
+    "noMembersTitle": "还没有成员",
+    "rosterLabel": "成员"
+  },
+  "nav": {
+    "create": "新建小队",
+    "defaultLeadName": "小队负责人",
+    "newSquadName": "新小队",
+    "noMatches": "没有匹配的小队。",
+    "noSquads": "还没有小队。可以从模板开始，或直接新建。",
+    "openList": "显示小队列表",
+    "searchPlaceholder": "搜索小队",
+    "squadsLabel": "你的小队",
+    "static": {
+      "templates": "模板"
+    }
+  }
+}

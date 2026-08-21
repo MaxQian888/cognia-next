@@ -73,7 +73,7 @@ export type SettingsSectionId =
   | "agents"
   | "agent-modes"
   | "agent-runtime"
-  | "agent-teams"
+  | "squads"
   | "eval"
   | "hooks"
   | "fleet"
@@ -268,9 +268,9 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: WorkflowIcon,
   },
   {
-    id: "agent-teams",
-    labelKey: "agentTeams",
-    descriptionKey: "agentTeams",
+    id: "squads",
+    labelKey: "squads",
+    descriptionKey: "squads",
     group: "ai",
     icon: Layers3Icon,
   },
@@ -1345,7 +1345,10 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "派发",
     "并行",
   ],
-  "agent-teams": [
+  squads: [
+    "squad",
+    "squads",
+    "小队",
     "team",
     "teams",
     "multi-agent",

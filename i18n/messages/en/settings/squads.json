@@ -1,0 +1,31 @@
+{
+  "detail": {
+    "dangerDescription": "Conversations bound to it fall back to a single agent. Past runs are kept.",
+    "dangerTitle": "Delete this Squad",
+    "deleteAction": "Delete Squad",
+    "deleteBody": "This removes the Squad and its members. Runs it has already produced stay in the run history.",
+    "deleteTitle": "Delete {name}?",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "What is this Squad for?",
+    "memberCount": "{count, plural, =0 {none} =1 {1 member} other {# members}}",
+    "missingDescription": "It was deleted, perhaps in another window. Pick another from the list.",
+    "missingTitle": "Squad unavailable",
+    "nameLabel": "Name",
+    "noMembersDescription": "Add teammates from a template, or from the Squad's own run surface.",
+    "noMembersTitle": "No members yet",
+    "rosterLabel": "Members"
+  },
+  "nav": {
+    "create": "New Squad",
+    "defaultLeadName": "Squad Lead",
+    "newSquadName": "New Squad",
+    "noMatches": "No Squad matches that.",
+    "noSquads": "No Squads yet. Start from a template, or create one.",
+    "openList": "Show Squad list",
+    "searchPlaceholder": "Search Squads",
+    "squadsLabel": "Your Squads",
+    "static": {
+      "templates": "Templates"
+    }
+  }
+}

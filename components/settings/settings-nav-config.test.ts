@@ -31,12 +31,12 @@ describe("settings-nav-config", () => {
       }
     })
 
-    it("agent-teams sits in the AI group with Layers3 icon", () => {
-      const item = SETTINGS_NAV.find((n) => n.id === "agent-teams")
+    it("squads sits in the AI group with Layers3 icon", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "squads")
       expect(item).toBeDefined()
       expect(item?.group).toBe("ai")
-      expect(item?.labelKey).toBe("agentTeams")
-      expect(item?.descriptionKey).toBe("agentTeams")
+      expect(item?.labelKey).toBe("squads")
+      expect(item?.descriptionKey).toBe("squads")
     })
 
     it("splits AI Connections and Model Catalog without reusing generic Connections", () => {
@@ -113,7 +113,7 @@ describe("settings-nav-config", () => {
     })
 
     it("matches by keyword", () => {
-      const item = SETTINGS_NAV.find((n) => n.id === "agent-teams")!
+      const item = SETTINGS_NAV.find((n) => n.id === "squads")!
       expect(isSearchMatch(item, "supervisor", t)).toBe(true)
       expect(isSearchMatch(item, "团队", t)).toBe(true)
     })

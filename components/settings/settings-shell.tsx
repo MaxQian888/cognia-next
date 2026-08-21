@@ -142,8 +142,8 @@ const AgentRuntimeSection = dynamic(
   () => import("./agent-runtime/agent-runtime-section").then((m) => m.AgentRuntimeSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
-const AgentTeamTemplatesSection = dynamic(
-  () => import("./agent/agent-team-templates-section").then((m) => m.AgentTeamTemplatesSection),
+const SquadsSection = dynamic(
+  () => import("./squads/squads-section").then((m) => m.SquadsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const HooksSection = dynamic(() => import("./hooks/hooks-section").then((m) => m.HooksSection), {
@@ -307,6 +307,10 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "appearance",
   "subscription",
   "subagents",
+  // Same conversion as Subagents: a rail plus a detail pane, both owning their
+  // own scroll. Left out of this set it renders capped at max-w-5xl with the
+  // two fighting over 1024px and the page, not the pane, doing the scrolling.
+  "squads",
   // Both became master/detail panes that own their own scroll; in the capped
   // ScrollArea branch they would render at max-w-5xl with the nav rail and the
   // detail pane fighting over 1024px.
@@ -530,8 +534,8 @@ function SectionContent({
       return <CustomModeSettings />
     case "agent-runtime":
       return <AgentRuntimeSection />
-    case "agent-teams":
-      return <AgentTeamTemplatesSection />
+    case "squads":
+      return <SquadsSection />
     case "eval":
       return <EvalSettingsSection />
     case "hooks":
