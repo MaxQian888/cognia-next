@@ -731,7 +731,23 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
         (item) => item.type === "resource.changed"
       )?.payload.recoveryAnchor
     ).toEqual(expect.objectContaining({ sdkSessionId: "sdk-after" }))
-    expect((DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][2].execution).toBeUndefined()
+    // This used to assert the send carried NO spec, which was only ever true
+    // because the `agentExecutionResolverV2` gate kept it off the wire. That
+    // gate is retired, so every send is stamped. What still has to hold —
+    // and is what recovery actually depends on — is that the stamped spec's
+    // identity is the identity the anchor journals, so a continuation can
+    // re-mint the same execution instead of starting a stranger.
+    expect(started?.payload.recoveryAnchor).toEqual(
+      expect.objectContaining({ executionIdentityRunId: expect.any(String) })
+    )
+    const journalledIdentity = started?.payload.recoveryAnchor as {
+      executionIdentityRunId: string
+      attemptId: string
+    }
+    expect((DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][2].execution?.identity).toEqual({
+      runId: journalledIdentity.executionIdentityRunId,
+      attemptId: journalledIdentity.attemptId,
+    })
     expect(
       mockAppendCanonicalEnvelopes.mock.calls.map(
         (call) => (call[1] as Array<{ event: { kind: string } }>)[0].event.kind
@@ -781,10 +797,6 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
   })
 
   it("continues a terminal run in a linked immutable journal run", async () => {
-    window.localStorage.setItem(
-      "cognia-agent-execution-flags-v1",
-      JSON.stringify({ agentExecutionResolverV2: true })
-    )
     const conversationKey = "telegram:adapter_1:chat_resume_existing_run"
     const event = makeEvent({ conversationKey, messageId: "same-message" })
     await callHandler(makeEvent({ conversationKey, messageId: "seed" }), "manual-store")
@@ -861,10 +873,10 @@ describe("installRuntime — ai-run (live-activity card wiring)", () => {
       runId: executionIdentityRunId,
       attemptId: "recovery-test",
     })
-    const { resolveAgentExecutionShadowSpec } =
+    const { resolveAgentExecutionSpecForConfig } =
       await import("@/lib/ai/agent/execution/agent-execution-service")
     const resumedSendOptions = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[1][2]
-    const expectedResolution = await resolveAgentExecutionShadowSpec(
+    const expectedResolution = await resolveAgentExecutionSpecForConfig(
       {
         sessionId: session!.id,
         provider: resumedSendOptions.provider,
@@ -1213,6 +1225,47 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     mockStartWorkflowFromIM.mockResolvedValue({ ok: true, runId: "run_x" })
   })
 
+  it("dispatches a DRAFTED turn to the bound team instead of silently answering alone", async () => {
+    // The headline defect of the old shape: `draft-prepare` was a route, and
+    // that branch resolved no execution target — so a conversation bound to a
+    // team produced a single-character draft and nothing recorded that the
+    // team had been skipped.
+    const key = "telegram:adapter_1:chat_team_draft"
+    await seedAdapter("adapter_1")
+    await getDb().sessions.add({
+      id: "s_team_draft",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({
+      conversationKey: key,
+      sessionId: "s_team_draft",
+      teamId: "team_r",
+    })
+
+    await callHandler(makeEvent({ conversationKey: key }), "draft-prepare")
+
+    expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    // Acceptance is honoured through the mechanism a team actually has: a
+    // human signs off on the plan before it acts. Holding the finished output
+    // would review work already done.
+    expect(
+      (mockStartTeamRunFromIM.mock.calls[0][0] as { requirePlanApprovalFloor?: boolean })
+        .requirePlanApprovalFloor
+    ).toBe(true)
+    const audit = await getDb().connectorAudit.toArray()
+    const dispatched = audit.find((row) => row.kind === "team.dispatched")
+    expect(dispatched?.fields).toMatchObject({ acceptance: "plan-approval" })
+    // No draft row: the single-agent product that used to be drafted here was
+    // never what the operator asked for.
+    expect(await getDb().connectorDrafts.count()).toBe(0)
+  })
+
   it("routes to the team runtime (not runAndCapture) when the conversation has a teamId", async () => {
     const key = "telegram:adapter_1:chat_team"
     await seedAdapter("adapter_1")
@@ -1243,7 +1296,10 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(arg.teamId).toBe("team_r")
     expect(arg.goal).toBe("hello runtime")
     expect(arg.conversationKey).toBe(key)
-    expect(mockBindExecutionRun).toHaveBeenCalledWith("run_team_bound")
+    // The execution journal keys a team run as `execution:team:<sourceId>`;
+    // binding the raw source id meant crash recovery could never reconnect the
+    // inbound job to the run it belonged to.
+    expect(mockBindExecutionRun).toHaveBeenCalledWith("execution:team:run_team_bound")
 
     const audit = await getDb().connectorAudit.toArray()
     expect(audit.some((r) => r.kind === "team.dispatched")).toBe(true)
@@ -1279,6 +1335,55 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(audit.some((r) => r.kind === "adapter.error" && r.reason === "team_not_found")).toBe(
       true
     )
+  })
+
+  it("holds a DRAFTED workflow dispatch behind an Approve card instead of running it live", async () => {
+    // The third shape of acceptance. A workflow has no plan gate and ships its
+    // product through its own nodes, so the only moment "a human signs off
+    // before it acts" is still true is before the run starts.
+    const key = "telegram:adapter_1:chat_wf_draft"
+    await seedAdapter("adapter_1")
+    await getDb().sessions.add({
+      id: "s_wf_draft",
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+    await upsertByConversationKey({
+      conversationKey: key,
+      sessionId: "s_wf_draft",
+      workflowId: "wf_n",
+    })
+
+    await callHandler(makeEvent({ conversationKey: key }), "draft-prepare")
+
+    expect(mockStartWorkflowFromIM).not.toHaveBeenCalled()
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    // No draft row either: the single-character product the old branch drafted
+    // here was never what the operator asked for.
+    expect(await getDb().connectorDrafts.count()).toBe(0)
+
+    const bindings = await getDb().connectorCallbackBindings.toArray()
+    expect(bindings.map((row) => row.kind).sort()).toEqual(["wf_approve", "wf_cancel"])
+    // One surface — the dispatcher deletes siblings by surfaceId.
+    expect(new Set(bindings.map((row) => row.surfaceId)).size).toBe(1)
+    expect(bindings[0].payload).toMatchObject({
+      workflowId: "wf_n",
+      runParams: { message: "hello runtime" },
+      triggeredFrom: { source: "im", conversationKey: key },
+    })
+    // The card itself went out.
+    expect(await getDb().outboundQueue.count()).toBe(1)
+
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.find((row) => row.kind === "workflow.dispatch_held")?.fields).toMatchObject({
+      workflowId: "wf_n",
+      acceptance: "run-approval",
+    })
+    expect(audit.some((row) => row.kind === "workflow.dispatched")).toBe(false)
   })
 
   it("routes to the workflow orchestrator when the conversation has a workflowId", async () => {
@@ -1870,7 +1975,12 @@ describe("installRuntime — draft-prepare", () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_draft_perm" })
     await callHandler(event, "draft-prepare")
 
-    await expect(Promise.resolve(seenPermission)).resolves.toEqual({ decision: "deny" })
+    // The reason travels with the denial now: the sidecar (and the trace) can
+    // tell "the operator has the bot drafting" from a plain refusal.
+    await expect(Promise.resolve(seenPermission)).resolves.toEqual({
+      decision: "deny",
+      message: "ask-tier tools are denied while drafting",
+    })
   })
 
   it("does NOT persist a draft when the capture rejects (real error → adapter.error)", async () => {
@@ -2687,7 +2797,11 @@ describe("installRuntime — ai-run (adapter teardown abort propagation)", () =>
     ).toHaveLength(0)
   })
 
-  it("threads the adapter signal into draft-prepare captures too", async () => {
+  it("threads the adapter signal into drafted captures too", async () => {
+    // A drafted turn now runs the ai-run path, so its capture signal is the
+    // COMPOSED one (adapter teardown OR run-control stop) rather than the raw
+    // adapter signal the old separate branch passed. Assert propagation, not
+    // identity: identity would pin the weaker of the two behaviours.
     const adapterAc = new AbortController()
     registerRunningAdapter("adapter_1", {
       adapter: stubAdapterHandle,
@@ -2699,7 +2813,10 @@ describe("installRuntime — ai-run (adapter teardown abort propagation)", () =>
     const cap = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0][3] as {
       signal?: AbortSignal
     }
-    expect(cap.signal).toBe(adapterAc.signal)
+    expect(cap.signal).toBeDefined()
+    expect(cap.signal!.aborted).toBe(false)
+    adapterAc.abort("teardown")
+    expect(cap.signal!.aborted).toBe(true)
   })
 })
 

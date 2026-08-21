@@ -14,6 +14,7 @@
  * deleted so the user can't double-approve / double-cancel.
  */
 
+import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { getDb } from "@/lib/db/schema"
@@ -35,6 +36,16 @@ interface ApprovalPayload {
   workflowName?: string
   runParams?: Record<string, unknown>
   triggeredFrom: WorkflowTriggeredFrom
+  /**
+   * IM ceiling frozen by the caller that recorded the binding.
+   *
+   * Carried on the payload rather than re-resolved here because the card can
+   * sit unanswered for hours: re-deriving would let a policy change between the
+   * ask and the press silently widen what the approved run may do. Absent on
+   * bindings written before the acceptance path existed, and on the
+   * `wf_run_workflow_by_name` plugin path, which never had one.
+   */
+  permissionCeiling?: AgentPermissionCeiling
 }
 
 function readPayload(binding: ConnectorCallbackBindingRow): ApprovalPayload | null {
@@ -47,6 +58,7 @@ function readPayload(binding: ConnectorCallbackBindingRow): ApprovalPayload | nu
     workflowName: payload.workflowName,
     runParams: payload.runParams,
     triggeredFrom: tf,
+    ...(payload.permissionCeiling ? { permissionCeiling: payload.permissionCeiling } : {}),
   }
 }
 
@@ -123,6 +135,7 @@ export async function handleWorkflowApprovalCallback(
     workflowId: payload.workflowId,
     runParams: payload.runParams,
     triggeredFrom: payload.triggeredFrom,
+    ...(payload.permissionCeiling ? { permissionCeiling: payload.permissionCeiling } : {}),
   })
 
   if (!result.ok) {

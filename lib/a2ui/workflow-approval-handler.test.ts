@@ -2,6 +2,7 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow } from "@/lib/db/workflows"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { publishWorkflowLifecycle } from "@/lib/workflow/publish/publication-lifecycle"
 import { handleWorkflowApprovalCallback } from "./workflow-approval-handler"
 
 const dbFixture = createDbTestFixture()
@@ -11,7 +12,11 @@ beforeEach(async () => {
   await dbFixture.restore()
 })
 
-async function seedBindingPair(workflowId: string, workflowName: string) {
+async function seedBindingPair(
+  workflowId: string,
+  workflowName: string,
+  extra: Record<string, unknown> = {}
+) {
   const adapterId = "wecom:a"
   const surfaceId = "wfsurf:abc"
   const conversationKey = "wecom:wecom:a:room"
@@ -25,6 +30,7 @@ async function seedBindingPair(workflowId: string, workflowName: string) {
       conversationKey,
       sessionId: "s1",
     },
+    ...extra,
   }
   await recordCallbackBinding({
     adapterId,
@@ -52,6 +58,12 @@ afterAll(dbFixture.dispose)
 describe("handleWorkflowApprovalCallback", () => {
   it("approve path starts the workflow + enqueues a confirmation + deletes bindings", async () => {
     const wf = await createWorkflow({ name: "Daily Standup" })
+    // `executeDeployedWorkflow` is a FORMAL invocation: it resolves a published
+    // production deployment and refuses with `deployment-not-found` when there
+    // is none. A workflow that was only created has never been published, so
+    // without this the approve path takes the not-found branch and asserts
+    // nothing about approving.
+    await publishWorkflowLifecycle(wf.id, Date.now())
     const { adapterId, surfaceId, conversationKey } = await seedBindingPair(wf.id, "Daily Standup")
     const approveBinding = (await getDb()
       .connectorCallbackBindings.where("[adapterId+actionId]")
@@ -83,6 +95,35 @@ describe("handleWorkflowApprovalCallback", () => {
       .filter((b) => b.surfaceId === surfaceId)
       .toArray()
     expect(bindings).toHaveLength(0)
+  })
+
+  it("carries the frozen permission ceiling into the approved run", async () => {
+    // The card can sit unanswered for hours. Re-deriving the ceiling at press
+    // time would let a policy change between the ask and the answer widen the
+    // run that was actually approved, so the binding carries it verbatim.
+    const wf = await createWorkflow({ name: "Deploy" })
+    await publishWorkflowLifecycle(wf.id, Date.now())
+    const { adapterId, conversationKey } = await seedBindingPair(wf.id, "Deploy", {
+      permissionCeiling: { allowedTools: ["Read"], permissionMode: "default" },
+    })
+    const approveBinding = (await getDb()
+      .connectorCallbackBindings.where("[adapterId+actionId]")
+      .equals([adapterId, "wfapp:abc"])
+      .first())!
+
+    await handleWorkflowApprovalCallback({
+      binding: approveBinding,
+      cancelled: false,
+      adapterId,
+      platform: "wecom",
+      conversationKey,
+    })
+
+    const run = (await getDb().workflowRuns.toArray()).find((r) => r.workflowId === wf.id)
+    expect(run?.securityContext?.permissionCeiling).toEqual({
+      allowedTools: ["Read"],
+      permissionMode: "default",
+    })
   })
 
   it("cancel path enqueues a cancellation + deletes bindings + does NOT create a run", async () => {

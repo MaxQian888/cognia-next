@@ -243,6 +243,16 @@ export type AuditKind =
   // `runAndCapture` path. Mirrors `team.dispatched`; `teamId` wins when both are
   // set. Carries `fields.workflowId` + `fields.sourceMessageId`.
   | "workflow.dispatched"
+  // A workflow-bound conversation running under `autonomy: "suggest"` held its
+  // dispatch behind an Approve/Cancel card instead of starting the run. The
+  // third shape of acceptance: a workflow has no plan gate and delivers its
+  // product through its own nodes, so the only point where "a human signs off
+  // before it acts" is still true is BEFORE the run starts. Carries
+  // `fields.workflowId`, `fields.surfaceId`, `fields.sourceMessageId` and
+  // `fields.acceptance: "run-approval"`. The press is answered by the existing
+  // `wf_approve` / `wf_cancel` dispatcher. See
+  // `lib/connectors/hitl/workflow-run-approval.ts`.
+  | "workflow.dispatch_held"
   // Draft mode prepared a real AI-generated reply for human review (manual
   // connector mode / unmatched-in-draft policy). Fired when the `draft-prepare`
   // route decision ran the character/twin/memory-grounded turn through the PII

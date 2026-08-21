@@ -31,6 +31,8 @@ import type { RouteDecision } from "./mode-router"
 import type { LiveSteerHandler } from "./bus"
 import type { ResolvedBinding } from "./policy-resolve"
 import { matchDispatchRule } from "./dispatch-rules"
+import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
+import { projectImComposition } from "./composition/im-composition-selection"
 import { resolveImEffectiveConfig } from "./effective-config"
 import type {
   SendContent,
@@ -75,6 +77,7 @@ import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
 import { getRunningAdapter } from "./lifecycle"
 import { makeImPermissionResponder } from "./hitl/tool-approval"
+import { holdWorkflowDispatchForApproval } from "./hitl/workflow-run-approval"
 import {
   createExecutionRun,
   putExecutionRunBinding,
@@ -151,13 +154,13 @@ export async function resolveRecoveryExecutionSpec(
   // The initial send already resolved and (for gateway) minted its exact
   // ticket in build-options. Reuse it; only a recovery attempt needs remint.
   if (sendOptions.execution && !recoveringSafely) return sendOptions.execution
-  const [{ resolveAgentExecutionShadowSpec }, { sendSpecFromResolved }, { isTauri }] =
+  const [{ resolveAgentExecutionSpecForConfig }, { sendSpecFromResolved }, { isTauri }] =
     await Promise.all([
       import("@/lib/ai/agent/execution/agent-execution-service"),
       import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
       import("@/lib/tauri"),
     ])
-  const resolution = await resolveAgentExecutionShadowSpec(
+  const resolution = await resolveAgentExecutionSpecForConfig(
     {
       sessionId,
       provider: sendOptions.provider,
@@ -701,6 +704,13 @@ async function resolveInboundSendOptions(params: {
   executionIdentity?: { runId: string; attemptId?: string }
   permissionCeiling?: AgentPermissionCeiling
   resolvedCharacter?: Awaited<ReturnType<typeof resolveCharacterById>>
+  /**
+   * Composition selection projected from this conversation's effective config
+   * (ADR-0117). Without it `resolveTurnComposition` reads the localStorage
+   * session store, so an IM turn would compose from whatever the desktop user
+   * last picked in the composer chip.
+   */
+  compositionSelection?: AgentCompositionSelectionV1
 }): Promise<{
   sendOptions: Awaited<ReturnType<typeof resolveSendOptions>>
   appSettings: AppSettings | undefined
@@ -717,6 +727,7 @@ async function resolveInboundSendOptions(params: {
     executionIdentity,
     permissionCeiling,
     resolvedCharacter,
+    compositionSelection,
   } = params
 
   let appSettings: AppSettings | undefined
@@ -809,6 +820,7 @@ async function resolveInboundSendOptions(params: {
     traceSurface: "connector",
     executionIdentity,
     permissionCeiling,
+    compositionSelection,
   })
 
   const projects = await getAllProjects().catch(() => [])
@@ -888,7 +900,20 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
 
     // ── Step 3: branch on decision ───────────────────────────────────────────
     switch (decision) {
-      case "ai-run": {
+      case "ai-run":
+      case "draft-prepare": {
+        // `draft-prepare` is NOT a second execution path — it is this one with
+        // its product held for a human. Keeping it separate is what made a
+        // team-bound conversation silently degrade: that branch resolved no
+        // execution target, so `/team`-bound work never reached the team and
+        // the "draft" was a single-character reply nobody had asked for.
+        //
+        // In axis terms (ADR-0117) this is `autonomy: "suggest"` producing
+        // `requireAcceptance`, which is a property of the PRODUCT, not of the
+        // executor. So the turn runs exactly as it otherwise would — same
+        // routing, same team, same workflow, same PII gate — and only the
+        // DELIVERY stage differs.
+        const requireAcceptance = decision === "draft-prepare"
         // Real ai-run path: build the SendOptions with inbox context, check
         // the suppression gate, and either short-circuit (write a deferred
         // audit) or invoke the capture wrapper and enqueue the result.
@@ -914,6 +939,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           override,
           rule: ruleHit,
           system: { mode: resolved.mode, characterId: resolved.characterId },
+          // The send path reads `session.model` between the conversation
+          // override and the bot default, so the facade has to see it too or
+          // `/status` reports a model this turn will not use.
+          session: { model: session.model, providerOverride: session.providerOverride },
         })
         const routing = effectiveConfig.routing
         const effectiveTeamId = routing.teamId
@@ -1024,11 +1053,28 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             sessionId: session.id,
+            session,
             ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
             permissionCeiling,
+            ...(event.sender.remoteUserId ? { initiatorUserId: event.sender.remoteUserId } : {}),
+            // Acceptance, expressed through the mechanism that exists for a
+            // team. A single-character turn can be held as a draft because its
+            // product lands here; a team's product lands minutes later through
+            // the presentation runner, where there is nothing to hold. What
+            // `suggest` actually means for a team is "a human signs off before
+            // it acts" — which is the plan gate, and it now has a card to ask
+            // on (`makeImPlanApprovalDelegate`). Holding the finished output
+            // instead would review work already done.
+            ...(requireAcceptance ? { requirePlanApprovalFloor: true } : {}),
           })
           if (res.started && res.runId) {
-            await routeContext.bindExecutionRun(res.runId)
+            // Bind the EXECUTION run id, not the raw team run id. The two are
+            // different keys (`execution:team:<id>` vs `<id>`), and
+            // `reconcileCrashedRuns` filters `connectorInboundJobs` by the
+            // execution id — so binding the raw id meant a crashed team turn
+            // could never re-link to the inbound job that started it.
+            const { agentTeamExecutionRunId } = await import("@/lib/execution/agent-team-bridge")
+            await routeContext.bindExecutionRun(agentTeamExecutionRunId(res.runId))
           }
           await appendAudit({
             adapterId: event.adapterId,
@@ -1044,6 +1090,11 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               teamId: effectiveTeamId,
               teamSource: routing.teamSource,
               sourceMessageId: storedMsg.id,
+              // Recorded because the old `draft-prepare` branch could not
+              // dispatch at all: a draft-mode conversation bound to a team
+              // silently produced a single-character reply, and nothing said
+              // so. Now the team runs and the audit names how it was gated.
+              ...(requireAcceptance ? { acceptance: "plan-approval" } : {}),
             },
           })
           if (!res.started) {
@@ -1069,27 +1120,90 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           if (routing.workflowSource === "rule") {
             await auditRuleDecision({ workflowId: effectiveWorkflowId })
           }
-          const res = await startWorkflowFromIM({
-            workflowId: effectiveWorkflowId,
-            runParams: {
-              message: event.plainText,
-              ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
+          const runParams = {
+            message: event.plainText,
+            ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
+          }
+          const triggeredFrom = {
+            source: "im" as const,
+            adapterId: event.adapterId,
+            conversationKey: event.conversationKey,
+            sourceMessageId: event.messageId,
+            deliveryTarget: deliveryTargetFromEvent(event),
+            ...(session.id ? { sessionId: session.id } : {}),
+            ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
+            initiator: {
+              platformIdentityId: event.sender.id,
+              remoteUserId: event.sender.remoteUserId,
+              displayName: event.sender.displayName,
+              ...(readResolvedPrincipal(event.channelData) ?? {}),
             },
-            triggeredFrom: {
-              source: "im",
+          }
+
+          // ── Acceptance, expressed through the mechanism a workflow has ──
+          // The third shape of `autonomy: "suggest"`. Direct holds the
+          // product, a team holds its plan; a workflow has neither — its
+          // product is delivered by its own nodes and never lands here, so by
+          // the time anything is holdable the work has shipped. The only
+          // remaining point where "a human signs off before it acts" is still
+          // true is BEFORE the run starts, so that is what is held. The press
+          // is answered by the `wf_approve` / `wf_cancel` dispatcher that
+          // already exists, which is why nothing is dispatched here.
+          if (requireAcceptance) {
+            const held = await holdWorkflowDispatchForApproval({
+              workflowId: effectiveWorkflowId,
+              runParams,
+              triggeredFrom,
+              permissionCeiling,
               adapterId: event.adapterId,
               conversationKey: event.conversationKey,
-              sourceMessageId: event.messageId,
+              conversationRef: event.conversationRef,
               deliveryTarget: deliveryTargetFromEvent(event),
-              ...(session.id ? { sessionId: session.id } : {}),
-              ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
-              initiator: {
-                platformIdentityId: event.sender.id,
-                remoteUserId: event.sender.remoteUserId,
-                displayName: event.sender.displayName,
-                ...(readResolvedPrincipal(event.channelData) ?? {}),
-              },
-            },
+              ...(event.sender.remoteUserId ? { initiatorUserId: event.sender.remoteUserId } : {}),
+              requestText: event.plainText,
+            })
+            if (held.held) {
+              await appendAudit({
+                adapterId: event.adapterId,
+                kind: "workflow.dispatch_held",
+                at: Date.now(),
+                conversationKey: event.conversationKey,
+                fields: {
+                  workflowId: effectiveWorkflowId,
+                  surfaceId: held.surfaceId,
+                  sourceMessageId: storedMsg.id,
+                  acceptance: "run-approval",
+                },
+              })
+            } else {
+              // Fail closed. Running the workflow because the question could
+              // not be asked is the exact gap this closes, only louder.
+              await appendAudit({
+                adapterId: event.adapterId,
+                kind: "adapter.error",
+                at: Date.now(),
+                conversationKey: event.conversationKey,
+                reason: "workflow_hold_failed",
+                message: held.message,
+                fields: {
+                  workflowId: effectiveWorkflowId,
+                  sourceMessageId: storedMsg.id,
+                  acceptance: "run-approval",
+                },
+              })
+              notifyImFailure(
+                event.conversationKey,
+                IM_FAILURE_NOTICE.dispatchFailed,
+                `dispatch-error:${event.conversationKey}`
+              )
+            }
+            break
+          }
+
+          const res = await startWorkflowFromIM({
+            workflowId: effectiveWorkflowId,
+            runParams,
+            triggeredFrom,
             permissionCeiling,
           })
           if (res.ok) {
@@ -1101,7 +1215,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             at: Date.now(),
             conversationKey: event.conversationKey,
             ...(res.ok ? {} : { reason: res.reason ?? "workflow_dispatch_failed" }),
-            fields: { workflowId: effectiveWorkflowId, sourceMessageId: storedMsg.id },
+            fields: {
+              workflowId: effectiveWorkflowId,
+              sourceMessageId: storedMsg.id,
+            },
           })
           // Surface the failure to the conversation (parity with the
           // capture-failure branch below) — the audit row alone leaves the IM
@@ -1185,6 +1302,12 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             emitTrace: true,
             executionIdentity,
             permissionCeiling,
+            // A ChatSession carries no `agentModeId` of its own (that field
+            // lives on SystemPromptPreset), so the preset stays Standard here
+            // rather than borrowing the desktop's localStorage default — which
+            // is the very coupling this seam exists to remove. The axes below
+            // it all come from this conversation's Dexie config.
+            compositionSelection: projectImComposition({ effective: effectiveConfig }).selection,
           })
 
         let recoveryExecution: AgentExecutionSendSpec
@@ -1276,7 +1399,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // legitimate human approval (registry TTL 10 min) resolves before the
         // turn times out, while a genuinely stuck sidecar is still bounded.
         const targetAdapter = bus.getAdapter(event.adapterId)
-        const liveActivityEnabled = override?.liveActivity !== false
+        // A drafted turn has no live conversational surface: nobody has agreed
+        // to see it yet, so a progress card would announce a reply the operator
+        // may never approve.
+        const liveActivityEnabled = override?.liveActivity !== false && !requireAcceptance
         // ── Respond-via bot (multi-bot cross-account send) ──
         // A matched dispatch rule may ask for the reply to be delivered
         // through ANOTHER of our own bot instances. Validate the target at
@@ -1294,6 +1420,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           adapterRow
         )
         const streamsThroughReceiver =
+          !requireAcceptance &&
           outboundTarget.adapterId === event.adapterId &&
           outboundTarget.conversationKey === event.conversationKey
         await createExecutionRun({
@@ -1426,7 +1553,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             })
             const decision = restoredDeniedRequests.has(request.requestId)
               ? { decision: "deny" as const, message: "permission denied by recovered state" }
-              : await basePermissionResponder(request)
+              : requireAcceptance
+                ? // No human is in the loop at GENERATION time for a drafted
+                  // turn — the human reviews the finished product. Asking now
+                  // would project an Allow/Deny card into a conversation whose
+                  // operator has said the bot does not speak unprompted.
+                  { decision: "deny" as const, message: "ask-tier tools are denied while drafting" }
+                : await basePermissionResponder(request)
             await persistCanonicalEvent({
               kind: "permission-resolved",
               requestId: request.requestId,
@@ -1495,7 +1628,11 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               kind: "adapter.error",
               at: Date.now(),
               conversationKey: event.conversationKey,
-              reason: "ai_run_capture_failed",
+              // The reason stays distinct even though the path is now shared:
+              // an operator filtering for drafting failures would otherwise
+              // lose that signal to the collapse, and "the draft never
+              // appeared" is a different report from "the bot did not reply".
+              reason: requireAcceptance ? "draft_prepare_capture_failed" : "ai_run_capture_failed",
               message: err instanceof Error ? err.message : String(err),
               fields: { sourceMessageId: storedMsg.id },
             })
@@ -1620,6 +1757,42 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           event.channel.kind !== "private" &&
           hasCapability(getPlatformCapabilities(event.platform), "send.reply") &&
           (override?.replyQuoting ?? adapterRow.replyQuoting ?? true)
+        // ── The one place acceptance changes anything ──
+        //
+        // The turn is finished and identical either way; what differs is
+        // whether its product ships or waits for a human. That is why `draft`
+        // stopped being a route: routing it separately meant deciding WHO runs
+        // the turn from a flag about WHO signs off on it.
+        if (requireAcceptance) {
+          const draftSegments: MessageSegment[] = outboundSegments.length
+            ? outboundSegments
+            : [{ type: "text", text: recoveredText }]
+          const draft = await createDraft({
+            conversationKey: event.conversationKey,
+            sessionId: session.id,
+            segments: draftSegments,
+            sourceMessageId: storedMsg.id,
+          })
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "draft.prepared",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            fields: {
+              draftId: draft.id,
+              sourceMessageId: storedMsg.id,
+              assistantMessageId: captured.messageId,
+              // Recorded because the old branch could not: a draft now names
+              // the target that produced it, so "the team was bound and the
+              // draft came from one character anyway" is auditable rather than
+              // invisible.
+              ...(effectiveTeamId ? { teamId: effectiveTeamId } : {}),
+              ...(effectiveWorkflowId ? { workflowId: effectiveWorkflowId } : {}),
+            },
+          })
+          break
+        }
+
         // Deliver through the respond-via target resolved above (falls back to
         // the receiving bot on any invalid target).
         await enqueueOutbound({
@@ -1683,92 +1856,6 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             metadata: { assistantMessageId: captured.messageId },
           })
         }
-        break
-      }
-
-      case "draft-prepare": {
-        // Generate a REAL drafted reply — grounded in the same character / twin
-        // / memory context a live `ai-run` would use — and persist it for human
-        // review (manual connector mode: the operator approves or edits before
-        // it's sent). The turn runs through the same PII gate (`opts.runAndCapture`
-        // → `safeSendPrompt`), so a leak blocks the draft instead of persisting
-        // sensitive text. Unlike `ai-run`, a draft has no live conversation
-        // surface: no live-activity card, no platform streaming, and any
-        // ask-tier tool permission is denied by default — there is no human in
-        // the loop at generation time (the human reviews the finished draft).
-        const { sendOptions } = await resolveInboundSendOptions({
-          event,
-          session,
-          resolved,
-          override,
-          adapterRow,
-          emitTrace: false,
-        })
-        const draftPrompt = inboundEventToSendContent(event)
-        let draftCapture: Awaited<ReturnType<RunAndCaptureFn>>
-        try {
-          // Same abort propagation as the ai-run branch: the adapter's
-          // teardown signal halts an in-flight draft generation too.
-          const draftSignal = getRunningAdapter(event.adapterId)?.abortController.signal
-          draftCapture = await opts.runAndCapture(session.id, draftPrompt, sendOptions, {
-            adapterId: event.adapterId,
-            conversationKey: event.conversationKey,
-            timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
-            idleTimeoutMs: CONNECTOR_TURN_IDLE_TIMEOUT_MS,
-            ...(draftSignal ? { signal: draftSignal } : {}),
-            onPermissionRequest: () => ({ decision: "deny" as const }),
-          })
-        } catch (err) {
-          // The PII gate (`safeSendPrompt`) throws `PiiGateBlocked` after writing
-          // its own `pii_blocked` audit row — don't double-audit, and never
-          // persist a draft that would leak. Mirrors the ai-run capture-error
-          // handling (adapter.error + reason).
-          const isPiiBlocked = err instanceof Error && err.name === "PiiGateBlocked"
-          if (!isPiiBlocked) {
-            await appendAudit({
-              adapterId: event.adapterId,
-              kind: "adapter.error",
-              at: Date.now(),
-              conversationKey: event.conversationKey,
-              reason: "draft_prepare_capture_failed",
-              message: err instanceof Error ? err.message : String(err),
-              fields: { sourceMessageId: storedMsg.id },
-            })
-          }
-          break
-        }
-
-        // Project the captured reply (text + any A2UI surfaces) into segments —
-        // identical to the ai-run outbound projection so an approved draft
-        // renders the same as a live reply. A turn that produced neither text
-        // nor surfaces still stores an explicit text mirror so the draft is not
-        // silently empty.
-        const projected = assistantReplyToSegments({
-          text: draftCapture.text,
-          a2uiSurfaces: draftCapture.a2uiSurfaces,
-          a2uiSurfaceOrder: draftCapture.a2uiSurfaceOrder,
-          telemetry: { adapterId: event.adapterId, platform: event.platform },
-        })
-        const draftSegments: MessageSegment[] = projected.length
-          ? projected
-          : [{ type: "text", text: draftCapture.text }]
-        const draft = await createDraft({
-          conversationKey: event.conversationKey,
-          sessionId: session.id,
-          segments: draftSegments,
-          sourceMessageId: storedMsg.id,
-        })
-        await appendAudit({
-          adapterId: event.adapterId,
-          kind: "draft.prepared",
-          at: Date.now(),
-          conversationKey: event.conversationKey,
-          fields: {
-            draftId: draft.id,
-            sourceMessageId: storedMsg.id,
-            assistantMessageId: draftCapture.messageId,
-          },
-        })
         break
       }
 

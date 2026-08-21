@@ -146,9 +146,35 @@ The `draft` × delegation bug is a consequence of the old shape and disappears i
 the new one. `draft` was a **route** — one branch of `routeInbound` — so a
 conversation bound to a team resolved no target at all and silently degraded to a
 single-agent draft. As an axis it is `autonomy: "suggest"`, which produces
-`requireAcceptance`, and the **delivery** stage chooses between a draft and a
-governed send. A team-bound conversation under `suggest` really does dispatch to
-the team, and stores the team's output as a draft.
+`requireAcceptance`, and only the **delivery** stage changes: the turn runs the
+real path, with the same routing, the same team, the same workflow, and the same
+PII gate.
+
+#### The three shapes of acceptance
+
+`requireAcceptance` is a property of the PRODUCT, and each execution target
+honours it through the mechanism it actually has. There is no fourth approval
+system — every one of these is an existing gate given a new caller:
+
+| Target | What is held | Mechanism | Audit |
+| --- | --- | --- | --- |
+| direct | the product | a `connectorDrafts` row a person approves, edits, or discards | `draft.prepared` |
+| team | the plan | `requirePlanApprovalFloor` → the ADR-0070 plan gate, asked on an IM card (ADR-0137) | `team.dispatched` with `acceptance: "plan-approval"` |
+| workflow | the dispatch | a `wf_approve` / `wf_cancel` card; the press starts the run through the dispatcher that already answers those bindings | `workflow.dispatch_held` with `acceptance: "run-approval"` |
+
+A team's product lands minutes later through the presentation runner, where
+there is nothing left to hold, so holding the finished output would review work
+already done. A workflow has neither a plan gate nor a product that returns
+here — its nodes deliver it — so by the time anything is holdable the work has
+shipped. The only moment at which "a human signs off before it acts" is still
+true for a workflow is BEFORE the run starts, which is what is held.
+
+Two properties of the workflow hold are load-bearing. It **fails closed**: if the
+card cannot be delivered the dispatch does not happen, because running the
+workflow anyway is the original gap only louder. And the permission ceiling is
+**frozen onto the binding** rather than re-derived at approval time: the card can
+sit unanswered for hours, and re-deriving would let a policy change between the
+ask and the press silently widen the run that was actually approved.
 
 Engagement follows the **target**, not the mode — which is the axis-level
 statement of the same defect:
