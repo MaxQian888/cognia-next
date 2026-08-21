@@ -1958,7 +1958,12 @@ fn store_error(error: SecurityStoreError) -> ApiError {
             "invalid_device_capabilities",
             "the requested capability snapshot contains an invalid grant or removes required Owner authority",
         ),
-        SecurityStoreError::Sqlite(_) => {
+        SecurityStoreError::InvalidDeviceTransition => ApiError::new(
+            StatusCode::CONFLICT,
+            "invalid_device_transition",
+            "the device is not in a state that permits this lifecycle change",
+        ),
+        SecurityStoreError::Sqlite(_) | SecurityStoreError::Migration(_) => {
             ApiError::unavailable("the security database could not complete the request")
         }
     }

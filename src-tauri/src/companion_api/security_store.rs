@@ -31,6 +31,10 @@ pub enum SecurityStoreError {
     LastOwner,
     #[error("the requested device capability set is invalid")]
     InvalidCapabilities,
+    #[error("security schema migration failed: {0}")]
+    Migration(String),
+    #[error("device lifecycle transition is invalid")]
+    InvalidDeviceTransition,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,6 +55,38 @@ pub struct AuthorizationSnapshot {
     pub public_key_pem: String,
     pub key_thumbprint: String,
     pub capabilities: Vec<String>,
+}
+
+/// The three states a device row can be in.
+///
+/// `Suspended` retains the device's keys and grants — it is a reversible "this
+/// device is not allowed to act right now". `Revoked` is terminal: the keys are
+/// gone, a `revocations` row exists, and there is no transition back.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceLifecycleState {
+    Active,
+    Suspended,
+    Revoked,
+}
+
+impl DeviceLifecycleState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Suspended => "suspended",
+            Self::Revoked => "revoked",
+        }
+    }
+
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "active" => Some(Self::Active),
+            "suspended" => Some(Self::Suspended),
+            "revoked" => Some(Self::Revoked),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -137,21 +173,29 @@ pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 
 impl SecurityStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Arc<Self>, SecurityStoreError> {
+        let path = path.as_ref();
         let mut conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA_SQL)?;
-        reconcile_interrupted_operations(&mut conn, unix_time_secs())?;
+        let now = unix_time_secs();
+        apply_schema_migrations(&mut conn, now, Some(path))?;
+        reconcile_interrupted_operations(&mut conn, now)?;
         Ok(Arc::new(Self {
             conn: Arc::new(Mutex::new(conn)),
         }))
     }
 
     pub fn in_memory() -> Result<Arc<Self>, SecurityStoreError> {
-        let conn = Connection::open_in_memory()?;
+        let mut conn = Connection::open_in_memory()?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA_SQL)?;
+        // An in-memory database is built from the current `SCHEMA_SQL` and so
+        // only ever records markers. Running the runner here anyway is what
+        // keeps it exercised by the test suite rather than only by real user
+        // data on someone's disk.
+        apply_schema_migrations(&mut conn, unix_time_secs(), None)?;
         Ok(Arc::new(Self {
             conn: Arc::new(Mutex::new(conn)),
         }))
@@ -592,9 +636,12 @@ impl SecurityStore {
         }
         let mut conn = self.conn.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Management plane: a suspended device's grants must stay editable, or
+        // the Device Center's switches would silently no-op on a paused device.
         let role: Option<String> = tx
             .query_row(
-                "SELECT role FROM devices WHERE tenant_id = ?1 AND id = ?2 AND status = 'active'",
+                "SELECT role FROM devices
+                 WHERE tenant_id = ?1 AND id = ?2 AND status IN ('active', 'suspended')",
                 params![tenant_id, device_id],
                 |row| row.get(0),
             )
@@ -658,7 +705,8 @@ impl SecurityStore {
             for device_id in devices {
                 let tenant: Option<String> = tx
                     .query_row(
-                        "SELECT tenant_id FROM devices WHERE id = ?1 AND status = 'active' LIMIT 1",
+                        "SELECT tenant_id FROM devices
+                         WHERE id = ?1 AND status IN ('active', 'suspended') LIMIT 1",
                         [device_id],
                         |row| row.get(0),
                     )
@@ -1159,6 +1207,173 @@ impl SecurityStore {
             .map_err(Into::into)
     }
 
+    /// Read a device's lifecycle state. `None` when the device does not exist.
+    pub fn device_state(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+    ) -> Result<Option<DeviceLifecycleState>, SecurityStoreError> {
+        let raw: Option<String> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT status FROM devices WHERE tenant_id = ?1 AND id = ?2",
+                params![tenant_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(raw.as_deref().and_then(DeviceLifecycleState::parse))
+    }
+
+    /// Management-plane capability read: returns a snapshot for `active` AND
+    /// `suspended` devices, together with which of the two it is.
+    ///
+    /// The authorization-plane [`Self::capability_snapshot`] stays strict —
+    /// this exists so the UI can render and edit a paused device's grants
+    /// without that widening leaking into a permission check.
+    pub fn manageable_capability_snapshot(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+    ) -> Result<Option<(DeviceLifecycleState, Vec<String>)>, SecurityStoreError> {
+        let connection = self.conn.lock();
+        let raw: Option<String> = connection
+            .query_row(
+                "SELECT status FROM devices
+                 WHERE tenant_id = ?1 AND id = ?2 AND status IN ('active', 'suspended')",
+                params![tenant_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(state) = raw.as_deref().and_then(DeviceLifecycleState::parse) else {
+            return Ok(None);
+        };
+        let mut statement = connection.prepare(
+            "SELECT capability FROM capability_grants
+             WHERE tenant_id = ?1 AND device_id = ?2 AND revoked_at IS NULL
+             ORDER BY capability",
+        )?;
+        let capabilities = statement
+            .query_map(params![tenant_id, device_id], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(Some((state, capabilities)))
+    }
+
+    /// Suspend an active device. Returns `false` when it was already suspended.
+    ///
+    /// Deliberately unlike [`Self::revoke_device`]:
+    /// - `device_keys` are **retained** — holding the keys is the whole point,
+    ///   it is what makes resume possible without re-pairing;
+    /// - **no** `revocations` row is written — a suspension is not a revocation
+    ///   and must not show up in the revocation ledger;
+    /// - outstanding socket tickets **are** consumed, so a ticket minted a
+    ///   moment before the suspension cannot still be redeemed after it.
+    pub fn suspend_device(
+        &self,
+        tenant_id: &str,
+        actor_id: &str,
+        device_id: &str,
+        trust_root_override: bool,
+        now: i64,
+    ) -> Result<bool, SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT status FROM devices WHERE tenant_id = ?1 AND id = ?2",
+                params![tenant_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let current = current
+            .as_deref()
+            .and_then(DeviceLifecycleState::parse)
+            .ok_or(SecurityStoreError::DeviceUnavailable)?;
+        match current {
+            DeviceLifecycleState::Suspended => return Ok(false),
+            DeviceLifecycleState::Revoked => {
+                return Err(SecurityStoreError::InvalidDeviceTransition)
+            }
+            DeviceLifecycleState::Active => {}
+        }
+
+        let role: String = tx.query_row(
+            "SELECT role FROM devices WHERE tenant_id = ?1 AND id = ?2",
+            params![tenant_id, device_id],
+            |row| row.get(0),
+        )?;
+        if role == "owner" && !trust_root_override {
+            // Same invariant as `revoke_device`: suspending this owner has to
+            // leave another *active* one behind. Otherwise the operator is
+            // locked out of every owner-gated route with no way back short of
+            // the CLI trust root.
+            let other_active_owners: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM devices
+                 WHERE tenant_id = ?1 AND role = 'owner' AND status = 'active'
+                   AND id != ?2",
+                params![tenant_id, device_id],
+                |row| row.get(0),
+            )?;
+            if other_active_owners == 0 {
+                return Err(SecurityStoreError::LastOwner);
+            }
+        }
+
+        tx.execute(
+            "UPDATE devices SET status = 'suspended', updated_at = ?1
+             WHERE tenant_id = ?2 AND id = ?3",
+            params![now, tenant_id, device_id],
+        )?;
+        tx.execute(
+            "UPDATE socket_tickets SET consumed_at = ?1
+             WHERE tenant_id = ?2 AND device_id = ?3 AND consumed_at IS NULL",
+            params![now, tenant_id, device_id],
+        )?;
+        insert_audit(&tx, tenant_id, actor_id, "device.suspended", device_id, now)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Return a suspended device to service. Returns `false` when it was
+    /// already active. Revocation is terminal, so a revoked device errors.
+    pub fn resume_device(
+        &self,
+        tenant_id: &str,
+        actor_id: &str,
+        device_id: &str,
+        now: i64,
+    ) -> Result<bool, SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT status FROM devices WHERE tenant_id = ?1 AND id = ?2",
+                params![tenant_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let current = current
+            .as_deref()
+            .and_then(DeviceLifecycleState::parse)
+            .ok_or(SecurityStoreError::DeviceUnavailable)?;
+        match current {
+            DeviceLifecycleState::Active => return Ok(false),
+            DeviceLifecycleState::Revoked => {
+                return Err(SecurityStoreError::InvalidDeviceTransition)
+            }
+            DeviceLifecycleState::Suspended => {}
+        }
+
+        tx.execute(
+            "UPDATE devices SET status = 'active', updated_at = ?1
+             WHERE tenant_id = ?2 AND id = ?3",
+            params![now, tenant_id, device_id],
+        )?;
+        insert_audit(&tx, tenant_id, actor_id, "device.resumed", device_id, now)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     pub fn revoke_device(
         &self,
         tenant_id: &str,
@@ -1169,23 +1384,34 @@ impl SecurityStore {
     ) -> Result<(), SecurityStoreError> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // A suspended device must still be revocable — suspension is not a
+        // dead end, it is a state you can escalate out of.
         let role: Option<String> = tx
             .query_row(
                 "SELECT role FROM devices
-                 WHERE tenant_id = ?1 AND id = ?2 AND status = 'active'",
+                 WHERE tenant_id = ?1 AND id = ?2 AND status IN ('active', 'suspended')",
                 params![tenant_id, device_id],
                 |row| row.get(0),
             )
             .optional()?;
         let role = role.ok_or(SecurityStoreError::DeviceUnavailable)?;
         if role == "owner" && !trust_root_override {
-            let owners: i64 = tx.query_row(
+            // The invariant `require_owner_access` actually needs is "some
+            // ACTIVE owner still exists", so the count is of *other* owners
+            // that are active. Counting suspended owners as protection would
+            // be exactly backwards — a suspended owner cannot exercise owner
+            // authority, so "suspend owner A, revoke owner B" would strand the
+            // tenant with nothing that can authorize. Counting active owners
+            // including this one is equally wrong the other way: it refuses to
+            // revoke a *suspended* owner while an active one is right there.
+            let other_active_owners: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM devices
-                 WHERE tenant_id = ?1 AND role = 'owner' AND status = 'active'",
-                params![tenant_id],
+                 WHERE tenant_id = ?1 AND role = 'owner' AND status = 'active'
+                   AND id != ?2",
+                params![tenant_id, device_id],
                 |row| row.get(0),
             )?;
-            if owners <= 1 {
+            if other_active_owners == 0 {
                 return Err(SecurityStoreError::LastOwner);
             }
         }
@@ -1481,6 +1707,198 @@ fn upsert_capability_grant(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Schema migrations
+// ---------------------------------------------------------------------------
+//
+// `SCHEMA_SQL` is applied on every open with `CREATE TABLE IF NOT EXISTS`, so
+// it can only ever add a missing table — it can never change one that is
+// already on disk. Anything that alters an existing table has to run here.
+//
+// Migrations are keyed, recorded in `security_migrations`, and run in
+// declaration order from both `open` and `in_memory`.
+
+/// Widens `devices.status` from `('active','revoked')` to also admit
+/// `'suspended'`. SQLite cannot `ALTER` a `CHECK` constraint, so this is the
+/// documented 12-step table rebuild.
+const MIGRATION_DEVICE_STATUS_SUSPENDED: &str = "device-status-suspended-v1";
+
+/// Steps 4-7 of the rebuild. The column list is spelled out rather than
+/// `SELECT *` so that a future column landing in a different position cannot
+/// silently transpose two values.
+const DEVICES_REBUILD_SQL: &str = r#"
+CREATE TABLE devices_new (
+    id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('owner', 'member', 'service')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'suspended', 'revoked')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, id)
+);
+INSERT INTO devices_new
+    (id, tenant_id, display_name, role, status, created_at, updated_at)
+    SELECT id, tenant_id, display_name, role, status, created_at, updated_at
+    FROM devices;
+DROP TABLE devices;
+ALTER TABLE devices_new RENAME TO devices;
+"#;
+
+fn migration_applied(conn: &Connection, key: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM security_migrations WHERE key = ?1)",
+        [key],
+        |row| row.get(0),
+    )
+}
+
+fn mark_migration(tx: &rusqlite::Transaction<'_>, key: &str, now: i64) -> rusqlite::Result<()> {
+    tx.execute(
+        "INSERT OR IGNORE INTO security_migrations (key, applied_at) VALUES (?1, ?2)",
+        params![key, now],
+    )?;
+    Ok(())
+}
+
+fn table_ddl(conn: &Connection, table: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map(Option::flatten)
+}
+
+/// Apply every pending schema migration, in declaration order.
+///
+/// `backup_target` is the on-disk database path, or `None` for an in-memory
+/// store. It is only used by migrations that rewrite a table.
+fn apply_schema_migrations(
+    conn: &mut Connection,
+    now: i64,
+    backup_target: Option<&Path>,
+) -> Result<(), SecurityStoreError> {
+    migrate_device_status_suspended(conn, now, backup_target)?;
+    Ok(())
+}
+
+fn migrate_device_status_suspended(
+    conn: &mut Connection,
+    now: i64,
+    backup_target: Option<&Path>,
+) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_DEVICE_STATUS_SUSPENDED)? {
+        return Ok(());
+    }
+
+    // A database created from the current `SCHEMA_SQL` already carries the
+    // widened constraint. Record the marker so the `sqlite_master` probe does
+    // not re-run on every open for the rest of this install's life.
+    let already_widened = table_ddl(conn, "devices")?
+        .map(|ddl| ddl.contains("'suspended'"))
+        .unwrap_or(false);
+    if already_widened {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        mark_migration(&tx, MIGRATION_DEVICE_STATUS_SUSPENDED, now)?;
+        tx.commit()?;
+        return Ok(());
+    }
+
+    // The rebuild drops the parent of three foreign keys. A rollback covers a
+    // failed statement, but not the process being killed mid-commit, so take a
+    // consistent snapshot first. `VACUUM INTO` rather than a file copy: the
+    // database runs in WAL mode and copying the main file alone can miss
+    // committed pages that still live in the `-wal` sidecar.
+    let backup = match backup_target {
+        Some(path) => write_pre_migration_backup(conn, path)?,
+        None => None,
+    };
+
+    // `PRAGMA foreign_keys` is a no-op inside a transaction, so both pragmas
+    // are set on the bare connection. `legacy_alter_table` keeps step 7's
+    // `RENAME` from re-parsing and rewriting the child tables' `REFERENCES
+    // devices` clauses — which is what this procedure wants, because those
+    // clauses already name the table the rename is about to produce.
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    conn.pragma_update(None, "legacy_alter_table", true)?;
+    let outcome = rebuild_devices_table(conn, now);
+    conn.pragma_update(None, "legacy_alter_table", false)?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    outcome?;
+
+    // Only once the rebuild has committed.
+    if let Some(path) = backup {
+        if let Err(error) = std::fs::remove_file(&path) {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "could not remove the pre-migration security backup"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn rebuild_devices_table(conn: &mut Connection, now: i64) -> Result<(), SecurityStoreError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(DEVICES_REBUILD_SQL)?;
+
+    // Commit gate. A rebuild that stranded `device_keys`, `capability_grants`,
+    // or `socket_tickets` rows must roll back rather than ship a database whose
+    // authorization joins quietly return nothing — which reads as "this device
+    // was never granted anything", the exact shape of a silent auth bypass.
+    let violations = {
+        let mut statement = tx.prepare("PRAGMA foreign_key_check")?;
+        let mut rows = statement.query([])?;
+        let mut count = 0usize;
+        while rows.next()?.is_some() {
+            count += 1;
+        }
+        count
+    };
+    if violations > 0 {
+        // Dropping the transaction unread rolls it back.
+        return Err(SecurityStoreError::Migration(format!(
+            "the device table rebuild left {violations} foreign key violation(s)"
+        )));
+    }
+
+    mark_migration(&tx, MIGRATION_DEVICE_STATUS_SUSPENDED, now)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Snapshot the database next to itself before a destructive migration.
+/// Returns `None` when the path has no file name to hang the suffix off.
+fn write_pre_migration_backup(
+    conn: &Connection,
+    database: &Path,
+) -> Result<Option<std::path::PathBuf>, SecurityStoreError> {
+    let Some(file_name) = database.file_name() else {
+        return Ok(None);
+    };
+    let mut backup_name = file_name.to_os_string();
+    backup_name.push(".pre-suspend.bak");
+    let target = database.with_file_name(backup_name);
+
+    // `VACUUM INTO` refuses to overwrite, so a backup left behind by an
+    // interrupted earlier attempt has to go first.
+    if target.exists() {
+        std::fs::remove_file(&target).map_err(|error| {
+            SecurityStoreError::Migration(format!(
+                "could not clear the stale security backup: {error}"
+            ))
+        })?;
+    }
+    let target_str = target.to_str().ok_or_else(|| {
+        SecurityStoreError::Migration("the security database path is not valid UTF-8".to_string())
+    })?;
+    conn.execute("VACUUM INTO ?1", [target_str])?;
+    Ok(Some(target))
+}
+
 const SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
 
@@ -1489,7 +1907,7 @@ CREATE TABLE IF NOT EXISTS devices (
     tenant_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('owner', 'member', 'service')),
-    status TEXT NOT NULL CHECK(status IN ('active', 'revoked')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'suspended', 'revoked')),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, id)
@@ -1646,6 +2064,203 @@ CREATE INDEX IF NOT EXISTS idx_audit_tenant_created ON audit_events(tenant_id, c
 mod tests {
     use super::*;
 
+    /// The two-state `devices` DDL every install before the suspend migration
+    /// was created with. Tests build a database from this on purpose: a
+    /// migration that is only ever exercised against a database already in the
+    /// new shape is a migration nothing tests.
+    #[cfg(test)]
+    const LEGACY_DEVICES_DDL: &str = r#"
+CREATE TABLE devices (
+    id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('owner', 'member', 'service')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'revoked')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, id)
+);
+"#;
+
+    /// Build a pre-migration database at `path`: the legacy `devices` table,
+    /// the rest of the current schema, and one row in each of the three child
+    /// tables whose foreign key points at `devices`.
+    #[cfg(test)]
+    fn seed_legacy_database(path: &std::path::Path) {
+        let conn = Connection::open(path).unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        conn.execute_batch(LEGACY_DEVICES_DDL).unwrap();
+        // Everything else in `SCHEMA_SQL` is `IF NOT EXISTS`, so this leaves the
+        // legacy `devices` table alone and creates the rest as it is today.
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+
+        conn.execute(
+            "INSERT INTO devices (id, tenant_id, display_name, role, status, created_at, updated_at)
+             VALUES ('device-active', 'tenant-a', 'Active', 'owner', 'active', 10, 10)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO devices (id, tenant_id, display_name, role, status, created_at, updated_at)
+             VALUES ('device-revoked', 'tenant-a', 'Revoked', 'member', 'revoked', 11, 12)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO device_keys (id, device_id, tenant_id, public_key_pem, thumbprint, created_at)
+             VALUES ('key-1', 'device-active', 'tenant-a', 'PEM', 'thumb-1', 13)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO capability_grants (id, tenant_id, device_id, capability, created_at)
+             VALUES ('grant-1', 'tenant-a', 'device-active', 'terminal.open', 14)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO socket_tickets
+               (id, tenant_id, device_id, ticket_hash, path, audience, expires_at, created_at)
+             VALUES ('ticket-1', 'tenant-a', 'device-active', 'hash-1', '/ws/events', 'events', 999, 15)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn devices_check_constraint_admits_suspended() {
+        assert!(SCHEMA_SQL.contains("CHECK(status IN ('active', 'suspended', 'revoked'))"));
+    }
+
+    #[test]
+    fn a_fresh_database_records_the_marker_without_rebuilding() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security.sqlite");
+        let store = SecurityStore::open(&path).unwrap();
+        let conn = store.conn.lock();
+        assert!(migration_applied(&conn, MIGRATION_DEVICE_STATUS_SUSPENDED).unwrap());
+        // Nothing was rewritten, so no backup should have been produced.
+        drop(conn);
+        assert!(!path
+            .with_file_name("security.sqlite.pre-suspend.bak")
+            .exists());
+    }
+
+    #[test]
+    fn legacy_two_state_devices_table_is_rebuilt() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security.sqlite");
+        seed_legacy_database(&path);
+
+        let store = SecurityStore::open(&path).unwrap();
+        let conn = store.conn.lock();
+
+        assert!(migration_applied(&conn, MIGRATION_DEVICE_STATUS_SUSPENDED).unwrap());
+        let ddl = table_ddl(&conn, "devices").unwrap().unwrap();
+        assert!(
+            ddl.contains("'suspended'"),
+            "devices DDL was not widened: {ddl}"
+        );
+
+        // Both device rows survived, with their status intact.
+        let rows = {
+            let mut statement = conn
+                .prepare("SELECT id, status FROM devices ORDER BY id")
+                .unwrap();
+            let collected = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            collected
+        };
+        assert_eq!(
+            rows,
+            vec![
+                ("device-active".to_string(), "active".to_string()),
+                ("device-revoked".to_string(), "revoked".to_string()),
+            ]
+        );
+
+        // Every child row still points at a live parent.
+        for table in ["device_keys", "capability_grants", "socket_tickets"] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 1, "{table} lost its row across the rebuild");
+        }
+        let violations = {
+            let mut statement = conn.prepare("PRAGMA foreign_key_check").unwrap();
+            let mut rows = statement.query([]).unwrap();
+            let mut count = 0usize;
+            while rows.next().unwrap().is_some() {
+                count += 1;
+            }
+            count
+        };
+        assert_eq!(violations, 0);
+
+        // The widened constraint actually accepts the new value.
+        conn.execute(
+            "INSERT INTO devices (id, tenant_id, display_name, role, status, created_at, updated_at)
+             VALUES ('device-suspended', 'tenant-a', 'Suspended', 'member', 'suspended', 20, 20)",
+            [],
+        )
+        .unwrap();
+
+        // ...and still rejects a value outside it.
+        assert!(conn
+            .execute(
+                "INSERT INTO devices (id, tenant_id, display_name, role, status, created_at, updated_at)
+                 VALUES ('device-bogus', 'tenant-a', 'Bogus', 'member', 'paused', 21, 21)",
+                [],
+            )
+            .is_err());
+
+        drop(conn);
+        drop(store);
+        // The snapshot is removed once the rebuild commits.
+        assert!(!path
+            .with_file_name("security.sqlite.pre-suspend.bak")
+            .exists());
+    }
+
+    #[test]
+    fn schema_migration_is_idempotent_across_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security.sqlite");
+        seed_legacy_database(&path);
+
+        let first = SecurityStore::open(&path).unwrap();
+        drop(first);
+        let second = SecurityStore::open(&path).unwrap();
+        let conn = second.conn.lock();
+
+        let applied_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM security_migrations WHERE key = ?1",
+                [MIGRATION_DEVICE_STATUS_SUSPENDED],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(applied_count, 1);
+        let device_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM devices", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(device_count, 2, "the second open re-ran the rebuild");
+    }
+
+    #[test]
+    fn in_memory_stores_run_the_migration_runner() {
+        let store = SecurityStore::in_memory().unwrap();
+        let conn = store.conn.lock();
+        assert!(migration_applied(&conn, MIGRATION_DEVICE_STATUS_SUSPENDED).unwrap());
+    }
+
     #[test]
     fn dpop_replays_are_not_persisted_in_the_security_schema() {
         assert!(!SCHEMA_SQL.contains("proof_replays"));
@@ -1696,6 +2311,385 @@ mod tests {
                 now,
             )
             .unwrap();
+    }
+
+    /// Count the rows a query returns, for the ledger assertions below.
+    fn scalar_i64(store: &SecurityStore, sql: &str) -> i64 {
+        store
+            .conn
+            .lock()
+            .query_row(sql, [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn suspend_then_resume_round_trips_and_retains_keys() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+
+        assert!(store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap());
+        assert_eq!(
+            store.device_state("tenant-a", "device-a").unwrap(),
+            Some(DeviceLifecycleState::Suspended)
+        );
+
+        // The key is retained — that is what makes resume possible without
+        // re-pairing — while the authorization plane still refuses to hand it out.
+        let revoked_at: Option<i64> = store
+            .conn
+            .lock()
+            .query_row(
+                "SELECT revoked_at FROM device_keys
+                 WHERE tenant_id = 'tenant-a' AND device_id = 'device-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(revoked_at, None, "suspend must not revoke the device key");
+        assert!(store
+            .active_device_key("tenant-a", "device-a")
+            .unwrap()
+            .is_none());
+
+        assert!(store
+            .resume_device("tenant-a", "device-b", "device-a", 120)
+            .unwrap());
+        assert_eq!(
+            store.device_state("tenant-a", "device-a").unwrap(),
+            Some(DeviceLifecycleState::Active)
+        );
+        assert!(store
+            .active_device_key("tenant-a", "device-a")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn suspend_and_resume_are_idempotent() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+
+        assert!(store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap());
+        assert!(
+            !store
+                .suspend_device("tenant-a", "device-b", "device-a", false, 111)
+                .unwrap(),
+            "a second suspend reports no change"
+        );
+        assert!(store
+            .resume_device("tenant-a", "device-b", "device-a", 120)
+            .unwrap());
+        assert!(
+            !store
+                .resume_device("tenant-a", "device-b", "device-a", 121)
+                .unwrap(),
+            "a second resume reports no change"
+        );
+    }
+
+    #[test]
+    fn revocation_is_terminal_for_both_transitions() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+        store
+            .revoke_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+
+        assert!(matches!(
+            store.suspend_device("tenant-a", "device-b", "device-a", false, 111),
+            Err(SecurityStoreError::InvalidDeviceTransition)
+        ));
+        assert!(matches!(
+            store.resume_device("tenant-a", "device-b", "device-a", 112),
+            Err(SecurityStoreError::InvalidDeviceTransition)
+        ));
+    }
+
+    #[test]
+    fn a_suspended_device_can_still_be_revoked() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+        store
+            .revoke_device("tenant-a", "device-b", "device-a", false, 111)
+            .unwrap();
+        assert_eq!(
+            store.device_state("tenant-a", "device-a").unwrap(),
+            Some(DeviceLifecycleState::Revoked)
+        );
+    }
+
+    #[test]
+    fn suspending_the_last_active_owner_is_refused_without_the_trust_root() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+
+        assert!(matches!(
+            store.suspend_device("tenant-a", "local-trust-root", "device-a", false, 110),
+            Err(SecurityStoreError::LastOwner)
+        ));
+        // The deployment trust root may still do it.
+        assert!(store
+            .suspend_device("tenant-a", "local-trust-root", "device-a", true, 111)
+            .unwrap());
+    }
+
+    #[test]
+    fn the_last_active_owner_is_protected_even_when_another_owner_is_suspended() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+
+        // device-b is now the only owner that can actually authorize anything.
+        // A suspended owner is not a substitute, so revoking it is refused...
+        assert!(matches!(
+            store.revoke_device("tenant-a", "local", "device-b", false, 111),
+            Err(SecurityStoreError::LastOwner)
+        ));
+        // ...and so is suspending it.
+        assert!(matches!(
+            store.suspend_device("tenant-a", "local", "device-b", false, 112),
+            Err(SecurityStoreError::LastOwner)
+        ));
+    }
+
+    #[test]
+    fn a_suspended_owner_can_be_revoked_while_an_active_owner_remains() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+
+        // The mirror image of the test above: device-b is active and can
+        // authorize, so retiring the suspended owner strands nothing. Counting
+        // active owners *including the target* would wrongly refuse this.
+        store
+            .revoke_device("tenant-a", "device-b", "device-a", false, 111)
+            .unwrap();
+        assert_eq!(
+            store.device_state("tenant-a", "device-a").unwrap(),
+            Some(DeviceLifecycleState::Revoked)
+        );
+    }
+
+    #[test]
+    fn a_suspended_device_is_invisible_to_every_authorization_query() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+        let ticket = store
+            .issue_socket_ticket("tenant-a", "device-a", "/ws/events", "events", 100, 60)
+            .unwrap();
+
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+
+        assert!(!store
+            .has_capability("tenant-a", "device-a", "host.admin")
+            .unwrap());
+        assert!(store
+            .capability_snapshot("tenant-a", "device-a")
+            .unwrap()
+            .is_none());
+        assert!(store
+            .authorization_snapshot("tenant-a", "device-a")
+            .unwrap()
+            .is_none());
+        assert!(store.active_device_tenant("device-a").unwrap().is_none());
+        assert!(store
+            .active_device_key("tenant-a", "device-a")
+            .unwrap()
+            .is_none());
+        assert!(store
+            .redeem_socket_ticket(&ticket, "/ws/events", "events", 111)
+            .is_err());
+    }
+
+    #[test]
+    fn suspend_consumes_outstanding_socket_tickets() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+        store
+            .issue_socket_ticket("tenant-a", "device-a", "/ws/events", "events", 100, 600)
+            .unwrap();
+        assert_eq!(
+            scalar_i64(
+                &store,
+                "SELECT COUNT(*) FROM socket_tickets
+                 WHERE device_id = 'device-a' AND consumed_at IS NULL"
+            ),
+            1
+        );
+
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+        assert_eq!(
+            scalar_i64(
+                &store,
+                "SELECT COUNT(*) FROM socket_tickets
+                 WHERE device_id = 'device-a' AND consumed_at IS NULL"
+            ),
+            0,
+            "a ticket minted before the suspension must not survive it"
+        );
+    }
+
+    #[test]
+    fn suspend_writes_no_revocations_row() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+        assert_eq!(
+            scalar_i64(&store, "SELECT COUNT(*) FROM revocations"),
+            0,
+            "a suspension is not a revocation and must stay out of the ledger"
+        );
+
+        store
+            .revoke_device("tenant-a", "device-b", "device-a", false, 111)
+            .unwrap();
+        assert_eq!(scalar_i64(&store, "SELECT COUNT(*) FROM revocations"), 1);
+    }
+
+    #[test]
+    fn a_suspended_devices_capabilities_remain_manageable() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+
+        // The management plane sees it, and reports which state it is in.
+        let (state, capabilities) = store
+            .manageable_capability_snapshot("tenant-a", "device-a")
+            .unwrap()
+            .expect("a suspended device is manageable");
+        assert_eq!(state, DeviceLifecycleState::Suspended);
+        assert!(capabilities.iter().any(|entry| entry == "host.admin"));
+
+        // And the grants stay editable while it is paused.
+        store
+            .replace_device_capabilities(
+                "tenant-a",
+                "device-b",
+                "device-a",
+                &["host.admin".to_string(), "terminal.open".to_string()],
+                111,
+            )
+            .unwrap();
+        let (_, capabilities) = store
+            .manageable_capability_snapshot("tenant-a", "device-a")
+            .unwrap()
+            .unwrap();
+        assert!(capabilities.iter().any(|entry| entry == "terminal.open"));
+
+        // A revoked device is not manageable.
+        store
+            .revoke_device("tenant-a", "device-b", "device-a", false, 112)
+            .unwrap();
+        assert!(store
+            .manageable_capability_snapshot("tenant-a", "device-a")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn audit_records_suspend_and_resume_with_the_actor() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+        store
+            .resume_device("tenant-a", "device-b", "device-a", 120)
+            .unwrap();
+
+        let actions = {
+            let conn = store.conn.lock();
+            let mut statement = conn
+                .prepare(
+                    "SELECT action, actor_id, target_id FROM audit_events
+                     WHERE target_id = 'device-a'
+                       AND action IN ('device.suspended', 'device.resumed')
+                     ORDER BY created_at",
+                )
+                .unwrap();
+            let collected = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            collected
+        };
+        assert_eq!(
+            actions,
+            vec![
+                (
+                    "device.suspended".to_string(),
+                    "device-b".to_string(),
+                    "device-a".to_string()
+                ),
+                (
+                    "device.resumed".to_string(),
+                    "device-b".to_string(),
+                    "device-a".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_devices_reports_the_suspended_state() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-a", "device-b", 101);
+        store
+            .suspend_device("tenant-a", "device-b", "device-a", false, 110)
+            .unwrap();
+
+        let devices = store.list_devices("tenant-a").unwrap();
+        let suspended = devices
+            .iter()
+            .find(|device| device.device_id == "device-a")
+            .expect("the suspended device is still listed");
+        assert_eq!(suspended.status, "suspended");
+        // Its grants are still visible to the management plane.
+        assert!(suspended
+            .capabilities
+            .iter()
+            .any(|entry| entry == "host.admin"));
     }
 
     #[test]
