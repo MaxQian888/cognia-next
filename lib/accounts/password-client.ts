@@ -7,6 +7,8 @@ import { assertPasswordMeetsPolicy } from "./password-policy"
 
 export const ACCOUNT_PASSWORD_CREATE_VERIFIER_COMMAND = "account_password_create_verifier"
 export const ACCOUNT_PASSWORD_VERIFY_COMMAND = "account_password_verify"
+export const ACCOUNT_UNBIND_LOCAL_COMMAND = "account_unbind_local"
+export const ACCOUNT_REBIND_VERIFIER_COMMAND = "account_rebind_verifier"
 
 type InvokeFn = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 
@@ -30,9 +32,19 @@ export async function createPasswordVerifier(password: string): Promise<Password
   }
 }
 
+/**
+ * Verify a local account password.
+ *
+ * Passing `accountId` also binds the desktop host to that account, which is how
+ * the companion API learns whose devices it is serving instead of assuming a
+ * single hardcoded tenant. The bind is deliberately tied to this call because a
+ * successful verification is the only moment the host sees proof that the caller
+ * holds both the password and the verifier.
+ */
 export async function verifyPassword(
   password: string,
-  verifier: PasswordVerifierRecord
+  verifier: PasswordVerifierRecord,
+  accountId?: string
 ): Promise<boolean> {
   assertUsablePassword(password)
   if (!isTauri()) {
@@ -42,11 +54,45 @@ export async function verifyPassword(
     const result = await (invoke as InvokeFn)<unknown>(ACCOUNT_PASSWORD_VERIFY_COMMAND, {
       password,
       verifier,
+      accountId,
     })
     if (typeof result !== "boolean") {
       throw new Error("Native password verification returned a malformed result.")
     }
     return result
+  } catch (error) {
+    throw toError(error)
+  }
+}
+
+/**
+ * Drop the host's account binding when an account locks or is switched away
+ * from. The recorded tenant is untouched — locking does not un-own it.
+ */
+export async function unbindLocalAccount(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    await (invoke as InvokeFn)<unknown>(ACCOUNT_UNBIND_LOCAL_COMMAND)
+  } catch (error) {
+    // Never let this fail a lock: the worst case is a stale in-process binding
+    // that the next unlock overwrites anyway.
+    console.warn("account: could not unbind the host account binding", error)
+  }
+}
+
+/**
+ * Re-pin the host binding after a password rotation.
+ *
+ * The binding is pinned to the verifier it was first seen with, so without this
+ * a rotated password would be refused as a mismatch on every later unlock.
+ */
+export async function rebindPasswordVerifier(
+  accountId: string,
+  verifier: PasswordVerifierRecord
+): Promise<void> {
+  if (!isTauri()) return
+  try {
+    await (invoke as InvokeFn)<unknown>(ACCOUNT_REBIND_VERIFIER_COMMAND, { accountId, verifier })
   } catch (error) {
     throw toError(error)
   }

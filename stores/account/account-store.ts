@@ -11,7 +11,12 @@ import {
   legacyDatabaseExists,
   migrateLegacyDatabaseToAccount,
 } from "@/lib/accounts/legacy-migration"
-import { createPasswordVerifier, verifyPassword } from "@/lib/accounts/password-client"
+import {
+  createPasswordVerifier,
+  rebindPasswordVerifier,
+  unbindLocalAccount,
+  verifyPassword,
+} from "@/lib/accounts/password-client"
 import { isDevAutoUnlockEnabled } from "@/lib/accounts/dev-auto-unlock"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import {
@@ -340,7 +345,7 @@ export function createAccountStore(
           if (shouldUseBrowserVault()) {
             await unlockBrowserVault(account.id, password)
           } else {
-            const ok = await verifyPassword(password, account.passwordVerifier)
+            const ok = await verifyPassword(password, account.passwordVerifier, account.id)
             if (!ok) {
               throw new Error("Invalid local account password.")
             }
@@ -363,7 +368,7 @@ export function createAccountStore(
           if (shouldUseBrowserVault()) {
             await unlockBrowserVault(account.id, password)
           } else {
-            const ok = await verifyPassword(password, account.passwordVerifier)
+            const ok = await verifyPassword(password, account.passwordVerifier, account.id)
             if (!ok) {
               throw new Error("Invalid local account password.")
             }
@@ -401,7 +406,7 @@ export function createAccountStore(
           const useBrowserVault = shouldUseBrowserVault()
           const ok = useBrowserVault
             ? await verifyBrowserVaultPassword(accountId, currentPassword)
-            : await verifyPassword(currentPassword, account.passwordVerifier)
+            : await verifyPassword(currentPassword, account.passwordVerifier, account.id)
           if (!ok) {
             throw new Error("Invalid local account password.")
           }
@@ -427,6 +432,13 @@ export function createAccountStore(
               }
               throw vaultError
             }
+          }
+          // The host pins its account binding to the verifier it first saw, so a
+          // rotation has to re-pin or every later unlock is refused as a
+          // mismatch. Runs after the registry write so a failed rotation cannot
+          // leave the host trusting a verifier the account no longer has.
+          if (!useBrowserVault) {
+            await rebindPasswordVerifier(accountId, passwordVerifier)
           }
           set((state) => {
             const accounts = upsertAccount(state.accounts, updated)
@@ -527,6 +539,7 @@ export function createAccountStore(
           if (unlockedAccountId) {
             await dependencies.clearSubscriptionRuntime(unlockedAccountId)
           }
+          await unbindLocalAccount()
           lockBrowserVault()
           clearActiveRuntimeTargetContext()
           clearAccountDatabaseSelection()

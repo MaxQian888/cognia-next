@@ -54,17 +54,87 @@ pub fn account_password_create_verifier(
     create_password_verifier_with_salt(&password, &salt)
 }
 
+/// Verify a local account password and, on success, bind this host to the
+/// account.
+///
+/// The bind lives here rather than on a separate command because this is the
+/// only place the host ever sees proof that the caller holds both the password
+/// and the verifier. See `companion_api::host_identity` for exactly what that
+/// does and does not prove.
+///
+/// `account_id` is optional so the browser/web callers, which have no companion
+/// host to bind, keep working unchanged.
 #[tauri::command]
 pub fn account_password_verify(
     password: String,
     verifier: AccountPasswordVerifier,
+    account_id: Option<String>,
 ) -> Result<bool, String> {
     validate_password(&password)?;
     validate_verifier_metadata(&verifier)?;
     let salt = decode_base64_field("salt", &verifier.salt, SALT_B64_LEN, SALT_LEN)?;
     let expected = decode_base64_field("hash", &verifier.hash, HASH_B64_LEN, OUTPUT_LEN)?;
     let actual = derive_hash(&password, &salt, &verifier.params)?;
-    Ok(constant_time_eq(&actual, &expected))
+    let matched = constant_time_eq(&actual, &expected);
+
+    if matched {
+        if let Some(account_id) = account_id.as_deref() {
+            bind_host_to_account(account_id, &verifier)?;
+        }
+    }
+    Ok(matched)
+}
+
+/// Drop this host's in-process account binding. Called when an account locks or
+/// the app switches away from it; the recorded tenant is left untouched.
+#[tauri::command]
+pub fn account_unbind_local() {
+    crate::companion_api::host_identity::unbind_local_account();
+}
+
+/// Re-pin the host binding after a password rotation.
+///
+/// Rotating a password changes the verifier, so without this the new one would
+/// be refused as a mismatch forever. Callers must already have verified the
+/// *current* password.
+#[tauri::command]
+pub fn account_rebind_verifier(
+    account_id: String,
+    verifier: AccountPasswordVerifier,
+) -> Result<(), String> {
+    validate_verifier_metadata(&verifier)?;
+    crate::companion_api::host_identity::rebind_verifier(
+        &account_id,
+        &verifier_digest_of(&verifier),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn bind_host_to_account(
+    account_id: &str,
+    verifier: &AccountPasswordVerifier,
+) -> Result<(), String> {
+    use crate::companion_api::host_identity::{bind_local_account, HostIdentityError};
+
+    match bind_local_account(account_id, &verifier_digest_of(verifier)) {
+        Ok(_) => Ok(()),
+        // A host with no security database (no companion server has ever run
+        // here) is a normal desktop state, not an unlock failure.
+        Err(HostIdentityError::StoreUnavailable) => Ok(()),
+        Err(error @ HostIdentityError::BindingMismatch) => Err(error.to_string()),
+        Err(error) => {
+            log::warn!("host account binding failed: {error}");
+            Ok(())
+        }
+    }
+}
+
+fn verifier_digest_of(verifier: &AccountPasswordVerifier) -> String {
+    crate::companion_api::host_identity::verifier_digest(
+        &verifier.algorithm,
+        &verifier.salt,
+        &verifier.hash,
+    )
 }
 
 fn create_password_verifier_with_salt(
@@ -201,8 +271,8 @@ mod tests {
         assert_eq!(verifier.params.time_cost, 2);
         assert_eq!(verifier.params.parallelism, 1);
         assert_eq!(verifier.params.output_length, 32);
-        assert!(account_password_verify("correct horse".into(), verifier.clone()).unwrap());
-        assert!(!account_password_verify("wrong horse".into(), verifier).unwrap());
+        assert!(account_password_verify("correct horse".into(), verifier.clone(), None).unwrap());
+        assert!(!account_password_verify("wrong horse".into(), verifier, None).unwrap());
     }
 
     #[test]
@@ -212,7 +282,7 @@ mod tests {
             .contains("password"));
 
         let verifier = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
-        assert!(account_password_verify("".into(), verifier)
+        assert!(account_password_verify("".into(), verifier, None)
             .unwrap_err()
             .contains("password"));
     }
@@ -225,7 +295,7 @@ mod tests {
             .contains("too long"));
 
         let verifier = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
-        assert!(account_password_verify(password, verifier)
+        assert!(account_password_verify(password, verifier, None)
             .unwrap_err()
             .contains("too long"));
     }
@@ -239,7 +309,7 @@ mod tests {
         // The verify path never enforces the minimum: a short password is a
         // normal (wrong) input, not an error, so pre-policy accounts unlock.
         let verifier = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
-        assert!(!account_password_verify("short".into(), verifier).unwrap());
+        assert!(!account_password_verify("short".into(), verifier, None).unwrap());
     }
 
     #[test]
@@ -249,9 +319,11 @@ mod tests {
 
         verifier.hash = "not base64".into();
 
-        assert!(account_password_verify("correct horse".into(), verifier)
-            .unwrap_err()
-            .contains("hash"));
+        assert!(
+            account_password_verify("correct horse".into(), verifier, None)
+                .unwrap_err()
+                .contains("hash")
+        );
     }
 
     #[test]
@@ -260,9 +332,11 @@ mod tests {
             create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
         verifier.params.memory_cost = MEMORY_COST_KIB / 2;
 
-        assert!(account_password_verify("correct horse".into(), verifier)
-            .unwrap_err()
-            .contains("params"));
+        assert!(
+            account_password_verify("correct horse".into(), verifier, None)
+                .unwrap_err()
+                .contains("params")
+        );
     }
 
     #[test]
@@ -271,9 +345,11 @@ mod tests {
             create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
         verifier.params.output_length = OUTPUT_LEN * 1024;
 
-        assert!(account_password_verify("correct horse".into(), verifier)
-            .unwrap_err()
-            .contains("params"));
+        assert!(
+            account_password_verify("correct horse".into(), verifier, None)
+                .unwrap_err()
+                .contains("params")
+        );
     }
 
     #[test]
@@ -282,17 +358,111 @@ mod tests {
             create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
         short_salt.salt = STANDARD_NO_PAD.encode([7_u8; 8]);
 
-        assert!(account_password_verify("correct horse".into(), short_salt)
-            .unwrap_err()
-            .contains("salt"));
+        assert!(
+            account_password_verify("correct horse".into(), short_salt, None)
+                .unwrap_err()
+                .contains("salt")
+        );
 
         let mut short_hash =
             create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
         short_hash.hash = STANDARD_NO_PAD.encode([9_u8; 8]);
 
-        assert!(account_password_verify("correct horse".into(), short_hash)
-            .unwrap_err()
-            .contains("hash"));
+        assert!(
+            account_password_verify("correct horse".into(), short_hash, None)
+                .unwrap_err()
+                .contains("hash")
+        );
+    }
+
+    #[test]
+    fn a_successful_verify_binds_the_host_to_the_account() {
+        use crate::companion_api::host_identity::{current, unbind_local_account};
+        use crate::companion_api::security_store::{
+            install_security_store, test_guard, SecurityStore,
+        };
+
+        let _guard = test_guard();
+        install_security_store(Some(SecurityStore::in_memory().unwrap()));
+        unbind_local_account();
+
+        let verifier = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
+
+        // A wrong password must not bind anything.
+        assert!(!account_password_verify(
+            "wrong horse".into(),
+            verifier.clone(),
+            Some("acct_one".into())
+        )
+        .unwrap());
+        assert_eq!(
+            current().unwrap().local_account_namespace,
+            crate::companion_api::security_store::LOCAL_NAMESPACE_UNBOUND
+        );
+
+        // The right one does.
+        assert!(account_password_verify(
+            "correct horse".into(),
+            verifier.clone(),
+            Some("acct_one".into())
+        )
+        .unwrap());
+        assert_eq!(current().unwrap().local_account_namespace, "acct_one");
+
+        // A different verifier for the same account is refused outright, rather
+        // than reported as a failed password — the caller needs to be able to
+        // tell "wrong password" from "this is not that account".
+        let forged = create_password_verifier_with_salt("correct horse", &[9_u8; 16]).unwrap();
+        assert!(
+            account_password_verify("correct horse".into(), forged, Some("acct_one".into()))
+                .is_err()
+        );
+
+        unbind_local_account();
+    }
+
+    #[test]
+    fn a_password_rotation_re_pins_the_binding() {
+        use crate::companion_api::host_identity::unbind_local_account;
+        use crate::companion_api::security_store::{
+            install_security_store, test_guard, SecurityStore,
+        };
+
+        let _guard = test_guard();
+        install_security_store(Some(SecurityStore::in_memory().unwrap()));
+        unbind_local_account();
+
+        let first = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
+        account_password_verify("correct horse".into(), first, Some("acct_one".into())).unwrap();
+
+        let rotated = create_password_verifier_with_salt("battery staple", &[8_u8; 16]).unwrap();
+        // Without the rebind the new verifier would be refused forever.
+        account_rebind_verifier("acct_one".into(), rotated.clone()).unwrap();
+        assert!(
+            account_password_verify("battery staple".into(), rotated, Some("acct_one".into()))
+                .unwrap()
+        );
+
+        unbind_local_account();
+    }
+
+    #[test]
+    fn verifying_without_an_account_id_never_binds() {
+        use crate::companion_api::host_identity::{current, unbind_local_account};
+        use crate::companion_api::security_store::{
+            install_security_store, test_guard, SecurityStore, LOCAL_NAMESPACE_UNBOUND,
+        };
+
+        let _guard = test_guard();
+        install_security_store(Some(SecurityStore::in_memory().unwrap()));
+        unbind_local_account();
+
+        let verifier = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
+        assert!(account_password_verify("correct horse".into(), verifier, None).unwrap());
+        assert_eq!(
+            current().unwrap().local_account_namespace,
+            LOCAL_NAMESPACE_UNBOUND
+        );
     }
 
     #[test]

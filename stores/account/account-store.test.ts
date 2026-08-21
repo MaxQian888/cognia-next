@@ -43,11 +43,18 @@ jest.mock("@/lib/accounts/account-db", () => ({
 }))
 
 const mockCreatePasswordVerifier = jest.fn<Promise<PasswordVerifierRecord>, [string]>()
-const mockVerifyPassword = jest.fn<Promise<boolean>, [string, PasswordVerifierRecord]>()
+const mockVerifyPassword = jest.fn<
+  Promise<boolean>,
+  [string, PasswordVerifierRecord, string | undefined]
+>()
+const mockUnbindLocalAccount = jest.fn<Promise<void>, []>()
+const mockRebindPasswordVerifier = jest.fn<Promise<void>, [string, PasswordVerifierRecord]>()
 
 jest.mock("@/lib/accounts/password-client", () => ({
   createPasswordVerifier: mockCreatePasswordVerifier,
   verifyPassword: mockVerifyPassword,
+  unbindLocalAccount: mockUnbindLocalAccount,
+  rebindPasswordVerifier: mockRebindPasswordVerifier,
 }))
 
 // Default OFF, so every suite below exercises the production gate. The dev
@@ -182,6 +189,8 @@ beforeEach(() => {
   mockGetState.mockResolvedValue({ activeAccountId: null })
   mockCreatePasswordVerifier.mockImplementation(async (password) => verifier(password))
   mockVerifyPassword.mockResolvedValue(true)
+  mockUnbindLocalAccount.mockResolvedValue()
+  mockRebindPasswordVerifier.mockResolvedValue()
   mockLegacyDatabaseExists.mockResolvedValue(false)
   mockMigrateLegacyDatabaseToAccount.mockResolvedValue({})
   mockCreateRegistryAccount.mockImplementation(async (input) => {
@@ -481,7 +490,7 @@ describe("account store create and unlock", () => {
 
     await store.getState().unlockAccount("acct_alpha", "secret")
 
-    expect(mockVerifyPassword).toHaveBeenCalledWith("secret", alpha.passwordVerifier)
+    expect(mockVerifyPassword).toHaveBeenCalledWith("secret", alpha.passwordVerifier, "acct_alpha")
     expect(mockSetActiveAccountId).toHaveBeenCalledWith("acct_alpha")
     expect(mockActivateAccountDatabase).toHaveBeenCalledWith("acct_alpha")
     expect(mockPrepareDatabase).toHaveBeenCalledTimes(1)
@@ -604,7 +613,11 @@ describe("account store switching, locking, and lifecycle", () => {
 
     await store.getState().switchAccount("acct_beta", "beta-password")
 
-    expect(mockVerifyPassword).toHaveBeenLastCalledWith("beta-password", beta.passwordVerifier)
+    expect(mockVerifyPassword).toHaveBeenLastCalledWith(
+      "beta-password",
+      beta.passwordVerifier,
+      "acct_beta"
+    )
     expect(mockClearSubscriptionRuntime).toHaveBeenCalledWith("acct_alpha")
     expect(mockClearSubscriptionRuntime.mock.invocationCallOrder[0]).toBeLessThan(
       mockSetActiveAccountId.mock.invocationCallOrder.at(-1)!
@@ -744,12 +757,45 @@ describe("account store switching, locking, and lifecycle", () => {
       .getState()
       .changePassword("acct_alpha", "old-password", "new-secret")
 
-    expect(mockVerifyPassword).toHaveBeenLastCalledWith("old-password", alpha.passwordVerifier)
+    expect(mockVerifyPassword).toHaveBeenLastCalledWith(
+      "old-password",
+      alpha.passwordVerifier,
+      "acct_alpha"
+    )
     expect(mockCreatePasswordVerifier).toHaveBeenLastCalledWith("new-secret")
     expect(mockUpdatePasswordVerifier).toHaveBeenCalledWith("acct_alpha", verifier("new-secret"))
     expect(updated.passwordVerifier).toEqual(verifier("new-secret"))
     expect(store.getState().accounts[0].passwordVerifier).toEqual(verifier("new-secret"))
     expect(store.getState().error).toBeNull()
+  })
+
+  it("re-pins the host binding when the password rotates", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "old-password")
+
+    await store.getState().changePassword("acct_alpha", "old-password", "new-secret")
+
+    // Without this the host stays pinned to the OLD verifier and refuses every
+    // later unlock as a binding mismatch.
+    expect(mockRebindPasswordVerifier).toHaveBeenCalledWith("acct_alpha", verifier("new-secret"))
+  })
+
+  it("drops the host account binding when locking", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+
+    await store.getState().lock()
+
+    expect(mockUnbindLocalAccount).toHaveBeenCalled()
+    expect(store.getState().unlockedAccountId).toBeNull()
   })
 
   it("rejects a password change when the current password is wrong", async () => {

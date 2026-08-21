@@ -3,7 +3,11 @@ import { invoke } from "@tauri-apps/api/core"
 import {
   ACCOUNT_PASSWORD_CREATE_VERIFIER_COMMAND,
   ACCOUNT_PASSWORD_VERIFY_COMMAND,
+  ACCOUNT_REBIND_VERIFIER_COMMAND,
+  ACCOUNT_UNBIND_LOCAL_COMMAND,
   createPasswordVerifier,
+  rebindPasswordVerifier,
+  unbindLocalAccount,
   verifyPassword,
 } from "./password-client"
 import type { PasswordVerifierRecord } from "./account-types"
@@ -55,7 +59,56 @@ describe("password-client", () => {
     expect(invokeMock).toHaveBeenCalledWith(ACCOUNT_PASSWORD_VERIFY_COMMAND, {
       password: "correct horse",
       verifier,
+      accountId: undefined,
     })
+  })
+
+  it("passes the account id so a successful verify binds the host", async () => {
+    invokeMock.mockResolvedValueOnce(true)
+
+    await expect(verifyPassword("correct horse", verifier, "acct_alpha")).resolves.toBe(true)
+
+    expect(invokeMock).toHaveBeenCalledWith(ACCOUNT_PASSWORD_VERIFY_COMMAND, {
+      password: "correct horse",
+      verifier,
+      accountId: "acct_alpha",
+    })
+  })
+
+  it("unbinds the host account binding without failing a lock", async () => {
+    invokeMock.mockResolvedValueOnce(undefined)
+    await expect(unbindLocalAccount()).resolves.toBeUndefined()
+    expect(invokeMock).toHaveBeenCalledWith(ACCOUNT_UNBIND_LOCAL_COMMAND)
+
+    // A failing unbind must never block locking — the stale in-process binding
+    // is overwritten by the next unlock anyway.
+    invokeMock.mockRejectedValueOnce(new Error("native error"))
+    await expect(unbindLocalAccount()).resolves.toBeUndefined()
+  })
+
+  it("re-pins the host binding after a password rotation", async () => {
+    invokeMock.mockResolvedValueOnce(undefined)
+
+    await expect(rebindPasswordVerifier("acct_alpha", verifier)).resolves.toBeUndefined()
+
+    expect(invokeMock).toHaveBeenCalledWith(ACCOUNT_REBIND_VERIFIER_COMMAND, {
+      accountId: "acct_alpha",
+      verifier,
+    })
+
+    // Unlike the unbind, this one surfaces: silently skipping it would leave
+    // the host pinned to a verifier the account no longer has.
+    invokeMock.mockRejectedValueOnce(new Error("native error"))
+    await expect(rebindPasswordVerifier("acct_alpha", verifier)).rejects.toThrow("native error")
+  })
+
+  it("does not reach the host outside Tauri", async () => {
+    tauriRuntime = false
+
+    await expect(unbindLocalAccount()).resolves.toBeUndefined()
+    await expect(rebindPasswordVerifier("acct_alpha", verifier)).resolves.toBeUndefined()
+
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 
   it("rejects empty passwords before invoking native code", async () => {

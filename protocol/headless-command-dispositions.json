@@ -184,6 +184,8 @@
         "a2ui_bridge_runtime_paths",
         "account_password_create_verifier",
         "account_password_verify",
+        "account_rebind_verifier",
+        "account_unbind_local",
         "acp_terminal_create",
         "acp_terminal_get_info",
         "acp_terminal_get_session_terminals",

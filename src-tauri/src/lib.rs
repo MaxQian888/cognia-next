@@ -626,6 +626,8 @@ pub fn run() {
             jobs::background_monitor_register_scheduled,
             account_auth::account_password_create_verifier,
             account_auth::account_password_verify,
+            account_auth::account_rebind_verifier,
+            account_auth::account_unbind_local,
             claude::commands::claude_send,
             claude::commands::agent_send,
             claude::commands::agent_interrupt,
