@@ -17,6 +17,7 @@ import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow
 import type { CapabilityId } from "@/lib/platform/capabilities"
 import { dispatchRemoteStep } from "@/lib/workflow/runtime/remote-step-broker"
 import { listPairedDevices } from "@/lib/db/paired-devices"
+import { isPlaceable } from "@/lib/placement/liveness"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 
 /** Default wait for the device (human may need to point a camera): 120 s. */
@@ -25,6 +26,7 @@ const DEFAULT_STEP_TIMEOUT_MS = 120_000
 export interface MobileProxyDeps {
   listDevices?: () => Promise<PairedDeviceRow[]>
   dispatch?: typeof dispatchRemoteStep
+  now?: () => number
 }
 
 function eligible(row: PairedDeviceRow, capability: CapabilityId): boolean {
@@ -33,15 +35,33 @@ function eligible(row: PairedDeviceRow, capability: CapabilityId): boolean {
 }
 
 /**
- * Resolve the target device for a capability. Pinned id wins (and is
- * validated); otherwise the most recently seen eligible device.
+ * Eligible AND actually reachable.
+ *
+ * Grants and capabilities say a device is *allowed* to run the step; neither
+ * says it is switched on. Selecting purely on those is what let a phone last
+ * seen days ago win the sort, absorb the dispatch, and block the run for two
+ * minutes before failing — with no attempt at the next candidate.
  */
-export async function selectTargetDevice(
+function placeable(row: PairedDeviceRow, capability: CapabilityId, now: number): boolean {
+  if (!eligible(row, capability)) return false
+  return isPlaceable({ online: true, lastSeenAt: row.lastSeenAt ?? 0, source: "request" }, now)
+}
+
+/**
+ * Resolve the target devices for a capability, freshest first.
+ *
+ * Returns an ordered list rather than one winner so the caller can fail over:
+ * a device can go offline between selection and dispatch, and with a single
+ * pick that means the whole step fails while an idle, capable phone sits
+ * unused.
+ */
+export async function selectTargetDevices(
   capability: CapabilityId,
   pinnedDeviceId: string | undefined,
   deps: MobileProxyDeps = {}
-): Promise<PairedDeviceRow> {
+): Promise<PairedDeviceRow[]> {
   const rows = await (deps.listDevices ?? listPairedDevices)()
+  const now = (deps.now ?? Date.now)()
   if (pinnedDeviceId) {
     const pinned = rows.find((r) => r.deviceId === pinnedDeviceId)
     if (!pinned) throw new Error(`paired device ${pinnedDeviceId} not found`)
@@ -50,16 +70,33 @@ export async function selectTargetDevice(
         `paired device ${pinnedDeviceId} is not eligible (revoked/paused or missing '${capability}')`
       )
     }
-    return pinned
+    if (!placeable(pinned, capability, now)) {
+      throw new Error(
+        `paired device ${pinnedDeviceId} has not been seen recently — open the app on it and retry`
+      )
+    }
+    return [pinned]
   }
-  const candidates = rows.filter((r) => eligible(r, capability))
+  const candidates = rows.filter((r) => placeable(r, capability, now))
   if (candidates.length === 0) {
+    const eligibleButStale = rows.some((r) => eligible(r, capability))
     throw new Error(
-      `no paired device reports the '${capability}' capability — pair a phone (and let it connect once) first`
+      eligibleButStale
+        ? `every paired device with the '${capability}' capability is offline — open the app on one and retry`
+        : `no paired device reports the '${capability}' capability — pair a phone (and let it connect once) first`
     )
   }
   candidates.sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-  return candidates[0]
+  return candidates
+}
+
+/** Single-target convenience for callers that cannot fail over. */
+export async function selectTargetDevice(
+  capability: CapabilityId,
+  pinnedDeviceId: string | undefined,
+  deps: MobileProxyDeps = {}
+): Promise<PairedDeviceRow> {
+  return (await selectTargetDevices(capability, pinnedDeviceId, deps))[0]!
 }
 
 /** Generic proxy: strip routing params, dispatch, wrap the device output. */
@@ -79,21 +116,52 @@ export async function runMobileStep(
   delete params.deviceId
   delete params.timeoutMs
 
-  const device = await selectTargetDevice(capability, pinned, deps)
-  ctx.log("info", `Dispatching ${kind} to device ${device.deviceId} (${device.label})`)
+  const devices = await selectTargetDevices(capability, pinned, deps)
+  const dispatch = deps.dispatch ?? dispatchRemoteStep
 
-  const output = await (deps.dispatch ?? dispatchRemoteStep)({
-    targetDeviceId: device.deviceId,
-    kind,
-    params,
-    runId: ctx.runId,
-    stepId: ctx.stepId,
-    workflowId: ctx.workflowId,
-    timeoutMs,
-    signal: ctx.signal,
-  })
+  let lastError: unknown
+  for (const device of devices) {
+    ctx.log("info", `Dispatching ${kind} to device ${device.deviceId} (${device.label})`)
+    try {
+      const output = await dispatch({
+        targetDeviceId: device.deviceId,
+        kind,
+        params,
+        runId: ctx.runId,
+        stepId: ctx.stepId,
+        workflowId: ctx.workflowId,
+        timeoutMs,
+        signal: ctx.signal,
+      })
+      return { output: { deviceId: device.deviceId, ...(output as Record<string, unknown>) } }
+    } catch (error) {
+      // A cancelled run must not silently walk the rest of the fleet, and a
+      // device-side denial is an answer, not an outage — neither is retryable
+      // somewhere else. Everything else (the device went offline between
+      // selection and dispatch, the broker timed out) is worth the next
+      // candidate rather than failing a step an idle phone could have run.
+      if (ctx.signal?.aborted || isTerminalDeviceError(error)) throw error
+      lastError = error
+      ctx.log(
+        "warn",
+        `Device ${device.deviceId} could not run ${kind}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`no paired device could run ${kind}`)
+}
 
-  return { output: { deviceId: device.deviceId, ...(output as Record<string, unknown>) } }
+/** Denials and cancellations are the device's answer; do not ask another one. */
+function isTerminalDeviceError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  return (
+    message.includes("denied") ||
+    message.includes("cancelled") ||
+    message.includes("canceled") ||
+    message.includes("rejected")
+  )
 }
 
 export const runMobileCamera = (ctx: StepExecutionContext, deps?: MobileProxyDeps) =>

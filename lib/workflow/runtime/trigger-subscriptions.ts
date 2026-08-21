@@ -15,7 +15,7 @@
  * they don't need this lookup table.
  */
 
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import type { WorkflowNodeKind, WorkflowRow } from "@/types/workflow/visual"
 import { loggers } from "@cognia/logging"
@@ -75,7 +75,15 @@ export function initTriggerSubscriptions(): void {
   if (typeof window === "undefined") return
   disposeTriggerSubscriptions()
   try {
-    const observable = liveQuery(() => getDb().workflows.toArray())
+    // `Dexie.liveQuery`, not a named `liveQuery` import. Dexie's CJS build (what
+    // Jest resolves) defines `liveQuery` as a NON-ENUMERABLE property of
+    // `module.exports` and sets no `__esModule` marker. Importing the `Dexie`
+    // default alongside it, as this module now does, routes the module through
+    // SWC's `_interop_require_wildcard`, which copies enumerable keys only, so a
+    // named `liveQuery` binding would silently be `undefined`. The static is the
+    // same function (`Dexie.liveQuery === liveQuery` under real ESM) and is
+    // correct through either path.
+    const observable = Dexie.liveQuery(() => getDb().workflows.toArray())
     state.subscription = observable.subscribe({
       next: (rows) => {
         rebuildIndex(rows)

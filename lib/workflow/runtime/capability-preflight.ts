@@ -82,13 +82,21 @@ export function preflightCapabilities(
  * an unreadable registry yields the empty set (preflight then falls back to
  * strict local checking).
  */
-export async function remoteCapabilityUnion(): Promise<CapabilityId[]> {
+export async function remoteCapabilityUnion(now: number = Date.now()): Promise<CapabilityId[]> {
   const union = new Set<CapabilityId>()
   try {
     const { listPairedDevices } = await import("@/lib/db/paired-devices")
+    const { isPlaceable } = await import("@/lib/placement/liveness")
     const rows = await listPairedDevices()
     for (const row of rows) {
       if (row.revokedAt !== undefined || row.pausedAt !== undefined) continue
+      // Preflight decides whether a run *can* start. Counting a device that
+      // has been dark for days let a workflow pass the gate and then hang on
+      // dispatch until it timed out — the check has to use the same liveness
+      // rule the dispatcher will use, or it is answering a different question.
+      if (!isPlaceable({ online: true, lastSeenAt: row.lastSeenAt ?? 0, source: "request" }, now)) {
+        continue
+      }
       for (const cap of row.capabilities ?? []) union.add(cap as CapabilityId)
     }
   } catch {

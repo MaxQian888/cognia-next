@@ -22,7 +22,7 @@
  * means desktop-event workflows don't fire (logged once).
  */
 
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 
 import { getDb } from "@/lib/db/schema"
 import { elementRef, type EventFilter, type EventKind } from "@/lib/automation/types"
@@ -287,7 +287,15 @@ export function initDesktopEventTrigger(deps: DesktopEventTriggerDeps = {}): voi
       .workflows.toArray()
       .then((rows) => queueReconcile(rows))
       .catch(() => undefined)
-    const observable = liveQuery(() => getDb().workflows.toArray())
+    // `Dexie.liveQuery`, not a named `liveQuery` import. Dexie's CJS build (what
+    // Jest resolves) defines `liveQuery` as a NON-ENUMERABLE property of
+    // `module.exports` and sets no `__esModule` marker. Importing the `Dexie`
+    // default alongside it, as this module now does, routes the module through
+    // SWC's `_interop_require_wildcard`, which copies enumerable keys only, so a
+    // named `liveQuery` binding would silently be `undefined`. The static is the
+    // same function (`Dexie.liveQuery === liveQuery` under real ESM) and is
+    // correct through either path.
+    const observable = Dexie.liveQuery(() => getDb().workflows.toArray())
     s.workflowsSub = observable.subscribe({
       next: (rows) => {
         queueReconcile(rows)

@@ -10,7 +10,7 @@
  */
 
 import { useEffect } from "react"
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 import type { EditorStore, NodeRunStatus } from "@/lib/workflow/editor/store"
 import { getDb } from "@/lib/db/index"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
@@ -76,7 +76,15 @@ export function startRunStatusBridge(opts: BridgeOptions): () => void {
     }
   }
 
-  const runsObservable = liveQuery(async () => {
+  // `Dexie.liveQuery`, not a named `liveQuery` import. Dexie's CJS build (what
+  // Jest resolves) defines `liveQuery` as a NON-ENUMERABLE property of
+  // `module.exports` and sets no `__esModule` marker. Importing the `Dexie`
+  // default alongside it, as this module now does, routes the module through
+  // SWC's `_interop_require_wildcard`, which copies enumerable keys only, so a
+  // named `liveQuery` binding would silently be `undefined`. The static is the
+  // same function (`Dexie.liveQuery === liveQuery` under real ESM) and is
+  // correct through either path.
+  const runsObservable = Dexie.liveQuery(async () => {
     // The schema indexes `[workflowId+startedAt]` (see lib/db/schema.ts v22).
     // Using a different field here would silently throw inside the live query
     // and the bridge would never emit — the canvas rings would stay grey
@@ -107,7 +115,7 @@ export function startRunStatusBridge(opts: BridgeOptions): () => void {
       lastRunId = latestRun.id
       store.getState().clearRunStatus()
       unsubscribeEvents()
-      const eventsObservable = liveQuery(async () => {
+      const eventsObservable = Dexie.liveQuery(async () => {
         return getDb()
           .workflowRunEvents.where("[runId+ts]")
           .between([latestRun.id, 0], [latestRun.id, Number.POSITIVE_INFINITY])

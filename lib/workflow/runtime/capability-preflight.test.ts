@@ -212,7 +212,9 @@ describe("remoteCapabilityUnion", () => {
       nowMs: 1,
     })
     await recordDeviceCapabilities("phone-1", ["camera"])
-    expect(await remoteCapabilityUnion()).toContain("camera")
+    // The fixture's `lastSeenAt` is 1, so the union has to be asked as of a
+    // moment when that device is still inside the liveness window.
+    expect(await remoteCapabilityUnion(1)).toContain("camera")
   })
 
   it("includes the host this client is driving, which is not a paired device", async () => {
@@ -265,6 +267,25 @@ describe("remoteCapabilityUnion", () => {
       nowMs: 1,
     })
     await recordDeviceCapabilities("phone-2", ["barcode-scan"])
-    expect(await remoteCapabilityUnion()).toEqual(["barcode-scan"])
+    expect(await remoteCapabilityUnion(1)).toEqual(["barcode-scan"])
+  })
+
+  it("excludes a paired device that has been dark past the liveness window", async () => {
+    // Preflight decides whether a run *can* start. Counting a phone last seen
+    // days ago made the gate pass and the dispatch then hang until it timed
+    // out — the check must answer the same question the dispatcher will.
+    const { addPairedDevice, recordDeviceCapabilities } = await import("@/lib/db/paired-devices")
+    await addPairedDevice({
+      deviceId: "phone-stale",
+      label: "Old phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    await recordDeviceCapabilities("phone-stale", ["barcode-scan"])
+
+    expect(await remoteCapabilityUnion(1)).toContain("barcode-scan")
+    expect(await remoteCapabilityUnion(3 * 86_400_000)).not.toContain("barcode-scan")
   })
 })

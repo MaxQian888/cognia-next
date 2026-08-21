@@ -1,7 +1,7 @@
 /**
  * `action.agent.turn` — run one full agent turn as a workflow step.
  *
- * Desktop (Tauri): rides the tool-enabled sidecar pipeline (`executeAgent`
+ * Desktop (Tauri): rides the tool-enabled sidecar pipeline (the agent rail
  * with `toolsEnabled`), so the agent can call Bash/Read/Edit/plugin/MCP
  * tools subject to the existing per-tool approval gate and the
  * character's `allowedTools`. Web/mobile: degrades to a text-only
@@ -18,7 +18,7 @@ import {
   runStructuredTurn,
   type SchemaViolationMode,
 } from "@/lib/workflow/nodes/ai/structured-turn"
-import type { ExecuteAgentResult } from "@/lib/ai/agent/agent-executor"
+import type { ExecuteAgentConfig, ExecuteAgentResult } from "@/lib/ai/agent/agent-executor"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
 
@@ -78,20 +78,10 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
   }
   const toolsEnabled = params.toolsEnabled !== false
 
-  // ADR-0090 Phase 6: behind the resolver flag the unified service owns rail
-  // selection and the requireTools fail-before-spend (its host truth comes
-  // from the resolver environment, not an ad-hoc isTauri probe here).
-  const { isAgentExecutionFlagEnabled } = await import("@/lib/ai/agent/execution/feature-flags")
-  const resolverAuthoritative = isAgentExecutionFlagEnabled("agentExecutionResolverV2")
-
-  // requireTools is a hard precondition — check BEFORE spending a turn.
-  // (Flag off only; the service enforces the same policy fail-closed.)
-  if (!resolverAuthoritative && toolsEnabled && params.requireTools) {
-    const { isTauri } = await import("@/lib/tauri")
-    if (!isTauri()) {
-      throw nonRetryable(REQUIRE_TOOLS_UNAVAILABLE_MESSAGE)
-    }
-  }
+  // ADR-0090: the unified service owns rail selection AND the requireTools
+  // fail-before-spend. Its host truth comes from the resolver environment, so
+  // the ad-hoc `isTauri()` precheck that used to live here is gone — it was a
+  // second implementation of the same policy and could only drift.
 
   const { startSpan, endSpan } = await import("@cognia/agent-trace/emitter")
   const span = startSpan({
@@ -104,22 +94,18 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
   })
 
   try {
-    const [{ executeAgent }, { getSettings }] = await Promise.all([
-      import("@/lib/ai/agent/agent-executor"),
-      import("@/lib/db/settings"),
-    ])
+    const { getSettings } = await import("@/lib/db/settings")
     // Provider snapshot for the text channel (the sidecar channel resolves
     // its own provider through resolveSendOptions).
     const settings = await getSettings().catch(() => undefined)
 
-    // Single turn runner: the unified service behind the flag (surface +
-    // requireTools become resolver policy; the host-unavailable failure keeps
-    // the node's pinned error copy), the legacy executor otherwise.
+    // Single turn runner through the unified service: `surface` and
+    // `requireTools` become resolver policy, and the host-unavailable failure
+    // is remapped so the node keeps its pinned error copy.
     const runTurn = async (
       turnPrompt: string,
-      cfg: Parameters<typeof executeAgent>[1]
+      cfg: ExecuteAgentConfig
     ): Promise<ExecuteAgentResult & { degradedReason?: string }> => {
-      if (!resolverAuthoritative) return executeAgent(turnPrompt, cfg)
       const [{ executeAgentTurn, AgentHostUnavailableError }, { isTauri }, { isHeadlessHost }] =
         await Promise.all([
           import("@/lib/ai/agent/execution/agent-execution-service"),
@@ -166,12 +152,10 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
       ...(settings
         ? {
             defaultProvider: settings.defaultProvider,
-            providerSettings: settings.providerSettings as NonNullable<
-              Parameters<typeof executeAgent>[1]
-            >["providerSettings"],
-            customProviders: settings.customProviders as NonNullable<
-              Parameters<typeof executeAgent>[1]
-            >["customProviders"],
+            providerSettings:
+              settings.providerSettings as NonNullable<ExecuteAgentConfig>["providerSettings"],
+            customProviders:
+              settings.customProviders as NonNullable<ExecuteAgentConfig>["customProviders"],
             modelMappings: settings.modelMappings,
             routingConfig: settings.routingConfig,
             autoRouting: settings.autoRouting,

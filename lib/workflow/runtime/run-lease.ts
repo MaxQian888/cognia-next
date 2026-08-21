@@ -117,6 +117,17 @@ export async function releaseRunLease(
 const heartbeats = new Map<string, ReturnType<typeof setInterval>>()
 
 /**
+ * Runs this process is currently driving.
+ *
+ * The heartbeat map already IS that set — a lease is only renewed while its
+ * executor is alive — so shutdown can release exactly what it holds instead of
+ * scanning every running row and guessing which ones were ours.
+ */
+export function heldRunIds(): string[] {
+  return [...heartbeats.keys()]
+}
+
+/**
  * Keep the lease fresh while the run executes, and observe cross-executor
  * cancel requests (`cancelRequestedAt` stamped by a surface that couldn't
  * abort locally). Returns a stop function; also registered per runId so

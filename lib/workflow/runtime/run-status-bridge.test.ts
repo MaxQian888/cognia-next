@@ -2,10 +2,16 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
+
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { deriveRunStatusFromEvents, startRunStatusBridge } from "./run-status-bridge"
 import type { NodeRunStatus, EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import type { WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
+
+// Constructing the Dexie instance costs ~1s+ per `__resetDbForTesting()` +
+// `getDb()` cycle (see the note in lib/db/schema.ts), and the default 5s
+// budget is not enough for that hook once the directory runs in parallel.
+jest.setTimeout(30_000)
 
 beforeEach(async () => {
   await getDb().delete()
@@ -173,6 +179,71 @@ describe("startRunStatusBridge", () => {
     await tick()
     expect(state.clearRunStatus).not.toHaveBeenCalled()
     expect(state.setRunStatusBatch).not.toHaveBeenCalled()
+
+    stop()
+  })
+
+  it("streams step statuses from the per-run events liveQuery", async () => {
+    const { store, state } = makeFakeStore()
+    const stop = startRunStatusBridge({ workflowId: "wf_a", store })
+    await tick()
+
+    await getDb().workflowRuns.put(makeRun("run_1", "wf_a", 1))
+    // The events observable is opened lazily inside the runs observable's
+    // `next` handler — it is a SECOND `Dexie.liveQuery` call that no other
+    // test in this file reaches, and its failure is swallowed by the bridge's
+    // `error()` arm. Assert on the emissions it produces so a broken binding
+    // (see the interop note in lib/db/outbound-jobs.ts) cannot pass silently.
+    await getDb().workflowRunEvents.bulkPut([
+      { id: "ev_1", runId: "run_1", ts: 1, type: "step_started", stepId: "n_a" },
+      { id: "ev_2", runId: "run_1", ts: 2, type: "step_completed", stepId: "n_a" },
+      { id: "ev_3", runId: "run_1", ts: 3, type: "step_started", stepId: "n_b" },
+    ] as WorkflowRunEventRow[])
+
+    for (let i = 0; i < 40 && state.setRunStatusBatch.mock.calls.length === 0; i++) {
+      await tick(20)
+    }
+    expect(state.setRunStatusBatch).toHaveBeenCalled()
+    const latest =
+      state.setRunStatusBatch.mock.calls[state.setRunStatusBatch.mock.calls.length - 1][0]
+    expect(latest).toEqual({ n_a: "succeeded", n_b: "running" })
+
+    stop()
+  })
+
+  it("keeps emitting as later events land on the tracked run", async () => {
+    const { store, state } = makeFakeStore()
+    const stop = startRunStatusBridge({ workflowId: "wf_a", store })
+    await tick()
+
+    await getDb().workflowRuns.put(makeRun("run_1", "wf_a", 1))
+    await getDb().workflowRunEvents.put({
+      id: "ev_1",
+      runId: "run_1",
+      ts: 1,
+      type: "step_started",
+      stepId: "n_a",
+    } as WorkflowRunEventRow)
+    for (let i = 0; i < 40 && state.setRunStatusBatch.mock.calls.length === 0; i++) {
+      await tick(20)
+    }
+    state.setRunStatusBatch.mockClear()
+
+    // A live subscription must pick this up; an initial-read-only
+    // implementation would stall on the first emission.
+    await getDb().workflowRunEvents.put({
+      id: "ev_2",
+      runId: "run_1",
+      ts: 2,
+      type: "step_failed",
+      stepId: "n_a",
+    } as WorkflowRunEventRow)
+    for (let i = 0; i < 40 && state.setRunStatusBatch.mock.calls.length === 0; i++) {
+      await tick(20)
+    }
+    const latest =
+      state.setRunStatusBatch.mock.calls[state.setRunStatusBatch.mock.calls.length - 1][0]
+    expect(latest).toEqual({ n_a: "failed" })
 
     stop()
   })

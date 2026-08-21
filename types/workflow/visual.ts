@@ -944,6 +944,16 @@ export interface WorkflowRunRow {
    */
   cancelRequestedAt?: number
   /**
+   * Epoch ms this run's executor released its lease on the way out.
+   *
+   * A desktop quitting mid-run used to leave a live lease behind, so the run
+   * stayed unclaimable for the rest of the lease TTL even though its executor
+   * was demonstrably gone. Stamping the release makes the handoff explicit —
+   * whoever picks the run up can tell "the previous host stood down" from "the
+   * previous host vanished", which are different stories in an audit.
+   */
+  releasedForHandoffAt?: number
+  /**
    * Dead-letter / replay metadata (A3). All additive + non-indexed (no Dexie
    * version bump): the dead-letter panel queries the existing `status` index
    * for `"failed"` rows.

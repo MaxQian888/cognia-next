@@ -57,19 +57,32 @@ export async function waitForWorkflowWaitpoint(
       cleanup()
       reject(error)
     }
-    const observe = (waitpoint: WorkflowWaitpoint) => {
-      if (waitpoint.id === id && isTerminal(waitpoint)) finish(waitpoint)
+    const settleIfTerminal = (waitpoint: WorkflowWaitpoint) => {
+      if (isTerminal(waitpoint)) finish(waitpoint)
     }
     const refresh = async () => {
       try {
         const current = await repository.get(id)
         if (!current) return fail(new Error(`workflow waitpoint not found: ${id}`))
-        observe(current)
+        settleIfTerminal(current)
       } catch (error) {
         fail(error)
       }
     }
+    /**
+     * A pushed snapshot is a HINT, never the answer: `decideWorkflowWaitpoint`
+     * writes the row and only then awaits its receipt before notifying, so a
+     * notification can arrive long after the row it describes was superseded —
+     * or, for a deterministic id like `apr_<runId>_<stepId>`, after that row was
+     * replaced by a later generation this waiter is the one actually waiting on.
+     * Re-reading keeps the promise faithful to the docstring above: the row is
+     * the source of truth, and this listener only says "look again".
+     */
+    const observe = (waitpoint: WorkflowWaitpoint) => {
+      if (waitpoint.id === id && isTerminal(waitpoint)) void refresh()
+    }
     const expire = async () => {
+      if (settled) return
       try {
         const decision = await repository.decide(id, {
           outcome: "timed_out",

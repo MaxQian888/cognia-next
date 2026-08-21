@@ -8,12 +8,12 @@ jest.mock("@cognia/agent-trace/emitter", () => ({
   endSpan: (...args: unknown[]) => mockEndSpan(...(args as [])),
 }))
 
-const mockExecuteAgent = jest.fn()
+// ADR-0090: `runAgentTurn` dispatches through the unified service, which
+// consumes these rails directly. There is no `executeAgent` hop to mock any
+// more — asserting on the rail is asserting on what the turn actually ran.
 const mockRunAgentRail = jest.fn()
 const mockRunCompletionRail = jest.fn()
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
-  executeAgent: (...args: unknown[]) => mockExecuteAgent(...(args as [])),
-  // The unified service (flag-on path) consumes the rails directly.
   runAgentRail: (...args: unknown[]) => mockRunAgentRail(...(args as [])),
   runCompletionRail: (...args: unknown[]) => mockRunCompletionRail(...(args as [])),
 }))
@@ -61,13 +61,15 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockIsTauri.mockReturnValue(false)
   mockIsHeadlessHost.mockReturnValue(false)
-  mockExecuteAgent.mockResolvedValue({
+  const reply = {
     text: "agent reply",
     finishReason: "stop",
     channel: "text",
     toolsAvailable: false,
     usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
-  })
+  }
+  mockRunCompletionRail.mockResolvedValue(reply)
+  mockRunAgentRail.mockResolvedValue(reply)
 })
 
 describe("runAgentTurn", () => {
@@ -81,12 +83,12 @@ describe("runAgentTurn", () => {
     await expect(
       runAgentTurn(makeCtx({ prompt: "email alice@example.com", piiGate: "off" }, extra))
     ).rejects.toMatchObject({ code: "pii_blocked", retryable: false })
-    expect(mockExecuteAgent).not.toHaveBeenCalled()
+    expect(mockRunCompletionRail).not.toHaveBeenCalled()
 
     const result = await runAgentTurn(
       makeCtx({ prompt: "email alice@example.com", piiGate: "redact" }, extra)
     )
-    expect(mockExecuteAgent).toHaveBeenCalledWith(
+    expect(mockRunCompletionRail).toHaveBeenCalledWith(
       expect.not.stringContaining("alice@example.com"),
       expect.any(Object)
     )
@@ -100,7 +102,7 @@ describe("runAgentTurn", () => {
     } catch (err) {
       expect((err as Error & { retryable?: boolean }).retryable).toBe(false)
     }
-    expect(mockExecuteAgent).not.toHaveBeenCalled()
+    expect(mockRunCompletionRail).not.toHaveBeenCalled()
   })
 
   it("runs the agent and returns text + channel + usage", async () => {
@@ -132,7 +134,7 @@ describe("runAgentTurn", () => {
         cwd: "C:/repo",
       })
     )
-    expect(mockExecuteAgent).toHaveBeenCalledWith(
+    expect(mockRunCompletionRail).toHaveBeenCalledWith(
       "go",
       expect.objectContaining({
         characterId: "char1",
@@ -166,7 +168,7 @@ describe("runAgentTurn", () => {
       )
     )
 
-    expect(mockExecuteAgent).toHaveBeenCalledWith(
+    expect(mockRunCompletionRail).toHaveBeenCalledWith(
       "go",
       expect.objectContaining({ permissionCeiling })
     )
@@ -183,12 +185,12 @@ describe("runAgentTurn", () => {
     await expect(runAgentTurn(makeCtx({ prompt: "go", requireTools: true }))).rejects.toThrow(
       /tools required/
     )
-    expect(mockExecuteAgent).not.toHaveBeenCalled()
+    expect(mockRunCompletionRail).not.toHaveBeenCalled()
   })
 
   it("proceeds with requireTools on desktop", async () => {
     mockIsTauri.mockReturnValue(true)
-    mockExecuteAgent.mockResolvedValue({
+    mockRunAgentRail.mockResolvedValue({
       text: "tooled reply",
       channel: "sidecar",
       toolsAvailable: true,
@@ -200,7 +202,7 @@ describe("runAgentTurn", () => {
   })
 
   it("skips usage reporting when the channel reports none", async () => {
-    mockExecuteAgent.mockResolvedValue({
+    mockRunCompletionRail.mockResolvedValue({
       text: "x",
       channel: "sidecar",
       toolsAvailable: true,
@@ -211,7 +213,7 @@ describe("runAgentTurn", () => {
   })
 
   it("ends the span with error info and rethrows on failure", async () => {
-    mockExecuteAgent.mockRejectedValue(new Error("agent exploded"))
+    mockRunCompletionRail.mockRejectedValue(new Error("agent exploded"))
     await expect(runAgentTurn(makeCtx({ prompt: "go" }))).rejects.toThrow("agent exploded")
     expect(mockEndSpan).toHaveBeenCalledWith(
       "span1",
@@ -222,7 +224,7 @@ describe("runAgentTurn", () => {
   it("forwards ctx.emitStream as the delta sink", async () => {
     const emitStream = jest.fn()
     await runAgentTurn(makeCtx({ prompt: "go" }, { emitStream }))
-    expect(mockExecuteAgent).toHaveBeenCalledWith(
+    expect(mockRunCompletionRail).toHaveBeenCalledWith(
       "go",
       expect.objectContaining({ onDelta: emitStream })
     )
@@ -230,7 +232,7 @@ describe("runAgentTurn", () => {
 
   it("projects commentary events through the dedicated workflow progress sink", async () => {
     const emitCommentary = jest.fn()
-    mockExecuteAgent.mockImplementation(async (_prompt, config) => {
+    mockRunCompletionRail.mockImplementation(async (_prompt, config) => {
       config.onEvent?.({
         type: "commentary-delta",
         delta: "Checking the repository",
@@ -253,7 +255,7 @@ describe("runAgentTurn", () => {
     }
 
     it("requests outputFormat and surfaces a validated object", async () => {
-      mockExecuteAgent.mockResolvedValue({
+      mockRunCompletionRail.mockResolvedValue({
         text: '{"verdict":"ok","score":1}',
         channel: "text",
         toolsAvailable: false,
@@ -264,14 +266,14 @@ describe("runAgentTurn", () => {
       const output = result.output as Record<string, unknown>
       expect(output.object).toEqual({ verdict: "ok", score: 1 })
       expect(output.schemaValid).toBe(true)
-      expect(mockExecuteAgent).toHaveBeenCalledWith(
+      expect(mockRunCompletionRail).toHaveBeenCalledWith(
         "judge",
         expect.objectContaining({ outputFormat: { type: "json_schema", schema } })
       )
     })
 
     it("auto-fixes once, accumulating usage across the retry", async () => {
-      mockExecuteAgent
+      mockRunCompletionRail
         .mockResolvedValueOnce({
           text: "{}",
           channel: "text",
@@ -291,11 +293,11 @@ describe("runAgentTurn", () => {
       expect(output.schemaValid).toBe(true)
       expect(output.usage).toEqual({ inputTokens: 10, outputTokens: 10, totalTokens: 20 })
       // Second call carries the corrective re-prompt.
-      expect(mockExecuteAgent.mock.calls[1][0]).toMatch(/score/)
+      expect(mockRunCompletionRail.mock.calls[1][0]).toMatch(/score/)
     })
 
     it("throws into the errorPolicy when the schema is unmet (fail default)", async () => {
-      mockExecuteAgent.mockResolvedValue({
+      mockRunCompletionRail.mockResolvedValue({
         text: "{}",
         channel: "text",
         toolsAvailable: false,
@@ -304,11 +306,11 @@ describe("runAgentTurn", () => {
       await expect(
         runAgentTurn(makeCtx({ prompt: "judge", outputSchema: schema }))
       ).rejects.toThrow(/did not satisfy/)
-      expect(mockExecuteAgent).toHaveBeenCalledTimes(2)
+      expect(mockRunCompletionRail).toHaveBeenCalledTimes(2)
     })
 
     it("returns the unvalidated object in soft mode", async () => {
-      mockExecuteAgent.mockResolvedValue({
+      mockRunCompletionRail.mockResolvedValue({
         text: "{}",
         channel: "text",
         toolsAvailable: false,
@@ -325,16 +327,15 @@ describe("runAgentTurn", () => {
 
     it("ignores an empty schema (no typed-output path)", async () => {
       await runAgentTurn(makeCtx({ prompt: "go", outputSchema: {} }))
-      expect(mockExecuteAgent).toHaveBeenCalledWith(
+      expect(mockRunCompletionRail).toHaveBeenCalledWith(
         "go",
         expect.not.objectContaining({ outputFormat: expect.anything() })
       )
     })
   })
 
-  describe("ADR-0090 resolver flag (unified service path)", () => {
+  describe("ADR-0090 unified service path", () => {
     beforeEach(() => {
-      process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
       mockRunCompletionRail.mockResolvedValue({
         text: "completion rail",
         finishReason: "stop",
@@ -348,10 +349,6 @@ describe("runAgentTurn", () => {
         toolsAvailable: true,
       })
     })
-    afterEach(() => {
-      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
-    })
-
     it("requireTools with no host fails closed with the PINNED legacy copy, before any spend", async () => {
       mockIsTauri.mockReturnValue(false)
       await expect(runAgentTurn(makeCtx({ prompt: "go", requireTools: true }))).rejects.toThrow(
@@ -360,7 +357,6 @@ describe("runAgentTurn", () => {
       )
       expect(mockRunAgentRail).not.toHaveBeenCalled()
       expect(mockRunCompletionRail).not.toHaveBeenCalled()
-      expect(mockExecuteAgent).not.toHaveBeenCalled()
     })
 
     it("legacy tool degradation surfaces degradedReason on the node output", async () => {
@@ -370,7 +366,7 @@ describe("runAgentTurn", () => {
       expect(output.text).toBe("completion rail")
       expect(output.channel).toBe("text")
       expect(output.degradedReason).toBe("legacy-completion-fallback")
-      expect(mockExecuteAgent).not.toHaveBeenCalled()
+      expect(mockRunAgentRail).not.toHaveBeenCalled()
     })
 
     it("routes through the agent rail on a desktop host", async () => {

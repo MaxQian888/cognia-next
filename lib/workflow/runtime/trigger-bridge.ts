@@ -12,6 +12,7 @@
 import type { TriggerEvent, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { executeDeployedWorkflow, WorkflowAdmissionError } from "./execution-authority"
+import { deterministicTriggerIdempotencyKey } from "./trigger-idempotency"
 import { listenTriggerEvents } from "./tauri-bridge"
 
 export type TriggerBridgeDisposer = () => void
@@ -56,6 +57,16 @@ export async function dispatchTrigger(
   // Single canonical fan-in for every trigger path (cron / webhook / connector
   // / chat / plugin all route through here). Resume does NOT call this, so a
   // resumed run correctly does not re-fire the trigger hook.
+  // Without a key the ledger lookup in `execution-authority` is skipped
+  // outright (`existingInvocation` is only read when one is present), so every
+  // trigger minted a fresh invocation and two hosts observing the same cron
+  // occurrence both ran it.
+  const idempotencyKey = deterministicTriggerIdempotencyKey({
+    workflowId: event.workflowId,
+    triggerKind: normalizedEvent.kind,
+    ...(normalizedEvent.triggerId ? { triggerId: normalizedEvent.triggerId } : {}),
+    ...(typeof normalizedEvent.originAt === "number" ? { originAt: normalizedEvent.originAt } : {}),
+  })
   try {
     await executeDeployedWorkflow({
       workflowId: event.workflowId,
@@ -67,6 +78,7 @@ export async function dispatchTrigger(
       triggerOriginAt: normalizedEvent.originAt,
       payload: normalizedEvent.payload,
       triggeredBy: opts?.triggeredBy,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
       onAdmitted: () =>
         getPluginEventHooks().dispatchWorkflowTriggerFired(
           event.workflowId,
