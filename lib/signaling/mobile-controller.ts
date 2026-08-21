@@ -26,7 +26,7 @@
  * ADR-0021, ADR-0059.
  */
 
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
@@ -331,7 +331,10 @@ export function installCompanionSignalingController(
   // which is the common case on a warm remount. Seed it here.
   if (tx.getConnectionState() === "connected") runEndpointRefresh()
 
-  const sub: Subscription = liveQuery(() => readSettings()).subscribe({
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const sub: Subscription = Dexie.liveQuery(() => readSettings()).subscribe({
     next: (settings) => {
       manageProvisioner(settings)
       void applyCurrentSettings(settings, provisioner?.current() ?? []).catch((err) => {

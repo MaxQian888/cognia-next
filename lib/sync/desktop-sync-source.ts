@@ -297,6 +297,25 @@ function runActivityAt(run: WorkflowRunRow): number {
   return Math.max(run.startedAt ?? 0, run.completedAt ?? 0)
 }
 
+/**
+ * Strip the fields that only mean something on the machine that wrote them.
+ *
+ * `lease.expiresAt` is an absolute timestamp from the *executing desktop's*
+ * clock, and the receiving client judges liveness with its own `Date.now()`
+ * (`run-lease.ts:isLive`). Copying the row whole therefore hands a phone a
+ * lease it can consider live or stale purely by clock skew, owned by an
+ * `ownerId` that names a process it cannot reach. `cancelRequestedAt` is the
+ * same shape of mistake: it is a request addressed to the lease holder.
+ *
+ * Nothing downstream of the sync needs either — the mobile surfaces read status
+ * and timing — so they are projected out rather than translated.
+ */
+function projectRunForSync(run: WorkflowRunRow): WorkflowRunRow {
+  if (run.lease === undefined && run.cancelRequestedAt === undefined) return run
+  const { lease: _lease, cancelRequestedAt: _cancelRequestedAt, ...remote } = run
+  return remote as WorkflowRunRow
+}
+
 async function readWorkflowRunsDelta(since: number): Promise<SyncDelta<WorkflowRunRow>> {
   const db = getDb()
   // Floor the first full sync to a recent window so a years-deep run history
@@ -311,7 +330,7 @@ async function readWorkflowRunsDelta(since: number): Promise<SyncDelta<WorkflowR
     if (runActivityAt(run) > since) byId.set(run.id, run)
   }
   const ordered = [...byId.values()].sort((a, b) => runActivityAt(a) - runActivityAt(b))
-  const page = ordered.slice(0, RUN_PAGE_SIZE)
+  const page = ordered.slice(0, RUN_PAGE_SIZE).map(projectRunForSync)
   const hasMore = ordered.length > RUN_PAGE_SIZE
   return finalizeDelta("workflowRuns", page, since, hasMore, runActivityAt)
 }

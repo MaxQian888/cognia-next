@@ -24,7 +24,7 @@ interface FakePluginOpts {
 function makePlugin(opts: FakePluginOpts = {}) {
   let perm: PushPermission = opts.initialPerm ?? "prompt"
   const listeners: Record<string, Array<(payload: unknown) => void>> = {}
-  const removers: Array<() => Promise<void>> = []
+  const removers: Array<jest.Mock<Promise<void>, []>> = []
 
   const addListener = jest.fn(async (event: string, handler: (payload: unknown) => void) => {
     listeners[event] ??= []
@@ -75,23 +75,31 @@ function makePlugin(opts: FakePluginOpts = {}) {
   }
 }
 
+/**
+ * `window.Capacitor` is injected by the mobile boot, so the DOM lib knows
+ * nothing about it. One typed view of the global instead of a cast at each of
+ * the six access sites; the value is only ever stashed and restored here, never
+ * read through, so `unknown` is enough.
+ */
+const capacitorWindow = window as Window & typeof globalThis & { Capacitor?: unknown }
+
 describe("registerPushNotifications", () => {
   it("returns registered + token on a happy path", async () => {
     const fake = makePlugin({ initialPerm: "granted", token: "abc-123" })
-    const previous = window.Capacitor
-    window.Capacitor = { getPlatform: () => "ios" }
+    const previous = capacitorWindow.Capacitor
+    capacitorWindow.Capacitor = { getPlatform: () => "ios" }
     try {
       const out = await registerPushNotifications({ loader: async () => fake.plugin })
       expect(out).toEqual({ kind: "registered", token: "abc-123", platform: "ios" })
     } finally {
-      window.Capacitor = previous
+      capacitorWindow.Capacitor = previous
     }
   })
 
   it("uses the native global plugin registered by the mobile boot", async () => {
     const fake = makePlugin({ initialPerm: "granted", token: "global-token" })
-    const previous = window.Capacitor
-    window.Capacitor = {
+    const previous = capacitorWindow.Capacitor
+    capacitorWindow.Capacitor = {
       isNativePlatform: () => true,
       getPlatform: () => "android",
       Plugins: { PushNotifications: fake.plugin },
@@ -103,7 +111,7 @@ describe("registerPushNotifications", () => {
         platform: "android",
       })
     } finally {
-      window.Capacitor = previous
+      capacitorWindow.Capacitor = previous
     }
   })
 

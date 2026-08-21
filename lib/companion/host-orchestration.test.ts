@@ -92,7 +92,9 @@ function harness(options: { failReload?: boolean; failRollback?: boolean } = {})
         return activeTarget
       },
     },
-    runPhase: async (phase) => order.push(`phase:${phase}`),
+    runPhase: async (phase) => {
+      order.push(`phase:${phase}`)
+    },
     activateDatabase: (_accountId, hostId) => order.push(`database:${hostId}`),
     setContext: (_accountId, hostId) => order.push(`context:${hostId}`),
     reloadTransport: async () => {
@@ -114,11 +116,17 @@ function harness(options: { failReload?: boolean; failRollback?: boolean } = {})
       order.push(`manifest:${record.hostId}`)
       return { compatible: true, operations: ["claude_send"], grants: ["claude.chat"] }
     },
-    authoritativeSync: async () => order.push(`sync:${activeTarget.id}`),
-    rebindHostServices: async (record) => order.push(`rebind:${record.hostId}`),
+    authoritativeSync: async () => {
+      order.push(`sync:${activeTarget.id}`)
+    },
+    rebindHostServices: async (record) => {
+      order.push(`rebind:${record.hostId}`)
+    },
     publishSnapshot: (snapshot) =>
       order.push(`snapshot:${snapshot.target?.id}:${snapshot.connectionState}`),
-    enterOffline: async () => order.push("offline"),
+    enterOffline: async () => {
+      order.push("offline")
+    },
   }
   return { dependencies, order }
 }

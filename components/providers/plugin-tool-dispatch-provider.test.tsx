@@ -3,12 +3,17 @@ import { render, waitFor } from "@testing-library/react"
 jest.mock("@/lib/claude/ipc", () => ({
   subscribePluginToolExec: jest.fn(),
   sendPluginToolResponse: jest.fn(),
+  subscribePluginHookExec: jest.fn().mockResolvedValue(() => {}),
+  sendPluginHookResponse: jest.fn(),
   subscribeProtocolAdapterExec: jest.fn().mockResolvedValue(() => {}),
   subscribeProtocolAdapterCancel: jest.fn().mockResolvedValue(() => {}),
   sendProtocolAdapterMessage: jest.fn(),
 }))
 jest.mock("@/lib/claude/plugin-tool-ipc", () => ({
   handlePluginToolExec: jest.fn(),
+}))
+jest.mock("@/lib/claude/plugin-hook-ipc", () => ({
+  handlePluginHookExec: jest.fn(),
 }))
 jest.mock("@/lib/claude/protocol-adapter-ipc", () => ({
   dispatchProtocolAdapterExec: jest.fn().mockResolvedValue(undefined),
@@ -23,11 +28,14 @@ import { PluginToolDispatchProvider } from "./plugin-tool-dispatch-provider"
 import {
   subscribePluginToolExec,
   sendPluginToolResponse,
+  subscribePluginHookExec,
+  sendPluginHookResponse,
   subscribeProtocolAdapterExec,
   subscribeProtocolAdapterCancel,
   sendProtocolAdapterMessage,
 } from "@/lib/claude/ipc"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
+import { handlePluginHookExec } from "@/lib/claude/plugin-hook-ipc"
 import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
 import type { PluginToolExecEvent } from "@cognia/agent-config-types"
 
@@ -38,6 +46,9 @@ const mockSubscribeProtocolExec = subscribeProtocolAdapterExec as jest.Mock
 const mockSubscribeProtocolCancel = subscribeProtocolAdapterCancel as jest.Mock
 const mockSendProtocolAdapterMessage = sendProtocolAdapterMessage as jest.Mock
 const mockDispatchProtocolAdapterExec = dispatchProtocolAdapterExec as jest.Mock
+const mockSubscribeHook = subscribePluginHookExec as jest.Mock
+const mockSendHook = sendPluginHookResponse as jest.Mock
+const mockHandleHook = handlePluginHookExec as jest.Mock
 
 describe("PluginToolDispatchProvider", () => {
   beforeEach(() => {
@@ -258,5 +269,75 @@ describe("PluginToolDispatchProvider", () => {
       }),
       context
     )
+  })
+})
+
+describe("PluginToolDispatchProvider — plugin lifecycle hooks", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockSubscribe.mockResolvedValue(() => {})
+    mockSubscribeProtocolExec.mockResolvedValue(() => {})
+    mockSubscribeProtocolCancel.mockResolvedValue(() => {})
+  })
+
+  const req = {
+    type: "plugin_hook_exec" as const,
+    sessionId: "s1",
+    execId: "e1",
+    pluginId: "p1",
+    hookId: "onPreToolUse",
+    payload: { hook_event_name: "PreToolUse" },
+  }
+
+  it("subscribes once at mount — without this a configured plugin hook silently times out", async () => {
+    mockSubscribeHook.mockResolvedValue(() => {})
+    render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+    await waitFor(() => expect(mockSubscribeHook).toHaveBeenCalledTimes(1))
+  })
+
+  it("routes a request through the handler and answers the sidecar", async () => {
+    mockHandleHook.mockResolvedValue({ result: { block: "denied" } })
+    mockSubscribeHook.mockImplementation(async (cb: (r: typeof req) => void) => {
+      cb(req)
+      return () => {}
+    })
+
+    render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+
+    await waitFor(() => expect(mockHandleHook).toHaveBeenCalledWith(req))
+    await waitFor(() =>
+      expect(mockSendHook).toHaveBeenCalledWith({
+        sessionId: "s1",
+        execId: "e1",
+        result: { block: "denied" },
+      })
+    )
+  })
+
+  it("forwards a handler error so the sidecar stops waiting on its timeout", async () => {
+    mockHandleHook.mockResolvedValue({ error: "no live handler for p1:onPreToolUse" })
+    mockSubscribeHook.mockImplementation(async (cb: (r: typeof req) => void) => {
+      cb(req)
+      return () => {}
+    })
+
+    render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+
+    await waitFor(() =>
+      expect(mockSendHook).toHaveBeenCalledWith({
+        sessionId: "s1",
+        execId: "e1",
+        error: "no live handler for p1:onPreToolUse",
+      })
+    )
+  })
+
+  it("unsubscribes on unmount", async () => {
+    const unlisten = jest.fn()
+    mockSubscribeHook.mockResolvedValue(unlisten)
+    const { unmount } = render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+    await waitFor(() => expect(mockSubscribeHook).toHaveBeenCalled())
+    unmount()
+    await waitFor(() => expect(unlisten).toHaveBeenCalled())
   })
 })

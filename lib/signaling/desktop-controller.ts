@@ -23,7 +23,7 @@
  * `lib/tauri/transport-rtc.ts`.
  */
 
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 
 // Import `transport` from the leaf module directly so we don't pull
 // `@/lib/tauri` (the barrel) into our import graph. The barrel re-exports
@@ -109,7 +109,10 @@ export function installDesktopSignalingController(
     }
   }
 
-  const devicesSub: Subscription = liveQuery(() => listPairedDevices()).subscribe({
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const devicesSub: Subscription = Dexie.liveQuery(() => listPairedDevices()).subscribe({
     next: (rows) => {
       const eligible = rows.filter(
         (r) =>
@@ -207,7 +210,7 @@ export function installDesktopSignalingController(
       console.warn("desktop-signaling-controller: initial settings read failed", err)
     })
 
-  const settingsSub: Subscription = liveQuery(() => readSettings()).subscribe({
+  const settingsSub: Subscription = Dexie.liveQuery(() => readSettings()).subscribe({
     next: (settings) => {
       handleSettings(settings)
     },

@@ -491,6 +491,34 @@ describe("readDexieDelta", () => {
     expect(delta.next_since).toBe(40)
   })
 
+  it("never ships an execution lease or a cancel request to another machine", async () => {
+    // `lease.expiresAt` is an absolute timestamp from THIS desktop's clock, and
+    // the receiving client judges it with its own `Date.now()` — so copying the
+    // row whole hands a phone a lease it can call live or stale purely by clock
+    // skew, owned by a process it cannot reach. `cancelRequestedAt` is a request
+    // addressed to that lease holder and equally meaningless once it travels.
+    const db = getDb()
+    await db.workflowRuns.bulkPut([
+      {
+        id: "r-leased",
+        workflowId: "wf-1",
+        status: "running",
+        startedAt: 30,
+        lease: { ownerId: "exec_local", expiresAt: Date.now() + 60_000, heartbeatAt: Date.now() },
+        cancelRequestedAt: 31,
+      } as never,
+    ])
+
+    const delta = await readDexieDelta("workflowRuns", 10)
+    const row = delta.rows.find((candidate) => (candidate as { id: string }).id === "r-leased")
+
+    expect(row).toBeDefined()
+    expect(row).not.toHaveProperty("lease")
+    expect(row).not.toHaveProperty("cancelRequestedAt")
+    // Everything a remote surface actually reads still travels.
+    expect(row).toMatchObject({ status: "running", startedAt: 30, workflowId: "wf-1" })
+  })
+
   it("returns canonical execution summaries without syncing private event rows", async () => {
     const db = getDb()
     await db.executionRuns.bulkPut([

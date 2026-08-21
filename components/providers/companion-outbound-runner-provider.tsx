@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo } from "react"
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 
 import { usePlatform } from "@/hooks/use-platform"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
@@ -20,10 +20,7 @@ import { registerRuntimeTargetTransitionParticipant } from "@/lib/runtime/runtim
 import { useAccountStore } from "@/stores/account/account-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
-import {
-  hostStateStatusAllowsWrites,
-  installHostStateSyncForTarget,
-} from "@/lib/sync/host-state-service"
+import { installHostStateSyncForTarget } from "@/lib/sync/host-state-service"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import {
   getRuntimeSnapshot,
@@ -47,7 +44,10 @@ const liveDispatcher: OutboundDispatcher = {
 }
 
 function subscribeToPendingJobs(scope: RuntimeTargetScope, onPending: () => void): () => void {
-  const subscription = liveQuery(() =>
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const subscription = Dexie.liveQuery(() =>
     getDb()
       .mobileOutboundQueue.where("status")
       .equals("pending")
@@ -169,9 +169,7 @@ export function CompanionOutboundRunnerProvider({
         return
       }
       stopSync = () => installed.stop()
-      if (hostStateStatusAllowsWrites(installed.status)) {
-        updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
-      }
+      updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
       unregisterResync = remoteEventResyncCoordinator.register("host-state", () =>
         installed.resync()
       )

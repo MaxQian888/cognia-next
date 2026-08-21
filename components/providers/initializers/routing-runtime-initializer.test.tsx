@@ -6,7 +6,10 @@ const certificationStore = { marker: "certification-store" }
 const installDesktopCertificationRuntimeMock = jest.fn(async () => certificationStore)
 const rebuildCompatibilityProjectionMock = jest.fn<Promise<number>, [unknown]>(async () => 1)
 const setPricingResolverMock = jest.fn()
-const resolveModelPricingUsdMock = jest.fn(() => ({ promptPer1M: 3, completionPer1M: 15 }))
+const resolveModelPricingUsdMock = jest.fn((..._a: unknown[]) => ({
+  promptPer1M: 3,
+  completionPer1M: 15,
+}))
 jest.mock("@cognia/provider-routing/runtime-adapters", () => ({
   setProviderRoutingRuntimeAdapters: (...a: unknown[]) => setAdaptersMock(...a),
 }))

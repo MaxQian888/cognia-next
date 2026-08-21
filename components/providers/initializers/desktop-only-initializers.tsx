@@ -109,6 +109,14 @@ const FleetHistorySinkInitializer = dynamic(
   () => import("./fleet-history-sink-initializer").then((m) => m.FleetHistorySinkInitializer),
   { ssr: false }
 )
+const WorkerRuntimeInitializer = dynamic(
+  () => import("./worker-runtime-initializer").then((m) => m.WorkerRuntimeInitializer),
+  { ssr: false }
+)
+const ExitLeaseReleaseInitializer = dynamic(
+  () => import("./exit-lease-release-initializer").then((m) => m.ExitLeaseReleaseInitializer),
+  { ssr: false }
+)
 const PluginDeepLinkRouter = dynamic(
   () => import("@/components/plugins/plugin-deep-link-router").then((m) => m.PluginDeepLinkRouter),
   { ssr: false }
@@ -136,6 +144,10 @@ const SelectionToolbarInitializer = dynamic(
 )
 const TrayPanelInitializer = dynamic(
   () => import("./tray-panel-initializer").then((m) => m.TrayPanelInitializer),
+  { ssr: false }
+)
+const SessionImportWatchInitializer = dynamic(
+  () => import("./session-import-watch-initializer").then((m) => m.SessionImportWatchInitializer),
   { ssr: false }
 )
 
@@ -179,6 +191,8 @@ export function DesktopOnlyInitializers() {
       <LocalCharacterPackInitializer />
       <PetWindowInitializer />
       <FleetHistorySinkInitializer />
+      <WorkerRuntimeInitializer />
+      <ExitLeaseReleaseInitializer />
       <UpdateCheckInitializer />
       <PluginDeepLinkRouter />
       <ConsentOverlay />
@@ -187,6 +201,7 @@ export function DesktopOnlyInitializers() {
       <CrashReportDialog />
       <SelectionToolbarInitializer />
       <TrayPanelInitializer />
+      <SessionImportWatchInitializer />
     </>
   )
 }

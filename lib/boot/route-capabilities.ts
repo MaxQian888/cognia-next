@@ -16,6 +16,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [string, BootCapability]> = [
   ["/memory", "knowledge-agents"],
   ["/twin", "knowledge-agents"],
   ["/agent-teams", "knowledge-agents"],
+  ["/agent-teams", "desktop-tools"],
   ["/templates", "knowledge-agents"],
   ["/skills", "knowledge-agents"],
   ["/skills", "desktop-tools"],

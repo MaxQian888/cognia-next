@@ -33,23 +33,33 @@ import type { AppSettings } from "@cognia/agent-config-types"
 // install, routing a rejected read to the observer's `error` arm.
 jest.mock("dexie", () => {
   const actual = jest.requireActual<Record<string, unknown>>("dexie")
+  const liveQuery = (query: () => Promise<unknown>) => ({
+    subscribe: (observer: { next: (v: unknown) => void; error: (e: unknown) => void }) => {
+      void Promise.resolve()
+        .then(query)
+        .then(
+          (value) => observer.next(value),
+          (err) => observer.error(err)
+        )
+      return { unsubscribe: () => {} }
+    },
+  })
+  // Preserve the default export explicitly — every `lib/db/*` module does
+  // `class X extends Dexie`, and losing it takes the whole graph down.
+  const DexieDefault = (actual.default ?? actual) as Record<string, unknown>
+  // The controller calls `Dexie.liveQuery(...)` (the static) rather than the
+  // named export — see the interop note in `lib/db/outbound-jobs.ts`. Because
+  // this factory sets `__esModule: true`, the default export is handed back
+  // untouched, so stubbing only the named `liveQuery` below would leave the
+  // controller on the REAL implementation and this mock silently inert.
+  // Jest gives each test file its own module registry, so patching the static
+  // here cannot leak into another suite.
+  DexieDefault.liveQuery = liveQuery
   return {
     ...actual,
     __esModule: true,
-    // Preserve the default export explicitly — every `lib/db/*` module does
-    // `class X extends Dexie`, and losing it takes the whole graph down.
-    default: actual.default ?? actual,
-    liveQuery: (query: () => Promise<unknown>) => ({
-      subscribe: (observer: { next: (v: unknown) => void; error: (e: unknown) => void }) => {
-        void Promise.resolve()
-          .then(query)
-          .then(
-            (value) => observer.next(value),
-            (err) => observer.error(err)
-          )
-        return { unsubscribe: () => {} }
-      },
-    }),
+    default: DexieDefault,
+    liveQuery,
   }
 })
 

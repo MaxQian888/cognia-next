@@ -153,7 +153,7 @@ export async function pairAndActivateCompanionHost(
         const host = await deps.negotiateHost(restored, existing)
         if (!host.compatible) throw new Error("The previous Host is no longer compatible.")
         await deps.authoritativeSync()
-        await deps.rebindHostServices(existing)
+        await deps.rebindHostServices(existing, input.platform)
         deps.publishSnapshot(snapshotFor(existing, input.platform, "online", host))
       } catch (restoreError) {
         const aggregate = new AggregateError(
@@ -292,7 +292,11 @@ function productionDependencies(registry: RuntimeTargetRegistry): HostOrchestrat
     reloadTransport: () => reloadCompanionConfigForActiveTarget({ notify: false }),
     negotiateHost: async () =>
       runtimeHostSnapshotFromManifest(await transport.call("host_feature_manifest", {})),
-    authoritativeSync: () => runSyncDown(),
+    // The outcomes array is the sync's own detail; this seam only promises that
+    // the pass completed.
+    authoritativeSync: async () => {
+      await runSyncDown()
+    },
     // `reloadCompanionConfigForActiveTarget` synchronously emits the existing
     // config-changed lifecycle event. Web/Mobile boot providers own the actual
     // Host-bound installers and complete their teardown before this transition.

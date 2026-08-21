@@ -25,7 +25,6 @@ import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import { transport } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
 import {
-  hostStateStatusAllowsWrites,
   installHostStateSyncForTarget,
   type InstalledHostStateSync,
 } from "@/lib/sync/host-state-service"
@@ -219,9 +218,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
             accountId: config.accountId ?? "local-default",
             runtimeTargetId: config.targetId ?? "web-companion",
           })
-          if (hostStateStatusAllowsWrites(hostStateSync.status)) {
-            updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
-          }
+          updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
           cleanup.push(() => hostStateSync?.stop())
           cleanup.push(
             remoteEventResyncCoordinator.register(

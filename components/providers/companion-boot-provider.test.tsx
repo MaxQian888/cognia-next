@@ -72,7 +72,7 @@ jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
 jest.mock("@/lib/runtime/runtime-target-lifecycle", () => ({
   registerRuntimeTargetSubscriptionStopper: () => jest.fn(),
 }))
-const classifyWsHostMock = jest.fn((): string => "ws-lan")
+const classifyWsHostMock = jest.fn((_url: string): string => "ws-lan")
 jest.mock("@/lib/connectivity/lan-classify", () => ({
   classifyWsHost: (url: string) => classifyWsHostMock(url),
 }))
@@ -90,7 +90,7 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
     return mockTransport
   },
 }))
-const installCapabilityReporterMock = jest.fn(() => jest.fn())
+const installCapabilityReporterMock = jest.fn((..._args: unknown[]) => jest.fn())
 jest.mock("@/lib/companion/capability-reporter", () => ({
   installCapabilityReporter: (...args: unknown[]) => installCapabilityReporterMock(...args),
 }))

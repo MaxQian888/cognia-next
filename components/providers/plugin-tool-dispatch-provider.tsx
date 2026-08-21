@@ -17,6 +17,8 @@ import { useEffect } from "react"
 import {
   subscribePluginToolExec,
   sendPluginToolResponse,
+  subscribePluginHookExec,
+  sendPluginHookResponse,
   subscribeProtocolAdapterExec,
   subscribeProtocolAdapterCancel,
   sendProtocolAdapterMessage,
@@ -63,6 +65,51 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
         .catch((err) => {
           loggers.app.error("plugin_tool_response write failed", {
             toolUseId: req.toolUseId,
+            error: String(err),
+          })
+        })
+    }).then((fn) => {
+      if (cancelled) fn()
+      else unlisten = fn
+    })
+
+    return () => {
+      cancelled = true
+      if (unlisten) {
+        unlisten()
+        unlisten = null
+      }
+    }
+  }, [])
+
+  // Settings.json `{ type: "plugin" }` lifecycle hooks round-trip the same way
+  // plugin tools do. Mounted here rather than per-session because the sidecar
+  // keys the round-trip by sessionId+execId, so one subscription serves direct
+  // chat, teams and background runs alike.
+  //
+  // Without this, a configured plugin hook simply times out after 5s and fails
+  // OPEN with a warning — never a block. That is deliberate, but it means the
+  // hook silently does nothing, so this provider is load-bearing.
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | null = null
+
+    void subscribePluginHookExec((req) => {
+      // handlePluginHookExec never throws (every failure collapses onto
+      // `error`); only the write-back can.
+      void import("@/lib/claude/plugin-hook-ipc")
+        .then(({ handlePluginHookExec }) => handlePluginHookExec(req))
+        .then((outcome) =>
+          sendPluginHookResponse({
+            sessionId: req.sessionId,
+            execId: req.execId,
+            ...(outcome.result !== undefined ? { result: outcome.result } : {}),
+            ...(outcome.error ? { error: outcome.error } : {}),
+          })
+        )
+        .catch((err) => {
+          loggers.app.error("plugin_hook_response write failed", {
+            execId: req.execId,
             error: String(err),
           })
         })

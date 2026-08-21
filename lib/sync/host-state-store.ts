@@ -3,7 +3,6 @@ import {
   canonicalHostStateJson,
   createEmptyHostStateSession,
   hostStateDigest,
-  hostStateMigrationStageAllowsWrites,
   isHostStateActionV1,
   reduceHostStateMutation,
   sessionIndexChannel,
@@ -28,14 +27,6 @@ import { markSessionDirty } from "@/lib/chat/search/indexer"
 export const HOST_STATE_META_ID = "singleton" as const
 export const HOST_STATE_LEASE_TTL_MS = 30_000
 export const HOST_STATE_LEASE_HEARTBEAT_MS = 10_000
-
-export type HostStateMigrationStage =
-  | "legacy-authoritative"
-  | "shadow"
-  | "hoststate-read"
-  | "hoststate-authoritative"
-  | "legacy-projection-only"
-  | "retired"
 
 export interface HostStateChannelRow {
   channel: string
@@ -76,7 +67,6 @@ export interface HostStateMetaRow {
   hostSeq: number
   leaseOwnerId: string
   leaseExpiresAt: number
-  migrationStage: HostStateMigrationStage
   updatedAt: number
 }
 
@@ -88,7 +78,6 @@ export type HostStateStoreErrorCode =
   | "host_state_lease_expired"
   | "host_state_session_not_found"
   | "host_state_message_not_found"
-  | "host_state_not_authoritative"
   | "stale_host_generation"
 
 export class HostStateStoreError extends Error {
@@ -140,7 +129,6 @@ export async function acquireHostStateLease(input: HostStateLeaseInput): Promise
       hostSeq: 0,
       leaseOwnerId: input.ownerId,
       leaseExpiresAt: now + ttlMs,
-      migrationStage: current?.migrationStage ?? "legacy-authoritative",
       updatedAt: now,
     }
     await db.hostStateMeta.put(next)
@@ -314,10 +302,6 @@ export async function commitHostStateAction(
         const snapshot = await snapshotInTransaction(input.action.channel, meta, db, now)
         return { event: existing.event, snapshot, duplicate: true }
       }
-      if (!hostStateMigrationStageAllowsWrites(meta.migrationStage)) {
-        throw new HostStateStoreError("host_state_not_authoritative")
-      }
-
       const current = await getOrCreateChannel(input.action.channel, meta, db, now)
       const hostSeq = meta.hostSeq + 1
       const conflict =
@@ -465,17 +449,6 @@ export async function getHostStateMeta(): Promise<HostStateMetaRow> {
   const meta = await getDb().hostStateMeta.get(HOST_STATE_META_ID)
   if (!meta) throw new HostStateStoreError("host_state_lease_missing")
   return meta
-}
-
-export async function setHostStateMigrationStage(
-  migrationStage: HostStateMigrationStage,
-  now = Date.now()
-): Promise<void> {
-  const updated = await getDb().hostStateMeta.update(HOST_STATE_META_ID, {
-    migrationStage,
-    updatedAt: now,
-  })
-  if (!updated) throw new HostStateStoreError("host_state_lease_missing")
 }
 
 export async function listPendingHostStateActions(): Promise<HostStateActionRow[]> {
@@ -785,8 +758,12 @@ async function persistBusinessProjection(
         .between([action.sessionId, 0], [action.sessionId, Number.MAX_SAFE_INTEGER])
         .sortBy("createdAt")
       let keepThrough = -1
-      if (action.action.afterMessageId) {
-        keepThrough = messages.findIndex((message) => message.id === action.action.afterMessageId)
+      // Bound to a local: narrowing does not survive into the `findIndex`
+      // callback, so the read there saw the un-narrowed intent union.
+      const afterMessageId =
+        action.action.kind === "transcript.truncate" ? action.action.afterMessageId : undefined
+      if (afterMessageId) {
+        keepThrough = messages.findIndex((message) => message.id === afterMessageId)
         if (keepThrough < 0) throw new HostStateStoreError("host_state_message_not_found")
       }
       const removed = messages.slice(keepThrough + 1)

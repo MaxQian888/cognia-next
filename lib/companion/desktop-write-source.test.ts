@@ -14,8 +14,8 @@ jest.mock("@/lib/connectors/bootstrap/install-connector-runtime", () => ({
   isConnectorRuntimeOwnedHere: jest.fn(() => true),
 }))
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const ownsRuntimeMock = (
+const ownsRuntimeMock = // eslint-disable-next-line @typescript-eslint/no-require-imports
+(
   require("@/lib/connectors/bootstrap/install-connector-runtime") as {
     isConnectorRuntimeOwnedHere: jest.Mock
   }
@@ -88,8 +88,31 @@ jest.mock("@/lib/goal/runtime", () => {
   const pauseGoal = jest.fn().mockResolvedValue({ id: "g1", status: "paused" })
   const resumeGoal = jest.fn().mockResolvedValue({ id: "g1", status: "active" })
   const stopGoal = jest.fn().mockResolvedValue({ id: "g1", status: "stopped" })
-  return { getGoalRuntime: () => ({ pauseGoal, resumeGoal, stopGoal }) }
+  const createGoal = jest.fn().mockResolvedValue({ id: "g-new", status: "active" })
+  const updateObjective = jest
+    .fn()
+    .mockResolvedValue({ goal: { id: "g1", status: "active" }, updatePrompt: "re-aimed" })
+  const updateConfig = jest.fn().mockResolvedValue({ id: "g1", status: "active" })
+  return {
+    getGoalRuntime: () => ({
+      pauseGoal,
+      resumeGoal,
+      stopGoal,
+      createGoal,
+      updateObjective,
+      updateConfig,
+    }),
+  }
 })
+
+const mockGetGoal = jest.fn().mockResolvedValue({ id: "g1", status: "active" })
+const mockGetActiveGoalForSession = jest.fn().mockResolvedValue({ id: "g1" })
+const mockListGoalsBySession = jest.fn().mockResolvedValue([{ id: "g1" }, { id: "g0" }])
+jest.mock("@/lib/db/goals", () => ({
+  getGoal: (...args: unknown[]) => mockGetGoal(...(args as [])),
+  getActiveGoalForSession: (...args: unknown[]) => mockGetActiveGoalForSession(...(args as [])),
+  listGoalsBySession: (...args: unknown[]) => mockListGoalsBySession(...(args as [])),
+}))
 
 const mockAgentTaskStart = jest.fn().mockResolvedValue({ ok: true, executionId: "execution-1" })
 const mockAgentTaskPause = jest.fn().mockResolvedValue({ ok: true })
@@ -163,6 +186,10 @@ beforeEach(async () => {
   await db.connectorDrafts.clear().catch(() => undefined)
   await db.outboundQueue.clear().catch(() => undefined)
   await db.plugins.clear().catch(() => undefined)
+  await db.characters.clear().catch(() => undefined)
+  await db.skills.clear().catch(() => undefined)
+  await db.adapterInstances.clear().catch(() => undefined)
+  await db.twinProfile.clear().catch(() => undefined)
   mockActiveRuntimeTarget.mockReturnValue({ accountId: "local-default", targetId: "target-a" })
 })
 
@@ -191,6 +218,41 @@ describe("dispatchCommand: HostState authority", () => {
       accountId: "local-default",
       runtimeTargetId: "target-a",
     })
+  })
+
+  it("routes host_state_submit to the authoritative service without the routing fields", async () => {
+    const payload = {
+      protocolVersion: 1,
+      accountId: "local-default",
+      callerAccountId: "local-default",
+      runtimeTargetId: "target-a",
+      authoritativeHostId: "host-a",
+      mutations: [{ kind: "noop" }],
+    }
+
+    await expect(dispatchCommand("host_state_submit", payload)).resolves.toEqual({
+      protocolVersion: 1,
+      receipts: [],
+    })
+    // `authoritativeHostId` / `callerAccountId` are transport-level routing
+    // fields injected by Rust — the service must never see them as request body.
+    expect(mockHostStateService.submit).toHaveBeenCalledWith({
+      protocolVersion: 1,
+      accountId: "local-default",
+      runtimeTargetId: "target-a",
+      mutations: [{ kind: "noop" }],
+    })
+  })
+
+  it("rejects a host_state_submit outside the active runtime target", async () => {
+    await expect(
+      dispatchCommand("host_state_submit", {
+        callerAccountId: "other-account",
+        runtimeTargetId: "target-a",
+        authoritativeHostId: "host-a",
+      })
+    ).rejects.toThrow("host_state_scope_mismatch")
+    expect(mockHostStateService.submit).not.toHaveBeenCalled()
   })
 
   it("rejects a HostState request outside the active runtime target", async () => {
@@ -406,19 +468,18 @@ describe("relayed inbox writes on a process that lost the connector runtime", ()
   beforeEach(() => ownsRuntimeMock.mockReturnValue(false))
   afterEach(() => ownsRuntimeMock.mockReturnValue(true))
 
-  it.each([
-    "connector_enqueue_outbound",
-    "connector_approve_draft",
-    "connector_reject_draft",
-  ])("refuses %s instead of enqueuing a job nothing will deliver", async (command) => {
-    // During a desktop ⇄ brain handoff the bridge can route a phone's reply to
-    // the side that just released the lease. Running it there would enqueue an
-    // outbound job no runner picks up — or double-send once the real owner
-    // also handles the retry.
-    await expect(dispatchCommand(command, { draftId: "d1" })).rejects.toThrow(
-      /connector_runtime_not_owner/
-    )
-  })
+  it.each(["connector_enqueue_outbound", "connector_approve_draft", "connector_reject_draft"])(
+    "refuses %s instead of enqueuing a job nothing will deliver",
+    async (command) => {
+      // During a desktop ⇄ brain handoff the bridge can route a phone's reply to
+      // the side that just released the lease. Running it there would enqueue an
+      // outbound job no runner picks up — or double-send once the real owner
+      // also handles the retry.
+      await expect(dispatchCommand(command, { draftId: "d1" })).rejects.toThrow(
+        /connector_runtime_not_owner/
+      )
+    }
+  )
 
   it("throws a message the durable queue treats as RETRYABLE", async () => {
     // The phone's queue must replay across the handoff window (5 attempts of
@@ -805,6 +866,311 @@ describe("dispatchCommand: goal_pause / goal_resume / goal_stop", () => {
   it("rejects when goalId is missing", async () => {
     await expect(dispatchCommand("goal_pause", {})).rejects.toThrow(/goal_pause.goalId is required/)
     await expect(dispatchCommand("goal_stop", {})).rejects.toThrow(/goal_stop.goalId is required/)
+  })
+})
+
+describe("dispatchCommand: goal_create / goal_update / goal_status", () => {
+  it("goal_create delegates to the canonical runtime and marks the origin remote", async () => {
+    const res = (await dispatchCommand("goal_create", {
+      sessionId: "s1",
+      rawObjective: "Ship the release",
+      nameHints: ["Ada"],
+      startPaused: true,
+    })) as { goal: { id: string } }
+
+    // `origin: "remote"` is the load-bearing bit: the operator is not at the
+    // desktop's Continue button, so the manual-continue gate must treat this
+    // as headless (ADR-0070 Phase 2).
+    expect(getGoalRuntime().createGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "s1",
+        rawObjective: "Ship the release",
+        nameHints: ["Ada"],
+        startPaused: true,
+        origin: "remote",
+      })
+    )
+    expect(res.goal.id).toBe("g-new")
+  })
+
+  it("goal_create defaults nameHints to empty and startPaused to false", async () => {
+    await dispatchCommand("goal_create", { sessionId: "s1", rawObjective: "Ship it" })
+    expect(getGoalRuntime().createGoal).toHaveBeenCalledWith(
+      expect.objectContaining({ nameHints: [], startPaused: false })
+    )
+  })
+
+  it("goal_create rejects a missing session, a blank objective, or malformed hints", async () => {
+    await expect(dispatchCommand("goal_create", { rawObjective: "x" })).rejects.toThrow(
+      /goal_create.sessionId is required/
+    )
+    await expect(
+      dispatchCommand("goal_create", { sessionId: "s1", rawObjective: "   " })
+    ).rejects.toThrow(/goal_create.rawObjective is required/)
+    await expect(
+      dispatchCommand("goal_create", { sessionId: "s1", rawObjective: "x", nameHints: [1] })
+    ).rejects.toThrow(/nameHints must be an array of strings/)
+    expect(getGoalRuntime().createGoal).not.toHaveBeenCalled()
+  })
+
+  it("goal_update re-aims the objective and returns the model-facing prompt", async () => {
+    const res = (await dispatchCommand("goal_update", {
+      goalId: "g1",
+      rawObjective: "New aim",
+      nameHints: [],
+    })) as { goal: unknown; updatePrompt?: string }
+
+    expect(getGoalRuntime().updateObjective).toHaveBeenCalledWith("g1", "New aim", [])
+    expect(res.updatePrompt).toBe("re-aimed")
+  })
+
+  it("goal_update patches config and can do both in one call", async () => {
+    await dispatchCommand("goal_update", { goalId: "g1", config: { maxTurns: 5 } })
+    expect(getGoalRuntime().updateConfig).toHaveBeenCalledWith("g1", { maxTurns: 5 })
+    expect(getGoalRuntime().updateObjective).not.toHaveBeenCalled()
+
+    await dispatchCommand("goal_update", {
+      goalId: "g1",
+      rawObjective: "New aim",
+      config: { maxTurns: 5 },
+    })
+    expect(getGoalRuntime().updateObjective).toHaveBeenCalled()
+    expect(getGoalRuntime().updateConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it("goal_update falls back to the persisted goal when nothing changed", async () => {
+    // `updateObjective` answers null for a missing/terminal goal or an
+    // unchanged objective — the caller still gets the goal it referenced.
+    ;(getGoalRuntime().updateObjective as jest.Mock).mockResolvedValueOnce(null)
+    const res = (await dispatchCommand("goal_update", {
+      goalId: "g1",
+      rawObjective: "Same aim",
+    })) as { goal: { id: string } | null }
+
+    expect(mockGetGoal).toHaveBeenCalledWith("g1")
+    expect(res.goal).toEqual({ id: "g1", status: "active" })
+  })
+
+  it("goal_update requires a goalId and at least one of objective/config", async () => {
+    await expect(dispatchCommand("goal_update", { rawObjective: "x" })).rejects.toThrow(
+      /goal_update.goalId is required/
+    )
+    await expect(dispatchCommand("goal_update", { goalId: "g1" })).rejects.toThrow(
+      /requires rawObjective and\/or config/
+    )
+    await expect(
+      dispatchCommand("goal_update", { goalId: "g1", rawObjective: "  " })
+    ).rejects.toThrow(/must be a non-empty string/)
+  })
+
+  it("goal_status reads one goal by id", async () => {
+    await expect(dispatchCommand("goal_status", { goalId: "g1" })).resolves.toEqual({
+      goal: { id: "g1", status: "active" },
+    })
+    expect(mockGetActiveGoalForSession).not.toHaveBeenCalled()
+  })
+
+  it("goal_status answers a session with its active goal plus the full list", async () => {
+    await expect(dispatchCommand("goal_status", { sessionId: "s1" })).resolves.toEqual({
+      activeGoal: { id: "g1" },
+      goals: [{ id: "g1" }, { id: "g0" }],
+    })
+  })
+
+  it("goal_status normalizes a missing goal to null rather than undefined", async () => {
+    mockGetGoal.mockResolvedValueOnce(undefined)
+    await expect(dispatchCommand("goal_status", { goalId: "nope" })).resolves.toEqual({
+      goal: null,
+    })
+  })
+
+  it("goal_status requires goalId or sessionId", async () => {
+    await expect(dispatchCommand("goal_status", {})).rejects.toThrow(
+      /goal_status requires goalId or sessionId/
+    )
+  })
+})
+
+describe("dispatchCommand: character_upsert / character_delete / character_bind_twin", () => {
+  it("character_upsert creates without an id and updates with one", async () => {
+    const created = (await dispatchCommand("character_upsert", {
+      draft: { name: "Ada", systemPrompt: "be precise" },
+    })) as { character: { id: string; name: string } }
+    expect(created.character.name).toBe("Ada")
+
+    await dispatchCommand("character_upsert", {
+      id: created.character.id,
+      draft: { name: "Ada Lovelace" },
+    })
+    const row = await getDb().characters.get(created.character.id)
+    expect(row?.name).toBe("Ada Lovelace")
+    // An update must not create a second row.
+    expect(await getDb().characters.count()).toBe(1)
+  })
+
+  it("character_upsert rejects a missing or non-object draft", async () => {
+    await expect(dispatchCommand("character_upsert", {})).rejects.toThrow(
+      /character_upsert.draft is required/
+    )
+    await expect(dispatchCommand("character_upsert", { draft: "nope" })).rejects.toThrow(
+      /character_upsert.draft is required/
+    )
+  })
+
+  it("character_delete removes the row and requires an id", async () => {
+    const created = (await dispatchCommand("character_upsert", {
+      draft: { name: "Temp", systemPrompt: "" },
+    })) as { character: { id: string } }
+
+    await expect(dispatchCommand("character_delete", { id: created.character.id })).resolves.toBe(
+      null
+    )
+    expect(await getDb().characters.get(created.character.id)).toBeUndefined()
+    await expect(dispatchCommand("character_delete", {})).rejects.toThrow(
+      /character_delete.id is required/
+    )
+  })
+
+  it("character_bind_twin binds a twin and clears it on an explicit null", async () => {
+    const created = (await dispatchCommand("character_upsert", {
+      draft: { name: "Bound", systemPrompt: "" },
+    })) as { character: { id: string } }
+
+    await dispatchCommand("character_bind_twin", {
+      characterId: created.character.id,
+      twinId: "twin-1",
+    })
+    expect((await getDb().characters.get(created.character.id))?.twinId).toBe("twin-1")
+
+    // `null` is the unbind signal — it must not become the string "null".
+    await dispatchCommand("character_bind_twin", {
+      characterId: created.character.id,
+      twinId: null,
+    })
+    expect((await getDb().characters.get(created.character.id))?.twinId).toBeUndefined()
+  })
+
+  it("character_bind_twin requires a characterId", async () => {
+    await expect(dispatchCommand("character_bind_twin", { twinId: "t1" })).rejects.toThrow(
+      /character_bind_twin.characterId is required/
+    )
+  })
+})
+
+describe("dispatchCommand: skill_set_enabled", () => {
+  beforeEach(async () => {
+    await getDb().skills.put({ id: "sk1", status: "disabled" } as never)
+  })
+
+  it("translates the boolean RPC into the stored status enum", async () => {
+    await dispatchCommand("skill_set_enabled", { id: "sk1", enabled: true })
+    expect((await getDb().skills.get("sk1"))?.status).toBe("enabled")
+
+    await dispatchCommand("skill_set_enabled", { id: "sk1", enabled: false })
+    expect((await getDb().skills.get("sk1"))?.status).toBe("disabled")
+  })
+
+  it("requires an id and a real boolean", async () => {
+    await expect(dispatchCommand("skill_set_enabled", { enabled: true })).rejects.toThrow(
+      /skill_set_enabled.id is required/
+    )
+    await expect(
+      dispatchCommand("skill_set_enabled", { id: "sk1", enabled: "yes" })
+    ).rejects.toThrow(/skill_set_enabled.enabled must be boolean/)
+  })
+})
+
+describe("dispatchCommand: adapter_update_policy", () => {
+  const quietHours = { from: "22:00", to: "07:00", tz: "Asia/Shanghai" }
+
+  beforeEach(async () => {
+    await getDb().adapterInstances.put({
+      id: "ad1",
+      defaultMode: "manual",
+      muted: false,
+      quietHours,
+    } as never)
+  })
+
+  it("applies only the fields the caller actually sent", async () => {
+    await dispatchCommand("adapter_update_policy", { id: "ad1", muted: true })
+    const row = await getDb().adapterInstances.get("ad1")
+    expect(row?.muted).toBe(true)
+    // Untouched fields survive — this is a patch, not a replace.
+    expect(row?.defaultMode).toBe("manual")
+    expect(row?.quietHours).toEqual(quietHours)
+  })
+
+  it("accepts the three known modes and ignores anything else", async () => {
+    await dispatchCommand("adapter_update_policy", { id: "ad1", defaultMode: "auto" })
+    expect((await getDb().adapterInstances.get("ad1"))?.defaultMode).toBe("auto")
+
+    await dispatchCommand("adapter_update_policy", { id: "ad1", defaultMode: "chaos" })
+    expect((await getDb().adapterInstances.get("ad1"))?.defaultMode).toBe("auto")
+  })
+
+  it("replaces a complete quiet window and ignores a partial one", async () => {
+    const next = { from: "23:00", to: "06:00", tz: "UTC" }
+    await dispatchCommand("adapter_update_policy", { id: "ad1", quietHours: next })
+    expect((await getDb().adapterInstances.get("ad1"))?.quietHours).toEqual(next)
+
+    await dispatchCommand("adapter_update_policy", { id: "ad1", quietHours: { from: "01:00" } })
+    expect((await getDb().adapterInstances.get("ad1"))?.quietHours).toEqual(next)
+  })
+
+  it("unsets the quiet window on an explicit null", async () => {
+    // Dexie's UpdateSpec rejects `null` for a non-nullable field, so the handler
+    // hand-rolls the unset through `modify` — the distinction between "leave
+    // unchanged" (absent) and "clear" (null) is the whole point of this arm.
+    await dispatchCommand("adapter_update_policy", { id: "ad1", quietHours: null })
+    const row = await getDb().adapterInstances.get("ad1")
+    expect(row).toBeDefined()
+    expect(row?.quietHours).toBeUndefined()
+  })
+
+  it("requires an id", async () => {
+    await expect(dispatchCommand("adapter_update_policy", { muted: true })).rejects.toThrow(
+      /adapter_update_policy.id is required/
+    )
+  })
+})
+
+describe("dispatchCommand: app_settings_update", () => {
+  it("persists the patch and answers with the merged settings", async () => {
+    const res = (await dispatchCommand("app_settings_update", {
+      patch: { theme: "dark" },
+    })) as { settings: { theme?: string } }
+    expect(res.settings.theme).toBe("dark")
+  })
+
+  it("rejects a missing or non-object patch", async () => {
+    await expect(dispatchCommand("app_settings_update", {})).rejects.toThrow(
+      /app_settings_update.patch is required/
+    )
+    await expect(dispatchCommand("app_settings_update", { patch: "dark" })).rejects.toThrow(
+      /app_settings_update.patch is required/
+    )
+  })
+})
+
+describe("dispatchCommand: twin_profile_get", () => {
+  it("returns the stored profile, which is keyed by the twin id (1:1)", async () => {
+    await getDb().twinProfile.put({ id: "t1", twinId: "t1", entities: [] } as never)
+    await expect(dispatchCommand("twin_profile_get", { twinId: "t1" })).resolves.toEqual({
+      profile: { id: "t1", twinId: "t1", entities: [] },
+    })
+  })
+
+  it("normalizes an absent profile to null rather than undefined", async () => {
+    await expect(dispatchCommand("twin_profile_get", { twinId: "missing" })).resolves.toEqual({
+      profile: null,
+    })
+  })
+
+  it("requires a twinId", async () => {
+    await expect(dispatchCommand("twin_profile_get", {})).rejects.toThrow(
+      /twin_profile_get.twinId is required/
+    )
   })
 })
 

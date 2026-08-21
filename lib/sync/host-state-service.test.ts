@@ -15,7 +15,6 @@ import { activateAccountDatabase, __resetDbForTesting, getDb } from "@/lib/db/sc
 import {
   createAgentRpcHostStateDispatcher,
   createHostStateService,
-  hostStateStatusAllowsWrites,
   installHostStateSync,
 } from "./host-state-service"
 import type { Transport } from "@/lib/tauri/transport-types"
@@ -69,7 +68,6 @@ const writableStatus = {
   hostId,
   hostGeneration: 4,
   hostSeq: 8,
-  migrationStage: "hoststate-authoritative" as const,
   leaseExpiresAt: 10_000,
   pendingDispatch: 0,
   pendingBroadcast: 0,
@@ -111,7 +109,7 @@ describe("HostStateService", () => {
       createdAt: 1,
       updatedAt: 1,
     })
-  })
+  }, 30_000)
 
   afterEach(async () => {
     await getDb().delete()
@@ -130,7 +128,6 @@ describe("HostStateService", () => {
     await service.start({
       now: 0,
       heartbeat: false,
-      migrationStage: "hoststate-authoritative",
     })
 
     const response = await service.submit({
@@ -183,7 +180,6 @@ describe("HostStateService", () => {
     await service.start({
       now: 0,
       heartbeat: false,
-      migrationStage: "hoststate-authoritative",
     })
     const queued = action({
       kind: "message.enqueue",
@@ -217,7 +213,6 @@ describe("HostStateService", () => {
     await service.start({
       now: 0,
       heartbeat: false,
-      migrationStage: "hoststate-authoritative",
     })
     const source = action({ kind: "draft.replace", text: "recover me", attachments: [] })
     await commitHostStateAction({
@@ -265,7 +260,6 @@ describe("HostStateService", () => {
     await service.start({
       now: 0,
       heartbeat: false,
-      migrationStage: "hoststate-authoritative",
     })
 
     await expect(
@@ -291,7 +285,6 @@ describe("HostStateService", () => {
     await service.start({
       now: 0,
       heartbeat: false,
-      migrationStage: "hoststate-authoritative",
     })
     const turns = [
       { turnId: "turn-user", role: "user" as const, text: "Question" },
@@ -349,7 +342,6 @@ describe("HostStateService", () => {
     await service.start({
       now: 0,
       heartbeat: false,
-      migrationStage: "hoststate-authoritative",
     })
     const envelope: AgentEventEnvelope = {
       schemaVersion: 1,
@@ -661,17 +653,6 @@ describe("HostStateService", () => {
     })
     sync.stop()
   })
-
-  it("enables client writes only after the Host reaches an authoritative stage", () => {
-    expect(hostStateStatusAllowsWrites(writableStatus)).toBe(true)
-    expect(
-      hostStateStatusAllowsWrites({ ...writableStatus, migrationStage: "legacy-projection-only" })
-    ).toBe(true)
-    expect(
-      hostStateStatusAllowsWrites({ ...writableStatus, migrationStage: "legacy-authoritative" })
-    ).toBe(false)
-    expect(hostStateStatusAllowsWrites({ ...writableStatus, migrationStage: "shadow" })).toBe(false)
-  })
 })
 
 describe("HostState Agent RPC dispatcher", () => {
@@ -695,7 +676,7 @@ describe("HostState Agent RPC dispatcher", () => {
     stopLeaseHeartbeatMock.mockClear()
     buildSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet" })
     sendPromptMock.mockReset().mockResolvedValue(undefined)
-  })
+  }, 30_000)
 
   afterEach(async () => {
     await getDb().delete()

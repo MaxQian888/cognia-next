@@ -1,20 +1,40 @@
 "use client"
 
 /**
- * Desktop-side counterpart of the Rust
- * `companion::desktop_writes_bridge` (Wave 2).
+ * Host-side counterpart of the Rust `companion::desktop_writes_bridge`.
  *
- * The phone hits one of 8 mutating RPCs (`character_upsert`, `character_delete`,
- * `character_bind_twin`, `skill_set_enabled`, `plugin_set_enabled`,
- * `adapter_update_policy`, `app_settings_update`, `twin_profile_get`)
- * against the desktop's Rust HTTP server. The Rust handler emits a
- * unified `companion://desktop-write-request` event with `{ command,
- * payload }`. This module dispatches by command name, runs the matching
- * Dexie operation, and ships the result back via the
- * `companion_desktop_write_response` Tauri command.
+ * A remote client (phone, web companion, or a desktop driving another host)
+ * calls `_rpc/<command>` on this host's Rust HTTP server. Rust round-trips the
+ * call through one unified `companion://desktop-write-request` event carrying
+ * `{ requestId, command, payload }`; this module dispatches by command name,
+ * runs the matching Dexie / store / runtime operation, and ships the result
+ * back via the `companion_desktop_write_response` Tauri command.
+ *
+ * Installed by BOTH hosts, so one implementation serves both:
+ *   - desktop renderer — `components/providers/desktop-message-source-provider.tsx`
+ *   - headless brain   — `lib/headless/runtimes/desktop-message-source.ts`
+ *
+ * The command surface is not a fixed list. `dispatchCommand` owns the arms
+ * enumerated in its own switch and delegates three families wholesale:
+ * `perf_*` (`lib/perf/host-dispatch.ts`), `scheduled_task_*`
+ * (`lib/scheduler/scheduled-task-rpc.ts`), and `workflow_api_*`
+ * (`lib/workflow/api/workflow-api-service.ts`).
+ *
+ * The authoritative routing table lives on the Rust side — a command only
+ * reaches here if one of these dispatches it to the writes bridge:
+ *   - `src-tauri/src/companion_api/rpc/data_sync.rs` (the bulk of the surface)
+ *   - `src-tauri/src/companion_api/rpc/service_plane.rs` (`app_settings_update`)
+ *   - `src-tauri/src/companion_api/workflow_api.rs` (`workflow_api_*`)
+ * An arm with no counterpart there is unreachable; a Rust route with no arm
+ * here fails with `unknown desktop-write command`.
  *
  * Modeled after `lib/companion/desktop-message-source.ts` — same install
  * guard, same bridge-injection pattern for tests.
+ *
+ * Tests are split by concern, not by release:
+ *   - `desktop-write-source.test.ts` — real Dexie (`fake-indexeddb`), behavior
+ *   - `desktop-write-source.dispatch-contract.test.ts` — mocked backends, routing
+ *   - `desktop-write-source.workflow-api.test.ts` — the `workflow_api_*` delegation
  */
 
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
@@ -306,6 +326,13 @@ export async function dispatchCommand(
       return connectorRejectDraft(payload)
     case "workflow_trigger_manual":
       return workflowTriggerManual(payload)
+    // Durable workflow approval gates (ADR-0061 P2). Host-split by design:
+    // a Tauri host answers these natively from the Rust waitpoint mirror the
+    // renderer writes through, so a paired device can decide while the WebView
+    // is asleep. A headless brain has no such mirror — nothing there can call
+    // the `workflow_waitpoint_create` Tauri command — so Rust diverts both
+    // commands here, where this host's Dexie is the only authority. See the
+    // guard in `src-tauri/src/companion_api/rpc/data_sync.rs`.
     case "workflow_approval_list":
       return workflowApprovalList()
     case "workflow_approval_respond":
@@ -1274,6 +1301,10 @@ async function workflowTriggerManual(payload: Record<string, unknown>): Promise<
 }
 
 /** Read-only projection of the pending workflow-approval registry (ADR-0061). */
+/** List pending approval + risk_gate waitpoints, oldest first. Reached only on
+ *  a headless host (a Tauri host answers natively) — see the dispatch arm. The
+ *  returned rows must keep satisfying the closed `workflow_approval_list`
+ *  output contract in `crates/cognia-cli/assets/host-command-catalog.json`. */
 async function workflowApprovalList(): Promise<{ approvals: unknown[] }> {
   const { listPendingApprovals } = await import("@/lib/workflow/runtime/approval-registry")
   return { approvals: await listPendingApprovals() }
@@ -1281,7 +1312,8 @@ async function workflowApprovalList(): Promise<{ approvals: unknown[] }> {
 
 /** Resolve a pending `action.approval.request` gate from a paired device.
  *  Control-gated in Rust; the responder identity is the JWT-verified
- *  `callerDeviceId` injected by the RPC layer (spoof-proof). */
+ *  `callerDeviceId` injected by the RPC layer (spoof-proof). Reached only on a
+ *  headless host — see the dispatch arm. */
 async function workflowApprovalRespond(
   payload: Record<string, unknown>
 ): Promise<{ ok: boolean; reason?: string }> {

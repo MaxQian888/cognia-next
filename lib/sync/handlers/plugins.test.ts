@@ -23,7 +23,11 @@ describe("syncPlugins", () => {
     const tx = makeTransport()
     const out = await syncPlugins(tx, { since: 0 })
 
-    expect(tx.call).toHaveBeenCalledWith("sync_pull", { table: "plugins", since: 0 })
+    expect(tx.call).toHaveBeenCalledWith("sync_pull", {
+      table: "plugins",
+      since: 0,
+      content_protocol_version: 1,
+    })
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.result.nextSince).toBe(9)

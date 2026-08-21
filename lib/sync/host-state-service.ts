@@ -2,7 +2,6 @@ import {
   HOST_STATE_PROTOCOL_VERSION,
   canonicalHostStateJson,
   hostStateDigest,
-  hostStateMigrationStageAllowsWrites,
   isHostStateActionV1,
   isHostStateAppliedActionV1,
   isHostStateSnapshotV1,
@@ -42,10 +41,8 @@ import {
   markHostStateDispatch,
   markHostStateSummary,
   renewHostStateLease,
-  setHostStateMigrationStage,
   validateHostStateBusinessAction,
   type HostStateActionRow,
-  type HostStateMigrationStage,
 } from "./host-state-store"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 
@@ -239,11 +236,7 @@ export interface HostStateServiceOptions {
 }
 
 export interface HostStateService {
-  start(options?: {
-    now?: number
-    heartbeat?: boolean
-    migrationStage?: HostStateMigrationStage
-  }): Promise<HostStateStatusV1>
+  start(options?: { now?: number; heartbeat?: boolean }): Promise<HostStateStatusV1>
   stop(): Promise<void>
   snapshot(request: HostStateSnapshotRequestV1): Promise<HostStateSnapshotV1>
   submit(request: HostStateSubmitRequestV1): Promise<HostStateSubmitResponseV1>
@@ -256,10 +249,6 @@ export interface InstalledHostStateSync {
   status: HostStateStatusV1
   resync(): Promise<void>
   stop(): void
-}
-
-export function hostStateStatusAllowsWrites(status: HostStateStatusV1): boolean {
-  return hostStateMigrationStageAllowsWrites(status.migrationStage)
 }
 
 /**
@@ -638,9 +627,6 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         now: startOptions.now ?? now(),
       })
       generation = acquired.hostGeneration
-      if (startOptions.migrationStage) {
-        await setHostStateMigrationStage(startOptions.migrationStage, startOptions.now ?? now())
-      }
       if (startOptions.heartbeat !== false && !heartbeat) {
         heartbeat = setInterval(() => {
           if (generation === null) return
@@ -711,7 +697,6 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         hostId: meta.hostId,
         hostGeneration: meta.hostGeneration,
         hostSeq: meta.hostSeq,
-        migrationStage: meta.migrationStage,
         leaseExpiresAt: meta.leaseExpiresAt,
         pendingDispatch: pending.filter(
           (row) => row.dispatchState === "pending" || row.dispatchState === "failed"
@@ -978,22 +963,29 @@ function mutationForAction(
       return { mutation: { kind: "session.status-changed", status: "queued", revision } }
     case "turn.abort":
       return { mutation: { kind: "turn.finished", status: "aborted", revision } }
-    case "approval.respond":
-      if (action.action.kind !== "approval.respond") return {}
-      return state.pendingApprovals.some((item) => item.requestId === action.action.requestId)
-        ? { mutation: { kind: "approval.resolved", requestId: action.action.requestId, revision } }
+    // Bound to a local before the `.some(...)` callback: narrowing does not
+    // survive into a function expression, so `action.action.requestId` read as
+    // the un-narrowed union inside it.
+    case "approval.respond": {
+      const intent = action.action
+      if (intent.kind !== "approval.respond") return {}
+      return state.pendingApprovals.some((item) => item.requestId === intent.requestId)
+        ? { mutation: { kind: "approval.resolved", requestId: intent.requestId, revision } }
         : alreadyResolved(state.revision)
-    case "elicitation.respond":
-      if (action.action.kind !== "elicitation.respond") return {}
-      return state.pendingElicitations.some((item) => item.requestId === action.action.requestId)
+    }
+    case "elicitation.respond": {
+      const intent = action.action
+      if (intent.kind !== "elicitation.respond") return {}
+      return state.pendingElicitations.some((item) => item.requestId === intent.requestId)
         ? {
             mutation: {
               kind: "elicitation.resolved",
-              requestId: action.action.requestId,
+              requestId: intent.requestId,
               revision,
             },
           }
         : alreadyResolved(state.revision)
+    }
     case "transcript.edit":
     case "transcript.truncate":
       return {

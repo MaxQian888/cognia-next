@@ -23,7 +23,7 @@ function memory(): Memory {
     pinned: true,
     provenance: "user",
     confidence: 0.8,
-    sensitivity: "private",
+    sensitivity: "sensitive",
   }
 }
 

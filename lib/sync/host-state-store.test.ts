@@ -9,7 +9,6 @@ import {
   commitHostStateAction,
   getHostStateSnapshot,
   renewHostStateLease,
-  setHostStateMigrationStage,
 } from "./host-state-store"
 
 const scope = { accountId: "acct-host-state", targetId: "desktop-a", hostId: "host-opaque-a" }
@@ -36,7 +35,6 @@ function draftAction(overrides: Partial<HostStateActionV1> = {}): HostStateActio
 
 async function acquireWritableLease(): Promise<Awaited<ReturnType<typeof acquireHostStateLease>>> {
   const lease = await acquireHostStateLease({ hostId: scope.hostId, ownerId: "brain-a", now: 0 })
-  await setHostStateMigrationStage("hoststate-authoritative", 0)
   return lease
 }
 
@@ -53,7 +51,7 @@ describe("HostState durable store", () => {
       createdAt: 1,
       updatedAt: 1,
     })
-  })
+  }, 30_000)
 
   afterEach(async () => {
     await getDb().delete()
@@ -233,22 +231,24 @@ describe("HostState durable store", () => {
     await expect(getDb().hostStateActions.count()).resolves.toBe(0)
   })
 
-  it("rejects a new client action while the target is still shadowing legacy writes", async () => {
+  it("commits a client action on the strength of the lease alone", async () => {
+    // This used to assert the opposite. A six-stage `migrationStage` ladder sat
+    // in front of every write and nothing in production ever advanced it past
+    // `legacy-authoritative`, so HostState could never accept an action at all.
+    // The lease plus the host generation is the real ownership test.
     await acquireHostStateLease({ hostId: scope.hostId, ownerId: "brain-a", now: 0 })
 
-    await expect(
-      commitHostStateAction({
-        action: draftAction(),
-        mutation: {
-          kind: "draft.replaced",
-          text: "must not commit",
-          attachments: [],
-          draftRevision: 1,
-          revision: 1,
-        },
-        now: 1,
-      })
-    ).rejects.toThrow("host_state_not_authoritative")
-    await expect(getDb().hostStateActions.count()).resolves.toBe(0)
+    await commitHostStateAction({
+      action: draftAction(),
+      mutation: {
+        kind: "draft.replaced",
+        text: "commits",
+        attachments: [],
+        draftRevision: 1,
+        revision: 1,
+      },
+      now: 1,
+    })
+    await expect(getDb().hostStateActions.count()).resolves.toBe(1)
   })
 })
