@@ -40,6 +40,9 @@ import { deriveProjectKey, isValidProjectKey } from "@/lib/issues/identifier"
 import type { IssueActor, IssueProject, IssueStatus } from "@/types/issues"
 import { AssigneePicker } from "./assignee-picker"
 
+/** Sentinel for the picker's "new container" row; `Select` needs a value. */
+const NEW_PROJECT_VALUE = "__new__"
+
 export interface CreateIssueDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -61,7 +64,17 @@ export function CreateIssueDialog({
 }: CreateIssueDialogProps) {
   const t = useTranslations("issues")
 
-  const needsProject = projects.length === 0
+  /**
+   * "Create a container as part of this issue" mode.
+   *
+   * It used to be exactly `projects.length === 0`, which — combined with
+   * `/projects` having no create button and `deleteIssueProject` having no
+   * caller — meant a workspace got ONE container ever: the count could never
+   * fall back to zero to re-open the path. It is now available at any time,
+   * from the "new container" row in the container picker.
+   */
+  const [creatingProject, setCreatingProject] = useState(false)
+  const needsProject = projects.length === 0 || creatingProject
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [assignee, setAssignee] = useState<IssueActor | null>(null)
@@ -77,9 +90,11 @@ export function CreateIssueDialog({
   // synchronously are better expressed without one: the default container is
   // derived below, and `submit` already clears the error before it writes.
   useEffect(() => {
-    if (!open) return
+    // Gated on the branch that uses them: the keys are only read to derive and
+    // validate a NEW container's key, and the dialog usually just picks one.
+    if (!open || !needsProject) return
     void listTakenProjectKeys().then(setTakenKeys)
-  }, [open])
+  }, [open, needsProject])
 
   /** Falls back to the first container until the user picks another. */
   const selectedProjectId = issueProjectId || (projects[0]?.id ?? "")
@@ -150,6 +165,17 @@ export function CreateIssueDialog({
         <div className="flex flex-col gap-4">
           {needsProject ? (
             <>
+              {projects.length > 0 ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-mb-2 w-fit px-0 text-xs"
+                  onClick={() => setCreatingProject(false)}
+                  data-testid="create-issue-project-cancel-new"
+                >
+                  {t("create.pickExistingProject")}
+                </Button>
+              ) : null}
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="issue-project-name">{t("projects.nameLabel")}</Label>
                 <Input
@@ -185,7 +211,16 @@ export function CreateIssueDialog({
           ) : (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="issue-project">{t("create.projectLabel")}</Label>
-              <Select value={selectedProjectId} onValueChange={setIssueProjectId}>
+              <Select
+                value={selectedProjectId}
+                onValueChange={(next) => {
+                  if (next === NEW_PROJECT_VALUE) {
+                    setCreatingProject(true)
+                    return
+                  }
+                  setIssueProjectId(next)
+                }}
+              >
                 <SelectTrigger id="issue-project" data-testid="create-issue-project">
                   <SelectValue />
                 </SelectTrigger>
@@ -195,6 +230,9 @@ export function CreateIssueDialog({
                       {project.name} ({project.key})
                     </SelectItem>
                   ))}
+                  <SelectItem value={NEW_PROJECT_VALUE} data-testid="create-issue-project-new">
+                    {t("create.newProject")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

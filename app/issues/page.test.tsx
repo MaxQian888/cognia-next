@@ -69,4 +69,15 @@ describe("IssuesPage", () => {
     render(<IssuesPage />)
     expect(screen.getByTestId("issue-console-stub")).toBeInTheDocument()
   })
+
+  it("forwards the ?project= deep link, which is what /projects links into", () => {
+    search = new URLSearchParams("project=iprj_9")
+    render(<IssuesPage />)
+    expect(consoleProps).toMatchObject({ initialProjectId: "iprj_9" })
+  })
+
+  it("passes undefined when there is no container deep link", () => {
+    render(<IssuesPage />)
+    expect(consoleProps).toMatchObject({ initialProjectId: undefined })
+  })
 })

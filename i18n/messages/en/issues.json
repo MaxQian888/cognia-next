@@ -149,7 +149,9 @@
     "projectLabel": "Project",
     "submit": "Create issue",
     "cancel": "Cancel",
-    "noProject": "Create a project first — issues need somewhere to live."
+    "noProject": "Create a project first — issues need somewhere to live.",
+    "newProject": "New container…",
+    "pickExistingProject": "← Pick an existing container"
   },
   "projects": {
     "title": "Projects",
@@ -194,7 +196,15 @@
     "repoInvalid": "Use the owner/repository form.",
     "repoTaken": "That repository is already bound to a project.",
     "noRootsAvailable": "No unbound directories are mounted on this workspace.",
-    "noResources": "No resources bound yet."
+    "noResources": "No resources bound yet.",
+    "issueCount": "Issues",
+    "createHint": "A container groups issues and gives them their identifier prefix.",
+    "keyImmutable": "Cannot be changed",
+    "deleteTitle": "Delete {name}?",
+    "deleteBody": "{count, plural, =0 {The container has no issues.} one {Its # issue goes too, with its activity trail and run history.} other {Its # issues go too, with their activity trails and run histories.}} Identifiers starting {key}- will not be reused. This cannot be undone.",
+    "deleted": "Deleted {name}",
+    "openIssues": "View these issues",
+    "icon": "Icon"
   },
   "workspace": {
     "title": "Workspace",

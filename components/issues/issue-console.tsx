@@ -61,7 +61,7 @@ import {
 } from "@/lib/issues/run/running"
 import { getIssueSourceRegistry } from "@/lib/issues/sources/registry"
 import { runWorkspaceGithubSync } from "@/lib/issues/sync-runner"
-import { toggleFilterValue } from "@/lib/issues/filter-chips"
+import { setSoleFilterValue, toggleFilterValue } from "@/lib/issues/filter-chips"
 import {
   applyIssueSort,
   applyViewScope,
@@ -99,9 +99,14 @@ const INITIAL_VIEWER: IssueViewerContext = { selfKey: SELF_ACTOR_KEY, agentKeys:
 export interface IssueConsoleProps {
   /** Deep-linked issue (`/issues?id=…`), since a static export has no `[id]`. */
   initialSelectedId?: string
+  /**
+   * Deep-linked container filter (`/issues?project=…`), which is what the
+   * projects console's "view these issues" produces.
+   */
+  initialProjectId?: string
 }
 
-export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
+export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConsoleProps) {
   const t = useTranslations("issues")
   const projectId = useProjectStore((s) => s.activeProjectId)
 
@@ -119,6 +124,29 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
 
   const view = findIssueView(viewId) ?? BUILTIN_ISSUE_VIEWS[0]
   const prefs = useMemo(() => resolveIssueViewPreferences(view, overrides), [view, overrides])
+
+  /**
+   * Apply `?project=` once, then never again.
+   *
+   * It writes to the persisted view store rather than to React state, so it
+   * has to be a one-shot: re-applying on every render would make the container
+   * filter impossible to take off. The ref is written inside the effect, not
+   * during render.
+   */
+  const deepLinkApplied = useRef(false)
+  useEffect(() => {
+    if (deepLinkApplied.current || !initialProjectId) return
+    deepLinkApplied.current = true
+    const current = useIssueViewStore.getState()
+    const active = resolveIssueViewPreferences(
+      findIssueView(current.viewId) ?? BUILTIN_ISSUE_VIEWS[0],
+      current.overrides[current.viewId]
+    )
+    current.setFilter(
+      current.viewId,
+      setSoleFilterValue(active.filter, "issueProjectIds", initialProjectId)
+    )
+  }, [initialProjectId])
 
   const [selectedId, setSelectedId] = useState<string | undefined>(
     initialSelectedId ? `local:${initialSelectedId}` : undefined
