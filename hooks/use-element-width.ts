@@ -1,10 +1,8 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
+import { useEffect, useRef, useState, type RefObject } from "react"
 
-// `useLayoutEffect` warns during SSR; the composer is client-only but the
-// static export still pre-renders, so fall back to `useEffect` off the DOM.
-const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 
 interface Binding {
   el: HTMLElement

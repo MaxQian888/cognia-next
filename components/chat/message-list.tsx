@@ -45,6 +45,8 @@ import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { useChatAutoPlayTTS } from "@/hooks/media/use-chat-auto-play-tts"
 import { useCompactionToast } from "@/hooks/chat/use-compaction-toast"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
+import { useStickToBottom } from "@/hooks/chat/use-stick-to-bottom"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { densitySurfaceProps } from "@/lib/appearance/density-applier"
 import type { MessageDisplayPreferences } from "@/types/appearance"
 import type { Character } from "@cognia/agent-config-types"
@@ -149,7 +151,6 @@ export function MessageList({
   // becomes persistent chrome and needs no dismissal state.
   const showLongPressHint = isMobile && messages.length > 0 && messages.length <= 2
   const [actionMessage, setActionMessage] = useState<UIMessage | null>(null)
-  const [isAtBottom, setIsAtBottom] = useState(true)
   const messageDisplay = useMessageDisplay(messageDisplayOverride)
   // ADR-0127: the message list is the `chat` density surface (see
   // `densitySurfaceProps`); the reading column and row rhythm read the
@@ -180,6 +181,23 @@ export function MessageList({
   const autoScrollOnStream = useSettingsStore(
     (s) => s.settings?.composerBehavior?.autoScrollOnStream
   )
+
+  // ADR-0138 — the single owner of this list's `scrollTop`. Every pin runs in
+  // the layout phase (or from a ResizeObserver, which is already pre-paint), so
+  // a growth and its scroll correction land in the same frame instead of the
+  // browser painting the jump and the next frame undoing it.
+  const {
+    atBottom: isAtBottom,
+    handleScroll: trackScrollPosition,
+    pinNow,
+    resetToBottom,
+  } = useStickToBottom({
+    scrollRef: scrollParentRef,
+    contentRef,
+    enabled: autoScrollOnStream !== false,
+    active: status === "streaming" || status === "awaiting_approval",
+    pinKey: messages,
+  })
 
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -285,44 +303,31 @@ export function MessageList({
     measureElement: (el) => Math.round(el?.getBoundingClientRect().height ?? 0),
   })
 
-  // Re-measure every row when the streaming row finalises. The streaming→idle
-  // setStatus is wrapped in startTransition by the chat hook (see
-  // use-claude-chat's turn seal), so this re-measure lands at transition
-  // priority.
-  useEffect(() => {
+  // Re-measure every row when the turn finalises. The streaming→idle setStatus
+  // is wrapped in startTransition by the chat hook (see use-claude-chat's turn
+  // seal), so this re-measure lands at transition priority.
+  //
+  // A layout effect, not `useEffect` + rAF: the re-measure changes the total
+  // size, and a reader pinned at the foot must not see that shift painted
+  // before it is corrected. `pinNow` no-ops when the reader scrolled away or
+  // auto-scroll is off; the content observer inside the hook catches whatever
+  // height the re-measure settles on a frame later.
+  useIsomorphicLayoutEffect(() => {
     if (status !== "idle") return
     rowVirtualizer.measure()
-    // Reconcile the just-finalised streaming row's estimate→actual height. That
-    // row was sized by `estimateSize` alone (it carries no measureElement ref),
-    // so if the projection undershot the real height, re-measuring here shifts
-    // the total size and a user pinned at the bottom is left drifted up. Re-pin
-    // on the next frame — after the measure lands — when still stuck to bottom.
-    // Skips when the user scrolled away or auto-scroll is off; setting scrollTop
-    // never resizes content, so this can't loop.
-    const { enabled, atBottom } = stickRef.current
-    if (!enabled || !atBottom) return
-    const raf = requestAnimationFrame(() => {
-      const el = scrollParentRef.current
-      if (el) el.scrollTop = el.scrollHeight
-    })
-    return () => cancelAnimationFrame(raf)
-  }, [status, rowVirtualizer])
+    pinNow()
+  }, [status, rowVirtualizer, pinNow])
 
   // Switching sessions invalidates every cached row height — left over
   // measurements from the prior session leave gaps / overlaps in the
   // virtual list. It also invalidates the scroll state: a freshly opened
   // conversation starts at its latest message, and carrying the previous
-  // session's `isAtBottom=false` over would disarm stick-to-bottom for the
+  // session's `atBottom=false` over would disarm stick-to-bottom for the
   // whole new thread (short lists never emit a scroll event to correct it).
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     rowVirtualizer.measure()
-    const raf = requestAnimationFrame(() => {
-      const el = scrollParentRef.current
-      if (el) el.scrollTop = el.scrollHeight
-      setIsAtBottom(true)
-    })
-    return () => cancelAnimationFrame(raf)
-  }, [sessionId, rowVirtualizer])
+    resetToBottom()
+  }, [sessionId, rowVirtualizer, resetToBottom])
 
   // Layout and disclosure changes can alter every row's geometry at once.
   // Drop cached measurements without moving a reader who is inspecting older
@@ -334,67 +339,6 @@ export function MessageList({
 
   const virtualItems = rowVirtualizer.getVirtualItems()
   const totalSize = rowVirtualizer.getTotalSize()
-
-  // Stick-to-bottom: auto-scroll when streaming and user is at the bottom.
-  // Gated by the composer-behavior toggle (defaults ON via `!== false`).
-  useEffect(() => {
-    if (autoScrollOnStream === false) return
-    if ((status === "streaming" || status === "awaiting_approval") && isAtBottom) {
-      const el = scrollParentRef.current
-      if (el) el.scrollTop = el.scrollHeight
-    }
-  }, [messages, status, isAtBottom, autoScrollOnStream])
-
-  // Latest stick condition, mirrored into a ref so the ResizeObserver below
-  // (registered once) can read current values without re-subscribing per frame.
-  const stickRef = useRef({ atBottom: true, active: false, enabled: true })
-  stickRef.current = {
-    atBottom: isAtBottom,
-    active: status === "streaming" || status === "awaiting_approval",
-    enabled: autoScrollOnStream !== false,
-  }
-
-  // Content-resize follow. The streaming text renders through
-  // `useDeferredValue` (see streaming-text-part) and async syntax highlighting,
-  // so the visible DOM height grows one or more frames AFTER the `messages`
-  // state changes — the effect above pins based on the pre-growth height and
-  // never re-fires for that deferred growth, letting the view drift up off the
-  // bottom. Observing the content box re-pins on the actual height change,
-  // regardless of when React commits it. Setting scrollTop never resizes
-  // content, so this can't loop.
-  useEffect(() => {
-    const content = contentRef.current
-    if (!content) return
-    const ro = new ResizeObserver(() => {
-      const { enabled, active, atBottom } = stickRef.current
-      if (!enabled || !active || !atBottom) return
-      const el = scrollParentRef.current
-      if (el) el.scrollTop = el.scrollHeight
-    })
-    ro.observe(content)
-    return () => ro.disconnect()
-  }, [])
-
-  // Viewport-resize follow. The observer above watches the *content* box (grows
-  // when messages render); this one watches the *scroll viewport* box, which
-  // changes when the container itself is resized — dragging the artifact dock
-  // divider, toggling it with Cmd/Ctrl+J, or resizing the window. Narrowing the
-  // viewport rewraps text taller, so a user parked at the bottom drifts up
-  // unless we re-pin. Unlike the content observer this drops the `active`
-  // (streaming) gate: staying pinned across a layout change is a scroll-
-  // stability concern, not a streaming one. Setting scrollTop never resizes the
-  // viewport, so this can't loop.
-  useEffect(() => {
-    const el = scrollParentRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => {
-      const { enabled, atBottom } = stickRef.current
-      if (!enabled || !atBottom) return
-      el.scrollTop = el.scrollHeight
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
 
   // ── The one floating offer at the foot of the pane ──────────────────────
   const {
@@ -410,15 +354,13 @@ export function MessageList({
   const programmaticScrollUntilRef = useRef(0)
 
   const handleScroll = useCallback(() => {
-    const el = scrollParentRef.current
-    if (!el) return
-    setIsAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 32)
+    trackScrollPosition()
     // Scrolling by hand IS choosing a new place to be, which retires the offer
     // to go back to the old one. Guarded inside the hook so this costs no
     // re-render on the frames where nothing is on offer.
     if (Date.now() < programmaticScrollUntilRef.current) return
     forgetReturn()
-  }, [forgetReturn])
+  }, [forgetReturn, trackScrollPosition])
 
   // New replies that landed while the user was reading further up. Reset the
   // moment they return to the bottom — they have seen them.
@@ -546,16 +488,6 @@ export function MessageList({
     }
   }, [ownsShortcuts])
 
-  // Re-pin to the bottom when the thinking indicator grows (skeleton / tips
-  // reveal or tip rotation). The stick-to-bottom effect above only reacts to
-  // `messages`/`status`, so it can't see this row's internal timer growth.
-  const pinToBottom = useCallback(() => {
-    if (autoScrollOnStream === false) return
-    if (!isAtBottom) return
-    const el = scrollParentRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [autoScrollOnStream, isAtBottom])
-
   // Shared row body for both the virtualized and the document-flow branch so
   // the MessageRenderer props (and the mobile LongPress wrapper) stay
   // identical regardless of which path renders the row.
@@ -670,7 +602,7 @@ export function MessageList({
                           >
                             <ChatThinkingIndicator
                               directCharacter={directCharacter}
-                              onPhaseChange={pinToBottom}
+                              onPhaseChange={pinNow}
                               compact={thinking === "compact"}
                             />
                           </div>
@@ -751,7 +683,7 @@ export function MessageList({
                       <div key="thinking" className="px-3 sm:px-5">
                         <ChatThinkingIndicator
                           directCharacter={directCharacter}
-                          onPhaseChange={pinToBottom}
+                          onPhaseChange={pinNow}
                           compact={thinking === "compact"}
                         />
                       </div>

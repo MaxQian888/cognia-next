@@ -1,10 +1,8 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useState } from "react"
+import { useState } from "react"
 
-// `useLayoutEffect` warns during SSR; consumers are client-only but the static
-// export still pre-renders, so fall back to `useEffect` off the DOM.
-const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 
 /** Which side of the box to track. */
 export type ElementAxis = "width" | "height"
