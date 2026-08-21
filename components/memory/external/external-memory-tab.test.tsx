@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import type { ExternalMemoryFile } from "@/lib/memory/external/types"
 import type { UseExternalMemory } from "@/hooks/memory/use-external-memory"
 
@@ -57,7 +57,7 @@ describe("ExternalMemoryTab", () => {
   it("renders an empty state when no files are found", () => {
     mockHook.mockReturnValue(hookValue({ files: [] }))
     render(<ExternalMemoryTab />)
-    expect(screen.getByText("empty.title")).toBeTruthy()
+    expect(screen.getByText("No external agent memory found")).toBeTruthy()
   })
 
   it("groups files by agent and counts present files", () => {
@@ -76,9 +76,38 @@ describe("ExternalMemoryTab", () => {
     )
     render(<ExternalMemoryTab />)
     expect(screen.getAllByTestId("external-memory-row")).toHaveLength(2)
-    expect(screen.getByRole("heading", { name: "agents.claude-code" })).toBeTruthy()
-    expect(screen.getByRole("heading", { name: "agents.codex" })).toBeTruthy()
-    expect(within(screen.getByTestId("external-stat-total")).getByText("2")).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "Claude Code" })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "Codex" })).toBeTruthy()
+    expect(screen.getByTestId("external-stat-total").textContent).toContain("2")
+  })
+
+  // The tab used to group by a local `["claude-code", "codex"]` list while
+  // discovery returned four agents, so OpenCode and Pi files were read off disk
+  // and then dropped before render.
+  it("renders every agent discovery can return, not just the first two", () => {
+    mockHook.mockReturnValue(
+      hookValue({
+        files: [
+          file({ absPath: "/Users/x/.claude/CLAUDE.md", agent: "claude-code" }),
+          file({
+            absPath: "/Users/x/.config/opencode/AGENTS.md",
+            agent: "opencode",
+            scope: "global",
+            label: "~/.config/opencode/AGENTS.md",
+          }),
+          file({
+            absPath: "/Users/x/.pi/AGENTS.md",
+            agent: "pi",
+            scope: "global",
+            label: "~/.pi/AGENTS.md",
+          }),
+        ],
+      })
+    )
+    render(<ExternalMemoryTab />)
+    expect(screen.getAllByTestId("external-memory-row")).toHaveLength(3)
+    expect(screen.getByRole("heading", { name: "OpenCode" })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "Pi" })).toBeTruthy()
   })
 
   it("opens the editor when a row is clicked", () => {
@@ -92,7 +121,7 @@ describe("ExternalMemoryTab", () => {
     const refresh = jest.fn()
     mockHook.mockReturnValue(hookValue({ files: [file()], refresh }))
     render(<ExternalMemoryTab />)
-    fireEvent.click(screen.getByRole("button", { name: /refresh/i }))
+    fireEvent.click(screen.getByRole("button", { name: /rescan/i }))
     expect(refresh).toHaveBeenCalled()
   })
 })

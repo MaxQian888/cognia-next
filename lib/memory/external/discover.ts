@@ -12,7 +12,20 @@ import { discoverOpencode } from "./providers/opencode"
 import { discoverPi } from "./providers/pi"
 import type { DiscoverCtx, ExternalAgentId, ExternalMemoryFile, ExternalMemoryScope } from "./types"
 
-const AGENT_ORDER: ExternalAgentId[] = ["claude-code", "codex", "opencode", "pi"]
+/**
+ * Display + de-dupe order for every agent a provider can return. Exported so
+ * the `/memory` external tab groups by the same list this module discovers —
+ * it used to keep a private copy naming only `claude-code` and `codex`, which
+ * silently dropped every OpenCode and Pi file that discovery had already read
+ * off disk.
+ */
+export const EXTERNAL_AGENT_ORDER: readonly ExternalAgentId[] = [
+  "claude-code",
+  "codex",
+  "opencode",
+  "pi",
+]
+const AGENT_ORDER = EXTERNAL_AGENT_ORDER
 const SCOPE_ORDER: ExternalMemoryScope[] = [
   "user",
   "global",

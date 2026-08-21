@@ -21,23 +21,23 @@ describe("ExternalMemoryRow", () => {
   it("renders label, scope badge and path", () => {
     render(<ExternalMemoryRow file={file()} onOpen={jest.fn()} />)
     expect(screen.getByText("~/.claude/CLAUDE.md")).toBeTruthy()
-    expect(screen.getByText("scopes.user")).toBeTruthy()
+    expect(screen.getByText("User")).toBeTruthy()
     expect(screen.getByText("/Users/x/.claude/CLAUDE.md")).toBeTruthy()
   })
 
   it("shows a read-only badge for non-editable files", () => {
     render(<ExternalMemoryRow file={file({ editable: false })} onOpen={jest.fn()} />)
-    expect(screen.getByText("readOnly")).toBeTruthy()
+    expect(screen.getByText("Read-only")).toBeTruthy()
   })
 
   it("omits the read-only badge for editable files", () => {
     render(<ExternalMemoryRow file={file()} onOpen={jest.fn()} />)
-    expect(screen.queryByText("readOnly")).toBeNull()
+    expect(screen.queryByText("Read-only")).toBeNull()
   })
 
   it("shows a not-created hint for absent files", () => {
     render(<ExternalMemoryRow file={file({ exists: false })} onOpen={jest.fn()} />)
-    expect(screen.getByText("notCreated")).toBeTruthy()
+    expect(screen.getByText("Not created yet")).toBeTruthy()
   })
 
   it("renders a zero size when bytes are unknown", () => {
